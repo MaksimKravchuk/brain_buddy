@@ -3,6 +3,32 @@ from __future__ import annotations
 from app.schemas import TreeCreateRequest, TreeUpdateRequest
 
 
+def test_get_tree_uses_cache(tree_service, monkeypatch) -> None:
+    payload = TreeCreateRequest(title="Cached Tree", description=None)
+    tree = tree_service.create_tree(payload)
+
+    load_calls: list[str] = []
+    original_load = tree_service.tree_repo.load
+
+    tree_service._cache.clear()
+
+    def tracked_load(tree_id: str):
+        load_calls.append(tree_id)
+        return original_load(tree_id)
+
+    monkeypatch.setattr(tree_service.tree_repo, "load", tracked_load)
+
+    first = tree_service.get_tree(tree.id)
+    second = tree_service.get_tree(tree.id)
+
+    assert first.id == tree.id
+    assert second.id == tree.id
+    # Should only hit the repository once thanks to caching
+    assert load_calls == [tree.id]
+    # Returned documents are safe copies
+    assert first is not second
+
+
 def test_create_and_retrieve_tree(tree_service) -> None:
     payload = TreeCreateRequest(title="Test Tree", description="Sample")
     tree = tree_service.create_tree(payload)

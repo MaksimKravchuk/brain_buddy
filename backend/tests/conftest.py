@@ -61,3 +61,20 @@ def api_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[Tes
     client.close()
     get_config.cache_clear()
     monkeypatch.delenv("BRAIN_BUDDY_DATA_DIR", raising=False)
+
+
+@pytest.fixture
+def secured_api_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient, None, None]:
+    data_root = tmp_path / "secure-api-data"
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(data_root))
+    monkeypatch.setenv("BRAIN_BUDDY_API_KEY", "test-key")
+    monkeypatch.setenv("BRAIN_BUDDY_API_KEY_HEADER", "X-API-Key")
+    get_config.cache_clear()
+    app = create_app()
+    client = TestClient(app)
+    yield client
+    client.close()
+    get_config.cache_clear()
+    monkeypatch.delenv("BRAIN_BUDDY_DATA_DIR", raising=False)
+    monkeypatch.delenv("BRAIN_BUDDY_API_KEY", raising=False)
+    monkeypatch.delenv("BRAIN_BUDDY_API_KEY_HEADER", raising=False)

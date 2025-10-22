@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   Connection,
   Edge,
@@ -31,6 +31,7 @@ import {
 } from "../../api/hooks";
 import type { RelationResponse } from "../../api/types";
 import { getErrorMessage } from "../../utils/error";
+import { useGraphProfiler } from "../../hooks/useGraphProfiler";
 import { BrainNode } from "./BrainNode";
 
 type NodeType = Node<{ node: GraphNode }>;
@@ -101,6 +102,11 @@ export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element 
 
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
 
+  useGraphProfiler({
+    nodeCount: nodes.length,
+    edgeCount: relations.length
+  });
+
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() === "z" && (event.metaKey || event.ctrlKey)) {
@@ -151,210 +157,54 @@ export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element 
     }));
   }, [relations, selection]);
 
-  const handleNodeClick: NodeMouseHandler = (_, node) => {
-    select({ type: "node", id: node.id });
-  };
+  const handleNodeClick = useCallback<NodeMouseHandler>(
+    (_, node) => {
+      select({ type: "node", id: node.id });
+    },
+    [select]
+  );
 
-  const handleNodeDoubleClick: NodeMouseHandler = (_, node) => {
-    const graphNode = nodes.find((item) => item.id === node.id);
-    if (!graphNode) {
-      return;
-    }
-
-    const nextLabel = window.prompt("Rename node", graphNode.label);
-    if (nextLabel === null) {
-      return;
-    }
-
-    const trimmed = nextLabel.trim();
-    if (!trimmed || trimmed === graphNode.label) {
-      return;
-    }
-
-    pushSnapshot();
-    const token = beginOptimisticChange("rename-node-inline");
-    upsertNode({
-      ...graphNode,
-      label: trimmed,
-      metadata: { ...graphNode.metadata, updatedAt: new Date().toISOString() }
-    });
-
-    updateNodeMutation.mutate(
-      { nodeId: graphNode.id, payload: { label: trimmed } },
-      {
-        onSuccess: () => {
-          resolveOptimisticChange(token);
-          pushToast({
-            title: "Node renamed",
-            description: "Label updated inline.",
-            variant: "success",
-            duration: 2500
-          });
-        },
-        onError: (error) => {
-          rollbackOptimisticChange(token);
-          pushToast({
-            title: "Failed to update node",
-            description: getErrorMessage(error),
-            variant: "error",
-            duration: 6000
-          });
-        }
+  const handleNodeDoubleClick = useCallback<NodeMouseHandler>(
+    (_, node) => {
+      const graphNode = nodes.find((item) => item.id === node.id);
+      if (!graphNode) {
+        return;
       }
-    );
-  };
 
-  const handleNodeContextMenu: NodeMouseHandler = (event, node) => {
-    event.preventDefault();
-    select({ type: "node", id: node.id });
-    const graphNode = nodes.find((item) => item.id === node.id);
-    if (!graphNode) {
-      return;
-    }
-
-    const shouldDelete = window.confirm(`Delete "${graphNode.label}" and its relations?`);
-    if (!shouldDelete) {
-      return;
-    }
-
-    handleNodesDelete([node]);
-  };
-
-  const handleEdgeClick: EdgeMouseHandler = (_, edge) => {
-    select({ type: "relation", id: edge.id });
-  };
-
-  const handlePaneClick = () => {
-    select({ type: null, id: null });
-  };
-
-  const handleSelectionChange: OnSelectionChangeFunc = ({ nodes: selectedNodes, edges: selectedEdges }) => {
-    if (selectedNodes?.length) {
-      select({ type: "node", id: selectedNodes[0].id });
-      return;
-    }
-
-    if (selectedEdges?.length) {
-      select({ type: "relation", id: selectedEdges[0].id });
-      return;
-    }
-
-    select({ type: null, id: null });
-  };
-
-  const handleNodeDragStop: NodeMouseHandler = (_, node) => {
-    const graphNode = nodes.find((item) => item.id === node.id);
-    if (!graphNode) {
-      return;
-    }
-
-    pushSnapshot();
-    const token = beginOptimisticChange("move-node");
-    upsertNode({
-      ...graphNode,
-      position: { ...node.position },
-      metadata: { ...graphNode.metadata, updatedAt: new Date().toISOString() }
-    });
-
-    updateNodeMutation.mutate(
-      { nodeId: node.id, payload: { position: node.position } },
-      {
-        onSuccess: () => {
-          resolveOptimisticChange(token);
-        },
-        onError: (error) => {
-          rollbackOptimisticChange(token);
-          pushToast({
-            title: "Unable to update node position",
-            description: getErrorMessage(error),
-            variant: "error",
-            duration: 6000
-          });
-        }
+      const nextLabel = window.prompt("Rename node", graphNode.label);
+      if (nextLabel === null) {
+        return;
       }
-    );
-  };
 
-  const handleConnect: OnConnect = (connection: Connection) => {
-    if (!connection.source || !connection.target) {
-      return;
-    }
-
-    const now = new Date().toISOString();
-    pushSnapshot();
-    const token = beginOptimisticChange("create-relation");
-    const tempRelation: GraphRelation = {
-      id: `tmp-rel-${Math.random().toString(36).slice(2, 9)}`,
-      sourceId: connection.source,
-      targetId: connection.target,
-      questionLabel: "WHY?",
-      notes: null,
-      metadata: {
-        createdAt: now,
-        updatedAt: now,
-        author: "local"
+      const trimmed = nextLabel.trim();
+      if (!trimmed || trimmed === graphNode.label) {
+        return;
       }
-    };
 
-    upsertRelation(tempRelation);
-    createRelationMutation.mutate(
-      {
-        source_id: connection.source,
-        target_id: connection.target,
-        question_label: "WHY?"
-      },
-      {
-        onSuccess: (relation) => {
-          resolveOptimisticChange(token);
-          removeRelation(tempRelation.id);
-          upsertRelation(relationFromResponse(relation));
-          pushToast({
-            title: "Relation created",
-            description: "Connection established successfully.",
-            variant: "success",
-            duration: 3000
-          });
-        },
-        onError: (error) => {
-          rollbackOptimisticChange(token);
-          removeRelation(tempRelation.id);
-          pushToast({
-            title: "Failed to create relation",
-            description: getErrorMessage(error),
-            variant: "error",
-            duration: 6000
-          });
-        }
-      }
-    );
-  };
-
-  const handleNodesDelete: OnNodesDelete = (nodesToDelete) => {
-    if (!nodesToDelete.length) {
-      return;
-    }
-
-    nodesToDelete.forEach((node) => {
       pushSnapshot();
-      const token = beginOptimisticChange("delete-node");
-      removeNode(node.id);
+      const token = beginOptimisticChange("rename-node-inline");
+      upsertNode({
+        ...graphNode,
+        label: trimmed,
+        metadata: { ...graphNode.metadata, updatedAt: new Date().toISOString() }
+      });
 
-      deleteNodeMutation.mutate(
-        { nodeId: node.id, cascade: true },
+      updateNodeMutation.mutate(
+        { nodeId: graphNode.id, payload: { label: trimmed } },
         {
           onSuccess: () => {
             resolveOptimisticChange(token);
             pushToast({
-              title: "Node deleted",
-              description: `Removed ${node.data?.node?.label ?? "node"}.`,
-              variant: "info",
-              duration: 3000
+              title: "Node renamed",
+              description: "Label updated inline.",
+              variant: "success",
+              duration: 2500
             });
           },
           onError: (error) => {
             rollbackOptimisticChange(token);
             pushToast({
-              title: "Failed to delete node",
+              title: "Failed to update node",
               description: getErrorMessage(error),
               variant: "error",
               duration: 6000
@@ -362,39 +212,278 @@ export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element 
           }
         }
       );
-    });
-  };
+    },
+    [
+      beginOptimisticChange,
+      nodes,
+      pushSnapshot,
+      pushToast,
+      resolveOptimisticChange,
+      rollbackOptimisticChange,
+      select,
+      updateNodeMutation,
+      upsertNode
+    ]
+  );
 
-  const handleEdgesDelete: OnEdgesDelete = (edgesToDelete) => {
-    if (!edgesToDelete.length) {
-      return;
-    }
+  const handleNodeContextMenu = useCallback<NodeMouseHandler>(
+    (event, node) => {
+      event.preventDefault();
+      select({ type: "node", id: node.id });
+      const graphNode = nodes.find((item) => item.id === node.id);
+      if (!graphNode) {
+        return;
+      }
 
-    edgesToDelete.forEach((edge) => {
+      const shouldDelete = window.confirm(`Delete "${graphNode.label}" and its relations?`);
+      if (!shouldDelete) {
+        return;
+      }
+
+      handleNodesDelete([node]);
+    },
+    [handleNodesDelete, nodes, select]
+  );
+
+  const handleEdgeClick = useCallback<EdgeMouseHandler>(
+    (_, edge) => {
+      select({ type: "relation", id: edge.id });
+    },
+    [select]
+  );
+
+  const handlePaneClick = useCallback(() => {
+    select({ type: null, id: null });
+  }, [select]);
+
+  const handleSelectionChange = useCallback<OnSelectionChangeFunc>(
+    ({ nodes: selectedNodes, edges: selectedEdges }) => {
+      if (selectedNodes?.length) {
+        select({ type: "node", id: selectedNodes[0].id });
+        return;
+      }
+
+      if (selectedEdges?.length) {
+        select({ type: "relation", id: selectedEdges[0].id });
+        return;
+      }
+
+      select({ type: null, id: null });
+    },
+    [select]
+  );
+
+  const handleNodeDragStop = useCallback<NodeMouseHandler>(
+    (_, node) => {
+      const graphNode = nodes.find((item) => item.id === node.id);
+      if (!graphNode) {
+        return;
+      }
+
       pushSnapshot();
-      const token = beginOptimisticChange("delete-relation");
-      removeRelation(edge.id);
-
-      deleteRelationMutation.mutate(edge.id, {
-        onSuccess: () => {
-          resolveOptimisticChange(token);
-        },
-        onError: (error) => {
-          rollbackOptimisticChange(token);
-          pushToast({
-            title: "Failed to delete relation",
-            description: getErrorMessage(error),
-            variant: "error",
-            duration: 6000
-          });
-        }
+      const token = beginOptimisticChange("move-node");
+      upsertNode({
+        ...graphNode,
+        position: { ...node.position },
+        metadata: { ...graphNode.metadata, updatedAt: new Date().toISOString() }
       });
-    });
-  };
+
+      updateNodeMutation.mutate(
+        { nodeId: node.id, payload: { position: node.position } },
+        {
+          onSuccess: () => {
+            resolveOptimisticChange(token);
+          },
+          onError: (error) => {
+            rollbackOptimisticChange(token);
+            pushToast({
+              title: "Unable to update node position",
+              description: getErrorMessage(error),
+              variant: "error",
+              duration: 6000
+            });
+          }
+        }
+      );
+    },
+    [
+      beginOptimisticChange,
+      nodes,
+      pushSnapshot,
+      pushToast,
+      resolveOptimisticChange,
+      rollbackOptimisticChange,
+      updateNodeMutation,
+      upsertNode
+    ]
+  );
+
+  const handleConnect = useCallback<OnConnect>(
+    (connection: Connection) => {
+      if (!connection.source || !connection.target) {
+        return;
+      }
+
+      const retryConnection: Connection = { ...connection };
+      const now = new Date().toISOString();
+      pushSnapshot();
+      const token = beginOptimisticChange("create-relation");
+      const tempRelation: GraphRelation = {
+        id: `tmp-rel-${Math.random().toString(36).slice(2, 9)}`,
+        sourceId: connection.source,
+        targetId: connection.target,
+        questionLabel: "WHY?",
+        notes: null,
+        metadata: {
+          createdAt: now,
+          updatedAt: now,
+          author: "local"
+        }
+      };
+
+      upsertRelation(tempRelation);
+      createRelationMutation.mutate(
+        {
+          source_id: connection.source,
+          target_id: connection.target,
+          question_label: "WHY?"
+        },
+        {
+          onSuccess: (relation) => {
+            resolveOptimisticChange(token);
+            removeRelation(tempRelation.id);
+            upsertRelation(relationFromResponse(relation));
+            pushToast({
+              title: "Relation created",
+              description: "Connection established successfully.",
+              variant: "success",
+              duration: 3000
+            });
+          },
+          onError: (error) => {
+            rollbackOptimisticChange(token);
+            removeRelation(tempRelation.id);
+            pushToast({
+              title: "Failed to create relation",
+              description: getErrorMessage(error),
+              variant: "error",
+              action: {
+                label: "Retry",
+                onClick: () => handleConnect(retryConnection)
+              }
+            });
+          }
+        }
+      );
+    },
+    [
+      beginOptimisticChange,
+      createRelationMutation,
+      pushSnapshot,
+      pushToast,
+      removeRelation,
+      resolveOptimisticChange,
+      rollbackOptimisticChange,
+      upsertRelation
+    ]
+  );
+
+  const handleNodesDelete = useCallback<OnNodesDelete>(
+    (nodesToDelete) => {
+      if (!nodesToDelete.length) {
+        return;
+      }
+
+      nodesToDelete.forEach((node) => {
+        pushSnapshot();
+        const token = beginOptimisticChange("delete-node");
+        removeNode(node.id);
+        const retryDelete = () => handleNodesDelete([node]);
+
+        deleteNodeMutation.mutate(
+          { nodeId: node.id, cascade: true },
+          {
+            onSuccess: () => {
+              resolveOptimisticChange(token);
+              pushToast({
+                title: "Node deleted",
+                description: `Removed ${node.data?.node?.label ?? "node"}.`,
+                variant: "info",
+                duration: 3000
+              });
+            },
+            onError: (error) => {
+              rollbackOptimisticChange(token);
+              pushToast({
+                title: "Failed to delete node",
+                description: getErrorMessage(error),
+                variant: "error",
+                action: {
+                  label: "Retry",
+                  onClick: retryDelete
+                }
+              });
+            }
+          }
+        );
+      });
+    },
+    [
+      beginOptimisticChange,
+      deleteNodeMutation,
+      pushSnapshot,
+      pushToast,
+      removeNode,
+      resolveOptimisticChange,
+      rollbackOptimisticChange
+    ]
+  );
+
+  const handleEdgesDelete = useCallback<OnEdgesDelete>(
+    (edgesToDelete) => {
+      if (!edgesToDelete.length) {
+        return;
+      }
+
+      edgesToDelete.forEach((edge) => {
+        pushSnapshot();
+        const token = beginOptimisticChange("delete-relation");
+        removeRelation(edge.id);
+        const retryDelete = () => handleEdgesDelete([edge]);
+
+        deleteRelationMutation.mutate(edge.id, {
+          onSuccess: () => {
+            resolveOptimisticChange(token);
+          },
+          onError: (error) => {
+            rollbackOptimisticChange(token);
+            pushToast({
+              title: "Failed to delete relation",
+              description: getErrorMessage(error),
+              variant: "error",
+              action: {
+                label: "Retry",
+                onClick: retryDelete
+              }
+            });
+          }
+        });
+      });
+    },
+    [
+      beginOptimisticChange,
+      deleteRelationMutation,
+      pushSnapshot,
+      pushToast,
+      removeRelation,
+      resolveOptimisticChange,
+      rollbackOptimisticChange
+    ]
+  );
 
   const [creatingNode, setCreatingNode] = useState(false);
 
-  const handleCreateNode = () => {
+  const handleCreateNode = useCallback(() => {
     const placeholder = createPlaceholderNode();
     const viewportCenter = reactFlowInstance
       ? reactFlowInstance.screenToFlowPosition({
@@ -435,7 +524,10 @@ export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element 
             title: "Failed to create node",
             description: getErrorMessage(error),
             variant: "error",
-            duration: 6000
+            action: {
+              label: "Retry",
+              onClick: handleCreateNode
+            }
           });
         },
         onSettled: () => {
@@ -443,7 +535,19 @@ export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element 
         }
       }
     );
-  };
+  }, [
+    beginOptimisticChange,
+    createNodeMutation,
+    pushSnapshot,
+    pushToast,
+    reactFlowInstance,
+    removeNode,
+    setCreatingNode,
+    resolveOptimisticChange,
+    rollbackOptimisticChange,
+    select,
+    upsertNode
+  ]);
 
   const hasContent = nodes.length > 0 || relations.length > 0;
 
@@ -475,6 +579,7 @@ export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element 
         deleteKeyCode={["Backspace", "Delete"]}
         snapToGrid
         snapGrid={[16, 16]}
+        onlyRenderVisibleElements
       >
         <Background gap={24} size={1} color="rgba(59,130,246,0.1)" />
         <MiniMap

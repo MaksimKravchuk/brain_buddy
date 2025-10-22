@@ -38,6 +38,19 @@ class LoggingSettings(BaseModel):
         return self.level.upper()
 
 
+class SecuritySettings(BaseModel):
+    """Security-related toggles for API hardening."""
+
+    api_key: str | None = Field(default=None, description="Static API key required for requests.")
+    api_key_header: str = Field(default="X-API-Key", description="Header used for the static API key.")
+
+    model_config = ConfigDict(frozen=True)
+
+    @property
+    def has_api_key(self) -> bool:
+        return bool(self.api_key)
+
+
 class DataSettings(BaseModel):
     """Filesystem layout for the application."""
 
@@ -59,6 +72,7 @@ class AppConfig(BaseModel):
     api_prefix: str = Field(default="/api")
     data: DataSettings = Field(default_factory=DataSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    security: SecuritySettings = Field(default_factory=SecuritySettings)
 
     model_config = ConfigDict(frozen=True)
 
@@ -83,6 +97,8 @@ def _build_config() -> AppConfig:
     api_prefix = os.getenv("BRAIN_BUDDY_API_PREFIX", "/api")
     log_level = os.getenv("BRAIN_BUDDY_LOG_LEVEL", "INFO")
     data_dir_value = os.getenv("BRAIN_BUDDY_DATA_DIR", str(DEFAULT_DATA_DIR))
+    api_key = os.getenv("BRAIN_BUDDY_API_KEY")
+    api_key_header = os.getenv("BRAIN_BUDDY_API_KEY_HEADER", "X-API-Key")
 
     data_dir = Path(data_dir_value).expanduser().resolve()
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -91,6 +107,7 @@ def _build_config() -> AppConfig:
 
     logging_config = LoggingSettings(level=log_level)
     data_config = DataSettings(root_dir=data_dir, schema_version=schema_version)
+    security_config = SecuritySettings(api_key=api_key, api_key_header=api_key_header)
 
     try:
         environment = AppEnvironment(env_value)
@@ -102,6 +119,7 @@ def _build_config() -> AppConfig:
         api_prefix=api_prefix,
         data=data_config,
         logging=logging_config,
+        security=security_config,
     )
 
 
@@ -112,4 +130,4 @@ def get_config() -> AppConfig:
     return _build_config()
 
 
-__all__ = ["AppConfig", "AppEnvironment", "get_config"]
+__all__ = ["AppConfig", "AppEnvironment", "get_config", "SecuritySettings"]

@@ -17,6 +17,8 @@ import {
 } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
+const API_KEY = import.meta.env.VITE_API_KEY ?? null;
+const API_KEY_HEADER = import.meta.env.VITE_API_KEY_HEADER ?? "X-API-Key";
 
 type JsonRequestOptions = Omit<RequestInit, "body"> & {
   body?: unknown;
@@ -51,18 +53,23 @@ function parseFilename(contentDisposition: string | null): string | null {
 export class ApiError extends Error {
   status: number;
   payload: unknown;
+  correlationId?: string;
 
-  constructor(message: string, status: number, payload: unknown) {
+  constructor(message: string, status: number, payload: unknown, correlationId?: string) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.payload = payload;
+    this.correlationId = correlationId;
   }
 }
 
 async function request<T>(path: string, options: JsonRequestOptions = {}): Promise<T> {
   const { body, ...rest } = options;
   const headers = new Headers(rest.headers);
+  if (API_KEY && !headers.has(API_KEY_HEADER)) {
+    headers.set(API_KEY_HEADER, API_KEY);
+  }
   const method = options.method ?? "GET";
   const hasBody = body !== undefined && body !== null;
 
@@ -93,7 +100,8 @@ async function request<T>(path: string, options: JsonRequestOptions = {}): Promi
   const data = isJson ? await response.json() : await response.text();
 
   if (!response.ok) {
-    throw new ApiError(response.statusText || "Request failed", response.status, data);
+    const correlationId = response.headers.get("X-Correlation-ID") ?? undefined;
+    throw new ApiError(response.statusText || "Request failed", response.status, data, correlationId);
   }
 
   return data as T;
@@ -180,7 +188,8 @@ export const apiClient = {
           payload = rawBody;
         }
       }
-      throw new ApiError(response.statusText || "Request failed", response.status, payload);
+      const correlationId = response.headers.get("X-Correlation-ID") ?? undefined;
+      throw new ApiError(response.statusText || "Request failed", response.status, payload, correlationId);
     }
 
     const filename =

@@ -28,13 +28,27 @@ export function ToastStack(): JSX.Element | null {
                 <p className="font-semibold">{toast.title}</p>
                 {toast.description ? <p className="mt-1 text-xs opacity-80">{toast.description}</p> : null}
               </div>
-              <button
-                type="button"
-                onClick={() => dismiss(toast.id)}
-                className="text-xs uppercase tracking-wide text-slate-400 transition hover:text-slate-200"
-              >
-                Close
-              </button>
+              <div className="flex gap-2">
+                {toast.action ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      toast.action?.onClick();
+                      dismiss(toast.id);
+                    }}
+                    className="text-xs uppercase tracking-wide text-brand-primary transition hover:text-brand-primary/80"
+                  >
+                    {toast.action.label}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => dismiss(toast.id)}
+                  className="text-xs uppercase tracking-wide text-slate-400 transition hover:text-slate-200"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         ))}

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ReactFlowProvider } from "reactflow";
 import "reactflow/dist/style.css";
 
+import { ApiError } from "./api/client";
 import type { TreeDetailResponse } from "./api/types";
 import { useTree, useTrees } from "./api/hooks";
 import { TreeCanvas } from "./components/canvas/TreeCanvas";
@@ -18,18 +19,26 @@ import { TreeSelector } from "./components/topbar/TreeSelector";
 import { ToastStack } from "./components/ui/ToastStack";
 import { useTreeStore } from "./stores/treeStore";
 import { useUiStore } from "./stores/uiStore";
+import { getErrorMessage } from "./utils/error";
 
 export default function App(): JSX.Element {
   const [selectedTreeId, setSelectedTreeId] = useState<string | null>(null);
 
-  const { data: trees, isLoading: isTreesLoading } = useTrees();
+  const {
+    data: trees,
+    isLoading: isTreesLoading,
+    error: treesError,
+    refetch: refetchTrees
+  } = useTrees();
   const setTree = useTreeStore((state) => state.setTree);
   const resetTree = useTreeStore((state) => state.reset);
   const metadata = useTreeStore((state) => state.metadata);
   const activeTreeId = useTreeStore((state) => state.activeTreeId);
   const inspectorTab = useUiStore((state) => state.inspectorTab);
+  const pushToast = useUiStore((state) => state.pushToast);
 
   const treeQuery = useTree(selectedTreeId);
+  const { error: treeError, refetch: refetchTree } = treeQuery;
 
   useEffect(() => {
     if (!selectedTreeId && trees?.length) {
@@ -48,6 +57,42 @@ export default function App(): JSX.Element {
       resetTree();
     }
   }, [selectedTreeId, resetTree]);
+
+  useEffect(() => {
+    if (!treesError) {
+      return;
+    }
+    pushToast({
+      id: "tree-list-error",
+      title: "Unable to load trees",
+      description: getErrorMessage(treesError),
+      variant: "error",
+      action: {
+        label: "Retry",
+        onClick: () => {
+          refetchTrees();
+        }
+      }
+    });
+  }, [treesError, pushToast, refetchTrees]);
+
+  useEffect(() => {
+    if (!treeError || !selectedTreeId) {
+      return;
+    }
+    pushToast({
+      id: `tree-detail-error-${selectedTreeId}`,
+      title: "Unable to load tree",
+      description: getErrorMessage(treeError),
+      variant: "error",
+      action: {
+        label: "Retry",
+        onClick: () => {
+          refetchTree();
+        }
+      }
+    });
+  }, [treeError, pushToast, refetchTree, selectedTreeId]);
 
   const handleTreeCreated = (tree: TreeDetailResponse) => {
     setSelectedTreeId(tree.id);
@@ -95,7 +140,14 @@ export default function App(): JSX.Element {
         footer="Use ⌘Z / Ctrl+Z to undo and Shift+⌘Z / Shift+Ctrl+Z to redo changes."
       >
         <CanvasShell>
-          {activeTreeId ? (
+          {treeError ? (
+            <ErrorCanvasState
+              message={getErrorMessage(treeError)}
+              correlationId={treeError instanceof ApiError ? treeError.correlationId ?? undefined : undefined}
+              isRetrying={treeQuery.isFetching}
+              onRetry={() => refetchTree()}
+            />
+          ) : activeTreeId ? (
             <TreeCanvas treeId={activeTreeId} isLoading={isTreeLoading} />
           ) : (
             <EmptyCanvasState isLoading={isTreeLoading} hasTrees={Boolean(trees?.length)} />
@@ -122,6 +174,33 @@ function EmptyCanvasState({ isLoading, hasTrees }: { isLoading: boolean; hasTree
     <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-sm text-slate-400">
       <p>{hasTrees ? "Select a tree from the dropdown to visualize it." : "Create your first tree to get started."}</p>
       <p className="text-xs text-slate-500">Need help? Start by outlining the core problem in the first root node.</p>
+    </div>
+  );
+}
+
+function ErrorCanvasState({
+  message,
+  correlationId,
+  onRetry,
+  isRetrying
+}: {
+  message: string;
+  correlationId?: string;
+  onRetry: () => void;
+  isRetrying: boolean;
+}): JSX.Element {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-sm text-red-200">
+      <p className="max-w-md text-balance">{message}</p>
+      {correlationId ? <p className="text-xs text-slate-500">Reference: {correlationId}</p> : null}
+      <button
+        type="button"
+        onClick={onRetry}
+        disabled={isRetrying}
+        className="rounded-md border border-red-500/60 px-3 py-1 text-xs font-semibold text-red-100 transition hover:border-red-400 hover:text-white disabled:cursor-not-allowed disabled:border-slate-600 disabled:text-slate-400"
+      >
+        {isRetrying ? "Retrying…" : "Retry"}
+      </button>
     </div>
   );
 }

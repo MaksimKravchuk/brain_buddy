@@ -7,6 +7,7 @@ def test_tree_crud_flow(api_client) -> None:
     create_payload = TreeCreateRequest(title="API Tree", description="Demo")
     response = api_client.post("/api/trees", json=create_payload.model_dump())
     assert response.status_code == 201
+    assert response.headers.get("X-Correlation-ID")
     tree_id = response.json()["id"]
 
     list_resp = api_client.get("/api/trees")
@@ -30,3 +31,18 @@ def test_tree_crud_flow(api_client) -> None:
 
     delete_resp = api_client.delete(f"/api/trees/{tree_id}")
     assert delete_resp.status_code == 204
+
+
+def test_correlation_id_present_on_errors(api_client) -> None:
+    response = api_client.get("/api/trees/non-existent")
+    assert response.status_code == 404
+    assert response.headers.get("X-Correlation-ID")
+
+
+def test_api_key_middleware_enforces_header(secured_api_client) -> None:
+    unauthenticated = secured_api_client.get("/api/trees")
+    assert unauthenticated.status_code == 401
+    assert unauthenticated.headers.get("X-Correlation-ID")
+
+    authenticated = secured_api_client.get("/api/trees", headers={"X-API-Key": "test-key"})
+    assert authenticated.status_code == 200

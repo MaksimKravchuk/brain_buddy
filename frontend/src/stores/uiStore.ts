@@ -9,6 +9,10 @@ export interface Toast {
   variant: ToastVariant;
   duration: number;
   createdAt: number;
+  action?: {
+    label: string;
+    onClick: () => void;
+  };
 }
 
 type ModalKey = "createTree" | "deleteTree" | "manageVersions";
@@ -52,8 +56,9 @@ export const useUiStore = create<UiStoreState>((set, get) => ({
       title: payload.title,
       description: payload.description,
       variant: payload.variant,
-      duration: payload.duration ?? 5000,
-      createdAt: Date.now()
+      duration: payload.duration ?? (payload.action ? 0 : 5000),
+      createdAt: Date.now(),
+      action: payload.action
     };
     set((state) => ({
       toasts: [...state.toasts.filter((item) => item.id !== id), toast]
