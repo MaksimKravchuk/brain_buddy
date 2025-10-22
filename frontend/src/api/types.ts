@@ -66,14 +66,29 @@ export interface RelationUpdateRequest {
   notes?: string | null;
 }
 
+export interface VersionDiffSummary {
+  nodes_added: number;
+  nodes_removed: number;
+  nodes_modified: number;
+  relations_added: number;
+  relations_removed: number;
+  relations_modified: number;
+}
+
 export interface VersionListItem {
   id: string;
   label: string;
   created_at: string;
+  author?: string | null;
+  notes?: string | null;
+  diff_summary?: VersionDiffSummary | null;
+  conflict_count: number;
 }
 
 export interface VersionCreateRequest {
   label?: string | null;
+  author?: string | null;
+  notes?: string | null;
 }
 
 export interface TreeListItem {

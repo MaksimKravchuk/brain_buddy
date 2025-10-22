@@ -10,7 +10,7 @@
 - ✅ Phase 1 – Backend MVP Foundations delivered (20 automated tests covering repositories/services/API).
 - ✅ Phase 2 – Frontend MVP Foundations running with canvas, inspectors, optimistic CRUD, React Query wiring.
 - ✅ Phase 3 – AI Validation Integration live with prompt builder, provider abstraction, mock provider, and UI hooks.
-- ⬜ Phase 4 – Versioning & Export Completion (up next).
+- ✅ Phase 4 – Versioning & Export Completion delivered with diff summaries, export API, and UI integration.
 - ⬜ Phase 5 – Hardening & Polish.
 - ⬜ Phase 6 – Deployment Readiness.
 
@@ -79,12 +79,30 @@
 
 ## Phase 4 – Versioning & Export Completion (Weeks 6–7)
 - **Goal**: finalize snapshot, restore, and export capabilities with end-to-end coverage.
+- **Status**: ✅ Delivered Week 7 with backend diff metadata, streaming exports, and refreshed frontend workflows.
 - **Scope**
   - Harden `VersionService` for diffing, merge conflict detection, and metadata (author, notes).
   - Add endpoints for create/restore/list/delete snapshots plus JSON export streaming download.
   - Frontend: connect version panel actions (create, rename, restore, delete, view metadata), implement progress feedback and confirmation modals.
   - Provide export download UI with file naming convention and success toast; include skeleton for future PDF export.
   - Testing: regression suite verifying restore accuracy on large graphs, snapshot rollback, export file shape; frontend Cypress flow covering create/restore/export.
+- **Kickoff Checklist**
+  - **Backend**
+    - Extend `VersionDocument` and related Pydantic schemas with author/notes fields plus a diff summary payload.
+    - Implement diff + conflict helpers in `VersionService`, persisting metadata and surfacing merge warnings through `VersionRepository`.
+    - Wire REST routes in `app/api/routes.py` for list/create/delete/restore plus a streaming export endpoint using FastAPI `StreamingResponse`.
+    - Add regression coverage in `tests/test_version_service.py` and a new API suite capturing restore/rollback/export flows.
+  - **Frontend**
+    - Hook `VersionPanel` actions up to the new API via `api/hooks.ts`, including optimistic updates and loading states.
+    - Add confirmation modals for destructive actions and progress toasts in `ToastStack`.
+    - Implement export trigger with deterministic filenames and integrate metadata display within `VersionPanel`.
+  - **QA & Docs**
+    - Generate seed fixtures for large tree restore testing and document the workflow in `/requirements`.
+    - Schedule Cypress coverage for snapshot create/restore/export and record evidence in the regression log.
+- **Outcome Highlights**
+  - Version snapshots now capture author + notes metadata, diff summaries, and conflict signals persisted on disk.
+  - REST API exposes JSON exports (live + historic), enriched version listings, and restore/delete confirmations with coverage in `tests/test_api_versions.py`.
+  - Frontend version panel upgraded with optimistic React Query flows, confirmation dialogs, diff visualization, and one-click exports aligned with backend filenames.
 - **Deliverables**: downloadable JSON export, restore demo, regression documentation for version handling.
 - **Acceptance Criteria**: restoring snapshot rehydrates nodes/relations accurately, export passes schema validation, tests cover >80% of versioning module paths.
 - **Dependencies**: Phase 1 repositories/services, Phase 2 UI, Phase 3 validation data persistence.

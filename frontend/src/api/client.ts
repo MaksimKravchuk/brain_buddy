@@ -27,6 +27,27 @@ function buildUrl(path: string): string {
   return `${API_BASE_URL.replace(/\/$/, "")}${path}`;
 }
 
+function parseFilename(contentDisposition: string | null): string | null {
+  if (!contentDisposition) {
+    return null;
+  }
+
+  const match = /filename\*=UTF-8''(?<encoded>[^;]+)|filename="?([^"]+)"?/i.exec(contentDisposition);
+  if (!match) {
+    return null;
+  }
+
+  if (match.groups?.encoded) {
+    try {
+      return decodeURIComponent(match.groups.encoded);
+    } catch {
+      return match.groups.encoded;
+    }
+  }
+
+  return match[2] ?? null;
+}
+
 export class ApiError extends Error {
   status: number;
   payload: unknown;
@@ -141,6 +162,32 @@ export const apiClient = {
 
   deleteVersion(treeId: string, versionId: string) {
     return request<void>(`/trees/${treeId}/versions/${versionId}`, { method: "DELETE" });
+  },
+
+  async exportTree(treeId: string, versionId?: string) {
+    const query = versionId ? `?version_id=${encodeURIComponent(versionId)}` : "";
+    const response = await fetch(buildUrl(`/trees/${treeId}/export${query}`), {
+      method: "GET"
+    });
+    const rawBody = await response.text();
+    if (!response.ok) {
+      const contentType = response.headers.get("Content-Type");
+      let payload: unknown = rawBody;
+      if (contentType && contentType.includes("application/json")) {
+        try {
+          payload = JSON.parse(rawBody);
+        } catch {
+          payload = rawBody;
+        }
+      }
+      throw new ApiError(response.statusText || "Request failed", response.status, payload);
+    }
+
+    const filename =
+      parseFilename(response.headers.get("Content-Disposition")) ??
+      `${treeId}-${versionId ? versionId.split("::").pop() : "latest"}.json`;
+    const blob = new Blob([rawBody], { type: "application/json" });
+    return { filename, blob };
   },
 
   triggerValidation(treeId: string, nodeId: string, payload: ValidationRequest) {

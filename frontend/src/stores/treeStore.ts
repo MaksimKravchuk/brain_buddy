@@ -46,7 +46,18 @@ export interface GraphRelation {
 export interface GraphVersion {
   id: string;
   label: string;
+  author?: string | null;
+  notes?: string | null;
   createdAt: string;
+  diffSummary?: {
+    nodesAdded: number;
+    nodesRemoved: number;
+    nodesModified: number;
+    relationsAdded: number;
+    relationsRemoved: number;
+    relationsModified: number;
+  } | null;
+  conflictCount: number;
 }
 
 export interface TreeMetadata {
@@ -157,7 +168,20 @@ export function mapVersionResponse(version: VersionListItem): GraphVersion {
   return {
     id: version.id,
     label: version.label,
-    createdAt: version.created_at
+    author: version.author ?? null,
+    notes: version.notes ?? null,
+    createdAt: version.created_at,
+    diffSummary: version.diff_summary
+      ? {
+          nodesAdded: version.diff_summary.nodes_added,
+          nodesRemoved: version.diff_summary.nodes_removed,
+          nodesModified: version.diff_summary.nodes_modified,
+          relationsAdded: version.diff_summary.relations_added,
+          relationsRemoved: version.diff_summary.relations_removed,
+          relationsModified: version.diff_summary.relations_modified
+        }
+      : null,
+    conflictCount: version.conflict_count ?? 0
   };
 }
 
@@ -175,7 +199,10 @@ function snapshotFromState(state: TreeStoreState): GraphSnapshot {
       ...relation,
       metadata: { ...relation.metadata }
     })),
-    versions: state.versions.map((version) => ({ ...version })),
+    versions: state.versions.map((version) => ({
+      ...version,
+      diffSummary: version.diffSummary ? { ...version.diffSummary } : null
+    })),
     selection: { ...state.selection }
   };
 }
@@ -194,7 +221,10 @@ function applySnapshot(snapshot: GraphSnapshot) {
       ...relation,
       metadata: { ...relation.metadata }
     })),
-    versions: snapshot.versions.map((version) => ({ ...version })),
+    versions: snapshot.versions.map((version) => ({
+      ...version,
+      diffSummary: version.diffSummary ? { ...version.diffSummary } : null
+    })),
     selection: { ...snapshot.selection } as SelectionState
   };
 }

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, status
+from fastapi.responses import StreamingResponse
 
 from app.api.dependencies import (
     get_node_service,
@@ -28,7 +29,7 @@ from app.schemas import (
     VersionCreateRequest,
     VersionListItem,
 )
-from app.schemas.domain import RelationDocument, TreeDocument
+from app.schemas.domain import RelationDocument, TreeDocument, TreeVersionRef
 
 router = APIRouter(tags=["trees"])
 
@@ -67,10 +68,7 @@ def _build_tree_response(tree: TreeDocument) -> TreeDetailResponse:
         for relation in tree.relations
     ]
 
-    version_payloads = [
-        VersionListItem(id=ref.id, label=ref.label, created_at=ref.created_at)
-        for ref in tree.version_refs
-    ]
+    version_payloads = [_version_ref_to_item(ref) for ref in tree.version_refs]
 
     return TreeDetailResponse(
         id=tree.id,
@@ -207,15 +205,20 @@ def create_version(
     version_service=Depends(get_version_service),
 ) -> VersionListItem:
     version = version_service.create_version(tree_id, payload)
-    return VersionListItem(id=version.id, label=version.label, created_at=version.captured_at)
+    return VersionListItem(
+        id=version.id,
+        label=version.label,
+        created_at=version.captured_at,
+        author=version.author,
+        notes=version.notes,
+        diff_summary=version.diff,
+        conflict_count=len(version.conflicts),
+    )
 
 
 @router.get("/trees/{tree_id}/versions", response_model=list[VersionListItem])
 def list_versions(tree_id: str, version_service=Depends(get_version_service)) -> list[VersionListItem]:
-    return [
-        VersionListItem(id=ref.id, label=ref.label, created_at=ref.created_at)
-        for ref in version_service.list_versions(tree_id)
-    ]
+    return [_version_ref_to_item(ref) for ref in version_service.list_versions(tree_id)]
 
 
 @router.post(
@@ -238,6 +241,20 @@ def delete_version(
     version_service=Depends(get_version_service),
 ) -> None:
     version_service.delete_version(tree_id, version_id)
+
+
+@router.get(
+    "/trees/{tree_id}/export",
+    response_class=StreamingResponse,
+)
+def export_tree(
+    tree_id: str,
+    version_id: str | None = Query(default=None),
+    version_service=Depends(get_version_service),
+) -> StreamingResponse:
+    filename, content = version_service.export_tree(tree_id, version_id)
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return StreamingResponse(iter([content]), media_type="application/json", headers=headers)
 
 
 @router.post(
@@ -311,4 +328,16 @@ def _relation_to_response(relation: RelationDocument) -> RelationResponse:
         question_label=relation.question_label,
         notes=relation.notes,
         metadata=metadata,
+    )
+
+
+def _version_ref_to_item(ref: TreeVersionRef) -> VersionListItem:
+    return VersionListItem(
+        id=ref.id,
+        label=ref.label,
+        created_at=ref.created_at,
+        author=ref.author,
+        notes=ref.notes,
+        diff_summary=ref.diff_summary,
+        conflict_count=ref.conflict_count,
     )

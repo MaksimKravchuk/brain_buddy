@@ -179,6 +179,12 @@ export function useRestoreVersion(treeId: string) {
   });
 }
 
+export function useExportTree(treeId: string) {
+  return useMutation({
+    mutationFn: ({ versionId }: { versionId?: string }) => apiClient.exportTree(treeId, versionId)
+  });
+}
+
 export function useValidation(treeId: string) {
   const queryClient = useQueryClient();
   return useMutation({

@@ -30,7 +30,24 @@ const sampleTree: TreeDetailResponse = {
     }
   ],
   relations: [],
-  versions: []
+  versions: [
+    {
+      id: "tree-1::abc",
+      label: "Initial",
+      author: "mario",
+      notes: "Baseline snapshot",
+      created_at: "2024-04-01T10:00:00Z",
+      diff_summary: {
+        nodes_added: 1,
+        nodes_removed: 0,
+        nodes_modified: 0,
+        relations_added: 0,
+        relations_removed: 0,
+        relations_modified: 0
+      },
+      conflict_count: 0
+    }
+  ]
 };
 
 describe("treeStore", () => {
@@ -48,6 +65,8 @@ describe("treeStore", () => {
     expect(state.nodes).toHaveLength(1);
     expect(state.nodes[0].label).toBe("Root hypothesis");
     expect(state.nodes[0].metadata.author).toBe("mario");
+    expect(state.versions).toHaveLength(1);
+    expect(state.versions[0].diffSummary?.nodesAdded).toBe(1);
   });
 
   it("preserves validation metadata on hydration", () => {

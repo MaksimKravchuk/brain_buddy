@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import ConfigDict, Field
 
 from .common import Position, StrictBaseModel, TimestampMetadata, ValidationState, VisualState
+from .domain import VersionDiffSummary
 
 
 class ErrorResponse(StrictBaseModel):
@@ -101,6 +102,8 @@ class VersionCreateRequest(StrictBaseModel):
     """Payload to create a new snapshot version."""
 
     label: str | None = Field(default=None, description="Optional label for the snapshot.")
+    author: str | None = Field(default=None, description="Optional author metadata for the snapshot.")
+    notes: str | None = Field(default=None, description="Optional notes providing context for the snapshot.")
 
 
 class VersionListItem(StrictBaseModel):
@@ -109,6 +112,12 @@ class VersionListItem(StrictBaseModel):
     id: str = Field(description="Version identifier.")
     label: str = Field(description="Display name for the version.")
     created_at: datetime = Field(description="Timestamp when the version was created.")
+    author: str | None = Field(default=None, description="Recorded author for the snapshot.")
+    notes: str | None = Field(default=None, description="Optional notes attached to the snapshot.")
+    diff_summary: VersionDiffSummary | None = Field(
+        default=None, description="Summary of changes compared to the previous snapshot."
+    )
+    conflict_count: int = Field(default=0, ge=0, description="Number of conflicts detected for the snapshot.")
 
 
 class TreeDetailResponse(StrictBaseModel):
