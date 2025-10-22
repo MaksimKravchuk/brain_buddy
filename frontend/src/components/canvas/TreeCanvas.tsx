@@ -226,6 +226,56 @@ export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element 
     ]
   );
 
+  const handleNodesDelete = useCallback<OnNodesDelete>(
+    (nodesToDelete) => {
+      if (!nodesToDelete.length) {
+        return;
+      }
+
+      nodesToDelete.forEach((node) => {
+        pushSnapshot();
+        const token = beginOptimisticChange("delete-node");
+        removeNode(node.id);
+
+        deleteNodeMutation.mutate(
+          { nodeId: node.id, cascade: true },
+          {
+            onSuccess: () => {
+              resolveOptimisticChange(token);
+              pushToast({
+                title: "Node deleted",
+                description: `Removed ${node.data?.node?.label ?? "node"}.`,
+                variant: "info",
+                duration: 3000
+              });
+            },
+            onError: (error) => {
+              rollbackOptimisticChange(token);
+              pushToast({
+                title: "Failed to delete node",
+                description: getErrorMessage(error),
+                variant: "error",
+                action: {
+                  label: "Retry",
+                  onClick: () => handleNodesDelete([node])
+                }
+              });
+            }
+          }
+        );
+      });
+    },
+    [
+      beginOptimisticChange,
+      deleteNodeMutation,
+      pushSnapshot,
+      pushToast,
+      removeNode,
+      resolveOptimisticChange,
+      rollbackOptimisticChange
+    ]
+  );
+
   const handleNodeContextMenu = useCallback<NodeMouseHandler>(
     (event, node) => {
       event.preventDefault();
@@ -385,57 +435,6 @@ export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element 
       resolveOptimisticChange,
       rollbackOptimisticChange,
       upsertRelation
-    ]
-  );
-
-  const handleNodesDelete = useCallback<OnNodesDelete>(
-    (nodesToDelete) => {
-      if (!nodesToDelete.length) {
-        return;
-      }
-
-      nodesToDelete.forEach((node) => {
-        pushSnapshot();
-        const token = beginOptimisticChange("delete-node");
-        removeNode(node.id);
-        const retryDelete = () => handleNodesDelete([node]);
-
-        deleteNodeMutation.mutate(
-          { nodeId: node.id, cascade: true },
-          {
-            onSuccess: () => {
-              resolveOptimisticChange(token);
-              pushToast({
-                title: "Node deleted",
-                description: `Removed ${node.data?.node?.label ?? "node"}.`,
-                variant: "info",
-                duration: 3000
-              });
-            },
-            onError: (error) => {
-              rollbackOptimisticChange(token);
-              pushToast({
-                title: "Failed to delete node",
-                description: getErrorMessage(error),
-                variant: "error",
-                action: {
-                  label: "Retry",
-                  onClick: retryDelete
-                }
-              });
-            }
-          }
-        );
-      });
-    },
-    [
-      beginOptimisticChange,
-      deleteNodeMutation,
-      pushSnapshot,
-      pushToast,
-      removeNode,
-      resolveOptimisticChange,
-      rollbackOptimisticChange
     ]
   );
 

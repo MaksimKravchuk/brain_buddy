@@ -43,6 +43,16 @@ npm run dev
 
 By default the frontend expects the backend at `http://localhost:8000/api`. Configure `VITE_API_BASE_URL` to point elsewhere.
 
+### Smoke Test via Docker Compose
+
+Prefer containers for manual verification or stakeholder demos? Copy `.env.example` to `.env`, then run:
+
+```bash
+make compose-smoke-up
+```
+
+The backend will listen on `http://localhost:8000`, and the frontend will be available at `http://localhost:8080`. When finished, tear everything down with `make compose-smoke-down`. See `docs/deployment_smoke.md` for the full runbook, including optional API key wiring and automated smoke checks.
+
 ## Environment & Configuration
 
 | Variable | Default | Purpose |
@@ -75,6 +85,7 @@ See `docs/api_usage.md` for request/response details and examples.
 - `docs/troubleshooting.md`
 - `docs/contributing.md`
 - `docs/performance_report_phase5.md`
+- `docs/deployment_smoke.md`
 
 Historical requirements, contracts, and the phased roadmap remain under `requirements/`.
 

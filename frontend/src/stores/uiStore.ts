@@ -18,12 +18,17 @@ export interface Toast {
 type ModalKey = "createTree" | "deleteTree" | "manageVersions";
 type InspectorTab = "node" | "relation" | "versions";
 
+type ToastPayload = Omit<Toast, "id" | "createdAt" | "duration"> & {
+  id?: string;
+  duration?: number;
+};
+
 interface UiStoreState {
   isSidePanelCollapsed: boolean;
   inspectorTab: InspectorTab;
   modals: Record<ModalKey, boolean>;
   toasts: Toast[];
-  pushToast(toast: Omit<Toast, "id" | "createdAt"> & { id?: string }): string;
+  pushToast(toast: ToastPayload): string;
   dismissToast(id: string): void;
   clearToasts(): void;
   setInspectorTab(tab: InspectorTab): void;
