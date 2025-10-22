@@ -11,5 +11,16 @@ export default defineConfig({
   preview: {
     port: 4173,
     strictPort: true
+  },
+  test: {
+    environment: "jsdom",
+    globals: true,
+    css: true,
+    setupFiles: "./src/setupTests.ts",
+    coverage: {
+      reporter: ["text", "lcov"],
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: ["src/main.tsx"]
+    }
   }
 });

@@ -5,7 +5,7 @@
     "moduleResolution": "Bundler",
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
-    "noEmit": true
+    "noEmit": false
   },
   "include": ["vite.config.ts"]
 }
