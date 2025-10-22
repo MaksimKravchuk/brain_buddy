@@ -1,0 +1,57 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "brain-buddy-backend"
+version = "0.1.0"
+description = "Brain Buddy backend service"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "Brain Buddy Team" }
+]
+dependencies = [
+  "fastapi>=0.110,<1.0",
+  "uvicorn[standard]>=0.27,<0.28",
+  "pydantic>=2.6,<3.0",
+  "httpx>=0.25,<0.28",
+  "python-dotenv>=1.0,<2.0",
+  "typer>=0.9,<1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0,<9.0",
+  "black>=24.3,<25.0",
+  "ruff>=0.3,<0.4",
+  "mypy>=1.8,<2.0",
+]
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 88
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+target-version = "py311"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+strict = false
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.hatch.build.targets.sdist]
+include = ["app", "README.md", "pyproject.toml"]

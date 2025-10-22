@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.env
+.env.*
+
+# Node
+node_modules/
+.pnpm-store/
+.npm/
+
+# Build outputs
+dist/
+build/
+coverage/
+
+# Editors
+.idea/
+.vscode/
+.DS_Store
+
+# Local data
+data/

@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  @apply bg-slate-950 text-slate-100 min-h-screen antialiased;
+}
+
+main.app-shell {
+  @apply flex min-h-screen;
+}
+
+.panel {
+  @apply w-80 bg-slate-900 p-6 space-y-4 border-r border-slate-800;
+}
+
+.panel__title {
+  @apply text-2xl font-semibold;
+}
+
+.panel__description {
+  @apply text-sm text-slate-300;
+}
+
+.canvas {
+  @apply flex-1 bg-slate-950;
+}
