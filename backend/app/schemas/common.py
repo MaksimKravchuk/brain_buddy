@@ -13,6 +13,12 @@ class StrictBaseModel(BaseModel):
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=False)
 
 
+class StorageBaseModel(BaseModel):
+    """Base model for on-disk documents that tolerates unknown legacy fields."""
+
+    model_config = ConfigDict(extra="ignore", arbitrary_types_allowed=False)
+
+
 class TimestampMetadata(StrictBaseModel):
     """Common metadata block used for created/updated timestamps."""
 
@@ -52,6 +58,7 @@ class SortDirection(StrictBaseModel):
 __all__ = [
     "Position",
     "StrictBaseModel",
+    "StorageBaseModel",
     "TimestampMetadata",
     "ValidationState",
     "VisualState",

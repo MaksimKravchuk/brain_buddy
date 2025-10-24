@@ -6,10 +6,10 @@ from typing import Any, Literal
 
 from pydantic import ConfigDict, Field
 
-from .common import Position, StrictBaseModel, TimestampMetadata, ValidationState, VisualState
+from .common import Position, StorageBaseModel, TimestampMetadata, ValidationState, VisualState
 
 
-class NodeDocument(StrictBaseModel):
+class NodeDocument(StorageBaseModel):
     """Full representation of a node as stored on disk."""
 
     id: str = Field(description="Unique identifier for the node.")
@@ -21,7 +21,7 @@ class NodeDocument(StrictBaseModel):
     extra: dict[str, Any] | None = Field(default=None, description="Reserved for future structured metadata.")
 
 
-class RelationMetadata(StrictBaseModel):
+class RelationMetadata(StorageBaseModel):
     """Metadata specific to relations."""
 
     created_at: datetime = Field(description="UTC timestamp when the relation was created.")
@@ -29,7 +29,7 @@ class RelationMetadata(StrictBaseModel):
     author: str | None = Field(default=None, description="Optional author identifier.")
 
 
-class RelationDocument(StrictBaseModel):
+class RelationDocument(StorageBaseModel):
     """Stored representation of a directed relation between nodes."""
 
     id: str = Field(description="Unique identifier for the relation.")
@@ -40,7 +40,7 @@ class RelationDocument(StrictBaseModel):
     metadata: RelationMetadata = Field(description="Timestamps and authorship metadata.")
 
 
-class ValidationEntry(StrictBaseModel):
+class ValidationEntry(StorageBaseModel):
     """Entry stored in validation history for a node."""
 
     confidence: int = Field(ge=0, le=100, description="Confidence score reported by provider.")
@@ -51,7 +51,7 @@ class ValidationEntry(StrictBaseModel):
     raw_response: dict[str, Any] | None = Field(default=None, description="Optional raw provider payload for audit.")
 
 
-class IndexEntry(StrictBaseModel):
+class IndexEntry(StorageBaseModel):
     """Entry stored in the global tree index."""
 
     id: str = Field(description="Tree identifier.")
@@ -60,7 +60,7 @@ class IndexEntry(StrictBaseModel):
     updated_at: datetime = Field(description="Timestamp of most recent modification.")
 
 
-class ProviderConfig(StrictBaseModel):
+class ProviderConfig(StorageBaseModel):
     """Configuration for a single AI provider."""
 
     model_config = ConfigDict(extra="allow")
@@ -69,14 +69,14 @@ class ProviderConfig(StrictBaseModel):
     model: str | None = Field(default=None, description="Model identifier to use for requests.")
 
 
-class ProviderRegistryDocument(StrictBaseModel):
+class ProviderRegistryDocument(StorageBaseModel):
     """Top-level provider configuration stored on disk."""
 
     default_provider: str | None = Field(default=None, description="Default provider identifier.")
     providers: dict[str, ProviderConfig] = Field(default_factory=dict, description="Map of provider ID to configuration.")
 
 
-class VersionDiffSummary(StrictBaseModel):
+class VersionDiffSummary(StorageBaseModel):
     """Summarised change counts between snapshots."""
 
     nodes_added: int = Field(ge=0, description="Number of nodes added since the previous snapshot.")
@@ -87,7 +87,7 @@ class VersionDiffSummary(StrictBaseModel):
     relations_modified: int = Field(ge=0, description="Number of relations whose endpoints or metadata changed.")
 
 
-class VersionConflict(StrictBaseModel):
+class VersionConflict(StorageBaseModel):
     """Potential merge conflict captured during diffing."""
 
     entity_type: Literal["node", "relation"] = Field(description="Type of entity in conflict.")
@@ -106,7 +106,7 @@ def _empty_diff_summary() -> VersionDiffSummary:
     )
 
 
-class TreeVersionRef(StrictBaseModel):
+class TreeVersionRef(StorageBaseModel):
     """Reference to a stored version snapshot."""
 
     id: str = Field(description="Unique identifier for the version.")
@@ -120,7 +120,7 @@ class TreeVersionRef(StrictBaseModel):
     conflict_count: int = Field(default=0, ge=0, description="Number of potential conflicts detected for this snapshot.")
 
 
-class TreeDocument(StrictBaseModel):
+class TreeDocument(StorageBaseModel):
     """Canonical representation of a tree stored in the filesystem."""
 
     id: str = Field(description="Unique identifier for the tree.")
@@ -133,7 +133,7 @@ class TreeDocument(StrictBaseModel):
     version_refs: list[TreeVersionRef] = Field(default_factory=list, description="References to stored snapshots.")
 
 
-class VersionDocument(StrictBaseModel):
+class VersionDocument(StorageBaseModel):
     """Snapshot of a tree captured at a moment in time."""
 
     id: str = Field(description="Identifier of the version snapshot.")

@@ -1,4 +1,4 @@
-FROM python:3.11-slim AS runtime
+FROM python:3.11-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -12,8 +12,21 @@ RUN apt-get update && \
 
 COPY backend /app
 
-RUN pip install --upgrade pip && \
-    pip install --no-cache-dir .
+RUN pip install --upgrade pip
+
+FROM base AS tests
+
+RUN pip install --no-cache-dir ".[dev]"
+
+ENV BRAIN_BUDDY_ENV=test \
+    BRAIN_BUDDY_DATA_DIR=/app/data \
+    BRAIN_BUDDY_API_PREFIX=/api
+
+CMD ["pytest"]
+
+FROM base AS runtime
+
+RUN pip install --no-cache-dir .
 
 ENV BRAIN_BUDDY_ENV=production \
     BRAIN_BUDDY_DATA_DIR=/app/data \

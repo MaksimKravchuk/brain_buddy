@@ -13,7 +13,8 @@ dev-frontend:
 	cd frontend && npm run dev
 
 test-backend:
-	cd backend && pytest
+	docker build --target tests -t brain-buddy-backend-tests -f backend/Dockerfile .
+	docker run --rm brain-buddy-backend-tests
 
 compose-smoke-up:
 	docker compose -f docker-compose.smoke.yml up --build

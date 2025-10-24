@@ -1,5 +1,8 @@
 # Brain Buddy
 
+[![CI](https://github.com/MVkravchuk/brain_buddy/actions/workflows/ci.yml/badge.svg)](https://github.com/MVkravchuk/brain_buddy/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-artifacts-blue)](https://github.com/MVkravchuk/brain_buddy/actions/workflows/ci.yml)
+
 Brain Buddy is a collaborative knowledge-graph workspace that helps product teams capture research trees, validate assumptions with AI guidance, and preserve historical versions of their thinking.
 
 ## Highlights
@@ -86,6 +89,9 @@ See `docs/api_usage.md` for request/response details and examples.
 - `docs/contributing.md`
 - `docs/performance_report_phase5.md`
 - `docs/deployment_smoke.md`
+- `docs/infrastructure_runbook.md`
+- `docs/release_checklist.md`
+- `docs/pilot_dataset.json`
 
 Historical requirements, contracts, and the phased roadmap remain under `requirements/`.
 

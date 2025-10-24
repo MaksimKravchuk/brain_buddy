@@ -28,6 +28,12 @@ Use this guide to spin up the Brain Buddy stack locally using Docker Compose for
    ```
    Include `--volumes` (already wired into the target) if you want to drop stored data and restart fresh later.
 
+4. (Optional) Load the pilot dataset into the local volume:
+   ```bash
+   python scripts/load_dataset.py docs/pilot_dataset.json --data-dir backend/data
+   ```
+   This seeds a sample tree (`tree_pilot_onboarding`) so you can immediately explore canvas interactions.
+
 ## Smoke Test Script
 
 Run the automated smoke probe once the stack is up to confirm the API is healthy:

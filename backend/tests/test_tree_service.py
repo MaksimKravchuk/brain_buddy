@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from app.schemas import TreeCreateRequest, TreeUpdateRequest
 
 
@@ -62,3 +64,37 @@ def test_delete_tree(tree_service) -> None:
 
     entries = tree_service.list_trees()
     assert tree.id not in {entry.id for entry in entries}
+
+
+def test_get_tree_ignores_unknown_persisted_fields(tree_service) -> None:
+    tree = tree_service.create_tree(TreeCreateRequest(title="Legacy Compatible", description=None))
+    tree_service._cache.clear()
+
+    tree_path = tree_service.tree_repo.tree_path(tree.id)
+    payload = json.loads(tree_path.read_text(encoding="utf-8"))
+
+    payload["legacy_flag"] = True
+    payload["nodes"].append(
+        {
+            "id": "node_legacy",
+            "label": "Legacy Node",
+            "position": {"x": 1, "y": 2},
+            "metadata": {
+                "created_at": "2024-01-01T00:00:00Z",
+                "updated_at": "2024-01-01T00:00:00Z",
+                "author": None,
+            },
+            "incoming_count": 42,
+            "legacy_blob": {"foo": "bar"},
+        }
+    )
+
+    tree_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    loaded = tree_service.get_tree(tree.id)
+    dump = loaded.model_dump(mode="python")
+
+    assert dump["nodes"][0]["id"] == "node_legacy"
+    assert "incoming_count" not in dump["nodes"][0]
+    assert "legacy_blob" not in dump["nodes"][0]
+    assert "legacy_flag" not in dump

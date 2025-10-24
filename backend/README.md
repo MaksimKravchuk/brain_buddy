@@ -12,3 +12,14 @@ Environment variables allow you to tailor local behavior:
 - `BRAIN_BUDDY_API_PREFIX` – base path for the public API (`/api` by default).
 
 Place these in a `.env` file or export them before starting the server. The active configuration is cached and exposed via `app.state.config`.
+
+## Running Tests in Docker
+
+Build the dedicated test image and execute the pytest suite from the repository root:
+
+```bash
+docker build --target tests -t brain-buddy-backend-tests -f backend/Dockerfile .
+docker run --rm brain-buddy-backend-tests
+```
+
+The image installs the backend along with its development dependencies and sets `BRAIN_BUDDY_ENV=test` by default, so the container exits with the pytest status code.
