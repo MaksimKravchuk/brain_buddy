@@ -25,23 +25,26 @@ export function VersionPanel(): JSX.Element {
   const [notes, setNotes] = useState("");
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
 
-  if (!activeTreeId || !metadata) {
+  const isReady = Boolean(activeTreeId && metadata);
+  const treeIdForMutations = activeTreeId ?? "";
+
+  const createVersionMutation = useCreateVersion(treeIdForMutations);
+  const deleteVersionMutation = useDeleteVersion(treeIdForMutations);
+  const restoreVersionMutation = useRestoreVersion(treeIdForMutations);
+  const exportTreeMutation = useExportTree(treeIdForMutations);
+
+  const sortedVersions = useMemo(
+    () => [...versions].sort((a, b) => (a.createdAt > b.createdAt ? -1 : 1)),
+    [versions]
+  );
+
+  if (!isReady || !metadata) {
     return (
       <div className="rounded-lg border border-dashed border-slate-700 bg-surface-sunken/40 p-4 text-sm text-slate-500">
         Select a tree to manage versions.
       </div>
     );
   }
-
-  const createVersionMutation = useCreateVersion(activeTreeId);
-  const deleteVersionMutation = useDeleteVersion(activeTreeId);
-  const restoreVersionMutation = useRestoreVersion(activeTreeId);
-  const exportTreeMutation = useExportTree(activeTreeId);
-
-  const sortedVersions = useMemo(
-    () => [...versions].sort((a, b) => (a.createdAt > b.createdAt ? -1 : 1)),
-    [versions]
-  );
 
   const handleCreate = () => {
     const trimmedLabel = label.trim();

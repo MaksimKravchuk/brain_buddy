@@ -1,4 +1,4 @@
-.PHONY: install-backend install-frontend dev-backend dev-frontend test-backend compose-smoke-up compose-smoke-down compose-smoke-logs
+.PHONY: install-backend install-frontend dev-backend dev-frontend test-backend test-frontend compose-smoke-up compose-smoke-down compose-smoke-logs
 
 install-backend:
 	cd backend && python -m pip install -e .[dev]
@@ -15,6 +15,10 @@ dev-frontend:
 test-backend:
 	docker build --target tests -t brain-buddy-backend-tests -f backend/Dockerfile .
 	docker run --rm brain-buddy-backend-tests
+
+test-frontend:
+	docker build --target tests -t brain-buddy-frontend-tests -f frontend/Dockerfile .
+	docker run --rm brain-buddy-frontend-tests
 
 compose-smoke-up:
 	docker compose -f docker-compose.smoke.yml up --build

@@ -1,4 +1,4 @@
-FROM node:18-alpine AS build
+FROM node:18-alpine AS base
 
 WORKDIR /app
 
@@ -14,6 +14,14 @@ ARG VITE_API_KEY_HEADER=X-API-Key
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL \
     VITE_API_KEY=$VITE_API_KEY \
     VITE_API_KEY_HEADER=$VITE_API_KEY_HEADER
+
+FROM base AS tests
+
+ENV CI=1
+
+CMD ["npm", "run", "test"]
+
+FROM base AS build
 
 RUN npm run build
 
