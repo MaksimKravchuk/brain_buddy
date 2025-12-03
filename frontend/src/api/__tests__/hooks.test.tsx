@@ -3,9 +3,11 @@ import { renderHook, waitFor, act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 
+import * as clientModule from "../client";
 import { apiClient } from "../client";
-import { useExportTree, useImportTree, useTrees } from "../hooks";
+import { useExportTree, useImportTree, useTrees, useTreeImportWithToasts } from "../hooks";
 import type { TreeDetailResponse, TreeImportPayload, TreeListItem } from "../types";
+import { useUiStore } from "../../stores/uiStore";
 
 function createWrapper(queryClient: QueryClient) {
   return function Wrapper({ children }: { children: ReactNode }) {
@@ -29,6 +31,7 @@ describe("api hooks", () => {
   afterEach(() => {
     queryClient.clear();
     vi.restoreAllMocks();
+    useUiStore.getState().clearToasts();
   });
 
   it("uses listTrees for useTrees", async () => {
@@ -96,5 +99,51 @@ describe("api hooks", () => {
     expect(spy).toHaveBeenCalledWith(importPayload);
     const cached = queryClient.getQueryData<TreeDetailResponse>(["trees", "detail", "tree-3"]);
     expect(cached).toEqual(importPayload);
+  });
+
+  it("imports from file with owner mapping and success toast", async () => {
+    const tree: TreeDetailResponse = {
+      id: "tree-9",
+      name: "File Import",
+      metadata: {
+        version: 1,
+        created_at: "2025-01-02T00:00:00Z",
+        updated_at: "2025-01-02T00:00:00Z",
+        owner_id: null,
+        layout: null
+      },
+      nodes: [],
+      relations: [],
+      owner_id: null
+    };
+
+    const ownerSpy = vi.spyOn(clientModule, "getOwnerId").mockReturnValue("owner-123");
+    const importSpy = vi.spyOn(apiClient, "importTree").mockResolvedValue(tree);
+    const onImported = vi.fn();
+
+    const { result } = renderHook(() => useTreeImportWithToasts(onImported), {
+      wrapper: createWrapper(queryClient)
+    });
+
+    const file = {
+      name: "tree.json",
+      text: () => Promise.resolve(JSON.stringify(tree))
+    } as unknown as File;
+
+    await act(async () => {
+      await result.current.importFromFile(file);
+    });
+
+    await waitFor(() =>
+      expect(importSpy).toHaveBeenCalledWith({
+        ...tree,
+        owner_id: "owner-123",
+        metadata: { ...tree.metadata, owner_id: "owner-123" }
+      })
+    );
+    expect(onImported).toHaveBeenCalledWith(tree);
+    const toast = useUiStore.getState().toasts.find((t) => t.title === "Imported tree");
+    expect(toast?.description).toBe("File Import");
+    ownerSpy.mockRestore();
   });
 });

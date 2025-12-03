@@ -4,7 +4,7 @@ import "reactflow/dist/style.css";
 
 import { ApiError } from "./api/client";
 import type { TreeDetailResponse } from "./api/types";
-import { useTree, useTrees } from "./api/hooks";
+import { useTree, useTrees, useTreeDownload, useTreeImportWithToasts } from "./api/hooks";
 import { TreeCanvas, type TreeCanvasHandle } from "./components/canvas/TreeCanvas";
 import { CanvasShell } from "./components/layout/CanvasShell";
 import { Layout } from "./components/layout/Layout";
@@ -35,11 +35,19 @@ export default function App(): JSX.Element {
   const resetTree = useTreeStore((state) => state.reset);
   const metadata = useTreeStore((state) => state.metadata);
   const activeTreeId = useTreeStore((state) => state.activeTreeId);
+  const flushPendingPersistence = useTreeStore((state) => state.flushPendingPersistence);
+  const pendingSync = useTreeStore((state) => state.pendingSync);
   const inspectorTab = useUiStore((state) => state.inspectorTab);
   const pushToast = useUiStore((state) => state.pushToast);
 
   const treeQuery = useTree(selectedTreeId);
   const { error: treeError, refetch: refetchTree } = treeQuery;
+  const { download, isDownloading } = useTreeDownload(selectedTreeId);
+  const { importFromFile, isImporting } = useTreeImportWithToasts((tree) => {
+    setSelectedTreeId(tree.id);
+    setTree(tree);
+  });
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (!selectedTreeId && trees?.length) {
@@ -114,6 +122,49 @@ export default function App(): JSX.Element {
   const handleZoomOut = () => canvasRef.current?.zoomOut();
   const handleCenter = () => canvasRef.current?.centerOnSelection();
 
+  const handleSave = async () => {
+    if (!activeTreeId || !metadata) {
+      pushToast({
+        title: "Nothing to save",
+        description: "Select or create a tree before saving.",
+        variant: "warning",
+        duration: 4000
+      });
+      return;
+    }
+
+    setIsSaving(true);
+    const toastId = pushToast({
+      title: pendingSync ? "Saving changes…" : "Syncing draft…",
+      description: metadata.name,
+      variant: "info",
+      duration: 0
+    });
+
+    await flushPendingPersistence();
+    setIsSaving(false);
+    const state = useTreeStore.getState();
+
+    if (state.pendingSync || state.lastSyncError) {
+      pushToast({
+        id: toastId,
+        title: "Save incomplete",
+        description: state.lastSyncError ?? "Still pending sync, will retry automatically.",
+        variant: "warning",
+        duration: 6000
+      });
+      return;
+    }
+
+    pushToast({
+      id: toastId,
+      title: "Saved",
+      description: `${metadata.name} updated`,
+      variant: "success",
+      duration: 3500
+    });
+  };
+
   return (
     <ReactFlowProvider>
       <Layout
@@ -127,6 +178,12 @@ export default function App(): JSX.Element {
                 value={selectedTreeId}
                 onChange={handleTreeChange}
                 isLoading={isTreesLoading}
+                onSave={handleSave}
+                isSaving={isSaving}
+                onDownload={download}
+                isDownloading={isDownloading}
+                onImport={importFromFile}
+                isImporting={isImporting}
               />
             }
           />
