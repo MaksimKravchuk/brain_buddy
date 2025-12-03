@@ -62,6 +62,8 @@ make compose-smoke-up
 
 The backend will listen on `http://localhost:8000`, and the frontend will be available at `http://localhost:8080`. When finished, tear everything down with `make compose-smoke-down`. See `docs/deployment_smoke.md` for the full runbook, including optional API key wiring and automated smoke checks.
 
+Looking for a local-first workflow with refresh/troubleshooting steps? See `docs/runbooks/local-deployment.md`.
+
 **API keys in compose**: set `BRAIN_BUDDY_API_KEY` and `VITE_API_KEY` together in `.env` to require a key end-to-end. The compose stack forwards these into backend/frontend containers and the smoke test will include them automatically.
 
 ## Environment & Configuration
