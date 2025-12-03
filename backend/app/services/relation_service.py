@@ -1,7 +1,6 @@
 """Service layer for relation operations."""
-from __future__ import annotations
 
-from typing import Tuple
+from __future__ import annotations
 
 from app.exceptions import ConflictError, NotFoundError, ValidationFailure
 from app.repositories import TreeRepository
@@ -19,13 +18,17 @@ class RelationService:
         self.tree_repo = tree_repo
         self.tree_service = tree_service
 
-    def create_relation(self, tree_id: str, payload: RelationCreateRequest) -> Tuple[RelationDocument, TreeDocument]:
+    def create_relation(
+        self, tree_id: str, payload: RelationCreateRequest
+    ) -> tuple[RelationDocument, TreeDocument]:
         tree = self.tree_repo.load(tree_id)
         self._ensure_node_exists(tree, payload.from_id)
         self._ensure_node_exists(tree, payload.to_id)
 
         if any(
-            relation.source_id == payload.from_id and relation.target_id == payload.to_id for relation in tree.relations
+            relation.source_id == payload.from_id
+            and relation.target_id == payload.to_id
+            for relation in tree.relations
         ):
             raise ConflictError("Relation", f"{payload.from_id}->{payload.to_id}")
 
@@ -46,17 +49,21 @@ class RelationService:
 
     def update_relation(
         self, tree_id: str, relation_id: str, payload: RelationUpdateRequest
-    ) -> Tuple[RelationDocument, TreeDocument]:
+    ) -> tuple[RelationDocument, TreeDocument]:
         tree = self.tree_repo.load(tree_id)
         relations = list(tree.relations)
         try:
-            index = next(idx for idx, relation in enumerate(relations) if relation.id == relation_id)
+            index = next(
+                idx
+                for idx, relation in enumerate(relations)
+                if relation.id == relation_id
+            )
         except StopIteration as exc:
             raise NotFoundError("Relation", relation_id) from exc
 
         relation = relations[index]
 
-        updates = {}
+        updates: dict[str, object] = {}
         if "from_id" in payload.model_fields_set:
             if payload.from_id is None:
                 raise ValidationFailure("from_id cannot be null")
@@ -98,7 +105,9 @@ class RelationService:
 
     def delete_relation(self, tree_id: str, relation_id: str) -> TreeDocument:
         tree = self.tree_repo.load(tree_id)
-        relations = [relation for relation in tree.relations if relation.id != relation_id]
+        relations = [
+            relation for relation in tree.relations if relation.id != relation_id
+        ]
         if len(relations) == len(tree.relations):
             raise NotFoundError("Relation", relation_id)
         updated_tree = tree.model_copy(update={"relations": relations})

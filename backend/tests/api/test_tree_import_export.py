@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.schemas import NodeCreateRequest, Position, RelationCreateRequest
 
 
 def _iso(ts: datetime) -> str:
-    return ts.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+    return ts.replace(tzinfo=UTC).isoformat().replace("+00:00", "Z")
 
 
 def _parse(dt_str: str) -> datetime:
@@ -30,14 +30,28 @@ def test_export_includes_highlights_and_layout_metadata(api_client) -> None:
     cause_id = cause_resp.json()["id"]
     effect_id = effect_resp.json()["id"]
 
-    relation_payload = RelationCreateRequest(from_id=cause_id, to_id=effect_id, kind="why").model_dump()
-    relation_resp = api_client.post(f"/api/trees/{tree_id}/relations", json=relation_payload)
+    relation_payload = RelationCreateRequest(
+        from_id=cause_id, to_id=effect_id, kind="why"
+    ).model_dump()
+    relation_resp = api_client.post(
+        f"/api/trees/{tree_id}/relations", json=relation_payload
+    )
     assert relation_resp.status_code == 201
 
     highlight_update = {"highlight_state": "cause_candidate"}
     effect_highlight = {"highlight_state": "effect_spanning"}
-    assert api_client.patch(f"/api/trees/{tree_id}/nodes/{cause_id}", json=highlight_update).status_code == 200
-    assert api_client.patch(f"/api/trees/{tree_id}/nodes/{effect_id}", json=effect_highlight).status_code == 200
+    assert (
+        api_client.patch(
+            f"/api/trees/{tree_id}/nodes/{cause_id}", json=highlight_update
+        ).status_code
+        == 200
+    )
+    assert (
+        api_client.patch(
+            f"/api/trees/{tree_id}/nodes/{effect_id}", json=effect_highlight
+        ).status_code
+        == 200
+    )
 
     detail = api_client.get(f"/api/trees/{tree_id}").json()
     layout_block = {"zoom": 1.1, "center": {"x": 5, "y": -3}}
@@ -70,7 +84,13 @@ def test_import_preserves_ids_and_timestamps(api_client) -> None:
     tree_payload = {
         "id": "tree-import-123",
         "name": "Imported Tree",
-        "metadata": {"version": 1, "created_at": created, "updated_at": updated, "layout": {"zoom": 0.9}, "owner_id": "user-1"},
+        "metadata": {
+            "version": 1,
+            "created_at": created,
+            "updated_at": updated,
+            "layout": {"zoom": 0.9},
+            "owner_id": "user-1",
+        },
         "nodes": [
             {
                 "id": "n1",
@@ -127,9 +147,32 @@ def test_import_invalid_relations_returns_bad_request(api_client) -> None:
     payload = {
         "id": "invalid-tree",
         "name": "Invalid",
-        "metadata": {"version": 1, "created_at": now, "updated_at": now, "layout": None, "owner_id": None},
-        "nodes": [{"id": "a", "label": "A", "type": "regular", "position": {"x": 0, "y": 0}, "highlight_state": "none", "relation_counts": {"up_count": 0, "down_count": 0}}],
-        "relations": [{"id": "r1", "from_id": "a", "to_id": "missing", "kind": "why", "created_at": now}],
+        "metadata": {
+            "version": 1,
+            "created_at": now,
+            "updated_at": now,
+            "layout": None,
+            "owner_id": None,
+        },
+        "nodes": [
+            {
+                "id": "a",
+                "label": "A",
+                "type": "regular",
+                "position": {"x": 0, "y": 0},
+                "highlight_state": "none",
+                "relation_counts": {"up_count": 0, "down_count": 0},
+            }
+        ],
+        "relations": [
+            {
+                "id": "r1",
+                "from_id": "a",
+                "to_id": "missing",
+                "kind": "why",
+                "created_at": now,
+            }
+        ],
         "owner_id": None,
     }
 

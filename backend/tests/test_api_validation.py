@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from app.schemas import NodeCreateRequest, Position, RelationCreateRequest, TreeCreateRequest
+from app.schemas import (
+    NodeCreateRequest,
+    Position,
+    RelationCreateRequest,
+    TreeCreateRequest,
+)
 
 
 def test_validation_endpoint_flow(api_client) -> None:
@@ -9,7 +14,9 @@ def test_validation_endpoint_flow(api_client) -> None:
     assert tree_resp.status_code == 201
     tree_id = tree_resp.json()["id"]
 
-    effect_payload = NodeCreateRequest(label="Effect", type="undesired_effect", position=Position(x=0, y=0))
+    effect_payload = NodeCreateRequest(
+        label="Effect", type="undesired_effect", position=Position(x=0, y=0)
+    )
     effect_resp = api_client.post(
         f"/api/trees/{tree_id}/nodes",
         json=effect_payload.model_dump(),
@@ -17,7 +24,9 @@ def test_validation_endpoint_flow(api_client) -> None:
     assert effect_resp.status_code == 201
     effect_id = effect_resp.json()["id"]
 
-    cause_payload = NodeCreateRequest(label="Cause", type="cause", position=Position(x=120, y=120))
+    cause_payload = NodeCreateRequest(
+        label="Cause", type="cause", position=Position(x=120, y=120)
+    )
     cause_resp = api_client.post(
         f"/api/trees/{tree_id}/nodes",
         json=cause_payload.model_dump(),
@@ -36,14 +45,18 @@ def test_validation_endpoint_flow(api_client) -> None:
     )
     assert relation_resp.status_code == 201
 
-    validation_resp = api_client.post(f"/api/trees/{tree_id}/validate/{effect_id}", json={})
+    validation_resp = api_client.post(
+        f"/api/trees/{tree_id}/validate/{effect_id}", json={}
+    )
     assert validation_resp.status_code == 200
     payload = validation_resp.json()
     assert payload["provider"] == "mock"
     assert payload["node_id"] == effect_id
     assert 0 <= payload["confidence"] <= 100
 
-    history_resp = api_client.get(f"/api/trees/{tree_id}/nodes/{effect_id}/validation-history")
+    history_resp = api_client.get(
+        f"/api/trees/{tree_id}/nodes/{effect_id}/validation-history"
+    )
     assert history_resp.status_code == 200
     history_payload = history_resp.json()["items"]
     assert history_payload

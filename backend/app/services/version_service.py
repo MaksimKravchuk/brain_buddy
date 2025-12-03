@@ -1,8 +1,9 @@
 """Service responsible for snapshot and restore operations."""
+
 from __future__ import annotations
 
 import json
-from typing import Iterable
+from collections.abc import Iterable
 
 from app.exceptions import NotFoundError
 from app.repositories import TreeRepository, VersionRepository
@@ -25,20 +26,27 @@ class VersionService:
     """Capture and restore version snapshots for trees."""
 
     def __init__(
-        self, tree_repo: TreeRepository, version_repo: VersionRepository, tree_service: TreeService
+        self,
+        tree_repo: TreeRepository,
+        version_repo: VersionRepository,
+        tree_service: TreeService,
     ) -> None:
         self.tree_repo = tree_repo
         self.version_repo = version_repo
         self.tree_service = tree_service
 
-    def create_version(self, tree_id: str, payload: VersionCreateRequest) -> VersionDocument:
+    def create_version(
+        self, tree_id: str, payload: VersionCreateRequest
+    ) -> VersionDocument:
         tree = self.tree_repo.load(tree_id)
         now = utcnow()
         version_id = generate_version_id(tree.id)
         label = payload.label or f"Snapshot {to_isoformat(now)}"
         snapshot_tree = tree.model_copy(deep=True)
         previous_version = self._latest_version(tree_id)
-        diff_summary, conflicts = self._build_diff(previous_version.tree if previous_version else None, tree)
+        diff_summary, conflicts = self._build_diff(
+            previous_version.tree if previous_version else None, tree
+        )
         version_doc = VersionDocument(
             id=version_id,
             label=label,
@@ -110,7 +118,9 @@ class VersionService:
         updated_tree = tree.model_copy(update={"version_refs": updated_refs})
         self.tree_service.touch_tree(updated_tree)
 
-    def export_tree(self, tree_id: str, version_id: str | None = None) -> tuple[str, bytes]:
+    def export_tree(
+        self, tree_id: str, version_id: str | None = None
+    ) -> tuple[str, bytes]:
         """Serialize a tree (current or snapshot) for download."""
 
         exported_at = utcnow()
@@ -136,7 +146,9 @@ class VersionService:
             "tree": source_tree.model_dump(mode="json"),
         }
         filename = self._build_export_filename(tree_id, exported_at, version_id)
-        content = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        content = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode(
+            "utf-8"
+        )
         return filename, content
 
     def _latest_version(self, tree_id: str) -> VersionDocument | None:
@@ -165,18 +177,28 @@ class VersionService:
 
         node_conflicts: list[VersionConflict] = []
         for node_id in node_ids_curr & node_ids_prev:
-            changed_fields = self._compare_nodes(prev_nodes[node_id], curr_nodes[node_id])
+            changed_fields = self._compare_nodes(
+                prev_nodes[node_id], curr_nodes[node_id]
+            )
             if changed_fields:
                 node_conflicts.append(
-                    VersionConflict(entity_type="node", entity_id=node_id, fields=changed_fields)
+                    VersionConflict(
+                        entity_type="node", entity_id=node_id, fields=changed_fields
+                    )
                 )
 
         relation_conflicts: list[VersionConflict] = []
         for relation_id in relation_ids_curr & relation_ids_prev:
-            changed_fields = self._compare_relations(prev_relations[relation_id], curr_relations[relation_id])
+            changed_fields = self._compare_relations(
+                prev_relations[relation_id], curr_relations[relation_id]
+            )
             if changed_fields:
                 relation_conflicts.append(
-                    VersionConflict(entity_type="relation", entity_id=relation_id, fields=changed_fields)
+                    VersionConflict(
+                        entity_type="relation",
+                        entity_id=relation_id,
+                        fields=changed_fields,
+                    )
                 )
 
         diff_summary = VersionDiffSummary(
@@ -195,7 +217,9 @@ class VersionService:
         return {node.id: node for node in nodes}
 
     @staticmethod
-    def _index_relations(relations: Iterable[RelationDocument]) -> dict[str, RelationDocument]:
+    def _index_relations(
+        relations: Iterable[RelationDocument],
+    ) -> dict[str, RelationDocument]:
         return {relation.id: relation for relation in relations}
 
     @staticmethod
@@ -214,7 +238,9 @@ class VersionService:
         return changed
 
     @staticmethod
-    def _compare_relations(previous: RelationDocument, current: RelationDocument) -> list[str]:
+    def _compare_relations(
+        previous: RelationDocument, current: RelationDocument
+    ) -> list[str]:
         changed: list[str] = []
         if previous.source_id != current.source_id:
             changed.append("source_id")
@@ -227,7 +253,9 @@ class VersionService:
         return changed
 
     @staticmethod
-    def _build_export_filename(tree_id: str, exported_at, version_id: str | None) -> str:
+    def _build_export_filename(
+        tree_id: str, exported_at, version_id: str | None
+    ) -> str:
         timestamp = to_isoformat(exported_at).replace(":", "").replace("-", "")
         suffix = version_id.split("::")[-1] if version_id else "latest"
         return f"{tree_id}_{suffix}_{timestamp}.json"

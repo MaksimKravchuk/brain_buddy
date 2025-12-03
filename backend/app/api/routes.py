@@ -1,4 +1,5 @@
 """FastAPI routes implementing the Brain Buddy API contracts."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, status
@@ -11,6 +12,8 @@ from app.api.dependencies import (
     get_version_service,
 )
 from app.schemas import (
+    AiFeedbackRequest,
+    AiFeedbackResponse,
     NodeCreateRequest,
     NodeResponse,
     NodeUpdateRequest,
@@ -20,8 +23,6 @@ from app.schemas import (
     TreeCreateRequest,
     TreeDetailResponse,
     TreeExportResponse,
-    AiFeedbackRequest,
-    AiFeedbackResponse,
     TreeImportRequest,
     TreeListItem,
     TreeUpdateRequest,
@@ -53,11 +54,18 @@ def create_tree(
 @router.get("/trees", response_model=list[TreeListItem])
 def list_trees(tree_service=Depends(get_tree_service)) -> list[TreeListItem]:
     entries = tree_service.list_trees()
-    return [TreeListItem(id=entry.id, name=entry.title, updated_at=entry.updated_at, owner_id=None) for entry in entries]
+    return [
+        TreeListItem(
+            id=entry.id, name=entry.title, updated_at=entry.updated_at, owner_id=None
+        )
+        for entry in entries
+    ]
 
 
 @router.get("/trees/{tree_id}", response_model=TreeDetailResponse)
-def get_tree(tree_id: str, tree_service=Depends(get_tree_service)) -> TreeDetailResponse:
+def get_tree(
+    tree_id: str, tree_service=Depends(get_tree_service)
+) -> TreeDetailResponse:
     tree = tree_service.get_tree(tree_id)
     return _build_tree_response(tree)
 
@@ -82,13 +90,17 @@ def delete_tree(tree_id: str, tree_service=Depends(get_tree_service)) -> None:
     response_model=TreeDetailResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def import_tree(payload: TreeImportRequest, tree_service=Depends(get_tree_service)) -> TreeDetailResponse:
+def import_tree(
+    payload: TreeImportRequest, tree_service=Depends(get_tree_service)
+) -> TreeDetailResponse:
     tree = tree_service.import_tree(payload.tree)
     return _build_tree_response(tree)
 
 
 @router.post("/trees/{tree_id}/export", response_model=TreeExportResponse)
-def export_tree(tree_id: str, tree_service=Depends(get_tree_service)) -> TreeExportResponse:
+def export_tree(
+    tree_id: str, tree_service=Depends(get_tree_service)
+) -> TreeExportResponse:
     tree = tree_service.get_tree(tree_id)
     return TreeExportResponse(tree=_build_tree_response(tree))
 
@@ -131,7 +143,9 @@ def update_node(
     return _node_response_from_tree(tree, node.id)
 
 
-@router.delete("/trees/{tree_id}/nodes/{node_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/trees/{tree_id}/nodes/{node_id}", status_code=status.HTTP_204_NO_CONTENT
+)
 def delete_node(
     tree_id: str,
     node_id: str,
@@ -155,7 +169,9 @@ def create_relation(
     return _relation_to_response(relation)
 
 
-@router.patch("/trees/{tree_id}/relations/{relation_id}", response_model=RelationResponse)
+@router.patch(
+    "/trees/{tree_id}/relations/{relation_id}", response_model=RelationResponse
+)
 def update_relation(
     tree_id: str,
     relation_id: str,
@@ -166,7 +182,9 @@ def update_relation(
     return _relation_to_response(relation)
 
 
-@router.delete("/trees/{tree_id}/relations/{relation_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/trees/{tree_id}/relations/{relation_id}", status_code=status.HTTP_204_NO_CONTENT
+)
 def delete_relation(
     tree_id: str,
     relation_id: str,
@@ -198,7 +216,9 @@ def create_version(
 
 
 @router.get("/trees/{tree_id}/versions", response_model=list[VersionListItem])
-def list_versions(tree_id: str, version_service=Depends(get_version_service)) -> list[VersionListItem]:
+def list_versions(
+    tree_id: str, version_service=Depends(get_version_service)
+) -> list[VersionListItem]:
     return [_version_ref_to_item(ref) for ref in version_service.list_versions(tree_id)]
 
 
@@ -215,7 +235,9 @@ def restore_version(
     return _build_tree_response(tree)
 
 
-@router.delete("/trees/{tree_id}/versions/{version_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/trees/{tree_id}/versions/{version_id}", status_code=status.HTTP_204_NO_CONTENT
+)
 def delete_version(
     tree_id: str,
     version_id: str,
@@ -303,7 +325,9 @@ def _node_response_from_tree(tree: TreeDocument, node_id: str) -> NodeResponse:
     )
 
 
-def _relation_counts(relations: list[RelationDocument], node_id: str) -> tuple[int, int]:
+def _relation_counts(
+    relations: list[RelationDocument], node_id: str
+) -> tuple[int, int]:
     up_count = sum(1 for relation in relations if relation.source_id == node_id)
     down_count = sum(1 for relation in relations if relation.target_id == node_id)
     return up_count, down_count

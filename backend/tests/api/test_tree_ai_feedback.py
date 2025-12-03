@@ -2,17 +2,24 @@ from __future__ import annotations
 
 from app.schemas import Position
 
-
 API_HEADERS = {"X-API-Key": "test-key"}
 
 
 def _create_tree(client) -> str:
-    create_resp = client.post("/api/trees", json={"name": "AI Tree"}, headers=API_HEADERS)
+    create_resp = client.post(
+        "/api/trees", json={"name": "AI Tree"}, headers=API_HEADERS
+    )
     assert create_resp.status_code == 201
     tree_id = create_resp.json()["id"]
 
-    node_payload = {"label": "Root cause", "type": "cause", "position": Position(x=0, y=0).model_dump()}
-    node_resp = client.post(f"/api/trees/{tree_id}/nodes", json=node_payload, headers=API_HEADERS)
+    node_payload = {
+        "label": "Root cause",
+        "type": "cause",
+        "position": Position(x=0, y=0).model_dump(),
+    }
+    node_resp = client.post(
+        f"/api/trees/{tree_id}/nodes", json=node_payload, headers=API_HEADERS
+    )
     assert node_resp.status_code == 201
     return tree_id
 

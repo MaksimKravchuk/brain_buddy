@@ -1,4 +1,5 @@
 """Application entrypoint for the Brain Buddy backend."""
+
 from fastapi import FastAPI
 
 from app.api import api_router

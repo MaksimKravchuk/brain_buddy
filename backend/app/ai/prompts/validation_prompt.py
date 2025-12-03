@@ -1,8 +1,9 @@
 """Prompt builder for validation workflow."""
+
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from app.schemas.common import ValidationState
 from app.schemas.domain import NodeDocument, RelationDocument, TreeDocument
@@ -36,7 +37,9 @@ def summarize_validation_state(state: ValidationState | None) -> str:
 
     if not state:
         return "None"
-    return f"{state.confidence}% via {state.provider} on {state.last_checked.isoformat()}"
+    return (
+        f"{state.confidence}% via {state.provider} on {state.last_checked.isoformat()}"
+    )
 
 
 def truncate(value: str | None, limit: int = TRUNCATE_LIMIT) -> str:

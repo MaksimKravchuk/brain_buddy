@@ -1,9 +1,8 @@
 """Tests for filesystem utilities."""
+
 from __future__ import annotations
 
 from pathlib import Path
-
-import pytest
 
 from app.utils.file_ops import atomic_write, ensure_directory, read_json, write_json
 

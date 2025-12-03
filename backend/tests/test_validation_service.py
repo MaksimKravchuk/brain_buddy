@@ -1,14 +1,24 @@
 from __future__ import annotations
 
-from app.schemas import NodeCreateRequest, Position, RelationCreateRequest, TreeCreateRequest, ValidationRequest
+from app.schemas import (
+    NodeCreateRequest,
+    Position,
+    RelationCreateRequest,
+    TreeCreateRequest,
+    ValidationRequest,
+)
 
 
-def test_validation_flow(container, tree_service, node_service, relation_service, validation_service) -> None:
+def test_validation_flow(
+    container, tree_service, node_service, relation_service, validation_service
+) -> None:
     tree = tree_service.create_tree(TreeCreateRequest(name="Validation"))
 
     effect_node, tree = node_service.create_node(
         tree.id,
-        NodeCreateRequest(label="Effect", type="undesired_effect", position=Position(x=0, y=0)),
+        NodeCreateRequest(
+            label="Effect", type="undesired_effect", position=Position(x=0, y=0)
+        ),
     )
     cause_node, tree = node_service.create_node(
         tree.id,
