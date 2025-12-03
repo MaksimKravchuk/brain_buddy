@@ -20,6 +20,7 @@ export default defineConfig({
     include: ["src/**/*.test.{ts,tsx}", "src/**/*.spec.{ts,tsx}"],
     exclude: ["tests/**"],
     coverage: {
+      provider: "istanbul",
       reporter: ["text", "lcov"],
       include: ["src/**/*.{ts,tsx}"],
       exclude: ["src/main.tsx"]

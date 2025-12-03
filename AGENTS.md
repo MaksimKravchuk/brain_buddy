@@ -41,6 +41,12 @@
 - File-backed tree data volume (`backend/data`) with LRU cache; optional persisted volume in Compose (001-reality-tree-ui)
 - Python 3.11 (backend), TypeScript (strict) + React (frontend) + FastAPI, Pydantic, pytest/FastAPI TestClient; Vite, React, Zustand, React Query, Vitest/Testing Library (001-reality-tree-ui)
 - File-backed tree data under `backend/data` with LRU cache; optional cloud persistence for signed-in users (API key gated) (001-reality-tree-ui)
+- Python 3.11 (backend), TypeScript (strict) + React (frontend) + FastAPI, Pydantic; React, Vite, Zustand, React Query, Testing Library/Vites (001-remove-ui-minimize)
+- Existing file-backed tree data (unchanged for this feature) (001-remove-ui-minimize)
+- Python 3.11 (backend), TypeScript strict + React (frontend) + FastAPI, Pydantic, pytest; Vite, React, Zustand, React Query, Tailwind, Vitest/Testing Library (001-remove-ui-minimize)
+- File-backed tree data in `backend/data` with LRU cache; optional compose volume for persistence (no new data added for this feature) (001-remove-ui-minimize)
+- Python 3.11; TypeScript (strict) + React (Vite). + FastAPI + Pydantic backend; React + Zustand + React Query frontend; Docker/Compose for local stack. (001-local-deploy-setup)
+- File-backed tree data under `backend/data` with LRU cache (local volume). (001-local-deploy-setup)
 
 ## Recent Changes
 - 001-reality-tree-ui: Added Python 3.11 (backend), TypeScript (strict) + React (frontend) + FastAPI, Pydantic, pytest; React, Vite, Zustand, React Query, React Flow-like canvas, Vitest/Testing Library

@@ -1,4 +1,4 @@
-.PHONY: install-backend install-frontend dev-backend dev-frontend test-backend test-frontend compose-up compose-down compose-logs compose-smoke-up compose-smoke-down compose-smoke-logs
+.PHONY: install-backend install-frontend dev-backend dev-frontend test-backend test-frontend compose-up compose-down compose-logs compose-smoke-up compose-smoke-down compose-smoke-logs local-deploy local-deploy-down
 
 install-backend:
 	cd backend && python -m pip install -e .[dev]
@@ -37,3 +37,10 @@ compose-smoke-down:
 
 compose-smoke-logs:
 	docker compose -f docker-compose.smoke.yml logs -f
+
+# Local deployment shortcuts (uses smoke stack)
+local-deploy:
+	docker compose -f docker-compose.smoke.yml up --build
+
+local-deploy-down:
+	docker compose -f docker-compose.smoke.yml down --volumes
