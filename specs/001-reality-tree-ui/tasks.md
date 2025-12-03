@@ -57,9 +57,9 @@ description: "Task list for Current Reality Tree UI"
 
 - [X] T018 [US2] Implement backend tree CRUD and import/export per contract in `backend/app/api/routes.py` and `backend/app/services/tree_service.py`.
 - [X] T019 [P] [US2] Add backend import/export validation tests in `backend/tests/api/test_tree_import_export.py`.
-- [ ] T020 [US2] Wire tree management menu (new/save/open) to backend API in `frontend/src/components/topbar/TreeSelector.tsx` and `frontend/src/components/modals/CreateTreeModal.tsx`.
-- [ ] T021 [P] [US2] Add download/import flows with toasts and error handling in `frontend/src/api/hooks.ts` and `frontend/src/utils/error.ts`.
-- [ ] T022 [US2] Implement signed-in persistence (API key forwarding/owner mapping) in `frontend/src/api/client.ts` and `frontend/src/stores/treeStore.ts`.
+- [X] T020 [US2] Wire tree management menu (new/save/open) to backend API in `frontend/src/components/topbar/TreeSelector.tsx` and `frontend/src/components/modals/CreateTreeModal.tsx`.
+- [X] T021 [P] [US2] Add download/import flows with toasts and error handling in `frontend/src/api/hooks.ts` and `frontend/src/utils/error.ts`.
+- [X] T022 [US2] Implement signed-in persistence (API key forwarding/owner mapping) in `frontend/src/api/client.ts` and `frontend/src/stores/treeStore.ts`.
 
 ---
 

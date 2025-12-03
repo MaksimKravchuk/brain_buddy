@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { apiClient } from "./client";
+import { apiClient, getOwnerId } from "./client";
 import type {
   NodeCreateRequest,
   NodeResponse,
@@ -19,6 +19,8 @@ import type {
   VersionCreateRequest,
   VersionListItem
 } from "./types";
+import { useUiStore } from "../stores/uiStore";
+import { getErrorMessage } from "../utils/error";
 
 export const treeKeys = {
   all: ["trees"] as const,
@@ -221,4 +223,151 @@ export function useValidationHistory(treeId: string, nodeId: string | null) {
     },
     enabled: Boolean(nodeId)
   });
+}
+
+export function useTreeDownload(treeId: string | null) {
+  const pushToast = useUiStore((state) => state.pushToast);
+  const exportTreeMutation = useExportTree(treeId ?? "");
+
+  const download = () => {
+    if (!treeId) {
+      pushToast({
+        title: "Select a tree first",
+        description: "Choose a tree to export before downloading.",
+        variant: "warning",
+        duration: 4000
+      });
+      return;
+    }
+
+    const toastId = pushToast({
+      title: "Preparing download…",
+      variant: "info",
+      duration: 0
+    });
+
+    exportTreeMutation.mutate(undefined, {
+      onSuccess: ({ tree }) => {
+        const filename = `${tree.name}-${tree.metadata.updated_at.replace(/[:]/g, "")}.json`;
+        const content = JSON.stringify(tree, null, 2);
+        if (typeof window !== "undefined") {
+          const blob = new Blob([content], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement("a");
+          anchor.href = url;
+          anchor.download = filename;
+          document.body.appendChild(anchor);
+          anchor.click();
+          anchor.remove();
+          window.setTimeout(() => URL.revokeObjectURL(url), 0);
+        }
+        pushToast({
+          id: toastId,
+          title: "Download ready",
+          description: filename,
+          variant: "success",
+          duration: 4000
+        });
+      },
+      onError: (error) => {
+        pushToast({
+          id: toastId,
+          title: "Download failed",
+          description: getErrorMessage(error),
+          variant: "error",
+          duration: 6000
+        });
+      }
+    });
+  };
+
+  return { download, isDownloading: exportTreeMutation.isPending };
+}
+
+function parseImportPayload(raw: unknown): TreeImportPayload {
+  if (!raw || typeof raw !== "object") {
+    throw new Error("Import file must be JSON");
+  }
+  const candidate = raw as Partial<TreeImportPayload>;
+  if (!candidate.id || !candidate.name || !candidate.metadata || !candidate.nodes || !candidate.relations) {
+    throw new Error("Import file is missing required fields");
+  }
+  return candidate as TreeImportPayload;
+}
+
+export function useTreeImportWithToasts(onImported?: (tree: TreeDetailResponse) => void) {
+  const importTreeMutation = useImportTree();
+  const pushToast = useUiStore((state) => state.pushToast);
+
+  const importFromFile = async (file: File) => {
+    const toastId = pushToast({
+      title: "Importing tree…",
+      description: file.name,
+      variant: "info",
+      duration: 0
+    });
+
+    let parsed: unknown;
+    try {
+      const content = await file.text();
+      parsed = JSON.parse(content);
+    } catch (error) {
+      pushToast({
+        id: toastId,
+        title: "Invalid import file",
+        description: error instanceof Error ? error.message : "Could not read file",
+        variant: "error",
+        duration: 6000
+      });
+      return;
+    }
+
+    let payload: TreeImportPayload;
+    try {
+      payload = parseImportPayload(parsed);
+    } catch (error) {
+      pushToast({
+        id: toastId,
+        title: "Import failed",
+        description: error instanceof Error ? error.message : "Import file is not valid",
+        variant: "error",
+        duration: 6000
+      });
+      return;
+    }
+
+    const ownerId = getOwnerId();
+    const payloadWithOwner = ownerId
+      ? {
+          ...payload,
+          owner_id: payload.owner_id ?? ownerId,
+          metadata: {
+            ...payload.metadata,
+            owner_id: payload.metadata.owner_id ?? ownerId
+          }
+        }
+      : payload;
+
+    try {
+      const tree = await importTreeMutation.mutateAsync(payloadWithOwner);
+      onImported?.(tree);
+      pushToast({
+        id: toastId,
+        title: "Imported tree",
+        description: tree.name,
+        variant: "success",
+        duration: 4000
+      });
+    } catch (error) {
+      pushToast({
+        id: toastId,
+        title: "Import failed",
+        description: getErrorMessage(error),
+        variant: "error",
+        duration: 6000
+      });
+    }
+  };
+
+  return { importFromFile, isImporting: importTreeMutation.isPending };
 }

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import { apiClient } from "../api/client";
+import { apiClient, getOwnerId, hasApiKey } from "../api/client";
 
 import type {
   NodeResponse,
@@ -135,7 +135,7 @@ export const TREE_DRAFT_PREFIX = "brainbuddy:tree-draft:";
 
 const AUTOSAVE_DEBOUNCE_MS = 5000;
 
-const isSignedIn = Boolean(import.meta.env.VITE_API_KEY);
+const sessionOwnerId = getOwnerId();
 
 function toNodeResponse(node: GraphNode): NodeResponse {
   return {
@@ -255,6 +255,7 @@ function mapTreeDetail(state: TreeStoreState): TreeDetailResponse | null {
   }
 
   const updatedAt = new Date().toISOString();
+  const ownerId = state.metadata.ownerId ?? sessionOwnerId ?? null;
 
   return {
     id: state.activeTreeId,
@@ -264,11 +265,11 @@ function mapTreeDetail(state: TreeStoreState): TreeDetailResponse | null {
       created_at: state.metadata.createdAt,
       updated_at: updatedAt,
       layout: state.metadata.layout ?? null,
-      owner_id: state.metadata.ownerId ?? null
+      owner_id: ownerId
     },
     nodes: state.nodes.map(toNodeResponse),
     relations: state.relations.map(toRelationResponse),
-    owner_id: state.metadata.ownerId ?? null
+    owner_id: ownerId
   };
 }
 
@@ -301,6 +302,12 @@ async function persistTree(get: () => TreeStoreState, set: (partial: Partial<Tre
     return;
   }
 
+  const ownerId = detail.owner_id ?? sessionOwnerId ?? null;
+  if (ownerId) {
+    detail.owner_id = ownerId;
+    detail.metadata.owner_id = ownerId;
+  }
+
   clearAutosaveTimer();
 
   const savedLocally = persistDraft(detail);
@@ -310,7 +317,7 @@ async function persistTree(get: () => TreeStoreState, set: (partial: Partial<Tre
   let lastSyncError: string | null = savedLocally ? null : "Local draft save failed";
   let lastCloudSyncAt: string | null = null;
 
-  if (isSignedIn) {
+  if (hasApiKey()) {
     try {
       await apiClient.updateTree(detail.id, buildTreeUpdateRequest(detail));
       lastCloudSyncAt = timestamp;
@@ -454,6 +461,7 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
   setTree(tree) {
     const mappedRelations = tree.relations.map(mapRelationResponse);
     const mappedNodes = applyDerivedNodeState(tree.nodes.map(mapNodeResponse), mappedRelations);
+    const ownerId = tree.owner_id ?? tree.metadata.owner_id ?? sessionOwnerId ?? null;
 
     set(() => ({
       activeTreeId: tree.id,
@@ -463,7 +471,7 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
         version: tree.metadata.version,
         createdAt: tree.metadata.created_at,
         updatedAt: tree.metadata.updated_at,
-        ownerId: tree.owner_id ?? tree.metadata.owner_id ?? null,
+        ownerId,
         layout: tree.metadata.layout ?? null
       },
       nodes: mappedNodes,
