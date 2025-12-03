@@ -56,20 +56,13 @@ interface TreeCanvasProps {
 }
 
 function createPlaceholderNode(): GraphNode {
-  const now = new Date().toISOString();
   return {
     id: `tmp-${Math.random().toString(36).slice(2, 9)}`,
     label: "New node",
     position: { x: 0, y: 0 },
-    metadata: {
-      createdAt: now,
-      updatedAt: now,
-      author: "local"
-    },
-    visual: null,
-    validation: null,
-    incomingCount: 0,
-    outgoingCount: 0
+    type: "regular",
+    highlightState: "none",
+    relationCounts: { up: 0, down: 0 }
   };
 }
 
@@ -138,10 +131,10 @@ export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element 
   const flowEdges = useMemo<EdgeType[]>(() => {
     return relations.map((relation) => ({
       id: relation.id,
-      source: relation.sourceId,
-      target: relation.targetId,
+      source: relation.fromId,
+      target: relation.toId,
       data: { relation },
-      label: relation.questionLabel,
+      label: relation.kind.toUpperCase(),
       selected: selection.type === "relation" && selection.id === relation.id,
       type: "smoothstep",
       animated: false,
@@ -185,8 +178,7 @@ export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element 
       const token = beginOptimisticChange("rename-node-inline");
       upsertNode({
         ...graphNode,
-        label: trimmed,
-        metadata: { ...graphNode.metadata, updatedAt: new Date().toISOString() }
+        label: trimmed
       });
 
       updateNodeMutation.mutate(
@@ -334,8 +326,7 @@ export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element 
       const token = beginOptimisticChange("move-node");
       upsertNode({
         ...graphNode,
-        position: { ...node.position },
-        metadata: { ...graphNode.metadata, updatedAt: new Date().toISOString() }
+        position: { ...node.position }
       });
 
       updateNodeMutation.mutate(
@@ -380,23 +371,18 @@ export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element 
       const token = beginOptimisticChange("create-relation");
       const tempRelation: GraphRelation = {
         id: `tmp-rel-${Math.random().toString(36).slice(2, 9)}`,
-        sourceId: connection.source,
-        targetId: connection.target,
-        questionLabel: "WHY?",
-        notes: null,
-        metadata: {
-          createdAt: now,
-          updatedAt: now,
-          author: "local"
-        }
+        fromId: connection.source,
+        toId: connection.target,
+        kind: "why",
+        createdAt: now
       };
 
       upsertRelation(tempRelation);
       createRelationMutation.mutate(
         {
-          source_id: connection.source,
-          target_id: connection.target,
-          question_label: "WHY?"
+          from_id: connection.source,
+          to_id: connection.target,
+          kind: "why"
         },
         {
           onSuccess: (relation) => {
@@ -501,7 +487,9 @@ export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element 
     createNodeMutation.mutate(
       {
         label: placeholder.label,
-        position: viewportCenter
+        position: viewportCenter,
+        type: "regular",
+        highlight_state: "none"
       },
       {
         onSuccess: (nodeResponse) => {
@@ -583,7 +571,13 @@ export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element 
         <Background gap={24} size={1} color="rgba(59,130,246,0.1)" />
         <MiniMap
           className="!bg-surface-sunken/80"
-          nodeColor={(node) => (node.data?.node?.validation ? "#22c55e" : "#38bdf8")}
+          nodeColor={(node) =>
+            node.data?.node?.highlightState === "effect_spanning"
+              ? "#f43f5e"
+              : node.data?.node?.highlightState === "cause_candidate"
+                ? "#f59e0b"
+                : "#38bdf8"
+          }
         />
         <Controls className="rounded-lg border border-slate-700 bg-surface-sunken/90 text-slate-200" />
         <Panel position="top-left" className="rounded-lg border border-slate-800 bg-surface-sunken/80 px-3 py-2 text-xs shadow-lg">

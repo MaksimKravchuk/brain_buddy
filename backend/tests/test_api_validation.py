@@ -4,12 +4,12 @@ from app.schemas import NodeCreateRequest, Position, RelationCreateRequest, Tree
 
 
 def test_validation_endpoint_flow(api_client) -> None:
-    tree_payload = TreeCreateRequest(title="API Validation", description=None)
+    tree_payload = TreeCreateRequest(name="API Validation")
     tree_resp = api_client.post("/api/trees", json=tree_payload.model_dump())
     assert tree_resp.status_code == 201
     tree_id = tree_resp.json()["id"]
 
-    effect_payload = NodeCreateRequest(label="Effect", position=Position(x=0, y=0))
+    effect_payload = NodeCreateRequest(label="Effect", type="undesired_effect", position=Position(x=0, y=0))
     effect_resp = api_client.post(
         f"/api/trees/{tree_id}/nodes",
         json=effect_payload.model_dump(),
@@ -17,7 +17,7 @@ def test_validation_endpoint_flow(api_client) -> None:
     assert effect_resp.status_code == 201
     effect_id = effect_resp.json()["id"]
 
-    cause_payload = NodeCreateRequest(label="Cause", position=Position(x=120, y=120))
+    cause_payload = NodeCreateRequest(label="Cause", type="cause", position=Position(x=120, y=120))
     cause_resp = api_client.post(
         f"/api/trees/{tree_id}/nodes",
         json=cause_payload.model_dump(),
@@ -26,10 +26,9 @@ def test_validation_endpoint_flow(api_client) -> None:
     cause_id = cause_resp.json()["id"]
 
     relation_payload = RelationCreateRequest(
-        source_id=effect_id,
-        target_id=cause_id,
-        question_label="WHY?",
-        notes="Investigate root",
+        from_id=cause_id,
+        to_id=effect_id,
+        kind="why",
     )
     relation_resp = api_client.post(
         f"/api/trees/{tree_id}/relations",

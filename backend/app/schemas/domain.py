@@ -33,8 +33,8 @@ class RelationDocument(StorageBaseModel):
     """Stored representation of a directed relation between nodes."""
 
     id: str = Field(description="Unique identifier for the relation.")
-    source_id: str = Field(description="Identifier of the effect node.")
-    target_id: str = Field(description="Identifier of the cause node.")
+    source_id: str = Field(description="Identifier of the cause (from_id) node.")
+    target_id: str = Field(description="Identifier of the effect (to_id) node.")
     question_label: str = Field(default="WHY?", description="Prompt associated with the relation.")
     notes: str | None = Field(default=None, description="Optional explanatory notes.")
     metadata: RelationMetadata = Field(description="Timestamps and authorship metadata.")
@@ -126,6 +126,10 @@ class TreeDocument(StorageBaseModel):
     id: str = Field(description="Unique identifier for the tree.")
     title: str = Field(description="Tree title shown to users.")
     description: str | None = Field(default=None, description="Optional narrative description.")
+    metadata: dict[str, Any] | None = Field(
+        default=None, description="Optional metadata such as layout, version, or ownership details."
+    )
+    owner_id: str | None = Field(default=None, description="Optional identifier of the tree owner.")
     created_at: datetime = Field(description="UTC timestamp when the tree was created.")
     updated_at: datetime = Field(description="UTC timestamp for the most recent update.")
     nodes: list[NodeDocument] = Field(default_factory=list, description="Collection of node documents.")

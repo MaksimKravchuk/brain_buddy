@@ -159,47 +159,46 @@ export function VersionPanel(): JSX.Element {
     });
   };
 
-  const handleExport = (version?: GraphVersion) => {
+  const handleExport = () => {
     const toastId = pushToast({
-      title: version ? `Preparing “${version.label}”` : "Preparing export…",
-      description: version ? new Date(version.createdAt).toLocaleString() : undefined,
+      title: "Preparing export…",
       variant: "info",
       duration: 0
     });
 
-    exportTreeMutation.mutate(
-      { versionId: version?.id },
-      {
-        onSuccess: ({ filename, blob }) => {
-          if (typeof window !== "undefined") {
-            const url = URL.createObjectURL(blob);
-            const anchor = document.createElement("a");
-            anchor.href = url;
-            anchor.download = filename;
-            document.body.appendChild(anchor);
-            anchor.click();
-            anchor.remove();
-            window.setTimeout(() => URL.revokeObjectURL(url), 0);
-          }
-          pushToast({
-            id: toastId,
-            title: "Export ready",
-            description: filename,
-            variant: "success",
-            duration: 4000
-          });
-        },
-        onError: (error) => {
-          pushToast({
-            id: toastId,
-            title: "Export failed",
-            description: getErrorMessage(error),
-            variant: "error",
-            duration: 6000
-          });
+    exportTreeMutation.mutate(undefined, {
+      onSuccess: ({ tree }) => {
+        const filename = `${tree.name}-${tree.metadata.updated_at.replace(/[:]/g, "")}.json`;
+        const content = JSON.stringify(tree, null, 2);
+        if (typeof window !== "undefined") {
+          const blob = new Blob([content], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement("a");
+          anchor.href = url;
+          anchor.download = filename;
+          document.body.appendChild(anchor);
+          anchor.click();
+          anchor.remove();
+          window.setTimeout(() => URL.revokeObjectURL(url), 0);
         }
+        pushToast({
+          id: toastId,
+          title: "Export ready",
+          description: filename,
+          variant: "success",
+          duration: 4000
+        });
+      },
+      onError: (error) => {
+        pushToast({
+          id: toastId,
+          title: "Export failed",
+          description: getErrorMessage(error),
+          variant: "error",
+          duration: 6000
+        });
       }
-    );
+    });
   };
 
   const isDeleting = deleteVersionMutation.isPending && confirmState?.action === "delete";
@@ -209,13 +208,8 @@ export function VersionPanel(): JSX.Element {
     <>
       <div className="space-y-4">
         <div className="rounded-lg border border-slate-800 bg-surface-sunken/60 p-3 text-xs text-slate-400">
-          <p className="font-semibold text-slate-200">{metadata.title}</p>
-          <p className="mt-1">
-            Last updated {new Date(metadata.updatedAt).toLocaleString()}
-            {metadata.description ? (
-              <span className="mt-1 block text-[11px] text-slate-500">{metadata.description}</span>
-            ) : null}
-          </p>
+          <p className="font-semibold text-slate-200">{metadata.name}</p>
+          <p className="mt-1">Last updated {new Date(metadata.updatedAt).toLocaleString()}</p>
         </div>
 
         <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-800 bg-surface-sunken/60 p-3 text-xs text-slate-300">
@@ -306,7 +300,7 @@ export function VersionPanel(): JSX.Element {
                   <div className="flex flex-wrap justify-end gap-2">
                     <button
                       type="button"
-                      onClick={() => handleExport(version)}
+                      onClick={() => handleExport()}
                       className="rounded-md border border-slate-600 px-3 py-1 text-xs font-semibold text-slate-200 transition hover:border-slate-400 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                       disabled={exportTreeMutation.isPending}
                     >

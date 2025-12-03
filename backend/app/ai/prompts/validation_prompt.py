@@ -67,8 +67,8 @@ def _build_downstream_chain(tree: TreeDocument, node: NodeDocument) -> list[Chai
         if not options:
             break
         relation = options[0]
-        cause = nodes.get(relation.target_id)
-        effect = nodes.get(relation.source_id)
+        effect = nodes.get(relation.target_id)
+        cause = nodes.get(relation.source_id)
         if not cause or not effect:
             break
         steps.append(
@@ -102,8 +102,8 @@ def _build_upstream_chain(tree: TreeDocument, node: NodeDocument) -> list[ChainS
         if not options:
             break
         relation = options[0]
-        effect = nodes.get(relation.source_id)
-        cause = nodes.get(relation.target_id)
+        effect = nodes.get(relation.target_id)
+        cause = nodes.get(relation.source_id)
         if not effect or not cause:
             break
         steps.append(

@@ -114,8 +114,8 @@ export default function App(): JSX.Element {
       <Layout
         header={
           <TopBar
-            title={metadata?.title ?? "Brain Buddy Canvas"}
-            subtitle={metadata?.description ?? "Select a tree or create a new one to begin mapping."}
+            title={metadata?.name ?? "Brain Buddy Canvas"}
+            subtitle="Select a tree or create a new one to begin mapping."
             rightSlot={
               <TreeSelector
                 trees={trees}

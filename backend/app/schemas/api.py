@@ -2,12 +2,17 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import ConfigDict, Field
 
-from .common import Position, StrictBaseModel, TimestampMetadata, ValidationState, VisualState
+from .common import Position, StrictBaseModel
 from .domain import VersionDiffSummary
+
+
+NodeType = Literal["undesired_effect", "cause", "regular"]
+HighlightState = Literal["none", "cause_candidate", "effect_spanning"]
+RelationKind = Literal["why"]
 
 
 class ErrorResponse(StrictBaseModel):
@@ -17,43 +22,29 @@ class ErrorResponse(StrictBaseModel):
     detail: Any | None = Field(default=None, description="Optional structured error details.")
 
 
-class TreeCreateRequest(StrictBaseModel):
-    """Payload for creating a new tree."""
+class RelationCounts(StrictBaseModel):
+    """Upstream and downstream relation counts for a node."""
 
-    title: str = Field(description="Title for the tree.")
-    description: str | None = Field(default=None, description="Optional description of the tree.")
-
-
-class TreeUpdateRequest(StrictBaseModel):
-    """Patch payload for updating tree metadata."""
-
-    title: str | None = Field(default=None, description="Updated title for the tree.")
-    description: str | None = Field(default=None, description="Updated description for the tree.")
-
-
-class TreeListItem(StrictBaseModel):
-    """Summary view used for listing trees."""
-
-    id: str = Field(description="Tree identifier.")
-    title: str = Field(description="Tree title.")
-    description: str | None = Field(default=None, description="Tree description.")
-    updated_at: datetime = Field(description="Timestamp of most recent modification.")
+    up_count: int = Field(default=0, ge=0, description="Relations where this node is the cause (from_id).")
+    down_count: int = Field(default=0, ge=0, description="Relations where this node is the effect (to_id).")
 
 
 class NodeCreateRequest(StrictBaseModel):
     """Payload for creating a node within a tree."""
 
     label: str = Field(description="Node label displayed in the UI.")
+    type: NodeType = Field(description="Node type describing its role in the tree.")
     position: Position = Field(description="Canvas position for the new node.")
-    visual: VisualState | None = Field(default=None, description="Optional visual hints for the node.")
+    highlight_state: HighlightState = Field(default="none", description="Current highlight state for the node.")
 
 
 class NodeUpdateRequest(StrictBaseModel):
     """Patch payload for updating an existing node."""
 
     label: str | None = Field(default=None, description="Updated node label.")
+    type: NodeType | None = Field(default=None, description="Updated node type.")
     position: Position | None = Field(default=None, description="Updated canvas position.")
-    visual: VisualState | None = Field(default=None, description="Updated visual hints.")
+    highlight_state: HighlightState | None = Field(default=None, description="Updated highlight state.")
 
 
 class NodeResponse(StrictBaseModel):
@@ -61,41 +52,107 @@ class NodeResponse(StrictBaseModel):
 
     id: str = Field(description="Node identifier.")
     label: str = Field(description="Node label.")
+    type: NodeType = Field(description="Node type describing its role in the tree.")
     position: Position = Field(description="Canvas position.")
-    metadata: TimestampMetadata = Field(description="Timestamps metadata.")
-    visual: VisualState | None = Field(default=None, description="Visual hints for UI rendering.")
-    validation: ValidationState | None = Field(default=None, description="Latest validation state.")
-    incoming_count: int = Field(ge=0, description="Number of relations pointing to this node.")
-    outgoing_count: int = Field(ge=0, description="Number of relations originating from this node.")
+    highlight_state: HighlightState = Field(default="none", description="Current highlight state for the node.")
+    relation_counts: RelationCounts = Field(
+        default_factory=RelationCounts,
+        description="Counts of upstream (from_id) and downstream (to_id) relations.",
+    )
 
 
 class RelationCreateRequest(StrictBaseModel):
     """Payload for creating a relation between nodes."""
 
-    source_id: str = Field(description="Effect node identifier.")
-    target_id: str = Field(description="Cause node identifier.")
-    question_label: str = Field(default="WHY?", description="Prompt question shown on the relation.")
-    notes: str | None = Field(default=None, description="Optional explanatory notes.")
+    from_id: str = Field(description="Cause node identifier (lower node).")
+    to_id: str = Field(description="Effect node identifier (upper node).")
+    kind: RelationKind = Field(default="why", description="Relation kind (only 'why' is supported).")
 
 
 class RelationUpdateRequest(StrictBaseModel):
     """Patch payload for updating a relation."""
 
-    source_id: str | None = Field(default=None, description="Updated effect node identifier.")
-    target_id: str | None = Field(default=None, description="Updated cause node identifier.")
-    question_label: str | None = Field(default=None, description="Updated prompt question.")
-    notes: str | None = Field(default=None, description="Updated notes.")
+    from_id: str | None = Field(default=None, description="Updated cause node identifier (lower node).")
+    to_id: str | None = Field(default=None, description="Updated effect node identifier (upper node).")
+    kind: RelationKind | None = Field(default=None, description="Updated relation kind.")
 
 
 class RelationResponse(StrictBaseModel):
     """API representation of a relation."""
 
     id: str = Field(description="Relation identifier.")
-    source_id: str = Field(description="Effect node identifier.")
-    target_id: str = Field(description="Cause node identifier.")
-    question_label: str = Field(description="Prompt question for the relation.")
-    notes: str | None = Field(default=None, description="Optional notes.")
-    metadata: TimestampMetadata = Field(description="Relation timestamps metadata.")
+    from_id: str = Field(description="Cause node identifier (lower node).")
+    to_id: str = Field(description="Effect node identifier (upper node).")
+    kind: RelationKind = Field(default="why", description="Relation kind (only 'why' is supported).")
+    created_at: datetime = Field(description="Timestamp when the relation was created.")
+
+
+class TreeMetadata(StrictBaseModel):
+    """Metadata for a tree export/import payload."""
+
+    model_config = ConfigDict(str_to_lower=False)
+
+    version: int = Field(default=1, ge=1, description="Schema version for the tree payload.")
+    created_at: datetime = Field(description="Timestamp when the tree was created.")
+    updated_at: datetime = Field(description="Timestamp when the tree was last updated.")
+    layout: dict[str, Any] | None = Field(default=None, description="Optional layout or viewport metadata.")
+    owner_id: str | None = Field(default=None, description="Optional identifier for the owning user/session.")
+
+    @classmethod
+    def from_timestamps(cls, *, created_at: datetime, updated_at: datetime, owner_id: str | None = None) -> "TreeMetadata":
+        return cls(created_at=created_at, updated_at=updated_at, owner_id=owner_id)
+
+
+class TreeCreateRequest(StrictBaseModel):
+    """Payload for creating a new tree."""
+
+    name: str = Field(description="Name for the tree.")
+    owner_id: str | None = Field(default=None, description="Optional owner identifier.")
+    metadata: TreeMetadata | None = Field(default=None, description="Optional metadata overrides.")
+    nodes: list[NodeResponse] = Field(default_factory=list, description="Optional starting nodes.")
+    relations: list[RelationResponse] = Field(default_factory=list, description="Optional starting relations.")
+
+
+class TreeUpdateRequest(StrictBaseModel):
+    """Payload for replacing a tree's state."""
+
+    name: str = Field(description="Updated tree name.")
+    metadata: TreeMetadata = Field(description="Updated metadata block for the tree.")
+    nodes: list[NodeResponse] = Field(default_factory=list, description="Updated nodes.")
+    relations: list[RelationResponse] = Field(default_factory=list, description="Updated relations.")
+    owner_id: str | None = Field(default=None, description="Updated owner identifier.")
+
+
+class TreeListItem(StrictBaseModel):
+    """Summary view used for listing trees."""
+
+    id: str = Field(description="Tree identifier.")
+    name: str = Field(description="Tree name.")
+    updated_at: datetime = Field(description="Timestamp of most recent modification.")
+    owner_id: str | None = Field(default=None, description="Optional owner identifier.")
+
+
+class TreeDetailResponse(StrictBaseModel):
+    """Detailed tree payload returned from read endpoints."""
+
+    id: str = Field(description="Tree identifier.")
+    name: str = Field(description="Tree name.")
+    metadata: TreeMetadata = Field(description="Metadata describing the tree payload.")
+    nodes: list[NodeResponse] = Field(default_factory=list, description="Collection of nodes for this tree.")
+    relations: list[RelationResponse] = Field(default_factory=list, description="Collection of relations for this tree.")
+    owner_id: str | None = Field(default=None, description="Optional owner identifier.")
+
+
+class TreeImportRequest(StrictBaseModel):
+    """Import payload containing a tree export."""
+
+    tree: TreeDetailResponse = Field(description="Complete tree payload to import.")
+
+
+class TreeExportResponse(StrictBaseModel):
+    """Export payload returned to clients."""
+
+    tree: TreeDetailResponse = Field(description="Tree payload matching the export schema.")
 
 
 class VersionCreateRequest(StrictBaseModel):
@@ -118,19 +175,6 @@ class VersionListItem(StrictBaseModel):
         default=None, description="Summary of changes compared to the previous snapshot."
     )
     conflict_count: int = Field(default=0, ge=0, description="Number of conflicts detected for the snapshot.")
-
-
-class TreeDetailResponse(StrictBaseModel):
-    """Detailed tree payload returned from read endpoints."""
-
-    id: str = Field(description="Tree identifier.")
-    title: str = Field(description="Tree title.")
-    description: str | None = Field(default=None, description="Tree description.")
-    created_at: datetime = Field(description="Tree creation timestamp.")
-    updated_at: datetime = Field(description="Last updated timestamp.")
-    nodes: list[NodeResponse] = Field(default_factory=list, description="Collection of nodes for this tree.")
-    relations: list[RelationResponse] = Field(default_factory=list, description="Collection of relations for this tree.")
-    versions: list[VersionListItem] = Field(default_factory=list, description="Snapshot references for this tree.")
 
 
 class ValidationRequest(StrictBaseModel):
@@ -164,11 +208,15 @@ __all__ = [
     "NodeResponse",
     "NodeUpdateRequest",
     "RelationCreateRequest",
+    "RelationCounts",
     "RelationResponse",
     "RelationUpdateRequest",
     "TreeCreateRequest",
     "TreeDetailResponse",
+    "TreeExportResponse",
+    "TreeImportRequest",
     "TreeListItem",
+    "TreeMetadata",
     "TreeUpdateRequest",
     "ValidationHistoryResponse",
     "ValidationRequest",

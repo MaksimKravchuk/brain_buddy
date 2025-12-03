@@ -3,67 +3,55 @@ export interface Position {
   y: number;
 }
 
-export interface TimestampMetadata {
-  created_at: string;
-  updated_at: string;
-  author?: string | null;
-}
+export type NodeType = "undesired_effect" | "cause" | "regular";
+export type HighlightState = "none" | "cause_candidate" | "effect_spanning";
 
-export interface VisualState {
-  color?: string | null;
-  highlight?: boolean;
-}
-
-export interface ValidationState {
-  confidence: number;
-  provider: string;
-  last_checked: string;
+export interface RelationCounts {
+  up_count: number;
+  down_count: number;
 }
 
 export interface NodeResponse {
   id: string;
   label: string;
+  type: NodeType;
   position: Position;
-  metadata: TimestampMetadata;
-  visual?: VisualState | null;
-  validation?: ValidationState | null;
-  incoming_count: number;
-  outgoing_count: number;
+  highlight_state: HighlightState;
+  relation_counts: RelationCounts;
 }
 
 export interface NodeCreateRequest {
   label: string;
+  type: NodeType;
   position: Position;
-  visual?: VisualState | null;
+  highlight_state?: HighlightState;
 }
 
 export interface NodeUpdateRequest {
   label?: string;
+  type?: NodeType;
   position?: Position;
-  visual?: VisualState | null;
+  highlight_state?: HighlightState;
 }
 
 export interface RelationResponse {
   id: string;
-  source_id: string;
-  target_id: string;
-  question_label: string;
-  notes?: string | null;
-  metadata: TimestampMetadata;
+  from_id: string;
+  to_id: string;
+  kind: "why";
+  created_at: string;
 }
 
 export interface RelationCreateRequest {
-  source_id: string;
-  target_id: string;
-  question_label?: string;
-  notes?: string | null;
+  from_id: string;
+  to_id: string;
+  kind?: "why";
 }
 
 export interface RelationUpdateRequest {
-  source_id?: string;
-  target_id?: string;
-  question_label?: string;
-  notes?: string | null;
+  from_id?: string;
+  to_id?: string;
+  kind?: "why";
 }
 
 export interface VersionDiffSummary {
@@ -91,32 +79,52 @@ export interface VersionCreateRequest {
   notes?: string | null;
 }
 
+export interface TreeMetadata {
+  version: number;
+  created_at: string;
+  updated_at: string;
+  layout?: Record<string, unknown> | null;
+  owner_id?: string | null;
+}
+
 export interface TreeListItem {
   id: string;
-  title: string;
-  description?: string | null;
+  name: string;
   updated_at: string;
+  owner_id?: string | null;
 }
 
 export interface TreeDetailResponse {
   id: string;
-  title: string;
-  description?: string | null;
-  created_at: string;
-  updated_at: string;
+  name: string;
+  metadata: TreeMetadata;
   nodes: NodeResponse[];
   relations: RelationResponse[];
-  versions: VersionListItem[];
+  owner_id?: string | null;
 }
 
 export interface TreeCreateRequest {
-  title: string;
-  description?: string | null;
+  name: string;
+  owner_id?: string | null;
+  metadata?: TreeMetadata;
+  nodes?: NodeResponse[];
+  relations?: RelationResponse[];
 }
 
 export interface TreeUpdateRequest {
-  title?: string;
-  description?: string | null;
+  name: string;
+  metadata: TreeMetadata;
+  nodes: NodeResponse[];
+  relations: RelationResponse[];
+  owner_id?: string | null;
+}
+
+export interface TreeImportRequest {
+  tree: TreeDetailResponse;
+}
+
+export interface TreeExportResponse {
+  tree: TreeDetailResponse;
 }
 
 export interface ValidationResponse {

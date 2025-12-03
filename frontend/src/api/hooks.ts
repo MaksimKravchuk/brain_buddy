@@ -181,7 +181,7 @@ export function useRestoreVersion(treeId: string) {
 
 export function useExportTree(treeId: string) {
   return useMutation({
-    mutationFn: ({ versionId }: { versionId?: string }) => apiClient.exportTree(treeId, versionId)
+    mutationFn: () => apiClient.exportTree(treeId)
   });
 }
 

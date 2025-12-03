@@ -39,6 +39,8 @@
 - File-backed tree data under backend/data with LRU caching; cloud persistence for signed-in users (reuse existing storage path) (001-reality-tree-ui)
 - Python 3.11 (backend), TypeScript (strict) + React (frontend), Compose v2 + FastAPI, Pydantic, pytest; Vite/React/Tailwind/TypeScript; Nginx (deploy), Docker/Compose (001-reality-tree-ui)
 - File-backed tree data volume (`backend/data`) with LRU cache; optional persisted volume in Compose (001-reality-tree-ui)
+- Python 3.11 (backend), TypeScript (strict) + React (frontend) + FastAPI, Pydantic, pytest/FastAPI TestClient; Vite, React, Zustand, React Query, Vitest/Testing Library (001-reality-tree-ui)
+- File-backed tree data under `backend/data` with LRU cache; optional cloud persistence for signed-in users (API key gated) (001-reality-tree-ui)
 
 ## Recent Changes
 - 001-reality-tree-ui: Added Python 3.11 (backend), TypeScript (strict) + React (frontend) + FastAPI, Pydantic, pytest; React, Vite, Zustand, React Query, React Flow-like canvas, Vitest/Testing Library

@@ -28,9 +28,12 @@ class NodeService:
             label=payload.label,
             position=payload.position,
             metadata=TimestampMetadata(created_at=now, updated_at=now, author=None),
-            visual=payload.visual,
+            visual=None,
             validation=None,
-            extra=None,
+            extra={
+                "type": payload.type,
+                "highlight_state": payload.highlight_state,
+            },
         )
 
         updated_tree = tree.model_copy(update={"nodes": [*tree.nodes, node]})
@@ -54,8 +57,13 @@ class NodeService:
             updates["label"] = payload.label
         if "position" in payload.model_fields_set and payload.position is not None:
             updates["position"] = payload.position
-        if "visual" in payload.model_fields_set:
-            updates["visual"] = payload.visual
+        if "type" in payload.model_fields_set or "highlight_state" in payload.model_fields_set:
+            extra = {**(node.extra or {})}
+            if "type" in payload.model_fields_set and payload.type is not None:
+                extra["type"] = payload.type
+            if "highlight_state" in payload.model_fields_set and payload.highlight_state is not None:
+                extra["highlight_state"] = payload.highlight_state
+            updates["extra"] = extra
 
         metadata = node.metadata.model_copy(update={"updated_at": utcnow()})
         updates["metadata"] = metadata
