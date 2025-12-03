@@ -1,4 +1,6 @@
 import {
+  AiFeedbackRequest,
+  AiFeedbackResponse,
   NodeCreateRequest,
   NodeResponse,
   NodeUpdateRequest,
@@ -211,6 +213,10 @@ export const apiClient = {
 
   exportTree(treeId: string) {
     return request<TreeExportResponse>(`/trees/${treeId}/export`, { method: "POST" });
+  },
+
+  aiFeedback(treeId: string, payload: AiFeedbackRequest) {
+    return request<AiFeedbackResponse>(`/trees/${treeId}/ai-feedback`, { method: "POST", body: payload });
   },
 
   importTree(tree: TreeImportPayload) {

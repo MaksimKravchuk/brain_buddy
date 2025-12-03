@@ -1,6 +1,8 @@
 """Pydantic schema definitions for Brain Buddy."""
 
 from .api import (
+    AiFeedbackRequest,
+    AiFeedbackResponse,
     ErrorResponse,
     NodeCreateRequest,
     NodeResponse,
@@ -50,6 +52,8 @@ __all__ = [
     "TreeListItem",
     "TreeMetadata",
     "TreeUpdateRequest",
+    "AiFeedbackRequest",
+    "AiFeedbackResponse",
     "TimestampMetadata",
     "ValidationEntry",
     "ValidationHistoryResponse",

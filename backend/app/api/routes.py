@@ -20,6 +20,8 @@ from app.schemas import (
     TreeCreateRequest,
     TreeDetailResponse,
     TreeExportResponse,
+    AiFeedbackRequest,
+    AiFeedbackResponse,
     TreeImportRequest,
     TreeListItem,
     TreeUpdateRequest,
@@ -89,6 +91,19 @@ def import_tree(payload: TreeImportRequest, tree_service=Depends(get_tree_servic
 def export_tree(tree_id: str, tree_service=Depends(get_tree_service)) -> TreeExportResponse:
     tree = tree_service.get_tree(tree_id)
     return TreeExportResponse(tree=_build_tree_response(tree))
+
+
+@router.post(
+    "/trees/{tree_id}/ai-feedback",
+    response_model=AiFeedbackResponse,
+    status_code=status.HTTP_200_OK,
+)
+def ai_feedback(
+    tree_id: str,
+    payload: AiFeedbackRequest,
+    tree_service=Depends(get_tree_service),
+) -> AiFeedbackResponse:
+    return tree_service.generate_ai_feedback(tree_id, payload)
 
 
 @router.post(

@@ -8,6 +8,8 @@ from typing import Iterable, OrderedDict as OrderedDictType
 from app.exceptions import NotFoundError, ValidationFailure
 from app.repositories import IndexRepository, TreeRepository
 from app.schemas.api import (
+    AiFeedbackRequest,
+    AiFeedbackResponse,
     NodeCreateRequest,
     NodeResponse,
     RelationCreateRequest,
@@ -100,6 +102,31 @@ class TreeService:
         except NotFoundError:
             # Index may have been out of sync; ignore to allow deletion
             pass
+
+    def generate_ai_feedback(self, tree_id: str, payload: AiFeedbackRequest) -> AiFeedbackResponse:
+        if not payload.consent:
+            raise ValidationFailure("Consent is required before requesting AI feedback.")
+
+        tree = self.get_tree(tree_id)
+        node_count = len(tree.nodes)
+        relation_count = len(tree.relations)
+        summary = f"Tree '{tree.title}' contains {node_count} nodes and {relation_count} relations."
+
+        recommendations: list[str] = []
+        if node_count == 0:
+            recommendations.append("Add nodes to capture the current reality before requesting feedback.")
+        else:
+            recommendations.append("Review whether each relation flows from cause to effect.")
+
+        if relation_count < max(1, node_count // 2):
+            recommendations.append("Consider linking more causes to effects to expose gaps.")
+
+        return AiFeedbackResponse(
+            status="success",
+            summary=summary,
+            recommendations=recommendations or ["No recommendations available."],
+            request_id=payload.request_id,
+        )
 
     def _sync_index(self, tree: TreeDocument) -> None:
         entry = IndexEntry(
