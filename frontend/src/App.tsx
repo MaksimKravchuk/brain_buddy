@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ReactFlowProvider } from "reactflow";
 import "reactflow/dist/style.css";
 
 import { ApiError } from "./api/client";
 import type { TreeDetailResponse } from "./api/types";
 import { useTree, useTrees } from "./api/hooks";
-import { TreeCanvas } from "./components/canvas/TreeCanvas";
+import { TreeCanvas, type TreeCanvasHandle } from "./components/canvas/TreeCanvas";
 import { CanvasShell } from "./components/layout/CanvasShell";
 import { Layout } from "./components/layout/Layout";
 import { SidePanel } from "./components/layout/SidePanel";
@@ -23,6 +23,7 @@ import { getErrorMessage } from "./utils/error";
 
 export default function App(): JSX.Element {
   const [selectedTreeId, setSelectedTreeId] = useState<string | null>(null);
+  const canvasRef = useRef<TreeCanvasHandle | null>(null);
 
   const {
     data: trees,
@@ -109,6 +110,10 @@ export default function App(): JSX.Element {
   const inspectorTitle =
     inspectorTab === "node" ? "Node Inspector" : inspectorTab === "relation" ? "Relation Inspector" : "Versions";
 
+  const handleZoomIn = () => canvasRef.current?.zoomIn();
+  const handleZoomOut = () => canvasRef.current?.zoomOut();
+  const handleCenter = () => canvasRef.current?.centerOnSelection();
+
   return (
     <ReactFlowProvider>
       <Layout
@@ -139,7 +144,11 @@ export default function App(): JSX.Element {
         }
         footer="Use ⌘Z / Ctrl+Z to undo and Shift+⌘Z / Shift+Ctrl+Z to redo changes."
       >
-        <CanvasShell>
+        <CanvasShell
+          toolbar={
+            <CanvasToolbar onZoomIn={handleZoomIn} onZoomOut={handleZoomOut} onCenter={handleCenter} />
+          }
+        >
           {treeError ? (
             <ErrorCanvasState
               message={getErrorMessage(treeError)}
@@ -148,7 +157,7 @@ export default function App(): JSX.Element {
               onRetry={() => refetchTree()}
             />
           ) : activeTreeId ? (
-            <TreeCanvas treeId={activeTreeId} isLoading={isTreeLoading} />
+            <TreeCanvas ref={canvasRef} treeId={activeTreeId} isLoading={isTreeLoading} />
           ) : (
             <EmptyCanvasState isLoading={isTreeLoading} hasTrees={Boolean(trees?.length)} />
           )}
@@ -158,6 +167,42 @@ export default function App(): JSX.Element {
       <ToastStack />
       <CreateTreeModal onCreated={handleTreeCreated} />
     </ReactFlowProvider>
+  );
+}
+
+function CanvasToolbar({
+  onZoomIn,
+  onZoomOut,
+  onCenter
+}: {
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onCenter: () => void;
+}): JSX.Element {
+  return (
+    <div className="flex items-center gap-2 text-xs text-slate-200">
+      <button
+        type="button"
+        onClick={onZoomOut}
+        className="rounded-md border border-slate-700 bg-surface-sunken px-2 py-1 font-semibold transition hover:border-slate-500 hover:text-white"
+      >
+        Zoom out
+      </button>
+      <button
+        type="button"
+        onClick={onZoomIn}
+        className="rounded-md border border-slate-700 bg-surface-sunken px-2 py-1 font-semibold transition hover:border-slate-500 hover:text-white"
+      >
+        Zoom in
+      </button>
+      <button
+        type="button"
+        onClick={onCenter}
+        className="rounded-md border border-slate-700 bg-surface-sunken px-2 py-1 font-semibold transition hover:border-slate-500 hover:text-white"
+      >
+        Center
+      </button>
+    </div>
   );
 }
 

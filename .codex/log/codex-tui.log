@@ -6618,3 +6618,1695 @@
 - - [ ] T010 Scaffold tree/UI stores for state, selection, and hotkey plumbing in `frontend/src/stores/treeStore.ts` and `frontend/src/stores/uiStore.ts`.
 + - [X] T010 Scaffold tree/UI stores for state, selection, and hotkey plumbing in `frontend/src/stores/treeStore.ts` and `frontend/src/stores/uiStore.ts`.
 *** End Patch
+[2m2025-12-03T15:23:07.925500Z[0m [32m INFO[0m spawning ghost snapshot task
+[2m2025-12-03T15:23:08.060694Z[0m [32m INFO[0m ghost snapshot blocking task finished
+[2m2025-12-03T15:23:08.060715Z[0m [32m INFO[0m ghost commit captured: ad9189a213a4ebe34d1df70d319fb198440c5934
+[2m2025-12-03T15:23:08.060719Z[0m [32m INFO[0m ghost snapshot gate marked ready
+[2m2025-12-03T15:23:11.719334Z[0m [32m INFO[0m ToolCall: shell_command {"command":".specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:23:14.927836Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls /Users/max/Code/brain_buddy/specs/001-reality-tree-ui/checklists","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:23:20.135018Z[0m [32m INFO[0m ToolCall: shell_command {"command":"python - <<'PY'\nfrom pathlib import Path\np=Path('/Users/max/Code/brain_buddy/specs/001-reality-tree-ui/checklists/requirements.md')\ntext=p.read_text().splitlines()\nimport re\ntotal=completed=incomplete=0\nfor line in text:\n    if re.search(r'- \\[[ xX]\\]', line):\n        total+=1\n        if re.search(r'- \\[[xX]\\]', line):\n            completed+=1\n        elif re.search(r'- \\[ \\]', line):\n            incomplete+=1\nprint(total,completed,incomplete)\nPY","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:23:23.996874Z[0m [32m INFO[0m ToolCall: shell_command {"command":"python3 - <<'PY'\nfrom pathlib import Path\np=Path('/Users/max/Code/brain_buddy/specs/001-reality-tree-ui/checklists/requirements.md')\ntext=p.read_text().splitlines()\nimport re\ntotal=completed=incomplete=0\nfor line in text:\n    if re.search(r'- \\[[ xX]\\]', line):\n        total+=1\n        if re.search(r'- \\[[xX]\\]', line):\n            completed+=1\n        elif re.search(r'- \\[ \\]', line):\n            incomplete+=1\nprint(total,completed,incomplete)\nPY","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:23:28.679405Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,220p' /Users/max/Code/brain_buddy/specs/001-reality-tree-ui/tasks.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:23:31.194318Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' /Users/max/Code/brain_buddy/specs/001-reality-tree-ui/plan.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:23:33.751957Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '200,400p' /Users/max/Code/brain_buddy/specs/001-reality-tree-ui/plan.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:23:36.415180Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,240p' /Users/max/Code/brain_buddy/specs/001-reality-tree-ui/spec.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:23:40.306891Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' /Users/max/Code/brain_buddy/specs/001-reality-tree-ui/data-model.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:23:42.849466Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' /Users/max/Code/brain_buddy/specs/001-reality-tree-ui/research.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:23:45.852334Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' /Users/max/Code/brain_buddy/specs/001-reality-tree-ui/quickstart.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:23:48.138958Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' /Users/max/Code/brain_buddy/.specify/memory/constitution.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:23:53.748158Z[0m [32m INFO[0m ToolCall: shell_command {"command":"git rev-parse --git-dir 2>/dev/null","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:23:58.223090Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls -a /Users/max/Code/brain_buddy","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:24:00.925440Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' .gitignore","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:24:04.977040Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' .dockerignore","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:24:09.573326Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls /Users/max/Code/brain_buddy | grep eslint","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:24:11.732189Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls frontend | grep eslint","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:24:14.677744Z[0m [32m INFO[0m ToolCall: shell_command {"command":"find . -maxdepth 2 -name '*eslint*'","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:24:17.479530Z[0m [32m INFO[0m ToolCall: shell_command {"command":"find . -maxdepth 3 -name 'eslint.config.*'","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:24:21.808122Z[0m [32m INFO[0m ToolCall: shell_command {"command":"find . -maxdepth 2 -name '.prettierrc*'","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:24:24.960619Z[0m [32m INFO[0m ToolCall: shell_command {"command":"find . -name '*.tf'","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:24:31.030495Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,240p' frontend/src/stores/__tests__/treeStore.test.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:24:33.466357Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,260p' frontend/src/stores/treeStore.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:24:35.911312Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '260,520p' frontend/src/stores/treeStore.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:25:34.120640Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/stores/treeStore.ts
+@@
+ export interface GraphNode {
+   id: string;
+   label: string;
+   type: NodeResponse["type"];
+   position: { x: number; y: number };
+   highlightState: NodeResponse["highlight_state"];
+@@
+   versions: GraphVersion[];
+   selection: SelectionState;
+ }
+ 
+ interface OptimisticChange {
+@@
+ export function mapVersionResponse(version: VersionListItem): GraphVersion {
+   return {
+     id: version.id,
+     label: version.label,
+@@
+ function applySnapshot(snapshot: GraphSnapshot) {
+   return {
+     metadata: snapshot.metadata
+       ? {
+           ...snapshot.metadata,
+           layout: snapshot.metadata.layout ? { ...snapshot.metadata.layout } : snapshot.metadata.layout
+@@
+ function generateId(): string {
+   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+     return crypto.randomUUID();
+   }
+ 
+   return `opt-${Math.random().toString(36).slice(2, 10)}`;
+ }
+ 
+ const initialSelection: SelectionState = { type: null, id: null };
+ 
++function calculateRelationCounts(nodes: GraphNode[], relations: GraphRelation[]) {
++  const counts = new Map<string, { up: number; down: number }>();
++  nodes.forEach((node) => counts.set(node.id, { up: 0, down: 0 }));
++
++  relations.forEach((relation) => {
++    const from = counts.get(relation.fromId);
++    if (from) {
++      from.up += 1;
++    }
++    const to = counts.get(relation.toId);
++    if (to) {
++      to.down += 1;
++    }
++  });
++
++  return counts;
++}
++
++function applyRelationCounts(nodes: GraphNode[], relations: GraphRelation[]) {
++  const counts = calculateRelationCounts(nodes, relations);
++  return nodes.map((node) => ({
++    ...node,
++    relationCounts: counts.get(node.id) ?? node.relationCounts
++  }));
++}
++
+ export const useTreeStore = create<TreeStoreState>((set, get) => ({
+   activeTreeId: null,
+   metadata: null,
+   nodes: [],
+   relations: [],
+@@
+   setTree(tree) {
+-    set(() => ({
+-      activeTreeId: tree.id,
+-      metadata: {
+-        id: tree.id,
+-        name: tree.name,
+-        version: tree.metadata.version,
+-        createdAt: tree.metadata.created_at,
+-        updatedAt: tree.metadata.updated_at,
+-        ownerId: tree.owner_id ?? tree.metadata.owner_id ?? null,
+-        layout: tree.metadata.layout ?? null
+-      },
+-      nodes: tree.nodes.map(mapNodeResponse),
+-      relations: tree.relations.map(mapRelationResponse),
+-      versions: [],
+-      selection: initialSelection,
+-      undoStack: [],
+-      redoStack: [],
+-      optimisticQueue: []
+-    }));
++    const mappedRelations = tree.relations.map(mapRelationResponse);
++    const mappedNodes = applyRelationCounts(tree.nodes.map(mapNodeResponse), mappedRelations);
++
++    set(() => ({
++      activeTreeId: tree.id,
++      metadata: {
++        id: tree.id,
++        name: tree.name,
++        version: tree.metadata.version,
++        createdAt: tree.metadata.created_at,
++        updatedAt: tree.metadata.updated_at,
++        ownerId: tree.owner_id ?? tree.metadata.owner_id ?? null,
++        layout: tree.metadata.layout ?? null
++      },
++      nodes: mappedNodes,
++      relations: mappedRelations,
++      versions: [],
++      selection: initialSelection,
++      undoStack: [],
++      redoStack: [],
++      optimisticQueue: []
++    }));
+   },
+ 
+   reset() {
+     set(() => ({
+       activeTreeId: null,
+@@
+   removeNode(nodeId) {
+-    set((state) => ({
+-      nodes: state.nodes.filter((node) => node.id !== nodeId),
+-      relations: state.relations.filter(
+-        (relation) => relation.fromId !== nodeId && relation.toId !== nodeId
+-      ),
+-      selection:
+-        state.selection.type === "node" && state.selection.id === nodeId ? initialSelection : state.selection
+-    }));
++    set((state) => {
++      const remainingRelations = state.relations.filter(
++        (relation) => relation.fromId !== nodeId && relation.toId !== nodeId
++      );
++      const remainingNodes = state.nodes.filter((node) => node.id !== nodeId);
++      return {
++        nodes: applyRelationCounts(remainingNodes, remainingRelations),
++        relations: remainingRelations,
++        selection:
++          state.selection.type === "node" && state.selection.id === nodeId
++            ? initialSelection
++            : state.selection
++      };
++    });
+   },
+ 
+   upsertRelation(relation) {
+     set((state) => {
+       const exists = state.relations.findIndex((item) => item.id === relation.id);
+-      if (exists >= 0) {
+-        const nextRelations = [...state.relations];
+-        nextRelations[exists] = relation;
+-        return { relations: nextRelations };
+-      }
+-      return { relations: [...state.relations, relation] };
++      const nextRelations =
++        exists >= 0
++          ? state.relations.map((item, idx) => (idx === exists ? relation : item))
++          : [...state.relations, relation];
++      return {
++        relations: nextRelations,
++        nodes: applyRelationCounts(state.nodes, nextRelations)
++      };
+     });
+   },
+ 
+   removeRelation(relationId) {
+-    set((state) => ({
+-      relations: state.relations.filter((relation) => relation.id !== relationId),
+-      selection:
+-        state.selection.type === "relation" && state.selection.id === relationId
+-          ? initialSelection
+-          : state.selection
+-    }));
++    set((state) => {
++      const nextRelations = state.relations.filter((relation) => relation.id !== relationId);
++      return {
++        relations: nextRelations,
++        nodes: applyRelationCounts(state.nodes, nextRelations),
++        selection:
++          state.selection.type === "relation" && state.selection.id === relationId
++            ? initialSelection
++            : state.selection
++      };
++    });
+   },
+*** End Patch
+[2m2025-12-03T15:25:49.742820Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/stores/__tests__/treeStore.test.ts
+@@
+ const sampleTree: TreeDetailResponse = {
+   id: "tree-1",
+   name: "Sample Tree",
+   metadata: {
+@@
+   relations: [],
+   owner_id: null
+ };
+ 
++const sampleTreeWithRelations: TreeDetailResponse = {
++  ...sampleTree,
++  nodes: [
++    sampleTree.nodes[0],
++    {
++      id: "node-2",
++      label: "Undesired effect",
++      type: "undesired_effect",
++      position: { x: 10, y: 20 },
++      highlight_state: "none",
++      relation_counts: {
++        up_count: 0,
++        down_count: 0
++      }
++    }
++  ],
++  relations: [
++    {
++      id: "relation-1",
++      from_id: "node-1",
++      to_id: "node-2",
++      kind: "why",
++      created_at: "2024-04-01T10:00:00Z"
++    }
++  ]
++};
++
+ describe("treeStore", () => {
+   beforeEach(() => {
+     useTreeStore.getState().reset();
+   });
+@@
+   it("hydrates tree metadata and nodes from API response", () => {
+     useTreeStore.getState().setTree(sampleTree);
+ 
+     const state = useTreeStore.getState();
+@@
+ 
+     store.rollbackOptimisticChange(token);
+ 
+     expect(useTreeStore.getState().nodes[0].label).toBe(originalLabel);
+   });
++
++  it("recalculates relation counts when relations are added and removed", () => {
++    const store = useTreeStore.getState();
++    store.setTree(sampleTreeWithRelations);
++
++    expect(store.nodes.find((n) => n.id === "node-1")?.relationCounts.up).toBe(1);
++    expect(store.nodes.find((n) => n.id === "node-2")?.relationCounts.down).toBe(1);
++
++    store.removeRelation("relation-1");
++
++    expect(store.nodes.find((n) => n.id === "node-1")?.relationCounts.up).toBe(0);
++    expect(store.nodes.find((n) => n.id === "node-2")?.relationCounts.down).toBe(0);
++
++    store.upsertRelation({
++      id: "relation-2",
++      fromId: "node-2",
++      toId: "node-1",
++      kind: "why",
++      createdAt: "2024-04-01T10:00:01Z"
++    });
++
++    expect(store.nodes.find((n) => n.id === "node-2")?.relationCounts.up).toBe(1);
++    expect(store.nodes.find((n) => n.id === "node-1")?.relationCounts.down).toBe(1);
++  });
++
++  it("tracks selection and clears it when the selected entity is removed", () => {
++    const store = useTreeStore.getState();
++    store.setTree(sampleTreeWithRelations);
++    store.select({ type: "node", id: "node-2" });
++    expect(store.selection).toEqual({ type: "node", id: "node-2" });
++
++    store.removeNode("node-2");
++    expect(store.selection).toEqual({ type: null, id: null });
++
++    store.select({ type: "relation", id: "relation-1" });
++    expect(store.selection).toEqual({ type: "relation", id: "relation-1" });
++
++    store.removeRelation("relation-1");
++    expect(store.selection).toEqual({ type: null, id: null });
++  });
++
++  it("updates node highlighting state via upsert", () => {
++    const store = useTreeStore.getState();
++    store.setTree(sampleTree);
++
++    const node = store.nodes[0];
++    store.upsertNode({ ...node, highlightState: "cause_candidate" });
++
++    expect(useTreeStore.getState().nodes[0].highlightState).toBe("cause_candidate");
++  });
+ });
+*** End Patch
+[2m2025-12-03T15:25:53.594916Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' frontend/src/stores/__tests__/treeStore.test.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:26:03.356779Z[0m [33m WARN[0m stream disconnected - retrying turn (1/5 in 195ms)...
+[2m2025-12-03T15:26:17.720741Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/stores/__tests__/treeStore.test.ts
+@@
+ import type { TreeDetailResponse } from "../../api/types";
+ import { useTreeStore } from "../treeStore";
+ 
+ const sampleTree: TreeDetailResponse = {
+   id: "tree-1",
+@@
+   ],
+   relations: [],
+   owner_id: null
+ };
+ 
++const sampleTreeWithRelations: TreeDetailResponse = {
++  ...sampleTree,
++  nodes: [
++    sampleTree.nodes[0],
++    {
++      id: "node-2",
++      label: "Undesired effect",
++      type: "undesired_effect",
++      position: { x: 10, y: 20 },
++      highlight_state: "none",
++      relation_counts: {
++        up_count: 0,
++        down_count: 0
++      }
++    }
++  ],
++  relations: [
++    {
++      id: "relation-1",
++      from_id: "node-1",
++      to_id: "node-2",
++      kind: "why",
++      created_at: "2024-04-01T10:00:00Z"
++    }
++  ]
++};
++
+ describe("treeStore", () => {
+   beforeEach(() => {
+     useTreeStore.getState().reset();
+   });
+@@
+ 
+     expect(useTreeStore.getState().nodes[0].label).toBe(originalLabel);
+   });
++
++  it("recalculates relation counts when relations are added and removed", () => {
++    const store = useTreeStore.getState();
++    store.setTree(sampleTreeWithRelations);
++
++    expect(store.nodes.find((n) => n.id === "node-1")?.relationCounts.up).toBe(1);
++    expect(store.nodes.find((n) => n.id === "node-2")?.relationCounts.down).toBe(1);
++
++    store.removeRelation("relation-1");
++
++    expect(store.nodes.find((n) => n.id === "node-1")?.relationCounts.up).toBe(0);
++    expect(store.nodes.find((n) => n.id === "node-2")?.relationCounts.down).toBe(0);
++
++    store.upsertRelation({
++      id: "relation-2",
++      fromId: "node-2",
++      toId: "node-1",
++      kind: "why",
++      createdAt: "2024-04-01T10:00:01Z"
++    });
++
++    expect(store.nodes.find((n) => n.id === "node-2")?.relationCounts.up).toBe(1);
++    expect(store.nodes.find((n) => n.id === "node-1")?.relationCounts.down).toBe(1);
++  });
++
++  it("tracks selection and clears it when the selected entity is removed", () => {
++    const store = useTreeStore.getState();
++    store.setTree(sampleTreeWithRelations);
++    store.select({ type: "node", id: "node-2" });
++    expect(store.selection).toEqual({ type: "node", id: "node-2" });
++
++    store.removeNode("node-2");
++    expect(store.selection).toEqual({ type: null, id: null });
++
++    store.select({ type: "relation", id: "relation-1" });
++    expect(store.selection).toEqual({ type: "relation", id: "relation-1" });
++
++    store.removeRelation("relation-1");
++    expect(store.selection).toEqual({ type: null, id: null });
++  });
++
++  it("updates node highlighting state via upsert", () => {
++    const store = useTreeStore.getState();
++    store.setTree(sampleTree);
++
++    const node = store.nodes[0];
++    store.upsertNode({ ...node, highlightState: "cause_candidate" });
++
++    expect(useTreeStore.getState().nodes[0].highlightState).toBe("cause_candidate");
++  });
+ });
+*** End Patch
+[2m2025-12-03T15:26:24.326644Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"highlight_state\" -n frontend/src/api/types.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:26:27.653022Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,120p' frontend/src/api/types.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:26:37.943797Z[0m [32m INFO[0m ToolCall: shell_command {"command":"cd frontend && npm test -- --runInBand src/stores/__tests__/treeStore.test.ts","workdir":"/Users/max/Code/brain_buddy","timeout_ms":120000}
+[2m2025-12-03T15:26:46.690910Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: specs/001-reality-tree-ui/tasks.md
+@@
+ - [ ] T011 [US1] Add Vitest coverage for node highlighting/selection and relation counts in `frontend/src/stores/__tests__/treeStore.test.ts`.
+*** End Patch
+[2m2025-12-03T15:26:49.891075Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: specs/001-reality-tree-ui/tasks.md
+@@
+-- [ ] T011 [US1] Add Vitest coverage for node highlighting/selection and relation counts in `frontend/src/stores/__tests__/treeStore.test.ts`.
++- [X] T011 [US1] Add Vitest coverage for node highlighting/selection and relation counts in `frontend/src/stores/__tests__/treeStore.test.ts`.
+*** End Patch
+[2m2025-12-03T15:26:53.310917Z[0m [32m INFO[0m ToolCall: shell_command {"command":"git status --short","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:35:19.195478Z[0m [32m INFO[0m spawning ghost snapshot task
+[2m2025-12-03T15:35:19.379779Z[0m [32m INFO[0m ghost snapshot blocking task finished
+[2m2025-12-03T15:35:19.379797Z[0m [32m INFO[0m ghost commit captured: 9f51a4077a3e6fcccfe0f717fe9175a688d02ef9
+[2m2025-12-03T15:35:19.379802Z[0m [32m INFO[0m ghost snapshot gate marked ready
+[2m2025-12-03T15:35:30.503819Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,240p' frontend/src/stores/uiStore.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:35:32.823342Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,240p' frontend/src/components/canvas/TreeCanvas.tsx","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:35:34.870360Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '240,520p' frontend/src/components/canvas/TreeCanvas.tsx","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:35:37.135037Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '520,1040p' frontend/src/components/canvas/TreeCanvas.tsx","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:36:33.736880Z[0m [32m INFO[0m ToolCall: update_plan {"plan":[{"status":"in_progress","step":"Assess shortcuts requirements (create/link/zoom/center) and current UI store/TreeCanvas structure; plan key combos."},{"status":"pending","step":"Implement hotkey registration/handling (uiStore + TreeCanvas) including link workflow and zoom/center actions."},{"status":"pending","step":"Add/store-level tests for hotkey triggering and update tasks.md to reflect T012 completion."}],"explanation":"Implementing keyboard shortcuts touches multiple files and behaviors; laying out steps keeps the work clear."}
+[2m2025-12-03T15:36:36.947972Z[0m [32m INFO[0m ToolCall: update_plan {"plan":[{"status":"completed","step":"Assess shortcuts requirements (create/link/zoom/center) and current UI store/TreeCanvas structure; plan key combos."},{"status":"in_progress","step":"Implement hotkey registration/handling (uiStore + TreeCanvas) including link workflow and zoom/center actions."},{"status":"pending","step":"Add/store-level tests for hotkey triggering and update tasks.md to reflect T012 completion."}]}
+[2m2025-12-03T15:37:37.703371Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/components/canvas/TreeCanvas.tsx
+@@
+-import { useCallback, useEffect, useMemo, useState } from "react";
++import { useCallback, useEffect, useMemo, useState } from "react";
+@@
+-import { useUiStore } from "../../stores/uiStore";
++import { useUiStore } from "../../stores/uiStore";
+@@
+ export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element {
+   const nodes = useTreeStore((state) => state.nodes);
+   const relations = useTreeStore((state) => state.relations);
+   const selection = useTreeStore((state) => state.selection);
+   const select = useTreeStore((state) => state.select);
+@@
+   const beginOptimisticChange = useTreeStore((state) => state.beginOptimisticChange);
+   const resolveOptimisticChange = useTreeStore((state) => state.resolveOptimisticChange);
+   const rollbackOptimisticChange = useTreeStore((state) => state.rollbackOptimisticChange);
+   const undo = useTreeStore((state) => state.undo);
+   const redo = useTreeStore((state) => state.redo);
+-  const pushToast = useUiStore((state) => state.pushToast);
++  const pushToast = useUiStore((state) => state.pushToast);
++  const registerHotkey = useUiStore((state) => state.registerHotkey);
++  const unregisterHotkey = useUiStore((state) => state.unregisterHotkey);
++  const triggerHotkey = useUiStore((state) => state.triggerHotkey);
+ 
+   const createNodeMutation = useCreateNode(treeId);
+   const updateNodeMutation = useUpdateNode(treeId);
+   const deleteNodeMutation = useDeleteNode(treeId);
+   const createRelationMutation = useCreateRelation(treeId);
+@@
+ 
+   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
++  const [linkSourceId, setLinkSourceId] = useState<string | null>(null);
+ 
+   useGraphProfiler({
+     nodeCount: nodes.length,
+     edgeCount: relations.length
+   });
+-
+-  useEffect(() => {
+-    const handler = (event: KeyboardEvent) => {
+-      if (event.key.toLowerCase() === "z" && (event.metaKey || event.ctrlKey)) {
+-        event.preventDefault();
+-        if (event.shiftKey) {
+-          redo();
+-        } else {
+-          undo();
+-        }
+-      }
+-    };
+-
+-    window.addEventListener("keydown", handler);
+-    return () => {
+-      window.removeEventListener("keydown", handler);
+-    };
+-  }, [undo, redo]);
++
++  const handleUndo = useCallback(() => {
++    undo();
++  }, [undo]);
++
++  const handleRedo = useCallback(() => {
++    redo();
++  }, [redo]);
++
++  const handleZoomIn = useCallback(() => {
++    if (!reactFlowInstance) return;
++    reactFlowInstance.zoomIn({ duration: 150 });
++  }, [reactFlowInstance]);
++
++  const handleZoomOut = useCallback(() => {
++    if (!reactFlowInstance) return;
++    reactFlowInstance.zoomOut({ duration: 150 });
++  }, [reactFlowInstance]);
++
++  const handleCenterOnSelection = useCallback(() => {
++    if (!reactFlowInstance) return;
++    if (selection.type === "node") {
++      const node = nodes.find((item) => item.id === selection.id);
++      if (!node) {
++        return;
++      }
++      reactFlowInstance.setCenter(node.position.x, node.position.y, { zoom: 1.1, duration: 250 });
++    } else {
++      reactFlowInstance.fitView({ padding: 0.2, duration: 250 });
++    }
++  }, [nodes, reactFlowInstance, selection]);
+ 
+   const flowNodes = useMemo<NodeType[]>(() => {
+     return nodes.map((node) => ({
+       id: node.id,
+@@
+       upsertNode
+     ]
+   );
+ 
++  const handleLinkNodes = useCallback(() => {
++    const selectedNodeId = selection.type === "node" ? selection.id : null;
++    if (!selectedNodeId) {
++      pushToast({
++        title: "Select a node first",
++        description: "Choose a node to start linking.",
++        variant: "warning",
++        duration: 3500
++      });
++      return;
++    }
++
++    if (!linkSourceId) {
++      setLinkSourceId(selectedNodeId);
++      pushToast({
++        title: "Link mode",
++        description: "Select a target node to finish the link.",
++        variant: "info",
++        duration: 3000
++      });
++      return;
++    }
++
++    if (linkSourceId === selectedNodeId) {
++      pushToast({
++        title: "Pick a different node",
++        description: "Choose another node to create a relation.",
++        variant: "warning",
++        duration: 3000
++      });
++      return;
++    }
++
++    handleConnect({
++      source: linkSourceId,
++      target: selectedNodeId
++    } as Connection);
++    setLinkSourceId(null);
++  }, [handleConnect, linkSourceId, pushToast, selection]);
++
+   const handleNodesDelete = useCallback<OnNodesDelete>(
+     (nodesToDelete) => {
+       if (!nodesToDelete.length) {
+         return;
+       }
+@@
+   const handleCreateNode = useCallback(() => {
+     const placeholder = createPlaceholderNode();
+     const viewportCenter = reactFlowInstance
+       ? reactFlowInstance.screenToFlowPosition({
+           x: window.innerWidth / 2,
+@@
+   ], [
+     beginOptimisticChange,
+     createNodeMutation,
++    handleCenterOnSelection,
+     pushSnapshot,
+     pushToast,
+     reactFlowInstance,
+     removeNode,
+     setCreatingNode,
+@@
+     select,
+     upsertNode
+   ]);
+ 
+   const hasContent = nodes.length > 0 || relations.length > 0;
++
++  const buildCombo = useCallback((event: KeyboardEvent) => {
++    const target = event.target as HTMLElement | null;
++    if (target) {
++      const tag = target.tagName?.toLowerCase();
++      if (
++        tag === "input" ||
++        tag === "textarea" ||
++        target.isContentEditable ||
++        tag === "select" ||
++        target.getAttribute("role") === "textbox"
++      ) {
++        return null;
++      }
++    }
++
++    const parts: string[] = [];
++    if (event.metaKey) parts.push("meta");
++    if (event.ctrlKey) parts.push("ctrl");
++    if (event.altKey) parts.push("alt");
++    if (event.shiftKey) parts.push("shift");
++
++    const key = event.key.toLowerCase();
++    parts.push(key);
++
++    return parts.join("+");
++  }, []);
++
++  useEffect(() => {
++    const bindings = [
++      { id: "create-node-meta", combo: "meta+shift+n", description: "Create node", handler: handleCreateNode },
++      { id: "create-node-ctrl", combo: "ctrl+shift+n", description: "Create node", handler: handleCreateNode },
++      { id: "link-nodes-meta", combo: "meta+shift+l", description: "Link nodes", handler: handleLinkNodes },
++      { id: "link-nodes-ctrl", combo: "ctrl+shift+l", description: "Link nodes", handler: handleLinkNodes },
++      { id: "zoom-in-meta", combo: "meta+=", description: "Zoom in", handler: handleZoomIn },
++      { id: "zoom-in-ctrl", combo: "ctrl+=", description: "Zoom in", handler: handleZoomIn },
++      { id: "zoom-in-meta-shift", combo: "meta+shift+=", description: "Zoom in", handler: handleZoomIn },
++      { id: "zoom-in-ctrl-shift", combo: "ctrl+shift+=", description: "Zoom in", handler: handleZoomIn },
++      { id: "zoom-out-meta", combo: "meta+-", description: "Zoom out", handler: handleZoomOut },
++      { id: "zoom-out-ctrl", combo: "ctrl+-", description: "Zoom out", handler: handleZoomOut },
++      { id: "center-meta", combo: "meta+shift+c", description: "Center on selection", handler: handleCenterOnSelection },
++      { id: "center-ctrl", combo: "ctrl+shift+c", description: "Center on selection", handler: handleCenterOnSelection },
++      { id: "undo-meta", combo: "meta+z", description: "Undo", handler: handleUndo },
++      { id: "undo-ctrl", combo: "ctrl+z", description: "Undo", handler: handleUndo },
++      { id: "redo-meta", combo: "meta+shift+z", description: "Redo", handler: handleRedo },
++      { id: "redo-ctrl", combo: "ctrl+shift+z", description: "Redo", handler: handleRedo }
++    ];
++
++    bindings.forEach((binding) => registerHotkey(binding));
++    return () => {
++      bindings.forEach((binding) => unregisterHotkey(binding.id));
++    };
++  }, [
++    handleCenterOnSelection,
++    handleCreateNode,
++    handleLinkNodes,
++    handleRedo,
++    handleUndo,
++    handleZoomIn,
++    handleZoomOut,
++    registerHotkey,
++    unregisterHotkey
++  ]);
++
++  useEffect(() => {
++    const listener = (event: KeyboardEvent) => {
++      const combo = buildCombo(event);
++      if (!combo) return;
++      const triggered = triggerHotkey(combo);
++      if (triggered) {
++        event.preventDefault();
++      }
++    };
++
++    window.addEventListener("keydown", listener);
++    return () => {
++      window.removeEventListener("keydown", listener);
++    };
++  }, [buildCombo, triggerHotkey]);
+ 
+   return (
+*** End Patch
+[2m2025-12-03T15:37:47.467782Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/components/canvas/TreeCanvas.tsx
+@@
+   const beginOptimisticChange = useTreeStore((state) => state.beginOptimisticChange);
+   const resolveOptimisticChange = useTreeStore((state) => state.resolveOptimisticChange);
+   const rollbackOptimisticChange = useTreeStore((state) => state.rollbackOptimisticChange);
+   const undo = useTreeStore((state) => state.undo);
+   const redo = useTreeStore((state) => state.redo);
+   const pushToast = useUiStore((state) => state.pushToast);
++  const registerHotkey = useUiStore((state) => state.registerHotkey);
++  const unregisterHotkey = useUiStore((state) => state.unregisterHotkey);
++  const triggerHotkey = useUiStore((state) => state.triggerHotkey);
+ 
+   const createNodeMutation = useCreateNode(treeId);
+   const updateNodeMutation = useUpdateNode(treeId);
+   const deleteNodeMutation = useDeleteNode(treeId);
+   const createRelationMutation = useCreateRelation(treeId);
+*** End Patch
+[2m2025-12-03T15:37:57.002715Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/components/canvas/TreeCanvas.tsx
+@@
+   useGraphProfiler({
+     nodeCount: nodes.length,
+     edgeCount: relations.length
+   });
+-
+-  useEffect(() => {
+-    const handler = (event: KeyboardEvent) => {
+-      if (event.key.toLowerCase() === "z" && (event.metaKey || event.ctrlKey)) {
+-        event.preventDefault();
+-        if (event.shiftKey) {
+-          redo();
+-        } else {
+-          undo();
+-        }
+-      }
+-    };
+-
+-    window.addEventListener("keydown", handler);
+-    return () => {
+-      window.removeEventListener("keydown", handler);
+-    };
+-  }, [undo, redo]);
++  const [linkSourceId, setLinkSourceId] = useState<string | null>(null);
++
++  const handleUndo = useCallback(() => {
++    undo();
++  }, [undo]);
++
++  const handleRedo = useCallback(() => {
++    redo();
++  }, [redo]);
++
++  const handleZoomIn = useCallback(() => {
++    if (!reactFlowInstance) return;
++    reactFlowInstance.zoomIn({ duration: 150 });
++  }, [reactFlowInstance]);
++
++  const handleZoomOut = useCallback(() => {
++    if (!reactFlowInstance) return;
++    reactFlowInstance.zoomOut({ duration: 150 });
++  }, [reactFlowInstance]);
++
++  const handleCenterOnSelection = useCallback(() => {
++    if (!reactFlowInstance) return;
++    if (selection.type === "node") {
++      const node = nodes.find((item) => item.id === selection.id);
++      if (!node) {
++        return;
++      }
++      reactFlowInstance.setCenter(node.position.x, node.position.y, { zoom: 1.1, duration: 250 });
++    } else {
++      reactFlowInstance.fitView({ padding: 0.2, duration: 250 });
++    }
++  }, [nodes, reactFlowInstance, selection]);
+*** End Patch
+[2m2025-12-03T15:38:05.566730Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/components/canvas/TreeCanvas.tsx
+@@
+   const handleConnect = useCallback<OnConnect>(
+     (connection: Connection) => {
+       if (!connection.source || !connection.target) {
+         return;
+       }
+@@
+       upsertRelation
+     ]
+   );
+ 
++  const handleLinkNodes = useCallback(() => {
++    const selectedNodeId = selection.type === "node" ? selection.id : null;
++    if (!selectedNodeId) {
++      pushToast({
++        title: "Select a node first",
++        description: "Choose a node to start linking.",
++        variant: "warning",
++        duration: 3500
++      });
++      return;
++    }
++
++    if (!linkSourceId) {
++      setLinkSourceId(selectedNodeId);
++      pushToast({
++        title: "Link mode",
++        description: "Select a target node to finish the link.",
++        variant: "info",
++        duration: 3000
++      });
++      return;
++    }
++
++    if (linkSourceId === selectedNodeId) {
++      pushToast({
++        title: "Pick a different node",
++        description: "Choose another node to create a relation.",
++        variant: "warning",
++        duration: 3000
++      });
++      return;
++    }
++
++    handleConnect({
++      source: linkSourceId,
++      target: selectedNodeId
++    } as Connection);
++    setLinkSourceId(null);
++  }, [handleConnect, linkSourceId, pushToast, selection]);
++
+   const handleEdgesDelete = useCallback<OnEdgesDelete>(
+     (edgesToDelete) => {
+       if (!edgesToDelete.length) {
+         return;
+       }
+*** End Patch
+[2m2025-12-03T15:38:10.836082Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"handleCreateNode\" -n -C 3 frontend/src/components/canvas/TreeCanvas.tsx","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:38:13.569395Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '520,620p' frontend/src/components/canvas/TreeCanvas.tsx","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:38:31.310485Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/components/canvas/TreeCanvas.tsx
+@@
+   }, [
+     beginOptimisticChange,
+     createNodeMutation,
+     pushSnapshot,
+     pushToast,
+     reactFlowInstance,
+     removeNode,
+     setCreatingNode,
+     resolveOptimisticChange,
+     rollbackOptimisticChange,
+     select,
+     upsertNode
+   ]);
+ 
++  const buildCombo = useCallback((event: KeyboardEvent) => {
++    const target = event.target as HTMLElement | null;
++    if (target) {
++      const tag = target.tagName?.toLowerCase();
++      if (
++        tag === "input" ||
++        tag === "textarea" ||
++        target.isContentEditable ||
++        tag === "select" ||
++        target.getAttribute("role") === "textbox"
++      ) {
++        return null;
++      }
++    }
++
++    const parts: string[] = [];
++    if (event.metaKey) parts.push("meta");
++    if (event.ctrlKey) parts.push("ctrl");
++    if (event.altKey) parts.push("alt");
++    if (event.shiftKey) parts.push("shift");
++
++    const key = event.key.toLowerCase();
++    parts.push(key);
++
++    return parts.join("+");
++  }, []);
++
++  useEffect(() => {
++    const bindings = [
++      { id: "create-node-meta", combo: "meta+shift+n", description: "Create node", handler: handleCreateNode },
++      { id: "create-node-ctrl", combo: "ctrl+shift+n", description: "Create node", handler: handleCreateNode },
++      { id: "link-nodes-meta", combo: "meta+shift+l", description: "Link nodes", handler: handleLinkNodes },
++      { id: "link-nodes-ctrl", combo: "ctrl+shift+l", description: "Link nodes", handler: handleLinkNodes },
++      { id: "zoom-in-meta", combo: "meta+=", description: "Zoom in", handler: handleZoomIn },
++      { id: "zoom-in-ctrl", combo: "ctrl+=", description: "Zoom in", handler: handleZoomIn },
++      { id: "zoom-in-meta-shift", combo: "meta+shift+=", description: "Zoom in", handler: handleZoomIn },
++      { id: "zoom-in-ctrl-shift", combo: "ctrl+shift+=", description: "Zoom in", handler: handleZoomIn },
++      { id: "zoom-out-meta", combo: "meta+-", description: "Zoom out", handler: handleZoomOut },
++      { id: "zoom-out-ctrl", combo: "ctrl+-", description: "Zoom out", handler: handleZoomOut },
++      { id: "center-meta", combo: "meta+shift+c", description: "Center on selection", handler: handleCenterOnSelection },
++      { id: "center-ctrl", combo: "ctrl+shift+c", description: "Center on selection", handler: handleCenterOnSelection },
++      { id: "undo-meta", combo: "meta+z", description: "Undo", handler: handleUndo },
++      { id: "undo-ctrl", combo: "ctrl+z", description: "Undo", handler: handleUndo },
++      { id: "redo-meta", combo: "meta+shift+z", description: "Redo", handler: handleRedo },
++      { id: "redo-ctrl", combo: "ctrl+shift+z", description: "Redo", handler: handleRedo }
++    ];
++
++    bindings.forEach((binding) => registerHotkey(binding));
++    return () => {
++      bindings.forEach((binding) => unregisterHotkey(binding.id));
++    };
++  }, [
++    handleCenterOnSelection,
++    handleCreateNode,
++    handleLinkNodes,
++    handleRedo,
++    handleUndo,
++    handleZoomIn,
++    handleZoomOut,
++    registerHotkey,
++    unregisterHotkey
++  ]);
++
++  useEffect(() => {
++    const listener = (event: KeyboardEvent) => {
++      const combo = buildCombo(event);
++      if (!combo) return;
++      const triggered = triggerHotkey(combo);
++      if (triggered) {
++        event.preventDefault();
++      }
++    };
++
++    window.addEventListener("keydown", listener);
++    return () => {
++      window.removeEventListener("keydown", listener);
++    };
++  }, [buildCombo, triggerHotkey]);
++
+   const hasContent = nodes.length > 0 || relations.length > 0;
+*** End Patch
+[2m2025-12-03T15:38:53.757593Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Add File: frontend/src/stores/__tests__/uiStore.test.ts
++import { beforeEach, describe, expect, it } from "vitest";
++
++import { useUiStore } from "../uiStore";
++
++const resetUiStore = () => {
++  useUiStore.setState({
++    isSidePanelCollapsed: false,
++    inspectorTab: "node",
++    modals: {
++      createTree: false,
++      deleteTree: false,
++      manageVersions: false
++    },
++    toasts: [],
++    hotkeys: {},
++    lastShortcut: null
++  });
++};
++
++describe("uiStore hotkeys", () => {
++  beforeEach(() => {
++    resetUiStore();
++  });
++
++  it("registers and triggers hotkeys case-insensitively", () => {
++    let count = 0;
++    const { registerHotkey, triggerHotkey } = useUiStore.getState();
++
++    registerHotkey({
++      id: "create-node",
++      combo: "meta+shift+n",
++      description: "Create node",
++      handler: () => {
++        count += 1;
++      }
++    });
++
++    const triggered = triggerHotkey("META+SHIFT+N");
++
++    expect(triggered).toBe(true);
++    expect(count).toBe(1);
++    expect(useUiStore.getState().lastShortcut?.toLowerCase()).toBe("meta+shift+n");
++  });
++
++  it("unregisters hotkeys to prevent triggering", () => {
++    const { registerHotkey, unregisterHotkey, triggerHotkey } = useUiStore.getState();
++    let fired = false;
++
++    registerHotkey({
++      id: "zoom-out",
++      combo: "ctrl+-",
++      description: "Zoom out",
++      handler: () => {
++        fired = true;
++      }
++    });
++
++    unregisterHotkey("zoom-out");
++
++    const triggered = triggerHotkey("ctrl+-");
++
++    expect(triggered).toBe(false);
++    expect(fired).toBe(false);
++  });
++});
+*** End Patch
+[2m2025-12-03T15:38:58.537234Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: specs/001-reality-tree-ui/tasks.md
+@@
+-- [ ] T012 [P] [US1] Implement keyboard shortcuts (create node, link, zoom, center) in `frontend/src/stores/uiStore.ts` and `frontend/src/components/canvas/TreeCanvas.tsx`.
++- [X] T012 [P] [US1] Implement keyboard shortcuts (create node, link, zoom, center) in `frontend/src/stores/uiStore.ts` and `frontend/src/components/canvas/TreeCanvas.tsx`.
+*** End Patch
+[2m2025-12-03T15:39:04.891262Z[0m [32m INFO[0m ToolCall: update_plan {"plan":[{"status":"completed","step":"Assess shortcuts requirements (create/link/zoom/center) and current UI store/TreeCanvas structure; plan key combos."},{"status":"completed","step":"Implement hotkey registration/handling (uiStore + TreeCanvas) including link workflow and zoom/center actions."},{"status":"in_progress","step":"Add/store-level tests for hotkey triggering and update tasks.md to reflect T012 completion."}]}
+[2m2025-12-03T15:39:08.619866Z[0m [32m INFO[0m ToolCall: shell_command {"command":"git status --short","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:39:12.882926Z[0m [32m INFO[0m ToolCall: update_plan {"plan":[{"status":"completed","step":"Assess shortcuts requirements (create/link/zoom/center) and current UI store/TreeCanvas structure; plan key combos."},{"status":"completed","step":"Implement hotkey registration/handling (uiStore + TreeCanvas) including link workflow and zoom/center actions."},{"status":"completed","step":"Add/store-level tests for hotkey triggering and update tasks.md to reflect T012 completion."}]}
+[2m2025-12-03T15:40:18.053018Z[0m [32m INFO[0m spawning ghost snapshot task
+[2m2025-12-03T15:40:18.202607Z[0m [32m INFO[0m ghost snapshot blocking task finished
+[2m2025-12-03T15:40:18.202624Z[0m [32m INFO[0m ghost commit captured: 07e22959e105a575e033d5138c162e81bc3902c3
+[2m2025-12-03T15:40:18.202628Z[0m [32m INFO[0m ghost snapshot gate marked ready
+[2m2025-12-03T15:41:27.846484Z[0m [32m INFO[0m spawning ghost snapshot task
+[2m2025-12-03T15:41:28.016966Z[0m [32m INFO[0m ghost snapshot blocking task finished
+[2m2025-12-03T15:41:28.016985Z[0m [32m INFO[0m ghost commit captured: 2db4708be85304d0581784b74c8d0f30d76509e0
+[2m2025-12-03T15:41:28.016988Z[0m [32m INFO[0m ghost snapshot gate marked ready
+[2m2025-12-03T15:41:40.381083Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"setTree\\(\" -n -C 3 frontend/src/stores/treeStore.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:41:42.732556Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '230,310p' frontend/src/stores/treeStore.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:42:06.148022Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/stores/__tests__/treeStore.test.ts
+@@
+   it("recalculates relation counts when relations are added and removed", () => {
+-    const store = useTreeStore.getState();
+-    store.setTree(sampleTreeWithRelations);
++    useTreeStore.getState().setTree(sampleTreeWithRelations);
++    let store = useTreeStore.getState();
+ 
+-    expect(store.nodes.find((n) => n.id === "node-1")?.relationCounts.up).toBe(1);
+-    expect(store.nodes.find((n) => n.id === "node-2")?.relationCounts.down).toBe(1);
++    expect(store.nodes.find((n) => n.id === "node-1")?.relationCounts.up).toBe(1);
++    expect(store.nodes.find((n) => n.id === "node-2")?.relationCounts.down).toBe(1);
+ 
+-    store.removeRelation("relation-1");
++    store.removeRelation("relation-1");
++    store = useTreeStore.getState();
+ 
+-    expect(store.nodes.find((n) => n.id === "node-1")?.relationCounts.up).toBe(0);
+-    expect(store.nodes.find((n) => n.id === "node-2")?.relationCounts.down).toBe(0);
++    expect(store.nodes.find((n) => n.id === "node-1")?.relationCounts.up).toBe(0);
++    expect(store.nodes.find((n) => n.id === "node-2")?.relationCounts.down).toBe(0);
+ 
+-    store.upsertRelation({
++    store.upsertRelation({
+       id: "relation-2",
+       fromId: "node-2",
+       toId: "node-1",
+       kind: "why",
+       createdAt: "2024-04-01T10:00:01Z"
+     });
+ 
+-    expect(store.nodes.find((n) => n.id === "node-2")?.relationCounts.up).toBe(1);
+-    expect(store.nodes.find((n) => n.id === "node-1")?.relationCounts.down).toBe(1);
++    store = useTreeStore.getState();
++
++    expect(store.nodes.find((n) => n.id === "node-2")?.relationCounts.up).toBe(1);
++    expect(store.nodes.find((n) => n.id === "node-1")?.relationCounts.down).toBe(1);
+   });
+ 
+   it("tracks selection and clears it when the selected entity is removed", () => {
+-    const store = useTreeStore.getState();
+-    store.setTree(sampleTreeWithRelations);
+-    store.select({ type: "node", id: "node-2" });
+-    expect(store.selection).toEqual({ type: "node", id: "node-2" });
++    const store = useTreeStore.getState();
++    store.setTree(sampleTreeWithRelations);
++    store.select({ type: "node", id: "node-2" });
++    expect(useTreeStore.getState().selection).toEqual({ type: "node", id: "node-2" });
+ 
+     store.removeNode("node-2");
+-    expect(store.selection).toEqual({ type: null, id: null });
++    expect(useTreeStore.getState().selection).toEqual({ type: null, id: null });
+ 
+     store.select({ type: "relation", id: "relation-1" });
+-    expect(store.selection).toEqual({ type: "relation", id: "relation-1" });
++    expect(useTreeStore.getState().selection).toEqual({ type: "relation", id: "relation-1" });
+ 
+     store.removeRelation("relation-1");
+-    expect(store.selection).toEqual({ type: null, id: null });
++    expect(useTreeStore.getState().selection).toEqual({ type: null, id: null });
+   });
+ 
+   it("updates node highlighting state via upsert", () => {
+-    const store = useTreeStore.getState();
+-    store.setTree(sampleTree);
++    useTreeStore.getState().setTree(sampleTree);
+ 
+-    const node = store.nodes[0];
++    const node = useTreeStore.getState().nodes[0];
+     store.upsertNode({ ...node, highlightState: "cause_candidate" });
+ 
+     expect(useTreeStore.getState().nodes[0].highlightState).toBe("cause_candidate");
+   });
+ });
+*** End Patch
+[2m2025-12-03T15:42:10.064424Z[0m [32m INFO[0m ToolCall: shell_command {"command":"cd frontend && npm test -- src/stores/__tests__/uiStore.test.ts src/stores/__tests__/treeStore.test.ts","workdir":"/Users/max/Code/brain_buddy","timeout_ms":120000}
+[2m2025-12-03T15:42:14.751033Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/stores/__tests__/treeStore.test.ts
+@@
+   it("updates node highlighting state via upsert", () => {
+     useTreeStore.getState().setTree(sampleTree);
+ 
+-    const node = useTreeStore.getState().nodes[0];
+-    store.upsertNode({ ...node, highlightState: "cause_candidate" });
++    const node = useTreeStore.getState().nodes[0];
++    const store = useTreeStore.getState();
++    store.upsertNode({ ...node, highlightState: "cause_candidate" });
+ 
+     expect(useTreeStore.getState().nodes[0].highlightState).toBe("cause_candidate");
+   });
+ });
+*** End Patch
+[2m2025-12-03T15:42:17.310992Z[0m [32m INFO[0m ToolCall: shell_command {"command":"cd frontend && npm test -- src/stores/__tests__/uiStore.test.ts src/stores/__tests__/treeStore.test.ts","workdir":"/Users/max/Code/brain_buddy","timeout_ms":120000}
+[2m2025-12-03T15:43:24.582929Z[0m [32m INFO[0m spawning ghost snapshot task
+[2m2025-12-03T15:43:24.754638Z[0m [32m INFO[0m ghost snapshot blocking task finished
+[2m2025-12-03T15:43:24.754656Z[0m [32m INFO[0m ghost commit captured: 9d95ce38187b6034d731d30be73f6ac82ee1a2d4
+[2m2025-12-03T15:43:24.754659Z[0m [32m INFO[0m ghost snapshot gate marked ready
+[2m2025-12-03T15:43:29.303036Z[0m [32m INFO[0m ToolCall: shell_command {"command":".specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:43:34.828355Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls /Users/max/Code/brain_buddy/specs/001-reality-tree-ui","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:43:37.898965Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls /Users/max/Code/brain_buddy/specs/001-reality-tree-ui/checklists","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:43:44.012623Z[0m [32m INFO[0m ToolCall: shell_command {"command":"python - <<'PY'\nfrom pathlib import Path\nroot = Path('/Users/max/Code/brain_buddy/specs/001-reality-tree-ui/checklists')\nfor path in root.glob('*.md'):\n    text = path.read_text().splitlines()\n    total = sum(1 for line in text if '- [ ]' in line or '- [x]' in line.lower())\n    completed = sum(1 for line in text if '- [x]' in line.lower())\n    incomplete = sum(1 for line in text if '- [ ]' in line)\n    status = '\\u2713 PASS' if incomplete == 0 else '\\u2717 FAIL'\n    print(f\"{path.name}|{total}|{completed}|{incomplete}|{status}\")\nPY"}
+[2m2025-12-03T15:43:48.257498Z[0m [32m INFO[0m ToolCall: shell_command {"command":"python3 - <<'PY'\nfrom pathlib import Path\nroot = Path('/Users/max/Code/brain_buddy/specs/001-reality-tree-ui/checklists')\nfor path in root.glob('*.md'):\n    text = path.read_text().splitlines()\n    total = sum(1 for line in text if '- [ ]' in line or '- [x]' in line.lower())\n    completed = sum(1 for line in text if '- [x]' in line.lower())\n    incomplete = sum(1 for line in text if '- [ ]' in line)\n    status = '\\u2713 PASS' if incomplete == 0 else '\\u2717 FAIL'\n    print(f\"{path.name}|{total}|{completed}|{incomplete}|{status}\")\nPY","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:43:54.470162Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"T007\" -n specs/001-reality-tree-ui/tasks.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:44:01.038669Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,240p' specs/001-reality-tree-ui/tasks.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:44:12.394973Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' specs/001-reality-tree-ui/plan.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:44:17.728441Z[0m [32m INFO[0m ToolCall: shell_command {"command":"cd frontend && npm test -- src/stores/__tests__/uiStore.test.ts src/stores/__tests__/treeStore.test.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:44:22.845208Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' frontend/src/components/BrainNode.tsx","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:44:24.888982Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls frontend/src/components","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:44:27.550972Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls frontend/src/components/canvas","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:44:32.283387Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' frontend/src/components/canvas/BrainNode.tsx","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:44:38.518448Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' frontend/src/components/CreateNodeButton.tsx","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:44:40.739745Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,260p' frontend/src/components/canvas/TreeCanvas.tsx","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:44:45.077467Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '260,520p' frontend/src/components/canvas/TreeCanvas.tsx","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:44:47.432357Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '520,1040p' frontend/src/components/canvas/TreeCanvas.tsx","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:44:50.579521Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,240p' frontend/src/components/layout/CanvasShell.tsx","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:44:57.158423Z[0m [32m INFO[0m ToolCall: update_plan {"plan":[{"status":"in_progress","step":"Review current canvas/node components and store capabilities for node creation/editing, relation rendering, and zoom/center controls (T013-T015 context)."},{"status":"pending","step":"Implement node create/edit UI with type-specific styling in BrainNode and CreateNodeButton (T013)."},{"status":"pending","step":"Render directional relations with selection highlighting in TreeCanvas (T014)."},{"status":"pending","step":"Add zoom/recenter controls in CanvasShell and wire to TreeCanvas handlers (T015)."},{"status":"pending","step":"Verify frontend unit tests (targeted Vitest) and adjust tasks.md status if needed."}]}
+[2m2025-12-03T15:45:01.913714Z[0m [32m INFO[0m ToolCall: update_plan {"plan":[{"status":"completed","step":"Review current canvas/node components and store capabilities for node creation/editing, relation rendering, and zoom/center controls (T013-T015 context)."},{"status":"in_progress","step":"Implement node create/edit UI with type-specific styling in BrainNode and CreateNodeButton (T013)."},{"status":"pending","step":"Render directional relations with selection highlighting in TreeCanvas (T014)."},{"status":"pending","step":"Add zoom/recenter controls in CanvasShell and wire to TreeCanvas handlers (T015)."},{"status":"pending","step":"Verify frontend unit tests (targeted Vitest) and adjust tasks.md status if needed."}]}
+[2m2025-12-03T15:45:07.874226Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"CreateNodeButton\" -n frontend/src","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:45:11.085911Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"color\" specs/001-reality-tree-ui/spec.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:45:17.916046Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,240p' frontend/src/stores/treeStore.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:45:19.929798Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '240,520p' frontend/src/stores/treeStore.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:45:23.886397Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"useCreateNode\" -n frontend/src/api/hooks.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:45:26.122373Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '70,140p' frontend/src/api/hooks.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:45:46.867021Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"CanvasShell\" -n frontend/src","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:45:50.190148Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '120,200p' frontend/src/App.tsx","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:46:26.252487Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"NodeInspector\" -n frontend/src/components/panels/NodeInspector.tsx","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:46:28.836727Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' frontend/src/components/panels/NodeInspector.tsx","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:46:49.437435Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/components/CreateNodeButton.tsx
+@@
+-import { useCallback } from "react";
+-import type { Node } from "reactflow";
+-import { twMerge } from "tailwind-merge";
+-
+-import { buttonVariants } from "../styles/buttonVariants";
+-
+-interface CreateNodeButtonProps {
+-  onCreate: (node: Node) => void;
+-}
+-
+-let counter = 0;
+-
+-export function CreateNodeButton({ onCreate }: CreateNodeButtonProps): JSX.Element {
+-  const handleClick = useCallback(() => {
+-    counter += 1;
+-    onCreate({
+-      id: `node-${counter}`,
+-      position: { x: counter * 40, y: counter * 20 },
+-      data: { label: `Node ${counter}` }
+-    });
+-  }, [onCreate]);
+-
+-  return (
+-    <button
+-      type="button"
+-      className={twMerge(buttonVariants({ intent: "primary" }), "w-full")}
+-      onClick={handleClick}
+-    >
+-      Add Node
+-    </button>
+-  );
+-}
++import { useMemo, useState } from "react";
++import { twMerge } from "tailwind-merge";
++
++import type { GraphNode } from "../stores/treeStore";
++import { buttonVariants } from "../styles/buttonVariants";
++
++interface CreateNodeButtonProps {
++  disabled?: boolean;
++  onCreate: (input: { type: GraphNode["type"]; label: string }) => void;
++}
++
++const typeOptions: { value: GraphNode["type"]; label: string; accent: string }[] = [
++  { value: "undesired_effect", label: "Undesired effect", accent: "bg-rose-500/20 text-rose-100" },
++  { value: "cause", label: "Cause", accent: "bg-amber-500/20 text-amber-100" },
++  { value: "regular", label: "Regular", accent: "bg-sky-500/20 text-sky-100" }
++];
++
++export function CreateNodeButton({ onCreate, disabled }: CreateNodeButtonProps): JSX.Element {
++  const [nodeType, setNodeType] = useState<GraphNode["type"]>("undesired_effect");
++  const [label, setLabel] = useState("");
++
++  const activeAccent = useMemo(() => typeOptions.find((item) => item.value === nodeType)?.accent, [nodeType]);
++
++  const handleSubmit = () => {
++    const trimmed = label.trim();
++    onCreate({
++      type: nodeType,
++      label: trimmed || (nodeType === "undesired_effect" ? "Undesired effect" : nodeType === "cause" ? "Cause" : "Idea")
++    });
++    setLabel("");
++  };
++
++  return (
++    <div className="flex w-full flex-col gap-2">
++      <div className="flex gap-2">
++        {typeOptions.map((option) => (
++          <button
++            key={option.value}
++            type="button"
++            onClick={() => setNodeType(option.value)}
++            className={twMerge(
++              "flex-1 rounded-md border border-slate-700 px-2 py-1 text-xs font-semibold transition hover:border-slate-500",
++              nodeType === option.value ? `${option.accent} ring-1 ring-offset-2 ring-offset-slate-900` : "text-slate-200"
++            )}
++          >
++            {option.label}
++          </button>
++        ))}
++      </div>
++
++      <div className="flex gap-2">
++        <input
++          value={label}
++          onChange={(event) => setLabel(event.target.value)}
++          placeholder="Node label"
++          className="w-full rounded-md border border-slate-700 bg-surface-sunken px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-slate-400"
++        />
++        <button
++          type="button"
++          disabled={disabled}
++          onClick={handleSubmit}
++          className={twMerge(
++            buttonVariants({ intent: "primary" }),
++            "shrink-0 px-4",
++            activeAccent,
++            disabled ? "cursor-not-allowed opacity-70" : ""
++          )}
++        >
++          Add
++        </button>
++      </div>
++    </div>
++  );
++}
+*** End Patch
+[2m2025-12-03T15:47:04.556844Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/components/canvas/BrainNode.tsx
+@@
+ export interface BrainNodeData {
+   node: GraphNode;
+ }
+ 
+ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Element {
+   const { node } = data;
+-  const typeChip =
+-    node.type === "undesired_effect"
+-      ? "bg-rose-500/20 text-rose-200 border border-rose-500/50"
+-      : node.type === "cause"
+-        ? "bg-amber-500/20 text-amber-200 border border-amber-500/40"
+-        : "bg-sky-500/20 text-sky-200 border border-sky-500/40";
++  const typeStyles =
++    node.type === "undesired_effect"
++      ? {
++          badge: "bg-rose-500/20 text-rose-200 border border-rose-500/50",
++          container: "border-rose-500/30 bg-gradient-to-b from-rose-900/40 to-surface-raised"
++        }
++      : node.type === "cause"
++        ? {
++            badge: "bg-amber-500/20 text-amber-200 border border-amber-500/40",
++            container: "border-amber-500/30 bg-gradient-to-b from-amber-900/30 to-surface-raised"
++          }
++        : {
++            badge: "bg-sky-500/20 text-sky-200 border border-sky-500/40",
++            container: "border-sky-500/30 bg-gradient-to-b from-sky-900/30 to-surface-raised"
++          };
+   const highlightRing =
+     node.highlightState === "cause_candidate"
+       ? "ring-2 ring-amber-400/70"
+       : node.highlightState === "effect_spanning"
+         ? "ring-2 ring-rose-400/70"
+         : "";
+ 
+   return (
+     <div
+       className={twMerge(
+-        "group relative rounded-xl border border-slate-800/80 bg-surface-raised px-4 py-3 text-left shadow-lg ring-1 ring-transparent transition-all duration-150",
+-        selected ? "border-brand-primary/80 shadow-glow ring-brand-primary/50" : "",
++        "group relative rounded-xl border px-4 py-3 text-left shadow-lg ring-1 ring-transparent transition-all duration-150",
++        typeStyles.container,
++        selected ? "border-brand-primary/80 shadow-glow ring-brand-primary/50" : "",
+         highlightRing
+       )}
+     >
+-      <Handle type="target" position={Position.Top} className="h-2 w-2 rounded-full bg-brand-secondary" />
+-      <Handle type="source" position={Position.Bottom} className="h-2 w-2 rounded-full bg-brand-primary" />
++      <Handle
++        type="target"
++        position={Position.Top}
++        className="h-2 w-2 rounded-full bg-brand-secondary ring-2 ring-slate-900"
++      />
++      <Handle
++        type="source"
++        position={Position.Bottom}
++        className="h-2 w-2 rounded-full bg-brand-primary ring-2 ring-slate-900"
++      />
+ 
+       <div className="flex items-start justify-between gap-3">
+         <p className="max-w-[180px] break-words text-sm font-medium text-slate-100">{node.label}</p>
+-        <span className={twMerge("rounded-full px-2 py-0.5 text-[11px] font-semibold", typeChip)}>
++        <span className={twMerge("rounded-full px-2 py-0.5 text-[11px] font-semibold", typeStyles.badge)}>
+           {node.type.replace("_", " ")}
+         </span>
+       </div>
+ 
+*** End Patch
+[2m2025-12-03T15:47:36.963865Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/components/canvas/TreeCanvas.tsx
+@@
+-import { useCallback, useEffect, useMemo, useState } from "react";
++import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
+ import type {
+   Connection,
+   Edge,
+   EdgeMouseHandler,
+   Node,
+@@
+-  OnSelectionChangeFunc,
++  OnSelectionChangeFunc,
+   ReactFlowInstance
+ } from "reactflow";
+-import ReactFlow, { Background, Controls, MiniMap, Panel } from "reactflow";
++import ReactFlow, { Background, Controls, MarkerType, MiniMap, Panel } from "reactflow";
+ import { twMerge } from "tailwind-merge";
+ 
+ import {
+   mapNodeResponse,
+   mapRelationResponse,
+@@
+ } from "../../api/hooks";
+ import type { RelationResponse } from "../../api/types";
+ import { getErrorMessage } from "../../utils/error";
+ import { useGraphProfiler } from "../../hooks/useGraphProfiler";
+ import { BrainNode } from "./BrainNode";
++import { CreateNodeButton } from "../CreateNodeButton";
+@@
+ interface TreeCanvasProps {
+   treeId: string;
+   isLoading: boolean;
+ }
+ 
+-function createPlaceholderNode(): GraphNode {
++export interface TreeCanvasHandle {
++  zoomIn(): void;
++  zoomOut(): void;
++  centerOnSelection(): void;
++}
++
++function createPlaceholderNode(type: GraphNode["type"], label: string): GraphNode {
+   return {
+     id: `tmp-${Math.random().toString(36).slice(2, 9)}`,
+-    label: "New node",
++    label,
+     position: { x: 0, y: 0 },
+-    type: "regular",
++    type,
+     highlightState: "none",
+     relationCounts: { up: 0, down: 0 }
+   };
+ }
+@@
+-function relationFromResponse(response: RelationResponse): GraphRelation {
++function relationFromResponse(response: RelationResponse): GraphRelation {
+   return mapRelationResponse(response);
+ }
+ 
+-export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element {
++export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function TreeCanvas(
++  { treeId, isLoading }: TreeCanvasProps,
++  ref
++): JSX.Element {
+   const nodes = useTreeStore((state) => state.nodes);
+   const relations = useTreeStore((state) => state.relations);
+   const selection = useTreeStore((state) => state.selection);
+   const select = useTreeStore((state) => state.select);
+   const upsertNode = useTreeStore((state) => state.upsertNode);
+@@
+   const handleZoomIn = useCallback(() => {
+     if (!reactFlowInstance) return;
+     reactFlowInstance.zoomIn({ duration: 150 });
+   }, [reactFlowInstance]);
+ 
+@@
+   const handleCenterOnSelection = useCallback(() => {
+     if (!reactFlowInstance) return;
+     if (selection.type === "node") {
+       const node = nodes.find((item) => item.id === selection.id);
+       if (!node) {
+         return;
+       }
+       reactFlowInstance.setCenter(node.position.x, node.position.y, { zoom: 1.1, duration: 250 });
+     } else {
+       reactFlowInstance.fitView({ padding: 0.2, duration: 250 });
+     }
+   }, [nodes, reactFlowInstance, selection]);
++
++  useImperativeHandle(
++    ref,
++    () => ({
++      zoomIn: handleZoomIn,
++      zoomOut: handleZoomOut,
++      centerOnSelection: handleCenterOnSelection
++    }),
++    [handleCenterOnSelection, handleZoomIn, handleZoomOut]
++  );
+@@
+   const flowEdges = useMemo<EdgeType[]>(() => {
+     return relations.map((relation) => ({
+       id: relation.id,
+       source: relation.fromId,
+       target: relation.toId,
+       data: { relation },
+       label: relation.kind.toUpperCase(),
+       selected: selection.type === "relation" && selection.id === relation.id,
+       type: "smoothstep",
+       animated: false,
+       style: {
+-        stroke: selection.type === "relation" && selection.id === relation.id ? "rgba(129,140,248,0.9)" : "rgba(56,189,248,0.35)",
+-        strokeWidth: selection.type === "relation" && selection.id === relation.id ? 3 : 2
++        stroke: selection.type === "relation" && selection.id === relation.id ? "rgba(129,140,248,0.95)" : "rgba(56,189,248,0.55)",
++        strokeWidth: selection.type === "relation" && selection.id === relation.id ? 3 : 2
+       },
++      markerEnd: {
++        type: MarkerType.ArrowClosed,
++        color: selection.type === "relation" && selection.id === relation.id ? "#a5b4fc" : "rgba(56,189,248,0.75)",
++        width: 18,
++        height: 18
++      },
+       labelStyle: {
+         fill: "#cbd5f5",
+         fontSize: 12,
+         fontWeight: 500
+       }
+@@
+-  const [creatingNode, setCreatingNode] = useState(false);
+-
+-  const handleCreateNode = useCallback(() => {
+-    const placeholder = createPlaceholderNode();
++  const [creatingNode, setCreatingNode] = useState(false);
++
++  const handleCreateNode = useCallback(
++    (input: { label: string; type: GraphNode["type"] }) => {
++      const placeholder = createPlaceholderNode(input.type, input.label);
+     const viewportCenter = reactFlowInstance
+       ? reactFlowInstance.screenToFlowPosition({
+           x: window.innerWidth / 2,
+           y: window.innerHeight / 2
+         })
+       : { x: Math.random() * 200, y: Math.random() * 200 };
+ 
+     placeholder.position = viewportCenter;
+ 
+     pushSnapshot();
+     const token = beginOptimisticChange("create-node");
+     setCreatingNode(true);
+     upsertNode(placeholder);
+ 
+     createNodeMutation.mutate(
+       {
+-        label: placeholder.label,
++        label: placeholder.label,
+         position: viewportCenter,
+-        type: "regular",
++        type: input.type,
+         highlight_state: "none"
+       },
+       {
+         onSuccess: (nodeResponse) => {
+           resolveOptimisticChange(token);
+@@
+           setCreatingNode(false);
+         }
+       }
+     );
+-  }, [
+-    beginOptimisticChange,
+-    createNodeMutation,
+-    pushSnapshot,
+-    pushToast,
+-    reactFlowInstance,
+-    removeNode,
+-    setCreatingNode,
+-    resolveOptimisticChange,
+-    rollbackOptimisticChange,
+-    select,
+-    upsertNode
+-  ]);
++    },
++    [
++      beginOptimisticChange,
++      createNodeMutation,
++      pushSnapshot,
++      pushToast,
++      reactFlowInstance,
++      removeNode,
++      setCreatingNode,
++      resolveOptimisticChange,
++      rollbackOptimisticChange,
++      select,
++      upsertNode
++    ]
++  );
+@@
+         <Panel position="top-left" className="rounded-lg border border-slate-800 bg-surface-sunken/80 px-3 py-2 text-xs shadow-lg">
+           <div className="flex items-center gap-3">
+-            <button
+-              type="button"
+-              onClick={handleCreateNode}
+-              className={twMerge(
+-                "rounded-md bg-brand-primary/90 px-3 py-1 text-xs font-semibold text-slate-950 transition hover:bg-brand-primary",
+-                creatingNode ? "pointer-events-none opacity-75" : ""
+-              )}
+-            >
+-              {creatingNode ? "Creating..." : "Add Node"}
+-            </button>
++            <div className="min-w-[320px]">
++              <CreateNodeButton onCreate={handleCreateNode} disabled={creatingNode} />
++            </div>
+             <button
+               type="button"
+               onClick={() => select({ type: null, id: null })}
+               className="rounded-md border border-slate-700/80 px-2 py-1 text-xs text-slate-300 transition hover:border-slate-500 hover:text-slate-100"
+             >
+*** End Patch
+[2m2025-12-03T15:47:42.282480Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,120p' frontend/src/App.tsx","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:47:58.641228Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/App.tsx
+@@
+-import { useEffect, useState } from "react";
++import { useEffect, useRef, useState } from "react";
+ import { ReactFlowProvider } from "reactflow";
+ import "reactflow/dist/style.css";
+ 
+ import { ApiError } from "./api/client";
+ import type { TreeDetailResponse } from "./api/types";
+ import { useTree, useTrees } from "./api/hooks";
+-import { TreeCanvas } from "./components/canvas/TreeCanvas";
++import { TreeCanvas, type TreeCanvasHandle } from "./components/canvas/TreeCanvas";
+ import { CanvasShell } from "./components/layout/CanvasShell";
+ import { Layout } from "./components/layout/Layout";
+ import { SidePanel } from "./components/layout/SidePanel";
+ import { TopBar } from "./components/layout/TopBar";
+ import { CreateTreeModal } from "./components/modals/CreateTreeModal";
+@@
+ export default function App(): JSX.Element {
+   const [selectedTreeId, setSelectedTreeId] = useState<string | null>(null);
++  const canvasRef = useRef<TreeCanvasHandle | null>(null);
+@@
+   const inspectorTitle =
+     inspectorTab === "node" ? "Node Inspector" : inspectorTab === "relation" ? "Relation Inspector" : "Versions";
+ 
++  const handleZoomIn = () => canvasRef.current?.zoomIn();
++  const handleZoomOut = () => canvasRef.current?.zoomOut();
++  const handleCenter = () => canvasRef.current?.centerOnSelection();
++
+   return (
+     <ReactFlowProvider>
+       <Layout
+@@
+         }
+         footer="Use ⌘Z / Ctrl+Z to undo and Shift+⌘Z / Shift+Ctrl+Z to redo changes."
+       >
+-        <CanvasShell>
++        <CanvasShell
++          toolbar={
++            <CanvasToolbar onZoomIn={handleZoomIn} onZoomOut={handleZoomOut} onCenter={handleCenter} />
++          }
++        >
+           {treeError ? (
+             <ErrorCanvasState
+               message={getErrorMessage(treeError)}
+               correlationId={treeError instanceof ApiError ? treeError.correlationId ?? undefined : undefined}
+               isRetrying={treeQuery.isFetching}
+               onRetry={() => refetchTree()}
+             />
+           ) : activeTreeId ? (
+-            <TreeCanvas treeId={activeTreeId} isLoading={isTreeLoading} />
++            <TreeCanvas ref={canvasRef} treeId={activeTreeId} isLoading={isTreeLoading} />
+           ) : (
+             <EmptyCanvasState isLoading={isTreeLoading} hasTrees={Boolean(trees?.length)} />
+           )}
+         </CanvasShell>
+       </Layout>
+@@
+   );
+ }
++
++function CanvasToolbar({
++  onZoomIn,
++  onZoomOut,
++  onCenter
++}: {
++  onZoomIn: () => void;
++  onZoomOut: () => void;
++  onCenter: () => void;
++}): JSX.Element {
++  return (
++    <div className="flex items-center gap-2 text-xs text-slate-200">
++      <button
++        type="button"
++        onClick={onZoomOut}
++        className="rounded-md border border-slate-700 bg-surface-sunken px-2 py-1 font-semibold transition hover:border-slate-500 hover:text-white"
++      >
++        Zoom out
++      </button>
++      <button
++        type="button"
++        onClick={onZoomIn}
++        className="rounded-md border border-slate-700 bg-surface-sunken px-2 py-1 font-semibold transition hover:border-slate-500 hover:text-white"
++      >
++        Zoom in
++      </button>
++      <button
++        type="button"
++        onClick={onCenter}
++        className="rounded-md border border-slate-700 bg-surface-sunken px-2 py-1 font-semibold transition hover:border-slate-500 hover:text-white"
++      >
++        Center
++      </button>
++    </div>
++  );
++}
+*** End Patch
+[2m2025-12-03T15:48:15.102454Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/components/canvas/TreeCanvas.tsx
+@@
+-  const handleCreateNode = useCallback(
+-    (input: { label: string; type: GraphNode["type"] }) => {
+-      const placeholder = createPlaceholderNode(input.type, input.label);
++  const handleCreateNode = useCallback(
++    (input?: { label?: string; type?: GraphNode["type"] }) => {
++      const type = input?.type ?? "regular";
++      const label = input?.label?.trim() || (type === "undesired_effect" ? "Undesired effect" : type === "cause" ? "Cause" : "New idea");
++      const placeholder = createPlaceholderNode(type, label);
+     const viewportCenter = reactFlowInstance
+       ? reactFlowInstance.screenToFlowPosition({
+           x: window.innerWidth / 2,
+           y: window.innerHeight / 2
+         })
+@@
+       upsertNode(placeholder);
+ 
+     createNodeMutation.mutate(
+       {
+-        label: placeholder.label,
++        label: placeholder.label,
+         position: viewportCenter,
+-        type: input.type,
++        type,
+         highlight_state: "none"
+       },
+*** End Patch
+[2m2025-12-03T15:48:39.986686Z[0m [32m INFO[0m ToolCall: shell_command {"command":"cd frontend && npm test -- src/stores/__tests__/uiStore.test.ts src/stores/__tests__/treeStore.test.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:48:47.800535Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: specs/001-reality-tree-ui/tasks.md
+@@
+-- [ ] T013 [P] [US1] Implement node create/edit UI with type-specific colors in `frontend/src/components/BrainNode.tsx` and `frontend/src/components/CreateNodeButton.tsx`.
+-- [ ] T014 [US1] Render directional "why" relations with selection highlighting in `frontend/src/components/canvas/TreeCanvas.tsx`.
+-- [ ] T015 [P] [US1] Add zoom and recenter controls keeping selection in view in `frontend/src/components/layout/CanvasShell.tsx`.
++- [X] T013 [P] [US1] Implement node create/edit UI with type-specific colors in `frontend/src/components/BrainNode.tsx` and `frontend/src/components/CreateNodeButton.tsx`.
++- [X] T014 [US1] Render directional "why" relations with selection highlighting in `frontend/src/components/canvas/TreeCanvas.tsx`.
++- [X] T015 [P] [US1] Add zoom and recenter controls keeping selection in view in `frontend/src/components/layout/CanvasShell.tsx`.
+*** End Patch
+[2m2025-12-03T15:48:52.549822Z[0m [32m INFO[0m ToolCall: update_plan {"plan":[{"status":"completed","step":"Review current canvas/node components and store capabilities for node creation/editing, relation rendering, and zoom/center controls (T013-T015 context)."},{"status":"completed","step":"Implement node create/edit UI with type-specific styling in BrainNode and CreateNodeButton (T013)."},{"status":"completed","step":"Render directional relations with selection highlighting in TreeCanvas (T014)."},{"status":"completed","step":"Add zoom/recenter controls in CanvasShell and wire to TreeCanvas handlers (T015)."},{"status":"completed","step":"Verify frontend unit tests (targeted Vitest) and adjust tasks.md status if needed."}]}
+[2m2025-12-03T16:03:57.938470Z[0m [32m INFO[0m spawning ghost snapshot task
+[2m2025-12-03T16:03:58.118631Z[0m [32m INFO[0m ghost snapshot blocking task finished
+[2m2025-12-03T16:03:58.118648Z[0m [32m INFO[0m ghost commit captured: 038a6c2ea6a4d778be6db6f206fa105a146a791f
+[2m2025-12-03T16:03:58.118653Z[0m [32m INFO[0m ghost snapshot gate marked ready
+[2m2025-12-03T16:04:01.686829Z[0m [32m INFO[0m ToolCall: shell_command {"command":"cd /Users/max/Code/brain_buddy && sed -n '1,260p' frontend/src/stores/treeStore.ts"}
+[2m2025-12-03T16:04:03.608298Z[0m [32m INFO[0m ToolCall: shell_command {"command":"cd /Users/max/Code/brain_buddy && sed -n '260,520p' frontend/src/stores/treeStore.ts"}
+[2m2025-12-03T16:04:08.749952Z[0m [32m INFO[0m ToolCall: shell_command {"command":"cd /Users/max/Code/brain_buddy && sed -n '1,240p' frontend/src/stores/__tests__/treeStore.test.ts"}
+[2m2025-12-03T16:04:35.067820Z[0m [32m INFO[0m ToolCall: shell_command {"command":"cd /Users/max/Code/brain_buddy/frontend && cat package.json"}
+[2m2025-12-03T16:05:11.195246Z[0m [32m INFO[0m ToolCall: shell_command {"command":"cd /Users/max/Code/brain_buddy/frontend && npm test -- --runInBand src/stores/__tests__/treeStore.test.ts","timeout_ms":120000}
+[2m2025-12-03T16:05:18.560500Z[0m [32m INFO[0m ToolCall: shell_command {"command":"cd /Users/max/Code/brain_buddy/frontend && npm test -- src/stores/__tests__/treeStore.test.ts","timeout_ms":120000}
+[2m2025-12-03T16:05:22.727850Z[0m [32m INFO[0m ToolCall: shell_command {"command":"cd /Users/max/Code/brain_buddy/frontend && npm test -- src/stores/__tests__/uiStore.test.ts src/stores/__tests__/treeStore.test.ts","timeout_ms":120000}

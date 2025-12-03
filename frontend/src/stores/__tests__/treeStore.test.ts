@@ -30,6 +30,33 @@ const sampleTree: TreeDetailResponse = {
   owner_id: null
 };
 
+const sampleTreeWithRelations: TreeDetailResponse = {
+  ...sampleTree,
+  nodes: [
+    sampleTree.nodes[0],
+    {
+      id: "node-2",
+      label: "Undesired effect",
+      type: "undesired_effect",
+      position: { x: 10, y: 20 },
+      highlight_state: "none",
+      relation_counts: {
+        up_count: 0,
+        down_count: 0
+      }
+    }
+  ],
+  relations: [
+    {
+      id: "relation-1",
+      from_id: "node-1",
+      to_id: "node-2",
+      kind: "why",
+      created_at: "2024-04-01T10:00:00Z"
+    }
+  ]
+};
+
 describe("treeStore", () => {
   beforeEach(() => {
     useTreeStore.getState().reset();
@@ -74,5 +101,58 @@ describe("treeStore", () => {
     store.rollbackOptimisticChange(token);
 
     expect(useTreeStore.getState().nodes[0].label).toBe(originalLabel);
+  });
+
+  it("recalculates relation counts when relations are added and removed", () => {
+    useTreeStore.getState().setTree(sampleTreeWithRelations);
+    let store = useTreeStore.getState();
+
+    expect(store.nodes.find((n) => n.id === "node-1")?.relationCounts.up).toBe(1);
+    expect(store.nodes.find((n) => n.id === "node-2")?.relationCounts.down).toBe(1);
+
+    store.removeRelation("relation-1");
+    store = useTreeStore.getState();
+
+    expect(store.nodes.find((n) => n.id === "node-1")?.relationCounts.up).toBe(0);
+    expect(store.nodes.find((n) => n.id === "node-2")?.relationCounts.down).toBe(0);
+
+    store.upsertRelation({
+      id: "relation-2",
+      fromId: "node-2",
+      toId: "node-1",
+      kind: "why",
+      createdAt: "2024-04-01T10:00:01Z"
+    });
+
+    store = useTreeStore.getState();
+
+    expect(store.nodes.find((n) => n.id === "node-2")?.relationCounts.up).toBe(1);
+    expect(store.nodes.find((n) => n.id === "node-1")?.relationCounts.down).toBe(1);
+  });
+
+  it("tracks selection and clears it when the selected entity is removed", () => {
+    const store = useTreeStore.getState();
+    store.setTree(sampleTreeWithRelations);
+    store.select({ type: "node", id: "node-2" });
+    expect(useTreeStore.getState().selection).toEqual({ type: "node", id: "node-2" });
+
+    store.removeNode("node-2");
+    expect(useTreeStore.getState().selection).toEqual({ type: null, id: null });
+
+    store.select({ type: "relation", id: "relation-1" });
+    expect(useTreeStore.getState().selection).toEqual({ type: "relation", id: "relation-1" });
+
+    store.removeRelation("relation-1");
+    expect(useTreeStore.getState().selection).toEqual({ type: null, id: null });
+  });
+
+  it("updates node highlighting state via upsert", () => {
+    useTreeStore.getState().setTree(sampleTree);
+
+    const node = useTreeStore.getState().nodes[0];
+    const store = useTreeStore.getState();
+    store.upsertNode({ ...node, highlightState: "cause_candidate" });
+
+    expect(useTreeStore.getState().nodes[0].highlightState).toBe("cause_candidate");
   });
 });
