@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, status
-from fastapi.responses import StreamingResponse
 
 from app.api.dependencies import (
     get_node_service,
@@ -18,9 +17,10 @@ from app.schemas import (
     RelationCreateRequest,
     RelationResponse,
     RelationUpdateRequest,
-    TimestampMetadata,
     TreeCreateRequest,
     TreeDetailResponse,
+    TreeExportResponse,
+    TreeImportRequest,
     TreeListItem,
     TreeUpdateRequest,
     ValidationHistoryResponse,
@@ -29,57 +29,10 @@ from app.schemas import (
     VersionCreateRequest,
     VersionListItem,
 )
+from app.schemas.api import RelationCounts, TreeMetadata
 from app.schemas.domain import RelationDocument, TreeDocument, TreeVersionRef
 
 router = APIRouter(tags=["trees"])
-
-
-def _build_tree_response(tree: TreeDocument) -> TreeDetailResponse:
-    node_counts: dict[str, tuple[int, int]] = {}
-    for relation in tree.relations:
-        incoming, outgoing = node_counts.get(relation.target_id, (0, 0))
-        node_counts[relation.target_id] = (incoming + 1, outgoing)
-        incoming, outgoing = node_counts.get(relation.source_id, (0, 0))
-        node_counts[relation.source_id] = (incoming, outgoing + 1)
-
-    node_payloads = [
-        NodeResponse(
-            id=node.id,
-            label=node.label,
-            position=node.position,
-            metadata=node.metadata,
-            visual=node.visual,
-            validation=node.validation,
-            incoming_count=node_counts.get(node.id, (0, 0))[0],
-            outgoing_count=node_counts.get(node.id, (0, 0))[1],
-        )
-        for node in tree.nodes
-    ]
-
-    relation_payloads = [
-        RelationResponse(
-            id=relation.id,
-            source_id=relation.source_id,
-            target_id=relation.target_id,
-            question_label=relation.question_label,
-            notes=relation.notes,
-            metadata=relation.metadata,
-        )
-        for relation in tree.relations
-    ]
-
-    version_payloads = [_version_ref_to_item(ref) for ref in tree.version_refs]
-
-    return TreeDetailResponse(
-        id=tree.id,
-        title=tree.title,
-        description=tree.description,
-        created_at=tree.created_at,
-        updated_at=tree.updated_at,
-        nodes=node_payloads,
-        relations=relation_payloads,
-        versions=version_payloads,
-    )
 
 
 @router.post(
@@ -98,10 +51,7 @@ def create_tree(
 @router.get("/trees", response_model=list[TreeListItem])
 def list_trees(tree_service=Depends(get_tree_service)) -> list[TreeListItem]:
     entries = tree_service.list_trees()
-    return [
-        TreeListItem(id=entry.id, title=entry.title, description=entry.description, updated_at=entry.updated_at)
-        for entry in entries
-    ]
+    return [TreeListItem(id=entry.id, name=entry.title, updated_at=entry.updated_at, owner_id=None) for entry in entries]
 
 
 @router.get("/trees/{tree_id}", response_model=TreeDetailResponse)
@@ -110,7 +60,7 @@ def get_tree(tree_id: str, tree_service=Depends(get_tree_service)) -> TreeDetail
     return _build_tree_response(tree)
 
 
-@router.patch("/trees/{tree_id}", response_model=TreeDetailResponse)
+@router.put("/trees/{tree_id}", response_model=TreeDetailResponse)
 def update_tree(
     tree_id: str,
     payload: TreeUpdateRequest,
@@ -123,6 +73,22 @@ def update_tree(
 @router.delete("/trees/{tree_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_tree(tree_id: str, tree_service=Depends(get_tree_service)) -> None:
     tree_service.delete_tree(tree_id)
+
+
+@router.post(
+    "/trees/import",
+    response_model=TreeDetailResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def import_tree(payload: TreeImportRequest, tree_service=Depends(get_tree_service)) -> TreeDetailResponse:
+    tree = tree_service.import_tree(payload.tree)
+    return _build_tree_response(tree)
+
+
+@router.post("/trees/{tree_id}/export", response_model=TreeExportResponse)
+def export_tree(tree_id: str, tree_service=Depends(get_tree_service)) -> TreeExportResponse:
+    tree = tree_service.get_tree(tree_id)
+    return TreeExportResponse(tree=_build_tree_response(tree))
 
 
 @router.post(
@@ -243,20 +209,6 @@ def delete_version(
     version_service.delete_version(tree_id, version_id)
 
 
-@router.get(
-    "/trees/{tree_id}/export",
-    response_class=StreamingResponse,
-)
-def export_tree(
-    tree_id: str,
-    version_id: str | None = Query(default=None),
-    version_service=Depends(get_version_service),
-) -> StreamingResponse:
-    filename, content = version_service.export_tree(tree_id, version_id)
-    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
-    return StreamingResponse(iter([content]), media_type="application/json", headers=headers)
-
-
 @router.post(
     "/trees/{tree_id}/validate/{node_id}",
     response_model=ValidationResponse,
@@ -294,40 +246,61 @@ def get_validation_history(
     return ValidationHistoryResponse(items=items)
 
 
+def _build_tree_response(tree: TreeDocument) -> TreeDetailResponse:
+    metadata = _build_tree_metadata(tree)
+    node_payloads = [_node_response_from_tree(tree, node.id) for node in tree.nodes]
+    relation_payloads = [_relation_to_response(relation) for relation in tree.relations]
+    return TreeDetailResponse(
+        id=tree.id,
+        name=tree.title,
+        metadata=metadata,
+        nodes=node_payloads,
+        relations=relation_payloads,
+        owner_id=tree.owner_id,
+    )
+
+
+def _build_tree_metadata(tree: TreeDocument) -> TreeMetadata:
+    meta_dict = tree.metadata or {}
+    version = int(meta_dict.get("version", 1))
+    layout = meta_dict.get("layout")
+    owner_id = meta_dict.get("owner_id") if tree.owner_id is None else tree.owner_id
+    return TreeMetadata(
+        version=version,
+        created_at=tree.created_at,
+        updated_at=tree.updated_at,
+        layout=layout if isinstance(layout, dict) else None,
+        owner_id=owner_id if isinstance(owner_id, str) else None,
+    )
+
+
 def _node_response_from_tree(tree: TreeDocument, node_id: str) -> NodeResponse:
     node = next(node for node in tree.nodes if node.id == node_id)
     counts = _relation_counts(tree.relations, node_id)
+    extra = node.extra or {}
     return NodeResponse(
         id=node.id,
         label=node.label,
+        type=extra.get("type", "regular"),
         position=node.position,
-        metadata=node.metadata,
-        visual=node.visual,
-        validation=node.validation,
-        incoming_count=counts[0],
-        outgoing_count=counts[1],
+        highlight_state=extra.get("highlight_state", "none"),
+        relation_counts=RelationCounts(up_count=counts[0], down_count=counts[1]),
     )
 
 
 def _relation_counts(relations: list[RelationDocument], node_id: str) -> tuple[int, int]:
-    incoming = sum(1 for relation in relations if relation.target_id == node_id)
-    outgoing = sum(1 for relation in relations if relation.source_id == node_id)
-    return incoming, outgoing
+    up_count = sum(1 for relation in relations if relation.source_id == node_id)
+    down_count = sum(1 for relation in relations if relation.target_id == node_id)
+    return up_count, down_count
 
 
 def _relation_to_response(relation: RelationDocument) -> RelationResponse:
-    metadata = TimestampMetadata(
-        created_at=relation.metadata.created_at,
-        updated_at=relation.metadata.updated_at,
-        author=relation.metadata.author,
-    )
     return RelationResponse(
         id=relation.id,
-        source_id=relation.source_id,
-        target_id=relation.target_id,
-        question_label=relation.question_label,
-        notes=relation.notes,
-        metadata=metadata,
+        from_id=relation.source_id,
+        to_id=relation.target_id,
+        kind="why",
+        created_at=relation.metadata.created_at,
     )
 
 

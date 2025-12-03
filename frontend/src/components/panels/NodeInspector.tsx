@@ -3,7 +3,6 @@ import { twMerge } from "tailwind-merge";
 
 import { useDeleteNode, useUpdateNode, useValidation, useValidationHistory } from "../../api/hooks";
 import type { ValidationResponse } from "../../api/types";
-import type { GraphNode } from "../../stores/treeStore";
 import { useTreeStore } from "../../stores/treeStore";
 import { useUiStore } from "../../stores/uiStore";
 import { getErrorMessage } from "../../utils/error";
@@ -25,10 +24,14 @@ export function NodeInspector(): JSX.Element {
   const pushToast = useUiStore((state) => state.pushToast);
 
   const [label, setLabel] = useState(node?.label ?? "");
+  const [nodeType, setNodeType] = useState(node?.type ?? "regular");
+  const [highlightState, setHighlightState] = useState(node?.highlightState ?? "none");
 
   useLayoutEffect(() => {
     setLabel(node?.label ?? "");
-  }, [node?.id, node?.label]);
+    setNodeType(node?.type ?? "regular");
+    setHighlightState(node?.highlightState ?? "none");
+  }, [node?.id, node?.label, node?.type, node?.highlightState]);
 
   if (!activeTreeId) {
     return <InspectorPlaceholder message="Select a tree to inspect nodes." />;
@@ -54,8 +57,7 @@ export function NodeInspector(): JSX.Element {
     const token = beginOptimisticChange("rename-node");
     upsertNode({
       ...node,
-      label: trimmed,
-      metadata: { ...node.metadata, updatedAt: new Date().toISOString() }
+      label: trimmed
     });
 
     updateNodeMutation.mutate(
@@ -78,6 +80,62 @@ export function NodeInspector(): JSX.Element {
             description: getErrorMessage(error),
             variant: "error",
             duration: 6000
+          });
+        }
+      }
+    );
+  };
+
+  const handleTypeChange = (nextType: typeof nodeType) => {
+    setNodeType(nextType);
+    pushSnapshot();
+    const token = beginOptimisticChange("update-node-type");
+    upsertNode({ ...node, type: nextType });
+    updateNodeMutation.mutate(
+      { nodeId: node.id, payload: { type: nextType } },
+      {
+        onSuccess: () => {
+          resolveOptimisticChange(token);
+          pushToast({
+            title: "Node updated",
+            description: "Type saved.",
+            variant: "success",
+            duration: 2000
+          });
+        },
+        onError: (error) => {
+          rollbackOptimisticChange(token);
+          setNodeType(node.type);
+          pushToast({
+            title: "Failed to update node",
+            description: getErrorMessage(error),
+            variant: "error",
+            duration: 6000
+          });
+        }
+      }
+    );
+  };
+
+  const handleHighlightChange = (next: typeof highlightState) => {
+    setHighlightState(next);
+    pushSnapshot();
+    const token = beginOptimisticChange("update-highlight");
+    upsertNode({ ...node, highlightState: next });
+    updateNodeMutation.mutate(
+      { nodeId: node.id, payload: { highlight_state: next } },
+      {
+        onSuccess: () => {
+          resolveOptimisticChange(token);
+        },
+        onError: (error) => {
+          rollbackOptimisticChange(token);
+          setHighlightState(node.highlightState);
+          pushToast({
+            title: "Failed to update highlight",
+            description: getErrorMessage(error),
+            variant: "error",
+            duration: 5000
           });
         }
       }
@@ -126,6 +184,7 @@ export function NodeInspector(): JSX.Element {
             variant: "success",
             duration: 3500
           });
+          historyQuery.refetch();
         },
         onError: (error) => {
           pushToast({
@@ -133,49 +192,6 @@ export function NodeInspector(): JSX.Element {
             description: getErrorMessage(error),
             variant: "error",
             duration: 6000
-          });
-        }
-      }
-    );
-  };
-
-  const handleHighlightToggle = () => {
-    const nextHighlight = !node.visual?.highlight;
-    const updatedVisual: GraphNode["visual"] = {
-      color: node.visual?.color ?? null,
-      highlight: nextHighlight
-    };
-
-    const next: GraphNode = {
-      ...node,
-      visual: updatedVisual
-    };
-
-    pushSnapshot();
-    const token = beginOptimisticChange("toggle-highlight");
-    upsertNode(next);
-
-    updateNodeMutation.mutate(
-      {
-        nodeId: node.id,
-        payload: {
-          visual: {
-            color: updatedVisual?.color ?? undefined,
-            highlight: updatedVisual?.highlight ?? false
-          }
-        }
-      },
-      {
-        onSuccess: () => {
-          resolveOptimisticChange(token);
-        },
-        onError: (error) => {
-          rollbackOptimisticChange(token);
-          pushToast({
-            title: "Failed to update highlight",
-            description: getErrorMessage(error),
-            variant: "error",
-            duration: 5000
           });
         }
       }
@@ -202,59 +218,47 @@ export function NodeInspector(): JSX.Element {
           className="w-full rounded-lg border border-slate-700 bg-surface-base px-3 py-2 text-sm text-slate-100 shadow-inner focus:border-brand-primary focus:outline-none"
         />
         <p className="text-xs text-slate-500">
-          Incoming relations: <strong>{node.incomingCount}</strong>, Outgoing relations: <strong>{node.outgoingCount}</strong>
+          Incoming relations: <strong>{node.relationCounts.up}</strong>, Outgoing relations: <strong>{node.relationCounts.down}</strong>
         </p>
       </div>
 
-      <div className="space-y-2 rounded-lg border border-slate-800 bg-surface-sunken/60 p-3 text-xs text-slate-400">
-        <MetadataRow label="Created" value={new Date(node.metadata.createdAt).toLocaleString()} />
-        <MetadataRow label="Updated" value={new Date(node.metadata.updatedAt).toLocaleString()} />
-        {node.metadata.author ? <MetadataRow label="Author" value={node.metadata.author} /> : null}
-      </div>
-
-      <div className="space-y-2 rounded-lg border border-slate-800 bg-surface-sunken/60 p-3">
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-medium text-slate-200">Visual Highlight</span>
-          <button
-            type="button"
-            onClick={handleHighlightToggle}
-            className={twMerge(
-              "rounded-md border px-2 py-1 text-xs font-medium transition",
-              node.visual?.highlight
-                ? "border-emerald-400/50 bg-emerald-500/20 text-emerald-200"
-                : "border-slate-700 bg-surface-base text-slate-200 hover:border-slate-500"
-            )}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-2 rounded-lg border border-slate-800 bg-surface-sunken/60 p-3">
+          <label htmlFor="node-type" className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+            Node Type
+          </label>
+          <select
+            id="node-type"
+            value={nodeType}
+            onChange={(event) => handleTypeChange(event.target.value as typeof nodeType)}
+            className="w-full rounded-md border border-slate-700 bg-surface-base px-3 py-2 text-sm text-slate-100 shadow-inner focus:border-brand-primary focus:outline-none"
           >
-            {node.visual?.highlight ? "Enabled" : "Enable"}
-          </button>
+            <option value="undesired_effect">Undesired effect</option>
+            <option value="cause">Cause</option>
+            <option value="regular">Regular</option>
+          </select>
         </div>
-        {node.visual?.color ? (
-          <div className="flex items-center gap-2 text-xs text-slate-400">
-            <span>Accent:</span>
-            <span
-              className="inline-block h-3 w-6 rounded"
-              style={{ backgroundColor: node.visual.color ?? "#38bdf8" }}
-            />
-          </div>
-        ) : (
-          <p className="text-xs text-slate-500">No custom color set</p>
-        )}
+
+        <div className="space-y-2 rounded-lg border border-slate-800 bg-surface-sunken/60 p-3">
+          <label htmlFor="node-highlight" className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+            Highlight State
+          </label>
+          <select
+            id="node-highlight"
+            value={highlightState}
+            onChange={(event) => handleHighlightChange(event.target.value as typeof highlightState)}
+            className="w-full rounded-md border border-slate-700 bg-surface-base px-3 py-2 text-sm text-slate-100 shadow-inner focus:border-brand-primary focus:outline-none"
+          >
+            <option value="none">None</option>
+            <option value="cause_candidate">Cause candidate</option>
+            <option value="effect_spanning">Effect spanning</option>
+          </select>
+        </div>
       </div>
 
       <div className="space-y-2 rounded-lg border border-slate-800 bg-surface-sunken/60 p-3">
         <span className="text-sm font-medium text-slate-200">Validation</span>
-        {node.validation ? (
-          <div className="text-xs text-slate-400">
-            <MetadataRow label="Confidence" value={`${node.validation.confidence}%`} />
-            <MetadataRow label="Provider" value={node.validation.provider} />
-            <MetadataRow
-              label="Last checked"
-              value={new Date(node.validation.lastChecked).toLocaleString()}
-            />
-          </div>
-        ) : (
-          <p className="text-xs text-slate-500">No validation results yet.</p>
-        )}
+        <p className="text-xs text-slate-500">Run validation against the selected provider and review history.</p>
         <div className="flex items-center gap-2 pt-2">
           <button
             type="button"
@@ -295,15 +299,6 @@ function InspectorPlaceholder({ message }: { message: string }): JSX.Element {
   return (
     <div className="rounded-lg border border-dashed border-slate-700 bg-surface-sunken/40 p-4 text-sm text-slate-500">
       {message}
-    </div>
-  );
-}
-
-function MetadataRow({ label, value }: { label: string; value: string }): JSX.Element {
-  return (
-    <div className="flex justify-between gap-4">
-      <span className="text-xs uppercase tracking-wide text-slate-500">{label}</span>
-      <span className="text-xs text-slate-300">{value}</span>
     </div>
   );
 }

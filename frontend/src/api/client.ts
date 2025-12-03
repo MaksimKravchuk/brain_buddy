@@ -7,6 +7,8 @@ import {
   RelationUpdateRequest,
   TreeCreateRequest,
   TreeDetailResponse,
+  TreeExportResponse,
+  TreeImportRequest,
   TreeListItem,
   TreeUpdateRequest,
   ValidationHistoryResponse,
@@ -27,27 +29,6 @@ type JsonRequestOptions = Omit<RequestInit, "body"> & {
 
 function buildUrl(path: string): string {
   return `${API_BASE_URL.replace(/\/$/, "")}${path}`;
-}
-
-function parseFilename(contentDisposition: string | null): string | null {
-  if (!contentDisposition) {
-    return null;
-  }
-
-  const match = /filename\*=UTF-8''(?<encoded>[^;]+)|filename="?([^"]+)"?/i.exec(contentDisposition);
-  if (!match) {
-    return null;
-  }
-
-  if (match.groups?.encoded) {
-    try {
-      return decodeURIComponent(match.groups.encoded);
-    } catch {
-      return match.groups.encoded;
-    }
-  }
-
-  return match[2] ?? null;
 }
 
 export class ApiError extends Error {
@@ -121,7 +102,7 @@ export const apiClient = {
   },
 
   updateTree(treeId: string, payload: TreeUpdateRequest) {
-    return request<TreeDetailResponse>(`/trees/${treeId}`, { method: "PATCH", body: payload });
+    return request<TreeDetailResponse>(`/trees/${treeId}`, { method: "PUT", body: payload });
   },
 
   deleteTree(treeId: string) {
@@ -172,31 +153,12 @@ export const apiClient = {
     return request<void>(`/trees/${treeId}/versions/${versionId}`, { method: "DELETE" });
   },
 
-  async exportTree(treeId: string, versionId?: string) {
-    const query = versionId ? `?version_id=${encodeURIComponent(versionId)}` : "";
-    const response = await fetch(buildUrl(`/trees/${treeId}/export${query}`), {
-      method: "GET"
-    });
-    const rawBody = await response.text();
-    if (!response.ok) {
-      const contentType = response.headers.get("Content-Type");
-      let payload: unknown = rawBody;
-      if (contentType && contentType.includes("application/json")) {
-        try {
-          payload = JSON.parse(rawBody);
-        } catch {
-          payload = rawBody;
-        }
-      }
-      const correlationId = response.headers.get("X-Correlation-ID") ?? undefined;
-      throw new ApiError(response.statusText || "Request failed", response.status, payload, correlationId);
-    }
+  exportTree(treeId: string) {
+    return request<TreeExportResponse>(`/trees/${treeId}/export`, { method: "POST" });
+  },
 
-    const filename =
-      parseFilename(response.headers.get("Content-Disposition")) ??
-      `${treeId}-${versionId ? versionId.split("::").pop() : "latest"}.json`;
-    const blob = new Blob([rawBody], { type: "application/json" });
-    return { filename, blob };
+  importTree(payload: TreeImportRequest) {
+    return request<TreeDetailResponse>("/trees/import", { method: "POST", body: payload });
   },
 
   triggerValidation(treeId: string, nodeId: string, payload: ValidationRequest) {

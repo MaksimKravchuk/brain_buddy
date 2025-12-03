@@ -30,7 +30,7 @@ export function TreeSelector({ trees, value, onChange, isLoading }: TreeSelector
         </option>
         {trees?.map((tree) => (
           <option key={tree.id} value={tree.id}>
-            {tree.title}
+            {tree.name}
           </option>
         ))}
       </select>

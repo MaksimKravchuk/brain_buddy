@@ -12,8 +12,8 @@ from app.schemas import (
 
 
 def test_create_version_captures_metadata_and_diff(tree_service, node_service, version_service) -> None:
-    tree = tree_service.create_tree(TreeCreateRequest(title="Versions", description=None))
-    node_service.create_node(tree.id, NodeCreateRequest(label="A", position=Position(x=0, y=0)))
+    tree = tree_service.create_tree(TreeCreateRequest(name="Versions"))
+    node_service.create_node(tree.id, NodeCreateRequest(label="A", type="regular", position=Position(x=0, y=0)))
 
     version = version_service.create_version(
         tree.id,
@@ -35,11 +35,15 @@ def test_create_version_captures_metadata_and_diff(tree_service, node_service, v
 
 
 def test_create_version_detects_conflicts(tree_service, node_service, version_service) -> None:
-    tree = tree_service.create_tree(TreeCreateRequest(title="Conflicts", description=None))
-    node, _ = node_service.create_node(tree.id, NodeCreateRequest(label="A", position=Position(x=0, y=0)))
+    tree = tree_service.create_tree(TreeCreateRequest(name="Conflicts"))
+    node, _ = node_service.create_node(
+        tree.id, NodeCreateRequest(label="A", type="regular", position=Position(x=0, y=0))
+    )
     version_service.create_version(tree.id, VersionCreateRequest(label="Initial"))
 
-    node_service.update_node(tree.id, node.id, NodeUpdateRequest(label="Renamed", position=Position(x=10, y=20)))
+    node_service.update_node(
+        tree.id, node.id, NodeUpdateRequest(label="Renamed", position=Position(x=10, y=20))
+    )
 
     version = version_service.create_version(tree.id, VersionCreateRequest(label="After change"))
 
@@ -53,8 +57,10 @@ def test_create_version_detects_conflicts(tree_service, node_service, version_se
 
 
 def test_restore_version(tree_service, node_service, version_service) -> None:
-    tree = tree_service.create_tree(TreeCreateRequest(title="Restore", description=None))
-    node, tree = node_service.create_node(tree.id, NodeCreateRequest(label="A", position=Position(x=0, y=0)))
+    tree = tree_service.create_tree(TreeCreateRequest(name="Restore"))
+    node, tree = node_service.create_node(
+        tree.id, NodeCreateRequest(label="A", type="regular", position=Position(x=0, y=0))
+    )
 
     version = version_service.create_version(tree.id, VersionCreateRequest(label="Before deletion"))
 
@@ -65,8 +71,8 @@ def test_restore_version(tree_service, node_service, version_service) -> None:
 
 
 def test_export_tree_supports_live_and_version(tree_service, node_service, version_service) -> None:
-    tree = tree_service.create_tree(TreeCreateRequest(title="Export", description=None))
-    node_service.create_node(tree.id, NodeCreateRequest(label="A", position=Position(x=0, y=0)))
+    tree = tree_service.create_tree(TreeCreateRequest(name="Export"))
+    node_service.create_node(tree.id, NodeCreateRequest(label="A", type="regular", position=Position(x=0, y=0)))
     version = version_service.create_version(tree.id, VersionCreateRequest(label="Snapshot"))
 
     live_filename, live_content = version_service.export_tree(tree.id)

@@ -4,43 +4,24 @@ import type {
   NodeResponse,
   RelationResponse,
   TreeDetailResponse,
-  ValidationState,
   VersionListItem
 } from "../api/types";
 
 export interface GraphNode {
   id: string;
   label: string;
+  type: NodeResponse["type"];
   position: { x: number; y: number };
-  metadata: {
-    createdAt: string;
-    updatedAt: string;
-    author?: string | null;
-  };
-  visual?: {
-    color?: string | null;
-    highlight?: boolean;
-  } | null;
-  validation?: {
-    confidence: number;
-    provider: string;
-    lastChecked: string;
-  } | null;
-  incomingCount: number;
-  outgoingCount: number;
+  highlightState: NodeResponse["highlight_state"];
+  relationCounts: { up: number; down: number };
 }
 
 export interface GraphRelation {
   id: string;
-  sourceId: string;
-  targetId: string;
-  questionLabel: string;
-  notes?: string | null;
-  metadata: {
-    createdAt: string;
-    updatedAt: string;
-    author?: string | null;
-  };
+  fromId: string;
+  toId: string;
+  kind: RelationResponse["kind"];
+  createdAt: string;
 }
 
 export interface GraphVersion {
@@ -62,10 +43,12 @@ export interface GraphVersion {
 
 export interface TreeMetadata {
   id: string;
-  title: string;
-  description?: string | null;
+  name: string;
+  version: number;
   createdAt: string;
   updatedAt: string;
+  ownerId?: string | null;
+  layout?: Record<string, unknown> | null;
 }
 
 interface GraphSnapshot {
@@ -119,48 +102,23 @@ export function mapNodeResponse(node: NodeResponse): GraphNode {
   return {
     id: node.id,
     label: node.label,
+    type: node.type,
     position: { ...node.position },
-    metadata: {
-      createdAt: node.metadata.created_at,
-      updatedAt: node.metadata.updated_at,
-      author: node.metadata.author ?? null
-    },
-    visual: node.visual
-      ? {
-          color: node.visual.color ?? null,
-          highlight: node.visual.highlight ?? false
-        }
-      : null,
-    validation: mapValidation(node.validation),
-    incomingCount: node.incoming_count,
-    outgoingCount: node.outgoing_count
-  };
-}
-
-function mapValidation(validation?: ValidationState | null) {
-  if (!validation) {
-    return null;
-  }
-
-  return {
-    confidence: validation.confidence,
-    provider: validation.provider,
-    lastChecked: validation.last_checked
+    highlightState: node.highlight_state,
+    relationCounts: {
+      up: node.relation_counts.up_count,
+      down: node.relation_counts.down_count
+    }
   };
 }
 
 export function mapRelationResponse(relation: RelationResponse): GraphRelation {
   return {
     id: relation.id,
-    sourceId: relation.source_id,
-    targetId: relation.target_id,
-    questionLabel: relation.question_label,
-    notes: relation.notes ?? null,
-    metadata: {
-      createdAt: relation.metadata.created_at,
-      updatedAt: relation.metadata.updated_at,
-      author: relation.metadata.author ?? null
-    }
+    fromId: relation.from_id,
+    toId: relation.to_id,
+    kind: relation.kind,
+    createdAt: relation.created_at
   };
 }
 
@@ -187,17 +145,19 @@ export function mapVersionResponse(version: VersionListItem): GraphVersion {
 
 function snapshotFromState(state: TreeStoreState): GraphSnapshot {
   return {
-    metadata: state.metadata ? { ...state.metadata } : null,
+    metadata: state.metadata
+      ? {
+          ...state.metadata,
+          layout: state.metadata.layout ? { ...state.metadata.layout } : state.metadata.layout
+        }
+      : null,
     nodes: state.nodes.map((node) => ({
       ...node,
       position: { ...node.position },
-      metadata: { ...node.metadata },
-      visual: node.visual ? { ...node.visual } : null,
-      validation: node.validation ? { ...node.validation } : null
+      relationCounts: { ...node.relationCounts }
     })),
     relations: state.relations.map((relation) => ({
-      ...relation,
-      metadata: { ...relation.metadata }
+      ...relation
     })),
     versions: state.versions.map((version) => ({
       ...version,
@@ -209,17 +169,19 @@ function snapshotFromState(state: TreeStoreState): GraphSnapshot {
 
 function applySnapshot(snapshot: GraphSnapshot) {
   return {
-    metadata: snapshot.metadata ? { ...snapshot.metadata } : null,
+    metadata: snapshot.metadata
+      ? {
+          ...snapshot.metadata,
+          layout: snapshot.metadata.layout ? { ...snapshot.metadata.layout } : snapshot.metadata.layout
+        }
+      : null,
     nodes: snapshot.nodes.map((node) => ({
       ...node,
       position: { ...node.position },
-      metadata: { ...node.metadata },
-      visual: node.visual ? { ...node.visual } : null,
-      validation: node.validation ? { ...node.validation } : null
+      relationCounts: { ...node.relationCounts }
     })),
     relations: snapshot.relations.map((relation) => ({
-      ...relation,
-      metadata: { ...relation.metadata }
+      ...relation
     })),
     versions: snapshot.versions.map((version) => ({
       ...version,
@@ -256,14 +218,16 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
       activeTreeId: tree.id,
       metadata: {
         id: tree.id,
-        title: tree.title,
-        description: tree.description ?? null,
-        createdAt: tree.created_at,
-        updatedAt: tree.updated_at
+        name: tree.name,
+        version: tree.metadata.version,
+        createdAt: tree.metadata.created_at,
+        updatedAt: tree.metadata.updated_at,
+        ownerId: tree.owner_id ?? tree.metadata.owner_id ?? null,
+        layout: tree.metadata.layout ?? null
       },
       nodes: tree.nodes.map(mapNodeResponse),
       relations: tree.relations.map(mapRelationResponse),
-      versions: tree.versions.map(mapVersionResponse),
+      versions: [],
       selection: initialSelection,
       undoStack: [],
       redoStack: [],
@@ -374,7 +338,7 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
     set((state) => ({
       nodes: state.nodes.filter((node) => node.id !== nodeId),
       relations: state.relations.filter(
-        (relation) => relation.sourceId !== nodeId && relation.targetId !== nodeId
+        (relation) => relation.fromId !== nodeId && relation.toId !== nodeId
       ),
       selection:
         state.selection.type === "node" && state.selection.id === nodeId ? initialSelection : state.selection

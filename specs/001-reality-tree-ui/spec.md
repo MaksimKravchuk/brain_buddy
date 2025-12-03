@@ -23,6 +23,7 @@ Nodes:
 
 - Q: Should AI feedback requests auto-send tree data or require user confirmation? → A: Prompt signed-in users to confirm sending the current tree for AI analysis each time.
 - Q: How should unsaved work be protected against data loss? → A: Auto-save drafts locally (and to cloud if signed in) on a short interval and warn on exit if unsaved sync is pending.
+- Q: What is the autosave cadence and exit warning rule? → A: Auto-save locally every ~5s after the last edit; cloud sync on the same cadence when signed in; warn on exit if any pending sync exists.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -122,7 +123,7 @@ Signed-in users want AI guidance on their chain of thought to spot gaps or sugge
 - **FR-008**: Users MUST be able to download the current tree as JSON (including node types, relations, and colors) and import a JSON file to fully restore structure; invalid files MUST produce clear errors without altering the canvas.
 - **FR-009**: Signed-in users MUST be able to save trees to their account and retrieve the same state after signing back in.
 - **FR-010**: Signed-in users MUST be able to request AI feedback that summarizes the chain of thought and returns recommendations; each request MUST prompt confirmation before sending tree data; failures MUST surface actionable errors and preserve the tree.
-- **FR-011**: The app MUST auto-save drafts locally at short intervals and, when signed in, sync to cloud; the user MUST be warned before exit/navigation if unsynced changes exist.
+- **FR-011**: The app MUST auto-save drafts locally roughly every 5 seconds after the last edit and, when signed in, sync to cloud on the same cadence; the user MUST be warned before exit/navigation if any pending sync exists.
 
 ### Key Entities *(include if feature involves data)*
 
