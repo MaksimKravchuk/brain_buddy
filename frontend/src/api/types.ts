@@ -146,3 +146,18 @@ export interface ValidationRequest {
   provider?: string | null;
   prompt_overrides?: Record<string, unknown> | null;
 }
+
+export type FeedbackStatus = "success" | "failed" | "pending";
+
+export interface AiFeedbackRequest {
+  consent: boolean;
+  provider?: string | null;
+  request_id?: string | null;
+}
+
+export interface AiFeedbackResponse {
+  status: FeedbackStatus;
+  summary: string | null;
+  recommendations: string[];
+  request_id?: string | null;
+}

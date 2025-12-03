@@ -72,6 +72,10 @@ description: "Task list for Current Reality Tree UI"
 - [ ] T024 [P] [US3] Add backend AI feedback contract tests (success/failure/consent) in `backend/tests/api/test_tree_ai_feedback.py`.
 - [ ] T025 [US3] Add AI feedback UI with confirmation, progress, retry handling in `frontend/src/components/panels/NodeInspector.tsx` and `frontend/src/stores/uiStore.ts`.
 - [ ] T026 [P] [US3] Add frontend AI feedback hook/error tests in `frontend/src/api/__tests__/aiHooks.test.ts`.
+ - [X] T023 [US3] Implement AI feedback endpoint `/api/trees/{id}/ai-feedback` with provider stub in `backend/app/api/routes.py` and `backend/app/services/tree_service.py`.
+ - [X] T024 [P] [US3] Add backend AI feedback contract tests (success/failure/consent) in `backend/tests/api/test_tree_ai_feedback.py`.
+ - [X] T025 [US3] Add AI feedback UI with confirmation, progress, retry handling in `frontend/src/components/panels/NodeInspector.tsx` and `frontend/src/stores/uiStore.ts`.
+ - [X] T026 [P] [US3] Add frontend AI feedback hook/error tests in `frontend/src/api/__tests__/aiHooks.test.ts`.
 
 ---
 

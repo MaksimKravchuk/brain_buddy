@@ -13,6 +13,7 @@ from .domain import VersionDiffSummary
 NodeType = Literal["undesired_effect", "cause", "regular"]
 HighlightState = Literal["none", "cause_candidate", "effect_spanning"]
 RelationKind = Literal["why"]
+FeedbackStatus = Literal["success", "failed", "pending"]
 
 
 class ErrorResponse(StrictBaseModel):
@@ -155,6 +156,23 @@ class TreeExportResponse(StrictBaseModel):
     tree: TreeDetailResponse = Field(description="Tree payload matching the export schema.")
 
 
+class AiFeedbackRequest(StrictBaseModel):
+    """Request payload for AI feedback on a tree."""
+
+    consent: bool = Field(description="User consent to share the tree with the AI provider.")
+    provider: str | None = Field(default=None, description="Optional provider identifier.")
+    request_id: str | None = Field(default=None, description="Optional client-provided request identifier.")
+
+
+class AiFeedbackResponse(StrictBaseModel):
+    """Response payload containing AI feedback results."""
+
+    status: FeedbackStatus = Field(description="Status of the AI feedback request.")
+    summary: str | None = Field(default=None, description="AI-generated summary of the tree.")
+    recommendations: list[str] = Field(default_factory=list, description="Actionable recommendations from the AI.")
+    request_id: str | None = Field(default=None, description="Echoed request identifier when provided.")
+
+
 class VersionCreateRequest(StrictBaseModel):
     """Payload to create a new snapshot version."""
 
@@ -218,6 +236,8 @@ __all__ = [
     "TreeListItem",
     "TreeMetadata",
     "TreeUpdateRequest",
+    "AiFeedbackRequest",
+    "AiFeedbackResponse",
     "ValidationHistoryResponse",
     "ValidationRequest",
     "ValidationResponse",

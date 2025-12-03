@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiClient, getOwnerId } from "./client";
 import type {
+  AiFeedbackRequest,
+  AiFeedbackResponse,
   NodeCreateRequest,
   NodeResponse,
   NodeUpdateRequest,
@@ -222,6 +224,27 @@ export function useValidationHistory(treeId: string, nodeId: string | null) {
       return apiClient.getValidationHistory(treeId, nodeId, signal);
     },
     enabled: Boolean(nodeId)
+  });
+}
+
+export function useAiFeedback(treeId: string | null) {
+  const pushToast = useUiStore((state) => state.pushToast);
+  return useMutation<AiFeedbackResponse, unknown, AiFeedbackRequest>({
+    mutationFn: (payload: AiFeedbackRequest) => {
+      if (!treeId) {
+        throw new Error("Tree ID is required");
+      }
+
+      return apiClient.aiFeedback(treeId, payload);
+    },
+    onError: (error) => {
+      pushToast({
+        title: "AI feedback failed",
+        description: getErrorMessage(error),
+        variant: "error",
+        duration: 6000
+      });
+    }
   });
 }
 
