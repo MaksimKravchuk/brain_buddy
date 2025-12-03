@@ -45,8 +45,8 @@ description: "Task list for Current Reality Tree UI"
 - [X] T013 [P] [US1] Implement node create/edit UI with type-specific colors in `frontend/src/components/BrainNode.tsx` and `frontend/src/components/CreateNodeButton.tsx`.
 - [X] T014 [US1] Render directional "why" relations with selection highlighting in `frontend/src/components/canvas/TreeCanvas.tsx`.
 - [X] T015 [P] [US1] Add zoom and recenter controls keeping selection in view in `frontend/src/components/layout/CanvasShell.tsx`.
-- [ ] T016 [US1] Apply cause/effect-spanning highlighting rules (>=3 upstream, all undesired effects) in `frontend/src/stores/treeStore.ts` and `frontend/src/components/BrainNode.tsx`.
-- [ ] T017 [US1] Implement auto-save (local ~5s debounce) and exit warning + cloud sync cadence in `frontend/src/stores/treeStore.ts` and `frontend/src/components/layout/Layout.tsx`.
+- [X] T016 [US1] Apply cause/effect-spanning highlighting rules (>=3 upstream, all undesired effects) in `frontend/src/stores/treeStore.ts` and `frontend/src/components/BrainNode.tsx`.
+- [X] T017 [US1] Implement auto-save (local ~5s debounce) and exit warning + cloud sync cadence in `frontend/src/stores/treeStore.ts` and `frontend/src/components/layout/Layout.tsx`.
 
 ---
 

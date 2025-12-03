@@ -27,9 +27,9 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
           };
   const highlightRing =
     node.highlightState === "cause_candidate"
-      ? "ring-2 ring-amber-400/70"
+      ? "ring-2 ring-amber-400/70 shadow-[0_0_0_6px_rgba(251,191,36,0.25)]"
       : node.highlightState === "effect_spanning"
-        ? "ring-2 ring-rose-400/70"
+        ? "ring-2 ring-rose-400/70 shadow-[0_0_0_6px_rgba(248,113,113,0.25)]"
         : "";
 
   return (

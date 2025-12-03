@@ -8310,3 +8310,402 @@
 [2m2025-12-03T16:05:11.195246Z[0m [32m INFO[0m ToolCall: shell_command {"command":"cd /Users/max/Code/brain_buddy/frontend && npm test -- --runInBand src/stores/__tests__/treeStore.test.ts","timeout_ms":120000}
 [2m2025-12-03T16:05:18.560500Z[0m [32m INFO[0m ToolCall: shell_command {"command":"cd /Users/max/Code/brain_buddy/frontend && npm test -- src/stores/__tests__/treeStore.test.ts","timeout_ms":120000}
 [2m2025-12-03T16:05:22.727850Z[0m [32m INFO[0m ToolCall: shell_command {"command":"cd /Users/max/Code/brain_buddy/frontend && npm test -- src/stores/__tests__/uiStore.test.ts src/stores/__tests__/treeStore.test.ts","timeout_ms":120000}
+[2m2025-12-03T16:09:22.340960Z[0m [32m INFO[0m spawning ghost snapshot task
+[2m2025-12-03T16:09:22.523045Z[0m [32m INFO[0m ghost snapshot blocking task finished
+[2m2025-12-03T16:09:22.523062Z[0m [32m INFO[0m ghost commit captured: e689457cafdab2b0926f9cf396de80dd047a8174
+[2m2025-12-03T16:09:22.523066Z[0m [32m INFO[0m ghost snapshot gate marked ready
+[2m2025-12-03T16:09:26.628424Z[0m [32m INFO[0m ToolCall: shell_command {"command":".specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks","workdir":"/Users/max/Code/brain_buddy","timeout_ms":120000}
+[2m2025-12-03T16:09:29.120175Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls /Users/max/Code/brain_buddy/specs/001-reality-tree-ui","timeout_ms":120000,"workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:09:31.406209Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls /Users/max/Code/brain_buddy/specs/001-reality-tree-ui/checklists","timeout_ms":120000}
+[2m2025-12-03T16:09:35.525800Z[0m [32m INFO[0m ToolCall: shell_command {"command":"python - <<'PY'\nimport re, json, pathlib\npath = pathlib.Path('/Users/max/Code/brain_buddy/specs/001-reality-tree-ui/checklists')\nfiles = sorted(path.glob('*.md'))\nrows=[]\nfor f in files:\n    text=f.read_text()\n    total=len(re.findall(r'^- \\[(?: |x|X)\\]', text, flags=re.M))\n    complete=len(re.findall(r'^- \\[(?:x|X)\\]', text, flags=re.M))\n    incomplete=len(re.findall(r'^- \\[ \\]', text, flags=re.M))\n    status='✓ PASS' if incomplete==0 else '✗ FAIL'\n    rows.append((f.name,total,complete,incomplete,status))\nprint(rows)\nPY","timeout_ms":120000}
+[2m2025-12-03T16:09:39.968550Z[0m [32m INFO[0m ToolCall: shell_command {"command":"python3 - <<'PY'\nimport re, pathlib\npath = pathlib.Path('/Users/max/Code/brain_buddy/specs/001-reality-tree-ui/checklists')\nfiles = sorted(path.glob('*.md'))\nrows=[]\nfor f in files:\n    text=f.read_text()\n    total=len(re.findall(r'^- \\[(?: |x|X)\\]', text, flags=re.M))\n    complete=len(re.findall(r'^- \\[(?:x|X)\\]', text, flags=re.M))\n    incomplete=len(re.findall(r'^- \\[ \\]', text, flags=re.M))\n    status='✓ PASS' if incomplete==0 else '✗ FAIL'\n    rows.append((f.name,total,complete,incomplete,status))\nprint(rows)\nPY","timeout_ms":120000,"workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:09:43.158231Z[0m [32m INFO[0m ToolCall: shell_command {"command":"cat /Users/max/Code/brain_buddy/specs/001-reality-tree-ui/tasks.md","timeout_ms":120000}
+[2m2025-12-03T16:09:46.449317Z[0m [32m INFO[0m ToolCall: shell_command {"command":"cat /Users/max/Code/brain_buddy/specs/001-reality-tree-ui/plan.md","timeout_ms":120000}
+[2m2025-12-03T16:09:48.853683Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"highlight\" -n /Users/max/Code/brain_buddy/specs/001-reality-tree-ui/spec.md","timeout_ms":120000}
+[2m2025-12-03T16:09:51.400657Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '90,150p' /Users/max/Code/brain_buddy/specs/001-reality-tree-ui/spec.md","timeout_ms":120000}
+[2m2025-12-03T16:09:54.258098Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,260p' frontend/src/stores/treeStore.ts","timeout_ms":120000,"workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:09:56.245270Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '260,520p' frontend/src/stores/treeStore.ts","timeout_ms":120000,"workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:09:59.947342Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,240p' frontend/src/components/canvas/BrainNode.tsx","timeout_ms":120000,"workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:10:04.452468Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,240p' frontend/src/stores/__tests__/treeStore.test.ts","timeout_ms":120000,"workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:10:15.756859Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"highlight_state\" -n frontend/src/api/types.ts","timeout_ms":120000,"workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:10:17.892190Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,120p' frontend/src/api/types.ts","timeout_ms":120000,"workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:11:10.104779Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/stores/treeStore.ts
+@@
+ function calculateRelationCounts(nodes: GraphNode[], relations: GraphRelation[]) {
+   const counts = new Map<string, { up: number; down: number }>();
+   nodes.forEach((node) => counts.set(node.id, { up: 0, down: 0 }));
+ 
+   relations.forEach((relation) => {
+     const from = counts.get(relation.fromId);
+     if (from) {
+       from.up += 1;
+     }
+     const to = counts.get(relation.toId);
+     if (to) {
+       to.down += 1;
+     }
+   });
+ 
+   return counts;
+ }
+ 
+-function applyRelationCounts(nodes: GraphNode[], relations: GraphRelation[]) {
+-  const counts = calculateRelationCounts(nodes, relations);
+-  return nodes.map((node) => ({
+-    ...node,
+-    relationCounts: counts.get(node.id) ?? node.relationCounts
+-  }));
++function reachesAllUndesiredEffects(
++  nodeId: string,
++  adjacency: Map<string, string[]>,
++  undesiredEffects: Set<string>
++) {
++  if (undesiredEffects.size === 0) {
++    return false;
++  }
++  const visited = new Set<string>();
++  const queue: string[] = [nodeId];
++
++  while (queue.length > 0) {
++    const current = queue.shift()!;
++    if (visited.has(current)) {
++      continue;
++    }
++    visited.add(current);
++    const next = adjacency.get(current) ?? [];
++    next.forEach((id) => {
++      if (!visited.has(id)) {
++        queue.push(id);
++      }
++    });
++  }
++
++  let covered = 0;
++  undesiredEffects.forEach((id) => {
++    if (visited.has(id)) {
++      covered += 1;
++    }
++  });
++
++  return covered === undesiredEffects.size;
++}
++
++function applyDerivedNodeState(nodes: GraphNode[], relations: GraphRelation[]) {
++  const counts = calculateRelationCounts(nodes, relations);
++  const adjacency = new Map<string, string[]>();
++  const undesiredEffects = new Set(nodes.filter((node) => node.type === "undesired_effect").map((n) => n.id));
++
++  relations.forEach((relation) => {
++    const current = adjacency.get(relation.fromId) ?? [];
++    current.push(relation.toId);
++    adjacency.set(relation.fromId, current);
++  });
++
++  return nodes.map((node) => {
++    const relationCounts = counts.get(node.id) ?? node.relationCounts;
++    const hasCauseCandidateSignal = relationCounts.up >= 3;
++    const effectSpanning = reachesAllUndesiredEffects(node.id, adjacency, undesiredEffects);
++
++    let highlightState: GraphNode["highlightState"] = "none";
++    if (effectSpanning) {
++      highlightState = "effect_spanning";
++    } else if (hasCauseCandidateSignal) {
++      highlightState = "cause_candidate";
++    }
++
++    return {
++      ...node,
++      relationCounts,
++      highlightState
++    };
++  });
+ }
+ 
+ export const useTreeStore = create<TreeStoreState>((set, get) => ({
+   activeTreeId: null,
+   metadata: null,
+@@
+ 
+   setTree(tree) {
+     const mappedRelations = tree.relations.map(mapRelationResponse);
+-    const mappedNodes = applyRelationCounts(tree.nodes.map(mapNodeResponse), mappedRelations);
++    const mappedNodes = applyDerivedNodeState(tree.nodes.map(mapNodeResponse), mappedRelations);
+ 
+     set(() => ({
+       activeTreeId: tree.id,
+       metadata: {
+         id: tree.id,
+@@
+ 
+   upsertNode(node) {
+     set((state) => {
+       const exists = state.nodes.findIndex((item) => item.id === node.id);
+-      if (exists >= 0) {
+-        const nextNodes = [...state.nodes];
+-        nextNodes[exists] = node;
+-        return { nodes: nextNodes };
+-      }
+-      return { nodes: [...state.nodes, node] };
++      const nextNodes = exists >= 0 ? state.nodes.map((item, idx) => (idx === exists ? node : item)) : [...state.nodes, node];
++      return { nodes: applyDerivedNodeState(nextNodes, state.relations) };
+     });
+   },
+ 
+   removeNode(nodeId) {
+     set((state) => {
+       const remainingRelations = state.relations.filter(
+         (relation) => relation.fromId !== nodeId && relation.toId !== nodeId
+       );
+       const remainingNodes = state.nodes.filter((node) => node.id !== nodeId);
+       return {
+-        nodes: applyRelationCounts(remainingNodes, remainingRelations),
++        nodes: applyDerivedNodeState(remainingNodes, remainingRelations),
+         relations: remainingRelations,
+         selection:
+           state.selection.type === "node" && state.selection.id === nodeId
+             ? initialSelection
+             : state.selection
+@@
+       const exists = state.relations.findIndex((item) => item.id === relation.id);
+       const nextRelations =
+         exists >= 0
+           ? state.relations.map((item, idx) => (idx === exists ? relation : item))
+           : [...state.relations, relation];
+       return {
+         relations: nextRelations,
+-        nodes: applyRelationCounts(state.nodes, nextRelations)
++        nodes: applyDerivedNodeState(state.nodes, nextRelations)
+       };
+     });
+   },
+ 
+   removeRelation(relationId) {
+     set((state) => {
+       const nextRelations = state.relations.filter((relation) => relation.id !== relationId);
+       return {
+         relations: nextRelations,
+-        nodes: applyRelationCounts(state.nodes, nextRelations),
++        nodes: applyDerivedNodeState(state.nodes, nextRelations),
+         selection:
+           state.selection.type === "relation" && state.selection.id === relationId
+             ? initialSelection
+             : state.selection
+*** End Patch
+[2m2025-12-03T16:11:47.330882Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/stores/__tests__/treeStore.test.ts
+@@
+ const sampleTreeWithRelations: TreeDetailResponse = {
+   ...sampleTree,
+   nodes: [
+     sampleTree.nodes[0],
+     {
+@@
+   ]
+ };
+ 
++const causeCandidateTree: TreeDetailResponse = {
++  ...sampleTree,
++  nodes: [
++    {
++      id: "root-cause",
++      label: "Root cause",
++      type: "cause",
++      position: { x: 0, y: 0 },
++      highlight_state: "none",
++      relation_counts: { up_count: 0, down_count: 0 }
++    },
++    {
++      id: "branch-1",
++      label: "Branch 1",
++      type: "regular",
++      position: { x: 10, y: 10 },
++      highlight_state: "none",
++      relation_counts: { up_count: 0, down_count: 0 }
++    },
++    {
++      id: "branch-2",
++      label: "Branch 2",
++      type: "regular",
++      position: { x: 20, y: 20 },
++      highlight_state: "none",
++      relation_counts: { up_count: 0, down_count: 0 }
++    },
++    {
++      id: "branch-3",
++      label: "Branch 3",
++      type: "regular",
++      position: { x: 30, y: 30 },
++      highlight_state: "none",
++      relation_counts: { up_count: 0, down_count: 0 }
++    }
++  ],
++  relations: [
++    { id: "rel-1", from_id: "root-cause", to_id: "branch-1", kind: "why", created_at: "2024-04-01" },
++    { id: "rel-2", from_id: "root-cause", to_id: "branch-2", kind: "why", created_at: "2024-04-01" },
++    { id: "rel-3", from_id: "root-cause", to_id: "branch-3", kind: "why", created_at: "2024-04-01" }
++  ]
++};
++
++const effectSpanningTree: TreeDetailResponse = {
++  ...sampleTree,
++  nodes: [
++    {
++      id: "root",
++      label: "Root cause",
++      type: "cause",
++      position: { x: 0, y: 0 },
++      highlight_state: "none",
++      relation_counts: { up_count: 0, down_count: 0 }
++    },
++    {
++      id: "mid",
++      label: "Intermediate",
++      type: "regular",
++      position: { x: 10, y: 10 },
++      highlight_state: "none",
++      relation_counts: { up_count: 0, down_count: 0 }
++    },
++    {
++      id: "effect-1",
++      label: "Effect 1",
++      type: "undesired_effect",
++      position: { x: 20, y: 20 },
++      highlight_state: "none",
++      relation_counts: { up_count: 0, down_count: 0 }
++    },
++    {
++      id: "effect-2",
++      label: "Effect 2",
++      type: "undesired_effect",
++      position: { x: 30, y: 30 },
++      highlight_state: "none",
++      relation_counts: { up_count: 0, down_count: 0 }
++    }
++  ],
++  relations: [
++    { id: "rel-a", from_id: "root", to_id: "mid", kind: "why", created_at: "2024-04-01" },
++    { id: "rel-b", from_id: "mid", to_id: "effect-1", kind: "why", created_at: "2024-04-01" },
++    { id: "rel-c", from_id: "mid", to_id: "effect-2", kind: "why", created_at: "2024-04-01" }
++  ]
++};
++
+ describe("treeStore", () => {
+   beforeEach(() => {
+     useTreeStore.getState().reset();
+   });
+@@
+   it("updates node highlighting state via upsert", () => {
+     useTreeStore.getState().setTree(sampleTree);
+ 
+     const node = useTreeStore.getState().nodes[0];
+     const store = useTreeStore.getState();
+     store.upsertNode({ ...node, highlightState: "cause_candidate" });
+ 
+     expect(useTreeStore.getState().nodes[0].highlightState).toBe("cause_candidate");
+   });
++
++  it("marks nodes with three or more upstream relations as cause candidates", () => {
++    useTreeStore.getState().setTree(causeCandidateTree);
++
++    const node = useTreeStore.getState().nodes.find((n) => n.id === "root-cause");
++    expect(node?.relationCounts.up).toBe(3);
++    expect(node?.highlightState).toBe("cause_candidate");
++  });
++
++  it("marks nodes whose paths reach all undesired effects as effect spanning", () => {
++    useTreeStore.getState().setTree(effectSpanningTree);
++
++    const root = useTreeStore.getState().nodes.find((n) => n.id === "root");
++    const mid = useTreeStore.getState().nodes.find((n) => n.id === "mid");
++
++    expect(root?.highlightState).toBe("effect_spanning");
++    // intermediate node also reaches both effects via its outgoing edges
++    expect(mid?.highlightState).toBe("effect_spanning");
++  });
+ });
+*** End Patch
+[2m2025-12-03T16:11:52.167453Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/components/canvas/BrainNode.tsx
+@@
+   const highlightRing =
+     node.highlightState === "cause_candidate"
+-      ? "ring-2 ring-amber-400/70"
++      ? "ring-2 ring-amber-400/70 shadow-[0_0_0_6px_rgba(251,191,36,0.25)]"
+       : node.highlightState === "effect_spanning"
+-        ? "ring-2 ring-rose-400/70"
++        ? "ring-2 ring-rose-400/70 shadow-[0_0_0_6px_rgba(248,113,113,0.25)]"
+         : "";
+*** End Patch
+[2m2025-12-03T16:11:55.803523Z[0m [32m INFO[0m ToolCall: shell_command {"command":"cd frontend && npm test -- src/stores/__tests__/uiStore.test.ts src/stores/__tests__/treeStore.test.ts","timeout_ms":120000,"workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:12:07.533079Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/stores/__tests__/treeStore.test.ts
+@@
+-  it("updates node highlighting state via upsert", () => {
++  it("recomputes highlighting state via upsert based on derived rules", () => {
+     useTreeStore.getState().setTree(sampleTree);
+ 
+     const node = useTreeStore.getState().nodes[0];
+     const store = useTreeStore.getState();
+     store.upsertNode({ ...node, highlightState: "cause_candidate" });
+ 
+-    expect(useTreeStore.getState().nodes[0].highlightState).toBe("cause_candidate");
++    // Derived rules keep highlight at none because there are no relations
++    expect(useTreeStore.getState().nodes[0].highlightState).toBe("none");
+   });
+*** End Patch
+[2m2025-12-03T16:12:10.921219Z[0m [32m INFO[0m ToolCall: shell_command {"command":"cd frontend && npm test -- src/stores/__tests__/uiStore.test.ts src/stores/__tests__/treeStore.test.ts","timeout_ms":120000,"workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:12:18.261086Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: specs/001-reality-tree-ui/tasks.md
+@@
+-- [ ] T016 [US1] Apply cause/effect-spanning highlighting rules (>=3 upstream, all undesired effects) in `frontend/src/stores/treeStore.ts` and `frontend/src/components/BrainNode.tsx`.
++- [X] T016 [US1] Apply cause/effect-spanning highlighting rules (>=3 upstream, all undesired effects) in `frontend/src/stores/treeStore.ts` and `frontend/src/components/BrainNode.tsx`.
+*** End Patch
+[2m2025-12-03T16:21:33.444489Z[0m [32m INFO[0m spawning ghost snapshot task
+[2m2025-12-03T16:21:33.632267Z[0m [32m INFO[0m ghost snapshot blocking task finished
+[2m2025-12-03T16:21:33.632292Z[0m [32m INFO[0m ghost commit captured: 9762df4e13142c2ee05e0624df5c67bd5853dc53
+[2m2025-12-03T16:21:33.632297Z[0m [32m INFO[0m ghost snapshot gate marked ready
+[2m2025-12-03T16:21:36.010668Z[0m [32m INFO[0m ToolCall: shell_command {"command":".specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:21:38.363152Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls /Users/max/Code/brain_buddy/specs/001-reality-tree-ui","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:21:40.925592Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls /Users/max/Code/brain_buddy/specs/001-reality-tree-ui/checklists","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:21:45.980911Z[0m [32m INFO[0m ToolCall: shell_command {"command":"python - <<'PY'\nimport re, pathlib\np=pathlib.Path('/Users/max/Code/brain_buddy/specs/001-reality-tree-ui/checklists')\nfiles=sorted(p.glob('*'))\nprint('name,total,completed,incomplete')\nfor f in files:\n    text=f.read_text()\n    total=len(re.findall(r'- \\[(?: |x|X)\\]', text))\n    completed=len(re.findall(r'- \\[(?:x|X)\\]', text))\n    incomplete=len(re.findall(r'- \\[ \\]', text))\n    print(f'{f.name},{total},{completed},{incomplete}')\nPY","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:21:50.292829Z[0m [32m INFO[0m ToolCall: shell_command {"command":"python3 - <<'PY'\nimport re, pathlib\np=pathlib.Path('/Users/max/Code/brain_buddy/specs/001-reality-tree-ui/checklists')\nfiles=sorted(p.glob('*'))\nprint('name,total,completed,incomplete')\nfor f in files:\n    text=f.read_text()\n    total=len(re.findall(r'- \\[(?: |x|X)\\]', text))\n    completed=len(re.findall(r'- \\[(?:x|X)\\]', text))\n    incomplete=len(re.findall(r'- \\[ \\]', text))\n    print(f'{f.name},{total},{completed},{incomplete}')\nPY","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:21:53.305810Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' /Users/max/Code/brain_buddy/specs/001-reality-tree-ui/tasks.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:21:56.182719Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,260p' frontend/src/stores/treeStore.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:21:58.445584Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '260,620p' frontend/src/stores/treeStore.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:22:00.758012Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,220p' frontend/src/components/layout/Layout.tsx","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:22:03.491662Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"autosave|auto-save|auto save\" frontend/src","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:22:07.242992Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"auto\" specs/001-reality-tree-ui/spec.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:22:10.717403Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"autosave|auto-save|auto save|sync\" specs/001-reality-tree-ui/plan.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:22:15.240968Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,240p' frontend/src/api/client.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:22:17.993874Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,240p' frontend/src/api/hooks.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:22:21.682450Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"signed\" frontend/src -g'*.ts*'","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:22:29.973622Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '120,220p' specs/001-reality-tree-ui/spec.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:22:33.064945Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"useTreeStore\" frontend/src -g'*.tsx'","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:22:36.734221Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,240p' frontend/src/App.tsx","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:22:39.533513Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '240,480p' frontend/src/App.tsx","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:22:44.387182Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"autosave|draft|local\" specs/001-reality-tree-ui/quickstart.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:22:58.155816Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"export interface TreeUpdateRequest\" -n frontend/src/api/types.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:23:01.876344Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '90,170p' frontend/src/api/types.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:23:29.313630Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"interface NodeResponse\" -n frontend/src/api/types.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:23:32.459612Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,60p' frontend/src/api/types.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:23:34.588340Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"interface TreeMetadata\" -n frontend/src/api/types.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:23:38.588204Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '70,100p' frontend/src/api/types.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:23:55.848178Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,240p' frontend/src/stores/__tests__/treeStore.test.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:23:58.041531Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '240,520p' frontend/src/stores/__tests__/treeStore.test.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:24:08.509242Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"metadata\" frontend/src/components -g'*.tsx'","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:25:43.842769Z[0m [32m INFO[0m ToolCall: shell_command {"command":"apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: frontend/src/stores/treeStore.ts\n@@\n-import { create } from \"zustand\";\n+import { create } from \"zustand\";\n+\n+import { apiClient } from \"../api/client\";\n@@\n interface TreeStoreState {\n   activeTreeId: string | null;\n   metadata: TreeMetadata | null;\n   nodes: GraphNode[];\n   relations: GraphRelation[];\n   versions: GraphVersion[];\n   selection: SelectionState;\n   undoStack: GraphSnapshot[];\n   redoStack: GraphSnapshot[];\n   optimisticQueue: OptimisticChange[];\n   maxHistory: number;\n+  pendingSync: boolean;\n+  lastChangeAt: number | null;\n+  lastLocalSaveAt: string | null;\n+  lastCloudSyncAt: string | null;\n+  lastSyncError: string | null;\n   setTree(tree: TreeDetailResponse): void;\n   reset(): void;\n   select(selection: SelectionState): void;\n   pushSnapshot(): void;\n   undo(): void;\n   redo(): void;\n@@\n   removeNode(nodeId: string): void;\n   upsertRelation(relation: GraphRelation): void;\n   removeRelation(relationId: string): void;\n   setVersions(versions: GraphVersion[]): void;\n+  flushPendingPersistence(): Promise<void>;\n }\n@@\n export function mapRelationResponse(relation: RelationResponse): GraphRelation {\n   return {\n     id: relation.id,\n     fromId: relation.from_id,\n@@\n }\n+\n+export const TREE_DRAFT_PREFIX = \"brainbuddy:tree-draft:\";\n+\n+const AUTOSAVE_DEBOUNCE_MS = 5000;\n+\n+const isSignedIn = Boolean(import.meta.env.VITE_API_KEY);\n+\n+function toNodeResponse(node: GraphNode): NodeResponse {\n+  return {\n+    id: node.id,\n+    label: node.label,\n+    type: node.type,\n+    position: { ...node.position },\n+    highlight_state: node.highlightState,\n+    relation_counts: {\n+      up_count: node.relationCounts.up,\n+      down_count: node.relationCounts.down\n+    }\n+  };\n+}\n+\n+function toRelationResponse(relation: GraphRelation): RelationResponse {\n+  return {\n+    id: relation.id,\n+    from_id: relation.fromId,\n+    to_id: relation.toId,\n+    kind: relation.kind,\n+    created_at: relation.createdAt\n+  };\n+}\n*** End Patch\nPATCH","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:26:00.308578Z[0m [32m INFO[0m ToolCall: shell_command {"command":"apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: frontend/src/stores/treeStore.ts\n@@\n function snapshotFromState(state: TreeStoreState): GraphSnapshot {\n   return {\n     metadata: state.metadata\n@@\n }\n \n const initialSelection: SelectionState = { type: null, id: null };\n+\n+let autosaveTimer: ReturnType<typeof setTimeout> | null = null;\n+\n+function clearAutosaveTimer() {\n+  if (autosaveTimer) {\n+    clearTimeout(autosaveTimer);\n+    autosaveTimer = null;\n+  }\n+}\n+\n+function mapTreeDetail(state: TreeStoreState): TreeDetailResponse | null {\n+  if (!state.activeTreeId || !state.metadata) {\n+    return null;\n+  }\n+\n+  const updatedAt = new Date().toISOString();\n+\n+  return {\n+    id: state.activeTreeId,\n+    name: state.metadata.name,\n+    metadata: {\n+      version: state.metadata.version,\n+      created_at: state.metadata.createdAt,\n+      updated_at: updatedAt,\n+      layout: state.metadata.layout ?? null,\n+      owner_id: state.metadata.ownerId ?? null\n+    },\n+    nodes: state.nodes.map(toNodeResponse),\n+    relations: state.relations.map(toRelationResponse),\n+    owner_id: state.metadata.ownerId ?? null\n+  };\n+}\n+\n+function buildTreeUpdateRequest(detail: TreeDetailResponse) {\n+  return {\n+    name: detail.name,\n+    metadata: detail.metadata,\n+    nodes: detail.nodes,\n+    relations: detail.relations,\n+    owner_id: detail.owner_id ?? null\n+  } satisfies TreeUpdateRequest;\n+}\n+\n+function persistDraft(detail: TreeDetailResponse) {\n+  if (typeof localStorage === \"undefined\") {\n+    return;\n+  }\n+  try {\n+    localStorage.setItem(`${TREE_DRAFT_PREFIX}${detail.id}`, JSON.stringify(detail));\n+  } catch (error) {\n+    console.warn(\"Failed to persist draft\", error);\n+  }\n+}\n+\n+async function persistTree(get: () => TreeStoreState, set: (partial: Partial<TreeStoreState>) => void) {\n+  const detail = mapTreeDetail(get());\n+  if (!detail) {\n+    return;\n+  }\n+\n+  clearAutosaveTimer();\n+\n+  persistDraft(detail);\n+\n+  const timestamp = detail.metadata.updated_at;\n+  let pendingSync = false;\n+  let lastSyncError: string | null = null;\n+  let lastCloudSyncAt: string | null = null;\n+\n+  if (isSignedIn) {\n+    try {\n+      await apiClient.updateTree(detail.id, buildTreeUpdateRequest(detail));\n+      lastCloudSyncAt = timestamp;\n+    } catch (error) {\n+      pendingSync = true;\n+      lastSyncError = error instanceof Error ? error.message : \"Cloud sync failed\";\n+    }\n+  }\n+\n+  set((state) => ({\n+    pendingSync,\n+    lastLocalSaveAt: timestamp,\n+    lastCloudSyncAt,\n+    lastSyncError,\n+    metadata: state.metadata ? { ...state.metadata, updatedAt: timestamp } : state.metadata\n+  }));\n+}\n+\n+function scheduleAutosave(get: () => TreeStoreState, set: (partial: Partial<TreeStoreState>) => void) {\n+  clearAutosaveTimer();\n+  if (!get().activeTreeId) {\n+    return;\n+  }\n+  autosaveTimer = setTimeout(() => {\n+    autosaveTimer = null;\n+    void persistTree(get, set);\n+  }, AUTOSAVE_DEBOUNCE_MS);\n+}\n+\n+function withPendingSync(): Partial<TreeStoreState> {\n+  return {\n+    pendingSync: true,\n+    lastChangeAt: Date.now(),\n+    lastSyncError: null\n+  };\n+}\n*** End Patch\nPATCH","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:26:05.397842Z[0m [32m INFO[0m ToolCall: shell_command {"command":"apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: frontend/src/stores/treeStore.ts\n@@\n import type {\n   NodeResponse,\n   RelationResponse,\n   TreeDetailResponse,\n+  TreeUpdateRequest,\n   VersionListItem\n } from \"../api/types\";\n*** End Patch\nPATCH","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:26:13.619426Z[0m [32m INFO[0m ToolCall: shell_command {"command":"apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: frontend/src/stores/treeStore.ts\n@@\n   selection: initialSelection,\n   undoStack: [],\n   redoStack: [],\n   optimisticQueue: [],\n   maxHistory: 20,\n+  pendingSync: false,\n+  lastChangeAt: null,\n+  lastLocalSaveAt: null,\n+  lastCloudSyncAt: null,\n+  lastSyncError: null,\n \n   setTree(tree) {\n     const mappedRelations = tree.relations.map(mapRelationResponse);\n     const mappedNodes = applyDerivedNodeState(tree.nodes.map(mapNodeResponse), mappedRelations);\n@@\n       selection: initialSelection,\n       undoStack: [],\n       redoStack: [],\n-      optimisticQueue: []\n+      optimisticQueue: [],\n+      pendingSync: false,\n+      lastChangeAt: null,\n+      lastLocalSaveAt: tree.metadata.updated_at,\n+      lastCloudSyncAt: tree.metadata.updated_at,\n+      lastSyncError: null\n     }));\n   },\n \n   reset() {\n     set(() => ({\n@@\n       selection: initialSelection,\n       undoStack: [],\n       redoStack: [],\n-      optimisticQueue: []\n+      optimisticQueue: [],\n+      pendingSync: false,\n+      lastChangeAt: null,\n+      lastLocalSaveAt: null,\n+      lastCloudSyncAt: null,\n+      lastSyncError: null\n     }));\n+    clearAutosaveTimer();\n   },\n*** End Patch\nPATCH","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:26:27.750983Z[0m [32m INFO[0m ToolCall: shell_command {"command":"apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: frontend/src/stores/treeStore.ts\n@@\n   pushSnapshot() {\n     const snapshot = snapshotFromState(get());\n     set((state) => {\n       const nextUndo = [...state.undoStack, snapshot].slice(-state.maxHistory);\n@@\n   upsertNode(node) {\n     set((state) => {\n       const exists = state.nodes.findIndex((item) => item.id === node.id);\n       const nextNodes = exists >= 0 ? state.nodes.map((item, idx) => (idx === exists ? node : item)) : [...state.nodes, node];\n-      return { nodes: applyDerivedNodeState(nextNodes, state.relations) };\n+      return {\n+        nodes: applyDerivedNodeState(nextNodes, state.relations),\n+        ...withPendingSync()\n+      };\n     });\n+    scheduleAutosave(get, set);\n   },\n \n   removeNode(nodeId) {\n     set((state) => {\n       const remainingRelations = state.relations.filter(\n         (relation) => relation.fromId !== nodeId && relation.toId !== nodeId\n       );\n       const remainingNodes = state.nodes.filter((node) => node.id !== nodeId);\n       return {\n         nodes: applyDerivedNodeState(remainingNodes, remainingRelations),\n         relations: remainingRelations,\n         selection:\n           state.selection.type === \"node\" && state.selection.id === nodeId\n             ? initialSelection\n-            : state.selection\n+            : state.selection,\n+        ...withPendingSync()\n       };\n     });\n+    scheduleAutosave(get, set);\n   },\n@@\n       const nextRelations =\n         exists >= 0\n           ? state.relations.map((item, idx) => (idx === exists ? relation : item))\n           : [...state.relations, relation];\n       return {\n         relations: nextRelations,\n-        nodes: applyDerivedNodeState(state.nodes, nextRelations)\n+        nodes: applyDerivedNodeState(state.nodes, nextRelations),\n+        ...withPendingSync()\n       };\n     });\n+    scheduleAutosave(get, set);\n   },\n@@\n       const nextRelations = state.relations.filter((relation) => relation.id !== relationId);\n       return {\n         relations: nextRelations,\n         nodes: applyDerivedNodeState(state.nodes, nextRelations),\n         selection:\n           state.selection.type === \"relation\" && state.selection.id === relationId\n             ? initialSelection\n-            : state.selection\n+            : state.selection,\n+        ...withPendingSync()\n       };\n     });\n+    scheduleAutosave(get, set);\n   },\n@@\n   setVersions(versions) {\n     set(() => ({\n       versions\n     }));\n+  },\n+\n+  async flushPendingPersistence() {\n+    await persistTree(get, set);\n   }\n }));\n*** End Patch\nPATCH","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:26:38.515713Z[0m [32m INFO[0m ToolCall: shell_command {"command":"apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: frontend/src/stores/treeStore.ts\n@@\n-function persistDraft(detail: TreeDetailResponse) {\n-  if (typeof localStorage === \"undefined\") {\n-    return;\n-  }\n-  try {\n-    localStorage.setItem(`${TREE_DRAFT_PREFIX}${detail.id}`, JSON.stringify(detail));\n-  } catch (error) {\n-    console.warn(\"Failed to persist draft\", error);\n-  }\n+function persistDraft(detail: TreeDetailResponse) {\n+  if (typeof localStorage === \"undefined\") {\n+    return false;\n+  }\n+  try {\n+    localStorage.setItem(`${TREE_DRAFT_PREFIX}${detail.id}`, JSON.stringify(detail));\n+    return true;\n+  } catch (error) {\n+    console.warn(\"Failed to persist draft\", error);\n+    return false;\n+  }\n }\n@@\n-  persistDraft(detail);\n-\n-  const timestamp = detail.metadata.updated_at;\n-  let pendingSync = false;\n-  let lastSyncError: string | null = null;\n-  let lastCloudSyncAt: string | null = null;\n+  const savedLocally = persistDraft(detail);\n+\n+  const timestamp = detail.metadata.updated_at;\n+  let pendingSync = !savedLocally;\n+  let lastSyncError: string | null = savedLocally ? null : \"Local draft save failed\";\n+  let lastCloudSyncAt: string | null = null;\n*** End Patch\nPATCH","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:26:54.789661Z[0m [32m INFO[0m ToolCall: shell_command {"command":"apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: frontend/src/stores/treeStore.ts\n@@\n   if (isSignedIn) {\n     try {\n       await apiClient.updateTree(detail.id, buildTreeUpdateRequest(detail));\n       lastCloudSyncAt = timestamp;\n+      pendingSync = false;\n+      lastSyncError = null;\n     } catch (error) {\n       pendingSync = true;\n       lastSyncError = error instanceof Error ? error.message : \"Cloud sync failed\";\n     }\n   }\n \n   set((state) => ({\n     pendingSync,\n-    lastLocalSaveAt: timestamp,\n+    lastLocalSaveAt: savedLocally ? timestamp : null,\n     lastCloudSyncAt,\n     lastSyncError,\n*** End Patch\nPATCH","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:27:04.525484Z[0m [32m INFO[0m ToolCall: shell_command {"command":"apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: frontend/src/components/layout/Layout.tsx\n@@\n-import type { ReactNode } from \"react\";\n+import { useEffect } from \"react\";\n+import type { ReactNode } from \"react\";\n+\n+import { useTreeStore } from \"../../stores/treeStore\";\n@@\n export function Layout({ header, sidebar, children, footer }: LayoutProps): JSX.Element {\n+  const hasPendingSync = useTreeStore((state) => state.pendingSync);\n+\n+  useEffect(() => {\n+    if (!hasPendingSync) {\n+      return;\n+    }\n+\n+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {\n+      event.preventDefault();\n+      event.returnValue = \"You have unsynced changes.\";\n+      return event.returnValue;\n+    };\n+\n+    window.addEventListener(\"beforeunload\", handleBeforeUnload);\n+    return () => window.removeEventListener(\"beforeunload\", handleBeforeUnload);\n+  }, [hasPendingSync]);\n+\n   return (\n     <div className=\"flex min-h-screen bg-surface-base text-slate-100\">\n       <div className=\"flex flex-1 flex-col\">\n*** End Patch\nPATCH","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:27:24.536837Z[0m [32m INFO[0m ToolCall: shell_command {"command":"apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: frontend/src/stores/__tests__/treeStore.test.ts\n@@\n-import { describe, expect, beforeEach, it } from \"vitest\";\n+import { describe, expect, beforeEach, afterEach, it, vi } from \"vitest\";\n \n import type { TreeDetailResponse } from \"../../api/types\";\n-import { useTreeStore } from \"../treeStore\";\n+import { TREE_DRAFT_PREFIX, useTreeStore } from \"../treeStore\";\n@@\n describe(\"treeStore\", () => {\n   beforeEach(() => {\n     useTreeStore.getState().reset();\n+    if (typeof localStorage !== \"undefined\") {\n+      localStorage.clear();\n+    }\n   });\n+\n+  afterEach(() => {\n+    vi.useRealTimers();\n+  });\n@@\n   it(\"marks nodes whose paths reach all undesired effects as effect spanning\", () => {\n     useTreeStore.getState().setTree(effectSpanningTree);\n@@\n     expect(root?.highlightState).toBe(\"effect_spanning\");\n     // intermediate node also reaches both effects via its outgoing edges\n     expect(mid?.highlightState).toBe(\"effect_spanning\");\n   });\n+\n+  it(\"auto-saves drafts locally after edits with a debounce\", async () => {\n+    vi.useFakeTimers();\n+    useTreeStore.getState().setTree(sampleTree);\n+\n+    const store = useTreeStore.getState();\n+    store.upsertNode({ ...store.nodes[0], label: \"Updated label\" });\n+\n+    expect(useTreeStore.getState().pendingSync).toBe(true);\n+\n+    await vi.runOnlyPendingTimersAsync();\n+\n+    const saved = localStorage.getItem(`${TREE_DRAFT_PREFIX}${sampleTree.id}`);\n+    expect(saved).toBeTruthy();\n+    const parsed = saved ? JSON.parse(saved) : null;\n+    expect(parsed?.nodes?.[0]?.label).toBe(\"Updated label\");\n+    expect(useTreeStore.getState().pendingSync).toBe(false);\n+  });\n+\n+  it(\"flushes pending persistence immediately when requested\", async () => {\n+    vi.useFakeTimers();\n+    useTreeStore.getState().setTree(sampleTree);\n+\n+    const store = useTreeStore.getState();\n+    store.upsertNode({ ...store.nodes[0], label: \"Immediate save\" });\n+\n+    await store.flushPendingPersistence();\n+\n+    const saved = localStorage.getItem(`${TREE_DRAFT_PREFIX}${sampleTree.id}`);\n+    expect(saved).toContain(\"Immediate save\");\n+    expect(useTreeStore.getState().pendingSync).toBe(false);\n+  });\n });\n*** End Patch\nPATCH","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:27:32.981563Z[0m [32m INFO[0m ToolCall: shell_command {"command":"apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: specs/001-reality-tree-ui/tasks.md\n@@\n - [X] T015 [P] [US1] Add zoom and recenter controls keeping selection in view in `frontend/src/components/layout/CanvasShell.tsx`.\n - [X] T016 [US1] Apply cause/effect-spanning highlighting rules (>=3 upstream, all undesired effects) in `frontend/src/stores/treeStore.ts` and `frontend/src/components/BrainNode.tsx`.\n-- [ ] T017 [US1] Implement auto-save (local ~5s debounce) and exit warning + cloud sync cadence in `frontend/src/stores/treeStore.ts` and `frontend/src/components/layout/Layout.tsx`.\n+- [X] T017 [US1] Implement auto-save (local ~5s debounce) and exit warning + cloud sync cadence in `frontend/src/stores/treeStore.ts` and `frontend/src/components/layout/Layout.tsx`.\n*** End Patch\nPATCH","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:27:36.432193Z[0m [32m INFO[0m ToolCall: shell_command {"command":"cd /Users/max/Code/brain_buddy/frontend && npm test -- src/stores/__tests__/treeStore.test.ts","workdir":"/Users/max/Code/brain_buddy/frontend"}
+[2m2025-12-03T16:27:42.962802Z[0m [32m INFO[0m ToolCall: shell_command {"command":"apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: frontend/src/stores/__tests__/treeStore.test.ts\n@@\n   beforeEach(() => {\n     useTreeStore.getState().reset();\n-    if (typeof localStorage !== \"undefined\") {\n-      localStorage.clear();\n+    if (typeof localStorage !== \"undefined\" && typeof localStorage.clear === \"function\") {\n+      localStorage.clear();\n     }\n   });\n*** End Patch\nPATCH","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:27:45.625974Z[0m [32m INFO[0m ToolCall: shell_command {"command":"cd /Users/max/Code/brain_buddy/frontend && npm test -- src/stores/__tests__/treeStore.test.ts","workdir":"/Users/max/Code/brain_buddy/frontend"}
+[2m2025-12-03T16:28:03.482814Z[0m [32m INFO[0m ToolCall: shell_command {"command":"apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: frontend/src/stores/__tests__/treeStore.test.ts\n@@\n import type { TreeDetailResponse } from \"../../api/types\";\n import { TREE_DRAFT_PREFIX, useTreeStore } from \"../treeStore\";\n+\n+function ensureLocalStorage() {\n+  if (typeof localStorage === \"undefined\" || typeof localStorage.getItem !== \"function\") {\n+    const memory = new Map<string, string>();\n+    const mockStorage = {\n+      getItem: (key: string) => (memory.has(key) ? memory.get(key)! : null),\n+      setItem: (key: string, value: string) => {\n+        memory.set(key, value);\n+      },\n+      removeItem: (key: string) => {\n+        memory.delete(key);\n+      },\n+      clear: () => memory.clear()\n+    } as Storage;\n+\n+    Object.defineProperty(globalThis, \"localStorage\", {\n+      value: mockStorage,\n+      writable: true\n+    });\n+    return mockStorage;\n+  }\n+\n+  return localStorage;\n+}\n@@\n   beforeEach(() => {\n+    const storage = ensureLocalStorage();\n     useTreeStore.getState().reset();\n-    if (typeof localStorage !== \"undefined\" && typeof localStorage.clear === \"function\") {\n-      localStorage.clear();\n+    if (typeof storage.clear === \"function\") {\n+      storage.clear();\n     }\n   });\n*** End Patch\nPATCH","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T16:28:08.002555Z[0m [32m INFO[0m ToolCall: shell_command {"command":"cd /Users/max/Code/brain_buddy/frontend && npm test -- src/stores/__tests__/treeStore.test.ts","workdir":"/Users/max/Code/brain_buddy/frontend"}
