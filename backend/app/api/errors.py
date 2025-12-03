@@ -30,7 +30,8 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(ValidationFailure)
     async def handle_validation_failure(request: Request, exc: ValidationFailure) -> JSONResponse:
         payload = ErrorResponse(message=str(exc))
-        return JSONResponse(status_code=422, content=payload.model_dump())
+        # Treat validation issues as bad requests rather than unprocessable entity to align with contract.
+        return JSONResponse(status_code=400, content=payload.model_dump())
 
     @app.exception_handler(RepositoryError)
     async def handle_repository_error(request: Request, exc: RepositoryError) -> JSONResponse:  # pragma: no cover
@@ -41,4 +42,3 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def handle_generic_error(request: Request, exc: BrainBuddyError) -> JSONResponse:  # pragma: no cover
         payload = ErrorResponse(message=str(exc))
         return JSONResponse(status_code=400, content=payload.model_dump())
-
