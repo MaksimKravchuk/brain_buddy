@@ -1,0 +1,32 @@
+# VCS
+.git
+.gitignore
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+.pnpm-store/
+.npm/
+dist/
+build/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Logs and coverage
+*.log
+*.log.*
+coverage/
+
+# Editors and misc
+.idea/
+.vscode/
+.DS_Store
