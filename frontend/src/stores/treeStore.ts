@@ -201,6 +201,32 @@ function generateId(): string {
 
 const initialSelection: SelectionState = { type: null, id: null };
 
+function calculateRelationCounts(nodes: GraphNode[], relations: GraphRelation[]) {
+  const counts = new Map<string, { up: number; down: number }>();
+  nodes.forEach((node) => counts.set(node.id, { up: 0, down: 0 }));
+
+  relations.forEach((relation) => {
+    const from = counts.get(relation.fromId);
+    if (from) {
+      from.up += 1;
+    }
+    const to = counts.get(relation.toId);
+    if (to) {
+      to.down += 1;
+    }
+  });
+
+  return counts;
+}
+
+function applyRelationCounts(nodes: GraphNode[], relations: GraphRelation[]) {
+  const counts = calculateRelationCounts(nodes, relations);
+  return nodes.map((node) => ({
+    ...node,
+    relationCounts: counts.get(node.id) ?? node.relationCounts
+  }));
+}
+
 export const useTreeStore = create<TreeStoreState>((set, get) => ({
   activeTreeId: null,
   metadata: null,
@@ -214,6 +240,9 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
   maxHistory: 20,
 
   setTree(tree) {
+    const mappedRelations = tree.relations.map(mapRelationResponse);
+    const mappedNodes = applyRelationCounts(tree.nodes.map(mapNodeResponse), mappedRelations);
+
     set(() => ({
       activeTreeId: tree.id,
       metadata: {
@@ -225,8 +254,8 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
         ownerId: tree.owner_id ?? tree.metadata.owner_id ?? null,
         layout: tree.metadata.layout ?? null
       },
-      nodes: tree.nodes.map(mapNodeResponse),
-      relations: tree.relations.map(mapRelationResponse),
+      nodes: mappedNodes,
+      relations: mappedRelations,
       versions: [],
       selection: initialSelection,
       undoStack: [],
@@ -335,36 +364,48 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
   },
 
   removeNode(nodeId) {
-    set((state) => ({
-      nodes: state.nodes.filter((node) => node.id !== nodeId),
-      relations: state.relations.filter(
+    set((state) => {
+      const remainingRelations = state.relations.filter(
         (relation) => relation.fromId !== nodeId && relation.toId !== nodeId
-      ),
-      selection:
-        state.selection.type === "node" && state.selection.id === nodeId ? initialSelection : state.selection
-    }));
+      );
+      const remainingNodes = state.nodes.filter((node) => node.id !== nodeId);
+      return {
+        nodes: applyRelationCounts(remainingNodes, remainingRelations),
+        relations: remainingRelations,
+        selection:
+          state.selection.type === "node" && state.selection.id === nodeId
+            ? initialSelection
+            : state.selection
+      };
+    });
   },
 
   upsertRelation(relation) {
     set((state) => {
       const exists = state.relations.findIndex((item) => item.id === relation.id);
-      if (exists >= 0) {
-        const nextRelations = [...state.relations];
-        nextRelations[exists] = relation;
-        return { relations: nextRelations };
-      }
-      return { relations: [...state.relations, relation] };
+      const nextRelations =
+        exists >= 0
+          ? state.relations.map((item, idx) => (idx === exists ? relation : item))
+          : [...state.relations, relation];
+      return {
+        relations: nextRelations,
+        nodes: applyRelationCounts(state.nodes, nextRelations)
+      };
     });
   },
 
   removeRelation(relationId) {
-    set((state) => ({
-      relations: state.relations.filter((relation) => relation.id !== relationId),
-      selection:
-        state.selection.type === "relation" && state.selection.id === relationId
-          ? initialSelection
-          : state.selection
-    }));
+    set((state) => {
+      const nextRelations = state.relations.filter((relation) => relation.id !== relationId);
+      return {
+        relations: nextRelations,
+        nodes: applyRelationCounts(state.nodes, nextRelations),
+        selection:
+          state.selection.type === "relation" && state.selection.id === relationId
+            ? initialSelection
+            : state.selection
+      };
+    });
   },
 
   setVersions(versions) {

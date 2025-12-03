@@ -40,11 +40,11 @@ description: "Task list for Current Reality Tree UI"
 **Goal**: Create nodes, link bottom-to-top "why" relations, navigate via keyboard/zoom, highlight paths.  
 **Independent Test**: Create nodes of each type, link directional relations, zoom/center, observe highlighting rules without persistence or AI.
 
-- [ ] T011 [US1] Add Vitest coverage for node highlighting/selection and relation counts in `frontend/src/stores/__tests__/treeStore.test.ts`.
-- [ ] T012 [P] [US1] Implement keyboard shortcuts (create node, link, zoom, center) in `frontend/src/stores/uiStore.ts` and `frontend/src/components/canvas/TreeCanvas.tsx`.
-- [ ] T013 [P] [US1] Implement node create/edit UI with type-specific colors in `frontend/src/components/BrainNode.tsx` and `frontend/src/components/CreateNodeButton.tsx`.
-- [ ] T014 [US1] Render directional "why" relations with selection highlighting in `frontend/src/components/canvas/TreeCanvas.tsx`.
-- [ ] T015 [P] [US1] Add zoom and recenter controls keeping selection in view in `frontend/src/components/layout/CanvasShell.tsx`.
+- [X] T011 [US1] Add Vitest coverage for node highlighting/selection and relation counts in `frontend/src/stores/__tests__/treeStore.test.ts`.
+- [X] T012 [P] [US1] Implement keyboard shortcuts (create node, link, zoom, center) in `frontend/src/stores/uiStore.ts` and `frontend/src/components/canvas/TreeCanvas.tsx`.
+- [X] T013 [P] [US1] Implement node create/edit UI with type-specific colors in `frontend/src/components/BrainNode.tsx` and `frontend/src/components/CreateNodeButton.tsx`.
+- [X] T014 [US1] Render directional "why" relations with selection highlighting in `frontend/src/components/canvas/TreeCanvas.tsx`.
+- [X] T015 [P] [US1] Add zoom and recenter controls keeping selection in view in `frontend/src/components/layout/CanvasShell.tsx`.
 - [ ] T016 [US1] Apply cause/effect-spanning highlighting rules (>=3 upstream, all undesired effects) in `frontend/src/stores/treeStore.ts` and `frontend/src/components/BrainNode.tsx`.
 - [ ] T017 [US1] Implement auto-save (local ~5s debounce) and exit warning + cloud sync cadence in `frontend/src/stores/treeStore.ts` and `frontend/src/components/layout/Layout.tsx`.
 

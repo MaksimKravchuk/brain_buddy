@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
 import type {
   Connection,
   Edge,
@@ -11,7 +11,7 @@ import type {
   OnSelectionChangeFunc,
   ReactFlowInstance
 } from "reactflow";
-import ReactFlow, { Background, Controls, MiniMap, Panel } from "reactflow";
+import ReactFlow, { Background, Controls, MarkerType, MiniMap, Panel } from "reactflow";
 import { twMerge } from "tailwind-merge";
 
 import {
@@ -33,6 +33,7 @@ import type { RelationResponse } from "../../api/types";
 import { getErrorMessage } from "../../utils/error";
 import { useGraphProfiler } from "../../hooks/useGraphProfiler";
 import { BrainNode } from "./BrainNode";
+import { CreateNodeButton } from "../CreateNodeButton";
 
 type NodeType = Node<{ node: GraphNode }>;
 type EdgeType = Edge<{ relation: GraphRelation }>;
@@ -55,12 +56,18 @@ interface TreeCanvasProps {
   isLoading: boolean;
 }
 
-function createPlaceholderNode(): GraphNode {
+export interface TreeCanvasHandle {
+  zoomIn(): void;
+  zoomOut(): void;
+  centerOnSelection(): void;
+}
+
+function createPlaceholderNode(type: GraphNode["type"], label: string): GraphNode {
   return {
     id: `tmp-${Math.random().toString(36).slice(2, 9)}`,
-    label: "New node",
+    label,
     position: { x: 0, y: 0 },
-    type: "regular",
+    type,
     highlightState: "none",
     relationCounts: { up: 0, down: 0 }
   };
@@ -70,7 +77,10 @@ function relationFromResponse(response: RelationResponse): GraphRelation {
   return mapRelationResponse(response);
 }
 
-export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element {
+export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function TreeCanvas(
+  { treeId, isLoading }: TreeCanvasProps,
+  ref
+): JSX.Element {
   const nodes = useTreeStore((state) => state.nodes);
   const relations = useTreeStore((state) => state.relations);
   const selection = useTreeStore((state) => state.selection);
@@ -86,6 +96,9 @@ export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element 
   const undo = useTreeStore((state) => state.undo);
   const redo = useTreeStore((state) => state.redo);
   const pushToast = useUiStore((state) => state.pushToast);
+  const registerHotkey = useUiStore((state) => state.registerHotkey);
+  const unregisterHotkey = useUiStore((state) => state.unregisterHotkey);
+  const triggerHotkey = useUiStore((state) => state.triggerHotkey);
 
   const createNodeMutation = useCreateNode(treeId);
   const updateNodeMutation = useUpdateNode(treeId);
@@ -99,24 +112,48 @@ export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element 
     nodeCount: nodes.length,
     edgeCount: relations.length
   });
+  const [linkSourceId, setLinkSourceId] = useState<string | null>(null);
 
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() === "z" && (event.metaKey || event.ctrlKey)) {
-        event.preventDefault();
-        if (event.shiftKey) {
-          redo();
-        } else {
-          undo();
-        }
+  const handleUndo = useCallback(() => {
+    undo();
+  }, [undo]);
+
+  const handleRedo = useCallback(() => {
+    redo();
+  }, [redo]);
+
+  const handleZoomIn = useCallback(() => {
+    if (!reactFlowInstance) return;
+    reactFlowInstance.zoomIn({ duration: 150 });
+  }, [reactFlowInstance]);
+
+  const handleZoomOut = useCallback(() => {
+    if (!reactFlowInstance) return;
+    reactFlowInstance.zoomOut({ duration: 150 });
+  }, [reactFlowInstance]);
+
+  const handleCenterOnSelection = useCallback(() => {
+    if (!reactFlowInstance) return;
+    if (selection.type === "node") {
+      const node = nodes.find((item) => item.id === selection.id);
+      if (!node) {
+        return;
       }
-    };
+      reactFlowInstance.setCenter(node.position.x, node.position.y, { zoom: 1.1, duration: 250 });
+    } else {
+      reactFlowInstance.fitView({ padding: 0.2, duration: 250 });
+    }
+  }, [nodes, reactFlowInstance, selection]);
 
-    window.addEventListener("keydown", handler);
-    return () => {
-      window.removeEventListener("keydown", handler);
-    };
-  }, [undo, redo]);
+  useImperativeHandle(
+    ref,
+    () => ({
+      zoomIn: handleZoomIn,
+      zoomOut: handleZoomOut,
+      centerOnSelection: handleCenterOnSelection
+    }),
+    [handleCenterOnSelection, handleZoomIn, handleZoomOut]
+  );
 
   const flowNodes = useMemo<NodeType[]>(() => {
     return nodes.map((node) => ({
@@ -139,8 +176,14 @@ export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element 
       type: "smoothstep",
       animated: false,
       style: {
-        stroke: selection.type === "relation" && selection.id === relation.id ? "rgba(129,140,248,0.9)" : "rgba(56,189,248,0.35)",
+        stroke: selection.type === "relation" && selection.id === relation.id ? "rgba(129,140,248,0.95)" : "rgba(56,189,248,0.55)",
         strokeWidth: selection.type === "relation" && selection.id === relation.id ? 3 : 2
+      },
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: selection.type === "relation" && selection.id === relation.id ? "#a5b4fc" : "rgba(56,189,248,0.75)",
+        width: 18,
+        height: 18
       },
       labelStyle: {
         fill: "#cbd5f5",
@@ -424,6 +467,46 @@ export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element 
     ]
   );
 
+  const handleLinkNodes = useCallback(() => {
+    const selectedNodeId = selection.type === "node" ? selection.id : null;
+    if (!selectedNodeId) {
+      pushToast({
+        title: "Select a node first",
+        description: "Choose a node to start linking.",
+        variant: "warning",
+        duration: 3500
+      });
+      return;
+    }
+
+    if (!linkSourceId) {
+      setLinkSourceId(selectedNodeId);
+      pushToast({
+        title: "Link mode",
+        description: "Select a target node to finish the link.",
+        variant: "info",
+        duration: 3000
+      });
+      return;
+    }
+
+    if (linkSourceId === selectedNodeId) {
+      pushToast({
+        title: "Pick a different node",
+        description: "Choose another node to create a relation.",
+        variant: "warning",
+        duration: 3000
+      });
+      return;
+    }
+
+    handleConnect({
+      source: linkSourceId,
+      target: selectedNodeId
+    } as Connection);
+    setLinkSourceId(null);
+  }, [handleConnect, linkSourceId, pushToast, selection]);
+
   const handleEdgesDelete = useCallback<OnEdgesDelete>(
     (edgesToDelete) => {
       if (!edgesToDelete.length) {
@@ -468,8 +551,11 @@ export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element 
 
   const [creatingNode, setCreatingNode] = useState(false);
 
-  const handleCreateNode = useCallback(() => {
-    const placeholder = createPlaceholderNode();
+  const handleCreateNode = useCallback(
+    (input?: { label?: string; type?: GraphNode["type"] }) => {
+      const type = input?.type ?? "regular";
+      const label = input?.label?.trim() || (type === "undesired_effect" ? "Undesired effect" : type === "cause" ? "Cause" : "New idea");
+      const placeholder = createPlaceholderNode(type, label);
     const viewportCenter = reactFlowInstance
       ? reactFlowInstance.screenToFlowPosition({
           x: window.innerWidth / 2,
@@ -482,13 +568,13 @@ export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element 
     pushSnapshot();
     const token = beginOptimisticChange("create-node");
     setCreatingNode(true);
-    upsertNode(placeholder);
+      upsertNode(placeholder);
 
     createNodeMutation.mutate(
       {
         label: placeholder.label,
         position: viewportCenter,
-        type: "regular",
+        type,
         highlight_state: "none"
       },
       {
@@ -522,19 +608,100 @@ export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element 
         }
       }
     );
+    },
+    [
+      beginOptimisticChange,
+      createNodeMutation,
+      pushSnapshot,
+      pushToast,
+      reactFlowInstance,
+      removeNode,
+      setCreatingNode,
+      resolveOptimisticChange,
+      rollbackOptimisticChange,
+      select,
+      upsertNode
+    ]
+  );
+
+  const buildCombo = useCallback((event: KeyboardEvent) => {
+    const target = event.target as HTMLElement | null;
+    if (target) {
+      const tag = target.tagName?.toLowerCase();
+      if (
+        tag === "input" ||
+        tag === "textarea" ||
+        target.isContentEditable ||
+        tag === "select" ||
+        target.getAttribute("role") === "textbox"
+      ) {
+        return null;
+      }
+    }
+
+    const parts: string[] = [];
+    if (event.metaKey) parts.push("meta");
+    if (event.ctrlKey) parts.push("ctrl");
+    if (event.altKey) parts.push("alt");
+    if (event.shiftKey) parts.push("shift");
+
+    const key = event.key.toLowerCase();
+    parts.push(key);
+
+    return parts.join("+");
+  }, []);
+
+  useEffect(() => {
+    const bindings = [
+      { id: "create-node-meta", combo: "meta+shift+n", description: "Create node", handler: handleCreateNode },
+      { id: "create-node-ctrl", combo: "ctrl+shift+n", description: "Create node", handler: handleCreateNode },
+      { id: "link-nodes-meta", combo: "meta+shift+l", description: "Link nodes", handler: handleLinkNodes },
+      { id: "link-nodes-ctrl", combo: "ctrl+shift+l", description: "Link nodes", handler: handleLinkNodes },
+      { id: "zoom-in-meta", combo: "meta+=", description: "Zoom in", handler: handleZoomIn },
+      { id: "zoom-in-ctrl", combo: "ctrl+=", description: "Zoom in", handler: handleZoomIn },
+      { id: "zoom-in-meta-shift", combo: "meta+shift+=", description: "Zoom in", handler: handleZoomIn },
+      { id: "zoom-in-ctrl-shift", combo: "ctrl+shift+=", description: "Zoom in", handler: handleZoomIn },
+      { id: "zoom-out-meta", combo: "meta+-", description: "Zoom out", handler: handleZoomOut },
+      { id: "zoom-out-ctrl", combo: "ctrl+-", description: "Zoom out", handler: handleZoomOut },
+      { id: "center-meta", combo: "meta+shift+c", description: "Center on selection", handler: handleCenterOnSelection },
+      { id: "center-ctrl", combo: "ctrl+shift+c", description: "Center on selection", handler: handleCenterOnSelection },
+      { id: "undo-meta", combo: "meta+z", description: "Undo", handler: handleUndo },
+      { id: "undo-ctrl", combo: "ctrl+z", description: "Undo", handler: handleUndo },
+      { id: "redo-meta", combo: "meta+shift+z", description: "Redo", handler: handleRedo },
+      { id: "redo-ctrl", combo: "ctrl+shift+z", description: "Redo", handler: handleRedo }
+    ];
+
+    bindings.forEach((binding) => registerHotkey(binding));
+    return () => {
+      bindings.forEach((binding) => unregisterHotkey(binding.id));
+    };
   }, [
-    beginOptimisticChange,
-    createNodeMutation,
-    pushSnapshot,
-    pushToast,
-    reactFlowInstance,
-    removeNode,
-    setCreatingNode,
-    resolveOptimisticChange,
-    rollbackOptimisticChange,
-    select,
-    upsertNode
+    handleCenterOnSelection,
+    handleCreateNode,
+    handleLinkNodes,
+    handleRedo,
+    handleUndo,
+    handleZoomIn,
+    handleZoomOut,
+    registerHotkey,
+    unregisterHotkey
   ]);
+
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => {
+      const combo = buildCombo(event);
+      if (!combo) return;
+      const triggered = triggerHotkey(combo);
+      if (triggered) {
+        event.preventDefault();
+      }
+    };
+
+    window.addEventListener("keydown", listener);
+    return () => {
+      window.removeEventListener("keydown", listener);
+    };
+  }, [buildCombo, triggerHotkey]);
 
   const hasContent = nodes.length > 0 || relations.length > 0;
 
@@ -582,16 +749,9 @@ export function TreeCanvas({ treeId, isLoading }: TreeCanvasProps): JSX.Element 
         <Controls className="rounded-lg border border-slate-700 bg-surface-sunken/90 text-slate-200" />
         <Panel position="top-left" className="rounded-lg border border-slate-800 bg-surface-sunken/80 px-3 py-2 text-xs shadow-lg">
           <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={handleCreateNode}
-              className={twMerge(
-                "rounded-md bg-brand-primary/90 px-3 py-1 text-xs font-semibold text-slate-950 transition hover:bg-brand-primary",
-                creatingNode ? "pointer-events-none opacity-75" : ""
-              )}
-            >
-              {creatingNode ? "Creating..." : "Add Node"}
-            </button>
+            <div className="min-w-[320px]">
+              <CreateNodeButton onCreate={handleCreateNode} disabled={creatingNode} />
+            </div>
             <button
               type="button"
               onClick={() => select({ type: null, id: null })}
