@@ -68,10 +68,6 @@ description: "Task list for Current Reality Tree UI"
 **Goal**: Provide AI summaries/recommendations with consent prompts and reliable error handling.  
 **Independent Test**: Request AI analysis on a populated tree while signed in; receive summary/recommendations within budget; failures show retry path without data loss.
 
-- [ ] T023 [US3] Implement AI feedback endpoint `/api/trees/{id}/ai-feedback` with provider stub in `backend/app/api/routes.py` and `backend/app/services/tree_service.py`.
-- [ ] T024 [P] [US3] Add backend AI feedback contract tests (success/failure/consent) in `backend/tests/api/test_tree_ai_feedback.py`.
-- [ ] T025 [US3] Add AI feedback UI with confirmation, progress, retry handling in `frontend/src/components/panels/NodeInspector.tsx` and `frontend/src/stores/uiStore.ts`.
-- [ ] T026 [P] [US3] Add frontend AI feedback hook/error tests in `frontend/src/api/__tests__/aiHooks.test.ts`.
  - [X] T023 [US3] Implement AI feedback endpoint `/api/trees/{id}/ai-feedback` with provider stub in `backend/app/api/routes.py` and `backend/app/services/tree_service.py`.
  - [X] T024 [P] [US3] Add backend AI feedback contract tests (success/failure/consent) in `backend/tests/api/test_tree_ai_feedback.py`.
  - [X] T025 [US3] Add AI feedback UI with confirmation, progress, retry handling in `frontend/src/components/panels/NodeInspector.tsx` and `frontend/src/stores/uiStore.ts`.
@@ -83,11 +79,11 @@ description: "Task list for Current Reality Tree UI"
 
 **Purpose**: Docs, performance/accessibility, and smoke validation across surfaces.
 
-- [ ] T027 Update docs (README.md, `specs/001-reality-tree-ui/quickstart.md`) with autosave cadence, AI consent flow, compose usage.
-- [ ] T028 Review accessibility and performance (200-node canvas, `useGraphProfiler`) and tune `frontend/src/components/canvas/TreeCanvas.tsx` and `frontend/src/hooks/useGraphProfiler.ts`.
-- [ ] T029 Validate compose stack via `make compose-smoke-up` and `./scripts/smoke_test.sh`; apply fixes in `docker-compose.local.yml` or `scripts/smoke_test.sh`.
-- [ ] T030 Run backend quality gates (Black/Ruff/mypy) per `backend/pyproject.toml` and fix findings in `backend/app/**`.
-- [ ] T031 Run frontend quality gates (ESLint/Prettier/tsc/Vitest) per `frontend/package.json` scripts and fix findings in `frontend/src/**`.
+- [X] T027 Update docs (README.md, `specs/001-reality-tree-ui/quickstart.md`) with autosave cadence, AI consent flow, compose usage.
+- [X] T028 Review accessibility and performance (200-node canvas, `useGraphProfiler`) and tune `frontend/src/components/canvas/TreeCanvas.tsx` and `frontend/src/hooks/useGraphProfiler.ts`.
+- [X] T029 Validate compose stack via `make compose-smoke-up` and `./scripts/smoke_test.sh`; apply fixes in `docker-compose.local.yml` or `scripts/smoke_test.sh`.
+- [X] T030 Run backend quality gates (Black/Ruff/mypy) per `backend/pyproject.toml` and fix findings in `backend/app/**`.
+- [X] T031 Run frontend quality gates (ESLint/Prettier/tsc/Vitest) per `frontend/package.json` scripts and fix findings in `frontend/src/**`.
 
 ---
 

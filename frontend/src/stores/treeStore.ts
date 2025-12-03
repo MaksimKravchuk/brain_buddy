@@ -107,6 +107,8 @@ interface TreeStoreState {
   flushPendingPersistence(): Promise<void>;
 }
 
+type TreeStoreSet = (partial: Partial<TreeStoreState> | ((state: TreeStoreState) => Partial<TreeStoreState>)) => void;
+
 export function mapNodeResponse(node: NodeResponse): GraphNode {
   return {
     id: node.id,
@@ -296,7 +298,7 @@ function persistDraft(detail: TreeDetailResponse) {
   }
 }
 
-async function persistTree(get: () => TreeStoreState, set: (partial: Partial<TreeStoreState>) => void) {
+async function persistTree(get: () => TreeStoreState, set: TreeStoreSet) {
   const detail = mapTreeDetail(get());
   if (!detail) {
     return;
@@ -338,7 +340,7 @@ async function persistTree(get: () => TreeStoreState, set: (partial: Partial<Tre
   }));
 }
 
-function scheduleAutosave(get: () => TreeStoreState, set: (partial: Partial<TreeStoreState>) => void) {
+function scheduleAutosave(get: () => TreeStoreState, set: TreeStoreSet) {
   clearAutosaveTimer();
   if (!get().activeTreeId) {
     return;
