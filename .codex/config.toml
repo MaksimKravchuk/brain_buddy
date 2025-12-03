@@ -1,0 +1,18 @@
+model = "gpt-5.1-codex-max"
+[projects."/Users/max/Code/brain_buddy"]
+trust_level = "trusted"
+
+[features]
+rmcp_client = true
+
+[notice]
+"hide_gpt-5.1-codex-max_migration_prompt" = true
+
+[mcp_servers.context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp"]
+
+[mcp_servers.github]
+type = "http"
+url = "https://api.githubcopilot.com/mcp/"
+bearer_token_env_var = "CODEX_GITHUB_PERSONAL_ACCESS_TOKEN"

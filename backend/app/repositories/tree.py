@@ -1,4 +1,5 @@
 """Repository for tree documents."""
+
 from __future__ import annotations
 
 import shutil
@@ -45,4 +46,3 @@ class TreeRepository(BaseRepository):
         if not directory.exists():
             raise NotFoundError("Tree", tree_id)
         shutil.rmtree(directory)
-

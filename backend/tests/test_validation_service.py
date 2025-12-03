@@ -1,27 +1,36 @@
 from __future__ import annotations
 
-from app.schemas import NodeCreateRequest, Position, RelationCreateRequest, TreeCreateRequest, ValidationRequest
+from app.schemas import (
+    NodeCreateRequest,
+    Position,
+    RelationCreateRequest,
+    TreeCreateRequest,
+    ValidationRequest,
+)
 
 
-def test_validation_flow(container, tree_service, node_service, relation_service, validation_service) -> None:
-    tree = tree_service.create_tree(TreeCreateRequest(title="Validation", description=None))
+def test_validation_flow(
+    container, tree_service, node_service, relation_service, validation_service
+) -> None:
+    tree = tree_service.create_tree(TreeCreateRequest(name="Validation"))
 
     effect_node, tree = node_service.create_node(
         tree.id,
-        NodeCreateRequest(label="Effect", position=Position(x=0, y=0)),
+        NodeCreateRequest(
+            label="Effect", type="undesired_effect", position=Position(x=0, y=0)
+        ),
     )
     cause_node, tree = node_service.create_node(
         tree.id,
-        NodeCreateRequest(label="Cause", position=Position(x=100, y=100)),
+        NodeCreateRequest(label="Cause", type="cause", position=Position(x=100, y=100)),
     )
 
     relation_service.create_relation(
         tree.id,
         RelationCreateRequest(
-            source_id=effect_node.id,
-            target_id=cause_node.id,
-            question_label="WHY is this happening?",
-            notes="Mock relation",
+            from_id=cause_node.id,
+            to_id=effect_node.id,
+            kind="why",
         ),
     )
 

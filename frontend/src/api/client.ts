@@ -1,4 +1,6 @@
 import {
+  AiFeedbackRequest,
+  AiFeedbackResponse,
   NodeCreateRequest,
   NodeResponse,
   NodeUpdateRequest,
@@ -7,6 +9,8 @@ import {
   RelationUpdateRequest,
   TreeCreateRequest,
   TreeDetailResponse,
+  TreeExportResponse,
+  TreeImportPayload,
   TreeListItem,
   TreeUpdateRequest,
   ValidationHistoryResponse,
@@ -17,37 +21,53 @@ import {
 } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
-const API_KEY = import.meta.env.VITE_API_KEY ?? null;
 const API_KEY_HEADER = import.meta.env.VITE_API_KEY_HEADER ?? "X-API-Key";
+const API_KEY_STORAGE_KEY = "brainbuddy:api-key";
+const SESSION_OWNER_ID = import.meta.env.VITE_OWNER_ID ?? import.meta.env.VITE_API_OWNER_ID ?? null;
+const hasStorage =
+  typeof window !== "undefined" &&
+  typeof window.localStorage !== "undefined" &&
+  typeof window.localStorage.getItem === "function" &&
+  typeof window.localStorage.setItem === "function";
+
+let cachedApiKey: string | null = import.meta.env.VITE_API_KEY ?? null;
+if (hasStorage) {
+  const stored = window.localStorage.getItem(API_KEY_STORAGE_KEY);
+  if (stored) {
+    cachedApiKey = stored;
+  }
+}
 
 type JsonRequestOptions = Omit<RequestInit, "body"> & {
   body?: unknown;
   signal?: AbortSignal;
 };
 
-function buildUrl(path: string): string {
-  return `${API_BASE_URL.replace(/\/$/, "")}${path}`;
-}
-
-function parseFilename(contentDisposition: string | null): string | null {
-  if (!contentDisposition) {
-    return null;
-  }
-
-  const match = /filename\*=UTF-8''(?<encoded>[^;]+)|filename="?([^"]+)"?/i.exec(contentDisposition);
-  if (!match) {
-    return null;
-  }
-
-  if (match.groups?.encoded) {
-    try {
-      return decodeURIComponent(match.groups.encoded);
-    } catch {
-      return match.groups.encoded;
+export function setApiKey(apiKey: string | null) {
+  cachedApiKey = apiKey;
+  if (hasStorage) {
+    if (apiKey) {
+      window.localStorage.setItem(API_KEY_STORAGE_KEY, apiKey);
+    } else {
+      window.localStorage.removeItem(API_KEY_STORAGE_KEY);
     }
   }
+}
 
-  return match[2] ?? null;
+export function getApiKey(): string | null {
+  return cachedApiKey;
+}
+
+export function getOwnerId(): string | null {
+  return SESSION_OWNER_ID ?? null;
+}
+
+export function hasApiKey(): boolean {
+  return Boolean(cachedApiKey);
+}
+
+function buildUrl(path: string): string {
+  return `${API_BASE_URL.replace(/\/$/, "")}${path}`;
 }
 
 export class ApiError extends Error {
@@ -67,8 +87,9 @@ export class ApiError extends Error {
 async function request<T>(path: string, options: JsonRequestOptions = {}): Promise<T> {
   const { body, ...rest } = options;
   const headers = new Headers(rest.headers);
-  if (API_KEY && !headers.has(API_KEY_HEADER)) {
-    headers.set(API_KEY_HEADER, API_KEY);
+  const apiKey = getApiKey();
+  if (apiKey && !headers.has(API_KEY_HEADER)) {
+    headers.set(API_KEY_HEADER, apiKey);
   }
   const method = options.method ?? "GET";
   const hasBody = body !== undefined && body !== null;
@@ -117,11 +138,21 @@ export const apiClient = {
   },
 
   createTree(payload: TreeCreateRequest) {
-    return request<TreeDetailResponse>("/trees", { method: "POST", body: payload });
+    const ownerId = getOwnerId();
+    const body = ownerId
+      ? {
+          ...payload,
+          owner_id: payload.owner_id ?? ownerId,
+          metadata: payload.metadata
+            ? { ...payload.metadata, owner_id: payload.metadata.owner_id ?? ownerId }
+            : undefined
+        }
+      : payload;
+    return request<TreeDetailResponse>("/trees", { method: "POST", body });
   },
 
   updateTree(treeId: string, payload: TreeUpdateRequest) {
-    return request<TreeDetailResponse>(`/trees/${treeId}`, { method: "PATCH", body: payload });
+    return request<TreeDetailResponse>(`/trees/${treeId}`, { method: "PUT", body: payload });
   },
 
   deleteTree(treeId: string) {
@@ -129,7 +160,11 @@ export const apiClient = {
   },
 
   createNode(treeId: string, payload: NodeCreateRequest) {
-    return request<NodeResponse>(`/trees/${treeId}/nodes`, { method: "POST", body: payload });
+    const body: NodeCreateRequest = {
+      highlight_state: "none",
+      ...payload
+    };
+    return request<NodeResponse>(`/trees/${treeId}/nodes`, { method: "POST", body });
   },
 
   updateNode(treeId: string, nodeId: string, payload: NodeUpdateRequest) {
@@ -142,7 +177,11 @@ export const apiClient = {
   },
 
   createRelation(treeId: string, payload: RelationCreateRequest) {
-    return request<RelationResponse>(`/trees/${treeId}/relations`, { method: "POST", body: payload });
+    const body: RelationCreateRequest = {
+      kind: "why",
+      ...payload
+    };
+    return request<RelationResponse>(`/trees/${treeId}/relations`, { method: "POST", body });
   },
 
   updateRelation(treeId: string, relationId: string, payload: RelationUpdateRequest) {
@@ -172,31 +211,16 @@ export const apiClient = {
     return request<void>(`/trees/${treeId}/versions/${versionId}`, { method: "DELETE" });
   },
 
-  async exportTree(treeId: string, versionId?: string) {
-    const query = versionId ? `?version_id=${encodeURIComponent(versionId)}` : "";
-    const response = await fetch(buildUrl(`/trees/${treeId}/export${query}`), {
-      method: "GET"
-    });
-    const rawBody = await response.text();
-    if (!response.ok) {
-      const contentType = response.headers.get("Content-Type");
-      let payload: unknown = rawBody;
-      if (contentType && contentType.includes("application/json")) {
-        try {
-          payload = JSON.parse(rawBody);
-        } catch {
-          payload = rawBody;
-        }
-      }
-      const correlationId = response.headers.get("X-Correlation-ID") ?? undefined;
-      throw new ApiError(response.statusText || "Request failed", response.status, payload, correlationId);
-    }
+  exportTree(treeId: string) {
+    return request<TreeExportResponse>(`/trees/${treeId}/export`, { method: "POST" });
+  },
 
-    const filename =
-      parseFilename(response.headers.get("Content-Disposition")) ??
-      `${treeId}-${versionId ? versionId.split("::").pop() : "latest"}.json`;
-    const blob = new Blob([rawBody], { type: "application/json" });
-    return { filename, blob };
+  aiFeedback(treeId: string, payload: AiFeedbackRequest) {
+    return request<AiFeedbackResponse>(`/trees/${treeId}/ai-feedback`, { method: "POST", body: payload });
+  },
+
+  importTree(tree: TreeImportPayload) {
+    return request<TreeDetailResponse>("/trees/import", { method: "POST", body: { tree } });
   },
 
   triggerValidation(treeId: string, nodeId: string, payload: ValidationRequest) {

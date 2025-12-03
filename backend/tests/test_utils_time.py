@@ -1,4 +1,5 @@
 """Tests for time helper utilities."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

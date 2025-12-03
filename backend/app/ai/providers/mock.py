@@ -1,4 +1,5 @@
 """Mock validation provider used for tests and offline workflows."""
+
 from __future__ import annotations
 
 import hashlib
@@ -48,9 +49,13 @@ class MockValidationProvider(ValidationProvider):
 
         suggestions: list[str] = []
         if severity != "info":
-            suggestions.append("What evidence confirms the stated cause directly affects the effect?")
+            suggestions.append(
+                "What evidence confirms the stated cause directly affects the effect?"
+            )
         if confidence < 80 and context.chain_length > 1:
-            suggestions.append("Can intermediate factors be documented to solidify this chain?")
+            suggestions.append(
+                "Can intermediate factors be documented to solidify this chain?"
+            )
 
         raw = {
             "confidence": confidence,

@@ -1,4 +1,5 @@
 """Common schema primitives used across Brain Buddy models."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -22,9 +23,15 @@ class StorageBaseModel(BaseModel):
 class TimestampMetadata(StrictBaseModel):
     """Common metadata block used for created/updated timestamps."""
 
-    created_at: datetime = Field(description="UTC timestamp when the entity was created.")
-    updated_at: datetime = Field(description="UTC timestamp for the most recent update.")
-    author: str | None = Field(default=None, description="Optional user identifier responsible for change.")
+    created_at: datetime = Field(
+        description="UTC timestamp when the entity was created."
+    )
+    updated_at: datetime = Field(
+        description="UTC timestamp for the most recent update."
+    )
+    author: str | None = Field(
+        default=None, description="Optional user identifier responsible for change."
+    )
 
 
 class Position(StrictBaseModel):
@@ -37,16 +44,26 @@ class Position(StrictBaseModel):
 class VisualState(StrictBaseModel):
     """Visual hints used by the frontend when rendering a node."""
 
-    color: str | None = Field(default=None, description="Hex color assigned to the node background.")
-    highlight: bool = Field(default=False, description="Whether the node should be visually highlighted.")
+    color: str | None = Field(
+        default=None, description="Hex color assigned to the node background."
+    )
+    highlight: bool = Field(
+        default=False, description="Whether the node should be visually highlighted."
+    )
 
 
 class ValidationState(StrictBaseModel):
     """Latest validation snapshot stored inline on a node."""
 
-    confidence: PositiveInt = Field(le=100, description="Validation confidence percentage (0-100).")
-    provider: str = Field(description="Identifier of the provider that produced the validation result.")
-    last_checked: datetime = Field(description="UTC timestamp when validation occurred.")
+    confidence: PositiveInt = Field(
+        le=100, description="Validation confidence percentage (0-100)."
+    )
+    provider: str = Field(
+        description="Identifier of the provider that produced the validation result."
+    )
+    last_checked: datetime = Field(
+        description="UTC timestamp when validation occurred."
+    )
 
 
 class SortDirection(StrictBaseModel):

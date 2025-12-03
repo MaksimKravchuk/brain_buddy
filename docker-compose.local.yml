@@ -1,0 +1,43 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - .env
+    environment:
+      BRAIN_BUDDY_ENV: ${BRAIN_BUDDY_ENV:-production}
+      BRAIN_BUDDY_DATA_DIR: ${BRAIN_BUDDY_DATA_DIR:-/app/data}
+      BRAIN_BUDDY_API_PREFIX: ${BRAIN_BUDDY_API_PREFIX:-/api}
+      BRAIN_BUDDY_API_KEY: ${BRAIN_BUDDY_API_KEY:-}
+      BRAIN_BUDDY_API_KEY_HEADER: ${BRAIN_BUDDY_API_KEY_HEADER:-X-API-Key}
+    volumes:
+      - backend-data:/app/data
+    ports:
+      - "${BRAIN_BUDDY_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
+        VITE_API_KEY: ${VITE_API_KEY:-}
+        VITE_API_KEY_HEADER: ${VITE_API_KEY_HEADER:-X-API-Key}
+    env_file:
+      - .env
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+
+volumes:
+  backend-data:
+    driver: local

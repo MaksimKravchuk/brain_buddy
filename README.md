@@ -10,6 +10,7 @@ Brain Buddy is a collaborative knowledge-graph workspace that helps product team
 - **FastAPI backend** persisting trees on the filesystem with LRU caching and version history snapshots.
 - **AI validation pipeline** with provider abstraction and mock provider for offline workflows.
 - **Operational polish** including correlation-ID tracing, optional API key guardrails, and expanded troubleshooting guides.
+- **Data safety by default** with 5s local autosave, exit warnings, and explicit consent gating before any AI request.
 
 ## Architecture Snapshot
 - **Backend**: FastAPI, Pydantic, pytest. Data persisted under `backend/data/` with schema versioning. See `docs/architecture_overview.md`.
@@ -46,6 +47,11 @@ npm run dev
 
 By default the frontend expects the backend at `http://localhost:8000/api`. Configure `VITE_API_BASE_URL` to point elsewhere.
 
+### Autosave & AI Consent
+- The canvas autosaves locally every ~5s (debounced) and warns on exit if unsaved changes exist; signed-in saves still run on-demand.
+- AI feedback requires an API key and explicit consent toggle in the inspector; decline consent to keep data local and receive a validation error instead of sending content.
+- Failures return correlation IDs in error toasts so you can retry or report with context.
+
 ### Smoke Test via Docker Compose
 
 Prefer containers for manual verification or stakeholder demos? Copy `.env.example` to `.env`, then run:
@@ -55,6 +61,8 @@ make compose-smoke-up
 ```
 
 The backend will listen on `http://localhost:8000`, and the frontend will be available at `http://localhost:8080`. When finished, tear everything down with `make compose-smoke-down`. See `docs/deployment_smoke.md` for the full runbook, including optional API key wiring and automated smoke checks.
+
+**API keys in compose**: set `BRAIN_BUDDY_API_KEY` and `VITE_API_KEY` together in `.env` to require a key end-to-end. The compose stack forwards these into backend/frontend containers and the smoke test will include them automatically.
 
 ## Environment & Configuration
 

@@ -1,8 +1,9 @@
 """Base interfaces for validation providers."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from app.schemas.domain import ProviderConfig
@@ -39,7 +40,7 @@ class ValidationProvider(Protocol):
         prompt: str,
         context: ProviderContext,
         *,
-        config: "ProviderConfig | None" = None,
+        config: ProviderConfig | None = None,
     ) -> ProviderResult:
         """Execute the validation request and return structured result."""
         ...

@@ -1,4 +1,5 @@
 """Repository responsible for validation history storage."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -25,10 +26,12 @@ class ValidationRepository(BaseRepository):
         path = self.history_path(tree_id, node_id)
         if not path.exists():
             return []
-        payload = read_json(path)
+        payload: list[dict[str, object]] = read_json(path)
         return [ValidationEntry.model_validate(entry) for entry in payload]
 
-    def save_history(self, tree_id: str, node_id: str, entries: list[ValidationEntry]) -> None:
+    def save_history(
+        self, tree_id: str, node_id: str, entries: list[ValidationEntry]
+    ) -> None:
         path = self.history_path(tree_id, node_id)
         data = [entry.model_dump(mode="json") for entry in entries]
         self.dump_payload(path, data)
@@ -37,4 +40,3 @@ class ValidationRepository(BaseRepository):
         history = self.load_history(tree_id, node_id)
         history.append(entry)
         self.save_history(tree_id, node_id, history)
-

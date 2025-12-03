@@ -1,10 +1,13 @@
 """Application configuration helpers."""
+
 from __future__ import annotations
 
+import logging
 import os
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
+
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -41,8 +44,12 @@ class LoggingSettings(BaseModel):
 class SecuritySettings(BaseModel):
     """Security-related toggles for API hardening."""
 
-    api_key: str | None = Field(default=None, description="Static API key required for requests.")
-    api_key_header: str = Field(default="X-API-Key", description="Header used for the static API key.")
+    api_key: str | None = Field(
+        default=None, description="Static API key required for requests."
+    )
+    api_key_header: str = Field(
+        default="X-API-Key", description="Header used for the static API key."
+    )
 
     model_config = ConfigDict(frozen=True)
 
@@ -101,7 +108,15 @@ def _build_config() -> AppConfig:
     api_key_header = os.getenv("BRAIN_BUDDY_API_KEY_HEADER", "X-API-Key")
 
     data_dir = Path(data_dir_value).expanduser().resolve()
-    data_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        data_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        fallback_dir = DEFAULT_DATA_DIR.resolve()
+        fallback_dir.mkdir(parents=True, exist_ok=True)
+        logging.getLogger(__name__).warning(
+            "Data dir %s is not writable; falling back to %s", data_dir, fallback_dir
+        )
+        data_dir = fallback_dir
 
     schema_version = _read_schema_version(data_dir)
 

@@ -9,6 +9,7 @@ interface UseGraphProfilerOptions {
 }
 
 const isProduction = import.meta.env.MODE === "production";
+const SMALL_GRAPH_SAMPLE_CUTOFF = 24;
 
 /**
  * Dev-only helper that logs render timing for large graphs so we can tune React Flow settings.
@@ -21,6 +22,7 @@ export function useGraphProfiler({
   onSample
 }: UseGraphProfilerOptions): void {
   const startRef = useRef<number | null>(null);
+  const slowStreakRef = useRef(0);
 
   useEffect(() => {
     if (
@@ -32,6 +34,10 @@ export function useGraphProfiler({
       return;
     }
 
+    if (nodeCount + edgeCount < SMALL_GRAPH_SAMPLE_CUTOFF) {
+      return;
+    }
+
     startRef.current = performance.now();
     const handle = requestAnimationFrame(() => {
       if (startRef.current === null || typeof performance === "undefined") {
@@ -39,11 +45,22 @@ export function useGraphProfiler({
       }
 
       const durationMs = performance.now() - startRef.current;
-      if (durationMs >= thresholdMs) {
+      const effectiveThreshold = Math.max(thresholdMs, nodeCount >= 200 ? 20 : thresholdMs);
+
+      if (durationMs >= effectiveThreshold) {
         const message = `[perf] ${label}: ${nodeCount} nodes / ${edgeCount} edges rendered in ${durationMs.toFixed(
           1
         )}ms`;
         console.info(message);
+        slowStreakRef.current += 1;
+        if (slowStreakRef.current >= 3 && durationMs >= effectiveThreshold * 1.25) {
+          console.warn(
+            `[perf] ${label}: slow render streak (${slowStreakRef.current}) over threshold ${effectiveThreshold}ms`
+          );
+          slowStreakRef.current = 0;
+        }
+      } else {
+        slowStreakRef.current = 0;
       }
       if (onSample) {
         onSample({ durationMs, nodeCount, edgeCount });

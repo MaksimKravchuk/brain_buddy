@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ReactFlowProvider } from "reactflow";
 import "reactflow/dist/style.css";
 
 import { ApiError } from "./api/client";
 import type { TreeDetailResponse } from "./api/types";
-import { useTree, useTrees } from "./api/hooks";
-import { TreeCanvas } from "./components/canvas/TreeCanvas";
+import { useTree, useTrees, useTreeDownload, useTreeImportWithToasts } from "./api/hooks";
+import { TreeCanvas, type TreeCanvasHandle } from "./components/canvas/TreeCanvas";
 import { CanvasShell } from "./components/layout/CanvasShell";
 import { Layout } from "./components/layout/Layout";
 import { SidePanel } from "./components/layout/SidePanel";
@@ -23,6 +23,7 @@ import { getErrorMessage } from "./utils/error";
 
 export default function App(): JSX.Element {
   const [selectedTreeId, setSelectedTreeId] = useState<string | null>(null);
+  const canvasRef = useRef<TreeCanvasHandle | null>(null);
 
   const {
     data: trees,
@@ -34,11 +35,19 @@ export default function App(): JSX.Element {
   const resetTree = useTreeStore((state) => state.reset);
   const metadata = useTreeStore((state) => state.metadata);
   const activeTreeId = useTreeStore((state) => state.activeTreeId);
+  const flushPendingPersistence = useTreeStore((state) => state.flushPendingPersistence);
+  const pendingSync = useTreeStore((state) => state.pendingSync);
   const inspectorTab = useUiStore((state) => state.inspectorTab);
   const pushToast = useUiStore((state) => state.pushToast);
 
   const treeQuery = useTree(selectedTreeId);
   const { error: treeError, refetch: refetchTree } = treeQuery;
+  const { download, isDownloading } = useTreeDownload(selectedTreeId);
+  const { importFromFile, isImporting } = useTreeImportWithToasts((tree) => {
+    setSelectedTreeId(tree.id);
+    setTree(tree);
+  });
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (!selectedTreeId && trees?.length) {
@@ -109,19 +118,72 @@ export default function App(): JSX.Element {
   const inspectorTitle =
     inspectorTab === "node" ? "Node Inspector" : inspectorTab === "relation" ? "Relation Inspector" : "Versions";
 
+  const handleZoomIn = () => canvasRef.current?.zoomIn();
+  const handleZoomOut = () => canvasRef.current?.zoomOut();
+  const handleCenter = () => canvasRef.current?.centerOnSelection();
+
+  const handleSave = async () => {
+    if (!activeTreeId || !metadata) {
+      pushToast({
+        title: "Nothing to save",
+        description: "Select or create a tree before saving.",
+        variant: "warning",
+        duration: 4000
+      });
+      return;
+    }
+
+    setIsSaving(true);
+    const toastId = pushToast({
+      title: pendingSync ? "Saving changes…" : "Syncing draft…",
+      description: metadata.name,
+      variant: "info",
+      duration: 0
+    });
+
+    await flushPendingPersistence();
+    setIsSaving(false);
+    const state = useTreeStore.getState();
+
+    if (state.pendingSync || state.lastSyncError) {
+      pushToast({
+        id: toastId,
+        title: "Save incomplete",
+        description: state.lastSyncError ?? "Still pending sync, will retry automatically.",
+        variant: "warning",
+        duration: 6000
+      });
+      return;
+    }
+
+    pushToast({
+      id: toastId,
+      title: "Saved",
+      description: `${metadata.name} updated`,
+      variant: "success",
+      duration: 3500
+    });
+  };
+
   return (
     <ReactFlowProvider>
       <Layout
         header={
           <TopBar
-            title={metadata?.title ?? "Brain Buddy Canvas"}
-            subtitle={metadata?.description ?? "Select a tree or create a new one to begin mapping."}
+            title={metadata?.name ?? "Brain Buddy Canvas"}
+            subtitle="Select a tree or create a new one to begin mapping."
             rightSlot={
               <TreeSelector
                 trees={trees}
                 value={selectedTreeId}
                 onChange={handleTreeChange}
                 isLoading={isTreesLoading}
+                onSave={handleSave}
+                isSaving={isSaving}
+                onDownload={download}
+                isDownloading={isDownloading}
+                onImport={importFromFile}
+                isImporting={isImporting}
               />
             }
           />
@@ -139,7 +201,11 @@ export default function App(): JSX.Element {
         }
         footer="Use ⌘Z / Ctrl+Z to undo and Shift+⌘Z / Shift+Ctrl+Z to redo changes."
       >
-        <CanvasShell>
+        <CanvasShell
+          toolbar={
+            <CanvasToolbar onZoomIn={handleZoomIn} onZoomOut={handleZoomOut} onCenter={handleCenter} />
+          }
+        >
           {treeError ? (
             <ErrorCanvasState
               message={getErrorMessage(treeError)}
@@ -148,7 +214,7 @@ export default function App(): JSX.Element {
               onRetry={() => refetchTree()}
             />
           ) : activeTreeId ? (
-            <TreeCanvas treeId={activeTreeId} isLoading={isTreeLoading} />
+            <TreeCanvas ref={canvasRef} treeId={activeTreeId} isLoading={isTreeLoading} />
           ) : (
             <EmptyCanvasState isLoading={isTreeLoading} hasTrees={Boolean(trees?.length)} />
           )}
@@ -158,6 +224,42 @@ export default function App(): JSX.Element {
       <ToastStack />
       <CreateTreeModal onCreated={handleTreeCreated} />
     </ReactFlowProvider>
+  );
+}
+
+function CanvasToolbar({
+  onZoomIn,
+  onZoomOut,
+  onCenter
+}: {
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onCenter: () => void;
+}): JSX.Element {
+  return (
+    <div className="flex items-center gap-2 text-xs text-slate-200">
+      <button
+        type="button"
+        onClick={onZoomOut}
+        className="rounded-md border border-slate-700 bg-surface-sunken px-2 py-1 font-semibold transition hover:border-slate-500 hover:text-white"
+      >
+        Zoom out
+      </button>
+      <button
+        type="button"
+        onClick={onZoomIn}
+        className="rounded-md border border-slate-700 bg-surface-sunken px-2 py-1 font-semibold transition hover:border-slate-500 hover:text-white"
+      >
+        Zoom in
+      </button>
+      <button
+        type="button"
+        onClick={onCenter}
+        className="rounded-md border border-slate-700 bg-surface-sunken px-2 py-1 font-semibold transition hover:border-slate-500 hover:text-white"
+      >
+        Center
+      </button>
+    </div>
   );
 }
 
