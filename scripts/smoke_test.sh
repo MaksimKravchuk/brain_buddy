@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Minimal smoke test that hits the compose stack endpoints.
+# Minimal smoke test for the compose stack.
+# Honors compose defaults from .env (ports 8000/8080, /api prefix).
 
-API_BASE_URL="${API_BASE_URL:-http://localhost:8000}"
-API_PREFIX="${API_PREFIX:-/api}"
+API_BASE_URL="${API_BASE_URL:-http://localhost:${BRAIN_BUDDY_PORT:-8000}}"
+API_PREFIX="${API_PREFIX:-${BRAIN_BUDDY_API_PREFIX:-/api}}"
 API_KEY="${BRAIN_BUDDY_API_KEY:-}"
 API_KEY_HEADER="${BRAIN_BUDDY_API_KEY_HEADER:-X-API-Key}"
 
@@ -52,7 +53,7 @@ tree_response=$(request POST "/trees" "${create_payload}")
 echo "${tree_response}" | pretty_print
 
 tree_id=$(
-  TREE_RESPONSE="${tree_response}" python - <<'PY'
+  TREE_RESPONSE="${tree_response}" python3 - <<'PY'
 import json
 import os
 

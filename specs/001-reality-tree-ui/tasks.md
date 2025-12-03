@@ -17,10 +17,10 @@ description: "Task list for Current Reality Tree UI (docker-compose-ready local 
 
 **Purpose**: Compose-ready local stack and env parity
 
-- [ ] T001 Update `.env.example` with compose defaults for API base URLs and ports to mirror dockerized backend/frontend.
-- [ ] T002 Add `docker-compose.local.yml` orchestrating backend (port 8000, data volume) and frontend (port 8080) with optional API key wiring.
-- [ ] T003 Update `Makefile` targets (`compose-up`, `compose-down`) to use `docker-compose.local.yml` and align with existing `compose-smoke` targets.
-- [ ] T004 Align `scripts/smoke_test.sh` to target compose hosts/ports and document usage comments for local stack.
+- [X] T001 Update `.env.example` with compose defaults for API base URLs and ports to mirror dockerized backend/frontend.
+- [X] T002 Add `docker-compose.local.yml` orchestrating backend (port 8000, data volume) and frontend (port 8080) with optional API key wiring.
+- [X] T003 Update `Makefile` targets (`compose-up`, `compose-down`) to use `docker-compose.local.yml` and align with existing `compose-smoke` targets.
+- [X] T004 Align `scripts/smoke_test.sh` to target compose hosts/ports and document usage comments for local stack.
 
 ---
 
