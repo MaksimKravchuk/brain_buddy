@@ -8,7 +8,7 @@ import {
   TreeCreateRequest,
   TreeDetailResponse,
   TreeExportResponse,
-  TreeImportRequest,
+  TreeImportPayload,
   TreeListItem,
   TreeUpdateRequest,
   ValidationHistoryResponse,
@@ -110,7 +110,11 @@ export const apiClient = {
   },
 
   createNode(treeId: string, payload: NodeCreateRequest) {
-    return request<NodeResponse>(`/trees/${treeId}/nodes`, { method: "POST", body: payload });
+    const body: NodeCreateRequest = {
+      highlight_state: "none",
+      ...payload
+    };
+    return request<NodeResponse>(`/trees/${treeId}/nodes`, { method: "POST", body });
   },
 
   updateNode(treeId: string, nodeId: string, payload: NodeUpdateRequest) {
@@ -123,7 +127,11 @@ export const apiClient = {
   },
 
   createRelation(treeId: string, payload: RelationCreateRequest) {
-    return request<RelationResponse>(`/trees/${treeId}/relations`, { method: "POST", body: payload });
+    const body: RelationCreateRequest = {
+      kind: "why",
+      ...payload
+    };
+    return request<RelationResponse>(`/trees/${treeId}/relations`, { method: "POST", body });
   },
 
   updateRelation(treeId: string, relationId: string, payload: RelationUpdateRequest) {
@@ -157,8 +165,8 @@ export const apiClient = {
     return request<TreeExportResponse>(`/trees/${treeId}/export`, { method: "POST" });
   },
 
-  importTree(payload: TreeImportRequest) {
-    return request<TreeDetailResponse>("/trees/import", { method: "POST", body: payload });
+  importTree(tree: TreeImportPayload) {
+    return request<TreeDetailResponse>("/trees/import", { method: "POST", body: { tree } });
   },
 
   triggerValidation(treeId: string, nodeId: string, payload: ValidationRequest) {

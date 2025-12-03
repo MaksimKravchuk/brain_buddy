@@ -5,6 +5,7 @@ export interface Position {
 
 export type NodeType = "undesired_effect" | "cause" | "regular";
 export type HighlightState = "none" | "cause_candidate" | "effect_spanning";
+export type RelationKind = "why";
 
 export interface RelationCounts {
   up_count: number;
@@ -38,20 +39,20 @@ export interface RelationResponse {
   id: string;
   from_id: string;
   to_id: string;
-  kind: "why";
+  kind: RelationKind;
   created_at: string;
 }
 
 export interface RelationCreateRequest {
   from_id: string;
   to_id: string;
-  kind?: "why";
+  kind?: RelationKind;
 }
 
 export interface RelationUpdateRequest {
   from_id?: string;
   to_id?: string;
-  kind?: "why";
+  kind?: RelationKind;
 }
 
 export interface VersionDiffSummary {
@@ -103,6 +104,8 @@ export interface TreeDetailResponse {
   owner_id?: string | null;
 }
 
+export type TreeImportPayload = TreeDetailResponse;
+
 export interface TreeCreateRequest {
   name: string;
   owner_id?: string | null;
@@ -120,7 +123,7 @@ export interface TreeUpdateRequest {
 }
 
 export interface TreeImportRequest {
-  tree: TreeDetailResponse;
+  tree: TreeImportPayload;
 }
 
 export interface TreeExportResponse {
