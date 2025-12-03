@@ -1,7 +1,31 @@
-import { describe, expect, beforeEach, it } from "vitest";
+import { describe, expect, beforeEach, afterEach, it, vi } from "vitest";
 
 import type { TreeDetailResponse } from "../../api/types";
-import { useTreeStore } from "../treeStore";
+import { TREE_DRAFT_PREFIX, useTreeStore } from "../treeStore";
+
+function ensureLocalStorage() {
+  if (typeof localStorage === "undefined" || typeof localStorage.getItem !== "function") {
+    const memory = new Map<string, string>();
+    const mockStorage = {
+      getItem: (key: string) => (memory.has(key) ? memory.get(key)! : null),
+      setItem: (key: string, value: string) => {
+        memory.set(key, value);
+      },
+      removeItem: (key: string) => {
+        memory.delete(key);
+      },
+      clear: () => memory.clear()
+    } as Storage;
+
+    Object.defineProperty(globalThis, "localStorage", {
+      value: mockStorage,
+      writable: true
+    });
+    return mockStorage;
+  }
+
+  return localStorage;
+}
 
 const sampleTree: TreeDetailResponse = {
   id: "tree-1",
@@ -57,9 +81,103 @@ const sampleTreeWithRelations: TreeDetailResponse = {
   ]
 };
 
+const causeCandidateTree: TreeDetailResponse = {
+  ...sampleTree,
+  nodes: [
+    {
+      id: "root-cause",
+      label: "Root cause",
+      type: "cause",
+      position: { x: 0, y: 0 },
+      highlight_state: "none",
+      relation_counts: { up_count: 0, down_count: 0 }
+    },
+    {
+      id: "branch-1",
+      label: "Branch 1",
+      type: "regular",
+      position: { x: 10, y: 10 },
+      highlight_state: "none",
+      relation_counts: { up_count: 0, down_count: 0 }
+    },
+    {
+      id: "branch-2",
+      label: "Branch 2",
+      type: "regular",
+      position: { x: 20, y: 20 },
+      highlight_state: "none",
+      relation_counts: { up_count: 0, down_count: 0 }
+    },
+    {
+      id: "branch-3",
+      label: "Branch 3",
+      type: "regular",
+      position: { x: 30, y: 30 },
+      highlight_state: "none",
+      relation_counts: { up_count: 0, down_count: 0 }
+    }
+  ],
+  relations: [
+    { id: "rel-1", from_id: "root-cause", to_id: "branch-1", kind: "why", created_at: "2024-04-01" },
+    { id: "rel-2", from_id: "root-cause", to_id: "branch-2", kind: "why", created_at: "2024-04-01" },
+    { id: "rel-3", from_id: "root-cause", to_id: "branch-3", kind: "why", created_at: "2024-04-01" }
+  ]
+};
+
+const effectSpanningTree: TreeDetailResponse = {
+  ...sampleTree,
+  nodes: [
+    {
+      id: "root",
+      label: "Root cause",
+      type: "cause",
+      position: { x: 0, y: 0 },
+      highlight_state: "none",
+      relation_counts: { up_count: 0, down_count: 0 }
+    },
+    {
+      id: "mid",
+      label: "Intermediate",
+      type: "regular",
+      position: { x: 10, y: 10 },
+      highlight_state: "none",
+      relation_counts: { up_count: 0, down_count: 0 }
+    },
+    {
+      id: "effect-1",
+      label: "Effect 1",
+      type: "undesired_effect",
+      position: { x: 20, y: 20 },
+      highlight_state: "none",
+      relation_counts: { up_count: 0, down_count: 0 }
+    },
+    {
+      id: "effect-2",
+      label: "Effect 2",
+      type: "undesired_effect",
+      position: { x: 30, y: 30 },
+      highlight_state: "none",
+      relation_counts: { up_count: 0, down_count: 0 }
+    }
+  ],
+  relations: [
+    { id: "rel-a", from_id: "root", to_id: "mid", kind: "why", created_at: "2024-04-01" },
+    { id: "rel-b", from_id: "mid", to_id: "effect-1", kind: "why", created_at: "2024-04-01" },
+    { id: "rel-c", from_id: "mid", to_id: "effect-2", kind: "why", created_at: "2024-04-01" }
+  ]
+};
+
 describe("treeStore", () => {
   beforeEach(() => {
+    const storage = ensureLocalStorage();
     useTreeStore.getState().reset();
+    if (typeof storage.clear === "function") {
+      storage.clear();
+    }
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("hydrates tree metadata and nodes from API response", () => {
@@ -146,13 +264,65 @@ describe("treeStore", () => {
     expect(useTreeStore.getState().selection).toEqual({ type: null, id: null });
   });
 
-  it("updates node highlighting state via upsert", () => {
+  it("recomputes highlighting state via upsert based on derived rules", () => {
     useTreeStore.getState().setTree(sampleTree);
 
     const node = useTreeStore.getState().nodes[0];
     const store = useTreeStore.getState();
     store.upsertNode({ ...node, highlightState: "cause_candidate" });
 
-    expect(useTreeStore.getState().nodes[0].highlightState).toBe("cause_candidate");
+    // Derived rules keep highlight at none because there are no relations
+    expect(useTreeStore.getState().nodes[0].highlightState).toBe("none");
+  });
+
+  it("marks nodes with three or more upstream relations as cause candidates", () => {
+    useTreeStore.getState().setTree(causeCandidateTree);
+
+    const node = useTreeStore.getState().nodes.find((n) => n.id === "root-cause");
+    expect(node?.relationCounts.up).toBe(3);
+    expect(node?.highlightState).toBe("cause_candidate");
+  });
+
+  it("marks nodes whose paths reach all undesired effects as effect spanning", () => {
+    useTreeStore.getState().setTree(effectSpanningTree);
+
+    const root = useTreeStore.getState().nodes.find((n) => n.id === "root");
+    const mid = useTreeStore.getState().nodes.find((n) => n.id === "mid");
+
+    expect(root?.highlightState).toBe("effect_spanning");
+    // intermediate node also reaches both effects via its outgoing edges
+    expect(mid?.highlightState).toBe("effect_spanning");
+  });
+
+  it("auto-saves drafts locally after edits with a debounce", async () => {
+    vi.useFakeTimers();
+    useTreeStore.getState().setTree(sampleTree);
+
+    const store = useTreeStore.getState();
+    store.upsertNode({ ...store.nodes[0], label: "Updated label" });
+
+    expect(useTreeStore.getState().pendingSync).toBe(true);
+
+    await vi.runOnlyPendingTimersAsync();
+
+    const saved = localStorage.getItem(`${TREE_DRAFT_PREFIX}${sampleTree.id}`);
+    expect(saved).toBeTruthy();
+    const parsed = saved ? JSON.parse(saved) : null;
+    expect(parsed?.nodes?.[0]?.label).toBe("Updated label");
+    expect(useTreeStore.getState().pendingSync).toBe(false);
+  });
+
+  it("flushes pending persistence immediately when requested", async () => {
+    vi.useFakeTimers();
+    useTreeStore.getState().setTree(sampleTree);
+
+    const store = useTreeStore.getState();
+    store.upsertNode({ ...store.nodes[0], label: "Immediate save" });
+
+    await store.flushPendingPersistence();
+
+    const saved = localStorage.getItem(`${TREE_DRAFT_PREFIX}${sampleTree.id}`);
+    expect(saved).toContain("Immediate save");
+    expect(useTreeStore.getState().pendingSync).toBe(false);
   });
 });
