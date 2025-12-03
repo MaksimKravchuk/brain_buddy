@@ -708,6 +708,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   return (
     <div className="relative h-full w-full">
       <ReactFlow
+        aria-label="Current reality tree canvas"
         nodes={flowNodes}
         edges={flowEdges}
         nodeTypes={nodeTypes}
@@ -734,6 +735,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         snapToGrid
         snapGrid={[16, 16]}
         onlyRenderVisibleElements
+        proOptions={{ hideAttribution: true }}
       >
         <Background gap={24} size={1} color="rgba(59,130,246,0.1)" />
         <MiniMap
@@ -777,4 +779,4 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       ) : null}
     </div>
   );
-}
+});

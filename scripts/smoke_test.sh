@@ -48,7 +48,7 @@ echo "[smoke] Listing trees (should be empty on first run)..."
 request GET "/trees" | pretty_print
 
 echo "[smoke] Creating temporary tree..."
-create_payload='{"title":"Smoke Test Tree","description":"Created by smoke_test.sh"}'
+create_payload='{"name":"Smoke Test Tree"}'
 tree_response=$(request POST "/trees" "${create_payload}")
 echo "${tree_response}" | pretty_print
 
