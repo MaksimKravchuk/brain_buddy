@@ -1,3 +1,4 @@
+# Smoke/local deployment stack; expects .env values for ports, API prefix, and optional API key.
 services:
   backend:
     build:
