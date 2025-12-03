@@ -52,7 +52,9 @@ def test_list_and_update_tree(tree_service) -> None:
     assert len(entries) == 2
     assert {entry.id for entry in entries} == {first.id, _second.id}
 
-    metadata = TreeMetadata.from_timestamps(created_at=first.created_at, updated_at=first.updated_at)
+    metadata = TreeMetadata.from_timestamps(
+        created_at=first.created_at, updated_at=first.updated_at
+    )
     updated = tree_service.update_tree(
         first.id,
         TreeUpdateRequest(

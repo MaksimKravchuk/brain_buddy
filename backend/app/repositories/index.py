@@ -1,8 +1,9 @@
 """Repository managing the global tree index for quick listing."""
+
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from app.exceptions import NotFoundError
 from app.schemas.domain import IndexEntry
@@ -23,7 +24,7 @@ class IndexRepository(BaseRepository):
     def load_all(self) -> list[IndexEntry]:
         if not self.index_path.exists():
             return []
-        raw_entries = read_json(self.index_path)
+        raw_entries: list[dict[str, object]] = read_json(self.index_path)
         return [IndexEntry.model_validate(entry) for entry in raw_entries]
 
     def save_all(self, entries: Iterable[IndexEntry]) -> None:

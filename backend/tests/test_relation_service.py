@@ -15,18 +15,23 @@ from app.schemas import (
 def prepare_tree_with_nodes(tree_service, node_service):
     tree = tree_service.create_tree(TreeCreateRequest(name="Relations"))
     node_a, tree = node_service.create_node(
-        tree.id, NodeCreateRequest(label="A", type="regular", position=Position(x=0, y=0))
+        tree.id,
+        NodeCreateRequest(label="A", type="regular", position=Position(x=0, y=0)),
     )
     node_b, tree = node_service.create_node(
-        tree.id, NodeCreateRequest(label="B", type="regular", position=Position(x=1, y=1))
+        tree.id,
+        NodeCreateRequest(label="B", type="regular", position=Position(x=1, y=1)),
     )
     node_c, tree = node_service.create_node(
-        tree.id, NodeCreateRequest(label="C", type="regular", position=Position(x=2, y=2))
+        tree.id,
+        NodeCreateRequest(label="C", type="regular", position=Position(x=2, y=2)),
     )
     return tree, node_a, node_b, node_c
 
 
-def test_create_and_update_relation(tree_service, node_service, relation_service) -> None:
+def test_create_and_update_relation(
+    tree_service, node_service, relation_service
+) -> None:
     tree, node_a, node_b, node_c = prepare_tree_with_nodes(tree_service, node_service)
 
     relation, _ = relation_service.create_relation(
@@ -41,7 +46,7 @@ def test_create_and_update_relation(tree_service, node_service, relation_service
         RelationUpdateRequest(to_id=node_c.id, kind="why"),
     )
     assert updated_relation.target_id == node_c.id
-    assert updated_relation.question_label == "how"
+    assert updated_relation.question_label == "why"
 
 
 def test_create_relation_conflict(tree_service, node_service, relation_service) -> None:

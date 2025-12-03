@@ -1,4 +1,5 @@
 """Time utilities used across the backend."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

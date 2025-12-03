@@ -1,4 +1,5 @@
 """Basic smoke tests for the Brain Buddy API."""
+
 from fastapi.testclient import TestClient
 
 from app.core import get_config

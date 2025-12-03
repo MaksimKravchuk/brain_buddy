@@ -1,4 +1,5 @@
 """Repository for AI provider configuration."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -31,7 +32,9 @@ class ProviderRepository(BaseRepository):
         self.save(registry)
         return registry
 
-    def upsert_provider(self, provider_id: str, config: ProviderConfig) -> ProviderRegistryDocument:
+    def upsert_provider(
+        self, provider_id: str, config: ProviderConfig
+    ) -> ProviderRegistryDocument:
         registry = self.load()
         providers = dict(registry.providers)
         providers[provider_id] = config

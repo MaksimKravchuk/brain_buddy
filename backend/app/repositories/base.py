@@ -1,4 +1,5 @@
 """Common helpers shared across repositories."""
+
 from __future__ import annotations
 
 import json
@@ -29,11 +30,16 @@ class BaseRepository:
         """Load JSON from path and validate using the provided Pydantic model."""
 
         try:
-            payload = read_json(path)
+            payload: Any = read_json(path)
             return model_cls.model_validate(payload)
-        except FileNotFoundError as exc:  # pragma: no cover - callers handle missing check
+        except (
+            FileNotFoundError
+        ) as exc:  # pragma: no cover - callers handle missing check
             raise exc
-        except (ValidationError, json.JSONDecodeError) as exc:  # pragma: no cover - indicates corrupted data
+        except (
+            ValidationError,
+            json.JSONDecodeError,
+        ) as exc:  # pragma: no cover - indicates corrupted data
             raise RepositoryError(f"Failed to load data from {path}: {exc}") from exc
 
     @staticmethod
@@ -47,4 +53,3 @@ class BaseRepository:
         """Serialize an arbitrary payload to disk using JSON."""
 
         write_json(path, payload)
-
