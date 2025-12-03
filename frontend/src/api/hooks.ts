@@ -12,6 +12,7 @@ import type {
   TreeDetailResponse,
   TreeListItem,
   TreeUpdateRequest,
+  TreeImportPayload,
   ValidationHistoryResponse,
   ValidationRequest,
   ValidationResponse,
@@ -182,6 +183,17 @@ export function useRestoreVersion(treeId: string) {
 export function useExportTree(treeId: string) {
   return useMutation({
     mutationFn: () => apiClient.exportTree(treeId)
+  });
+}
+
+export function useImportTree() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (tree: TreeImportPayload) => apiClient.importTree(tree),
+    onSuccess: (tree) => {
+      queryClient.invalidateQueries({ queryKey: treeKeys.list() });
+      queryClient.setQueryData(treeKeys.detail(tree.id), tree);
+    }
   });
 }
 

@@ -28,10 +28,10 @@ description: "Task list for Current Reality Tree UI"
 
  - [X] T005 Sync backend tree schemas/routes to `contracts/tree-api.md` in `backend/app/schemas/api.py` and `backend/app/api/routes.py`.
  - [X] T006 Add backend contract tests for tree list/detail/import/export in `backend/tests/api/test_trees.py`.
- - [ ] T007 Update frontend API types/clients to contract in `frontend/src/api/types.ts` and `frontend/src/api/client.ts`.
- - [ ] T008 Add frontend API hook tests for import/export/list in `frontend/src/api/__tests__/hooks.test.ts`.
+ - [X] T007 Update frontend API types/clients to contract in `frontend/src/api/types.ts` and `frontend/src/api/client.ts`.
+ - [X] T008 Add frontend API hook tests for import/export/list in `frontend/src/api/__tests__/hooks.test.ts`.
  - [X] T009 Implement relation cycle/direction validation helper in `backend/app/utils/identifiers.py` and `backend/app/services/tree_service.py`.
- - [ ] T010 Scaffold tree/UI stores for state, selection, and hotkey plumbing in `frontend/src/stores/treeStore.ts` and `frontend/src/stores/uiStore.ts`.
+ - [X] T010 Scaffold tree/UI stores for state, selection, and hotkey plumbing in `frontend/src/stores/treeStore.ts` and `frontend/src/stores/uiStore.ts`.
 
 ---
 
@@ -82,6 +82,8 @@ description: "Task list for Current Reality Tree UI"
 - [ ] T027 Update docs (README.md, `specs/001-reality-tree-ui/quickstart.md`) with autosave cadence, AI consent flow, compose usage.
 - [ ] T028 Review accessibility and performance (200-node canvas, `useGraphProfiler`) and tune `frontend/src/components/canvas/TreeCanvas.tsx` and `frontend/src/hooks/useGraphProfiler.ts`.
 - [ ] T029 Validate compose stack via `make compose-smoke-up` and `./scripts/smoke_test.sh`; apply fixes in `docker-compose.local.yml` or `scripts/smoke_test.sh`.
+- [ ] T030 Run backend quality gates (Black/Ruff/mypy) per `backend/pyproject.toml` and fix findings in `backend/app/**`.
+- [ ] T031 Run frontend quality gates (ESLint/Prettier/tsc/Vitest) per `frontend/package.json` scripts and fix findings in `frontend/src/**`.
 
 ---
 

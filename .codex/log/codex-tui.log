@@ -6194,3 +6194,427 @@
 + - [ ] T010 Scaffold tree/UI stores for state, selection, and hotkey plumbing in `frontend/src/stores/treeStore.ts` and `frontend/src/stores/uiStore.ts`.
 *** End Patch
 [2m2025-12-03T14:41:48.480871Z[0m [32m INFO[0m ToolCall: shell_command {"command":"git status --short","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:47:11.096444Z[0m [32m INFO[0m spawning ghost snapshot task
+[2m2025-12-03T14:47:11.246013Z[0m [32m INFO[0m ghost snapshot blocking task finished
+[2m2025-12-03T14:47:11.246030Z[0m [32m INFO[0m ghost commit captured: 9f027334c60a30dcbe6b617ce770a0c2ec3960b7
+[2m2025-12-03T14:47:11.246034Z[0m [32m INFO[0m ghost snapshot gate marked ready
+[2m2025-12-03T14:47:13.484206Z[0m [32m INFO[0m ToolCall: shell_command {"command":".specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:47:16.353515Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls /Users/max/Code/brain_buddy/specs/001-reality-tree-ui/checklists","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:47:20.467760Z[0m [32m INFO[0m ToolCall: shell_command {"command":"python3 - <<'PY'\nimport re, json, pathlib\npath = pathlib.Path('/Users/max/Code/brain_buddy/specs/001-reality-tree-ui/checklists')\nentries=[]\nfor file in sorted(path.glob('*.md')):\n    text=file.read_text()\n    total=len(re.findall(r'(?m)^\\s*- \\[(?: |x|X)\\]', text))\n    completed=len(re.findall(r'(?m)^\\s*- \\[(?:x|X)\\]', text))\n    incomplete=len(re.findall(r'(?m)^\\s*- \\[ \\]', text))\n    status='PASS' if incomplete==0 else 'FAIL'\n    entries.append((file.name,total,completed,incomplete,status))\nprint(entries)\nPY","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:47:23.644105Z[0m [32m INFO[0m ToolCall: shell_command {"command":"cat /Users/max/Code/brain_buddy/specs/001-reality-tree-ui/tasks.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:47:27.328441Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,240p' /Users/max/Code/brain_buddy/specs/001-reality-tree-ui/contracts/tree-api.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:47:29.969089Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' /Users/max/Code/brain_buddy/specs/001-reality-tree-ui/data-model.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:47:45.900994Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' frontend/src/api/types.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:47:47.776229Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,240p' frontend/src/api/client.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:47:52.519422Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"@router\" -n backend/app/api/routes.py","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:47:54.809036Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,260p' backend/app/api/routes.py","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:47:56.780566Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '260,520p' backend/app/api/routes.py","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:47:59.826947Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,260p' backend/app/schemas/api.py","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:48:08.998682Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,260p' frontend/src/api/hooks.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:48:32.621321Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"TreeCreateRequest\" -n frontend/src","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:49:07.376132Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"class VersionDiffSummary\" -n backend/app/schemas/domain.py","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:49:09.323583Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,160p' backend/app/schemas/domain.py","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:49:17.689476Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"importTree\" -n frontend/src","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:49:22.037210Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"exportTree\" -n frontend/src","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:49:24.658118Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,240p' frontend/src/components/panels/VersionPanel.tsx","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:49:28.560188Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' frontend/src/stores/treeStore.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:49:57.490925Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,240p' backend/app/services/tree_service.py","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:50:10.653618Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' /Users/max/Code/brain_buddy/specs/001-reality-tree-ui/plan.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:51:13.052025Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,220p' backend/tests/api/test_api_trees.py","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:51:15.688591Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls backend/tests/api","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:51:17.844851Z[0m [32m INFO[0m ToolCall: shell_command {"command":"find backend/tests -maxdepth 2 -type f","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:51:21.112374Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' backend/tests/test_api_trees.py","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:51:44.536768Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"FastAPI\" -n backend/app/main.py","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:51:47.855273Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,160p' backend/app/main.py","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:51:57.903115Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"updateTree\\(\" -n frontend/src","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:52:23.579025Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls -a /Users/max/Code/brain_buddy | grep ignore","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:53:41.365037Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/api/types.ts
+@@
+-export type NodeType = "undesired_effect" | "cause" | "regular";
++export type NodeType = "undesired_effect" | "cause" | "regular";
+ export type HighlightState = "none" | "cause_candidate" | "effect_spanning";
++export type RelationKind = "why";
+@@
+ export interface RelationResponse {
+   id: string;
+   from_id: string;
+   to_id: string;
+-  kind: "why";
++  kind: RelationKind;
+   created_at: string;
+ }
+ 
+ export interface RelationCreateRequest {
+   from_id: string;
+   to_id: string;
+-  kind?: "why";
++  kind?: RelationKind;
+ }
+ 
+ export interface RelationUpdateRequest {
+   from_id?: string;
+   to_id?: string;
+-  kind?: "why";
++  kind?: RelationKind;
+ }
+@@
+ export interface TreeDetailResponse {
+   id: string;
+   name: string;
+   metadata: TreeMetadata;
+   nodes: NodeResponse[];
+   relations: RelationResponse[];
+   owner_id?: string | null;
+ }
+ 
+ export interface TreeCreateRequest {
+   name: string;
+   owner_id?: string | null;
+*** End Patch
+[2m2025-12-03T14:53:47.904136Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/api/types.ts
+@@
+ export interface TreeDetailResponse {
+   id: string;
+   name: string;
+   metadata: TreeMetadata;
+   nodes: NodeResponse[];
+   relations: RelationResponse[];
+   owner_id?: string | null;
+ }
+ 
++export type TreeImportPayload = TreeDetailResponse;
++
+ export interface TreeCreateRequest {
+   name: string;
+   owner_id?: string | null;
+   metadata?: TreeMetadata;
+   nodes?: NodeResponse[];
+   relations?: RelationResponse[];
+@@
+ export interface TreeUpdateRequest {
+   name: string;
+   metadata: TreeMetadata;
+   nodes: NodeResponse[];
+   relations: RelationResponse[];
+   owner_id?: string | null;
+ }
+ 
+ export interface TreeImportRequest {
+-  tree: TreeDetailResponse;
++  tree: TreeImportPayload;
+ }
+ 
+ export interface TreeExportResponse {
+   tree: TreeDetailResponse;
+ }
+*** End Patch
+[2m2025-12-03T14:53:56.456450Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/api/client.ts
+@@
+   TreeCreateRequest,
+   TreeDetailResponse,
+   TreeExportResponse,
+-  TreeImportRequest,
++  TreeImportPayload,
+   TreeListItem,
+   TreeUpdateRequest,
+   ValidationHistoryResponse,
+   ValidationRequest,
+   ValidationResponse,
+*** End Patch
+[2m2025-12-03T14:54:06.266687Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/api/client.ts
+@@
+   createNode(treeId: string, payload: NodeCreateRequest) {
+-    return request<NodeResponse>(`/trees/${treeId}/nodes`, { method: "POST", body: payload });
++    const body: NodeCreateRequest = {
++      highlight_state: "none",
++      ...payload
++    };
++    return request<NodeResponse>(`/trees/${treeId}/nodes`, { method: "POST", body });
+   },
+@@
+   createRelation(treeId: string, payload: RelationCreateRequest) {
+-    return request<RelationResponse>(`/trees/${treeId}/relations`, { method: "POST", body: payload });
++    const body: RelationCreateRequest = {
++      kind: "why",
++      ...payload
++    };
++    return request<RelationResponse>(`/trees/${treeId}/relations`, { method: "POST", body });
+   },
+@@
+-  importTree(payload: TreeImportRequest) {
+-    return request<TreeDetailResponse>("/trees/import", { method: "POST", body: payload });
++  importTree(tree: TreeImportPayload) {
++    return request<TreeDetailResponse>("/trees/import", { method: "POST", body: { tree } });
+   },
+*** End Patch
+[2m2025-12-03T14:54:09.673769Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"importTree\" frontend/src","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T14:54:20.932598Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: specs/001-reality-tree-ui/tasks.md
+@@
+  - [X] T005 Sync backend tree schemas/routes to `contracts/tree-api.md` in `backend/app/schemas/api.py` and `backend/app/api/routes.py`.
+  - [X] T006 Add backend contract tests for tree list/detail/import/export in `backend/tests/api/test_trees.py`.
+- - [ ] T007 Update frontend API types/clients to contract in `frontend/src/api/types.ts` and `frontend/src/api/client.ts`.
++ - [X] T007 Update frontend API types/clients to contract in `frontend/src/api/types.ts` and `frontend/src/api/client.ts`.
+  - [ ] T008 Add frontend API hook tests for import/export/list in `frontend/src/api/__tests__/hooks.test.ts`.
+  - [X] T009 Implement relation cycle/direction validation helper in `backend/app/utils/identifiers.py` and `backend/app/services/tree_service.py`.
+  - [ ] T010 Scaffold tree/UI stores for state, selection, and hotkey plumbing in `frontend/src/stores/treeStore.ts` and `frontend/src/stores/uiStore.ts`.
+*** End Patch
+[2m2025-12-03T14:54:25.031039Z[0m [32m INFO[0m ToolCall: shell_command {"command":"git diff --stat","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:11:57.515159Z[0m [32m INFO[0m spawning ghost snapshot task
+[2m2025-12-03T15:11:57.694946Z[0m [32m INFO[0m ghost snapshot blocking task finished
+[2m2025-12-03T15:11:57.694963Z[0m [32m INFO[0m ghost commit captured: a419ade07b5948f1120c706138780909c20f40d5
+[2m2025-12-03T15:11:57.694967Z[0m [32m INFO[0m ghost snapshot gate marked ready
+[2m2025-12-03T15:12:05.912536Z[0m [32m INFO[0m ToolCall: shell_command {"command":"rg \"__tests__\" frontend/src/api -g'*.test.ts*'","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:12:09.207792Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls frontend/src/api","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:12:13.906535Z[0m [32m INFO[0m ToolCall: shell_command {"command":"find frontend/src -maxdepth 3 -type f -name '*hooks*.test.ts*'","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:12:17.908334Z[0m [32m INFO[0m ToolCall: shell_command {"command":"find frontend/src -maxdepth 4 -type f -name '*test*.ts*' | head","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:12:20.197713Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' frontend/src/stores/__tests__/treeStore.test.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:12:23.282574Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' frontend/src/components/panels/__tests__/InspectorTabs.test.tsx","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:12:50.406709Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/api/hooks.ts
+@@
+   TreeCreateRequest,
+   TreeDetailResponse,
+   TreeListItem,
+   TreeUpdateRequest,
++  TreeImportPayload,
+   ValidationHistoryResponse,
+   ValidationRequest,
+   ValidationResponse,
+   VersionCreateRequest,
+   VersionListItem
+@@
+ export function useExportTree(treeId: string) {
+   return useMutation({
+     mutationFn: () => apiClient.exportTree(treeId)
+   });
+ }
++
++export function useImportTree() {
++  const queryClient = useQueryClient();
++  return useMutation({
++    mutationFn: (tree: TreeImportPayload) => apiClient.importTree(tree),
++    onSuccess: (tree) => {
++      queryClient.invalidateQueries({ queryKey: treeKeys.list() });
++      queryClient.setQueryData(treeKeys.detail(tree.id), tree);
++    }
++  });
++}
+*** End Patch
+[2m2025-12-03T15:13:06.108251Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Add File: frontend/src/api/__tests__/hooks.test.ts
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import { renderHook, waitFor, act } from "@testing-library/react";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++import { apiClient } from "../client";
++import { useExportTree, useImportTree, useTrees } from "../hooks";
++import type { TreeDetailResponse, TreeImportPayload, TreeListItem } from "../types";
++
++function createWrapper(queryClient: QueryClient) {
++  return function Wrapper({ children }: { children: React.ReactNode }) {
++    return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
++  };
++}
++
++describe("api hooks", () => {
++  let queryClient: QueryClient;
++
++  beforeEach(() => {
++    queryClient = new QueryClient({
++      defaultOptions: {
++        queries: {
++          retry: false
++        }
++      }
++    });
++  });
++
++  afterEach(() => {
++    queryClient.clear();
++    vi.restoreAllMocks();
++  });
++
++  it("uses listTrees for useTrees", async () => {
++    const trees: TreeListItem[] = [
++      { id: "tree-1", name: "One", updated_at: "2025-01-01T00:00:00Z", owner_id: null }
++    ];
++    const spy = vi.spyOn(apiClient, "listTrees").mockResolvedValue(trees);
++
++    const { result } = renderHook(() => useTrees(), { wrapper: createWrapper(queryClient) });
++
++    await waitFor(() => expect(result.current.isSuccess).toBe(true));
++    expect(result.current.data).toEqual(trees);
++    expect(spy).toHaveBeenCalledTimes(1);
++  });
++
++  it("exports a tree via useExportTree", async () => {
++    const payload: TreeDetailResponse = {
++      id: "tree-2",
++      name: "Exportable",
++      metadata: {
++        version: 1,
++        created_at: "2025-01-01T00:00:00Z",
++        updated_at: "2025-01-01T00:00:00Z",
++        owner_id: null,
++        layout: null
++      },
++      nodes: [],
++      relations: [],
++      owner_id: null
++    };
++    const spy = vi.spyOn(apiClient, "exportTree").mockResolvedValue({ tree: payload });
++    const { result } = renderHook(() => useExportTree("tree-2"), { wrapper: createWrapper(queryClient) });
++
++    let response: { tree: TreeDetailResponse } | undefined;
++    await act(async () => {
++      response = await result.current.mutateAsync();
++    });
++
++    expect(spy).toHaveBeenCalledWith("tree-2");
++    expect(response?.tree).toEqual(payload);
++  });
++
++  it("imports a tree and caches detail via useImportTree", async () => {
++    const importPayload: TreeImportPayload = {
++      id: "tree-3",
++      name: "Imported",
++      metadata: {
++        version: 1,
++        created_at: "2025-01-02T00:00:00Z",
++        updated_at: "2025-01-02T00:00:00Z",
++        owner_id: null,
++        layout: null
++      },
++      nodes: [],
++      relations: [],
++      owner_id: null
++    };
++    const spy = vi.spyOn(apiClient, "importTree").mockResolvedValue(importPayload);
++    const { result } = renderHook(() => useImportTree(), { wrapper: createWrapper(queryClient) });
++
++    await act(async () => {
++      await result.current.mutateAsync(importPayload);
++    });
++
++    expect(spy).toHaveBeenCalledWith(importPayload);
++    const cached = queryClient.getQueryData<TreeDetailResponse>(["trees", "detail", "tree-3"]);
++    expect(cached).toEqual(importPayload);
++  });
++});
+*** End Patch
+[2m2025-12-03T15:13:12.074027Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: specs/001-reality-tree-ui/tasks.md
+@@
+  - [X] T005 Sync backend tree schemas/routes to `contracts/tree-api.md` in `backend/app/schemas/api.py` and `backend/app/api/routes.py`.
+  - [X] T006 Add backend contract tests for tree list/detail/import/export in `backend/tests/api/test_trees.py`.
+  - [X] T007 Update frontend API types/clients to contract in `frontend/src/api/types.ts` and `frontend/src/api/client.ts`.
+- - [ ] T008 Add frontend API hook tests for import/export/list in `frontend/src/api/__tests__/hooks.test.ts`.
++ - [X] T008 Add frontend API hook tests for import/export/list in `frontend/src/api/__tests__/hooks.test.ts`.
+  - [X] T009 Implement relation cycle/direction validation helper in `backend/app/utils/identifiers.py` and `backend/app/services/tree_service.py`.
+  - [ ] T010 Scaffold tree/UI stores for state, selection, and hotkey plumbing in `frontend/src/stores/treeStore.ts` and `frontend/src/stores/uiStore.ts`.
+*** End Patch
+[2m2025-12-03T15:13:17.451028Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: frontend/src/api/__tests__/hooks.test.ts
+@@
+-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+ import { renderHook, waitFor, act } from "@testing-library/react";
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import type { ReactNode } from "react";
+@@
+-function createWrapper(queryClient: QueryClient) {
+-  return function Wrapper({ children }: { children: React.ReactNode }) {
++function createWrapper(queryClient: QueryClient) {
++  return function Wrapper({ children }: { children: ReactNode }) {
+     return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+   };
+ }
+*** End Patch
+[2m2025-12-03T15:13:58.154220Z[0m [32m INFO[0m spawning ghost snapshot task
+[2m2025-12-03T15:13:58.322103Z[0m [32m INFO[0m ghost snapshot blocking task finished
+[2m2025-12-03T15:13:58.322126Z[0m [32m INFO[0m ghost commit captured: 08b04e8aeb84ea4990b6bed7756ad714f8e8e897
+[2m2025-12-03T15:13:58.322129Z[0m [32m INFO[0m ghost snapshot gate marked ready
+[2m2025-12-03T15:14:04.279467Z[0m [32m INFO[0m ToolCall: shell_command {"command":".specify/scripts/bash/check-prerequisites.sh --json","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:14:49.874733Z[0m [32m INFO[0m spawning ghost snapshot task
+[2m2025-12-03T15:14:50.012054Z[0m [32m INFO[0m ghost snapshot blocking task finished
+[2m2025-12-03T15:14:50.012070Z[0m [32m INFO[0m ghost commit captured: b1f7c47a9693d848c0680ff16f5a33f93362b6fb
+[2m2025-12-03T15:14:50.012073Z[0m [32m INFO[0m ghost snapshot gate marked ready
+[2m2025-12-03T15:14:59.687099Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,260p' specs/001-reality-tree-ui/spec.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:15:03.242839Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' specs/001-reality-tree-ui/research.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:15:05.492491Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' specs/001-reality-tree-ui/quickstart.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:15:37.765284Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls backend","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:15:40.501265Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls frontend","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:15:48.623813Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: specs/001-reality-tree-ui/tasks.md
+@@
+ 
+ ## Phase N: Polish & Cross-Cutting
+ 
+ **Purpose**: Docs, performance/accessibility, and smoke validation across surfaces.
+ 
+ - [ ] T027 Update docs (README.md, `specs/001-reality-tree-ui/quickstart.md`) with autosave cadence, AI consent flow, compose usage.
+ - [ ] T028 Review accessibility and performance (200-node canvas, `useGraphProfiler`) and tune `frontend/src/components/canvas/TreeCanvas.tsx` and `frontend/src/hooks/useGraphProfiler.ts`.
+ - [ ] T029 Validate compose stack via `make compose-smoke-up` and `./scripts/smoke_test.sh`; apply fixes in `docker-compose.local.yml` or `scripts/smoke_test.sh`.
++- [ ] T030 Run backend quality gates (Black/Ruff/mypy) per `backend/pyproject.toml` and fix findings in `backend/app/**`.
++- [ ] T031 Run frontend quality gates (ESLint/Prettier/tsc/Vitest) per `frontend/package.json` scripts and fix findings in `frontend/src/**`.
+ 
+ ---
+ 
+ ## Dependencies & Execution Order
+ 
+*** End Patch
+[2m2025-12-03T15:16:02.384008Z[0m [32m INFO[0m spawning ghost snapshot task
+[2m2025-12-03T15:16:02.520707Z[0m [32m INFO[0m ghost snapshot blocking task finished
+[2m2025-12-03T15:16:02.520723Z[0m [32m INFO[0m ghost commit captured: 305332855cb3f503b9b052ac616209a007522259
+[2m2025-12-03T15:16:02.520727Z[0m [32m INFO[0m ghost snapshot gate marked ready
+[2m2025-12-03T15:16:05.672665Z[0m [32m INFO[0m ToolCall: shell_command {"command":".specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:16:09.006506Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' .specify/memory/constitution.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:17:25.983625Z[0m [32m INFO[0m spawning ghost snapshot task
+[2m2025-12-03T15:17:26.114823Z[0m [32m INFO[0m ghost snapshot blocking task finished
+[2m2025-12-03T15:17:26.114840Z[0m [32m INFO[0m ghost commit captured: bd9e028c2ecc7056242c8ae51199df6c74d736ac
+[2m2025-12-03T15:17:26.114844Z[0m [32m INFO[0m ghost snapshot gate marked ready
+[2m2025-12-03T15:17:42.663586Z[0m [32m INFO[0m ToolCall: shell_command {"command":".specify/scripts/bash/check-prerequisites.sh --json --paths-only","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:18:41.878151Z[0m [32m INFO[0m spawning ghost snapshot task
+[2m2025-12-03T15:18:42.015672Z[0m [32m INFO[0m ghost snapshot blocking task finished
+[2m2025-12-03T15:18:42.015689Z[0m [32m INFO[0m ghost commit captured: 7199991c90f01c6ce4f311fdce11cb2206e593a8
+[2m2025-12-03T15:18:42.015695Z[0m [32m INFO[0m ghost snapshot gate marked ready
+[2m2025-12-03T15:18:44.779614Z[0m [32m INFO[0m ToolCall: shell_command {"command":".specify/scripts/bash/check-prerequisites.sh --json --paths-only","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:18:47.531978Z[0m [32m INFO[0m ToolCall: shell_command {"command":"python3 - <<'PY'\nfrom pathlib import Path\nspec_path = Path('/Users/max/Code/brain_buddy/specs/001-reality-tree-ui/spec.md')\nprint(spec_path.read_text())\nPY","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:20:17.264986Z[0m [32m INFO[0m spawning ghost snapshot task
+[2m2025-12-03T15:20:17.401727Z[0m [32m INFO[0m ghost snapshot blocking task finished
+[2m2025-12-03T15:20:17.401745Z[0m [32m INFO[0m ghost commit captured: 06d8febe57469854ddd1768cb175bb793d2084c6
+[2m2025-12-03T15:20:17.401749Z[0m [32m INFO[0m ghost snapshot gate marked ready
+[2m2025-12-03T15:20:19.622426Z[0m [32m INFO[0m ToolCall: shell_command {"command":".specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:20:22.220283Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls /Users/max/Code/brain_buddy/specs/001-reality-tree-ui","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:20:25.902461Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls /Users/max/Code/brain_buddy/specs/001-reality-tree-ui/checklists","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:20:29.890522Z[0m [32m INFO[0m ToolCall: shell_command {"command":"python - <<'PY'\nfrom pathlib import Path\np = Path('/Users/max/Code/brain_buddy/specs/001-reality-tree-ui/checklists/requirements.md')\ntext=p.read_text().splitlines()\nfrom collections import Counter\nc=Counter()\nfor line in text:\n    if line.strip().startswith('- [ ]'):\n        c['total']+=1;c['inc']+=1\n    elif line.strip().startswith(('- [X]','- [x]')):\n        c['total']+=1;c['comp']+=1\nprint(c)\nPY","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:20:34.439500Z[0m [32m INFO[0m ToolCall: shell_command {"command":"python3 - <<'PY'\nfrom pathlib import Path\np = Path('/Users/max/Code/brain_buddy/specs/001-reality-tree-ui/checklists/requirements.md')\ntext=p.read_text().splitlines()\nfrom collections import Counter\nc=Counter()\nfor line in text:\n    if line.strip().startswith('- [ ]'):\n        c['total']+=1;c['inc']+=1\n    elif line.strip().startswith(('- [X]','- [x]')):\n        c['total']+=1;c['comp']+=1\nprint(c)\nPY","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:20:38.612654Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' /Users/max/Code/brain_buddy/specs/001-reality-tree-ui/tasks.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:20:41.946447Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' /Users/max/Code/brain_buddy/specs/001-reality-tree-ui/plan.md","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:20:46.810533Z[0m [32m INFO[0m ToolCall: shell_command {"command":"git rev-parse --git-dir 2>/dev/null","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:20:50.689452Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls -a | grep ignore","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:20:53.838768Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls .eslintrc* eslint.config.*","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:20:57.712748Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls frontend | grep eslint","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:21:05.784201Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls frontend/src/stores","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:21:08.548381Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' frontend/src/stores/treeStore.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:21:13.728932Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '200,400p' frontend/src/stores/treeStore.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:21:24.412750Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' frontend/src/stores/uiStore.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:21:28.303348Z[0m [32m INFO[0m ToolCall: shell_command {"command":"ls frontend/src/stores/__tests__","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:21:32.828840Z[0m [32m INFO[0m ToolCall: shell_command {"command":"sed -n '1,200p' frontend/src/stores/__tests__/treeStore.test.ts","workdir":"/Users/max/Code/brain_buddy"}
+[2m2025-12-03T15:21:47.207348Z[0m [32m INFO[0m ToolCall: apply_patch *** Begin Patch
+*** Update File: specs/001-reality-tree-ui/tasks.md
+@@
+ 
+  - [X] T005 Sync backend tree schemas/routes to `contracts/tree-api.md` in `backend/app/schemas/api.py` and `backend/app/api/routes.py`.
+  - [X] T006 Add backend contract tests for tree list/detail/import/export in `backend/tests/api/test_trees.py`.
+  - [X] T007 Update frontend API types/clients to contract in `frontend/src/api/types.ts` and `frontend/src/api/client.ts`.
+  - [X] T008 Add frontend API hook tests for import/export/list in `frontend/src/api/__tests__/hooks.test.ts`.
+  - [X] T009 Implement relation cycle/direction validation helper in `backend/app/utils/identifiers.py` and `backend/app/services/tree_service.py`.
+- - [ ] T010 Scaffold tree/UI stores for state, selection, and hotkey plumbing in `frontend/src/stores/treeStore.ts` and `frontend/src/stores/uiStore.ts`.
++ - [X] T010 Scaffold tree/UI stores for state, selection, and hotkey plumbing in `frontend/src/stores/treeStore.ts` and `frontend/src/stores/uiStore.ts`.
+*** End Patch
