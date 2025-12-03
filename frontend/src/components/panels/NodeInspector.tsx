@@ -1,9 +1,9 @@
-import { useLayoutEffect, useState } from "react";
+import { useLayoutEffect, useMemo, useState } from "react";
 import { twMerge } from "tailwind-merge";
 
-import { useDeleteNode, useUpdateNode, useValidation, useValidationHistory } from "../../api/hooks";
-import type { ValidationResponse } from "../../api/types";
-import type { GraphNode } from "../../stores/treeStore";
+import { hasApiKey } from "../../api/client";
+import { useAiFeedback, useDeleteNode, useUpdateNode, useValidation, useValidationHistory } from "../../api/hooks";
+import type { AiFeedbackResponse, ValidationResponse } from "../../api/types";
 import { useTreeStore } from "../../stores/treeStore";
 import { useUiStore } from "../../stores/uiStore";
 import { getErrorMessage } from "../../utils/error";
@@ -25,10 +25,19 @@ export function NodeInspector(): JSX.Element {
   const pushToast = useUiStore((state) => state.pushToast);
 
   const [label, setLabel] = useState(node?.label ?? "");
+  const [nodeType, setNodeType] = useState(node?.type ?? "regular");
+  const [highlightState, setHighlightState] = useState(node?.highlightState ?? "none");
+  const [consent, setConsent] = useState(false);
+  const [feedback, setFeedback] = useState<AiFeedbackResponse | null>(null);
 
   useLayoutEffect(() => {
     setLabel(node?.label ?? "");
-  }, [node?.id, node?.label]);
+    setNodeType(node?.type ?? "regular");
+    setHighlightState(node?.highlightState ?? "none");
+    setFeedback(null);
+  }, [node?.id, node?.label, node?.type, node?.highlightState]);
+
+  const isSignedIn = useMemo(() => hasApiKey(), []);
 
   if (!activeTreeId) {
     return <InspectorPlaceholder message="Select a tree to inspect nodes." />;
@@ -42,6 +51,7 @@ export function NodeInspector(): JSX.Element {
   const deleteNodeMutation = useDeleteNode(activeTreeId);
   const validationMutation = useValidation(activeTreeId);
   const historyQuery = useValidationHistory(activeTreeId, node.id);
+  const aiFeedbackMutation = useAiFeedback(activeTreeId);
 
   const handleLabelSubmit = () => {
     const trimmed = label.trim();
@@ -54,8 +64,7 @@ export function NodeInspector(): JSX.Element {
     const token = beginOptimisticChange("rename-node");
     upsertNode({
       ...node,
-      label: trimmed,
-      metadata: { ...node.metadata, updatedAt: new Date().toISOString() }
+      label: trimmed
     });
 
     updateNodeMutation.mutate(
@@ -78,6 +87,62 @@ export function NodeInspector(): JSX.Element {
             description: getErrorMessage(error),
             variant: "error",
             duration: 6000
+          });
+        }
+      }
+    );
+  };
+
+  const handleTypeChange = (nextType: typeof nodeType) => {
+    setNodeType(nextType);
+    pushSnapshot();
+    const token = beginOptimisticChange("update-node-type");
+    upsertNode({ ...node, type: nextType });
+    updateNodeMutation.mutate(
+      { nodeId: node.id, payload: { type: nextType } },
+      {
+        onSuccess: () => {
+          resolveOptimisticChange(token);
+          pushToast({
+            title: "Node updated",
+            description: "Type saved.",
+            variant: "success",
+            duration: 2000
+          });
+        },
+        onError: (error) => {
+          rollbackOptimisticChange(token);
+          setNodeType(node.type);
+          pushToast({
+            title: "Failed to update node",
+            description: getErrorMessage(error),
+            variant: "error",
+            duration: 6000
+          });
+        }
+      }
+    );
+  };
+
+  const handleHighlightChange = (next: typeof highlightState) => {
+    setHighlightState(next);
+    pushSnapshot();
+    const token = beginOptimisticChange("update-highlight");
+    upsertNode({ ...node, highlightState: next });
+    updateNodeMutation.mutate(
+      { nodeId: node.id, payload: { highlight_state: next } },
+      {
+        onSuccess: () => {
+          resolveOptimisticChange(token);
+        },
+        onError: (error) => {
+          rollbackOptimisticChange(token);
+          setHighlightState(node.highlightState);
+          pushToast({
+            title: "Failed to update highlight",
+            description: getErrorMessage(error),
+            variant: "error",
+            duration: 5000
           });
         }
       }
@@ -126,6 +191,7 @@ export function NodeInspector(): JSX.Element {
             variant: "success",
             duration: 3500
           });
+          historyQuery.refetch();
         },
         onError: (error) => {
           pushToast({
@@ -139,43 +205,37 @@ export function NodeInspector(): JSX.Element {
     );
   };
 
-  const handleHighlightToggle = () => {
-    const nextHighlight = !node.visual?.highlight;
-    const updatedVisual: GraphNode["visual"] = {
-      color: node.visual?.color ?? null,
-      highlight: nextHighlight
-    };
+  const handleAiFeedback = () => {
+    if (!isSignedIn) {
+      pushToast({
+        title: "Sign in required",
+        description: "Add your API key to request AI feedback.",
+        variant: "warning",
+        duration: 5000
+      });
+      return;
+    }
 
-    const next: GraphNode = {
-      ...node,
-      visual: updatedVisual
-    };
+    if (!consent) {
+      pushToast({
+        title: "Consent required",
+        description: "Confirm consent before sending your tree to the AI provider.",
+        variant: "warning",
+        duration: 4500
+      });
+      return;
+    }
 
-    pushSnapshot();
-    const token = beginOptimisticChange("toggle-highlight");
-    upsertNode(next);
-
-    updateNodeMutation.mutate(
+    aiFeedbackMutation.mutate(
+      { consent: true, request_id: `req-${activeTreeId}` },
       {
-        nodeId: node.id,
-        payload: {
-          visual: {
-            color: updatedVisual?.color ?? undefined,
-            highlight: updatedVisual?.highlight ?? false
-          }
-        }
-      },
-      {
-        onSuccess: () => {
-          resolveOptimisticChange(token);
-        },
-        onError: (error) => {
-          rollbackOptimisticChange(token);
+        onSuccess: (result) => {
+          setFeedback(result);
           pushToast({
-            title: "Failed to update highlight",
-            description: getErrorMessage(error),
-            variant: "error",
-            duration: 5000
+            title: "AI feedback ready",
+            description: result.summary ?? "Summary available",
+            variant: "success",
+            duration: 4000
           });
         }
       }
@@ -202,59 +262,47 @@ export function NodeInspector(): JSX.Element {
           className="w-full rounded-lg border border-slate-700 bg-surface-base px-3 py-2 text-sm text-slate-100 shadow-inner focus:border-brand-primary focus:outline-none"
         />
         <p className="text-xs text-slate-500">
-          Incoming relations: <strong>{node.incomingCount}</strong>, Outgoing relations: <strong>{node.outgoingCount}</strong>
+          Incoming relations: <strong>{node.relationCounts.up}</strong>, Outgoing relations: <strong>{node.relationCounts.down}</strong>
         </p>
       </div>
 
-      <div className="space-y-2 rounded-lg border border-slate-800 bg-surface-sunken/60 p-3 text-xs text-slate-400">
-        <MetadataRow label="Created" value={new Date(node.metadata.createdAt).toLocaleString()} />
-        <MetadataRow label="Updated" value={new Date(node.metadata.updatedAt).toLocaleString()} />
-        {node.metadata.author ? <MetadataRow label="Author" value={node.metadata.author} /> : null}
-      </div>
-
-      <div className="space-y-2 rounded-lg border border-slate-800 bg-surface-sunken/60 p-3">
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-medium text-slate-200">Visual Highlight</span>
-          <button
-            type="button"
-            onClick={handleHighlightToggle}
-            className={twMerge(
-              "rounded-md border px-2 py-1 text-xs font-medium transition",
-              node.visual?.highlight
-                ? "border-emerald-400/50 bg-emerald-500/20 text-emerald-200"
-                : "border-slate-700 bg-surface-base text-slate-200 hover:border-slate-500"
-            )}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-2 rounded-lg border border-slate-800 bg-surface-sunken/60 p-3">
+          <label htmlFor="node-type" className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+            Node Type
+          </label>
+          <select
+            id="node-type"
+            value={nodeType}
+            onChange={(event) => handleTypeChange(event.target.value as typeof nodeType)}
+            className="w-full rounded-md border border-slate-700 bg-surface-base px-3 py-2 text-sm text-slate-100 shadow-inner focus:border-brand-primary focus:outline-none"
           >
-            {node.visual?.highlight ? "Enabled" : "Enable"}
-          </button>
+            <option value="undesired_effect">Undesired effect</option>
+            <option value="cause">Cause</option>
+            <option value="regular">Regular</option>
+          </select>
         </div>
-        {node.visual?.color ? (
-          <div className="flex items-center gap-2 text-xs text-slate-400">
-            <span>Accent:</span>
-            <span
-              className="inline-block h-3 w-6 rounded"
-              style={{ backgroundColor: node.visual.color ?? "#38bdf8" }}
-            />
-          </div>
-        ) : (
-          <p className="text-xs text-slate-500">No custom color set</p>
-        )}
+
+        <div className="space-y-2 rounded-lg border border-slate-800 bg-surface-sunken/60 p-3">
+          <label htmlFor="node-highlight" className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+            Highlight State
+          </label>
+          <select
+            id="node-highlight"
+            value={highlightState}
+            onChange={(event) => handleHighlightChange(event.target.value as typeof highlightState)}
+            className="w-full rounded-md border border-slate-700 bg-surface-base px-3 py-2 text-sm text-slate-100 shadow-inner focus:border-brand-primary focus:outline-none"
+          >
+            <option value="none">None</option>
+            <option value="cause_candidate">Cause candidate</option>
+            <option value="effect_spanning">Effect spanning</option>
+          </select>
+        </div>
       </div>
 
       <div className="space-y-2 rounded-lg border border-slate-800 bg-surface-sunken/60 p-3">
         <span className="text-sm font-medium text-slate-200">Validation</span>
-        {node.validation ? (
-          <div className="text-xs text-slate-400">
-            <MetadataRow label="Confidence" value={`${node.validation.confidence}%`} />
-            <MetadataRow label="Provider" value={node.validation.provider} />
-            <MetadataRow
-              label="Last checked"
-              value={new Date(node.validation.lastChecked).toLocaleString()}
-            />
-          </div>
-        ) : (
-          <p className="text-xs text-slate-500">No validation results yet.</p>
-        )}
+        <p className="text-xs text-slate-500">Run validation against the selected provider and review history.</p>
         <div className="flex items-center gap-2 pt-2">
           <button
             type="button"
@@ -278,6 +326,57 @@ export function NodeInspector(): JSX.Element {
         />
       </div>
 
+      <div className="space-y-2 rounded-lg border border-emerald-900/60 bg-emerald-950/40 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <span className="text-sm font-semibold text-emerald-100">AI Feedback</span>
+            <p className="text-xs text-emerald-200/80">Request a quick summary and recommendations.</p>
+          </div>
+          {!isSignedIn && <span className="rounded-full bg-amber-500/20 px-2 py-1 text-[10px] font-semibold text-amber-200">Requires API key</span>}
+        </div>
+
+        <label className="flex cursor-pointer items-start gap-2 text-xs text-emerald-50/90">
+          <input
+            type="checkbox"
+            checked={consent}
+            onChange={(event) => setConsent(event.target.checked)}
+            className="mt-1 h-4 w-4 rounded border-emerald-700 bg-emerald-950 text-emerald-400 focus:ring-emerald-400"
+          />
+          <span>I consent to send the current tree to the AI provider for analysis.</span>
+        </label>
+
+        <div className="flex items-center gap-2 pt-2">
+          <button
+            type="button"
+            onClick={handleAiFeedback}
+            disabled={!consent || aiFeedbackMutation.isPending}
+            className={twMerge(
+              "rounded-md bg-emerald-500/90 px-3 py-2 text-xs font-semibold text-emerald-950 transition",
+              (!consent || aiFeedbackMutation.isPending) && "pointer-events-none opacity-60",
+              aiFeedbackMutation.isPending ? "animate-pulse" : "hover:bg-emerald-400"
+            )}
+          >
+            {aiFeedbackMutation.isPending ? "Requesting…" : "Request Feedback"}
+          </button>
+          {feedback?.status === "success" && (
+            <span className="text-[11px] text-emerald-200/80">{feedback.recommendations.length} tips ready</span>
+          )}
+        </div>
+
+        {feedback && (
+          <div className="rounded-md border border-emerald-800/60 bg-emerald-950/70 p-3 text-sm text-emerald-50">
+            {feedback.summary && <p className="text-emerald-100">{feedback.summary}</p>}
+            {feedback.recommendations.length > 0 && (
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-emerald-100/90">
+                {feedback.recommendations.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className="flex gap-3">
         <button
           type="button"
@@ -295,15 +394,6 @@ function InspectorPlaceholder({ message }: { message: string }): JSX.Element {
   return (
     <div className="rounded-lg border border-dashed border-slate-700 bg-surface-sunken/40 p-4 text-sm text-slate-500">
       {message}
-    </div>
-  );
-}
-
-function MetadataRow({ label, value }: { label: string; value: string }): JSX.Element {
-  return (
-    <div className="flex justify-between gap-4">
-      <span className="text-xs uppercase tracking-wide text-slate-500">{label}</span>
-      <span className="text-xs text-slate-300">{value}</span>
     </div>
   );
 }

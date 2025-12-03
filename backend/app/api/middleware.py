@@ -1,4 +1,5 @@
 """Custom FastAPI middleware for Brain Buddy."""
+
 from __future__ import annotations
 
 import uuid
@@ -44,7 +45,9 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         self.logger.info("Blocked request without valid API key for %s", path)
-        payload = ErrorResponse(message="Missing or invalid API key.", detail={"header": self.header_name})
+        payload = ErrorResponse(
+            message="Missing or invalid API key.", detail={"header": self.header_name}
+        )
         response = JSONResponse(status_code=401, content=payload.model_dump())
         response.headers["WWW-Authenticate"] = "API-Key"
         return response
@@ -58,7 +61,9 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
         self.logger = get_logger(__name__)
 
     async def dispatch(self, request: Request, call_next):
-        incoming = request.headers.get(CORRELATION_HEADER) or request.headers.get("X-Request-ID")
+        incoming = request.headers.get(CORRELATION_HEADER) or request.headers.get(
+            "X-Request-ID"
+        )
         correlation_id = incoming or uuid.uuid4().hex
         token = set_correlation_id(correlation_id)
         request.state.correlation_id = correlation_id
@@ -66,7 +71,9 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
         try:
             response = await call_next(request)
         except Exception:
-            self.logger.exception("Unhandled exception for %s %s", request.method, request.url.path)
+            self.logger.exception(
+                "Unhandled exception for %s %s", request.method, request.url.path
+            )
             raise
         finally:
             reset_correlation_id(token)

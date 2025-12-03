@@ -1,4 +1,5 @@
 """Lightweight dependency container for application services."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

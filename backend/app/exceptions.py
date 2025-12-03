@@ -1,4 +1,5 @@
 """Custom exception hierarchy for Brain Buddy backend."""
+
 from __future__ import annotations
 
 

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 
-from app.schemas import TreeCreateRequest, TreeUpdateRequest
+from app.schemas import TreeCreateRequest, TreeMetadata, TreeUpdateRequest
 
 
 def test_get_tree_uses_cache(tree_service, monkeypatch) -> None:
-    payload = TreeCreateRequest(title="Cached Tree", description=None)
+    payload = TreeCreateRequest(name="Cached Tree")
     tree = tree_service.create_tree(payload)
 
     load_calls: list[str] = []
@@ -32,11 +32,10 @@ def test_get_tree_uses_cache(tree_service, monkeypatch) -> None:
 
 
 def test_create_and_retrieve_tree(tree_service) -> None:
-    payload = TreeCreateRequest(title="Test Tree", description="Sample")
+    payload = TreeCreateRequest(name="Test Tree")
     tree = tree_service.create_tree(payload)
 
     assert tree.title == "Test Tree"
-    assert tree.description == "Sample"
     assert tree.nodes == []
     assert tree.relations == []
 
@@ -46,20 +45,32 @@ def test_create_and_retrieve_tree(tree_service) -> None:
 
 
 def test_list_and_update_tree(tree_service) -> None:
-    first = tree_service.create_tree(TreeCreateRequest(title="First", description=None))
-    _second = tree_service.create_tree(TreeCreateRequest(title="Second", description=None))
+    first = tree_service.create_tree(TreeCreateRequest(name="First"))
+    _second = tree_service.create_tree(TreeCreateRequest(name="Second"))
 
     entries = tree_service.list_trees()
     assert len(entries) == 2
     assert {entry.id for entry in entries} == {first.id, _second.id}
 
-    updated = tree_service.update_tree(first.id, TreeUpdateRequest(description="Updated"))
-    assert updated.description == "Updated"
+    metadata = TreeMetadata.from_timestamps(
+        created_at=first.created_at, updated_at=first.updated_at
+    )
+    updated = tree_service.update_tree(
+        first.id,
+        TreeUpdateRequest(
+            name="Updated First",
+            metadata=metadata,
+            nodes=[],
+            relations=[],
+            owner_id=None,
+        ),
+    )
+    assert updated.title == "Updated First"
     assert updated.updated_at >= updated.created_at
 
 
 def test_delete_tree(tree_service) -> None:
-    tree = tree_service.create_tree(TreeCreateRequest(title="Deletable", description=None))
+    tree = tree_service.create_tree(TreeCreateRequest(name="Deletable"))
     tree_service.delete_tree(tree.id)
 
     entries = tree_service.list_trees()
@@ -67,7 +78,7 @@ def test_delete_tree(tree_service) -> None:
 
 
 def test_get_tree_ignores_unknown_persisted_fields(tree_service) -> None:
-    tree = tree_service.create_tree(TreeCreateRequest(title="Legacy Compatible", description=None))
+    tree = tree_service.create_tree(TreeCreateRequest(name="Legacy Compatible"))
     tree_service._cache.clear()
 
     tree_path = tree_service.tree_repo.tree_path(tree.id)

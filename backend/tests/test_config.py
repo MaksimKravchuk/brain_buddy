@@ -1,4 +1,5 @@
 """Tests for application configuration helpers."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -17,7 +18,9 @@ def reset_config_cache() -> None:
     get_config.cache_clear()  # type: ignore[attr-defined]
 
 
-def test_get_config_uses_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_config_uses_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("BRAIN_BUDDY_ENV", "test")
     monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BRAIN_BUDDY_LOG_LEVEL", "debug")

@@ -23,11 +23,20 @@ type ToastPayload = Omit<Toast, "id" | "createdAt" | "duration"> & {
   duration?: number;
 };
 
+export interface HotkeyBinding {
+  id: string;
+  combo: string;
+  description: string;
+  handler: () => void;
+}
+
 interface UiStoreState {
   isSidePanelCollapsed: boolean;
   inspectorTab: InspectorTab;
   modals: Record<ModalKey, boolean>;
   toasts: Toast[];
+  hotkeys: Record<string, HotkeyBinding>;
+  lastShortcut: string | null;
   pushToast(toast: ToastPayload): string;
   dismissToast(id: string): void;
   clearToasts(): void;
@@ -35,6 +44,9 @@ interface UiStoreState {
   toggleSidePanel(collapsed?: boolean): void;
   openModal(key: ModalKey): void;
   closeModal(key: ModalKey): void;
+  registerHotkey(binding: HotkeyBinding): void;
+  unregisterHotkey(id: string): void;
+  triggerHotkey(combo: string): boolean;
 }
 
 function generateId(): string {
@@ -52,6 +64,8 @@ export const useUiStore = create<UiStoreState>((set, get) => ({
     deleteTree: false,
     manageVersions: false
   },
+  hotkeys: {},
+  lastShortcut: null,
   toasts: [],
 
   pushToast(payload) {
@@ -108,5 +122,32 @@ export const useUiStore = create<UiStoreState>((set, get) => ({
     set((state) => ({
       modals: { ...state.modals, [key]: false }
     }));
+  },
+
+  registerHotkey(binding) {
+    set((state) => ({
+      hotkeys: { ...state.hotkeys, [binding.id]: binding }
+    }));
+  },
+
+  unregisterHotkey(id) {
+    set((state) => {
+      if (!state.hotkeys[id]) {
+        return {};
+      }
+      const next = { ...state.hotkeys };
+      delete next[id];
+      return { hotkeys: next };
+    });
+  },
+
+  triggerHotkey(combo) {
+    const binding = Object.values(get().hotkeys).find((item) => item.combo.toLowerCase() === combo.toLowerCase());
+    if (!binding) {
+      return false;
+    }
+    binding.handler();
+    set(() => ({ lastShortcut: combo }));
+    return true;
   }
 }));

@@ -1,14 +1,17 @@
 """Logging configuration for the Brain Buddy backend."""
+
 from __future__ import annotations
 
 import logging
 import logging.config
 from contextvars import ContextVar, Token
-from typing import Any, Mapping
+from typing import Any
 
 from .config import AppConfig, get_config
 
-DEFAULT_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(correlation_id)s | %(message)s"
+DEFAULT_FORMAT = (
+    "%(asctime)s | %(levelname)-8s | %(name)s | %(correlation_id)s | %(message)s"
+)
 DEFAULT_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 _correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="-")
@@ -40,7 +43,7 @@ def get_correlation_id() -> str:
     return _correlation_id_var.get("-")
 
 
-def build_logging_dict(level: str) -> Mapping[str, Any]:
+def build_logging_dict(level: str) -> dict[str, Any]:
     """Create a dictionary config for Python's logging module."""
 
     return {

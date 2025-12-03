@@ -1,8 +1,9 @@
 """Prompt builder for validation workflow."""
+
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from app.schemas.common import ValidationState
 from app.schemas.domain import NodeDocument, RelationDocument, TreeDocument
@@ -36,7 +37,9 @@ def summarize_validation_state(state: ValidationState | None) -> str:
 
     if not state:
         return "None"
-    return f"{state.confidence}% via {state.provider} on {state.last_checked.isoformat()}"
+    return (
+        f"{state.confidence}% via {state.provider} on {state.last_checked.isoformat()}"
+    )
 
 
 def truncate(value: str | None, limit: int = TRUNCATE_LIMIT) -> str:
@@ -67,8 +70,8 @@ def _build_downstream_chain(tree: TreeDocument, node: NodeDocument) -> list[Chai
         if not options:
             break
         relation = options[0]
-        cause = nodes.get(relation.target_id)
-        effect = nodes.get(relation.source_id)
+        effect = nodes.get(relation.target_id)
+        cause = nodes.get(relation.source_id)
         if not cause or not effect:
             break
         steps.append(
@@ -102,8 +105,8 @@ def _build_upstream_chain(tree: TreeDocument, node: NodeDocument) -> list[ChainS
         if not options:
             break
         relation = options[0]
-        effect = nodes.get(relation.source_id)
-        cause = nodes.get(relation.target_id)
+        effect = nodes.get(relation.target_id)
+        cause = nodes.get(relation.source_id)
         if not effect or not cause:
             break
         steps.append(

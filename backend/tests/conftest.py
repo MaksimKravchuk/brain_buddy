@@ -1,14 +1,14 @@
 """Common pytest fixtures for backend tests."""
+
 from __future__ import annotations
 
-import os
 from collections.abc import Generator
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.container import build_container, Container
+from app.container import Container, build_container
 from app.core import get_config
 from app.main import create_app
 
@@ -51,7 +51,9 @@ def validation_service(container: Container):
 
 
 @pytest.fixture
-def api_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient, None, None]:
+def api_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Generator[TestClient, None, None]:
     data_root = tmp_path / "api-data"
     monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(data_root))
     get_config.cache_clear()
@@ -64,7 +66,9 @@ def api_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[Tes
 
 
 @pytest.fixture
-def secured_api_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient, None, None]:
+def secured_api_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Generator[TestClient, None, None]:
     data_root = tmp_path / "secure-api-data"
     monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(data_root))
     monkeypatch.setenv("BRAIN_BUDDY_API_KEY", "test-key")

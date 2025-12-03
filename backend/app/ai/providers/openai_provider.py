@@ -1,4 +1,5 @@
 """OpenAI-backed validation provider (placeholder implementation)."""
+
 from __future__ import annotations
 
 import json
@@ -30,7 +31,9 @@ class OpenAIValidationProvider(ValidationProvider):
                 return env_value
         env_value = os.getenv("OPENAI_API_KEY")
         if not env_value:
-            raise ValidationFailure("OpenAI provider requires OPENAI_API_KEY or provider config api_key_ref.")
+            raise ValidationFailure(
+                "OpenAI provider requires OPENAI_API_KEY or provider config api_key_ref."
+            )
         return env_value
 
     def validate(
@@ -41,7 +44,9 @@ class OpenAIValidationProvider(ValidationProvider):
         config: ProviderConfig | None = None,
     ) -> ProviderResult:
         api_key = self._resolve_api_key(config)
-        model = (config.model if config and config.model else self.model_fallback) or self.model_fallback
+        model = (
+            config.model if config and config.model else self.model_fallback
+        ) or self.model_fallback
 
         payload = {
             "model": model,
@@ -58,9 +63,13 @@ class OpenAIValidationProvider(ValidationProvider):
 
         try:
             with httpx.Client(timeout=30) as client:
-                response = client.post(OPENAI_CHAT_COMPLETIONS_URL, json=payload, headers=headers)
+                response = client.post(
+                    OPENAI_CHAT_COMPLETIONS_URL, json=payload, headers=headers
+                )
                 response.raise_for_status()
-        except httpx.HTTPError as exc:  # pragma: no cover - network conditions not exercised in tests
+        except (
+            httpx.HTTPError
+        ) as exc:  # pragma: no cover - network conditions not exercised in tests
             raise ValidationFailure(f"OpenAI request failed: {exc!s}") from exc
 
         data: dict[str, Any] = response.json()
@@ -72,7 +81,9 @@ class OpenAIValidationProvider(ValidationProvider):
         try:
             parsed = json.loads(content)
         except json.JSONDecodeError as exc:
-            raise ValidationFailure("OpenAI response did not include valid JSON.") from exc
+            raise ValidationFailure(
+                "OpenAI response did not include valid JSON."
+            ) from exc
 
         confidence = int(parsed.get("confidence", 0))
         verdict = str(parsed.get("verdict", "uncertain"))

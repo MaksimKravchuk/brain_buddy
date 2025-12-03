@@ -1,4 +1,7 @@
+import { useEffect } from "react";
 import type { ReactNode } from "react";
+
+import { useTreeStore } from "../../stores/treeStore";
 
 interface LayoutProps {
   header: ReactNode;
@@ -8,6 +11,23 @@ interface LayoutProps {
 }
 
 export function Layout({ header, sidebar, children, footer }: LayoutProps): JSX.Element {
+  const hasPendingSync = useTreeStore((state) => state.pendingSync);
+
+  useEffect(() => {
+    if (!hasPendingSync) {
+      return;
+    }
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "You have unsynced changes.";
+      return event.returnValue;
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [hasPendingSync]);
+
   return (
     <div className="flex min-h-screen bg-surface-base text-slate-100">
       <div className="flex flex-1 flex-col">

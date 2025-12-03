@@ -1,46 +1,30 @@
 import { create } from "zustand";
 
+import { apiClient, getOwnerId, hasApiKey } from "../api/client";
+
 import type {
   NodeResponse,
   RelationResponse,
   TreeDetailResponse,
-  ValidationState,
+  TreeUpdateRequest,
   VersionListItem
 } from "../api/types";
 
 export interface GraphNode {
   id: string;
   label: string;
+  type: NodeResponse["type"];
   position: { x: number; y: number };
-  metadata: {
-    createdAt: string;
-    updatedAt: string;
-    author?: string | null;
-  };
-  visual?: {
-    color?: string | null;
-    highlight?: boolean;
-  } | null;
-  validation?: {
-    confidence: number;
-    provider: string;
-    lastChecked: string;
-  } | null;
-  incomingCount: number;
-  outgoingCount: number;
+  highlightState: NodeResponse["highlight_state"];
+  relationCounts: { up: number; down: number };
 }
 
 export interface GraphRelation {
   id: string;
-  sourceId: string;
-  targetId: string;
-  questionLabel: string;
-  notes?: string | null;
-  metadata: {
-    createdAt: string;
-    updatedAt: string;
-    author?: string | null;
-  };
+  fromId: string;
+  toId: string;
+  kind: RelationResponse["kind"];
+  createdAt: string;
 }
 
 export interface GraphVersion {
@@ -62,10 +46,12 @@ export interface GraphVersion {
 
 export interface TreeMetadata {
   id: string;
-  title: string;
-  description?: string | null;
+  name: string;
+  version: number;
   createdAt: string;
   updatedAt: string;
+  ownerId?: string | null;
+  layout?: Record<string, unknown> | null;
 }
 
 interface GraphSnapshot {
@@ -99,6 +85,11 @@ interface TreeStoreState {
   redoStack: GraphSnapshot[];
   optimisticQueue: OptimisticChange[];
   maxHistory: number;
+  pendingSync: boolean;
+  lastChangeAt: number | null;
+  lastLocalSaveAt: string | null;
+  lastCloudSyncAt: string | null;
+  lastSyncError: string | null;
   setTree(tree: TreeDetailResponse): void;
   reset(): void;
   select(selection: SelectionState): void;
@@ -113,54 +104,62 @@ interface TreeStoreState {
   upsertRelation(relation: GraphRelation): void;
   removeRelation(relationId: string): void;
   setVersions(versions: GraphVersion[]): void;
+  flushPendingPersistence(): Promise<void>;
 }
+
+type TreeStoreSet = (partial: Partial<TreeStoreState> | ((state: TreeStoreState) => Partial<TreeStoreState>)) => void;
 
 export function mapNodeResponse(node: NodeResponse): GraphNode {
   return {
     id: node.id,
     label: node.label,
+    type: node.type,
     position: { ...node.position },
-    metadata: {
-      createdAt: node.metadata.created_at,
-      updatedAt: node.metadata.updated_at,
-      author: node.metadata.author ?? null
-    },
-    visual: node.visual
-      ? {
-          color: node.visual.color ?? null,
-          highlight: node.visual.highlight ?? false
-        }
-      : null,
-    validation: mapValidation(node.validation),
-    incomingCount: node.incoming_count,
-    outgoingCount: node.outgoing_count
-  };
-}
-
-function mapValidation(validation?: ValidationState | null) {
-  if (!validation) {
-    return null;
-  }
-
-  return {
-    confidence: validation.confidence,
-    provider: validation.provider,
-    lastChecked: validation.last_checked
+    highlightState: node.highlight_state,
+    relationCounts: {
+      up: node.relation_counts.up_count,
+      down: node.relation_counts.down_count
+    }
   };
 }
 
 export function mapRelationResponse(relation: RelationResponse): GraphRelation {
   return {
     id: relation.id,
-    sourceId: relation.source_id,
-    targetId: relation.target_id,
-    questionLabel: relation.question_label,
-    notes: relation.notes ?? null,
-    metadata: {
-      createdAt: relation.metadata.created_at,
-      updatedAt: relation.metadata.updated_at,
-      author: relation.metadata.author ?? null
+    fromId: relation.from_id,
+    toId: relation.to_id,
+    kind: relation.kind,
+    createdAt: relation.created_at
+  };
+}
+
+export const TREE_DRAFT_PREFIX = "brainbuddy:tree-draft:";
+
+const AUTOSAVE_DEBOUNCE_MS = 5000;
+
+const sessionOwnerId = getOwnerId();
+
+function toNodeResponse(node: GraphNode): NodeResponse {
+  return {
+    id: node.id,
+    label: node.label,
+    type: node.type,
+    position: { ...node.position },
+    highlight_state: node.highlightState,
+    relation_counts: {
+      up_count: node.relationCounts.up,
+      down_count: node.relationCounts.down
     }
+  };
+}
+
+function toRelationResponse(relation: GraphRelation): RelationResponse {
+  return {
+    id: relation.id,
+    from_id: relation.fromId,
+    to_id: relation.toId,
+    kind: relation.kind,
+    created_at: relation.createdAt
   };
 }
 
@@ -187,17 +186,19 @@ export function mapVersionResponse(version: VersionListItem): GraphVersion {
 
 function snapshotFromState(state: TreeStoreState): GraphSnapshot {
   return {
-    metadata: state.metadata ? { ...state.metadata } : null,
+    metadata: state.metadata
+      ? {
+          ...state.metadata,
+          layout: state.metadata.layout ? { ...state.metadata.layout } : state.metadata.layout
+        }
+      : null,
     nodes: state.nodes.map((node) => ({
       ...node,
       position: { ...node.position },
-      metadata: { ...node.metadata },
-      visual: node.visual ? { ...node.visual } : null,
-      validation: node.validation ? { ...node.validation } : null
+      relationCounts: { ...node.relationCounts }
     })),
     relations: state.relations.map((relation) => ({
-      ...relation,
-      metadata: { ...relation.metadata }
+      ...relation
     })),
     versions: state.versions.map((version) => ({
       ...version,
@@ -209,17 +210,19 @@ function snapshotFromState(state: TreeStoreState): GraphSnapshot {
 
 function applySnapshot(snapshot: GraphSnapshot) {
   return {
-    metadata: snapshot.metadata ? { ...snapshot.metadata } : null,
+    metadata: snapshot.metadata
+      ? {
+          ...snapshot.metadata,
+          layout: snapshot.metadata.layout ? { ...snapshot.metadata.layout } : snapshot.metadata.layout
+        }
+      : null,
     nodes: snapshot.nodes.map((node) => ({
       ...node,
       position: { ...node.position },
-      metadata: { ...node.metadata },
-      visual: node.visual ? { ...node.visual } : null,
-      validation: node.validation ? { ...node.validation } : null
+      relationCounts: { ...node.relationCounts }
     })),
     relations: snapshot.relations.map((relation) => ({
-      ...relation,
-      metadata: { ...relation.metadata }
+      ...relation
     })),
     versions: snapshot.versions.map((version) => ({
       ...version,
@@ -239,6 +242,207 @@ function generateId(): string {
 
 const initialSelection: SelectionState = { type: null, id: null };
 
+let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearAutosaveTimer() {
+  if (autosaveTimer) {
+    clearTimeout(autosaveTimer);
+    autosaveTimer = null;
+  }
+}
+
+function mapTreeDetail(state: TreeStoreState): TreeDetailResponse | null {
+  if (!state.activeTreeId || !state.metadata) {
+    return null;
+  }
+
+  const updatedAt = new Date().toISOString();
+  const ownerId = state.metadata.ownerId ?? sessionOwnerId ?? null;
+
+  return {
+    id: state.activeTreeId,
+    name: state.metadata.name,
+    metadata: {
+      version: state.metadata.version,
+      created_at: state.metadata.createdAt,
+      updated_at: updatedAt,
+      layout: state.metadata.layout ?? null,
+      owner_id: ownerId
+    },
+    nodes: state.nodes.map(toNodeResponse),
+    relations: state.relations.map(toRelationResponse),
+    owner_id: ownerId
+  };
+}
+
+function buildTreeUpdateRequest(detail: TreeDetailResponse) {
+  return {
+    name: detail.name,
+    metadata: detail.metadata,
+    nodes: detail.nodes,
+    relations: detail.relations,
+    owner_id: detail.owner_id ?? null
+  } satisfies TreeUpdateRequest;
+}
+
+function persistDraft(detail: TreeDetailResponse) {
+  if (typeof localStorage === "undefined") {
+    return false;
+  }
+  try {
+    localStorage.setItem(`${TREE_DRAFT_PREFIX}${detail.id}`, JSON.stringify(detail));
+    return true;
+  } catch (error) {
+    console.warn("Failed to persist draft", error);
+    return false;
+  }
+}
+
+async function persistTree(get: () => TreeStoreState, set: TreeStoreSet) {
+  const detail = mapTreeDetail(get());
+  if (!detail) {
+    return;
+  }
+
+  const ownerId = detail.owner_id ?? sessionOwnerId ?? null;
+  if (ownerId) {
+    detail.owner_id = ownerId;
+    detail.metadata.owner_id = ownerId;
+  }
+
+  clearAutosaveTimer();
+
+  const savedLocally = persistDraft(detail);
+
+  const timestamp = detail.metadata.updated_at;
+  let pendingSync = !savedLocally;
+  let lastSyncError: string | null = savedLocally ? null : "Local draft save failed";
+  let lastCloudSyncAt: string | null = null;
+
+  if (hasApiKey()) {
+    try {
+      await apiClient.updateTree(detail.id, buildTreeUpdateRequest(detail));
+      lastCloudSyncAt = timestamp;
+      pendingSync = false;
+      lastSyncError = null;
+    } catch (error) {
+      pendingSync = true;
+      lastSyncError = error instanceof Error ? error.message : "Cloud sync failed";
+    }
+  }
+
+  set((state) => ({
+    pendingSync,
+    lastLocalSaveAt: savedLocally ? timestamp : null,
+    lastCloudSyncAt,
+    lastSyncError,
+    metadata: state.metadata ? { ...state.metadata, updatedAt: timestamp } : state.metadata
+  }));
+}
+
+function scheduleAutosave(get: () => TreeStoreState, set: TreeStoreSet) {
+  clearAutosaveTimer();
+  if (!get().activeTreeId) {
+    return;
+  }
+  autosaveTimer = setTimeout(() => {
+    autosaveTimer = null;
+    void persistTree(get, set);
+  }, AUTOSAVE_DEBOUNCE_MS);
+}
+
+function withPendingSync(): Partial<TreeStoreState> {
+  return {
+    pendingSync: true,
+    lastChangeAt: Date.now(),
+    lastSyncError: null
+  };
+}
+
+function calculateRelationCounts(nodes: GraphNode[], relations: GraphRelation[]) {
+  const counts = new Map<string, { up: number; down: number }>();
+  nodes.forEach((node) => counts.set(node.id, { up: 0, down: 0 }));
+
+  relations.forEach((relation) => {
+    const from = counts.get(relation.fromId);
+    if (from) {
+      from.up += 1;
+    }
+    const to = counts.get(relation.toId);
+    if (to) {
+      to.down += 1;
+    }
+  });
+
+  return counts;
+}
+
+function reachesAllUndesiredEffects(
+  nodeId: string,
+  adjacency: Map<string, string[]>,
+  undesiredEffects: Set<string>
+) {
+  if (undesiredEffects.size === 0) {
+    return false;
+  }
+  const visited = new Set<string>();
+  const queue: string[] = [nodeId];
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (visited.has(current)) {
+      continue;
+    }
+    visited.add(current);
+    const next = adjacency.get(current) ?? [];
+    next.forEach((id) => {
+      if (!visited.has(id)) {
+        queue.push(id);
+      }
+    });
+  }
+
+  let covered = 0;
+  undesiredEffects.forEach((id) => {
+    if (visited.has(id)) {
+      covered += 1;
+    }
+  });
+
+  return covered === undesiredEffects.size;
+}
+
+function applyDerivedNodeState(nodes: GraphNode[], relations: GraphRelation[]) {
+  const counts = calculateRelationCounts(nodes, relations);
+  const adjacency = new Map<string, string[]>();
+  const undesiredEffects = new Set(nodes.filter((node) => node.type === "undesired_effect").map((n) => n.id));
+
+  relations.forEach((relation) => {
+    const current = adjacency.get(relation.fromId) ?? [];
+    current.push(relation.toId);
+    adjacency.set(relation.fromId, current);
+  });
+
+  return nodes.map((node) => {
+    const relationCounts = counts.get(node.id) ?? node.relationCounts;
+    const hasCauseCandidateSignal = relationCounts.up >= 3;
+    const effectSpanning = reachesAllUndesiredEffects(node.id, adjacency, undesiredEffects);
+
+    let highlightState: GraphNode["highlightState"] = "none";
+    if (effectSpanning) {
+      highlightState = "effect_spanning";
+    } else if (hasCauseCandidateSignal) {
+      highlightState = "cause_candidate";
+    }
+
+    return {
+      ...node,
+      relationCounts,
+      highlightState
+    };
+  });
+}
+
 export const useTreeStore = create<TreeStoreState>((set, get) => ({
   activeTreeId: null,
   metadata: null,
@@ -250,24 +454,40 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
   redoStack: [],
   optimisticQueue: [],
   maxHistory: 20,
+  pendingSync: false,
+  lastChangeAt: null,
+  lastLocalSaveAt: null,
+  lastCloudSyncAt: null,
+  lastSyncError: null,
 
   setTree(tree) {
+    const mappedRelations = tree.relations.map(mapRelationResponse);
+    const mappedNodes = applyDerivedNodeState(tree.nodes.map(mapNodeResponse), mappedRelations);
+    const ownerId = tree.owner_id ?? tree.metadata.owner_id ?? sessionOwnerId ?? null;
+
     set(() => ({
       activeTreeId: tree.id,
       metadata: {
         id: tree.id,
-        title: tree.title,
-        description: tree.description ?? null,
-        createdAt: tree.created_at,
-        updatedAt: tree.updated_at
+        name: tree.name,
+        version: tree.metadata.version,
+        createdAt: tree.metadata.created_at,
+        updatedAt: tree.metadata.updated_at,
+        ownerId,
+        layout: tree.metadata.layout ?? null
       },
-      nodes: tree.nodes.map(mapNodeResponse),
-      relations: tree.relations.map(mapRelationResponse),
-      versions: tree.versions.map(mapVersionResponse),
+      nodes: mappedNodes,
+      relations: mappedRelations,
+      versions: [],
       selection: initialSelection,
       undoStack: [],
       redoStack: [],
-      optimisticQueue: []
+      optimisticQueue: [],
+      pendingSync: false,
+      lastChangeAt: null,
+      lastLocalSaveAt: tree.metadata.updated_at,
+      lastCloudSyncAt: tree.metadata.updated_at,
+      lastSyncError: null
     }));
   },
 
@@ -281,8 +501,14 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
       selection: initialSelection,
       undoStack: [],
       redoStack: [],
-      optimisticQueue: []
+      optimisticQueue: [],
+      pendingSync: false,
+      lastChangeAt: null,
+      lastLocalSaveAt: null,
+      lastCloudSyncAt: null,
+      lastSyncError: null
     }));
+    clearAutosaveTimer();
   },
 
   select(selection) {
@@ -361,51 +587,73 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
   upsertNode(node) {
     set((state) => {
       const exists = state.nodes.findIndex((item) => item.id === node.id);
-      if (exists >= 0) {
-        const nextNodes = [...state.nodes];
-        nextNodes[exists] = node;
-        return { nodes: nextNodes };
-      }
-      return { nodes: [...state.nodes, node] };
+      const nextNodes = exists >= 0 ? state.nodes.map((item, idx) => (idx === exists ? node : item)) : [...state.nodes, node];
+      return {
+        nodes: applyDerivedNodeState(nextNodes, state.relations),
+        ...withPendingSync()
+      };
     });
+    scheduleAutosave(get, set);
   },
 
   removeNode(nodeId) {
-    set((state) => ({
-      nodes: state.nodes.filter((node) => node.id !== nodeId),
-      relations: state.relations.filter(
-        (relation) => relation.sourceId !== nodeId && relation.targetId !== nodeId
-      ),
-      selection:
-        state.selection.type === "node" && state.selection.id === nodeId ? initialSelection : state.selection
-    }));
+    set((state) => {
+      const remainingRelations = state.relations.filter(
+        (relation) => relation.fromId !== nodeId && relation.toId !== nodeId
+      );
+      const remainingNodes = state.nodes.filter((node) => node.id !== nodeId);
+      return {
+        nodes: applyDerivedNodeState(remainingNodes, remainingRelations),
+        relations: remainingRelations,
+        selection:
+          state.selection.type === "node" && state.selection.id === nodeId
+            ? initialSelection
+            : state.selection,
+        ...withPendingSync()
+      };
+    });
+    scheduleAutosave(get, set);
   },
 
   upsertRelation(relation) {
     set((state) => {
       const exists = state.relations.findIndex((item) => item.id === relation.id);
-      if (exists >= 0) {
-        const nextRelations = [...state.relations];
-        nextRelations[exists] = relation;
-        return { relations: nextRelations };
-      }
-      return { relations: [...state.relations, relation] };
+      const nextRelations =
+        exists >= 0
+          ? state.relations.map((item, idx) => (idx === exists ? relation : item))
+          : [...state.relations, relation];
+      return {
+        relations: nextRelations,
+        nodes: applyDerivedNodeState(state.nodes, nextRelations),
+        ...withPendingSync()
+      };
     });
+    scheduleAutosave(get, set);
   },
 
   removeRelation(relationId) {
-    set((state) => ({
-      relations: state.relations.filter((relation) => relation.id !== relationId),
-      selection:
-        state.selection.type === "relation" && state.selection.id === relationId
-          ? initialSelection
-          : state.selection
-    }));
+    set((state) => {
+      const nextRelations = state.relations.filter((relation) => relation.id !== relationId);
+      return {
+        relations: nextRelations,
+        nodes: applyDerivedNodeState(state.nodes, nextRelations),
+        selection:
+          state.selection.type === "relation" && state.selection.id === relationId
+            ? initialSelection
+            : state.selection,
+        ...withPendingSync()
+      };
+    });
+    scheduleAutosave(get, set);
   },
 
   setVersions(versions) {
     set(() => ({
       versions
     }));
+  },
+
+  async flushPendingPersistence() {
+    await persistTree(get, set);
   }
 }));
