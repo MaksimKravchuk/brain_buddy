@@ -1,5 +1,6 @@
+import { useMemo, useState } from "react";
 import type { NodeProps } from "reactflow";
-import { Handle, Position } from "reactflow";
+import { Handle, NodeResizer, Position } from "reactflow";
 import { twMerge } from "tailwind-merge";
 
 import type { GraphNode } from "../../stores/treeStore";
@@ -8,64 +9,71 @@ export interface BrainNodeData {
   node: GraphNode;
 }
 
+const HANDLE_POSITIONS: { id: string; position: Position }[] = [
+  { id: "top", position: Position.Top },
+  { id: "right", position: Position.Right },
+  { id: "bottom", position: Position.Bottom },
+  { id: "left", position: Position.Left }
+];
+
 export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Element {
   const { node } = data;
-  const typeStyles =
-    node.type === "undesired_effect"
-      ? {
-          badge: "bg-rose-500/20 text-rose-200 border border-rose-500/50",
-          container: "border-rose-500/30 bg-gradient-to-b from-rose-900/40 to-surface-raised"
-        }
-      : node.type === "cause"
-        ? {
-            badge: "bg-amber-500/20 text-amber-200 border border-amber-500/40",
-            container: "border-amber-500/30 bg-gradient-to-b from-amber-900/30 to-surface-raised"
-          }
-        : {
-            badge: "bg-sky-500/20 text-sky-200 border border-sky-500/40",
-            container: "border-sky-500/30 bg-gradient-to-b from-sky-900/30 to-surface-raised"
-          };
-  const highlightRing =
-    node.highlightState === "cause_candidate"
-      ? "ring-2 ring-amber-400/70 shadow-[0_0_0_6px_rgba(251,191,36,0.25)]"
-      : node.highlightState === "effect_spanning"
-        ? "ring-2 ring-rose-400/70 shadow-[0_0_0_6px_rgba(248,113,113,0.25)]"
-        : "";
+  const [isHovered, setIsHovered] = useState(false);
+  const showControls = selected || isHovered;
+
+  const baseHandleClass = useMemo(
+    () =>
+      twMerge(
+        "!h-3 !w-3 !rounded-full !border !border-slate-600/80 !bg-slate-100 shadow-sm transition-opacity duration-150",
+        showControls ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+      ),
+    [showControls]
+  );
 
   return (
     <div
       className={twMerge(
-        "group relative rounded-xl border px-4 py-3 text-left shadow-lg ring-1 ring-transparent transition-all duration-150",
-        typeStyles.container,
-        selected ? "border-brand-primary/80 shadow-glow ring-brand-primary/50" : "",
-        highlightRing
+        "group relative h-full min-h-[90px] min-w-[180px] rounded-l-2xl rounded-r-xl border border-slate-600/60 bg-slate-900/70 text-left shadow-lg transition-all duration-150",
+        selected ? "ring-2 ring-slate-200/60 shadow-glow" : "ring-1 ring-transparent"
       )}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
     >
-      <Handle
-        type="target"
-        position={Position.Top}
-        className="h-2 w-2 rounded-full bg-brand-secondary ring-2 ring-slate-900"
-      />
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        className="h-2 w-2 rounded-full bg-brand-primary ring-2 ring-slate-900"
+      <NodeResizer
+        minWidth={160}
+        minHeight={80}
+        isVisible={showControls}
+        handlePositions={["top", "right", "bottom", "left"]}
+        handleClassName="!h-2.5 !w-2.5 !rounded-full !border !border-slate-600/80 !bg-slate-100"
+        lineClassName="!border-slate-600/50"
       />
 
-      <div className="flex items-start justify-between gap-3">
-        <p className="max-w-[180px] break-words text-sm font-medium text-slate-100">{node.label}</p>
-        <span className={twMerge("rounded-full px-2 py-0.5 text-[11px] font-semibold", typeStyles.badge)}>
-          {node.type.replace("_", " ")}
-        </span>
-      </div>
+      {HANDLE_POSITIONS.map((handle) => (
+        <Handle
+          key={`${handle.id}-source`}
+          type="source"
+          id={`${handle.id}-source`}
+          position={handle.position}
+          className={baseHandleClass}
+        />
+      ))}
 
-      <div className="mt-3 flex items-center gap-3 text-xs text-slate-400">
-        <span className="flex items-center gap-1">
-          <span className="inline-flex h-2 w-2 rounded-full bg-brand-secondary/80" /> {node.relationCounts.up}
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="inline-flex h-2 w-2 rounded-full bg-brand-primary/80" /> {node.relationCounts.down}
-        </span>
+      {HANDLE_POSITIONS.map((handle) => (
+        <Handle
+          key={`${handle.id}-target`}
+          type="target"
+          id={`${handle.id}-target`}
+          position={handle.position}
+          className={baseHandleClass}
+        />
+      ))}
+
+      <div className="pointer-events-none absolute inset-y-0 left-0 w-2 rounded-l-2xl bg-slate-200/10" />
+
+      <div className="flex h-full w-full items-center justify-center px-4 py-3">
+        <p className="w-full break-words text-center font-medium leading-tight text-[clamp(12px,1.6vw,18px)] tracking-tight text-slate-50">
+          {node.label}
+        </p>
       </div>
     </div>
   );

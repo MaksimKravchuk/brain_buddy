@@ -10,7 +10,7 @@ def test_version_endpoints_and_export(api_client) -> None:
     tree_id = tree_resp.json()["id"]
 
     node_payload = NodeCreateRequest(
-        label="Root", type="regular", position=Position(x=0, y=0)
+        label="Root", type="child", position=Position(x=0, y=0)
     )
     node_resp = api_client.post(
         f"/api/trees/{tree_id}/nodes", json=node_payload.model_dump()

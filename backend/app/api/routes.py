@@ -318,7 +318,7 @@ def _node_response_from_tree(tree: TreeDocument, node_id: str) -> NodeResponse:
     return NodeResponse(
         id=node.id,
         label=node.label,
-        type=extra.get("type", "regular"),
+        type=extra.get("type", "child"),
         position=node.position,
         highlight_state=extra.get("highlight_state", "none"),
         relation_counts=RelationCounts(up_count=counts[0], down_count=counts[1]),

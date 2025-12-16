@@ -10,13 +10,12 @@ interface CreateNodeButtonProps {
 }
 
 const typeOptions: { value: GraphNode["type"]; label: string; accent: string }[] = [
-  { value: "undesired_effect", label: "Undesired effect", accent: "bg-rose-500/20 text-rose-100" },
-  { value: "cause", label: "Cause", accent: "bg-amber-500/20 text-amber-100" },
-  { value: "regular", label: "Regular", accent: "bg-sky-500/20 text-sky-100" }
+  { value: "parent", label: "Parent", accent: "bg-slate-200/10 text-slate-50" },
+  { value: "child", label: "Child", accent: "bg-slate-200/10 text-slate-50" }
 ];
 
 export function CreateNodeButton({ onCreate, disabled }: CreateNodeButtonProps): JSX.Element {
-  const [nodeType, setNodeType] = useState<GraphNode["type"]>("undesired_effect");
+  const [nodeType, setNodeType] = useState<GraphNode["type"]>("child");
   const [label, setLabel] = useState("");
 
   const activeAccent = useMemo(() => typeOptions.find((item) => item.value === nodeType)?.accent, [nodeType]);
@@ -25,7 +24,7 @@ export function CreateNodeButton({ onCreate, disabled }: CreateNodeButtonProps):
     const trimmed = label.trim();
     onCreate({
       type: nodeType,
-      label: trimmed || (nodeType === "undesired_effect" ? "Undesired effect" : nodeType === "cause" ? "Cause" : "Idea")
+      label: trimmed || (nodeType === "parent" ? "Parent" : "Child")
     });
     setLabel("");
   };
