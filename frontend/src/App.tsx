@@ -1,21 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ReactFlowProvider } from "reactflow";
 import "reactflow/dist/style.css";
 
 import { ApiError } from "./api/client";
-import type { TreeDetailResponse } from "./api/types";
+import type { TreeDetailResponse, TreeListItem } from "./api/types";
 import { useTree, useTrees, useTreeDownload, useTreeImportWithToasts } from "./api/hooks";
 import { TreeCanvas, type TreeCanvasHandle } from "./components/canvas/TreeCanvas";
-import { CanvasShell } from "./components/layout/CanvasShell";
-import { Layout } from "./components/layout/Layout";
-import { SidePanel } from "./components/layout/SidePanel";
-import { TopBar } from "./components/layout/TopBar";
 import { CreateTreeModal } from "./components/modals/CreateTreeModal";
-import { NodeInspector } from "./components/panels/NodeInspector";
-import { RelationInspector } from "./components/panels/RelationInspector";
-import { InspectorTabs } from "./components/panels/InspectorTabs";
-import { VersionPanel } from "./components/panels/VersionPanel";
-import { TreeSelector } from "./components/topbar/TreeSelector";
 import { ToastStack } from "./components/ui/ToastStack";
 import { useTreeStore } from "./stores/treeStore";
 import { useUiStore } from "./stores/uiStore";
@@ -37,7 +28,7 @@ export default function App(): JSX.Element {
   const activeTreeId = useTreeStore((state) => state.activeTreeId);
   const flushPendingPersistence = useTreeStore((state) => state.flushPendingPersistence);
   const pendingSync = useTreeStore((state) => state.pendingSync);
-  const inspectorTab = useUiStore((state) => state.inspectorTab);
+  const openModal = useUiStore((state) => state.openModal);
   const pushToast = useUiStore((state) => state.pushToast);
 
   const treeQuery = useTree(selectedTreeId);
@@ -115,12 +106,11 @@ export default function App(): JSX.Element {
 
   const isTreeLoading = treeQuery.isLoading || treeQuery.isFetching;
 
-  const inspectorTitle =
-    inspectorTab === "node" ? "Node Inspector" : inspectorTab === "relation" ? "Relation Inspector" : "Versions";
-
   const handleZoomIn = () => canvasRef.current?.zoomIn();
   const handleZoomOut = () => canvasRef.current?.zoomOut();
   const handleCenter = () => canvasRef.current?.centerOnSelection();
+
+  const treeName = useMemo(() => metadata?.name ?? "Untitled tree", [metadata?.name]);
 
   const handleSave = async () => {
     if (!activeTreeId || !metadata) {
@@ -167,59 +157,97 @@ export default function App(): JSX.Element {
 
   return (
     <ReactFlowProvider>
-      <Layout
-        header={
-          <TopBar
-            title={metadata?.name ?? "Brain Buddy Canvas"}
-            subtitle="Select a tree or create a new one to begin mapping."
-            rightSlot={
-              <TreeSelector
+      <div className="flex min-h-screen flex-col bg-surface-base text-slate-100">
+        <header className="border-b border-slate-800 bg-surface-sunken/80 px-6 py-3 shadow-inset backdrop-blur">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1 rounded-md border border-slate-800 bg-slate-950/80 px-2 py-1 shadow-inner">
+              <span className="h-2 w-2 rounded bg-slate-600" aria-hidden />
+              <span className="h-2 w-2 rounded bg-slate-600" aria-hidden />
+              <span className="h-2 w-2 rounded bg-slate-600" aria-hidden />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={isSaving}
+              className="rounded-md border border-slate-700 bg-surface-sunken px-3 py-2 text-sm font-semibold transition hover:border-brand-primary hover:text-brand-primary disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSaving ? "Saving…" : "Save"}
+            </button>
+
+            <input
+              type="text"
+              value={treeName}
+              readOnly
+              className="w-56 rounded-md border border-slate-800 bg-surface-base px-3 py-2 text-sm shadow-inner focus:border-brand-primary focus:outline-none"
+              aria-label="Tree name"
+            />
+
+            <div className="ml-auto flex items-center gap-2 text-xs text-slate-200">
+              <SimpleTreeSelector
                 trees={trees}
                 value={selectedTreeId}
                 onChange={handleTreeChange}
                 isLoading={isTreesLoading}
-                onSave={handleSave}
-                isSaving={isSaving}
-                onDownload={download}
-                isDownloading={isDownloading}
-                onImport={importFromFile}
-                isImporting={isImporting}
               />
-            }
-          />
-        }
-        sidebar={
-          <SidePanel title={inspectorTitle} toolbar={<InspectorTabs />}>
-            {inspectorTab === "node" ? (
-              <NodeInspector />
-            ) : inspectorTab === "relation" ? (
-              <RelationInspector />
+              <button
+                type="button"
+                onClick={() => openModal("createTree")}
+                className="rounded-md border border-slate-700 bg-surface-sunken px-3 py-2 text-xs font-semibold transition hover:border-brand-primary hover:text-brand-primary"
+              >
+                New tree
+              </button>
+              <button
+                type="button"
+                onClick={download}
+                disabled={isDownloading}
+                className="rounded-md border border-slate-700 bg-surface-sunken px-3 py-2 text-xs font-semibold transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isDownloading ? "Preparing…" : "Download"}
+              </button>
+              <label
+                className={`cursor-pointer rounded-md border border-slate-700 bg-surface-sunken px-3 py-2 text-xs font-semibold transition hover:border-slate-500 hover:text-white ${
+                  isImporting ? "pointer-events-none opacity-60" : ""
+                }`}
+              >
+                <span>{isImporting ? "Importing…" : "Import"}</span>
+                <input
+                  type="file"
+                  accept="application/json"
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) {
+                      importFromFile(file);
+                    }
+                    event.target.value = "";
+                  }}
+                  aria-label="Import tree"
+                />
+              </label>
+            </div>
+          </div>
+        </header>
+
+        <main className="relative flex flex-1 overflow-hidden">
+          <div className="absolute inset-0">
+            {treeError ? (
+              <ErrorCanvasState
+                message={getErrorMessage(treeError)}
+                correlationId={treeError instanceof ApiError ? treeError.correlationId ?? undefined : undefined}
+                isRetrying={treeQuery.isFetching}
+                onRetry={() => refetchTree()}
+              />
+            ) : activeTreeId ? (
+              <TreeCanvas ref={canvasRef} treeId={activeTreeId} isLoading={isTreeLoading} />
             ) : (
-              <VersionPanel />
+              <EmptyCanvasState isLoading={isTreeLoading} hasTrees={Boolean(trees?.length)} />
             )}
-          </SidePanel>
-        }
-        footer="Use ⌘Z / Ctrl+Z to undo and Shift+⌘Z / Shift+Ctrl+Z to redo changes."
-      >
-        <CanvasShell
-          toolbar={
-            <CanvasToolbar onZoomIn={handleZoomIn} onZoomOut={handleZoomOut} onCenter={handleCenter} />
-          }
-        >
-          {treeError ? (
-            <ErrorCanvasState
-              message={getErrorMessage(treeError)}
-              correlationId={treeError instanceof ApiError ? treeError.correlationId ?? undefined : undefined}
-              isRetrying={treeQuery.isFetching}
-              onRetry={() => refetchTree()}
-            />
-          ) : activeTreeId ? (
-            <TreeCanvas ref={canvasRef} treeId={activeTreeId} isLoading={isTreeLoading} />
-          ) : (
-            <EmptyCanvasState isLoading={isTreeLoading} hasTrees={Boolean(trees?.length)} />
-          )}
-        </CanvasShell>
-      </Layout>
+          </div>
+
+          <FloatingZoomControls onZoomIn={handleZoomIn} onZoomOut={handleZoomOut} onCenter={handleCenter} />
+        </main>
+      </div>
 
       <ToastStack />
       <CreateTreeModal onCreated={handleTreeCreated} />
@@ -227,7 +255,37 @@ export default function App(): JSX.Element {
   );
 }
 
-function CanvasToolbar({
+function SimpleTreeSelector({
+  trees,
+  value,
+  onChange,
+  isLoading
+}: {
+  trees: TreeListItem[] | undefined;
+  value: string | null;
+  onChange: (treeId: string) => void;
+  isLoading?: boolean;
+}): JSX.Element {
+  return (
+    <select
+      value={value ?? ""}
+      onChange={(event) => onChange(event.target.value)}
+      disabled={isLoading || !trees?.length}
+      className="rounded-md border border-slate-800 bg-surface-base px-3 py-2 text-xs text-slate-100 shadow-inner focus:border-brand-primary focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      <option value="" disabled>
+        {isLoading ? "Loading trees…" : "Select a tree"}
+      </option>
+      {trees?.map((tree) => (
+        <option key={tree.id} value={tree.id}>
+          {tree.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function FloatingZoomControls({
   onZoomIn,
   onZoomOut,
   onCenter
@@ -237,25 +295,28 @@ function CanvasToolbar({
   onCenter: () => void;
 }): JSX.Element {
   return (
-    <div className="flex items-center gap-2 text-xs text-slate-200">
-      <button
-        type="button"
-        onClick={onZoomOut}
-        className="rounded-md border border-slate-700 bg-surface-sunken px-2 py-1 font-semibold transition hover:border-slate-500 hover:text-white"
-      >
-        Zoom out
-      </button>
+    <div className="pointer-events-none absolute right-6 top-1/2 z-20 flex -translate-y-1/2 flex-col items-center gap-2">
       <button
         type="button"
         onClick={onZoomIn}
-        className="rounded-md border border-slate-700 bg-surface-sunken px-2 py-1 font-semibold transition hover:border-slate-500 hover:text-white"
+        className="pointer-events-auto h-9 w-9 rounded-lg border border-slate-800 bg-surface-sunken text-lg font-semibold text-slate-100 shadow-inner transition hover:border-brand-primary hover:text-brand-primary"
+        aria-label="Zoom in"
       >
-        Zoom in
+        +
       </button>
       <button
         type="button"
+        onClick={onZoomOut}
+        className="pointer-events-auto h-9 w-9 rounded-lg border border-slate-800 bg-surface-sunken text-lg font-semibold text-slate-100 shadow-inner transition hover:border-brand-primary hover:text-brand-primary"
+        aria-label="Zoom out"
+      >
+        −
+      </button>
+      <div className="h-10 w-px bg-slate-700" aria-hidden />
+      <button
+        type="button"
         onClick={onCenter}
-        className="rounded-md border border-slate-700 bg-surface-sunken px-2 py-1 font-semibold transition hover:border-slate-500 hover:text-white"
+        className="pointer-events-auto h-9 w-9 rounded-lg border border-slate-800 bg-surface-sunken text-xs font-semibold text-slate-100 shadow-inner transition hover:border-brand-primary hover:text-brand-primary"
       >
         Center
       </button>
@@ -273,9 +334,13 @@ function EmptyCanvasState({ isLoading, hasTrees }: { isLoading: boolean; hasTree
   }
 
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-sm text-slate-400">
-      <p>{hasTrees ? "Select a tree from the dropdown to visualize it." : "Create your first tree to get started."}</p>
-      <p className="text-xs text-slate-500">Need help? Start by outlining the core problem in the first root node.</p>
+    <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-slate-300">
+      <p className="text-lg font-semibold text-slate-100">Start with your first undesired effect</p>
+      <p className="max-w-lg text-slate-400">
+        {hasTrees
+          ? "Pick a tree from the header to center the canvas on it."
+          : "Create a new tree to drop in your initial thought and build from there."}
+      </p>
     </div>
   );
 }
