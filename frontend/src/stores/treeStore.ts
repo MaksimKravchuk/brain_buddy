@@ -377,12 +377,12 @@ function calculateRelationCounts(nodes: GraphNode[], relations: GraphRelation[])
   return counts;
 }
 
-function reachesAllUndesiredEffects(
+function reachesAllChildren(
   nodeId: string,
   adjacency: Map<string, string[]>,
-  undesiredEffects: Set<string>
+  childNodes: Set<string>
 ) {
-  if (undesiredEffects.size === 0) {
+  if (childNodes.size === 0) {
     return false;
   }
   const visited = new Set<string>();
@@ -403,19 +403,19 @@ function reachesAllUndesiredEffects(
   }
 
   let covered = 0;
-  undesiredEffects.forEach((id) => {
+  childNodes.forEach((id) => {
     if (visited.has(id)) {
       covered += 1;
     }
   });
 
-  return covered === undesiredEffects.size;
+  return covered === childNodes.size;
 }
 
 function applyDerivedNodeState(nodes: GraphNode[], relations: GraphRelation[]) {
   const counts = calculateRelationCounts(nodes, relations);
   const adjacency = new Map<string, string[]>();
-  const undesiredEffects = new Set(nodes.filter((node) => node.type === "undesired_effect").map((n) => n.id));
+  const childNodes = new Set(nodes.filter((node) => node.type === "child").map((n) => n.id));
 
   relations.forEach((relation) => {
     const current = adjacency.get(relation.fromId) ?? [];
@@ -426,13 +426,15 @@ function applyDerivedNodeState(nodes: GraphNode[], relations: GraphRelation[]) {
   return nodes.map((node) => {
     const relationCounts = counts.get(node.id) ?? node.relationCounts;
     const hasCauseCandidateSignal = relationCounts.up >= 3;
-    const effectSpanning = reachesAllUndesiredEffects(node.id, adjacency, undesiredEffects);
+    const hasOutgoing = (adjacency.get(node.id) ?? []).length > 0;
+    const effectSpanning =
+      hasOutgoing && childNodes.size > 0 && reachesAllChildren(node.id, adjacency, childNodes);
 
     let highlightState: GraphNode["highlightState"] = "none";
-    if (effectSpanning) {
-      highlightState = "effect_spanning";
-    } else if (hasCauseCandidateSignal) {
+    if (hasCauseCandidateSignal) {
       highlightState = "cause_candidate";
+    } else if (effectSpanning) {
+      highlightState = "effect_spanning";
     }
 
     return {

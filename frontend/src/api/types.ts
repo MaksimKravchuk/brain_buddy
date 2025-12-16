@@ -3,7 +3,7 @@ export interface Position {
   y: number;
 }
 
-export type NodeType = "undesired_effect" | "cause" | "regular";
+export type NodeType = "parent" | "child";
 export type HighlightState = "none" | "cause_candidate" | "effect_spanning";
 export type RelationKind = "why";
 

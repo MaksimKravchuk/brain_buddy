@@ -41,7 +41,7 @@ const sampleTree: TreeDetailResponse = {
     {
       id: "node-1",
       label: "Root hypothesis",
-      type: "regular",
+      type: "child",
       position: { x: 0, y: 0 },
       highlight_state: "none",
       relation_counts: {
@@ -61,7 +61,7 @@ const sampleTreeWithRelations: TreeDetailResponse = {
     {
       id: "node-2",
       label: "Undesired effect",
-      type: "undesired_effect",
+      type: "child",
       position: { x: 10, y: 20 },
       highlight_state: "none",
       relation_counts: {
@@ -87,7 +87,7 @@ const causeCandidateTree: TreeDetailResponse = {
     {
       id: "root-cause",
       label: "Root cause",
-      type: "cause",
+      type: "parent",
       position: { x: 0, y: 0 },
       highlight_state: "none",
       relation_counts: { up_count: 0, down_count: 0 }
@@ -95,7 +95,7 @@ const causeCandidateTree: TreeDetailResponse = {
     {
       id: "branch-1",
       label: "Branch 1",
-      type: "regular",
+      type: "child",
       position: { x: 10, y: 10 },
       highlight_state: "none",
       relation_counts: { up_count: 0, down_count: 0 }
@@ -103,7 +103,7 @@ const causeCandidateTree: TreeDetailResponse = {
     {
       id: "branch-2",
       label: "Branch 2",
-      type: "regular",
+      type: "child",
       position: { x: 20, y: 20 },
       highlight_state: "none",
       relation_counts: { up_count: 0, down_count: 0 }
@@ -111,7 +111,7 @@ const causeCandidateTree: TreeDetailResponse = {
     {
       id: "branch-3",
       label: "Branch 3",
-      type: "regular",
+      type: "child",
       position: { x: 30, y: 30 },
       highlight_state: "none",
       relation_counts: { up_count: 0, down_count: 0 }
@@ -130,7 +130,7 @@ const effectSpanningTree: TreeDetailResponse = {
     {
       id: "root",
       label: "Root cause",
-      type: "cause",
+      type: "parent",
       position: { x: 0, y: 0 },
       highlight_state: "none",
       relation_counts: { up_count: 0, down_count: 0 }
@@ -138,7 +138,7 @@ const effectSpanningTree: TreeDetailResponse = {
     {
       id: "mid",
       label: "Intermediate",
-      type: "regular",
+      type: "child",
       position: { x: 10, y: 10 },
       highlight_state: "none",
       relation_counts: { up_count: 0, down_count: 0 }
@@ -146,7 +146,7 @@ const effectSpanningTree: TreeDetailResponse = {
     {
       id: "effect-1",
       label: "Effect 1",
-      type: "undesired_effect",
+      type: "child",
       position: { x: 20, y: 20 },
       highlight_state: "none",
       relation_counts: { up_count: 0, down_count: 0 }
@@ -154,7 +154,7 @@ const effectSpanningTree: TreeDetailResponse = {
     {
       id: "effect-2",
       label: "Effect 2",
-      type: "undesired_effect",
+      type: "child",
       position: { x: 30, y: 30 },
       highlight_state: "none",
       relation_counts: { up_count: 0, down_count: 0 }

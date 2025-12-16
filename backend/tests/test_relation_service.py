@@ -16,15 +16,15 @@ def prepare_tree_with_nodes(tree_service, node_service):
     tree = tree_service.create_tree(TreeCreateRequest(name="Relations"))
     node_a, tree = node_service.create_node(
         tree.id,
-        NodeCreateRequest(label="A", type="regular", position=Position(x=0, y=0)),
+        NodeCreateRequest(label="A", type="child", position=Position(x=0, y=0)),
     )
     node_b, tree = node_service.create_node(
         tree.id,
-        NodeCreateRequest(label="B", type="regular", position=Position(x=1, y=1)),
+        NodeCreateRequest(label="B", type="child", position=Position(x=1, y=1)),
     )
     node_c, tree = node_service.create_node(
         tree.id,
-        NodeCreateRequest(label="C", type="regular", position=Position(x=2, y=2)),
+        NodeCreateRequest(label="C", type="child", position=Position(x=2, y=2)),
     )
     return tree, node_a, node_b, node_c
 

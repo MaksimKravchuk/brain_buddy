@@ -25,14 +25,14 @@ export function NodeInspector(): JSX.Element {
   const pushToast = useUiStore((state) => state.pushToast);
 
   const [label, setLabel] = useState(node?.label ?? "");
-  const [nodeType, setNodeType] = useState(node?.type ?? "regular");
+  const [nodeType, setNodeType] = useState(node?.type ?? "child");
   const [highlightState, setHighlightState] = useState(node?.highlightState ?? "none");
   const [consent, setConsent] = useState(false);
   const [feedback, setFeedback] = useState<AiFeedbackResponse | null>(null);
 
   useLayoutEffect(() => {
     setLabel(node?.label ?? "");
-    setNodeType(node?.type ?? "regular");
+    setNodeType(node?.type ?? "child");
     setHighlightState(node?.highlightState ?? "none");
     setFeedback(null);
   }, [node?.id, node?.label, node?.type, node?.highlightState]);
@@ -277,9 +277,8 @@ export function NodeInspector(): JSX.Element {
             onChange={(event) => handleTypeChange(event.target.value as typeof nodeType)}
             className="w-full rounded-md border border-slate-700 bg-surface-base px-3 py-2 text-sm text-slate-100 shadow-inner focus:border-brand-primary focus:outline-none"
           >
-            <option value="undesired_effect">Undesired effect</option>
-            <option value="cause">Cause</option>
-            <option value="regular">Regular</option>
+            <option value="parent">Parent</option>
+            <option value="child">Child</option>
           </select>
         </div>
 
