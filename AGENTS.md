@@ -11,7 +11,7 @@
 - `make dev-backend` / `make dev-frontend`: run backend with uvicorn reload and Vite dev server.
 - `make test-backend`: execute pytest suite (`backend/tests`).
 - `make test-frontend`: run Vitest unit tests.
-- `npm run build` (frontend) / `docker compose -f docker-compose.smoke.yml up --build`: produce production bundles and compose stack.
+- `npm run build` (frontend) / `docker compose up --build`: produce production bundles and compose stack.
 - `./scripts/smoke_test.sh`: call core API endpoints against the compose stack.
 
 ## Coding Style & Naming Conventions
