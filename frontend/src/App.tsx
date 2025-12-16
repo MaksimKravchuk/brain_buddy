@@ -3,7 +3,7 @@ import { ReactFlowProvider } from "reactflow";
 import "reactflow/dist/style.css";
 
 import { ApiError } from "./api/client";
-import type { TreeDetailResponse, TreeListItem } from "./api/types";
+import type { TreeDetailResponse } from "./api/types";
 import { useTree, useTrees, useTreeDownload, useTreeImportWithToasts } from "./api/hooks";
 import { TreeCanvas, type TreeCanvasHandle } from "./components/canvas/TreeCanvas";
 import { CreateTreeModal } from "./components/modals/CreateTreeModal";
@@ -18,7 +18,6 @@ export default function App(): JSX.Element {
 
   const {
     data: trees,
-    isLoading: isTreesLoading,
     error: treesError,
     refetch: refetchTrees
   } = useTrees();
@@ -26,8 +25,6 @@ export default function App(): JSX.Element {
   const resetTree = useTreeStore((state) => state.reset);
   const metadata = useTreeStore((state) => state.metadata);
   const activeTreeId = useTreeStore((state) => state.activeTreeId);
-  const flushPendingPersistence = useTreeStore((state) => state.flushPendingPersistence);
-  const pendingSync = useTreeStore((state) => state.pendingSync);
   const openModal = useUiStore((state) => state.openModal);
   const pushToast = useUiStore((state) => state.pushToast);
 
@@ -38,7 +35,6 @@ export default function App(): JSX.Element {
     setSelectedTreeId(tree.id);
     setTree(tree);
   });
-  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (!selectedTreeId && trees?.length) {
@@ -99,11 +95,6 @@ export default function App(): JSX.Element {
     setTree(tree);
   };
 
-  const handleTreeChange = (treeId: string) => {
-    resetTree();
-    setSelectedTreeId(treeId);
-  };
-
   const isTreeLoading = treeQuery.isLoading || treeQuery.isFetching;
 
   const handleZoomIn = () => canvasRef.current?.zoomIn();
@@ -112,119 +103,57 @@ export default function App(): JSX.Element {
 
   const treeName = useMemo(() => metadata?.name ?? "Untitled tree", [metadata?.name]);
 
-  const handleSave = async () => {
-    if (!activeTreeId || !metadata) {
-      pushToast({
-        title: "Nothing to save",
-        description: "Select or create a tree before saving.",
-        variant: "warning",
-        duration: 4000
-      });
-      return;
-    }
-
-    setIsSaving(true);
-    const toastId = pushToast({
-      title: pendingSync ? "Saving changes…" : "Syncing draft…",
-      description: metadata.name,
-      variant: "info",
-      duration: 0
-    });
-
-    await flushPendingPersistence();
-    setIsSaving(false);
-    const state = useTreeStore.getState();
-
-    if (state.pendingSync || state.lastSyncError) {
-      pushToast({
-        id: toastId,
-        title: "Save incomplete",
-        description: state.lastSyncError ?? "Still pending sync, will retry automatically.",
-        variant: "warning",
-        duration: 6000
-      });
-      return;
-    }
-
-    pushToast({
-      id: toastId,
-      title: "Saved",
-      description: `${metadata.name} updated`,
-      variant: "success",
-      duration: 3500
-    });
-  };
-
   return (
     <ReactFlowProvider>
       <div className="flex min-h-screen flex-col bg-surface-base text-slate-100">
         <header className="border-b border-slate-800 bg-surface-sunken/80 px-6 py-3 shadow-inset backdrop-blur">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1 rounded-md border border-slate-800 bg-slate-950/80 px-2 py-1 shadow-inner">
-              <span className="h-2 w-2 rounded bg-slate-600" aria-hidden />
-              <span className="h-2 w-2 rounded bg-slate-600" aria-hidden />
-              <span className="h-2 w-2 rounded bg-slate-600" aria-hidden />
-            </div>
-
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={isSaving}
-              className="rounded-md border border-slate-700 bg-surface-sunken px-3 py-2 text-sm font-semibold transition hover:border-brand-primary hover:text-brand-primary disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isSaving ? "Saving…" : "Save"}
-            </button>
-
-            <input
-              type="text"
-              value={treeName}
-              readOnly
-              className="w-56 rounded-md border border-slate-800 bg-surface-base px-3 py-2 text-sm shadow-inner focus:border-brand-primary focus:outline-none"
-              aria-label="Tree name"
-            />
-
-            <div className="ml-auto flex items-center gap-2 text-xs text-slate-200">
-              <SimpleTreeSelector
-                trees={trees}
-                value={selectedTreeId}
-                onChange={handleTreeChange}
-                isLoading={isTreesLoading}
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
+              <input
+                type="text"
+                value={treeName}
+                readOnly
+                className="w-56 rounded-md border border-slate-800 bg-surface-base px-3 py-2 text-sm shadow-inner focus:border-brand-primary focus:outline-none"
+                aria-label="Tree name"
               />
-              <button
-                type="button"
-                onClick={() => openModal("createTree")}
-                className="rounded-md border border-slate-700 bg-surface-sunken px-3 py-2 text-xs font-semibold transition hover:border-brand-primary hover:text-brand-primary"
-              >
-                New tree
-              </button>
-              <button
-                type="button"
-                onClick={download}
-                disabled={isDownloading}
-                className="rounded-md border border-slate-700 bg-surface-sunken px-3 py-2 text-xs font-semibold transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isDownloading ? "Preparing…" : "Download"}
-              </button>
-              <label
-                className={`cursor-pointer rounded-md border border-slate-700 bg-surface-sunken px-3 py-2 text-xs font-semibold transition hover:border-slate-500 hover:text-white ${
-                  isImporting ? "pointer-events-none opacity-60" : ""
-                }`}
-              >
-                <span>{isImporting ? "Importing…" : "Import"}</span>
-                <input
-                  type="file"
-                  accept="application/json"
-                  className="hidden"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) {
-                      importFromFile(file);
-                    }
-                    event.target.value = "";
-                  }}
-                  aria-label="Import tree"
-                />
-              </label>
+
+              <div className="flex items-center gap-2 text-xs text-slate-200">
+                <button
+                  type="button"
+                  onClick={() => openModal("createTree")}
+                  className="rounded-md border border-slate-700 bg-surface-sunken px-3 py-2 text-xs font-semibold transition hover:border-brand-primary hover:text-brand-primary"
+                >
+                  New tree
+                </button>
+                <button
+                  type="button"
+                  onClick={download}
+                  disabled={isDownloading}
+                  className="rounded-md border border-slate-700 bg-surface-sunken px-3 py-2 text-xs font-semibold transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isDownloading ? "Preparing…" : "Download"}
+                </button>
+                <label
+                  className={`cursor-pointer rounded-md border border-slate-700 bg-surface-sunken px-3 py-2 text-xs font-semibold transition hover:border-slate-500 hover:text-white ${
+                    isImporting ? "pointer-events-none opacity-60" : ""
+                  }`}
+                >
+                  <span>{isImporting ? "Importing…" : "Import"}</span>
+                  <input
+                    type="file"
+                    accept="application/json"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) {
+                        importFromFile(file);
+                      }
+                      event.target.value = "";
+                    }}
+                    aria-label="Import tree"
+                  />
+                </label>
+              </div>
             </div>
           </div>
         </header>
@@ -255,36 +184,6 @@ export default function App(): JSX.Element {
   );
 }
 
-function SimpleTreeSelector({
-  trees,
-  value,
-  onChange,
-  isLoading
-}: {
-  trees: TreeListItem[] | undefined;
-  value: string | null;
-  onChange: (treeId: string) => void;
-  isLoading?: boolean;
-}): JSX.Element {
-  return (
-    <select
-      value={value ?? ""}
-      onChange={(event) => onChange(event.target.value)}
-      disabled={isLoading || !trees?.length}
-      className="rounded-md border border-slate-800 bg-surface-base px-3 py-2 text-xs text-slate-100 shadow-inner focus:border-brand-primary focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
-    >
-      <option value="" disabled>
-        {isLoading ? "Loading trees…" : "Select a tree"}
-      </option>
-      {trees?.map((tree) => (
-        <option key={tree.id} value={tree.id}>
-          {tree.name}
-        </option>
-      ))}
-    </select>
-  );
-}
-
 function FloatingZoomControls({
   onZoomIn,
   onZoomOut,
@@ -295,7 +194,7 @@ function FloatingZoomControls({
   onCenter: () => void;
 }): JSX.Element {
   return (
-    <div className="pointer-events-none absolute right-6 top-1/2 z-20 flex -translate-y-1/2 flex-col items-center gap-2">
+    <div className="pointer-events-none absolute right-6 bottom-6 z-20 flex flex-col items-center gap-2">
       <button
         type="button"
         onClick={onZoomIn}
@@ -338,7 +237,7 @@ function EmptyCanvasState({ isLoading, hasTrees }: { isLoading: boolean; hasTree
       <p className="text-lg font-semibold text-slate-100">Start with your first undesired effect</p>
       <p className="max-w-lg text-slate-400">
         {hasTrees
-          ? "Pick a tree from the header to center the canvas on it."
+          ? "Your most recent tree loads automatically. Continue mapping or start a new one."
           : "Create a new tree to drop in your initial thought and build from there."}
       </p>
     </div>
