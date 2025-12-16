@@ -9,10 +9,9 @@ import type {
   OnEdgesDelete,
   OnNodesDelete,
   OnSelectionChangeFunc,
-  Position,
   ReactFlowInstance
 } from "reactflow";
-import ReactFlow, { Background, MarkerType } from "reactflow";
+import ReactFlow, { Background, MarkerType, Position } from "reactflow";
 
 import {
   mapNodeResponse,
