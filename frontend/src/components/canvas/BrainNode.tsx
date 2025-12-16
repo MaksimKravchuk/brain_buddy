@@ -1,76 +1,88 @@
 import { useMemo, useState } from "react";
 import type { NodeProps } from "reactflow";
-import { Handle, NodeResizer, Position } from "reactflow";
+import { Handle, Position } from "reactflow";
 import { twMerge } from "tailwind-merge";
 
 import type { GraphNode } from "../../stores/treeStore";
 
 export interface BrainNodeData {
   node: GraphNode;
+  onCreateParent(): void;
+  onCreateChild(): void;
+  onCreateLeftSibling(): void;
+  onCreateRightSibling(): void;
 }
 
-const HANDLE_POSITIONS: { id: string; position: Position }[] = [
-  { id: "top", position: Position.Top },
-  { id: "right", position: Position.Right },
-  { id: "bottom", position: Position.Bottom },
-  { id: "left", position: Position.Left }
-];
-
 export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Element {
-  const { node } = data;
+  const { node, onCreateParent, onCreateChild, onCreateLeftSibling, onCreateRightSibling } = data;
   const [isHovered, setIsHovered] = useState(false);
   const showControls = selected || isHovered;
 
-  const baseHandleClass = useMemo(
-    () =>
-      twMerge(
-        "!h-3 !w-3 !rounded-full !border !border-slate-600/80 !bg-slate-100 shadow-sm transition-opacity duration-150",
-        showControls ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-      ),
-    [showControls]
-  );
+  const fontSize = useMemo(() => {
+    const length = node.label.length || 1;
+    const clamped = Math.max(11, 20 - length * 0.25);
+    return Math.min(20, clamped);
+  }, [node.label.length]);
 
   return (
     <div
       className={twMerge(
-        "group relative h-full min-h-[90px] min-w-[180px] rounded-l-2xl rounded-r-xl border border-slate-600/60 bg-slate-900/70 text-left shadow-lg transition-all duration-150",
+        "group relative h-full min-h-[96px] min-w-[200px] max-w-[280px] rounded-l-2xl rounded-r-xl border border-slate-600/60 bg-slate-900/70 text-left shadow-lg transition-all duration-150",
         selected ? "ring-2 ring-slate-200/60 shadow-glow" : "ring-1 ring-transparent"
       )}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      <NodeResizer
-        minWidth={160}
-        minHeight={80}
-        isVisible={showControls}
-        handleClassName="!h-2.5 !w-2.5 !rounded-full !border !border-slate-600/80 !bg-slate-100"
-        lineClassName="!border-slate-600/50"
-      />
-
-      {HANDLE_POSITIONS.map((handle) => (
-        <Handle
-          key={`${handle.id}-source`}
-          type="source"
-          id={`${handle.id}-source`}
-          position={handle.position}
-          className={baseHandleClass}
-        />
-      ))}
-
-      {HANDLE_POSITIONS.map((handle) => (
-        <Handle
-          key={`${handle.id}-target`}
-          type="target"
-          id={`${handle.id}-target`}
-          position={handle.position}
-          className={baseHandleClass}
-        />
-      ))}
+      <Handle type="source" position={Position.Top} className="pointer-events-none invisible" isConnectable={false} />
+      <Handle type="target" position={Position.Bottom} className="pointer-events-none invisible" isConnectable={false} />
 
       <div className="pointer-events-none absolute inset-y-0 left-0 w-2 rounded-l-2xl bg-slate-200/10" />
 
-      <div className="flex h-full w-full items-center justify-center px-4 py-3">
-        <p className="w-full break-words text-center font-medium leading-tight text-[clamp(12px,1.6vw,18px)] tracking-tight text-slate-50">
+      <button
+        type="button"
+        aria-label="Create parent"
+        onClick={onCreateParent}
+        className={twMerge(
+          "absolute left-1/2 top-0 z-10 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-slate-500/70 bg-slate-100 shadow-sm transition-opacity",
+          showControls ? "opacity-100" : "opacity-0"
+        )}
+      />
+
+      <button
+        type="button"
+        aria-label="Create right sibling"
+        onClick={onCreateRightSibling}
+        className={twMerge(
+          "absolute right-0 top-1/2 z-10 h-4 w-4 translate-x-1/2 -translate-y-1/2 rounded-full border border-slate-500/70 bg-slate-100 shadow-sm transition-opacity",
+          showControls ? "opacity-100" : "opacity-0"
+        )}
+      />
+
+      <button
+        type="button"
+        aria-label="Create child"
+        onClick={onCreateChild}
+        className={twMerge(
+          "absolute bottom-0 left-1/2 z-10 h-4 w-4 -translate-x-1/2 translate-y-1/2 rounded-full border border-slate-500/70 bg-slate-100 shadow-sm transition-opacity",
+          showControls ? "opacity-100" : "opacity-0"
+        )}
+      />
+
+      <button
+        type="button"
+        aria-label="Create left sibling"
+        onClick={onCreateLeftSibling}
+        className={twMerge(
+          "absolute left-0 top-1/2 z-10 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-slate-500/70 bg-slate-100 shadow-sm transition-opacity",
+          showControls ? "opacity-100" : "opacity-0"
+        )}
+      />
+
+      <div className="flex h-full w-full items-center justify-center px-5 py-4">
+        <p
+          className="w-full break-words text-center font-semibold leading-tight tracking-tight text-slate-50"
+          style={{ fontSize }}
+        >
           {node.label}
         </p>
       </div>
