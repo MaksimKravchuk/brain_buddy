@@ -10,7 +10,7 @@ from pydantic import ConfigDict, Field
 from .common import Position, StrictBaseModel
 from .domain import VersionDiffSummary
 
-NodeType = Literal["undesired_effect", "cause", "regular"]
+NodeType = Literal["parent", "child"]
 HighlightState = Literal["none", "cause_candidate", "effect_spanning"]
 RelationKind = Literal["why"]
 FeedbackStatus = Literal["success", "failed", "pending"]

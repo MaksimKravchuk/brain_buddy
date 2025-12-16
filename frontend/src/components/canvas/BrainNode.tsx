@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import type { NodeProps } from "reactflow";
 import { Handle, Position } from "reactflow";
 import { twMerge } from "tailwind-merge";
@@ -6,66 +7,84 @@ import type { GraphNode } from "../../stores/treeStore";
 
 export interface BrainNodeData {
   node: GraphNode;
+  onCreateParent(): void;
+  onCreateChild(): void;
+  onCreateLeftSibling(): void;
+  onCreateRightSibling(): void;
 }
 
 export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Element {
-  const { node } = data;
-  const typeStyles =
-    node.type === "undesired_effect"
-      ? {
-          badge: "bg-rose-500/20 text-rose-200 border border-rose-500/50",
-          container: "border-rose-500/30 bg-gradient-to-b from-rose-900/40 to-surface-raised"
-        }
-      : node.type === "cause"
-        ? {
-            badge: "bg-amber-500/20 text-amber-200 border border-amber-500/40",
-            container: "border-amber-500/30 bg-gradient-to-b from-amber-900/30 to-surface-raised"
-          }
-        : {
-            badge: "bg-sky-500/20 text-sky-200 border border-sky-500/40",
-            container: "border-sky-500/30 bg-gradient-to-b from-sky-900/30 to-surface-raised"
-          };
-  const highlightRing =
-    node.highlightState === "cause_candidate"
-      ? "ring-2 ring-amber-400/70 shadow-[0_0_0_6px_rgba(251,191,36,0.25)]"
-      : node.highlightState === "effect_spanning"
-        ? "ring-2 ring-rose-400/70 shadow-[0_0_0_6px_rgba(248,113,113,0.25)]"
-        : "";
+  const { node, onCreateParent, onCreateChild, onCreateLeftSibling, onCreateRightSibling } = data;
+  const [isHovered, setIsHovered] = useState(false);
+  const showControls = selected || isHovered;
+
+  const fontSize = useMemo(() => {
+    const length = node.label.length || 1;
+    const clamped = Math.max(11, 20 - length * 0.25);
+    return Math.min(20, clamped);
+  }, [node.label.length]);
 
   return (
     <div
       className={twMerge(
-        "group relative rounded-xl border px-4 py-3 text-left shadow-lg ring-1 ring-transparent transition-all duration-150",
-        typeStyles.container,
-        selected ? "border-brand-primary/80 shadow-glow ring-brand-primary/50" : "",
-        highlightRing
+        "group relative h-full min-h-[96px] min-w-[200px] max-w-[280px] rounded-l-2xl rounded-r-xl border border-slate-600/60 bg-slate-900/70 text-left shadow-lg transition-all duration-150",
+        selected ? "ring-2 ring-slate-200/60 shadow-glow" : "ring-1 ring-transparent"
       )}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
     >
-      <Handle
-        type="target"
-        position={Position.Top}
-        className="h-2 w-2 rounded-full bg-brand-secondary ring-2 ring-slate-900"
-      />
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        className="h-2 w-2 rounded-full bg-brand-primary ring-2 ring-slate-900"
+      <Handle type="source" position={Position.Top} className="pointer-events-none invisible" isConnectable={false} />
+      <Handle type="target" position={Position.Bottom} className="pointer-events-none invisible" isConnectable={false} />
+
+      <div className="pointer-events-none absolute inset-y-0 left-0 w-2 rounded-l-2xl bg-slate-200/10" />
+
+      <button
+        type="button"
+        aria-label="Create parent"
+        onClick={onCreateParent}
+        className={twMerge(
+          "absolute left-1/2 top-0 z-10 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-slate-500/70 bg-slate-100 shadow-sm transition-opacity",
+          showControls ? "opacity-100" : "opacity-0"
+        )}
       />
 
-      <div className="flex items-start justify-between gap-3">
-        <p className="max-w-[180px] break-words text-sm font-medium text-slate-100">{node.label}</p>
-        <span className={twMerge("rounded-full px-2 py-0.5 text-[11px] font-semibold", typeStyles.badge)}>
-          {node.type.replace("_", " ")}
-        </span>
-      </div>
+      <button
+        type="button"
+        aria-label="Create right sibling"
+        onClick={onCreateRightSibling}
+        className={twMerge(
+          "absolute right-0 top-1/2 z-10 h-4 w-4 translate-x-1/2 -translate-y-1/2 rounded-full border border-slate-500/70 bg-slate-100 shadow-sm transition-opacity",
+          showControls ? "opacity-100" : "opacity-0"
+        )}
+      />
 
-      <div className="mt-3 flex items-center gap-3 text-xs text-slate-400">
-        <span className="flex items-center gap-1">
-          <span className="inline-flex h-2 w-2 rounded-full bg-brand-secondary/80" /> {node.relationCounts.up}
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="inline-flex h-2 w-2 rounded-full bg-brand-primary/80" /> {node.relationCounts.down}
-        </span>
+      <button
+        type="button"
+        aria-label="Create child"
+        onClick={onCreateChild}
+        className={twMerge(
+          "absolute bottom-0 left-1/2 z-10 h-4 w-4 -translate-x-1/2 translate-y-1/2 rounded-full border border-slate-500/70 bg-slate-100 shadow-sm transition-opacity",
+          showControls ? "opacity-100" : "opacity-0"
+        )}
+      />
+
+      <button
+        type="button"
+        aria-label="Create left sibling"
+        onClick={onCreateLeftSibling}
+        className={twMerge(
+          "absolute left-0 top-1/2 z-10 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-slate-500/70 bg-slate-100 shadow-sm transition-opacity",
+          showControls ? "opacity-100" : "opacity-0"
+        )}
+      />
+
+      <div className="flex h-full w-full items-center justify-center px-5 py-4">
+        <p
+          className="w-full break-words text-center font-semibold leading-tight tracking-tight text-slate-50"
+          style={{ fontSize }}
+        >
+          {node.label}
+        </p>
       </div>
     </div>
   );

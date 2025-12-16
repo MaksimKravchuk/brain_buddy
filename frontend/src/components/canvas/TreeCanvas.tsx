@@ -11,7 +11,7 @@ import type {
   OnSelectionChangeFunc,
   ReactFlowInstance
 } from "reactflow";
-import ReactFlow, { Background, MarkerType } from "reactflow";
+import ReactFlow, { Background, MarkerType, Position } from "reactflow";
 
 import {
   mapNodeResponse,
@@ -44,7 +44,7 @@ const defaultEdgeOptions: Partial<Edge> = {
   type: "smoothstep",
   animated: false,
   style: {
-    stroke: "rgba(56,189,248,0.35)",
+    stroke: "rgba(148,163,184,0.55)",
     strokeWidth: 2
   }
 };
@@ -154,44 +154,6 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     }),
     [handleCenterOnSelection, handleZoomIn, handleZoomOut]
   );
-
-  const flowNodes = useMemo<NodeType[]>(() => {
-    return nodes.map((node) => ({
-      id: node.id,
-      type: "brainNode",
-      position: node.position,
-      data: { node },
-      selected: selection.type === "node" && selection.id === node.id
-    }));
-  }, [nodes, selection]);
-
-  const flowEdges = useMemo<EdgeType[]>(() => {
-    return relations.map((relation) => ({
-      id: relation.id,
-      source: relation.fromId,
-      target: relation.toId,
-      data: { relation },
-      label: relation.kind.toUpperCase(),
-      selected: selection.type === "relation" && selection.id === relation.id,
-      type: "smoothstep",
-      animated: false,
-      style: {
-        stroke: selection.type === "relation" && selection.id === relation.id ? "rgba(129,140,248,0.95)" : "rgba(56,189,248,0.55)",
-        strokeWidth: selection.type === "relation" && selection.id === relation.id ? 3 : 2
-      },
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        color: selection.type === "relation" && selection.id === relation.id ? "#a5b4fc" : "rgba(56,189,248,0.75)",
-        width: 18,
-        height: 18
-      },
-      labelStyle: {
-        fill: "#cbd5f5",
-        fontSize: 12,
-        fontWeight: 500
-      }
-    }));
-  }, [relations, selection]);
 
   const handleNodeClick = useCallback<NodeMouseHandler>(
     (_, node) => {
@@ -550,11 +512,14 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   );
 
   const handleCreateNode = useCallback(
-    (input?: { label?: string; type?: GraphNode["type"] }) => {
-      const type = input?.type ?? "regular";
-      const label =
-        input?.label?.trim() ||
-        (type === "undesired_effect" ? "Undesired effect" : type === "cause" ? "Cause" : "New idea");
+    (input?: {
+      label?: string;
+      type?: GraphNode["type"];
+      position?: { x: number; y: number };
+      relation?: { fromId: string | "new"; toId: string | "new" };
+    }) => {
+      const type = input?.type ?? "child";
+      const label = input?.label?.trim() || (type === "parent" ? "Parent" : "Child");
       const placeholder = createPlaceholderNode(type, label);
       const bounds = canvasRef.current?.getBoundingClientRect();
       const viewportCenter = reactFlowInstance
@@ -564,7 +529,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
           })
         : { x: Math.random() * 200, y: Math.random() * 200 };
 
-      placeholder.position = viewportCenter;
+      placeholder.position = input?.position ?? viewportCenter;
 
       pushSnapshot();
       const token = beginOptimisticChange("create-node");
@@ -573,7 +538,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       createNodeMutation.mutate(
         {
           label: placeholder.label,
-          position: viewportCenter,
+          position: placeholder.position,
           type,
           highlight_state: "none"
         },
@@ -581,8 +546,14 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
           onSuccess: (nodeResponse) => {
             resolveOptimisticChange(token);
             removeNode(placeholder.id);
-            upsertNode(mapNodeResponse(nodeResponse));
+            const createdNode = mapNodeResponse(nodeResponse);
+            upsertNode(createdNode);
             select({ type: "node", id: nodeResponse.id });
+            if (input?.relation) {
+              const sourceId = input.relation.fromId === "new" ? createdNode.id : input.relation.fromId;
+              const targetId = input.relation.toId === "new" ? createdNode.id : input.relation.toId;
+              handleConnect({ source: sourceId, target: targetId } as Connection);
+            }
             pushToast({
               title: "Node created",
               description: "Node added to the canvas.",
@@ -617,9 +588,83 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       resolveOptimisticChange,
       rollbackOptimisticChange,
       select,
+      handleConnect,
       upsertNode
     ]
   );
+
+  const handleCreateRelativeNode = useCallback(
+    (originId: string, direction: "parent" | "child" | "left" | "right") => {
+      const origin = nodes.find((item) => item.id === originId);
+      if (!origin) return;
+
+      const offsets: Record<typeof direction, { x: number; y: number }> = {
+        parent: { x: 0, y: -180 },
+        child: { x: 0, y: 180 },
+        left: { x: -240, y: 0 },
+        right: { x: 240, y: 0 }
+      };
+
+      const basePosition = origin.position;
+      const position = {
+        x: basePosition.x + offsets[direction].x,
+        y: basePosition.y + offsets[direction].y
+      };
+
+      if (direction === "child") {
+        handleCreateNode({ type: "child", position, relation: { fromId: "new", toId: origin.id } });
+        return;
+      }
+
+      if (direction === "parent") {
+        handleCreateNode({ type: "parent", position, relation: { fromId: origin.id, toId: "new" } });
+        return;
+      }
+
+      handleCreateNode({ type: origin.type, position });
+    },
+    [handleCreateNode, nodes]
+  );
+
+  const flowNodes = useMemo<NodeType[]>(() => {
+    return nodes.map((node) => ({
+      id: node.id,
+      type: "brainNode",
+      position: node.position,
+      sourcePosition: Position.Top,
+      targetPosition: Position.Bottom,
+      data: {
+        node,
+        onCreateParent: () => handleCreateRelativeNode(node.id, "parent"),
+        onCreateChild: () => handleCreateRelativeNode(node.id, "child"),
+        onCreateLeftSibling: () => handleCreateRelativeNode(node.id, "left"),
+        onCreateRightSibling: () => handleCreateRelativeNode(node.id, "right")
+      },
+      selected: selection.type === "node" && selection.id === node.id
+    }));
+  }, [handleCreateRelativeNode, nodes, selection]);
+
+  const flowEdges = useMemo<EdgeType[]>(() => {
+    return relations.map((relation) => ({
+      id: relation.id,
+      source: relation.fromId,
+      target: relation.toId,
+      data: { relation },
+      selected: selection.type === "relation" && selection.id === relation.id,
+      type: "smoothstep",
+      animated: false,
+      style: {
+        stroke: selection.type === "relation" && selection.id === relation.id ? "#e2e8f0" : "rgba(148,163,184,0.65)",
+        strokeWidth: selection.type === "relation" && selection.id === relation.id ? 3 : 2
+      },
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: selection.type === "relation" && selection.id === relation.id ? "#e2e8f0" : "rgba(148,163,184,0.85)",
+        width: 16,
+        height: 16
+      }
+    }));
+  }, [relations, selection]);
 
   useEffect(() => {
     hasCreatedDefaultNode.current = false;
@@ -631,7 +676,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     }
 
     hasCreatedDefaultNode.current = true;
-    handleCreateNode({ type: "undesired_effect", label: "Undesired effect" });
+    handleCreateNode({ type: "parent", label: "Parent" });
   }, [handleCreateNode, isLoading, nodes.length, reactFlowInstance]);
 
   const buildCombo = useCallback((event: KeyboardEvent) => {
@@ -752,7 +797,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
 
       {!hasContent && !isLoading ? (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-slate-400">
-          <p>No nodes yet. Start with the default undesired effect and grow connections from it.</p>
+          <p>No nodes yet. Add a parent or child node to start building your map.</p>
         </div>
       ) : null}
 

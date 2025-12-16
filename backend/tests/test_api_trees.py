@@ -26,10 +26,10 @@ def test_tree_contract_round_trip(api_client) -> None:
     assert any(item["id"] == tree_id and item["name"] == "API Tree" for item in listed)
 
     cause_payload = NodeCreateRequest(
-        label="Cause", type="cause", position=Position(x=0.0, y=0.0)
+        label="Cause", type="parent", position=Position(x=0.0, y=0.0)
     ).model_dump()
     effect_payload = NodeCreateRequest(
-        label="Effect", type="undesired_effect", position=Position(x=1.0, y=1.0)
+        label="Effect", type="child", position=Position(x=1.0, y=1.0)
     ).model_dump()
     cause_resp = api_client.post(f"/api/trees/{tree_id}/nodes", json=cause_payload)
     effect_resp = api_client.post(f"/api/trees/{tree_id}/nodes", json=effect_payload)
@@ -98,7 +98,7 @@ def test_import_rejects_cycles_and_missing_nodes(api_client) -> None:
             {
                 "id": "n1",
                 "label": "A",
-                "type": "regular",
+                "type": "child",
                 "position": {"x": 0, "y": 0},
                 "highlight_state": "none",
                 "relation_counts": {"up_count": 0, "down_count": 0},
@@ -106,7 +106,7 @@ def test_import_rejects_cycles_and_missing_nodes(api_client) -> None:
             {
                 "id": "n2",
                 "label": "B",
-                "type": "regular",
+                "type": "child",
                 "position": {"x": 1, "y": 1},
                 "highlight_state": "none",
                 "relation_counts": {"up_count": 0, "down_count": 0},
