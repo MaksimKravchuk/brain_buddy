@@ -24,3 +24,11 @@ coverage/
 
 # Local data
 data/
+.codex/history.jsonl
+.codex/prompts/speckit.specify.md
+.codex/prompts/speckit.taskstoissues.md
+.codex/sessions/2025/12/04/rollout-2025-12-04T00-44-12-019ae69a-23c0-76f0-8a9b-0aa6fd74bdfb.jsonl
+.specify/memory/constitution.md
+.specify/templates/plan-template.md
+.specify/templates/spec-template.md
+.specify/templates/tasks-template.md
