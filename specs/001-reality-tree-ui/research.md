@@ -28,6 +28,6 @@
 - **Alternatives considered**: Per-node suggestions only (less holistic); free-form chat (adds scope without benefit).
 
 ### Docker Compose stack for local deploy
-- **Decision**: Provide a compose file that builds backend and frontend images, runs backend on 8000 with data volume mount, serves frontend via dev server or nginx proxy, and wires optional API key/env variables from `.env`. Include `make compose-smoke-up/down` and reuse `./scripts/smoke_test.sh` for verification.
+- **Decision**: Provide a compose file that builds backend and frontend images, runs backend on 8000 with data volume mount, serves frontend via dev server or nginx proxy, and wires optional API key/env variables from `.env`. Use `docker compose up --build` / `docker compose down --volumes` and reuse `./scripts/smoke_test.sh` for verification.
 - **Rationale**: Keeps onboarding minimal while matching existing smoke workflow; preserves local data across runs via volume.
 - **Alternatives considered**: Separate compose for prod vs dev (unneeded now); bundling frontend into nginx-only image (can be added later if required).
