@@ -33,10 +33,37 @@ export const treeKeys = {
     [...treeKeys.detail(treeId), "validation", nodeId] as const
 };
 
+function isTreeListItem(value: unknown): value is TreeListItem {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const item = value as Partial<TreeListItem> & { owner_id?: unknown };
+  const hasValidOwnerId =
+    item.owner_id === undefined || item.owner_id === null || typeof item.owner_id === "string";
+
+  return (
+    typeof item.id === "string" &&
+    typeof item.name === "string" &&
+    typeof item.updated_at === "string" &&
+    hasValidOwnerId
+  );
+}
+
+function validateTreeListResponse(trees: unknown): TreeListItem[] {
+  if (!Array.isArray(trees) || trees.some((tree) => !isTreeListItem(tree))) {
+    throw new Error("Invalid tree list response");
+  }
+  return trees;
+}
+
 export function useTrees() {
   return useQuery<TreeListItem[]>({
     queryKey: treeKeys.list(),
-    queryFn: ({ signal }) => apiClient.listTrees(signal)
+    queryFn: async ({ signal }) => {
+      const data = await apiClient.listTrees(signal);
+      return validateTreeListResponse(data);
+    }
   });
 }
 

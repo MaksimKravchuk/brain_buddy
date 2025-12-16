@@ -24,3 +24,6 @@ coverage/
 
 # Local data
 data/
+
+# Codex
+.codex/
