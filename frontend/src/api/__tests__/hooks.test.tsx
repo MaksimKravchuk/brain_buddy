@@ -47,6 +47,16 @@ describe("api hooks", () => {
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
+  it("surfaces invalid tree list response", async () => {
+    vi.spyOn(apiClient, "listTrees").mockResolvedValue({} as TreeListItem[]);
+
+    const { result } = renderHook(() => useTrees(), { wrapper: createWrapper(queryClient) });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error).toBeInstanceOf(Error);
+    expect((result.current.error as Error).message).toContain("Invalid tree list response");
+  });
+
   it("exports a tree via useExportTree", async () => {
     const payload: TreeDetailResponse = {
       id: "tree-2",
