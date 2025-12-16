@@ -66,6 +66,21 @@ Looking for a local-first workflow with refresh/troubleshooting steps? See `docs
 
 **API keys in compose**: set `BRAIN_BUDDY_API_KEY` and `VITE_API_KEY` together in `.env` to require a key end-to-end. The compose stack forwards these into backend/frontend containers and the smoke test will include them automatically.
 
+## Fly.io Deployment (backend)
+
+Use `fly.backend.toml` to deploy the FastAPI service from `backend/Dockerfile` with health checks on `/health` and a volume mounted at `/app/data`.
+
+```bash
+# Create or resize the persistent volume
+flyctl volumes create brain_buddy_data --size 1 --region iad
+
+# Set optional API key; other environment values are defined in fly.backend.toml
+flyctl secrets set BRAIN_BUDDY_API_KEY="<your-api-key>"
+
+# Deploy using the backend config
+flyctl deploy -c fly.backend.toml
+```
+
 ## Environment & Configuration
 
 | Variable | Default | Purpose |
