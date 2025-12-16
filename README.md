@@ -70,6 +70,20 @@ Looking for a local-first workflow with refresh/troubleshooting steps? See `docs
 
 - **Fly.io**: Follow `docs/fly-deployment.md` for provisioning volumes, wiring secrets, deploying backend and frontend apps, and running curl smoke checks with rollback guidance.
 - **CI before deploys**: GitHub Actions (`.github/workflows/ci.yml`) runs backend lint/type/test + coverage, frontend unit tests + build, and Docker image builds on every push/PR to `main`. Wait for CI to go green (see the badge above) before deploying to Fly.
+## Fly.io Deployment (backend)
+
+Use `fly.backend.toml` to deploy the FastAPI service from `backend/Dockerfile` with health checks on `/health` and a volume mounted at `/app/data`.
+
+```bash
+# Create or resize the persistent volume
+flyctl volumes create brain_buddy_data --size 1 --region iad
+
+# Set optional API key; other environment values are defined in fly.backend.toml
+flyctl secrets set BRAIN_BUDDY_API_KEY="<your-api-key>"
+
+# Deploy using the backend config
+flyctl deploy -c fly.backend.toml
+```
 
 ## Environment & Configuration
 
