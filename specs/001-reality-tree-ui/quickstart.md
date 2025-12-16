@@ -24,7 +24,7 @@
 
 6) Run via Docker Compose (local stack)  
 - Copy `.env.example` to `.env` and set optional `BRAIN_BUDDY_API_KEY`/`VITE_API_KEY` (set both to enable auth).  
-- From repo root: `make compose-smoke-up` to build and start backend/frontend.  
+- From repo root: `docker compose up --build` to build and start backend/frontend.
 - Access UI at `http://localhost:8080` and API at `http://localhost:8000/api`.  
 - Run `./scripts/smoke_test.sh` to validate core endpoints.  
-- Tear down with `make compose-smoke-down`; data persists in the mounted volume.
+- Tear down with `docker compose down --volumes`; data persists in the mounted volume unless you drop it.

@@ -57,10 +57,10 @@ By default the frontend expects the backend at `http://localhost:8000/api`. Conf
 Prefer containers for manual verification or stakeholder demos? Copy `.env.example` to `.env`, then run:
 
 ```bash
-make compose-smoke-up
+docker compose up --build
 ```
 
-The backend will listen on `http://localhost:8000`, and the frontend will be available at `http://localhost:8080`. When finished, tear everything down with `make compose-smoke-down`. See `docs/deployment_smoke.md` for the full runbook, including optional API key wiring and automated smoke checks.
+The backend will listen on `http://localhost:8000`, and the frontend will be available at `http://localhost:8080`. When finished, tear everything down with `docker compose down --volumes`. See `docs/deployment_smoke.md` for the full runbook, including optional API key wiring and automated smoke checks.
 
 Looking for a local-first workflow with refresh/troubleshooting steps? See `docs/runbooks/local-deployment.md`.
 

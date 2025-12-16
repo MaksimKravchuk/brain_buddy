@@ -6,7 +6,7 @@ Covers end-to-end local deployment for Brain Buddy using the compose smoke stack
 
 - Docker Desktop or Docker Engine + Compose v2
 - Node.js (per `frontend/package.json` engines) and npm
-- Python 3.11 + `make`
+- Python 3.11
 - Network: ports 8000 (backend), 8080 (frontend), 5173/3000 (dev servers) available or remapped
 
 ## Environment Setup
@@ -21,7 +21,7 @@ Covers end-to-end local deployment for Brain Buddy using the compose smoke stack
 
 ## Quickstart: Initial Deploy (MVP)
 
-1) `make local-deploy` (runs `docker compose -f docker-compose.smoke.yml up --build`).
+1) `docker compose up --build` (builds from your current branch checkout).
 2) Wait for backend healthcheck to pass; frontend depends_on backend.
 3) Validate health:
    - Backend: `./scripts/smoke_test.sh` (runs against localhost:8000 via API_PREFIX)
@@ -35,7 +35,7 @@ Covers end-to-end local deployment for Brain Buddy using the compose smoke stack
 ## Refresh Workflow (after code changes)
 
 1) Pull or apply code changes on current branch.
-2) Restart stack with current code: `docker compose -f docker-compose.smoke.yml up --build --detach`.
+2) Restart stack with current code: `docker compose up --build --detach`.
    - This reuses Docker layer cache; keep prior images to stay under the 5-minute budget.
    - Faster iteration: `make dev-backend` and `make dev-frontend` in separate shells if you prefer hot reload (uses local host ports 8000/5173).
    - No manual file copying required; the stack runs from your checked-out branch.
@@ -59,12 +59,12 @@ Covers end-to-end local deployment for Brain Buddy using the compose smoke stack
 - Resolve: stop conflicting service or change port in `.env` and rerun compose
 
 ### Stale volumes / caches (US3)
-- Reset stack: `docker compose -f docker-compose.smoke.yml down --volumes`
+- Reset stack: `docker compose down --volumes`
 - Clear node cache (optional): `npm cache clean --force`
-- Rebuild: `docker compose -f docker-compose.smoke.yml up --build`
+- Rebuild: `docker compose up --build`
 
 ### Env mismatches or failed start (US3)
-- Inspect logs: `docker compose -f docker-compose.smoke.yml logs backend` / `frontend`
+- Inspect logs: `docker compose logs backend` / `frontend`
 - Confirm `.env` values match required list above; ensure `BRAIN_BUDDY_API_PREFIX` aligns with `VITE_API_BASE_URL`
 - If API key enforced, set both `BRAIN_BUDDY_API_KEY` and `VITE_API_KEY`
 
@@ -80,7 +80,7 @@ Covers end-to-end local deployment for Brain Buddy using the compose smoke stack
 
 ## Appendix: Commands Reference
 
-- Start stack: `make local-deploy`
-- Stop stack and clean volumes: `docker compose -f docker-compose.smoke.yml down --volumes`
-- Logs: `docker compose -f docker-compose.smoke.yml logs -f`
+- Start stack: `docker compose up --build`
+- Stop stack and clean volumes: `docker compose down --volumes`
+- Logs: `docker compose logs -f`
 - Dev servers: `make dev-backend` (uvicorn reload), `make dev-frontend` (Vite)
