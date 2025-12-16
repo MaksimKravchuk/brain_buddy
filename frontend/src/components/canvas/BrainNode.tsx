@@ -43,7 +43,6 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
         minWidth={160}
         minHeight={80}
         isVisible={showControls}
-        handlePositions={["top", "right", "bottom", "left"]}
         handleClassName="!h-2.5 !w-2.5 !rounded-full !border !border-slate-600/80 !bg-slate-100"
         lineClassName="!border-slate-600/50"
       />
