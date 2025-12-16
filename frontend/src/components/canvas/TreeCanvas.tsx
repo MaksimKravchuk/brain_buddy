@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type {
   Connection,
   Edge,
@@ -11,8 +11,7 @@ import type {
   OnSelectionChangeFunc,
   ReactFlowInstance
 } from "reactflow";
-import ReactFlow, { Background, Controls, MarkerType, MiniMap, Panel } from "reactflow";
-import { twMerge } from "tailwind-merge";
+import ReactFlow, { Background, MarkerType } from "reactflow";
 
 import {
   mapNodeResponse,
@@ -33,7 +32,6 @@ import type { RelationResponse } from "../../api/types";
 import { getErrorMessage } from "../../utils/error";
 import { useGraphProfiler } from "../../hooks/useGraphProfiler";
 import { BrainNode } from "./BrainNode";
-import { CreateNodeButton } from "../CreateNodeButton";
 
 type NodeType = Node<{ node: GraphNode }>;
 type EdgeType = Edge<{ relation: GraphRelation }>;
@@ -107,6 +105,8 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   const deleteRelationMutation = useDeleteRelation(treeId);
 
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
+  const hasCreatedDefaultNode = useRef(false);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
 
   useGraphProfiler({
     nodeCount: nodes.length,
@@ -549,80 +549,90 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     ]
   );
 
-  const [creatingNode, setCreatingNode] = useState(false);
-
   const handleCreateNode = useCallback(
     (input?: { label?: string; type?: GraphNode["type"] }) => {
       const type = input?.type ?? "regular";
-      const label = input?.label?.trim() || (type === "undesired_effect" ? "Undesired effect" : type === "cause" ? "Cause" : "New idea");
+      const label =
+        input?.label?.trim() ||
+        (type === "undesired_effect" ? "Undesired effect" : type === "cause" ? "Cause" : "New idea");
       const placeholder = createPlaceholderNode(type, label);
-    const viewportCenter = reactFlowInstance
-      ? reactFlowInstance.screenToFlowPosition({
-          x: window.innerWidth / 2,
-          y: window.innerHeight / 2
-        })
-      : { x: Math.random() * 200, y: Math.random() * 200 };
+      const bounds = canvasRef.current?.getBoundingClientRect();
+      const viewportCenter = reactFlowInstance
+        ? reactFlowInstance.screenToFlowPosition({
+            x: bounds ? bounds.left + bounds.width / 2 : window.innerWidth / 2,
+            y: bounds ? bounds.top + bounds.height / 2 : window.innerHeight / 2
+          })
+        : { x: Math.random() * 200, y: Math.random() * 200 };
 
-    placeholder.position = viewportCenter;
+      placeholder.position = viewportCenter;
 
-    pushSnapshot();
-    const token = beginOptimisticChange("create-node");
-    setCreatingNode(true);
+      pushSnapshot();
+      const token = beginOptimisticChange("create-node");
       upsertNode(placeholder);
 
-    createNodeMutation.mutate(
-      {
-        label: placeholder.label,
-        position: viewportCenter,
-        type,
-        highlight_state: "none"
-      },
-      {
-        onSuccess: (nodeResponse) => {
-          resolveOptimisticChange(token);
-          removeNode(placeholder.id);
-          upsertNode(mapNodeResponse(nodeResponse));
-          select({ type: "node", id: nodeResponse.id });
-          pushToast({
-            title: "Node created",
-            description: "Node added to the canvas.",
-            variant: "success",
-            duration: 3000
-          });
+      createNodeMutation.mutate(
+        {
+          label: placeholder.label,
+          position: viewportCenter,
+          type,
+          highlight_state: "none"
         },
-        onError: (error) => {
-          rollbackOptimisticChange(token);
-          removeNode(placeholder.id);
-          pushToast({
-            title: "Failed to create node",
-            description: getErrorMessage(error),
-            variant: "error",
-            action: {
-              label: "Retry",
-              onClick: handleCreateNode
-            }
-          });
-        },
-        onSettled: () => {
-          setCreatingNode(false);
+        {
+          onSuccess: (nodeResponse) => {
+            resolveOptimisticChange(token);
+            removeNode(placeholder.id);
+            upsertNode(mapNodeResponse(nodeResponse));
+            select({ type: "node", id: nodeResponse.id });
+            pushToast({
+              title: "Node created",
+              description: "Node added to the canvas.",
+              variant: "success",
+              duration: 3000
+            });
+          },
+          onError: (error) => {
+            rollbackOptimisticChange(token);
+            removeNode(placeholder.id);
+            pushToast({
+              title: "Failed to create node",
+              description: getErrorMessage(error),
+              variant: "error",
+              action: {
+                label: "Retry",
+                onClick: handleCreateNode
+              }
+            });
+          }
         }
-      }
-    );
+      );
     },
     [
       beginOptimisticChange,
       createNodeMutation,
       pushSnapshot,
       pushToast,
+      canvasRef,
       reactFlowInstance,
       removeNode,
-      setCreatingNode,
       resolveOptimisticChange,
       rollbackOptimisticChange,
       select,
       upsertNode
     ]
   );
+
+  useEffect(() => {
+    hasCreatedDefaultNode.current = false;
+  }, [treeId]);
+
+  useEffect(() => {
+    if (isLoading || nodes.length > 0 || !reactFlowInstance || hasCreatedDefaultNode.current) {
+      return;
+    }
+
+    hasCreatedDefaultNode.current = true;
+    handleCreateNode({ type: "undesired_effect", label: "Undesired effect" });
+  }, [handleCreateNode, isLoading, nodes.length, reactFlowInstance]);
 
   const buildCombo = useCallback((event: KeyboardEvent) => {
     const target = event.target as HTMLElement | null;
@@ -706,7 +716,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   const hasContent = nodes.length > 0 || relations.length > 0;
 
   return (
-    <div className="relative h-full w-full">
+    <div ref={canvasRef} className="relative h-full w-full">
       <ReactFlow
         aria-label="Current reality tree canvas"
         nodes={flowNodes}
@@ -738,37 +748,11 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={24} size={1} color="rgba(59,130,246,0.1)" />
-        <MiniMap
-          className="!bg-surface-sunken/80"
-          nodeColor={(node) =>
-            node.data?.node?.highlightState === "effect_spanning"
-              ? "#f43f5e"
-              : node.data?.node?.highlightState === "cause_candidate"
-                ? "#f59e0b"
-                : "#38bdf8"
-          }
-        />
-        <Controls className="rounded-lg border border-slate-700 bg-surface-sunken/90 text-slate-200" />
-        <Panel position="top-left" className="rounded-lg border border-slate-800 bg-surface-sunken/80 px-3 py-2 text-xs shadow-lg">
-          <div className="flex items-center gap-3">
-            <div className="min-w-[320px]">
-              <CreateNodeButton onCreate={handleCreateNode} disabled={creatingNode} />
-            </div>
-            <button
-              type="button"
-              onClick={() => select({ type: null, id: null })}
-              className="rounded-md border border-slate-700/80 px-2 py-1 text-xs text-slate-300 transition hover:border-slate-500 hover:text-slate-100"
-            >
-              Clear selection
-            </button>
-            <span className="hidden text-slate-500 md:inline">Drag nodes to reposition, connect to relate.</span>
-          </div>
-        </Panel>
       </ReactFlow>
 
       {!hasContent && !isLoading ? (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-slate-400">
-          <p>No nodes yet. Use &ldquo;Add Node&rdquo; or click-and-drag between nodes once created.</p>
+          <p>No nodes yet. Start with the default undesired effect and grow connections from it.</p>
         </div>
       ) : null}
 
