@@ -18,15 +18,15 @@ Use this guide to spin up the Brain Buddy stack locally using Docker Compose for
 
 2. Build and start the containers:
    ```bash
-   make compose-smoke-up
+   docker compose up --build
    ```
    This boots the FastAPI backend on `http://localhost:8000` and the frontend on `http://localhost:8080`. Docker will mount a named volume for persistence so your manual edits survive container restarts.
 
 3. When you're done testing, stop the stack:
    ```bash
-   make compose-smoke-down
+   docker compose down --volumes
    ```
-   Include `--volumes` (already wired into the target) if you want to drop stored data and restart fresh later.
+   Remove `--volumes` if you want to keep stored data between runs.
 
 4. (Optional) Load the pilot dataset into the local volume:
    ```bash
@@ -59,6 +59,6 @@ If you enabled API key authentication, export `BRAIN_BUDDY_API_KEY` (and optiona
 
 ## Troubleshooting
 
-- **Health check failures**: run `make compose-smoke-logs` to tail service logs; restart with `make compose-smoke-down` followed by `make compose-smoke-up`.
+- **Health check failures**: run `docker compose logs -f` to tail service logs; restart with `docker compose down --volumes` followed by `docker compose up --build`.
 - **Missing Docker**: install Docker Desktop or `docker` + `docker-compose-plugin` for your platform.
 - **API key mismatches**: ensure both backend (`BRAIN_BUDDY_API_KEY`) and frontend (`VITE_API_KEY`) values match in `.env` before rebuilding.

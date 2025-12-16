@@ -16,8 +16,8 @@ description: "Task list for Current Reality Tree UI"
 **Purpose**: Ensure local/compose environments and tooling are aligned with spec/plan.
 
  - [X] T001 Update `.env.example` with API base URLs/ports and optional `BRAIN_BUDDY_API_KEY`/`VITE_API_KEY` for local/compose.
- - [X] T002 Create/align `docker-compose.local.yml` to run FastAPI (8000, data volume) and Vite/React (8080) with env wiring.
- - [X] T003 Update `Makefile` compose targets (`compose-up`, `compose-down`, `compose-smoke`) to reference `docker-compose.local.yml`.
+- [X] T002 Create/align `compose.yaml` to run FastAPI (8000, data volume) and Vite/React (8080) with env wiring.
+- [X] T003 Update compose commands to reference the consolidated `compose.yaml`.
  - [X] T004 Align `scripts/smoke_test.sh` to compose hosts/ports and document usage comments.
 
 ---
@@ -81,7 +81,7 @@ description: "Task list for Current Reality Tree UI"
 
 - [X] T027 Update docs (README.md, `specs/001-reality-tree-ui/quickstart.md`) with autosave cadence, AI consent flow, compose usage.
 - [X] T028 Review accessibility and performance (200-node canvas, `useGraphProfiler`) and tune `frontend/src/components/canvas/TreeCanvas.tsx` and `frontend/src/hooks/useGraphProfiler.ts`.
-- [X] T029 Validate compose stack via `make compose-smoke-up` and `./scripts/smoke_test.sh`; apply fixes in `docker-compose.local.yml` or `scripts/smoke_test.sh`.
+- [X] T029 Validate compose stack via `docker compose up --build` and `./scripts/smoke_test.sh`; apply fixes in `compose.yaml` or `scripts/smoke_test.sh`.
 - [X] T030 Run backend quality gates (Black/Ruff/mypy) per `backend/pyproject.toml` and fix findings in `backend/app/**`.
 - [X] T031 Run frontend quality gates (ESLint/Prettier/tsc/Vitest) per `frontend/package.json` scripts and fix findings in `frontend/src/**`.
 
