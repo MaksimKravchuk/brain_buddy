@@ -1,30 +1,39 @@
-# Fly configuration for the Brain Buddy frontend. Deploy after the backend so
-# VITE_API_BASE_URL can target the correct Fly app hostname.
-app = "brain-buddy-frontend"
-primary_region = "iad"
+# fly.toml app configuration file generated for brain-buddy-frontend on 2025-12-16T23:35:16+01:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'brain-buddy-frontend'
+primary_region = 'ams'
 
 [build]
-  dockerfile = "frontend/Dockerfile"
+  dockerfile = 'frontend/Dockerfile'
+
   [build.args]
-    # Replace backend app name if it differs; this value feeds the Vite build.
-    VITE_API_BASE_URL = "https://brain-buddy-backend.fly.dev/api"
-    VITE_API_KEY = ""
-    VITE_API_KEY_HEADER = "X-API-Key"
+    VITE_API_BASE_URL = '/api'
+    VITE_API_KEY = ''
+    VITE_API_KEY_HEADER = 'X-API-Key'
 
 [env]
-  # Keep in sync with the backend Fly app name to avoid CORS/base URL mismatches.
-  VITE_API_BASE_URL = "https://brain-buddy-backend.fly.dev/api"
-  VITE_API_KEY_HEADER = "X-API-Key"
+  VITE_API_BASE_URL = '/api'
+  VITE_API_KEY_HEADER = 'X-API-Key'
+  BACKEND_ORIGIN = 'http://brain-buddy-backend.flycast:8000'
 
 [http_service]
   internal_port = 80
   force_https = true
-  auto_stop_machines = true
+  auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 0
-  processes = ["app"]
+  processes = ['app']
 
   [http_service.concurrency]
-    type = "requests"
-    soft_limit = 100
+    type = 'requests'
     hard_limit = 200
+    soft_limit = 100
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 1024
