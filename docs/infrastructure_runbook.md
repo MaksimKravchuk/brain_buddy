@@ -5,7 +5,7 @@ This runbook covers how to deploy, operate, and recover the Brain Buddy stack as
 ## Environments
 
 - **Development** – engineers run services via `make dev-backend` and `make dev-frontend`. Data persists under `backend/data/`.
-- **Pilot (Compose)** – the reference environment brought up with `docker-compose.smoke.yml`. The backend container mounts a named Docker volume for persistence.
+- **Pilot (Compose)** – the reference environment brought up with `docker compose` using the repo's `compose.yaml`. The backend container mounts a named Docker volume for persistence.
 - **CI** – GitHub Actions workflow `CI` runs on every push / PR to `main`, executing linting, tests, coverage, and Docker builds.
 
 All environments draw configuration from `.env.example`. Copy it to `.env` for compose deployments and keep real API keys in your secret manager.
@@ -18,9 +18,9 @@ All environments draw configuration from `.env.example`. Copy it to `.env` for c
    - Adjust `VITE_API_BASE_URL` if the frontend will proxy through another host.
 2. **Build & start containers**
    ```bash
-   make compose-smoke-up
+   docker compose up --build
    ```
-   This runs `docker compose -f docker-compose.smoke.yml up --build`, producing backend and frontend images from the repo Dockerfiles.
+   This runs the default compose file (`compose.yaml`), producing backend and frontend images from the repo Dockerfiles.
 3. **Load pilot dataset (optional but recommended)**
    ```bash
    python scripts/load_dataset.py docs/pilot_dataset.json --data-dir backend/data
@@ -36,9 +36,9 @@ All environments draw configuration from `.env.example`. Copy it to `.env` for c
 
 1. Stop the stack:
    ```bash
-   make compose-smoke-down
+   docker compose down --volumes
    ```
-2. Pull the desired Git commit and rebuild images with `make compose-smoke-up`.
+2. Pull the desired Git commit and rebuild images with `docker compose up --build`.
 3. To revert to a clean state, remove the data volume:
    ```bash
    docker volume rm brain-buddy_backend-data
