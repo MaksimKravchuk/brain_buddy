@@ -6,6 +6,12 @@ Deploy the Brain Buddy backend and frontend as separate Fly.io apps. The steps b
 - Install the Fly CLI (`flyctl`) from https://fly.io/docs/hands-on/install/ and run `flyctl auth login`.
 - Ensure Docker is available locally or enable Fly's remote builder (`flyctl deploy --remote-only`).
 - Decide on two app names: one for the backend API and one for the frontend (e.g., `brain-buddy-api` and `brain-buddy-web`).
+- Confirm the GitHub Actions CI workflow is green before deploying (see "CI guardrails" below) so the images you ship match what was tested.
+
+## CI guardrails
+- **Workflow location:** `.github/workflows/ci.yml` runs on pushes/PRs to `main`. It lints and type-checks the backend (Ruff + mypy), runs backend pytest with coverage, executes frontend unit tests with coverage, builds the frontend bundle, and performs Docker image builds for both services.
+- **Run locally:** `make test-backend` and `make test-frontend` mirror the CI steps. Optionally, `docker compose build` validates the Dockerfiles locally.
+- **Deploy only after green:** Wait for the CI badge in the README or the Actions tab to go green. If CI is red, fix the failures locally before running any Fly deploys.
 
 ## Backend setup (API)
 1. **Create the app (once):**
