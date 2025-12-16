@@ -1,7 +1,7 @@
 # Research: Local Deployment Setup
 
 ## Decision: Use Docker Compose for end-to-end local deployment
-- **Rationale**: Mirrors existing smoke stack, aligns with repository scripts (`docker-compose.smoke.yml`), and keeps backend/frontend parity with production-like networking. Simplifies port mapping and volume management for file-backed tree data.
+- **Rationale**: Mirrors the consolidated compose stack (`compose.yaml`) and keeps backend/frontend parity with production-like networking. Simplifies port mapping and volume management for file-backed tree data.
 - **Alternatives considered**: Standalone uvicorn + Vite dev servers (faster startup but diverges from composed stack networking); Kubernetes local (minikube/kind) adds overhead without need; pure mocks (no backend) fail to validate integration.
 
 ## Decision: Provide `.env.example`-driven configuration for local runs

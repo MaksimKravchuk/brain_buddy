@@ -17,7 +17,7 @@
 
 - [x] T001 Create deployment runbook scaffold in /Users/max/Code/brain_buddy/docs/runbooks/local-deployment.md
 - [x] T002 [P] Ensure required local env variables are listed with safe defaults in /Users/max/Code/brain_buddy/.env.example
-- [x] T003 [P] Verify compose stack references expected env/volumes and note overrides in /Users/max/Code/brain_buddy/deploy/docker-compose.smoke.yml
+- [x] T003 [P] Verify compose stack references expected env/volumes and note overrides in /Users/max/Code/brain_buddy/compose.yaml
 
 ---
 
@@ -25,7 +25,7 @@
 
 **Purpose**: Core setup steps that must precede story work
 
-- [x] T004 Add make/compose entry (or confirm existing) for local stack startup notes in /Users/max/Code/brain_buddy/Makefile
+- [x] T004 Add compose entry (or confirm existing) for local stack startup notes in /Users/max/Code/brain_buddy/Makefile
 - [x] T005 [P] Document smoke test usage for local validation in /Users/max/Code/brain_buddy/docs/runbooks/local-deployment.md
 - [x] T006 [P] Add port/resource matrix for local stack to /Users/max/Code/brain_buddy/docs/runbooks/local-deployment.md
 
