@@ -66,6 +66,10 @@ Looking for a local-first workflow with refresh/troubleshooting steps? See `docs
 
 **API keys in compose**: set `BRAIN_BUDDY_API_KEY` and `VITE_API_KEY` together in `.env` to require a key end-to-end. The compose stack forwards these into backend/frontend containers and the smoke test will include them automatically.
 
+## Deployment
+
+- **Fly.io**: Follow `docs/fly-deployment.md` for provisioning volumes, wiring secrets, deploying backend and frontend apps, and running curl smoke checks with rollback guidance.
+
 ## Environment & Configuration
 
 | Variable | Default | Purpose |
