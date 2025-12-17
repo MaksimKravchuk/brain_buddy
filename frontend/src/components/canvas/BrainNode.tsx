@@ -30,6 +30,7 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
   const beginOptimisticChange = useTreeStore((state) => state.beginOptimisticChange);
   const resolveOptimisticChange = useTreeStore((state) => state.resolveOptimisticChange);
   const rollbackOptimisticChange = useTreeStore((state) => state.rollbackOptimisticChange);
+  const select = useTreeStore((state) => state.select);
 
   const pushToast = useUiStore((state) => state.pushToast);
 
@@ -47,11 +48,32 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
     }
   }, [isEditing]);
 
+  const lineHeight = 1.1;
+
   const fontSize = useMemo(() => {
-    const length = node.label.length || 1;
-    const clamped = Math.max(11, 20 - length * 0.25);
-    return Math.min(20, clamped);
-  }, [node.label.length]);
+    const label = isEditing ? draftLabel : node.label;
+    const length = label.length || 1;
+    const maxFont = 20;
+    const minFont = 8;
+    const baseWidth = 200;
+    const baseHeight = 100;
+    const innerPaddingX = isEditing ? 24 : 0;
+    const innerPaddingY = isEditing ? 16 : 0;
+    const contentWidth = Math.max(1, baseWidth - innerPaddingX - 4);
+    const contentHeight = Math.max(1, baseHeight - innerPaddingY - 4);
+    const avgCharWidth = 0.62;
+
+    for (let size = maxFont; size >= minFont; size -= 1) {
+      const charsPerLine = Math.max(1, Math.floor(contentWidth / (size * avgCharWidth)));
+      const lineCount = Math.ceil(length / charsPerLine);
+      const estimatedHeight = lineCount * size * lineHeight;
+      if (estimatedHeight <= contentHeight) {
+        return size;
+      }
+    }
+
+    return minFont;
+  }, [draftLabel, isEditing, lineHeight, node.label]);
 
   const handleSubmitLabel = () => {
     const trimmed = draftLabel.trim();
@@ -99,9 +121,10 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
   return (
     <div
       className={twMerge(
-        "group relative h-full min-h-[96px] min-w-[200px] max-w-[280px] rounded-l-2xl rounded-r-xl border border-slate-600/60 bg-slate-900/70 text-left shadow-lg transition-all duration-150",
+        "group relative h-[132px] w-[240px] rounded-l-2xl rounded-r-xl border border-slate-600/60 bg-slate-900/70 text-left shadow-lg transition-all duration-150",
         selected ? "ring-2 ring-slate-200/60 shadow-glow" : "ring-1 ring-transparent"
       )}
+      onMouseDown={() => select({ type: "node", id: node.id })}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
@@ -150,7 +173,7 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
         )}
       />
 
-      <div className="flex h-full w-full items-center justify-center px-5 py-4">
+      <div className="flex h-full w-full items-center justify-center overflow-hidden px-5 py-4">
         {isEditing ? (
           <textarea
             ref={inputRef}
@@ -167,8 +190,8 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
                 handleCancelEdit();
               }
             }}
-            className="w-full resize-none rounded-md border border-slate-700 bg-slate-950/70 px-3 py-2 text-center text-slate-50 shadow-inner focus:border-brand-primary focus:outline-none"
-            style={{ fontSize }}
+            className="h-full w-full max-h-full resize-none rounded-md border border-slate-700 bg-slate-950/70 px-3 py-2 text-center text-slate-50 shadow-inner focus:border-brand-primary focus:outline-none"
+            style={{ fontSize, lineHeight }}
             rows={2}
           />
         ) : (
@@ -181,8 +204,8 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
                 setIsEditing(true);
               }
             }}
-            className="w-full break-words text-center font-semibold leading-tight tracking-tight text-slate-50 focus:outline-none"
-            style={{ fontSize }}
+            className="max-h-full w-full break-words overflow-y-auto text-center font-semibold leading-tight tracking-tight text-slate-50 focus:outline-none"
+            style={{ fontSize, lineHeight }}
           >
             {node.label}
           </button>
