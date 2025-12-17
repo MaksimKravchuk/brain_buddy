@@ -1,9 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { NodeProps } from "reactflow";
 import { Handle, Position } from "reactflow";
 import { twMerge } from "tailwind-merge";
 
 import type { GraphNode } from "../../stores/treeStore";
+import { useTreeStore } from "../../stores/treeStore";
+import { useUpdateNode } from "../../api/hooks";
 
 export interface BrainNodeData {
   node: GraphNode;
@@ -15,7 +17,12 @@ export interface BrainNodeData {
 
 export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Element {
   const { node, onCreateParent, onCreateChild, onCreateLeftSibling, onCreateRightSibling } = data;
+  const activeTreeId = useTreeStore((state) => state.activeTreeId);
+  const updateNodeMutation = useUpdateNode(activeTreeId ?? "");
   const [isHovered, setIsHovered] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftLabel, setDraftLabel] = useState(node.label);
+  const inputRef = useRef<HTMLInputElement>(null);
   const showControls = selected || isHovered;
 
   const linkHandleClass = (position: "top" | "bottom") =>
@@ -32,11 +39,34 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
       showControls ? "opacity-40" : "opacity-0"
     );
 
+  useEffect(() => {
+    setDraftLabel(node.label);
+  }, [node.label]);
+
+  useEffect(() => {
+    if (isEditing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [isEditing]);
+
+  const handleSubmitLabel = () => {
+    const trimmedLabel = draftLabel.trim();
+    setIsEditing(false);
+
+    if (!activeTreeId || !trimmedLabel || trimmedLabel === node.label) {
+      return;
+    }
+
+    updateNodeMutation.mutate({ nodeId: node.id, payload: { label: trimmedLabel } });
+  };
+
+  const lineHeight = 1.1;
   const fontSize = useMemo(() => {
-    const length = node.label.length || 1;
+    const length = (isEditing ? draftLabel : node.label).length || 1;
     const clamped = Math.max(11, 20 - length * 0.25);
     return Math.min(20, clamped);
-  }, [node.label.length]);
+  }, [draftLabel, isEditing, node.label]);
 
   return (
     <div
@@ -120,13 +150,34 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
         )}
       />
 
-      <div className="flex h-full w-full items-center justify-center px-5 py-4">
-        <p
-          className="w-full break-words text-center font-semibold leading-tight tracking-tight text-slate-50"
-          style={{ fontSize }}
-        >
-          {node.label}
-        </p>
+      <div className="flex h-full w-full items-center justify-center px-5 py-4" onDoubleClick={() => setIsEditing(true)}>
+        {isEditing ? (
+          <input
+            ref={inputRef}
+            value={draftLabel}
+            onChange={(event) => setDraftLabel(event.target.value)}
+            onBlur={handleSubmitLabel}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                handleSubmitLabel();
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                setDraftLabel(node.label);
+                setIsEditing(false);
+              }
+            }}
+            className="w-full rounded-lg border border-slate-400/50 bg-slate-900/70 px-2 py-1 text-center text-slate-50 shadow-inner outline-none ring-1 ring-slate-500/40 focus:ring-2 focus:ring-brand-primary"
+            style={{ fontSize, lineHeight }}
+          />
+        ) : (
+          <p
+            className="w-full break-words text-center font-semibold leading-tight tracking-tight text-slate-50"
+            style={{ fontSize, lineHeight }}
+          >
+            {node.label}
+          </p>
+        )}
       </div>
     </div>
   );
