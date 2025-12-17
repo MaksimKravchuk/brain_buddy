@@ -467,30 +467,42 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
     const mappedNodes = applyDerivedNodeState(tree.nodes.map(mapNodeResponse), mappedRelations);
     const ownerId = tree.owner_id ?? tree.metadata.owner_id ?? sessionOwnerId ?? null;
 
-    set(() => ({
-      activeTreeId: tree.id,
-      metadata: {
-        id: tree.id,
-        name: tree.name,
-        version: tree.metadata.version,
-        createdAt: tree.metadata.created_at,
-        updatedAt: tree.metadata.updated_at,
-        ownerId,
-        layout: tree.metadata.layout ?? null
-      },
-      nodes: mappedNodes,
-      relations: mappedRelations,
-      versions: [],
-      selection: initialSelection,
-      undoStack: [],
-      redoStack: [],
-      optimisticQueue: [],
-      pendingSync: false,
-      lastChangeAt: null,
-      lastLocalSaveAt: tree.metadata.updated_at,
-      lastCloudSyncAt: tree.metadata.updated_at,
-      lastSyncError: null
-    }));
+    set((state) => {
+      let nextSelection = state.activeTreeId === tree.id ? state.selection : initialSelection;
+
+      if (nextSelection.type === "node") {
+        const exists = mappedNodes.some((node) => node.id === nextSelection.id);
+        nextSelection = exists ? nextSelection : initialSelection;
+      } else if (nextSelection.type === "relation") {
+        const exists = mappedRelations.some((relation) => relation.id === nextSelection.id);
+        nextSelection = exists ? nextSelection : initialSelection;
+      }
+
+      return {
+        activeTreeId: tree.id,
+        metadata: {
+          id: tree.id,
+          name: tree.name,
+          version: tree.metadata.version,
+          createdAt: tree.metadata.created_at,
+          updatedAt: tree.metadata.updated_at,
+          ownerId,
+          layout: tree.metadata.layout ?? null
+        },
+        nodes: mappedNodes,
+        relations: mappedRelations,
+        versions: [],
+        selection: nextSelection,
+        undoStack: [],
+        redoStack: [],
+        optimisticQueue: [],
+        pendingSync: false,
+        lastChangeAt: null,
+        lastLocalSaveAt: tree.metadata.updated_at,
+        lastCloudSyncAt: tree.metadata.updated_at,
+        lastSyncError: null
+      };
+    });
   },
 
   reset() {

@@ -162,67 +162,6 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     [select]
   );
 
-  const handleNodeDoubleClick = useCallback<NodeMouseHandler>(
-    (_, node) => {
-      const graphNode = nodes.find((item) => item.id === node.id);
-      if (!graphNode) {
-        return;
-      }
-
-      const nextLabel = window.prompt("Rename node", graphNode.label);
-      if (nextLabel === null) {
-        return;
-      }
-
-      const trimmed = nextLabel.trim();
-      if (!trimmed || trimmed === graphNode.label) {
-        return;
-      }
-
-      pushSnapshot();
-      const token = beginOptimisticChange("rename-node-inline");
-      upsertNode({
-        ...graphNode,
-        label: trimmed
-      });
-
-      updateNodeMutation.mutate(
-        { nodeId: graphNode.id, payload: { label: trimmed } },
-        {
-          onSuccess: () => {
-            resolveOptimisticChange(token);
-            pushToast({
-              title: "Node renamed",
-              description: "Label updated inline.",
-              variant: "success",
-              duration: 2500
-            });
-          },
-          onError: (error) => {
-            rollbackOptimisticChange(token);
-            pushToast({
-              title: "Failed to update node",
-              description: getErrorMessage(error),
-              variant: "error",
-              duration: 6000
-            });
-          }
-        }
-      );
-    },
-    [
-      beginOptimisticChange,
-      nodes,
-      pushSnapshot,
-      pushToast,
-      resolveOptimisticChange,
-      rollbackOptimisticChange,
-      select,
-      updateNodeMutation,
-      upsertNode
-    ]
-  );
-
   const handleNodesDelete = useCallback<OnNodesDelete>(
     (nodesToDelete) => {
       if (!nodesToDelete.length) {
@@ -312,10 +251,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
 
       if (selectedEdges?.length) {
         select({ type: "relation", id: selectedEdges[0].id });
-        return;
       }
-
-      select({ type: null, id: null });
     },
     [select]
   );
@@ -394,12 +330,6 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
             resolveOptimisticChange(token);
             removeRelation(tempRelation.id);
             upsertRelation(relationFromResponse(relation));
-            pushToast({
-              title: "Relation created",
-              description: "Connection established successfully.",
-              variant: "success",
-              duration: 3000
-            });
           },
           onError: (error) => {
             rollbackOptimisticChange(token);
@@ -554,12 +484,6 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
               const targetId = input.relation.toId === "new" ? createdNode.id : input.relation.toId;
               handleConnect({ source: sourceId, target: targetId } as Connection);
             }
-            pushToast({
-              title: "Node created",
-              description: "Node added to the canvas.",
-              variant: "success",
-              duration: 3000
-            });
           },
           onError: (error) => {
             rollbackOptimisticChange(token);
@@ -799,7 +723,6 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         minZoom={0.1}
         maxZoom={1.5}
         onNodeClick={handleNodeClick}
-        onNodeDoubleClick={handleNodeDoubleClick}
         onNodeContextMenu={handleNodeContextMenu}
         onEdgeClick={handleEdgeClick}
         onPaneClick={handlePaneClick}
