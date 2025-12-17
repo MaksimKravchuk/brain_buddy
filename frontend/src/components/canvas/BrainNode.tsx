@@ -19,11 +19,6 @@ export interface BrainNodeData {
 
 export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Element {
   const { node, onCreateParent, onCreateChild, onCreateLeftSibling, onCreateRightSibling } = data;
-  const [isHovered, setIsHovered] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [draftLabel, setDraftLabel] = useState(node.label);
-  const inputRef = useRef<HTMLTextAreaElement | null>(null);
-
   const activeTreeId = useTreeStore((state) => state.activeTreeId);
   const pushSnapshot = useTreeStore((state) => state.pushSnapshot);
   const upsertNode = useTreeStore((state) => state.upsertNode);
@@ -32,10 +27,28 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
   const rollbackOptimisticChange = useTreeStore((state) => state.rollbackOptimisticChange);
   const select = useTreeStore((state) => state.select);
 
+  const updateNodeMutation = useUpdateNode(activeTreeId ?? "");
   const pushToast = useUiStore((state) => state.pushToast);
 
-  const updateNodeMutation = useUpdateNode(activeTreeId ?? "");
+  const [isHovered, setIsHovered] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftLabel, setDraftLabel] = useState(node.label);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const showControls = selected || isHovered;
+
+  const linkHandleClass = (position: "top" | "bottom") =>
+    twMerge(
+      "pointer-events-auto absolute left-1/2 z-10 h-3 w-16 -translate-x-1/2 rounded-full border border-slate-500/70 bg-slate-100/80 shadow-sm transition-opacity duration-150",
+      position === "top" ? "-top-3" : "-bottom-3",
+      showControls ? "opacity-80" : "opacity-0"
+    );
+
+  const linkTargetClass = (position: "top" | "bottom") =>
+    twMerge(
+      "pointer-events-auto absolute left-1/2 z-0 h-4 w-24 -translate-x-1/2 rounded-full border border-slate-400/40 bg-slate-100/30 transition-opacity duration-150",
+      position === "top" ? "-top-4" : "-bottom-4",
+      showControls ? "opacity-40" : "opacity-0"
+    );
 
   useEffect(() => {
     setDraftLabel(node.label);
@@ -128,8 +141,36 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      <Handle type="source" position={Position.Top} className="pointer-events-none invisible" isConnectable={false} />
-      <Handle type="target" position={Position.Bottom} className="pointer-events-none invisible" isConnectable={false} />
+      <Handle
+        id="link-up-source"
+        type="source"
+        position={Position.Top}
+        className={linkHandleClass("top")}
+        aria-label="Link to parent"
+      />
+      <Handle
+        id="link-up-target"
+        type="target"
+        position={Position.Top}
+        isConnectableStart={false}
+        className={linkTargetClass("top")}
+        aria-label="Accept parent link"
+      />
+      <Handle
+        id="link-down-source"
+        type="source"
+        position={Position.Bottom}
+        className={linkHandleClass("bottom")}
+        aria-label="Link to child"
+      />
+      <Handle
+        id="link-down-target"
+        type="target"
+        position={Position.Bottom}
+        isConnectableStart={false}
+        className={linkTargetClass("bottom")}
+        aria-label="Accept child link"
+      />
 
       <div className="pointer-events-none absolute inset-y-0 left-0 w-2 rounded-l-2xl bg-slate-200/10" />
 
