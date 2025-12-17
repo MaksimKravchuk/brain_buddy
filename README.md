@@ -69,10 +69,11 @@ Looking for a local-first workflow with refresh/troubleshooting steps? See `docs
 ## Deployment
 
 - **Fly.io**: Follow `docs/fly-deployment.md` for provisioning volumes, wiring secrets, deploying backend and frontend apps, and running curl smoke checks with rollback guidance.
+- **Fly.io review apps**: See `docs/fly-review-apps.md` for frontend PR preview deploys and required GitHub secrets.
 - **CI before deploys**: GitHub Actions (`.github/workflows/ci.yml`) runs backend lint/type/test + coverage, frontend unit tests + build, and Docker image builds on every push/PR to `main`. Wait for CI to go green (see the badge above) before deploying to Fly.
 ## Fly.io Deployment (backend)
 
-Use `fly.backend.toml` to deploy the FastAPI service from `backend/Dockerfile` with health checks on `/health` and a volume mounted at `/app/data`.
+The backend Fly app is private and only reachable over Flycast from other apps in your organization (no public `fly.dev` address). Use `fly.backend.toml` to deploy the FastAPI service from `backend/Dockerfile` with health checks on `/health` and a volume mounted at `/app/data`.
 
 ```bash
 # Create or resize the persistent volume
@@ -84,6 +85,8 @@ flyctl secrets set BRAIN_BUDDY_API_KEY="<your-api-key>"
 # Deploy using the backend config
 flyctl deploy -c fly.backend.toml
 ```
+
+When pairing the private backend with the public frontend, point the frontend proxy at the Flycast address for your backend app (e.g., `http://<backend-app>.flycast:8000`) via `BACKEND_ORIGIN` in `fly.frontend.toml` or `flyctl secrets set BACKEND_ORIGIN=... -a <frontend-app>`.
 
 ## Environment & Configuration
 
