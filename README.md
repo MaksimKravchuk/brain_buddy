@@ -69,6 +69,7 @@ Looking for a local-first workflow with refresh/troubleshooting steps? See `docs
 ## Deployment
 
 - **Fly.io**: Follow `docs/fly-deployment.md` for provisioning volumes, wiring secrets, deploying backend and frontend apps, and running curl smoke checks with rollback guidance.
+- **Fly.io review apps**: See `docs/fly-review-apps.md` for frontend PR preview deploys and required GitHub secrets.
 - **CI before deploys**: GitHub Actions (`.github/workflows/ci.yml`) runs backend lint/type/test + coverage, frontend unit tests + build, and Docker image builds on every push/PR to `main`. Wait for CI to go green (see the badge above) before deploying to Fly.
 ## Fly.io Deployment (backend)
 
