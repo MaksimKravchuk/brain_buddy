@@ -626,6 +626,18 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     [handleCreateNode, nodes]
   );
 
+  const handleCreateChildFromSelection = useCallback(() => {
+    if (selection.type !== "node") return;
+
+    handleCreateRelativeNode(selection.id, "child");
+  }, [handleCreateRelativeNode, selection]);
+
+  const handleCreateSiblingFromSelection = useCallback(() => {
+    if (selection.type !== "node") return;
+
+    handleCreateRelativeNode(selection.id, "right");
+  }, [handleCreateRelativeNode, selection]);
+
   const flowNodes = useMemo<NodeType[]>(() => {
     return nodes.map((node) => ({
       id: node.id,
@@ -718,6 +730,13 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       { id: "zoom-in-ctrl-shift", combo: "ctrl+shift+=", description: "Zoom in", handler: handleZoomIn },
       { id: "zoom-out-meta", combo: "meta+-", description: "Zoom out", handler: handleZoomOut },
       { id: "zoom-out-ctrl", combo: "ctrl+-", description: "Zoom out", handler: handleZoomOut },
+      { id: "create-child-enter", combo: "enter", description: "Create child node", handler: handleCreateChildFromSelection },
+      {
+        id: "create-sibling-tab",
+        combo: "tab",
+        description: "Create sibling node",
+        handler: handleCreateSiblingFromSelection
+      },
       { id: "center-meta", combo: "meta+shift+c", description: "Center on selection", handler: handleCenterOnSelection },
       { id: "center-ctrl", combo: "ctrl+shift+c", description: "Center on selection", handler: handleCenterOnSelection },
       { id: "undo-meta", combo: "meta+z", description: "Undo", handler: handleUndo },
@@ -733,6 +752,8 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   }, [
     handleCenterOnSelection,
     handleCreateNode,
+    handleCreateChildFromSelection,
+    handleCreateSiblingFromSelection,
     handleLinkNodes,
     handleRedo,
     handleUndo,
@@ -746,6 +767,11 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     const listener = (event: KeyboardEvent) => {
       const combo = buildCombo(event);
       if (!combo) return;
+
+      if ((combo === "enter" || combo === "tab") && selection.type !== "node") {
+        return;
+      }
+
       const triggered = triggerHotkey(combo);
       if (triggered) {
         event.preventDefault();
@@ -756,7 +782,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     return () => {
       window.removeEventListener("keydown", listener);
     };
-  }, [buildCombo, triggerHotkey]);
+  }, [buildCombo, selection, triggerHotkey]);
 
   const hasContent = nodes.length > 0 || relations.length > 0;
 
