@@ -264,6 +264,30 @@ describe("treeStore", () => {
     expect(useTreeStore.getState().selection).toEqual({ type: null, id: null });
   });
 
+  it("preserves selection on refresh when the same tree is reloaded", () => {
+    const store = useTreeStore.getState();
+    store.setTree(sampleTreeWithRelations);
+    store.select({ type: "node", id: "node-2" });
+
+    store.setTree({
+      ...sampleTreeWithRelations,
+      metadata: { ...sampleTreeWithRelations.metadata, updated_at: "2024-04-01T10:05:00Z" }
+    });
+
+    expect(useTreeStore.getState().selection).toEqual({ type: "node", id: "node-2" });
+
+    store.select({ type: "relation", id: "relation-1" });
+    store.setTree({
+      ...sampleTreeWithRelations,
+      metadata: { ...sampleTreeWithRelations.metadata, updated_at: "2024-04-01T10:06:00Z" }
+    });
+
+    expect(useTreeStore.getState().selection).toEqual({ type: "relation", id: "relation-1" });
+
+    store.setTree(sampleTree);
+    expect(useTreeStore.getState().selection).toEqual({ type: null, id: null });
+  });
+
   it("recomputes highlighting state via upsert based on derived rules", () => {
     useTreeStore.getState().setTree(sampleTree);
 
