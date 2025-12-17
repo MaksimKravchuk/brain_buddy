@@ -1,9 +1,13 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { NodeProps } from "reactflow";
 import { Handle, Position } from "reactflow";
 import { twMerge } from "tailwind-merge";
 
 import type { GraphNode } from "../../stores/treeStore";
+import { useTreeStore } from "../../stores/treeStore";
+import { useUpdateNode } from "../../api/hooks";
+import { useUiStore } from "../../stores/uiStore";
+import { getErrorMessage } from "../../utils/error";
 
 export interface BrainNodeData {
   node: GraphNode;
@@ -16,13 +20,81 @@ export interface BrainNodeData {
 export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Element {
   const { node, onCreateParent, onCreateChild, onCreateLeftSibling, onCreateRightSibling } = data;
   const [isHovered, setIsHovered] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftLabel, setDraftLabel] = useState(node.label);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const activeTreeId = useTreeStore((state) => state.activeTreeId);
+  const pushSnapshot = useTreeStore((state) => state.pushSnapshot);
+  const upsertNode = useTreeStore((state) => state.upsertNode);
+  const beginOptimisticChange = useTreeStore((state) => state.beginOptimisticChange);
+  const resolveOptimisticChange = useTreeStore((state) => state.resolveOptimisticChange);
+  const rollbackOptimisticChange = useTreeStore((state) => state.rollbackOptimisticChange);
+
+  const pushToast = useUiStore((state) => state.pushToast);
+
+  const updateNodeMutation = useUpdateNode(activeTreeId ?? "");
   const showControls = selected || isHovered;
+
+  useEffect(() => {
+    setDraftLabel(node.label);
+  }, [node.label]);
+
+  useEffect(() => {
+    if (isEditing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [isEditing]);
 
   const fontSize = useMemo(() => {
     const length = node.label.length || 1;
     const clamped = Math.max(11, 20 - length * 0.25);
     return Math.min(20, clamped);
   }, [node.label.length]);
+
+  const handleSubmitLabel = () => {
+    const trimmed = draftLabel.trim();
+    setIsEditing(false);
+
+    if (!activeTreeId) {
+      setDraftLabel(node.label);
+      return;
+    }
+
+    if (!trimmed || trimmed === node.label) {
+      setDraftLabel(node.label);
+      return;
+    }
+
+    pushSnapshot();
+    const token = beginOptimisticChange("rename-node-inline");
+    upsertNode({ ...node, label: trimmed });
+
+    updateNodeMutation.mutate(
+      { nodeId: node.id, payload: { label: trimmed } },
+      {
+        onSuccess: () => {
+          resolveOptimisticChange(token);
+        },
+        onError: (error) => {
+          rollbackOptimisticChange(token);
+          setDraftLabel(node.label);
+          pushToast({
+            title: "Failed to update node",
+            description: getErrorMessage(error),
+            variant: "error",
+            duration: 6000
+          });
+        }
+      }
+    );
+  };
+
+  const handleCancelEdit = () => {
+    setDraftLabel(node.label);
+    setIsEditing(false);
+  };
 
   return (
     <div
@@ -79,12 +151,42 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
       />
 
       <div className="flex h-full w-full items-center justify-center px-5 py-4">
-        <p
-          className="w-full break-words text-center font-semibold leading-tight tracking-tight text-slate-50"
-          style={{ fontSize }}
-        >
-          {node.label}
-        </p>
+        {isEditing ? (
+          <textarea
+            ref={inputRef}
+            value={draftLabel}
+            onChange={(event) => setDraftLabel(event.target.value)}
+            onBlur={handleSubmitLabel}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                handleSubmitLabel();
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                handleCancelEdit();
+              }
+            }}
+            className="w-full resize-none rounded-md border border-slate-700 bg-slate-950/70 px-3 py-2 text-center text-slate-50 shadow-inner focus:border-brand-primary focus:outline-none"
+            style={{ fontSize }}
+            rows={2}
+          />
+        ) : (
+          <button
+            type="button"
+            onDoubleClick={() => setIsEditing(true)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                setIsEditing(true);
+              }
+            }}
+            className="w-full break-words text-center font-semibold leading-tight tracking-tight text-slate-50 focus:outline-none"
+            style={{ fontSize }}
+          >
+            {node.label}
+          </button>
+        )}
       </div>
     </div>
   );
