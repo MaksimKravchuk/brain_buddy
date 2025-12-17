@@ -251,10 +251,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
 
       if (selectedEdges?.length) {
         select({ type: "relation", id: selectedEdges[0].id });
-        return;
       }
-
-      select({ type: null, id: null });
     },
     [select]
   );
@@ -333,12 +330,6 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
             resolveOptimisticChange(token);
             removeRelation(tempRelation.id);
             upsertRelation(relationFromResponse(relation));
-            pushToast({
-              title: "Relation created",
-              description: "Connection established successfully.",
-              variant: "success",
-              duration: 3000
-            });
           },
           onError: (error) => {
             rollbackOptimisticChange(token);
