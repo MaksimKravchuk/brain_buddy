@@ -1,6 +1,6 @@
 # Fly.io Deployment Runbook
 
-Deploy the Brain Buddy backend and frontend as separate Fly.io apps. The steps below cover prerequisites, persistent storage, secret wiring, deployment, validation, and rollback.
+Deploy the Brain Buddy backend and frontend as separate Fly.io apps. The backend is private and reachable only over Flycast from apps in the same organization; the frontend remains public and proxies `/api` requests to the private backend. The steps below cover prerequisites, persistent storage, secret wiring, deployment, validation, and rollback.
 
 ## Prerequisites
 - Install the Fly CLI (`flyctl`) from https://fly.io/docs/hands-on/install/ and run `flyctl auth login`.
@@ -41,7 +41,7 @@ Deploy the Brain Buddy backend and frontend as separate Fly.io apps. The steps b
    ```
 
 ## Deploy the backend
-Run the deployment from the repository root so the Dockerfile path resolves correctly:
+Run the deployment from the repository root so the Dockerfile path resolves correctly. The resulting app has no public `fly.dev` hostname; it listens on `http://<backend-app>.flycast:8000` for in-organization callers such as the frontend.
 ```bash
 flyctl deploy \
   --dockerfile backend/Dockerfile \
@@ -55,14 +55,15 @@ When prompted for a volume, select `brain-buddy-data` to mount at `/app/data`.
    ```bash
    flyctl apps create <frontend-app>
    ```
-2. **Point the client at the backend and forward API key settings (if any):**
+2. **Point the client at the backend (Flycast) and forward API key settings (if any):**
    ```bash
-  flyctl secrets set \
-    VITE_API_BASE_URL="https://<backend-app>.fly.dev/api" \
-    VITE_API_KEY=<optional-static-key> \
-    VITE_API_KEY_HEADER=X-API-Key \
-    -a <frontend-app>
-  ```
+   flyctl secrets set \
+     BACKEND_ORIGIN="http://<backend-app>.flycast:8000" \
+     VITE_API_BASE_URL="/api" \
+     VITE_API_KEY=<optional-static-key> \
+     VITE_API_KEY_HEADER=X-API-Key \
+     -a <frontend-app>
+   ```
 3. **Deploy:**
   ```bash
   flyctl deploy \
@@ -72,20 +73,16 @@ When prompted for a volume, select `brain-buddy-data` to mount at `/app/data`.
   ```
 
 ## Smoke verification
-- **Backend health:**
+- **Backend health (via Fly SSH into the private app):**
   ```bash
-  curl -f https://<backend-app>.fly.dev/health
-  ```
-- **Backend API prefix check (optional):**
-  ```bash
-  curl -f https://<backend-app>.fly.dev/api/trees
+  flyctl ssh console -a <backend-app> -C "curl -f http://127.0.0.1:8000/health"
   ```
 - **Frontend reachability and backend wiring:**
   ```bash
   curl -I https://<frontend-app>.fly.dev
-  curl -f "https://<frontend-app>.fly.dev/api/health"  # proxied to backend via VITE_API_BASE_URL
+  curl -f "https://<frontend-app>.fly.dev/api/health"  # proxied to backend via Flycast
   ```
-  Expect an HTTP 200 from Nginx and the compiled React bundle. Open the URL in a browser to confirm the canvas loads and can fetch data from the backend.
+  Expect an HTTP 200 from Nginx and the compiled React bundle. Open the URL in a browser to confirm the canvas loads and can fetch data from the private backend.
 
 ## Rollback guidance
 - List recent releases for either app:
