@@ -40,7 +40,7 @@ export function VersionPanel(): JSX.Element {
 
   if (!isReady || !metadata) {
     return (
-      <div className="rounded-lg border border-dashed border-slate-700 bg-surface-sunken/40 p-4 text-sm text-slate-500">
+      <div className="rounded-lg border border-dashed border-slate-200 bg-surface-sunken/40 p-4 text-sm text-slate-500">
         Select a tree to manage versions.
       </div>
     );
@@ -207,14 +207,14 @@ export function VersionPanel(): JSX.Element {
   return (
     <>
       <div className="space-y-4">
-        <div className="rounded-lg border border-slate-800 bg-surface-sunken/60 p-3 text-xs text-slate-400">
-          <p className="font-semibold text-slate-200">{metadata.name}</p>
+        <div className="rounded-lg border border-slate-200 bg-surface-sunken/60 p-3 text-xs text-slate-500">
+          <p className="font-semibold text-slate-800">{metadata.name}</p>
           <p className="mt-1">Last updated {new Date(metadata.updatedAt).toLocaleString()}</p>
         </div>
 
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-800 bg-surface-sunken/60 p-3 text-xs text-slate-300">
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-surface-sunken/60 p-3 text-xs text-slate-600">
           <div>
-            <p className="text-sm font-semibold text-slate-100">Export current state</p>
+            <p className="text-sm font-semibold text-slate-800">Export current state</p>
             <p className="mt-1 text-[11px] text-slate-500">
               Download a JSON export of the live canvas or any stored snapshot.
             </p>
@@ -230,7 +230,7 @@ export function VersionPanel(): JSX.Element {
         </div>
 
         <div className="space-y-2">
-          <label htmlFor="snapshot-label" className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+          <label htmlFor="snapshot-label" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
             Snapshot label
           </label>
           <input
@@ -238,12 +238,12 @@ export function VersionPanel(): JSX.Element {
             value={label}
             onChange={(event) => setLabel(event.target.value)}
             placeholder="e.g. Pre-interview notes"
-            className="w-full rounded-lg border border-slate-700 bg-surface-base px-3 py-2 text-sm text-slate-100 shadow-inner focus:border-brand-primary focus:outline-none"
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
           />
 
           <div className="grid gap-2 sm:grid-cols-2">
             <div className="space-y-2">
-              <label htmlFor="snapshot-author" className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              <label htmlFor="snapshot-author" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Author <span className="text-[10px] text-slate-500">(optional)</span>
               </label>
               <input
@@ -251,11 +251,11 @@ export function VersionPanel(): JSX.Element {
                 value={author}
                 onChange={(event) => setAuthor(event.target.value)}
                 placeholder="e.g. Taylor"
-                className="w-full rounded-lg border border-slate-700 bg-surface-base px-3 py-2 text-sm text-slate-100 shadow-inner focus:border-brand-primary focus:outline-none"
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
               />
             </div>
             <div className="space-y-2">
-              <label htmlFor="snapshot-notes" className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              <label htmlFor="snapshot-notes" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Notes <span className="text-[10px] text-slate-500">(optional)</span>
               </label>
               <input
@@ -263,7 +263,7 @@ export function VersionPanel(): JSX.Element {
                 value={notes}
                 onChange={(event) => setNotes(event.target.value)}
                 placeholder="Why are you capturing this snapshot?"
-                className="w-full rounded-lg border border-slate-700 bg-surface-base px-3 py-2 text-sm text-slate-100 shadow-inner focus:border-brand-primary focus:outline-none"
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
               />
             </div>
           </div>
@@ -280,28 +280,28 @@ export function VersionPanel(): JSX.Element {
 
         <ul className="space-y-3">
           {sortedVersions.length === 0 ? (
-            <li className="rounded-lg border border-dashed border-slate-700 bg-surface-sunken/40 p-3 text-sm text-slate-500">
+            <li className="rounded-lg border border-dashed border-slate-200 bg-surface-sunken/40 p-3 text-sm text-slate-500">
               No versions captured yet.
             </li>
           ) : (
             sortedVersions.map((version) => (
-              <li key={version.id} className="rounded-lg border border-slate-800 bg-surface-sunken/60 p-3">
+              <li key={version.id} className="rounded-lg border border-slate-200 bg-surface-sunken/60 p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-semibold text-slate-200">{version.label}</p>
+                    <p className="text-sm font-semibold text-slate-800">{version.label}</p>
                     <p className="text-xs text-slate-500">
                       {new Date(version.createdAt).toLocaleString()}
-                      {version.author ? <span className="ml-2 text-slate-400">• {version.author}</span> : null}
+                      {version.author ? <span className="ml-2 text-slate-500">• {version.author}</span> : null}
                     </p>
                     {version.notes ? (
-                      <p className="mt-1 text-xs italic text-slate-400">“{version.notes}”</p>
+                      <p className="mt-1 text-xs italic text-slate-500">“{version.notes}”</p>
                     ) : null}
                   </div>
                   <div className="flex flex-wrap justify-end gap-2">
                     <button
                       type="button"
                       onClick={() => handleExport()}
-                      className="rounded-md border border-slate-600 px-3 py-1 text-xs font-semibold text-slate-200 transition hover:border-slate-400 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="rounded-md border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-400 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                       disabled={exportTreeMutation.isPending}
                     >
                       {exportTreeMutation.isPending ? "Exporting…" : "Export"}
@@ -316,7 +316,7 @@ export function VersionPanel(): JSX.Element {
                     <button
                       type="button"
                       onClick={() => setConfirmState({ action: "delete", version })}
-                      className="rounded-md border border-red-500/40 px-3 py-1 text-xs font-semibold text-red-200 transition hover:border-red-400 hover:text-red-100"
+                      className="rounded-md border border-red-200 px-3 py-1 text-xs font-semibold text-red-700 transition hover:border-red-300 hover:text-red-800"
                     >
                       Delete
                     </button>
@@ -330,7 +330,7 @@ export function VersionPanel(): JSX.Element {
                 )}
 
                 {version.conflictCount > 0 ? (
-                  <p className="mt-2 text-[11px] font-semibold text-amber-300">
+                  <p className="mt-2 text-[11px] font-semibold text-amber-700">
                     {version.conflictCount} potential conflicts detected when this snapshot was saved.
                   </p>
                 ) : null}
@@ -363,21 +363,21 @@ export function VersionPanel(): JSX.Element {
 
 function DiffSummary({ diff }: { diff: NonNullable<GraphVersion["diffSummary"]> }): JSX.Element {
   return (
-    <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-slate-300">
-      <div className="rounded-md border border-slate-700 bg-slate-900/60 p-2">
-        <p className="font-semibold uppercase tracking-wide text-[10px] text-slate-400">Nodes</p>
+    <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-slate-500">
+      <div className="rounded-md border border-slate-200 bg-white/80 p-2">
+        <p className="font-semibold uppercase tracking-wide text-[10px] text-slate-500">Nodes</p>
         <div className="mt-1 flex gap-3 font-mono">
-          <span className="text-emerald-300">+{diff.nodesAdded}</span>
-          <span className="text-rose-300">-{diff.nodesRemoved}</span>
-          <span className="text-amber-300">~{diff.nodesModified}</span>
+          <span className="text-emerald-600">+{diff.nodesAdded}</span>
+          <span className="text-rose-600">-{diff.nodesRemoved}</span>
+          <span className="text-amber-600">~{diff.nodesModified}</span>
         </div>
       </div>
-      <div className="rounded-md border border-slate-700 bg-slate-900/60 p-2">
-        <p className="font-semibold uppercase tracking-wide text-[10px] text-slate-400">Relations</p>
+      <div className="rounded-md border border-slate-200 bg-white/80 p-2">
+        <p className="font-semibold uppercase tracking-wide text-[10px] text-slate-500">Relations</p>
         <div className="mt-1 flex gap-3 font-mono">
-          <span className="text-emerald-300">+{diff.relationsAdded}</span>
-          <span className="text-rose-300">-{diff.relationsRemoved}</span>
-          <span className="text-amber-300">~{diff.relationsModified}</span>
+          <span className="text-emerald-600">+{diff.relationsAdded}</span>
+          <span className="text-rose-600">-{diff.relationsRemoved}</span>
+          <span className="text-amber-600">~{diff.relationsModified}</span>
         </div>
       </div>
     </div>
@@ -409,10 +409,10 @@ function ConfirmDialog({ state, onConfirm, onCancel, isLoading }: ConfirmDialogP
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-surface-base/80 backdrop-blur">
-      <div className="w-full max-w-sm space-y-4 rounded-2xl border border-slate-700 bg-surface-sunken/90 p-5 shadow-2xl">
+      <div className="w-full max-w-sm space-y-4 rounded-2xl border border-slate-200 bg-white/90 p-5 shadow-xl">
         <header className="space-y-1">
-          <h3 className="text-base font-semibold text-slate-100">{title}</h3>
-          <p className="text-sm text-slate-300">
+          <h3 className="text-base font-semibold text-slate-900">{title}</h3>
+          <p className="text-sm text-slate-600">
             {baseDescription}
             {conflictNotice}
           </p>
@@ -422,7 +422,7 @@ function ConfirmDialog({ state, onConfirm, onCancel, isLoading }: ConfirmDialogP
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-md border border-slate-600 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-400 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-md border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             disabled={isLoading}
           >
             Cancel
@@ -432,8 +432,8 @@ function ConfirmDialog({ state, onConfirm, onCancel, isLoading }: ConfirmDialogP
             onClick={onConfirm}
             className={`rounded-md px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
               isRestore
-                ? "bg-brand-primary/90 text-slate-950 hover:bg-brand-primary"
-                : "bg-red-500/80 text-slate-900 hover:bg-red-500"
+                ? "bg-brand-primary/90 text-white hover:bg-brand-primary"
+                : "bg-red-500/90 text-white hover:bg-red-500"
             }`}
             disabled={isLoading}
           >

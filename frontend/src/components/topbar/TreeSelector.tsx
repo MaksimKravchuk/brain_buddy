@@ -42,7 +42,7 @@ export function TreeSelector({
           value={value ?? ""}
           onChange={handleChange}
           disabled={isLoading || !trees?.length}
-          className="rounded-lg border border-slate-700 bg-surface-base px-3 py-2 text-sm text-slate-100 shadow-inner focus:border-brand-primary focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <option value="" disabled>
             {isLoading ? "Loading trees…" : "Select tree"}
@@ -56,18 +56,18 @@ export function TreeSelector({
         <button
           type="button"
           onClick={() => openModal("createTree")}
-          className="rounded-md border border-slate-600 px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-brand-primary hover:text-brand-primary"
+          className="rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-brand-primary hover:text-brand-primary"
         >
           New
         </button>
       </div>
 
-      <div className="flex items-center gap-2 text-xs text-slate-200">
+      <div className="flex items-center gap-2 text-xs text-slate-600">
         <button
           type="button"
           onClick={onSave}
           disabled={!onSave || isSaving}
-          className="rounded-md border border-slate-700 bg-surface-sunken px-3 py-2 font-semibold transition hover:border-brand-primary hover:text-brand-primary disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-md border border-slate-200 bg-white/80 px-3 py-2 font-semibold text-slate-700 shadow-sm transition hover:border-brand-primary hover:text-brand-primary disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isSaving ? "Saving…" : "Save"}
         </button>
@@ -75,7 +75,7 @@ export function TreeSelector({
           type="button"
           onClick={onDownload}
           disabled={!onDownload || isDownloading}
-          className="rounded-md border border-slate-700 bg-surface-sunken px-3 py-2 font-semibold transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-md border border-slate-200 bg-white/80 px-3 py-2 font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isDownloading ? "Preparing…" : "Download"}
         </button>
@@ -95,7 +95,7 @@ export function TreeSelector({
           />
           <label
             htmlFor={importInputId}
-            className={`cursor-pointer rounded-md border border-slate-700 bg-surface-sunken px-3 py-2 font-semibold transition hover:border-slate-500 hover:text-white ${
+            className={`cursor-pointer rounded-md border border-slate-200 bg-white/80 px-3 py-2 font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900 ${
               isImporting || !onImport ? "pointer-events-none opacity-50" : ""
             }`}
           >

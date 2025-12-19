@@ -105,23 +105,23 @@ export default function App(): JSX.Element {
 
   return (
     <ReactFlowProvider>
-      <div className="flex min-h-screen flex-col bg-surface-base text-slate-100">
-        <header className="border-b border-slate-800 bg-surface-sunken/80 px-6 py-3 shadow-inset backdrop-blur">
+      <div className="flex min-h-screen flex-col bg-surface-base text-slate-900">
+        <header className="border-b border-slate-200 bg-surface-raised/90 px-6 py-3 shadow-sm backdrop-blur">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-3">
               <input
                 type="text"
                 value={treeName}
                 readOnly
-                className="w-56 rounded-md border border-slate-800 bg-surface-base px-3 py-2 text-sm shadow-inner focus:border-brand-primary focus:outline-none"
+                className="w-56 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
                 aria-label="Tree name"
               />
 
-              <div className="flex items-center gap-2 text-xs text-slate-200">
+              <div className="flex items-center gap-2 text-xs text-slate-600">
                 <button
                   type="button"
                   onClick={() => openModal("createTree")}
-                  className="rounded-md border border-slate-700 bg-surface-sunken px-3 py-2 text-xs font-semibold transition hover:border-brand-primary hover:text-brand-primary"
+                  className="rounded-md border border-slate-200 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-brand-primary hover:text-brand-primary"
                 >
                   New tree
                 </button>
@@ -129,12 +129,12 @@ export default function App(): JSX.Element {
                   type="button"
                   onClick={download}
                   disabled={isDownloading}
-                  className="rounded-md border border-slate-700 bg-surface-sunken px-3 py-2 text-xs font-semibold transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  className="rounded-md border border-slate-200 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isDownloading ? "Preparing…" : "Download"}
                 </button>
                 <label
-                  className={`cursor-pointer rounded-md border border-slate-700 bg-surface-sunken px-3 py-2 text-xs font-semibold transition hover:border-slate-500 hover:text-white ${
+                  className={`cursor-pointer rounded-md border border-slate-200 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900 ${
                     isImporting ? "pointer-events-none opacity-60" : ""
                   }`}
                 >
@@ -198,7 +198,7 @@ function FloatingZoomControls({
       <button
         type="button"
         onClick={onZoomIn}
-        className="pointer-events-auto h-9 w-9 rounded-lg border border-slate-800 bg-surface-sunken text-lg font-semibold text-slate-100 shadow-inner transition hover:border-brand-primary hover:text-brand-primary"
+        className="pointer-events-auto h-9 w-9 rounded-lg border border-slate-200 bg-white/90 text-lg font-semibold text-slate-700 shadow-sm transition hover:border-brand-primary hover:text-brand-primary"
         aria-label="Zoom in"
       >
         +
@@ -206,16 +206,16 @@ function FloatingZoomControls({
       <button
         type="button"
         onClick={onZoomOut}
-        className="pointer-events-auto h-9 w-9 rounded-lg border border-slate-800 bg-surface-sunken text-lg font-semibold text-slate-100 shadow-inner transition hover:border-brand-primary hover:text-brand-primary"
+        className="pointer-events-auto h-9 w-9 rounded-lg border border-slate-200 bg-white/90 text-lg font-semibold text-slate-700 shadow-sm transition hover:border-brand-primary hover:text-brand-primary"
         aria-label="Zoom out"
       >
         −
       </button>
-      <div className="h-10 w-px bg-slate-700" aria-hidden />
+      <div className="h-10 w-px bg-slate-200" aria-hidden />
       <button
         type="button"
         onClick={onCenter}
-        className="pointer-events-auto h-9 w-9 rounded-lg border border-slate-800 bg-surface-sunken text-xs font-semibold text-slate-100 shadow-inner transition hover:border-brand-primary hover:text-brand-primary"
+        className="pointer-events-auto h-9 w-9 rounded-lg border border-slate-200 bg-white/90 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-brand-primary hover:text-brand-primary"
       >
         Center
       </button>
@@ -226,16 +226,16 @@ function FloatingZoomControls({
 function EmptyCanvasState({ isLoading, hasTrees }: { isLoading: boolean; hasTrees: boolean }): JSX.Element {
   if (isLoading) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-slate-400">
+      <div className="flex h-full items-center justify-center text-sm text-slate-500">
         Loading tree…
       </div>
     );
   }
 
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-slate-300">
-      <p className="text-lg font-semibold text-slate-100">Start with your first undesired effect</p>
-      <p className="max-w-lg text-slate-400">
+    <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-slate-600">
+      <p className="text-lg font-semibold text-slate-900">Start with your first undesired effect</p>
+      <p className="max-w-lg text-slate-500">
         {hasTrees
           ? "Your most recent tree loads automatically. Continue mapping or start a new one."
           : "Create a new tree to drop in your initial thought and build from there."}
@@ -256,14 +256,14 @@ function ErrorCanvasState({
   isRetrying: boolean;
 }): JSX.Element {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-sm text-red-200">
+    <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-sm text-red-700">
       <p className="max-w-md text-balance">{message}</p>
       {correlationId ? <p className="text-xs text-slate-500">Reference: {correlationId}</p> : null}
       <button
         type="button"
         onClick={onRetry}
         disabled={isRetrying}
-        className="rounded-md border border-red-500/60 px-3 py-1 text-xs font-semibold text-red-100 transition hover:border-red-400 hover:text-white disabled:cursor-not-allowed disabled:border-slate-600 disabled:text-slate-400"
+        className="rounded-md border border-red-300 px-3 py-1 text-xs font-semibold text-red-700 transition hover:border-red-400 hover:text-red-800 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
       >
         {isRetrying ? "Retrying…" : "Retry"}
       </button>

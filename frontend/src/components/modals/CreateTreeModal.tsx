@@ -64,15 +64,15 @@ export function CreateTreeModal({ onCreated }: CreateTreeModalProps): JSX.Elemen
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-surface-base/80 backdrop-blur">
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-md space-y-5 rounded-2xl border border-slate-700 bg-surface-sunken/90 p-6 shadow-2xl"
+        className="w-full max-w-md space-y-5 rounded-2xl border border-slate-200 bg-white/90 p-6 shadow-xl"
       >
         <header className="space-y-1">
-          <h2 className="text-lg font-semibold text-slate-100">Create a new tree</h2>
-          <p className="text-sm text-slate-400">Provide a name to get started.</p>
+          <h2 className="text-lg font-semibold text-slate-900">Create a new tree</h2>
+          <p className="text-sm text-slate-500">Provide a name to get started.</p>
         </header>
 
         <div className="space-y-2">
-          <label htmlFor="new-tree-name" className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+          <label htmlFor="new-tree-name" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
             Name
           </label>
           <input
@@ -80,7 +80,7 @@ export function CreateTreeModal({ onCreated }: CreateTreeModalProps): JSX.Elemen
             value={name}
             onChange={(event) => setName(event.target.value)}
             placeholder="Current reality tree"
-            className="w-full rounded-lg border border-slate-700 bg-surface-base px-3 py-2 text-sm text-slate-100 shadow-inner focus:border-brand-primary focus:outline-none"
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
           />
         </div>
 
@@ -91,7 +91,7 @@ export function CreateTreeModal({ onCreated }: CreateTreeModalProps): JSX.Elemen
               closeModal("createTree");
               setName("");
             }}
-            className="rounded-md border border-slate-600 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-400 hover:text-slate-100"
+            className="rounded-md border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-800"
           >
             Cancel
           </button>

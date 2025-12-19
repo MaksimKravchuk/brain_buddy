@@ -15,18 +15,18 @@ const config: Config = {
       },
       colors: {
         surface: {
-          base: "#0f172a",
-          sunken: "#0b1220",
-          raised: "#16213b"
+          base: "#f8fafc",
+          sunken: "#f1f5f9",
+          raised: "#ffffff"
         },
         brand: {
-          primary: "#38bdf8",
-          secondary: "#818cf8"
+          primary: "#0ea5e9",
+          secondary: "#6366f1"
         }
       },
       boxShadow: {
-        inset: "inset 0 1px 0 0 rgba(255,255,255,0.04)",
-        glow: "0 0 24px rgba(56,189,248,0.25)"
+        inset: "inset 0 1px 0 0 rgba(15,23,42,0.08)",
+        glow: "0 16px 32px rgba(14,165,233,0.18)"
       },
       borderRadius: {
         xl: "1.25rem"

@@ -10,8 +10,8 @@ interface CreateNodeButtonProps {
 }
 
 const typeOptions: { value: GraphNode["type"]; label: string; accent: string }[] = [
-  { value: "parent", label: "Parent", accent: "bg-slate-200/10 text-slate-50" },
-  { value: "child", label: "Child", accent: "bg-slate-200/10 text-slate-50" }
+  { value: "parent", label: "Parent", accent: "bg-sky-100 text-slate-900" },
+  { value: "child", label: "Child", accent: "bg-sky-100 text-slate-900" }
 ];
 
 export function CreateNodeButton({ onCreate, disabled }: CreateNodeButtonProps): JSX.Element {
@@ -38,8 +38,8 @@ export function CreateNodeButton({ onCreate, disabled }: CreateNodeButtonProps):
             type="button"
             onClick={() => setNodeType(option.value)}
             className={twMerge(
-              "flex-1 rounded-md border border-slate-700 px-2 py-1 text-xs font-semibold transition hover:border-slate-500",
-              nodeType === option.value ? `${option.accent} ring-1 ring-offset-2 ring-offset-slate-900` : "text-slate-200"
+              "flex-1 rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300",
+              nodeType === option.value ? `${option.accent} ring-1 ring-offset-2 ring-offset-white` : ""
             )}
           >
             {option.label}
@@ -52,7 +52,7 @@ export function CreateNodeButton({ onCreate, disabled }: CreateNodeButtonProps):
           value={label}
           onChange={(event) => setLabel(event.target.value)}
           placeholder="Node label"
-          className="w-full rounded-md border border-slate-700 bg-surface-sunken px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-slate-400"
+          className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/20"
         />
         <button
           type="button"
