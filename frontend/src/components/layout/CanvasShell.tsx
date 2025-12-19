@@ -11,7 +11,7 @@ export function CanvasShell({ children, overlay, toolbar }: CanvasShellProps): J
     <div className="relative flex flex-1 flex-col">
       {toolbar ? (
         <div className="pointer-events-none absolute left-1/2 top-4 z-20 flex -translate-x-1/2 gap-2">
-          <div className="pointer-events-auto rounded-full border border-slate-800 bg-surface-sunken/80 px-3 py-2 shadow-inset backdrop-blur">
+          <div className="pointer-events-auto rounded-full border border-slate-200 bg-surface-raised/80 px-3 py-2 shadow-sm backdrop-blur">
             {toolbar}
           </div>
         </div>
