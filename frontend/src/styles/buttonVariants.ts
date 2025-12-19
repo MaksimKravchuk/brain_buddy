@@ -10,7 +10,7 @@ export const buttonVariants = cva(
     variants: {
       intent: {
         primary: "bg-sky-500 text-white hover:bg-sky-400 focus-visible:outline-sky-300",
-        secondary: "bg-slate-800 text-slate-100 hover:bg-slate-700 focus-visible:outline-slate-500"
+        secondary: "bg-white text-slate-700 hover:bg-slate-50 focus-visible:outline-slate-200"
       },
       size: {
         sm: "px-3 py-1.5 text-sm",

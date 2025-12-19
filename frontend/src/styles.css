@@ -3,12 +3,12 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
-  background-color: #0f172b;
+  color-scheme: light;
+  background-color: #f8fafc;
 }
 
 body {
-  @apply bg-surface-base text-slate-100 min-h-screen antialiased font-sans;
+  @apply bg-surface-base text-slate-900 min-h-screen antialiased font-sans;
 }
 
 #root {

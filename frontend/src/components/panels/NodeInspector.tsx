@@ -245,7 +245,7 @@ export function NodeInspector(): JSX.Element {
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <label htmlFor="node-label" className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+        <label htmlFor="node-label" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
           Node Label
         </label>
         <input
@@ -259,7 +259,7 @@ export function NodeInspector(): JSX.Element {
               handleLabelSubmit();
             }
           }}
-          className="w-full rounded-lg border border-slate-700 bg-surface-base px-3 py-2 text-sm text-slate-100 shadow-inner focus:border-brand-primary focus:outline-none"
+          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
         />
         <p className="text-xs text-slate-500">
           Incoming relations: <strong>{node.relationCounts.up}</strong>, Outgoing relations: <strong>{node.relationCounts.down}</strong>
@@ -267,30 +267,30 @@ export function NodeInspector(): JSX.Element {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <div className="space-y-2 rounded-lg border border-slate-800 bg-surface-sunken/60 p-3">
-          <label htmlFor="node-type" className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+        <div className="space-y-2 rounded-lg border border-slate-200 bg-surface-sunken/60 p-3">
+          <label htmlFor="node-type" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
             Node Type
           </label>
           <select
             id="node-type"
             value={nodeType}
             onChange={(event) => handleTypeChange(event.target.value as typeof nodeType)}
-            className="w-full rounded-md border border-slate-700 bg-surface-base px-3 py-2 text-sm text-slate-100 shadow-inner focus:border-brand-primary focus:outline-none"
+            className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
           >
             <option value="parent">Parent</option>
             <option value="child">Child</option>
           </select>
         </div>
 
-        <div className="space-y-2 rounded-lg border border-slate-800 bg-surface-sunken/60 p-3">
-          <label htmlFor="node-highlight" className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+        <div className="space-y-2 rounded-lg border border-slate-200 bg-surface-sunken/60 p-3">
+          <label htmlFor="node-highlight" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
             Highlight State
           </label>
           <select
             id="node-highlight"
             value={highlightState}
             onChange={(event) => handleHighlightChange(event.target.value as typeof highlightState)}
-            className="w-full rounded-md border border-slate-700 bg-surface-base px-3 py-2 text-sm text-slate-100 shadow-inner focus:border-brand-primary focus:outline-none"
+            className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
           >
             <option value="none">None</option>
             <option value="cause_candidate">Cause candidate</option>
@@ -299,8 +299,8 @@ export function NodeInspector(): JSX.Element {
         </div>
       </div>
 
-      <div className="space-y-2 rounded-lg border border-slate-800 bg-surface-sunken/60 p-3">
-        <span className="text-sm font-medium text-slate-200">Validation</span>
+      <div className="space-y-2 rounded-lg border border-slate-200 bg-surface-sunken/60 p-3">
+        <span className="text-sm font-medium text-slate-700">Validation</span>
         <p className="text-xs text-slate-500">Run validation against the selected provider and review history.</p>
         <div className="flex items-center gap-2 pt-2">
           <button
@@ -325,21 +325,21 @@ export function NodeInspector(): JSX.Element {
         />
       </div>
 
-      <div className="space-y-2 rounded-lg border border-emerald-900/60 bg-emerald-950/40 p-3">
+      <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <span className="text-sm font-semibold text-emerald-100">AI Feedback</span>
-            <p className="text-xs text-emerald-200/80">Request a quick summary and recommendations.</p>
+            <span className="text-sm font-semibold text-emerald-800">AI Feedback</span>
+            <p className="text-xs text-emerald-700/80">Request a quick summary and recommendations.</p>
           </div>
-          {!isSignedIn && <span className="rounded-full bg-amber-500/20 px-2 py-1 text-[10px] font-semibold text-amber-200">Requires API key</span>}
+          {!isSignedIn && <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-semibold text-amber-700">Requires API key</span>}
         </div>
 
-        <label className="flex cursor-pointer items-start gap-2 text-xs text-emerald-50/90">
+        <label className="flex cursor-pointer items-start gap-2 text-xs text-emerald-800">
           <input
             type="checkbox"
             checked={consent}
             onChange={(event) => setConsent(event.target.checked)}
-            className="mt-1 h-4 w-4 rounded border-emerald-700 bg-emerald-950 text-emerald-400 focus:ring-emerald-400"
+            className="mt-1 h-4 w-4 rounded border-emerald-300 bg-white text-emerald-500 focus:ring-emerald-300"
           />
           <span>I consent to send the current tree to the AI provider for analysis.</span>
         </label>
@@ -350,23 +350,23 @@ export function NodeInspector(): JSX.Element {
             onClick={handleAiFeedback}
             disabled={!consent || aiFeedbackMutation.isPending}
             className={twMerge(
-              "rounded-md bg-emerald-500/90 px-3 py-2 text-xs font-semibold text-emerald-950 transition",
+              "rounded-md bg-emerald-400/80 px-3 py-2 text-xs font-semibold text-emerald-950 transition",
               (!consent || aiFeedbackMutation.isPending) && "pointer-events-none opacity-60",
-              aiFeedbackMutation.isPending ? "animate-pulse" : "hover:bg-emerald-400"
+              aiFeedbackMutation.isPending ? "animate-pulse" : "hover:bg-emerald-400/90"
             )}
           >
             {aiFeedbackMutation.isPending ? "Requesting…" : "Request Feedback"}
           </button>
           {feedback?.status === "success" && (
-            <span className="text-[11px] text-emerald-200/80">{feedback.recommendations.length} tips ready</span>
+            <span className="text-[11px] text-emerald-700/80">{feedback.recommendations.length} tips ready</span>
           )}
         </div>
 
         {feedback && (
-          <div className="rounded-md border border-emerald-800/60 bg-emerald-950/70 p-3 text-sm text-emerald-50">
-            {feedback.summary && <p className="text-emerald-100">{feedback.summary}</p>}
+          <div className="rounded-md border border-emerald-200 bg-white p-3 text-sm text-emerald-900">
+            {feedback.summary && <p className="text-emerald-900">{feedback.summary}</p>}
             {feedback.recommendations.length > 0 && (
-              <ul className="mt-2 list-disc space-y-1 pl-5 text-emerald-100/90">
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-emerald-800/90">
                 {feedback.recommendations.map((item) => (
                   <li key={item}>{item}</li>
                 ))}
@@ -380,7 +380,7 @@ export function NodeInspector(): JSX.Element {
         <button
           type="button"
           onClick={handleDelete}
-          className="flex-1 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-200 transition hover:border-red-400 hover:text-red-100"
+          className="flex-1 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 transition hover:border-red-300 hover:text-red-800"
         >
           Delete Node
         </button>
@@ -391,7 +391,7 @@ export function NodeInspector(): JSX.Element {
 
 function InspectorPlaceholder({ message }: { message: string }): JSX.Element {
   return (
-    <div className="rounded-lg border border-dashed border-slate-700 bg-surface-sunken/40 p-4 text-sm text-slate-500">
+    <div className="rounded-lg border border-dashed border-slate-200 bg-surface-sunken/40 p-4 text-sm text-slate-500">
       {message}
     </div>
   );
@@ -412,7 +412,7 @@ function ValidationHistory({
 
   if (!items.length) {
     return (
-      <div className="rounded-md border border-dashed border-slate-700/80 bg-surface-base/60 p-3 text-xs text-slate-500">
+      <div className="rounded-md border border-dashed border-slate-200 bg-surface-base/60 p-3 text-xs text-slate-500">
         No previous validations recorded.
         <button
           type="button"
@@ -427,21 +427,21 @@ function ValidationHistory({
 
   return (
     <div className="space-y-2 pt-2">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">History</p>
-      <ul className="space-y-2 text-xs text-slate-400">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">History</p>
+      <ul className="space-y-2 text-xs text-slate-500">
         {items
           .slice()
           .reverse()
           .slice(0, 5)
           .map((item, index) => (
-            <li key={`${item.checked_at}-${index}`} className="rounded-md border border-slate-800/70 bg-surface-base px-3 py-2">
+            <li key={`${item.checked_at}-${index}`} className="rounded-md border border-slate-200 bg-surface-base px-3 py-2">
               <div className="flex items-center justify-between gap-2">
-                <span className="font-semibold text-slate-200">{item.confidence}%</span>
+                <span className="font-semibold text-slate-700">{item.confidence}%</span>
                 <span className="text-[11px] text-slate-500">
                   {new Date(item.checked_at).toLocaleString()}
                 </span>
               </div>
-              <p className="mt-1 text-slate-300">{item.summary}</p>
+              <p className="mt-1 text-slate-600">{item.summary}</p>
               <p className="mt-1 text-[11px] text-slate-500">Provider: {item.provider}</p>
             </li>
           ))}

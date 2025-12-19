@@ -57,7 +57,7 @@ export function RelationInspector(): JSX.Element {
 
   return (
     <div className="space-y-6">
-      <div className="space-y-2 rounded-lg border border-slate-800 bg-surface-sunken/60 p-3 text-xs text-slate-400">
+      <div className="space-y-2 rounded-lg border border-slate-200 bg-surface-sunken/60 p-3 text-xs text-slate-500">
         <MetadataRow label="From node" value={relation.fromId} />
         <MetadataRow label="To node" value={relation.toId} />
         <MetadataRow label="Kind" value={relation.kind.toUpperCase()} />
@@ -67,7 +67,7 @@ export function RelationInspector(): JSX.Element {
       <button
         type="button"
         onClick={handleDelete}
-        className="w-full rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-200 transition hover:border-red-400 hover:text-red-100"
+        className="w-full rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 transition hover:border-red-300 hover:text-red-800"
       >
         Delete Relation
       </button>
@@ -77,7 +77,7 @@ export function RelationInspector(): JSX.Element {
 
 function InspectorPlaceholder({ message }: { message: string }): JSX.Element {
   return (
-    <div className="rounded-lg border border-dashed border-slate-700 bg-surface-sunken/40 p-4 text-sm text-slate-500">
+    <div className="rounded-lg border border-dashed border-slate-200 bg-surface-sunken/40 p-4 text-sm text-slate-500">
       {message}
     </div>
   );
@@ -87,7 +87,7 @@ function MetadataRow({ label, value }: { label: string; value: string }): JSX.El
   return (
     <div className="flex justify-between gap-4">
       <span className="text-xs uppercase tracking-wide text-slate-500">{label}</span>
-      <span className="text-xs text-slate-300">{value}</span>
+      <span className="text-xs text-slate-700">{value}</span>
     </div>
   );
 }

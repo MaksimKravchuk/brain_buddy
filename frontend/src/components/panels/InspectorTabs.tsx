@@ -13,7 +13,7 @@ export function InspectorTabs(): JSX.Element {
   const selection = useTreeStore((state) => state.selection);
 
   return (
-    <div className="flex rounded-full border border-slate-800 bg-surface-sunken/80 p-1 text-xs shadow-inner">
+    <div className="flex rounded-full border border-slate-200 bg-surface-sunken/80 p-1 text-xs shadow-sm">
       {tabs.map((tab) => {
         const isActive = inspectorTab === tab.id;
         const isDisabled =
@@ -27,7 +27,7 @@ export function InspectorTabs(): JSX.Element {
             disabled={tab.id === "versions" ? false : isDisabled}
             onClick={() => setInspectorTab(tab.id)}
             className={`flex-1 rounded-full px-3 py-1 font-medium transition ${
-              isActive ? "bg-brand-primary/90 text-slate-950" : "text-slate-300"
+              isActive ? "bg-brand-primary/20 text-slate-900" : "text-slate-600"
             } ${isDisabled && tab.id !== "versions" ? "cursor-not-allowed opacity-40" : ""}`}
           >
             {tab.label}
