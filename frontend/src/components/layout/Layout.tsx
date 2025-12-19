@@ -29,14 +29,14 @@ export function Layout({ header, sidebar, children, footer }: LayoutProps): JSX.
   }, [hasPendingSync]);
 
   return (
-    <div className="flex min-h-screen bg-surface-base text-slate-100">
+    <div className="flex min-h-screen bg-surface-base text-slate-900">
       <div className="flex flex-1 flex-col">
-        <header className="border-b border-slate-800 bg-surface-sunken/80 px-6 py-4 shadow-inset backdrop-blur">
+        <header className="border-b border-slate-200 bg-surface-raised/90 px-6 py-4 shadow-sm backdrop-blur">
           {header}
         </header>
 
         <div className="flex flex-1 overflow-hidden">
-          <aside className="w-80 shrink-0 border-r border-slate-800 bg-surface-sunken/70 backdrop-blur-sm">
+          <aside className="w-80 shrink-0 border-r border-slate-200 bg-surface-sunken/80 backdrop-blur-sm">
             <div className="h-full overflow-y-auto px-4 py-6">{sidebar}</div>
           </aside>
 
@@ -44,7 +44,7 @@ export function Layout({ header, sidebar, children, footer }: LayoutProps): JSX.
         </div>
 
         {footer ? (
-          <footer className="border-t border-slate-800 bg-surface-sunken/70 px-6 py-3 text-sm text-slate-300">
+          <footer className="border-t border-slate-200 bg-surface-sunken/80 px-6 py-3 text-sm text-slate-600">
             {footer}
           </footer>
         ) : null}

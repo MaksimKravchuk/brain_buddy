@@ -1,10 +1,10 @@
 import { useUiStore } from "../../stores/uiStore";
 
 const variantStyles: Record<string, string> = {
-  info: "border-slate-600 bg-surface-sunken/80 text-slate-100",
-  success: "border-emerald-600/60 bg-emerald-500/15 text-emerald-100",
-  warning: "border-amber-600/60 bg-amber-500/15 text-amber-100",
-  error: "border-red-600/60 bg-red-500/15 text-red-100"
+  info: "border-slate-200 bg-white/80 text-slate-800",
+  success: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  warning: "border-amber-200 bg-amber-50 text-amber-800",
+  error: "border-red-200 bg-red-50 text-red-800"
 };
 
 export function ToastStack(): JSX.Element | null {
@@ -44,7 +44,7 @@ export function ToastStack(): JSX.Element | null {
                 <button
                   type="button"
                   onClick={() => dismiss(toast.id)}
-                  className="text-xs uppercase tracking-wide text-slate-400 transition hover:text-slate-200"
+                  className="text-xs uppercase tracking-wide text-slate-500 transition hover:text-slate-700"
                 >
                   Close
                 </button>

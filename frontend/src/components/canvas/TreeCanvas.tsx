@@ -745,13 +745,13 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       </ReactFlow>
 
       {!hasContent && !isLoading ? (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-slate-400">
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-slate-500">
           <p>No nodes yet. Add a parent or child node to start building your map.</p>
         </div>
       ) : null}
 
       {isLoading ? (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-surface-base/60 text-sm text-slate-400 backdrop-blur">
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-surface-base/60 text-sm text-slate-500 backdrop-blur">
           Loading tree…
         </div>
       ) : null}
