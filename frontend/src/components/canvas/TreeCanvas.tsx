@@ -44,7 +44,7 @@ const defaultEdgeOptions: Partial<Edge> = {
   type: "smoothstep",
   animated: false,
   style: {
-    stroke: "rgba(148,163,184,0.55)",
+    stroke: "rgba(100,116,139,0.85)",
     strokeWidth: 2
   }
 };
@@ -590,12 +590,12 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       type: "smoothstep",
       animated: false,
       style: {
-        stroke: selection.type === "relation" && selection.id === relation.id ? "#e2e8f0" : "rgba(148,163,184,0.65)",
+        stroke: selection.type === "relation" && selection.id === relation.id ? "#0ea5e9" : "rgba(100,116,139,0.9)",
         strokeWidth: selection.type === "relation" && selection.id === relation.id ? 3 : 2
       },
       markerEnd: {
         type: MarkerType.ArrowClosed,
-        color: selection.type === "relation" && selection.id === relation.id ? "#e2e8f0" : "rgba(148,163,184,0.85)",
+        color: selection.type === "relation" && selection.id === relation.id ? "#0ea5e9" : "rgba(100,116,139,0.95)",
         width: 16,
         height: 16
       }
