@@ -18,6 +18,9 @@
   - Tested independently
   - Deployed independently
   - Demonstrated to users independently
+
+  Highlight consent/local-first expectations, observability, and responsiveness where relevant so quality
+  gates can be enforced later.
 -->
 
 ### User Story 1 - [Brief Title] (Priority: P1)
@@ -70,6 +73,8 @@
 <!--
   ACTION REQUIRED: The content in this section represents placeholders.
   Fill them out with the right edge cases.
+  Include consent/API key failures, schema mismatches, data-loss risks, and performance degradations that
+  threaten responsiveness targets.
 -->
 
 - What happens when [boundary condition]?
@@ -80,6 +85,8 @@
 <!--
   ACTION REQUIRED: The content in this section represents placeholders.
   Fill them out with the right functional requirements.
+  Capture contract changes, consent/data-handling constraints, observability signals (correlation IDs,
+  actionable errors), and responsiveness expectations for the ~200-node canvas where applicable.
 -->
 
 ### Functional Requirements
@@ -99,13 +106,6 @@
 
 - **[Entity 1]**: [What it represents, key attributes without implementation]
 - **[Entity 2]**: [What it represents, relationships to other entities]
-
-### Non-Functional Requirements (Quality, UX, Performance)
-
-- **NFR-001**: Code MUST pass lint/format/type checks for touched surfaces (Black/Ruff/mypy for backend; ESLint/Prettier/TypeScript for frontend).
-- **NFR-002**: Tests MUST cover new behavior (pytest/FastAPI TestClient; Vitest/Testing Library) with updated fixtures/contracts where schemas change.
-- **NFR-003**: UI/UX MUST align with existing patterns (layout, toasts, modals), remain accessible (focus/ARIA/keyboard), and stay responsive to tablet widths.
-- **NFR-004**: Performance targets declared and validated (e.g., canvas interactions on 200+ nodes near <=20 ms renders via `useGraphProfiler`; backend tree reads/writes <200 ms local p95 with caching intact).
 
 ## Success Criteria *(mandatory)*
 
