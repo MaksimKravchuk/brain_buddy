@@ -15,7 +15,7 @@ def test_validation_endpoint_flow(api_client) -> None:
     tree_id = tree_resp.json()["id"]
 
     effect_payload = NodeCreateRequest(
-        label="Effect", type="child", position=Position(x=0, y=0)
+        label="Effect", type="effect", position=Position(x=0, y=0)
     )
     effect_resp = api_client.post(
         f"/api/trees/{tree_id}/nodes",
@@ -25,7 +25,7 @@ def test_validation_endpoint_flow(api_client) -> None:
     effect_id = effect_resp.json()["id"]
 
     cause_payload = NodeCreateRequest(
-        label="Cause", type="parent", position=Position(x=120, y=120)
+        label="Cause", type="cause", position=Position(x=120, y=120)
     )
     cause_resp = api_client.post(
         f"/api/trees/{tree_id}/nodes",

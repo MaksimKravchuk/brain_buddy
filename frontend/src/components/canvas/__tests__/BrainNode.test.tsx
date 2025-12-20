@@ -17,7 +17,7 @@ describe("BrainNode inline editing", () => {
   const baseNode = {
     id: "node-1",
     label: "Original",
-    type: "child" as const,
+    type: "cause" as const,
     position: { x: 0, y: 0 },
     highlightState: "none" as const,
     relationCounts: { up: 0, down: 0 }

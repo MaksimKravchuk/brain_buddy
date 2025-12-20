@@ -32,7 +32,7 @@ from app.schemas import (
     VersionCreateRequest,
     VersionListItem,
 )
-from app.schemas.api import RelationCounts, TreeMetadata
+from app.schemas.api import NodeType, RelationCounts, TreeMetadata
 from app.schemas.domain import RelationDocument, TreeDocument, TreeVersionRef
 
 router = APIRouter(tags=["trees"])
@@ -311,6 +311,16 @@ def _build_tree_metadata(tree: TreeDocument) -> TreeMetadata:
     )
 
 
+def _normalize_node_type(raw_type: str | None) -> NodeType:
+    if raw_type == "parent":
+        return "effect"
+    if raw_type == "child":
+        return "cause"
+    if raw_type == "effect":
+        return "effect"
+    return "cause"
+
+
 def _node_response_from_tree(tree: TreeDocument, node_id: str) -> NodeResponse:
     node = next(node for node in tree.nodes if node.id == node_id)
     counts = _relation_counts(tree.relations, node_id)
@@ -318,7 +328,7 @@ def _node_response_from_tree(tree: TreeDocument, node_id: str) -> NodeResponse:
     return NodeResponse(
         id=node.id,
         label=node.label,
-        type=extra.get("type", "child"),
+        type=_normalize_node_type(extra.get("type")),
         position=node.position,
         highlight_state=extra.get("highlight_state", "none"),
         relation_counts=RelationCounts(up_count=counts[0], down_count=counts[1]),

@@ -10,7 +10,7 @@ from pydantic import ConfigDict, Field
 from .common import Position, StrictBaseModel
 from .domain import VersionDiffSummary
 
-NodeType = Literal["parent", "child"]
+NodeType = Literal["cause", "effect"]
 HighlightState = Literal["none", "cause_candidate", "effect_spanning"]
 RelationKind = Literal["why"]
 FeedbackStatus = Literal["success", "failed", "pending"]
@@ -40,7 +40,7 @@ class NodeCreateRequest(StrictBaseModel):
     """Payload for creating a node within a tree."""
 
     label: str = Field(description="Node label displayed in the UI.")
-    type: NodeType = Field(description="Node type describing its role in the tree.")
+    type: NodeType = Field(description="Node type describing its role (cause/effect).")
     position: Position = Field(description="Canvas position for the new node.")
     highlight_state: HighlightState = Field(
         default="none", description="Current highlight state for the node."
@@ -65,7 +65,7 @@ class NodeResponse(StrictBaseModel):
 
     id: str = Field(description="Node identifier.")
     label: str = Field(description="Node label.")
-    type: NodeType = Field(description="Node type describing its role in the tree.")
+    type: NodeType = Field(description="Node type describing its role (cause/effect).")
     position: Position = Field(description="Canvas position.")
     highlight_state: HighlightState = Field(
         default="none", description="Current highlight state for the node."

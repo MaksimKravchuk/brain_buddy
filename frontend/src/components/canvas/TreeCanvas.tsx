@@ -85,13 +85,13 @@ function orderRelationEndpoints(sourceId: string, targetId: string, nodes: Graph
     return { fromId: sourceId, toId: targetId };
   }
 
-  const sourceIsParent = sourceNode.type === "parent";
-  const targetIsParent = targetNode.type === "parent";
+  const sourceIsEffect = sourceNode.type === "effect";
+  const targetIsEffect = targetNode.type === "effect";
 
-  if (sourceIsParent !== targetIsParent) {
-    const parentNode = sourceIsParent ? sourceNode : targetNode;
-    const childNode = sourceIsParent ? targetNode : sourceNode;
-    return { fromId: childNode.id, toId: parentNode.id };
+  if (sourceIsEffect !== targetIsEffect) {
+    const effectNode = sourceIsEffect ? sourceNode : targetNode;
+    const causeNode = sourceIsEffect ? targetNode : sourceNode;
+    return { fromId: causeNode.id, toId: effectNode.id };
   }
 
   let lowerNode = sourceNode;
@@ -101,10 +101,10 @@ function orderRelationEndpoints(sourceId: string, targetId: string, nodes: Graph
     lowerNode = targetNode;
     upperNode = sourceNode;
   } else if (sourceNode.position.y === targetNode.position.y) {
-    const sourceIsChild = sourceNode.type === "child";
-    const targetIsChild = targetNode.type === "child";
+    const sourceIsCause = sourceNode.type === "cause";
+    const targetIsCause = targetNode.type === "cause";
 
-    if (!sourceIsChild && targetIsChild) {
+    if (!sourceIsCause && targetIsCause) {
       lowerNode = targetNode;
       upperNode = sourceNode;
     }
@@ -488,8 +488,8 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       position?: { x: number; y: number };
       relation?: { fromId: string | "new"; toId: string | "new" };
     }) => {
-      const type = input?.type ?? "child";
-      const label = input?.label?.trim() || (type === "parent" ? "Parent" : "Child");
+      const type = input?.type ?? "cause";
+      const label = input?.label?.trim() || (type === "effect" ? "Effect" : "Cause");
       const placeholder = createPlaceholderNode(type, label);
       const bounds = canvasRef.current?.getBoundingClientRect();
       const viewportCenter = reactFlowInstance
@@ -558,13 +558,13 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   );
 
   const handleCreateRelativeNode = useCallback(
-    (originId: string, direction: "parent" | "child" | "left" | "right") => {
+    (originId: string, direction: "effect" | "cause" | "left" | "right") => {
       const origin = nodes.find((item) => item.id === originId);
       if (!origin) return;
 
       const offsets: Record<typeof direction, { x: number; y: number }> = {
-        parent: { x: 0, y: -180 },
-        child: { x: 0, y: 180 },
+        effect: { x: 0, y: -180 },
+        cause: { x: 0, y: 180 },
         left: { x: -240, y: 0 },
         right: { x: 240, y: 0 }
       };
@@ -575,13 +575,13 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         y: basePosition.y + offsets[direction].y
       };
 
-      if (direction === "child") {
-        handleCreateNode({ type: "child", position, relation: { fromId: "new", toId: origin.id } });
+      if (direction === "cause") {
+        handleCreateNode({ type: "cause", position, relation: { fromId: "new", toId: origin.id } });
         return;
       }
 
-      if (direction === "parent") {
-        handleCreateNode({ type: "parent", position, relation: { fromId: origin.id, toId: "new" } });
+      if (direction === "effect") {
+        handleCreateNode({ type: "effect", position, relation: { fromId: origin.id, toId: "new" } });
         return;
       }
 
@@ -593,7 +593,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   const handleCreateChildFromSelection = useCallback(() => {
     if (selection.type !== "node") return;
 
-    handleCreateRelativeNode(selection.id, "child");
+    handleCreateRelativeNode(selection.id, "cause");
   }, [handleCreateRelativeNode, selection]);
 
   const handleCreateSiblingFromSelection = useCallback(() => {
@@ -611,8 +611,8 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       targetPosition: Position.Bottom,
       data: {
         node,
-        onCreateParent: () => handleCreateRelativeNode(node.id, "parent"),
-        onCreateChild: () => handleCreateRelativeNode(node.id, "child"),
+        onCreateParent: () => handleCreateRelativeNode(node.id, "effect"),
+        onCreateChild: () => handleCreateRelativeNode(node.id, "cause"),
         onCreateLeftSibling: () => handleCreateRelativeNode(node.id, "left"),
         onCreateRightSibling: () => handleCreateRelativeNode(node.id, "right")
       },
@@ -658,7 +658,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     }
 
     hasCreatedDefaultNode.current = true;
-    handleCreateNode({ type: "parent", label: "Parent" });
+    handleCreateNode({ type: "effect", label: "Effect" });
   }, [handleCreateNode, isLoading, nodes.length, reactFlowInstance]);
 
   const buildCombo = useCallback((event: KeyboardEvent) => {
@@ -700,7 +700,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       { id: "zoom-in-ctrl-shift", combo: "ctrl+shift+=", description: "Zoom in", handler: handleZoomIn },
       { id: "zoom-out-meta", combo: "meta+-", description: "Zoom out", handler: handleZoomOut },
       { id: "zoom-out-ctrl", combo: "ctrl+-", description: "Zoom out", handler: handleZoomOut },
-      { id: "create-child-enter", combo: "enter", description: "Create child node", handler: handleCreateChildFromSelection },
+      { id: "create-cause-enter", combo: "enter", description: "Create cause node", handler: handleCreateChildFromSelection },
       {
         id: "create-sibling-tab",
         combo: "tab",
@@ -792,7 +792,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
 
       {!hasContent && !isLoading ? (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-slate-500">
-          <p>No nodes yet. Add a parent or child node to start building your map.</p>
+          <p>No nodes yet. Add a cause or effect node to start building your map.</p>
         </div>
       ) : null}
 

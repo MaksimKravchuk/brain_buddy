@@ -19,10 +19,10 @@ def test_export_includes_highlights_and_layout_metadata(api_client) -> None:
     tree_id = create_resp.json()["id"]
 
     cause_payload = NodeCreateRequest(
-        label="Cause node", type="parent", position=Position(x=0, y=0)
+        label="Cause node", type="cause", position=Position(x=0, y=0)
     ).model_dump()
     effect_payload = NodeCreateRequest(
-        label="Effect node", type="child", position=Position(x=1, y=1)
+        label="Effect node", type="effect", position=Position(x=1, y=1)
     ).model_dump()
 
     cause_resp = api_client.post(f"/api/trees/{tree_id}/nodes", json=cause_payload)
@@ -95,7 +95,7 @@ def test_import_preserves_ids_and_timestamps(api_client) -> None:
             {
                 "id": "n1",
                 "label": "Root cause",
-                "type": "parent",
+                "type": "cause",
                 "position": {"x": 0, "y": 0},
                 "highlight_state": "cause_candidate",
                 "relation_counts": {"up_count": 1, "down_count": 0},
@@ -103,7 +103,7 @@ def test_import_preserves_ids_and_timestamps(api_client) -> None:
             {
                 "id": "n2",
                 "label": "Effect",
-                "type": "child",
+                "type": "effect",
                 "position": {"x": 1, "y": 1},
                 "highlight_state": "none",
                 "relation_counts": {"up_count": 0, "down_count": 1},
@@ -158,7 +158,7 @@ def test_import_invalid_relations_returns_bad_request(api_client) -> None:
             {
                 "id": "a",
                 "label": "A",
-                "type": "child",
+                "type": "cause",
                 "position": {"x": 0, "y": 0},
                 "highlight_state": "none",
                 "relation_counts": {"up_count": 0, "down_count": 0},

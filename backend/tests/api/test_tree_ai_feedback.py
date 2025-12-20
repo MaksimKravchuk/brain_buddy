@@ -14,7 +14,7 @@ def _create_tree(client) -> str:
 
     node_payload = {
         "label": "Root cause",
-        "type": "parent",
+        "type": "cause",
         "position": Position(x=0, y=0).model_dump(),
     }
     node_resp = client.post(

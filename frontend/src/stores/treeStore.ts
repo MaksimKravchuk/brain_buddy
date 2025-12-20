@@ -377,12 +377,12 @@ function calculateRelationCounts(nodes: GraphNode[], relations: GraphRelation[])
   return counts;
 }
 
-function reachesAllChildren(
+function reachesAllCauses(
   nodeId: string,
   adjacency: Map<string, string[]>,
-  childNodes: Set<string>
+  causeNodes: Set<string>
 ) {
-  if (childNodes.size === 0) {
+  if (causeNodes.size === 0) {
     return false;
   }
   const visited = new Set<string>();
@@ -403,19 +403,19 @@ function reachesAllChildren(
   }
 
   let covered = 0;
-  childNodes.forEach((id) => {
+  causeNodes.forEach((id) => {
     if (visited.has(id)) {
       covered += 1;
     }
   });
 
-  return covered === childNodes.size;
+  return covered === causeNodes.size;
 }
 
 function applyDerivedNodeState(nodes: GraphNode[], relations: GraphRelation[]) {
   const counts = calculateRelationCounts(nodes, relations);
   const adjacency = new Map<string, string[]>();
-  const childNodes = new Set(nodes.filter((node) => node.type === "child").map((n) => n.id));
+  const causeNodes = new Set(nodes.filter((node) => node.type === "cause").map((n) => n.id));
 
   relations.forEach((relation) => {
     const current = adjacency.get(relation.fromId) ?? [];
@@ -428,7 +428,7 @@ function applyDerivedNodeState(nodes: GraphNode[], relations: GraphRelation[]) {
     const hasCauseCandidateSignal = relationCounts.up >= 3;
     const hasOutgoing = (adjacency.get(node.id) ?? []).length > 0;
     const effectSpanning =
-      hasOutgoing && childNodes.size > 0 && reachesAllChildren(node.id, adjacency, childNodes);
+      hasOutgoing && causeNodes.size > 0 && reachesAllCauses(node.id, adjacency, causeNodes);
 
     let highlightState: GraphNode["highlightState"] = "none";
     if (hasCauseCandidateSignal) {

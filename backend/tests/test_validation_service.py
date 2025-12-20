@@ -16,12 +16,12 @@ def test_validation_flow(
 
     effect_node, tree = node_service.create_node(
         tree.id,
-        NodeCreateRequest(label="Effect", type="child", position=Position(x=0, y=0)),
+        NodeCreateRequest(label="Effect", type="effect", position=Position(x=0, y=0)),
     )
     cause_node, tree = node_service.create_node(
         tree.id,
         NodeCreateRequest(
-            label="Cause", type="parent", position=Position(x=100, y=100)
+            label="Cause", type="cause", position=Position(x=100, y=100)
         ),
     )
 
