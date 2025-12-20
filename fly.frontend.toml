@@ -17,7 +17,7 @@ primary_region = 'ams'
 [env]
   VITE_API_BASE_URL = '/api'
   VITE_API_KEY_HEADER = 'X-API-Key'
-  BACKEND_ORIGIN = 'http://brain-buddy-backend.internal:8000'
+  BACKEND_ORIGIN = 'https://brain-buddy-backend.fly.dev'
 
 [http_service]
   internal_port = 80
