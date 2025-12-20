@@ -85,6 +85,15 @@ function orderRelationEndpoints(sourceId: string, targetId: string, nodes: Graph
     return { fromId: sourceId, toId: targetId };
   }
 
+  const sourceIsParent = sourceNode.type === "parent";
+  const targetIsParent = targetNode.type === "parent";
+
+  if (sourceIsParent !== targetIsParent) {
+    const parentNode = sourceIsParent ? sourceNode : targetNode;
+    const childNode = sourceIsParent ? targetNode : sourceNode;
+    return { fromId: childNode.id, toId: parentNode.id };
+  }
+
   let lowerNode = sourceNode;
   let upperNode = targetNode;
 
@@ -619,6 +628,8 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         id: relation.id,
         source: ordered.fromId,
         target: ordered.toId,
+        sourceHandle: "link-up-source",
+        targetHandle: "link-down-target",
         data: { relation },
         selected: selection.type === "relation" && selection.id === relation.id,
         type: edgeType,
