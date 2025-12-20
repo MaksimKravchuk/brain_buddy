@@ -27,10 +27,3 @@ data/
 
 # Codex
 .codex/
-.codex/auth.json
-.codex/config.toml
-.codex/history.jsonl
-.codex/version.json
-.codex/log/codex-tui.log
-.codex/prompts/speckit.specify.md
-.codex/prompts/speckit.taskstoissues.md
