@@ -31,10 +31,11 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-- Code quality: identify lint/format/type-check commands for every surface you will touch (backend: Black/Ruff/mypy; frontend: ESLint/Prettier/TypeScript) and plan contract sync between backend schemas and frontend clients/types.
-- Testing: enumerate unit/integration/smoke coverage for each user story; confirm how `make test-backend` and `make test-frontend` will validate the change and where new fixtures are needed.
-- UX consistency: describe how UI changes align with existing layout/toast/modal patterns, accessibility (focus/ARIA/keyboard), and responsive behavior down to tablet widths.
-- Performance: state expected budgets (e.g., canvas interactions on 200+ nodes remain near ≤20 ms renders; backend tree reads/writes target <200 ms local p95) and the profiling/logging you will use to prove no regressions.
+- Consent & Safety: How will data stay local-first, with per-request consent and API key enforcement (`BRAIN_BUDDY_API_KEY` + `VITE_API_KEY`) where needed? No real data committed.
+- Tests: What backend (pytest/FastAPI TestClient) and frontend (Vitest + Testing Library) failing-first tests will cover new behaviors? Include edge cases for AI/persistence flows.
+- Contracts: Which schemas/endpoints change, and how will compatibility be preserved across backend and frontend?
+- Observability: How will correlation IDs, structured logs, and actionable errors/retries surface for this work?
+- Performance/Resilience: How will responsiveness targets (~200-node canvas) and data-loss protections (autosave, warnings) be maintained?
 
 ## Project Structure
 

@@ -1,62 +1,64 @@
 <!--
-Sync Impact Report
-- Version change: placeholder -> 1.0.0
-- Modified principles: initialized (new)
-- Added sections: Quality Gates & Tooling Requirements; Delivery Workflow & Review Expectations
-- Removed sections: Placeholder principle slots beyond the four defined pillars
-- Templates requiring updates: DONE .specify/templates/plan-template.md; DONE .specify/templates/spec-template.md; DONE .specify/templates/tasks-template.md; REVIEW .specify/templates/checklist-template.md (reviewed, no edits needed); REVIEW .specify/templates/agent-file-template.md (reviewed, no edits needed)
-- Follow-up TODOs: TODO(RATIFICATION_DATE): Original ratification date not yet recorded
+Sync Impact Report:
+- Version change: unversioned -> 1.0.0
+- Modified principles: New -> I. Data Consent & Safety; II. Tested Delivery Across Stack; III. Contract-First Interfaces; IV. Traceable & Actionable Observability; V. Responsive, Resilient Experience
+- Added sections: Operational Guardrails; Development Workflow & Quality Gates
+- Removed sections: None
+- Templates requiring updates: ✅ .specify/templates/plan-template.md; ✅ .specify/templates/spec-template.md; ✅ .specify/templates/tasks-template.md; ⚠ .specify/templates/commands (directory absent)
+- Follow-up TODOs: None
 -->
-
 # Brain Buddy Constitution
 
 ## Core Principles
 
-### I. Code Quality & Maintainability
+### I. Data Consent & Safety
+Protect user trust by defaulting to local control and explicit consent before sending data anywhere.
+- AI or remote processing MUST require per-request consent and API key pairing (`BRAIN_BUDDY_API_KEY` + `VITE_API_KEY` when enforced); decline requests if consent or keys are missing.
+- Data remains local-first with 5s autosave and exit warnings; cloud sync only when signed in and confirmed.
+- Never commit real user data or secrets; use `.env.example`, local volumes under `backend/data`, and scrub logs to avoid sensitive payloads.
 
-- Every change MUST pass formatters/linters/type checks (Black, Ruff, mypy for backend; ESLint/Prettier/TypeScript strict for frontend) before review, or the break-glass rationale is recorded in the PR.
-- Modules MUST follow established patterns (FastAPI repositories/services, shared schemas; React components/hooks/stores) and keep changes scoped with clear ownership; data contracts require synchronized backend schemas and frontend types.
-- Comments stay purposeful and focused on intent or edge cases; config/env updates MUST mirror `.env.example` and relevant docs.
-Rationale: Consistent patterns and static analysis keep the codebase approachable, reduce regressions, and make cross-surface work predictable.
+### II. Tested Delivery Across Stack
+Changes ship only with targeted, automated validation covering both backend and frontend.
+- New or changed behavior MUST include failing-then-passing tests (pytest/FastAPI TestClient, Vitest + Testing Library); run `make test-backend` and `make test-frontend` before merge.
+- AI or persistence flows MUST carry contract/edge-case coverage (invalid payloads, timeouts, consent required).
+- Refactors without behavior change still require guardrails (smoke/contract tests) proving parity.
 
-### II. Test Discipline & Coverage
+### III. Contract-First Interfaces
+Shared JSON payloads and schemas are the source of truth and cannot drift across tiers.
+- Define and evolve schemas in `backend/app/schemas`; any breaking change requires migration notes, frontend alignment, and backwards-compatibility strategy.
+- APIs MUST return actionable errors with correlation IDs; client handling MUST preserve these for reporting and retries.
+- Exports/imports MUST round-trip node types, relations, and colors without loss.
 
-- New or changed behavior MUST ship with automated tests: pytest + FastAPI TestClient for backend, Vitest + Testing Library for frontend; integration/smoke coverage is required when touching API contracts or cross-surface flows.
-- Tests MUST be deterministic, include realistic fixtures, and exercise error handling (e.g., correlation IDs and retry paths). Update or add fixtures when schemas change.
-- CI/PR gates MUST run `make test-backend` and `make test-frontend`; red-green cycles are expected for new work, and skipped tests require documented justification.
-Rationale: Reliable, repeatable tests are the primary guardrail against regressions across services and UI.
+### IV. Traceable & Actionable Observability
+Every request and client action must be traceable, diagnosable, and recoverable.
+- Emit structured logs with `X-Correlation-ID` through backend and surface the ID in user-facing errors/toasts.
+- Add progress and retry affordances for networked/AI actions; failures MUST not drop user work.
+- Profiling and debug hooks (e.g., canvas render timings) stay available in development without polluting production UX.
 
-### III. User Experience Consistency
+### V. Responsive, Resilient Experience
+The canvas and API must remain responsive for large trees and never trade speed for data safety.
+- Interactions (zoom, select, highlight) MUST remain perceptually responsive on ~200-node trees; regressions require remediation before release.
+- Long-running actions (AI, import/export, saves) MUST stream or signal status and be cancellable or safely retryable.
+- Local drafts and cloud saves MUST avoid data loss; warnings are mandatory before any destructive navigation.
 
-- UI changes MUST align with existing patterns (top bar, side panels, canvas interactions, toast-driven retries, modal flows) and keep copy consistent with current terminology.
-- Accessibility and responsiveness are mandatory: focus states, keyboard navigation for interactive controls, sensible ARIA labels for canvas controls, and layouts that work down to tablet widths without overlap.
-- Error surfaces MUST include actionable guidance and correlation references when available; new UX flows require acceptance criteria that include success, failure, and empty states.
-Rationale: Consistent, accessible UX keeps the canvas usable under load and ensures errors are recoverable without developer intervention.
+## Operational Guardrails
+Security, configuration, and data-handling constraints that apply to all work.
+- Follow `.env.example` for environment setup; never hardcode secrets. Compose and Fly deployments MUST respect API key pair enforcement when enabled.
+- Backend data persists under `backend/data` with an LRU cache; treat the volume as sensitive and keep it out of version control.
+- Frontend defaults to `/api`; configure `VITE_API_BASE_URL` when pointing to remote stacks and ensure matching CORS/API key headers.
+- CI gates (lint/type/test/build) are required before deploys; smoke tests via `./scripts/smoke_test.sh` or compose MUST pass for release candidates.
 
-### IV. Performance & Reliability Budgets
-
-- Large-graph interactions (200+ nodes) MUST avoid regressions against current baselines: aim for <=20 ms average render steps in development (per `useGraphProfiler`) and avoid blocking the main thread with heavy selectors.
-- Backend hot paths (tree reads/writes) SHOULD keep local p95 latency under 200 ms; caching (e.g., TreeService LRU) and async I/O should be preserved or improved when modifying these flows.
-- New features MUST declare measurable performance expectations in their specs and validate with profiling traces (frontend) or timings/logs (backend) when touching hot paths.
-Rationale: Documented budgets prevent silent performance drift and keep the product responsive for large canvases and frequent tree access.
-
-## Quality Gates & Tooling Requirements
-
-- Formatting, linting, and type-checking are mandatory pre-merge steps for all touched surfaces.
-- Update documentation and `.env.example` alongside behavior or configuration changes; keep API contract updates synchronized across backend schemas and frontend types/clients.
-- Feature work MUST reference the relevant requirements doc and record architecture or performance considerations in the feature spec/plan.
-
-## Delivery Workflow & Review Expectations
-
-- Plans/specs MUST enumerate test coverage (unit/integration/smoke) and expected UX/performance outcomes before implementation starts.
-- Code reviews check for constitution alignment: static analysis status, test depth, UX consistency, and stated performance budgets with evidence where applicable.
-- Breaking changes or cross-service impacts require migration notes and manual verification steps (e.g., smoke test runbook) attached to the PR.
+## Development Workflow & Quality Gates
+How features are specified, planned, implemented, and reviewed.
+- Specs MUST define independently testable user stories and acceptance scenarios; plans/tasks MUST keep stories deliverable in isolation.
+- Tasks and commits MUST reference real file paths and group work by user story; tests for each story are expected unless explicitly waived in the spec.
+- Reviews MUST block on constitution compliance: consent enforcement, contract alignment, dual-stack tests, observability hooks, and performance budgets.
+- Use `make dev-backend` / `make dev-frontend` for local work; run backend/frontend test suites plus targeted smoke checks before merge or deploy.
 
 ## Governance
+This constitution supersedes other practices where conflicts exist and guides all reviews.
+- Amendments require a documented proposal referencing affected principles, impact analysis, and updated templates; maintain change history in this file.
+- Versioning follows semantic rules: MAJOR for breaking governance changes, MINOR for new principles/sections, PATCH for clarifications.
+- Compliance reviews occur on every PR and before releases; violations need documented justification plus a remediation plan and timeline.
 
-- This constitution supersedes other practice notes; deviations require explicit, time-bound exceptions recorded in PRs or runbooks.
-- Amendment procedure: propose a change with rationale, impacted principles/sections, version bump type, and validation plan; maintainers review and approve before adoption.
-- Versioning: MAJOR for removals or incompatible redefinitions; MINOR for added/expanded principles; PATCH for clarifications. Last amended date updates with every approved change.
-- Compliance review: Each PR owner ensures quality gates, tests, UX acceptance, and performance budgets are addressed; reviewers verify evidence or request follow-up tasks.
-
-**Version**: 1.0.0 | **Ratified**: TODO(RATIFICATION_DATE): Original adoption date not yet recorded | **Last Amended**: 2025-12-03
+**Version**: 1.0.0 | **Ratified**: 2025-12-20 | **Last Amended**: 2025-12-20
