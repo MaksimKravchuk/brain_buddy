@@ -77,40 +77,23 @@ function relationFromResponse(response: RelationResponse): GraphRelation {
   return mapRelationResponse(response);
 }
 
-function orderRelationEndpoints(sourceId: string, targetId: string, nodes: GraphNode[]) {
+function resolveRelationEndpoints(sourceId: string, targetId: string) {
+  return { fromId: sourceId, toId: targetId };
+}
+
+function resolveRelationHandles(sourceId: string, targetId: string, nodes: GraphNode[]) {
   const sourceNode = nodes.find((node) => node.id === sourceId);
   const targetNode = nodes.find((node) => node.id === targetId);
 
   if (!sourceNode || !targetNode) {
-    return { fromId: sourceId, toId: targetId };
+    return { sourceHandle: "link-down-source", targetHandle: "link-up-target" };
   }
 
-  const sourceIsParent = sourceNode.type === "parent";
-  const targetIsParent = targetNode.type === "parent";
-
-  if (sourceIsParent !== targetIsParent) {
-    const parentNode = sourceIsParent ? sourceNode : targetNode;
-    const childNode = sourceIsParent ? targetNode : sourceNode;
-    return { fromId: childNode.id, toId: parentNode.id };
+  if (sourceNode.position.y > targetNode.position.y) {
+    return { sourceHandle: "link-up-source", targetHandle: "link-down-target" };
   }
 
-  let lowerNode = sourceNode;
-  let upperNode = targetNode;
-
-  if (sourceNode.position.y < targetNode.position.y) {
-    lowerNode = targetNode;
-    upperNode = sourceNode;
-  } else if (sourceNode.position.y === targetNode.position.y) {
-    const sourceIsChild = sourceNode.type === "child";
-    const targetIsChild = targetNode.type === "child";
-
-    if (!sourceIsChild && targetIsChild) {
-      lowerNode = targetNode;
-      upperNode = sourceNode;
-    }
-  }
-
-  return { fromId: lowerNode.id, toId: upperNode.id };
+  return { sourceHandle: "link-down-source", targetHandle: "link-up-target" };
 }
 
 export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function TreeCanvas(
@@ -344,15 +327,15 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         return;
       }
 
-      const ordered = orderRelationEndpoints(connection.source, connection.target, nodes);
+      const endpoints = resolveRelationEndpoints(connection.source, connection.target);
       const retryConnection: Connection = { ...connection };
       const now = new Date().toISOString();
       pushSnapshot();
       const token = beginOptimisticChange("create-relation");
       const tempRelation: GraphRelation = {
         id: `tmp-rel-${Math.random().toString(36).slice(2, 9)}`,
-        fromId: ordered.fromId,
-        toId: ordered.toId,
+        fromId: endpoints.fromId,
+        toId: endpoints.toId,
         kind: "why",
         createdAt: now
       };
@@ -360,8 +343,8 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       upsertRelation(tempRelation);
       createRelationMutation.mutate(
         {
-          from_id: ordered.fromId,
-          to_id: ordered.toId,
+          from_id: endpoints.fromId,
+          to_id: endpoints.toId,
           kind: "why"
         },
         {
@@ -389,7 +372,6 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     [
       beginOptimisticChange,
       createRelationMutation,
-      nodes,
       pushSnapshot,
       pushToast,
       removeRelation,
@@ -576,7 +558,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       };
 
       if (direction === "child") {
-        handleCreateNode({ type: "child", position, relation: { fromId: "new", toId: origin.id } });
+        handleCreateNode({ type: "child", position, relation: { fromId: origin.id, toId: "new" } });
         return;
       }
 
@@ -622,14 +604,14 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
 
   const flowEdges = useMemo<EdgeType[]>(() => {
     return relations.map((relation) => {
-      const ordered = orderRelationEndpoints(relation.fromId, relation.toId, nodes);
+      const handles = resolveRelationHandles(relation.fromId, relation.toId, nodes);
 
       return {
         id: relation.id,
-        source: ordered.fromId,
-        target: ordered.toId,
-        sourceHandle: "link-up-source",
-        targetHandle: "link-down-target",
+        source: relation.fromId,
+        target: relation.toId,
+        sourceHandle: handles.sourceHandle,
+        targetHandle: handles.targetHandle,
         data: { relation },
         selected: selection.type === "relation" && selection.id === relation.id,
         type: edgeType,
