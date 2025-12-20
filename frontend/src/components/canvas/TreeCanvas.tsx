@@ -40,8 +40,10 @@ const nodeTypes = {
   brainNode: BrainNode
 };
 
+const edgeType = "simplebezier";
+
 const defaultEdgeOptions: Partial<Edge> = {
-  type: "smoothstep",
+  type: edgeType,
   animated: false,
   style: {
     stroke: "rgba(100,116,139,0.85)",
@@ -73,6 +75,42 @@ function createPlaceholderNode(type: GraphNode["type"], label: string): GraphNod
 
 function relationFromResponse(response: RelationResponse): GraphRelation {
   return mapRelationResponse(response);
+}
+
+function orderRelationEndpoints(sourceId: string, targetId: string, nodes: GraphNode[]) {
+  const sourceNode = nodes.find((node) => node.id === sourceId);
+  const targetNode = nodes.find((node) => node.id === targetId);
+
+  if (!sourceNode || !targetNode) {
+    return { fromId: sourceId, toId: targetId };
+  }
+
+  const sourceIsParent = sourceNode.type === "parent";
+  const targetIsParent = targetNode.type === "parent";
+
+  if (sourceIsParent !== targetIsParent) {
+    const parentNode = sourceIsParent ? sourceNode : targetNode;
+    const childNode = sourceIsParent ? targetNode : sourceNode;
+    return { fromId: childNode.id, toId: parentNode.id };
+  }
+
+  let lowerNode = sourceNode;
+  let upperNode = targetNode;
+
+  if (sourceNode.position.y < targetNode.position.y) {
+    lowerNode = targetNode;
+    upperNode = sourceNode;
+  } else if (sourceNode.position.y === targetNode.position.y) {
+    const sourceIsChild = sourceNode.type === "child";
+    const targetIsChild = targetNode.type === "child";
+
+    if (!sourceIsChild && targetIsChild) {
+      lowerNode = targetNode;
+      upperNode = sourceNode;
+    }
+  }
+
+  return { fromId: lowerNode.id, toId: upperNode.id };
 }
 
 export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function TreeCanvas(
@@ -306,14 +344,15 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         return;
       }
 
+      const ordered = orderRelationEndpoints(connection.source, connection.target, nodes);
       const retryConnection: Connection = { ...connection };
       const now = new Date().toISOString();
       pushSnapshot();
       const token = beginOptimisticChange("create-relation");
       const tempRelation: GraphRelation = {
         id: `tmp-rel-${Math.random().toString(36).slice(2, 9)}`,
-        fromId: connection.source,
-        toId: connection.target,
+        fromId: ordered.fromId,
+        toId: ordered.toId,
         kind: "why",
         createdAt: now
       };
@@ -321,8 +360,8 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       upsertRelation(tempRelation);
       createRelationMutation.mutate(
         {
-          from_id: connection.source,
-          to_id: connection.target,
+          from_id: ordered.fromId,
+          to_id: ordered.toId,
           kind: "why"
         },
         {
@@ -350,6 +389,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     [
       beginOptimisticChange,
       createRelationMutation,
+      nodes,
       pushSnapshot,
       pushToast,
       removeRelation,
@@ -581,26 +621,32 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   }, [handleCreateRelativeNode, nodes, selection]);
 
   const flowEdges = useMemo<EdgeType[]>(() => {
-    return relations.map((relation) => ({
-      id: relation.id,
-      source: relation.fromId,
-      target: relation.toId,
-      data: { relation },
-      selected: selection.type === "relation" && selection.id === relation.id,
-      type: "smoothstep",
-      animated: false,
-      style: {
-        stroke: selection.type === "relation" && selection.id === relation.id ? "#0ea5e9" : "rgba(100,116,139,0.9)",
-        strokeWidth: selection.type === "relation" && selection.id === relation.id ? 3 : 2
-      },
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        color: selection.type === "relation" && selection.id === relation.id ? "#0ea5e9" : "rgba(100,116,139,0.95)",
-        width: 16,
-        height: 16
-      }
-    }));
-  }, [relations, selection]);
+    return relations.map((relation) => {
+      const ordered = orderRelationEndpoints(relation.fromId, relation.toId, nodes);
+
+      return {
+        id: relation.id,
+        source: ordered.fromId,
+        target: ordered.toId,
+        sourceHandle: "link-up-source",
+        targetHandle: "link-down-target",
+        data: { relation },
+        selected: selection.type === "relation" && selection.id === relation.id,
+        type: edgeType,
+        animated: false,
+        style: {
+          stroke: selection.type === "relation" && selection.id === relation.id ? "#0ea5e9" : "rgba(100,116,139,0.9)",
+          strokeWidth: selection.type === "relation" && selection.id === relation.id ? 3 : 2
+        },
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: selection.type === "relation" && selection.id === relation.id ? "#0ea5e9" : "rgba(100,116,139,0.95)",
+          width: 16,
+          height: 16
+        }
+      };
+    });
+  }, [nodes, relations, selection]);
 
   useEffect(() => {
     hasCreatedDefaultNode.current = false;
