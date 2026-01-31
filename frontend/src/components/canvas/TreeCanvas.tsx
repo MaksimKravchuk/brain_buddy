@@ -29,7 +29,7 @@ import {
   useUpdateNode
 } from "../../api/hooks";
 import type { RelationResponse } from "../../api/types";
-import { getErrorMessage } from "../../utils/error";
+import { getErrorContext, getErrorMessage } from "../../utils/error";
 import { useGraphProfiler } from "../../hooks/useGraphProfiler";
 import { BrainNode } from "./BrainNode";
 
@@ -62,6 +62,11 @@ export interface TreeCanvasHandle {
   centerOnSelection(): void;
 }
 
+interface LinkErrorState {
+  message: string;
+  referenceId?: string | null;
+}
+
 function createPlaceholderNode(type: GraphNode["type"], label: string): GraphNode {
   return {
     id: `tmp-${Math.random().toString(36).slice(2, 9)}`,
@@ -75,42 +80,6 @@ function createPlaceholderNode(type: GraphNode["type"], label: string): GraphNod
 
 function relationFromResponse(response: RelationResponse): GraphRelation {
   return mapRelationResponse(response);
-}
-
-function orderRelationEndpoints(sourceId: string, targetId: string, nodes: GraphNode[]) {
-  const sourceNode = nodes.find((node) => node.id === sourceId);
-  const targetNode = nodes.find((node) => node.id === targetId);
-
-  if (!sourceNode || !targetNode) {
-    return { fromId: sourceId, toId: targetId };
-  }
-
-  const sourceIsParent = sourceNode.type === "parent";
-  const targetIsParent = targetNode.type === "parent";
-
-  if (sourceIsParent !== targetIsParent) {
-    const parentNode = sourceIsParent ? sourceNode : targetNode;
-    const childNode = sourceIsParent ? targetNode : sourceNode;
-    return { fromId: childNode.id, toId: parentNode.id };
-  }
-
-  let lowerNode = sourceNode;
-  let upperNode = targetNode;
-
-  if (sourceNode.position.y < targetNode.position.y) {
-    lowerNode = targetNode;
-    upperNode = sourceNode;
-  } else if (sourceNode.position.y === targetNode.position.y) {
-    const sourceIsChild = sourceNode.type === "child";
-    const targetIsChild = targetNode.type === "child";
-
-    if (!sourceIsChild && targetIsChild) {
-      lowerNode = targetNode;
-      upperNode = sourceNode;
-    }
-  }
-
-  return { fromId: lowerNode.id, toId: upperNode.id };
 }
 
 export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function TreeCanvas(
@@ -145,12 +114,29 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
   const hasCreatedDefaultNode = useRef(false);
   const canvasRef = useRef<HTMLDivElement | null>(null);
+  const linkErrorRef = useRef<HTMLDivElement | null>(null);
+  const lastFailedLink = useRef<Connection | null>(null);
 
   useGraphProfiler({
     nodeCount: nodes.length,
     edgeCount: relations.length
   });
   const [linkSourceId, setLinkSourceId] = useState<string | null>(null);
+  const [linkError, setLinkError] = useState<LinkErrorState | null>(null);
+  const [copiedReference, setCopiedReference] = useState(false);
+
+  useEffect(() => {
+    if (linkError) {
+      setCopiedReference(false);
+      linkErrorRef.current?.focus();
+    }
+  }, [linkError]);
+
+  const dismissLinkError = useCallback(() => {
+    setLinkError(null);
+    setCopiedReference(false);
+    lastFailedLink.current = null;
+  }, []);
 
   const handleUndo = useCallback(() => {
     undo();
@@ -328,7 +314,6 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     },
     [
       beginOptimisticChange,
-      nodes,
       pushSnapshot,
       pushToast,
       resolveOptimisticChange,
@@ -344,15 +329,15 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         return;
       }
 
-      const ordered = orderRelationEndpoints(connection.source, connection.target, nodes);
+      dismissLinkError();
       const retryConnection: Connection = { ...connection };
       const now = new Date().toISOString();
       pushSnapshot();
       const token = beginOptimisticChange("create-relation");
       const tempRelation: GraphRelation = {
         id: `tmp-rel-${Math.random().toString(36).slice(2, 9)}`,
-        fromId: ordered.fromId,
-        toId: ordered.toId,
+        fromId: connection.source,
+        toId: connection.target,
         kind: "why",
         createdAt: now
       };
@@ -360,8 +345,8 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       upsertRelation(tempRelation);
       createRelationMutation.mutate(
         {
-          from_id: ordered.fromId,
-          to_id: ordered.toId,
+          source_node_id: connection.source,
+          target_node_id: connection.target,
           kind: "why"
         },
         {
@@ -369,13 +354,18 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
             resolveOptimisticChange(token);
             removeRelation(tempRelation.id);
             upsertRelation(relationFromResponse(relation));
+            dismissLinkError();
           },
           onError: (error) => {
             rollbackOptimisticChange(token);
             removeRelation(tempRelation.id);
+            lastFailedLink.current = retryConnection;
+            const { message, referenceId } = getErrorContext(error, "Unable to create link");
+            const description = referenceId ? `${message} (ref: ${referenceId})` : getErrorMessage(error, message);
+            setLinkError({ message, referenceId });
             pushToast({
               title: "Failed to create relation",
-              description: getErrorMessage(error),
+              description,
               variant: "error",
               action: {
                 label: "Retry",
@@ -389,7 +379,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     [
       beginOptimisticChange,
       createRelationMutation,
-      nodes,
+      dismissLinkError,
       pushSnapshot,
       pushToast,
       removeRelation,
@@ -438,6 +428,36 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     } as Connection);
     setLinkSourceId(null);
   }, [handleConnect, linkSourceId, pushToast, selection]);
+
+  const handleCopyReference = useCallback(async () => {
+    if (!linkError?.referenceId) {
+      return;
+    }
+
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(linkError.referenceId);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = linkError.referenceId;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "absolute";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      setCopiedReference(true);
+    } catch (error) {
+      pushToast({
+        title: "Unable to copy reference",
+        description: getErrorMessage(error, "Unable to copy reference"),
+        variant: "error",
+        duration: 4000
+      });
+    }
+  }, [linkError?.referenceId, pushToast]);
 
   const handleEdgesDelete = useCallback<OnEdgesDelete>(
     (edgesToDelete) => {
@@ -489,7 +509,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       relation?: { fromId: string | "new"; toId: string | "new" };
     }) => {
       const type = input?.type ?? "child";
-      const label = input?.label?.trim() || (type === "parent" ? "Parent" : "Child");
+      const label = input?.label?.trim() || (type === "parent" ? "Cause" : "Effect");
       const placeholder = createPlaceholderNode(type, label);
       const bounds = canvasRef.current?.getBoundingClientRect();
       const viewportCenter = reactFlowInstance
@@ -622,12 +642,10 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
 
   const flowEdges = useMemo<EdgeType[]>(() => {
     return relations.map((relation) => {
-      const ordered = orderRelationEndpoints(relation.fromId, relation.toId, nodes);
-
       return {
         id: relation.id,
-        source: ordered.fromId,
-        target: ordered.toId,
+        source: relation.fromId,
+        target: relation.toId,
         sourceHandle: "link-up-source",
         targetHandle: "link-down-target",
         data: { relation },
@@ -646,7 +664,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         }
       };
     });
-  }, [nodes, relations, selection]);
+  }, [relations, selection]);
 
   useEffect(() => {
     hasCreatedDefaultNode.current = false;
@@ -658,7 +676,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     }
 
     hasCreatedDefaultNode.current = true;
-    handleCreateNode({ type: "parent", label: "Parent" });
+    handleCreateNode({ type: "parent", label: "Cause" });
   }, [handleCreateNode, isLoading, nodes.length, reactFlowInstance]);
 
   const buildCombo = useCallback((event: KeyboardEvent) => {
@@ -758,6 +776,9 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
 
   return (
     <div ref={canvasRef} className="relative h-full w-full">
+      <div aria-live="assertive" className="sr-only" data-testid="relation-error-live">
+        {linkError?.message ?? ""}
+      </div>
       <ReactFlow
         aria-label="Current reality tree canvas"
         nodes={flowNodes}
@@ -792,13 +813,75 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
 
       {!hasContent && !isLoading ? (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-slate-500">
-          <p>No nodes yet. Add a parent or child node to start building your map.</p>
+          <p>No nodes yet. Add a node to start mapping causes and effects.</p>
         </div>
       ) : null}
 
       {isLoading ? (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-surface-base/60 text-sm text-slate-500 backdrop-blur">
           Loading tree…
+        </div>
+      ) : null}
+
+      {linkError ? (
+        <div
+          ref={linkErrorRef}
+          role="alert"
+          aria-live="assertive"
+          tabIndex={-1}
+          className="pointer-events-auto absolute left-6 bottom-6 z-20 max-w-md rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 shadow-md focus:outline-none focus:ring-2 focus:ring-rose-300"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="font-semibold">Unable to create link</p>
+              <p className="mt-1 break-words" data-testid="relation-error-message">
+                {linkError.message}
+              </p>
+              {linkError.referenceId ? (
+                <p className="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-rose-800">
+                  <span className="rounded bg-white px-2 py-1 shadow-sm">
+                    Ref: {linkError.referenceId}
+                  </span>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-white px-2 py-1 text-[11px] font-semibold text-rose-800 shadow-sm transition hover:border-rose-300 hover:text-rose-900"
+                    onClick={handleCopyReference}
+                  >
+                    Copy reference
+                  </button>
+                  {copiedReference ? (
+                    <span className="text-emerald-700" role="status" aria-live="polite">
+                      Copied
+                    </span>
+                  ) : null}
+                </p>
+              ) : null}
+            </div>
+            <div className="flex flex-shrink-0 flex-col gap-2">
+              {lastFailedLink.current ? (
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center rounded-md border border-rose-200 bg-white px-3 py-1 text-xs font-semibold text-rose-700 shadow-sm transition hover:border-rose-300 hover:text-rose-800"
+                  onClick={() => {
+                    const retry = lastFailedLink.current;
+                    dismissLinkError();
+                    if (retry) {
+                      handleConnect(retry);
+                    }
+                  }}
+                >
+                  Retry link
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="inline-flex items-center justify-center rounded-md border border-rose-200 bg-white px-3 py-1 text-xs font-semibold text-rose-700 shadow-sm transition hover:border-rose-300 hover:text-rose-800"
+                onClick={dismissLinkError}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>

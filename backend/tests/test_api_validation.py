@@ -35,8 +35,8 @@ def test_validation_endpoint_flow(api_client) -> None:
     cause_id = cause_resp.json()["id"]
 
     relation_payload = RelationCreateRequest(
-        from_id=cause_id,
-        to_id=effect_id,
+        source_node_id=cause_id,
+        target_node_id=effect_id,
         kind="why",
     )
     relation_resp = api_client.post(

@@ -46,7 +46,9 @@ def test_delete_node_requires_cascade(
 
     relation_service.create_relation(
         tree.id,
-        RelationCreateRequest(from_id=node_a.id, to_id=node_b.id, kind="why"),
+        RelationCreateRequest(
+            source_node_id=node_a.id, target_node_id=node_b.id, kind="why"
+        ),
     )
 
     with pytest.raises(ValidationFailure):

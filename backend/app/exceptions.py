@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 
 class BrainBuddyError(Exception):
     """Base class for application-specific exceptions."""
@@ -33,6 +35,10 @@ class RepositoryError(BrainBuddyError):
 
 class ValidationFailure(BrainBuddyError):
     """Raised when requested operation fails domain validation checks."""
+
+    def __init__(self, message: str, detail: Any | None = None) -> None:
+        super().__init__(message)
+        self.detail = detail
 
 
 __all__ = [
