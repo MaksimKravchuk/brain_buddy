@@ -1,4 +1,3 @@
-import { performance } from "node:perf_hooks";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import type { TreeDetailResponse } from "../../../api/types";

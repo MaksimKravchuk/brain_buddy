@@ -53,6 +53,8 @@ export interface RelationCreateRequest {
   target_node_id: string;
   kind?: RelationKind;
   // Legacy fallbacks
+  source_id?: string;
+  target_id?: string;
   from_id?: string;
   to_id?: string;
 }
@@ -62,6 +64,8 @@ export interface RelationUpdateRequest {
   target_node_id?: string;
   kind?: RelationKind;
   // Legacy fallbacks
+  source_id?: string;
+  target_id?: string;
   from_id?: string;
   to_id?: string;
 }
