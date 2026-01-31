@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from app.schemas import NodeCreateRequest, NodeUpdateRequest, Position, RelationCreateRequest
+from app.schemas import (
+    NodeCreateRequest,
+    NodeUpdateRequest,
+    Position,
+    RelationCreateRequest,
+)
 
 
 def _iso(ts: datetime) -> str:
@@ -119,6 +124,7 @@ def test_create_relation_preserves_direction_after_node_moves(api_client) -> Non
             Position(x=2.5, y=6.0),
             Position(x=0.0, y=0.0),
         ),
+        strict=True,
     ):
         update_payload = NodeUpdateRequest(position=new_pos).model_dump(exclude_none=True)
         patch_resp = api_client.patch(
