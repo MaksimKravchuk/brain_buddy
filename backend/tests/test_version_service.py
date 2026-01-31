@@ -6,6 +6,7 @@ from app.schemas import (
     NodeCreateRequest,
     NodeUpdateRequest,
     Position,
+    RelationCreateRequest,
     TreeCreateRequest,
     VersionCreateRequest,
 )
@@ -86,12 +87,22 @@ def test_restore_version(tree_service, node_service, version_service) -> None:
 
 
 def test_export_tree_supports_live_and_version(
-    tree_service, node_service, version_service
+    tree_service, node_service, relation_service, version_service
 ) -> None:
     tree = tree_service.create_tree(TreeCreateRequest(name="Export"))
-    node_service.create_node(
+    node_a, _ = node_service.create_node(
         tree.id,
         NodeCreateRequest(label="A", type="child", position=Position(x=0, y=0)),
+    )
+    node_b, _ = node_service.create_node(
+        tree.id,
+        NodeCreateRequest(label="B", type="child", position=Position(x=1, y=1)),
+    )
+    relation_service.create_relation(
+        tree.id,
+        RelationCreateRequest(
+            source_node_id=node_a.id, target_node_id=node_b.id, kind="why"
+        ),
     )
     version = version_service.create_version(
         tree.id, VersionCreateRequest(label="Snapshot")
@@ -102,6 +113,8 @@ def test_export_tree_supports_live_and_version(
     live_payload = json.loads(live_content.decode("utf-8"))
     assert live_payload["source"]["type"] == "live"
     assert live_payload["tree"]["id"] == tree.id
+    assert live_payload["tree"]["relations"][0]["source_node_id"]
+    assert live_payload["tree"]["relations"][0]["target_node_id"]
 
     version_filename, version_content = version_service.export_tree(tree.id, version.id)
     assert version_filename.endswith(".json")
@@ -109,3 +122,5 @@ def test_export_tree_supports_live_and_version(
     assert version_payload["source"]["type"] == "version"
     assert version_payload["source"]["version_id"] == version.id
     assert version_payload["tree"]["id"] == tree.id
+    assert version_payload["tree"]["relations"][0]["source_node_id"]
+    assert version_payload["tree"]["relations"][0]["target_node_id"]

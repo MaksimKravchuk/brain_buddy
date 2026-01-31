@@ -28,8 +28,8 @@ def test_validation_flow(
     relation_service.create_relation(
         tree.id,
         RelationCreateRequest(
-            from_id=cause_node.id,
-            to_id=effect_node.id,
+            source_node_id=cause_node.id,
+            target_node_id=effect_node.id,
             kind="why",
         ),
     )

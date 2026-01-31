@@ -49,6 +49,7 @@
 - File-backed tree data under `backend/data` with LRU cache (local volume). (001-local-deploy-setup)
 - Python 3.11 (backend), TypeScript (strict) + React (frontend) + FastAPI, Pydantic, pytest; Vite, React, Zustand, React Query, Vitest/Testing Library (001-refactor-node-relations)
 - File-backed node data with LRU caching; optional compose volume (001-refactor-node-relations)
+- Python 3.11 (backend), TypeScript (strict) + React (frontend) + FastAPI, Pydantic, pytest/FastAPI TestClient; React, Vite, Zustand, React Query, React Flow-like canvas, Vitest + Testing Library (001-relation-linking-refactor)
 
 ## Recent Changes
 - 001-reality-tree-ui: Added Python 3.11 (backend), TypeScript (strict) + React (frontend) + FastAPI, Pydantic, pytest; React, Vite, Zustand, React Query, React Flow-like canvas, Vitest/Testing Library

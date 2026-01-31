@@ -99,7 +99,8 @@ class NodeService:
         removed_relations = len(relations) - len(remaining_relations)
         if removed_relations and not cascade:
             raise ValidationFailure(
-                f"Node '{node_id}' has {removed_relations} related connection(s); use cascade=true to remove."
+                f"Node '{node_id}' has {removed_relations} relation(s); "
+                "use cascade=true to remove."
             )
 
         updated_tree = tree.model_copy(

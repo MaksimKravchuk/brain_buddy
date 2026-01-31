@@ -31,16 +31,20 @@ def generate_version_id(tree_id: str) -> str:
 
 
 def ensure_acyclic(relations: Iterable[tuple[str, str]]) -> None:
-    """Validate that directed relations (from_id -> to_id) do not create a cycle."""
+    """
+    Validate that directed relations (source_node_id -> target_node_id) do not
+    create a cycle.
+    """
 
     graph: dict[str, set[str]] = {}
-    for from_id, to_id in relations:
-        if from_id == to_id:
+    for source_id, target_id in relations:
+        if source_id == target_id:
             raise ValidationFailure(
-                "Relation cannot reference the same node for both endpoints."
+                "Relation cannot reference the same node for both endpoints.",
+                detail={"reason": "self_link", "node_id": source_id},
             )
-        graph.setdefault(from_id, set()).add(to_id)
-        graph.setdefault(to_id, set())
+        graph.setdefault(source_id, set()).add(target_id)
+        graph.setdefault(target_id, set())
 
     visited: set[str] = set()
     visiting: set[str] = set()
@@ -48,7 +52,8 @@ def ensure_acyclic(relations: Iterable[tuple[str, str]]) -> None:
     def dfs(node: str) -> None:
         if node in visiting:
             raise ValidationFailure(
-                "Relations create a cycle; ensure direction flows from cause to effect."
+                "Relations create a cycle; ensure direction flows from cause to effect.",
+                detail={"reason": "cycle_detected", "node_id": node},
             )
         if node in visited:
             return

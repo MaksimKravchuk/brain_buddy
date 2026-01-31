@@ -52,8 +52,10 @@ class RelationDocument(StorageBaseModel):
     """Stored representation of a directed relation between nodes."""
 
     id: str = Field(description="Unique identifier for the relation.")
-    source_id: str = Field(description="Identifier of the cause (from_id) node.")
-    target_id: str = Field(description="Identifier of the effect (to_id) node.")
+    source_id: str = Field(description="Identifier of the cause (source_node_id) node.")
+    target_id: str = Field(
+        description="Identifier of the effect (target_node_id) node."
+    )
     question_label: str = Field(
         default="WHY?", description="Prompt associated with the relation."
     )
