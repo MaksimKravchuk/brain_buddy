@@ -8,6 +8,7 @@ import { useTreeStore } from "../../stores/treeStore";
 import { useUpdateNode } from "../../api/hooks";
 import { useUiStore } from "../../stores/uiStore";
 import { getErrorMessage } from "../../utils/error";
+import nodeColorConfig from "../../config/nodeColors.json";
 
 export interface BrainNodeData {
   node: GraphNode;
@@ -35,6 +36,17 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
   const [draftLabel, setDraftLabel] = useState(node.label);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const showControls = selected || isHovered;
+  const { up: outgoingCount, down: incomingCount } = node.relationCounts;
+
+  const nodeColors = useMemo(() => {
+    if (outgoingCount === 0 && incomingCount > 0) {
+      return nodeColorConfig.noOutgoing;
+    }
+    if (incomingCount === 0) {
+      return nodeColorConfig.noIncoming;
+    }
+    return nodeColorConfig.default;
+  }, [incomingCount, outgoingCount]);
 
   const linkHandleClass = (position: "top" | "bottom") =>
     twMerge(
@@ -133,10 +145,12 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
 
   return (
     <div
+      data-testid="brain-node"
       className={twMerge(
-        "group relative h-[132px] w-[240px] rounded-l-2xl rounded-r-xl border border-slate-200 bg-white/90 text-left shadow-sm transition-all duration-150",
+        "group relative h-[132px] w-[240px] rounded-l-2xl rounded-r-xl border border-slate-200 text-left shadow-sm transition-all duration-150",
         selected ? "ring-2 ring-brand-primary/30 shadow-glow" : "ring-1 ring-transparent"
       )}
+      style={{ backgroundColor: nodeColors.background, color: nodeColors.text }}
       onMouseDown={() => select({ type: "node", id: node.id })}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
@@ -245,8 +259,8 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
                 setIsEditing(true);
               }
             }}
-            className="max-h-full w-full break-words overflow-y-auto text-center font-semibold leading-tight tracking-tight text-slate-900 focus:outline-none"
-            style={{ fontSize, lineHeight }}
+            className="max-h-full w-full break-words overflow-y-auto text-center font-semibold leading-tight tracking-tight focus:outline-none"
+            style={{ fontSize, lineHeight, color: nodeColors.text }}
           >
             {node.label}
           </button>

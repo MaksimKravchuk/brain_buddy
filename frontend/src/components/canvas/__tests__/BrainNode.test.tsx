@@ -4,6 +4,7 @@ import { ReactFlowProvider, Position } from "reactflow";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BrainNode, type BrainNodeData } from "../BrainNode";
+import nodeColorConfig from "../../../config/nodeColors.json";
 import { useTreeStore } from "../../../stores/treeStore";
 import { useUiStore } from "../../../stores/uiStore";
 
@@ -101,5 +102,30 @@ describe("BrainNode inline editing", () => {
 
     expect(mutateSpy).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Original" })).toBeInTheDocument();
+  });
+
+  it("applies configured colors for effect and root cause nodes", () => {
+    render(
+      <ReactFlowProvider>
+        <RenderedBrainNode />
+      </ReactFlowProvider>
+    );
+
+    const node = screen.getByTestId("brain-node");
+    expect(node).toHaveStyle({
+      backgroundColor: nodeColorConfig.noIncoming.background,
+      color: nodeColorConfig.noIncoming.text
+    });
+
+    act(() => {
+      useTreeStore
+        .getState()
+        .upsertNode({ ...baseNode, relationCounts: { up: 0, down: 2 } });
+    });
+
+    expect(node).toHaveStyle({
+      backgroundColor: nodeColorConfig.noOutgoing.background,
+      color: nodeColorConfig.noOutgoing.text
+    });
   });
 });
