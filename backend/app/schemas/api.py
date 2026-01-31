@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import AliasChoices, ConfigDict, Field
 
 from .common import Position, StrictBaseModel
 from .domain import VersionDiffSummary
@@ -19,9 +19,19 @@ FeedbackStatus = Literal["success", "failed", "pending"]
 class ErrorResponse(StrictBaseModel):
     """Standard error payload for API responses."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     message: str = Field(description="Human-friendly error message.")
     detail: Any | None = Field(
         default=None, description="Optional structured error details."
+    )
+    reference_id: str | None = Field(
+        default=None,
+        description=(
+            "Optional correlation/reference identifier for support or debugging."
+        ),
+        validation_alias=AliasChoices("reference_id", "reference"),
+        serialization_alias="reference_id",
     )
 
 
@@ -29,10 +39,14 @@ class RelationCounts(StrictBaseModel):
     """Upstream and downstream relation counts for a node."""
 
     up_count: int = Field(
-        default=0, ge=0, description="Relations where this node is the cause (from_id)."
+        default=0,
+        ge=0,
+        description="Relations where this node is the source (source_node_id).",
     )
     down_count: int = Field(
-        default=0, ge=0, description="Relations where this node is the effect (to_id)."
+        default=0,
+        ge=0,
+        description="Relations where this node is the target (target_node_id).",
     )
 
 
@@ -72,15 +86,26 @@ class NodeResponse(StrictBaseModel):
     )
     relation_counts: RelationCounts = Field(
         default_factory=RelationCounts,
-        description="Counts of upstream (from_id) and downstream (to_id) relations.",
+        description=(
+            "Counts of upstream (source_node_id) and "
+            "downstream (target_node_id) relations."
+        ),
     )
 
 
 class RelationCreateRequest(StrictBaseModel):
     """Payload for creating a relation between nodes."""
 
-    from_id: str = Field(description="Cause node identifier (lower node).")
-    to_id: str = Field(description="Effect node identifier (upper node).")
+    model_config = ConfigDict(populate_by_name=True)
+
+    source_node_id: str = Field(
+        validation_alias=AliasChoices("source_node_id", "from_id"),
+        description="Cause node identifier (lower node).",
+    )
+    target_node_id: str = Field(
+        validation_alias=AliasChoices("target_node_id", "to_id"),
+        description="Effect node identifier (upper node).",
+    )
     kind: RelationKind = Field(
         default="why", description="Relation kind (only 'why' is supported)."
     )
@@ -89,11 +114,17 @@ class RelationCreateRequest(StrictBaseModel):
 class RelationUpdateRequest(StrictBaseModel):
     """Patch payload for updating a relation."""
 
-    from_id: str | None = Field(
-        default=None, description="Updated cause node identifier (lower node)."
+    model_config = ConfigDict(populate_by_name=True)
+
+    source_node_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("source_node_id", "from_id"),
+        description="Updated cause node identifier (lower node).",
     )
-    to_id: str | None = Field(
-        default=None, description="Updated effect node identifier (upper node)."
+    target_node_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("target_node_id", "to_id"),
+        description="Updated effect node identifier (upper node).",
     )
     kind: RelationKind | None = Field(
         default=None, description="Updated relation kind."
@@ -103,9 +134,19 @@ class RelationUpdateRequest(StrictBaseModel):
 class RelationResponse(StrictBaseModel):
     """API representation of a relation."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     id: str = Field(description="Relation identifier.")
-    from_id: str = Field(description="Cause node identifier (lower node).")
-    to_id: str = Field(description="Effect node identifier (upper node).")
+    source_node_id: str = Field(
+        description="Cause node identifier (lower node).",
+        validation_alias=AliasChoices("source_node_id", "from_id"),
+        serialization_alias="source_node_id",
+    )
+    target_node_id: str = Field(
+        description="Effect node identifier (upper node).",
+        validation_alias=AliasChoices("target_node_id", "to_id"),
+        serialization_alias="target_node_id",
+    )
     kind: RelationKind = Field(
         default="why", description="Relation kind (only 'why' is supported)."
     )

@@ -31,7 +31,7 @@ def test_export_includes_highlights_and_layout_metadata(api_client) -> None:
     effect_id = effect_resp.json()["id"]
 
     relation_payload = RelationCreateRequest(
-        from_id=cause_id, to_id=effect_id, kind="why"
+        source_node_id=cause_id, target_node_id=effect_id, kind="why"
     ).model_dump()
     relation_resp = api_client.post(
         f"/api/trees/{tree_id}/relations", json=relation_payload
@@ -112,8 +112,8 @@ def test_import_preserves_ids_and_timestamps(api_client) -> None:
         "relations": [
             {
                 "id": "r1",
-                "from_id": "n1",
-                "to_id": "n2",
+                "source_node_id": "n1",
+                "target_node_id": "n2",
                 "kind": "why",
                 "created_at": created,
             }
@@ -133,6 +133,8 @@ def test_import_preserves_ids_and_timestamps(api_client) -> None:
 
     relation = imported["relations"][0]
     assert relation["id"] == "r1"
+    assert relation["source_node_id"] == "n1"
+    assert relation["target_node_id"] == "n2"
     assert _parse(relation["created_at"]) == _parse(created)
 
     export_resp = api_client.post(f"/api/trees/{tree_payload['id']}/export")
@@ -140,6 +142,8 @@ def test_import_preserves_ids_and_timestamps(api_client) -> None:
     exported = export_resp.json()["tree"]
     assert {node["id"] for node in exported["nodes"]} == {"n1", "n2"}
     assert exported["relations"][0]["id"] == "r1"
+    assert exported["relations"][0]["source_node_id"] == "n1"
+    assert exported["relations"][0]["target_node_id"] == "n2"
 
 
 def test_import_invalid_relations_returns_bad_request(api_client) -> None:
@@ -167,8 +171,8 @@ def test_import_invalid_relations_returns_bad_request(api_client) -> None:
         "relations": [
             {
                 "id": "r1",
-                "from_id": "a",
-                "to_id": "missing",
+                "source_node_id": "a",
+                "target_node_id": "missing",
                 "kind": "why",
                 "created_at": now,
             }

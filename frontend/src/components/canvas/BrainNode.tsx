@@ -146,7 +146,7 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
         type="source"
         position={Position.Top}
         className={linkHandleClass("top")}
-        aria-label="Link to parent"
+        aria-label="Start link from this node (source)"
       />
       <Handle
         id="link-up-target"
@@ -154,14 +154,14 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
         position={Position.Top}
         isConnectableStart={false}
         className={linkTargetClass("top")}
-        aria-label="Accept parent link"
+        aria-label="Accept link to this node (target)"
       />
       <Handle
         id="link-down-source"
         type="source"
         position={Position.Bottom}
         className={linkHandleClass("bottom")}
-        aria-label="Link to child"
+        aria-label="Start link from this node (source)"
       />
       <Handle
         id="link-down-target"
@@ -169,14 +169,14 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
         position={Position.Bottom}
         isConnectableStart={false}
         className={linkTargetClass("bottom")}
-        aria-label="Accept child link"
+        aria-label="Accept link to this node (target)"
       />
 
       <div className="pointer-events-none absolute inset-y-0 left-0 w-2 rounded-l-2xl bg-brand-primary/10" />
 
       <button
         type="button"
-        aria-label="Create parent"
+        aria-label="Create upstream node"
         onClick={onCreateParent}
         className={twMerge(
           "absolute left-1/2 top-0 z-10 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-slate-300 bg-white shadow-sm transition-opacity",
@@ -196,7 +196,7 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
 
       <button
         type="button"
-        aria-label="Create child"
+        aria-label="Create downstream node"
         onClick={onCreateChild}
         className={twMerge(
           "absolute bottom-0 left-1/2 z-10 h-4 w-4 -translate-x-1/2 translate-y-1/2 rounded-full border border-slate-300 bg-white shadow-sm transition-opacity",

@@ -37,22 +37,33 @@ export interface NodeUpdateRequest {
 
 export interface RelationResponse {
   id: string;
-  from_id: string;
-  to_id: string;
+  source_node_id: string;
+  target_node_id: string;
   kind: RelationKind;
   created_at: string;
+  // Legacy fallbacks
+  source_id?: string;
+  target_id?: string;
+  from_id?: string;
+  to_id?: string;
 }
 
 export interface RelationCreateRequest {
-  from_id: string;
-  to_id: string;
+  source_node_id: string;
+  target_node_id: string;
   kind?: RelationKind;
+  // Legacy fallbacks
+  from_id?: string;
+  to_id?: string;
 }
 
 export interface RelationUpdateRequest {
+  source_node_id?: string;
+  target_node_id?: string;
+  kind?: RelationKind;
+  // Legacy fallbacks
   from_id?: string;
   to_id?: string;
-  kind?: RelationKind;
 }
 
 export interface VersionDiffSummary {

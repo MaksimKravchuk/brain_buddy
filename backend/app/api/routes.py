@@ -48,7 +48,7 @@ def create_tree(
     tree_service=Depends(get_tree_service),
 ) -> TreeDetailResponse:
     tree = tree_service.create_tree(payload)
-    return _build_tree_response(tree)
+    return tree_service.to_response(tree)
 
 
 @router.get("/trees", response_model=list[TreeListItem])
@@ -67,7 +67,7 @@ def get_tree(
     tree_id: str, tree_service=Depends(get_tree_service)
 ) -> TreeDetailResponse:
     tree = tree_service.get_tree(tree_id)
-    return _build_tree_response(tree)
+    return tree_service.to_response(tree)
 
 
 @router.put("/trees/{tree_id}", response_model=TreeDetailResponse)
@@ -77,7 +77,7 @@ def update_tree(
     tree_service=Depends(get_tree_service),
 ) -> TreeDetailResponse:
     tree = tree_service.update_tree(tree_id, payload)
-    return _build_tree_response(tree)
+    return tree_service.to_response(tree)
 
 
 @router.delete("/trees/{tree_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -94,7 +94,7 @@ def import_tree(
     payload: TreeImportRequest, tree_service=Depends(get_tree_service)
 ) -> TreeDetailResponse:
     tree = tree_service.import_tree(payload.tree)
-    return _build_tree_response(tree)
+    return tree_service.to_response(tree)
 
 
 @router.post("/trees/{tree_id}/export", response_model=TreeExportResponse)
@@ -102,7 +102,7 @@ def export_tree(
     tree_id: str, tree_service=Depends(get_tree_service)
 ) -> TreeExportResponse:
     tree = tree_service.get_tree(tree_id)
-    return TreeExportResponse(tree=_build_tree_response(tree))
+    return TreeExportResponse(tree=tree_service.to_response(tree))
 
 
 @router.post(
@@ -127,9 +127,10 @@ def create_node(
     tree_id: str,
     payload: NodeCreateRequest,
     node_service=Depends(get_node_service),
+    tree_service=Depends(get_tree_service),
 ) -> NodeResponse:
     node, tree = node_service.create_node(tree_id, payload)
-    return _node_response_from_tree(tree, node.id)
+    return tree_service.node_to_response(tree, node.id)
 
 
 @router.patch("/trees/{tree_id}/nodes/{node_id}", response_model=NodeResponse)
@@ -138,9 +139,10 @@ def update_node(
     node_id: str,
     payload: NodeUpdateRequest,
     node_service=Depends(get_node_service),
+    tree_service=Depends(get_tree_service),
 ) -> NodeResponse:
     node, tree = node_service.update_node(tree_id, node_id, payload)
-    return _node_response_from_tree(tree, node.id)
+    return tree_service.node_to_response(tree, node.id)
 
 
 @router.delete(
@@ -164,9 +166,10 @@ def create_relation(
     tree_id: str,
     payload: RelationCreateRequest,
     relation_service=Depends(get_relation_service),
+    tree_service=Depends(get_tree_service),
 ) -> RelationResponse:
     relation, _tree = relation_service.create_relation(tree_id, payload)
-    return _relation_to_response(relation)
+    return tree_service.relation_to_response(relation)
 
 
 @router.patch(
@@ -177,9 +180,10 @@ def update_relation(
     relation_id: str,
     payload: RelationUpdateRequest,
     relation_service=Depends(get_relation_service),
+    tree_service=Depends(get_tree_service),
 ) -> RelationResponse:
     relation, _tree = relation_service.update_relation(tree_id, relation_id, payload)
-    return _relation_to_response(relation)
+    return tree_service.relation_to_response(relation)
 
 
 @router.delete(
@@ -281,66 +285,6 @@ def get_validation_history(
         for entry in history
     ]
     return ValidationHistoryResponse(items=items)
-
-
-def _build_tree_response(tree: TreeDocument) -> TreeDetailResponse:
-    metadata = _build_tree_metadata(tree)
-    node_payloads = [_node_response_from_tree(tree, node.id) for node in tree.nodes]
-    relation_payloads = [_relation_to_response(relation) for relation in tree.relations]
-    return TreeDetailResponse(
-        id=tree.id,
-        name=tree.title,
-        metadata=metadata,
-        nodes=node_payloads,
-        relations=relation_payloads,
-        owner_id=tree.owner_id,
-    )
-
-
-def _build_tree_metadata(tree: TreeDocument) -> TreeMetadata:
-    meta_dict = tree.metadata or {}
-    version = int(meta_dict.get("version", 1))
-    layout = meta_dict.get("layout")
-    owner_id = meta_dict.get("owner_id") if tree.owner_id is None else tree.owner_id
-    return TreeMetadata(
-        version=version,
-        created_at=tree.created_at,
-        updated_at=tree.updated_at,
-        layout=layout if isinstance(layout, dict) else None,
-        owner_id=owner_id if isinstance(owner_id, str) else None,
-    )
-
-
-def _node_response_from_tree(tree: TreeDocument, node_id: str) -> NodeResponse:
-    node = next(node for node in tree.nodes if node.id == node_id)
-    counts = _relation_counts(tree.relations, node_id)
-    extra = node.extra or {}
-    return NodeResponse(
-        id=node.id,
-        label=node.label,
-        type=extra.get("type", "child"),
-        position=node.position,
-        highlight_state=extra.get("highlight_state", "none"),
-        relation_counts=RelationCounts(up_count=counts[0], down_count=counts[1]),
-    )
-
-
-def _relation_counts(
-    relations: list[RelationDocument], node_id: str
-) -> tuple[int, int]:
-    up_count = sum(1 for relation in relations if relation.source_id == node_id)
-    down_count = sum(1 for relation in relations if relation.target_id == node_id)
-    return up_count, down_count
-
-
-def _relation_to_response(relation: RelationDocument) -> RelationResponse:
-    return RelationResponse(
-        id=relation.id,
-        from_id=relation.source_id,
-        to_id=relation.target_id,
-        kind="why",
-        created_at=relation.metadata.created_at,
-    )
 
 
 def _version_ref_to_item(ref: TreeVersionRef) -> VersionListItem:

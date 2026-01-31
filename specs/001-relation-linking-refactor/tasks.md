@@ -3,118 +3,118 @@
 **Input**: Design documents from `/specs/001-relation-linking-refactor/`
 **Prerequisites**: plan.md (required), spec.md (required for user stories), research.md, data-model.md, contracts/
 
-**Tests**: Tests are optional; spec did not request new tests. Consider adding focused coverage during implementation.
+**Tests**: Tests are required for behavior changes (backend pytest/FastAPI TestClient and frontend Vitest/Testing Library).
 
-**Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story. Include consent/observability/performance safeguards where relevant.
+**Organization**: Tasks are grouped by user story to enable independent implementation and testing. Include observability (correlation IDs), accessibility for inline errors, and responsiveness/data-safety safeguards.
 
 ## Format: `[ID] [P?] [Story] Description`
 
+---
+
 ## Phase 1: Setup (Shared Infrastructure)
 
-- [ ] T001 Ensure environment configuration aligns with feature (copy `.env.example` to `.env` if needed) in repo root
-- [ ] T002 Verify relation contract baseline against plan in `specs/001-relation-linking-refactor/contracts/relations.md`
+- [X] T001 Verify environment and sample tree fixtures for relation scenarios in repo root (`.env.example` → `.env` if needed)
+- [X] T002 Align relation contract and data model references with `contracts/relations.md` and `data-model.md` (document any gaps)
 
 ---
 
 ## Phase 2: Foundational (Blocking Prerequisites)
 
-- [ ] T003 Update relation schema to enforce source/target fields and cause→effect direction in `backend/app/schemas/relation.py`
-- [ ] T004 Add relation validation utilities for self/duplicate/cycle checks in `backend/app/services/relations.py`
-- [ ] T005 Wire backend relation routes to new validation flow in `backend/app/api/routes/relations.py`
-- [ ] T006 Propagate correlation/reference id support for relation errors in `backend/app/api/routes/relations.py`
-- [ ] T007 Add frontend relation request typings and client helper for create/delete in `frontend/src/services/relations.ts`
+- [X] T003 Update relation schema aliases and error payload fields (source_node_id/target_node_id, reference id) in `backend/app/schemas/api.py`
+- [X] T004 Harden relation validation utilities for self/duplicate/cycle checks in `backend/app/services/relation_service.py`
+- [X] T005 Ensure error handler emits human-readable detail with correlation/reference header/body fields in `backend/app/api/errors.py`
+- [X] T006 Align frontend relation typings and API client payload mapping with source_node_id/target_node_id in `frontend/src/api/types.ts`
+- [X] T007 Update store mapping for relation load/save, including fallback to legacy keys, in `frontend/src/stores/treeStore.ts`
 
 ---
 
 ## Phase 3: User Story 1 - Link nodes across chains (Priority: P1) 🎯 MVP
 
-**Goal**: Create directed relations between nodes across branches without parent/child terminology.
+**Goal**: Create directed relations between any two nodes without parent/child terminology; direction must remain exactly as chosen.
 
-**Independent Test**: Link Node2 to Node5 across chains; relation renders with correct direction and highlight.
+**Independent Test**: In a tree with two chains, link Node2 → Node5; move nodes around and verify the arrow direction stays unchanged and selectable.
+
+### Tests for User Story 1
+
+- [X] T008 [P] [US1] Add backend test verifying create relation returns chosen source/target and stores direction in `backend/tests/test_api_trees.py`
+- [X] T009 [P] [US1] Add frontend test ensuring relation orientation persists after node drag in `frontend/src/stores/__tests__/treeStore.test.ts` (or new canvas-focused test)
+- [X] T010 [P] [US1] Validate canvas interactions remain responsive (<0.2s highlight/selection) on ~200-node mocked graph in `frontend/src/components/canvas/__tests__/TreeCanvas.perf.test.tsx`
 
 ### Implementation for User Story 1
 
-- [ ] T008 [US1] Add UI affordance for selecting source/target without parent/child wording in `frontend/src/components/Canvas/RelationCreate.tsx`
-- [ ] T009 [P] [US1] Ensure link rendering shows direction and highlights with endpoints in `frontend/src/components/Canvas/RelationEdge.tsx`
-- [ ] T010 [US1] Persist new relation via API call and update local store in `frontend/src/store/relations.ts`
-- [ ] T011 [US1] Confirm backend creates relation per contract and returns ids in `backend/app/api/routes/relations.py`
+- [X] T011 [US1] Keep relation rendering and creation source→target stable regardless of canvas position in `frontend/src/components/canvas/TreeCanvas.tsx`
+- [X] T012 [US1] Ensure neutral upstream/downstream labels (no parent/child) on node handles and controls in `frontend/src/components/canvas/BrainNode.tsx`
+- [X] T013 [P] [US1] Confirm relation creation uses explicit source/target ids and updates store consistently in `frontend/src/stores/treeStore.ts`
 
-**Checkpoint**: User Story 1 independently delivers cross-branch linking with correct direction.
+**Checkpoint**: User Story 1 independently delivers cross-branch linking with stable direction.
 
 ---
 
 ## Phase 4: User Story 2 - Preserve new relations (Priority: P2)
 
-**Goal**: Cross-branch relations survive save/reload and export/import.
+**Goal**: Cross-branch relations survive save/reload and export/import with direction intact.
 
-**Independent Test**: Create relation, save/reload, export/import, and verify direction persists.
+**Independent Test**: Create a relation, save/reload, export/import; verify the relation and its source/target orientation remain identical.
+
+### Tests for User Story 2
+
+- [X] T014 [P] [US2] Add backend import/export test covering relation ids and direction in `backend/tests/api/test_tree_import_export.py`
+- [X] T015 [P] [US2] Add frontend store test ensuring loaded relations keep source/target ids in `frontend/src/stores/__tests__/treeStore.test.ts`
 
 ### Implementation for User Story 2
 
-- [ ] T012 [US2] Include relations in tree save/load pipelines in `backend/app/services/trees.py`
-- [ ] T013 [US2] Serialize/deserialize relations in export/import logic in `backend/app/services/export.py`
-- [ ] T014 [US2] Update frontend import/export handling to include relations in `frontend/src/services/io/exportImport.ts`
-- [ ] T015 [P] [US2] Ensure UI refresh applies restored relations and highlights in `frontend/src/store/relations.ts`
+- [X] T016 [US2] Preserve relations in save/load and version persistence pipelines in `backend/app/services/relation_service.py` and related tree services
+- [X] T017 [US2] Serialize/deserialize relations with source_node_id/target_node_id in export/import flow in `backend/app/services` (tree export/import modules)
+- [X] T018 [US2] Refresh client state after import/export to render restored relations in `frontend/src/stores/treeStore.ts`
 
-**Checkpoint**: User Story 2 independently proves persistence across save/reload/export/import.
+**Checkpoint**: User Story 2 proves relations persist through save/reload/export/import.
 
 ---
 
 ## Phase 5: User Story 3 - Protect graph integrity (Priority: P3)
 
-**Goal**: Block invalid links (self, duplicate, cycle) with actionable, accessible inline errors.
+**Goal**: Block invalid links (self, duplicate, cycle) with actionable, accessible inline errors and correlation references.
 
-**Independent Test**: Attempt invalid links; inline message focuses/announces, includes correlation ref, and preserves responsiveness on ~200-node canvas.
+**Independent Test**: Attempt invalid links on a ~200-node tree; errors appear inline, focus and announce via live region, include correlation/reference id, and the canvas stays responsive.
+
+### Tests for User Story 3
+
+- [X] T019 [P] [US3] Add backend tests covering self/duplicate/cycle rejection and correlation reference exposure in `backend/tests/test_api_trees.py`
+- [X] T020 [P] [US3] Add frontend test for inline relation error focus + live-region announcement in `frontend/src/components/canvas/__tests__/TreeCanvas.a11y.test.tsx` (or equivalent)
+- [X] T021 [P] [US3] Add backend test ensuring correlation/reference id is copyable in error payload and header in `backend/tests/test_api_trees.py`
+- [X] T022 [P] [US3] Add frontend test asserting inline error banner shows correlation reference with copy affordance and live-region announcement in `frontend/src/components/canvas/__tests__/TreeCanvas.a11y.test.tsx`
 
 ### Implementation for User Story 3
 
-- [ ] T016 [US3] Implement cycle detection hook for relation creation in `backend/app/services/relations.py`
-- [ ] T017 [US3] Return structured human-readable error with correlation reference in `backend/app/api/routes/relations.py`
-- [ ] T018 [US3] Handle relation errors inline with focus + live region announcement in `frontend/src/components/Canvas/RelationCreate.tsx`
-- [ ] T019 [P] [US3] Maintain canvas responsiveness and highlight behavior on large graphs in `frontend/src/components/Canvas/RelationEdge.tsx`
+- [X] T023 [US3] Enforce duplicate/self/cycle detection with conflict responses in `backend/app/services/relation_service.py`
+- [X] T024 [US3] Return human-readable errors with correlation/reference id in body and headers for relation failures in `backend/app/api/errors.py`
+- [X] T025 [US3] Surface inline, accessible error banner with focus management and retry affordance in `frontend/src/components/canvas/TreeCanvas.tsx`
+- [X] T026 [P] [US3] Keep canvas interactions responsive and highlights intact during error states in `frontend/src/components/canvas/TreeCanvas.tsx`
 
-**Checkpoint**: User Story 3 independently validates integrity safeguards and accessible feedback.
+**Checkpoint**: User Story 3 validates integrity safeguards and accessible feedback.
 
 ---
 
 ## Phase N: Polish & Cross-Cutting Concerns
 
-- [ ] T020 Document linking/persistence/validation flow in `specs/001-relation-linking-refactor/quickstart.md`
-- [ ] T021 Update release notes or changelog entry for relations in `docs/` (add appropriate file)
-- [ ] T022 Run full backend/frontend test suites and fix regressions in `backend/` and `frontend/`
+- [ ] T027 Document relation direction, validation, and import/export flow in `specs/001-relation-linking-refactor/quickstart.md`
+- [ ] T028 Update release notes/changelog entry for relation direction + error references in `docs/` (add or amend appropriate file)
+- [ ] T029 Run `make test-backend` and fix regressions in `backend/`
+- [ ] T030 Run `make test-frontend` and fix regressions in `frontend/`
+- [ ] T031 Run perf smoke (backend relation latency + frontend large-graph interaction) and document results in `specs/001-relation-linking-refactor/quickstart.md`
 
 ---
 
 ## Dependencies & Execution Order
 
 - Foundational (Phase 2) blocks all user stories.
-- User Story 1 (P1) is MVP and should complete before P2/P3 validation.
-- User Story 2 depends on relation creation from US1.
-- User Story 3 depends on validation hooks from Foundational and creation flow from US1.
+- User Story 1 (P1) is MVP and must complete before P2/P3 validation.
+- User Story 2 depends on creation flow and schema alignment from Phase 2/US1.
+- User Story 3 depends on validation utilities and error contract from Phase 2.
 
 ### Parallel Opportunities
 
-- T009 and T010 can run in parallel after T008 setup.
-- T012 and T013 can run in parallel once backend relation schema/validation is ready.
-- T018 and T019 can run in parallel after API error contract (T017) is defined.
-
----
-
-## Implementation Strategy
-
-### MVP First (User Story 1 Only)
-1. Complete Foundational (Phase 2).
-2. Deliver User Story 1 linking flow.
-3. Validate linking end-to-end.
-
-### Incremental Delivery
-1. Finish Foundational.
-2. Add User Story 1 → validate.
-3. Add User Story 2 → validate persistence/export/import.
-4. Add User Story 3 → validate integrity and accessibility.
-
-### Parallel Team Strategy
-1. After Foundational, split:
-   - Developer A: US1 front-end flow (T008–T010).
-   - Developer B: US1/US3 backend validation and error handling (T011, T016–T017).
-   - Developer C: US2 persistence/export/import (T012–T015).
+- T003–T007 can run in parallel where files do not overlap (frontend vs backend).
+- T008–T010 can run in parallel once foundational schema alignment is done.
+- T014–T015 can run in parallel after US1 completes.
+- T019–T022 can run in parallel once error contract is defined (T024).

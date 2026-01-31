@@ -43,6 +43,31 @@ type JsonRequestOptions = Omit<RequestInit, "body"> & {
   signal?: AbortSignal;
 };
 
+function normalizeRelationCreate(payload: RelationCreateRequest): RelationCreateRequest {
+  const sourceNodeId =
+    payload.source_node_id ?? payload.source_id ?? payload.from_id ?? null;
+  const targetNodeId =
+    payload.target_node_id ?? payload.target_id ?? payload.to_id ?? null;
+  if (!sourceNodeId || !targetNodeId) {
+    throw new Error("source_node_id and target_node_id are required for relations");
+  }
+  return {
+    source_node_id: sourceNodeId,
+    target_node_id: targetNodeId,
+    kind: payload.kind ?? "why"
+  };
+}
+
+function normalizeRelationUpdate(payload: RelationUpdateRequest): RelationUpdateRequest {
+  const sourceNodeId = payload.source_node_id ?? payload.source_id ?? payload.from_id;
+  const targetNodeId = payload.target_node_id ?? payload.target_id ?? payload.to_id;
+  return {
+    ...(sourceNodeId ? { source_node_id: sourceNodeId } : {}),
+    ...(targetNodeId ? { target_node_id: targetNodeId } : {}),
+    ...(payload.kind ? { kind: payload.kind } : {})
+  };
+}
+
 export function setApiKey(apiKey: string | null) {
   cachedApiKey = apiKey;
   if (hasStorage) {
@@ -177,17 +202,15 @@ export const apiClient = {
   },
 
   createRelation(treeId: string, payload: RelationCreateRequest) {
-    const body: RelationCreateRequest = {
-      kind: "why",
-      ...payload
-    };
+    const body = normalizeRelationCreate(payload);
     return request<RelationResponse>(`/trees/${treeId}/relations`, { method: "POST", body });
   },
 
   updateRelation(treeId: string, relationId: string, payload: RelationUpdateRequest) {
+    const body = normalizeRelationUpdate(payload);
     return request<RelationResponse>(`/trees/${treeId}/relations/${relationId}`, {
       method: "PATCH",
-      body: payload
+      body
     });
   },
 
