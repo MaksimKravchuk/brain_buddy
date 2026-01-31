@@ -32,8 +32,7 @@ from app.schemas import (
     VersionCreateRequest,
     VersionListItem,
 )
-from app.schemas.api import RelationCounts, TreeMetadata
-from app.schemas.domain import RelationDocument, TreeDocument, TreeVersionRef
+from app.schemas.domain import TreeVersionRef
 
 router = APIRouter(tags=["trees"])
 
@@ -234,9 +233,10 @@ def restore_version(
     tree_id: str,
     version_id: str,
     version_service=Depends(get_version_service),
+    tree_service=Depends(get_tree_service),
 ) -> TreeDetailResponse:
     tree = version_service.restore_version(tree_id, version_id)
-    return _build_tree_response(tree)
+    return tree_service.to_response(tree)
 
 
 @router.delete(
