@@ -43,10 +43,14 @@ export default function App(): JSX.Element {
   }, [selectedTreeId, trees]);
 
   useEffect(() => {
-    if (treeQuery.data) {
-      setTree(treeQuery.data);
+    if (!treeQuery.data) {
+      return;
     }
-  }, [treeQuery.data, setTree]);
+    if (treeQuery.data.id === activeTreeId) {
+      return;
+    }
+    setTree(treeQuery.data);
+  }, [activeTreeId, treeQuery.data, setTree]);
 
   useEffect(() => {
     if (!selectedTreeId) {
@@ -95,7 +99,7 @@ export default function App(): JSX.Element {
     setTree(tree);
   };
 
-  const isTreeLoading = treeQuery.isLoading || treeQuery.isFetching;
+  const isTreeLoading = treeQuery.isLoading;
 
   const handleZoomIn = () => canvasRef.current?.zoomIn();
   const handleZoomOut = () => canvasRef.current?.zoomOut();
@@ -160,7 +164,7 @@ export default function App(): JSX.Element {
 
         <main className="relative flex flex-1 overflow-hidden">
           <div className="absolute inset-0">
-            {treeError ? (
+            {treeError && !activeTreeId ? (
               <ErrorCanvasState
                 message={getErrorMessage(treeError)}
                 correlationId={treeError instanceof ApiError ? treeError.correlationId ?? undefined : undefined}
