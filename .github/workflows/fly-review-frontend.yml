@@ -60,7 +60,8 @@ jobs:
           flyctl deploy "${deploy_args[@]}"
 
       - name: Write review URL
-        run: echo "Review app: https://${APP_NAME}.fly.dev" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          echo "Review app: https://${APP_NAME}.fly.dev" >> "$GITHUB_STEP_SUMMARY"
 
   destroy:
     if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
