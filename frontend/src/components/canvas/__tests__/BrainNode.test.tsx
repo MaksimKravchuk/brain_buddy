@@ -1,9 +1,10 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ReactFlowProvider, Position } from "reactflow";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BrainNode, type BrainNodeData } from "../BrainNode";
+import nodeColorConfig from "../../../config/nodeColors.json";
 import { useTreeStore } from "../../../stores/treeStore";
 import { useUiStore } from "../../../stores/uiStore";
 
@@ -101,5 +102,36 @@ describe("BrainNode inline editing", () => {
 
     expect(mutateSpy).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Original" })).toBeInTheDocument();
+  });
+
+  it("applies configured colors for effect and root cause nodes", async () => {
+    render(
+      <ReactFlowProvider>
+        <RenderedBrainNode />
+      </ReactFlowProvider>
+    );
+
+    const node = screen.getByTestId("brain-node");
+    expect(node).toHaveStyle({
+      backgroundColor: nodeColorConfig.noIncoming.background,
+      color: nodeColorConfig.noIncoming.text
+    });
+
+    act(() => {
+      useTreeStore.getState().upsertRelation({
+        id: "rel-1",
+        fromId: "upstream-node",
+        toId: baseNode.id,
+        kind: "why",
+        createdAt: "2024-04-01"
+      });
+    });
+
+    await waitFor(() => {
+      expect(node).toHaveStyle({
+        backgroundColor: nodeColorConfig.noOutgoing.background,
+        color: nodeColorConfig.noOutgoing.text
+      });
+    });
   });
 });
