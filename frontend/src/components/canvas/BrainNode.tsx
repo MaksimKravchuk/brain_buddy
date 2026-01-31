@@ -45,8 +45,8 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
 
   const linkTargetClass = (position: "top" | "bottom") =>
     twMerge(
-      "pointer-events-auto absolute left-1/2 z-0 h-4 w-24 -translate-x-1/2 rounded-full border border-slate-200 bg-surface-sunken/60 transition-opacity duration-150",
-      position === "top" ? "-top-4" : "-bottom-4",
+      "pointer-events-auto absolute left-1/2 z-0 h-5 w-32 -translate-x-1/2 rounded-full border border-slate-200 bg-surface-sunken/60 transition-opacity duration-150",
+      position === "top" ? "-top-5" : "-bottom-5",
       showControls ? "opacity-40" : "opacity-0"
     );
 
