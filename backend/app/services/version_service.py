@@ -140,10 +140,11 @@ class VersionService:
                 "tree_updated_at": to_isoformat(source_tree.updated_at),
             }
 
+        api_tree = self.tree_service.to_response(source_tree)
         payload = {
             "exported_at": to_isoformat(exported_at),
             "source": source,
-            "tree": source_tree.model_dump(mode="json"),
+            "tree": api_tree.model_dump(mode="json", by_alias=True),
         }
         filename = self._build_export_filename(tree_id, exported_at, version_id)
         content = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.exceptions import ConflictError, NotFoundError
+from app.exceptions import NotFoundError, ValidationFailure
 from app.schemas import (
     NodeCreateRequest,
     Position,
@@ -35,7 +35,10 @@ def test_create_and_update_relation(
     tree, node_a, node_b, node_c = prepare_tree_with_nodes(tree_service, node_service)
 
     relation, _ = relation_service.create_relation(
-        tree.id, RelationCreateRequest(from_id=node_a.id, to_id=node_b.id, kind="why")
+        tree.id,
+        RelationCreateRequest(
+            source_node_id=node_a.id, target_node_id=node_b.id, kind="why"
+        ),
     )
     assert relation.source_id == node_a.id
     assert relation.target_id == node_b.id
@@ -43,7 +46,7 @@ def test_create_and_update_relation(
     updated_relation, _ = relation_service.update_relation(
         tree.id,
         relation.id,
-        RelationUpdateRequest(to_id=node_c.id, kind="why"),
+        RelationUpdateRequest(target_node_id=node_c.id, kind="why"),
     )
     assert updated_relation.target_id == node_c.id
     assert updated_relation.question_label == "why"
@@ -52,21 +55,33 @@ def test_create_and_update_relation(
 def test_create_relation_conflict(tree_service, node_service, relation_service) -> None:
     tree, node_a, node_b, _ = prepare_tree_with_nodes(tree_service, node_service)
     relation_service.create_relation(
-        tree.id, RelationCreateRequest(from_id=node_a.id, to_id=node_b.id, kind="why")
+        tree.id,
+        RelationCreateRequest(
+            source_node_id=node_a.id, target_node_id=node_b.id, kind="why"
+        ),
     )
 
-    with pytest.raises(ConflictError):
+    with pytest.raises(ValidationFailure) as exc:
         relation_service.create_relation(
             tree.id,
-            RelationCreateRequest(from_id=node_a.id, to_id=node_b.id, kind="why"),
+            RelationCreateRequest(
+                source_node_id=node_a.id, target_node_id=node_b.id, kind="why"
+            ),
         )
+    assert exc.value.detail == {
+        "reason": "duplicate_relation",
+        "source_node_id": node_a.id,
+        "target_node_id": node_b.id,
+    }
 
 
 def test_delete_relation(tree_service, node_service, relation_service) -> None:
     tree, node_a, node_b, _ = prepare_tree_with_nodes(tree_service, node_service)
     relation, tree_with_relation = relation_service.create_relation(
         tree.id,
-        RelationCreateRequest(from_id=node_a.id, to_id=node_b.id, kind="why"),
+        RelationCreateRequest(
+            source_node_id=node_a.id, target_node_id=node_b.id, kind="why"
+        ),
     )
     assert any(rel.id == relation.id for rel in tree_with_relation.relations)
 

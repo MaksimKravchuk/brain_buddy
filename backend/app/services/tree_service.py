@@ -14,6 +14,7 @@ from app.schemas.api import (
     AiFeedbackResponse,
     NodeCreateRequest,
     NodeResponse,
+    RelationCounts,
     RelationCreateRequest,
     RelationResponse,
     TreeCreateRequest,
@@ -77,6 +78,21 @@ class TreeService:
             return cached.model_copy(deep=True)
         tree = self.tree_repo.load(tree_id)
         return self._store_and_clone(tree)
+
+    def to_response(self, tree: TreeDocument) -> TreeDetailResponse:
+        metadata = self._build_tree_metadata(tree)
+        node_payloads = [self.node_to_response(tree, node.id) for node in tree.nodes]
+        relation_payloads = [
+            self.relation_to_response(relation) for relation in tree.relations
+        ]
+        return TreeDetailResponse(
+            id=tree.id,
+            name=tree.title,
+            metadata=metadata,
+            nodes=node_payloads,
+            relations=relation_payloads,
+            owner_id=tree.owner_id,
+        )
 
     def update_tree(self, tree_id: str, payload: TreeUpdateRequest) -> TreeDocument:
         _ = self.tree_repo.load(tree_id)
@@ -265,8 +281,8 @@ class TreeService:
         created_at = getattr(relation, "created_at", None) or metadata.updated_at
         return RelationDocument(
             id=relation_id,
-            source_id=relation.from_id,
-            target_id=relation.to_id,
+            source_id=relation.source_node_id,
+            target_id=relation.target_node_id,
             question_label=getattr(relation, "kind", "why"),
             notes=None,
             metadata=RelationMetadata(
@@ -278,10 +294,22 @@ class TreeService:
         self, relations: Iterable[RelationDocument], node_ids: set[str]
     ) -> None:
         edges: list[tuple[str, str]] = []
+        seen_pairs: set[tuple[str, str]] = set()
         for relation in relations:
             if relation.source_id not in node_ids or relation.target_id not in node_ids:
                 raise ValidationFailure("Relation references unknown node id")
-            edges.append((relation.source_id, relation.target_id))
+            key = (relation.source_id, relation.target_id)
+            if key in seen_pairs:
+                raise ValidationFailure(
+                    "A link already exists between these nodes.",
+                    detail={
+                        "reason": "duplicate_relation",
+                        "source_node_id": relation.source_id,
+                        "target_node_id": relation.target_id,
+                    },
+                )
+            seen_pairs.add(key)
+            edges.append(key)
         ensure_acyclic(edges)
 
     def _resolve_metadata(
@@ -311,3 +339,47 @@ class TreeService:
         merged = {**(existing or {})}
         merged.update(updates)
         return merged
+
+    def _build_tree_metadata(self, tree: TreeDocument) -> TreeMetadata:
+        meta_dict = tree.metadata or {}
+        version = int(meta_dict.get("version", 1))
+        layout = meta_dict.get("layout")
+        owner_id = meta_dict.get("owner_id") if tree.owner_id is None else tree.owner_id
+        return TreeMetadata(
+            version=version,
+            created_at=tree.created_at,
+            updated_at=tree.updated_at,
+            layout=layout if isinstance(layout, dict) else None,
+            owner_id=owner_id if isinstance(owner_id, str) else None,
+        )
+
+    @staticmethod
+    def _relation_counts(
+        relations: list[RelationDocument], node_id: str
+    ) -> tuple[int, int]:
+        up_count = sum(1 for relation in relations if relation.source_id == node_id)
+        down_count = sum(1 for relation in relations if relation.target_id == node_id)
+        return up_count, down_count
+
+    def node_to_response(self, tree: TreeDocument, node_id: str) -> NodeResponse:
+        node = next(node for node in tree.nodes if node.id == node_id)
+        counts = self._relation_counts(tree.relations, node_id)
+        extra = node.extra or {}
+        return NodeResponse(
+            id=node.id,
+            label=node.label,
+            type=extra.get("type", "child"),
+            position=node.position,
+            highlight_state=extra.get("highlight_state", "none"),
+            relation_counts=RelationCounts(up_count=counts[0], down_count=counts[1]),
+        )
+
+    @staticmethod
+    def relation_to_response(relation: RelationDocument) -> RelationResponse:
+        return RelationResponse(
+            id=relation.id,
+            source_node_id=relation.source_id,
+            target_node_id=relation.target_id,
+            kind="why",
+            created_at=relation.metadata.created_at,
+        )

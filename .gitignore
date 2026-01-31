@@ -6,6 +6,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+venv/
 
 # Node
 node_modules/
@@ -16,6 +17,7 @@ node_modules/
 dist/
 build/
 coverage/
+*.log
 
 # Editors
 .idea/

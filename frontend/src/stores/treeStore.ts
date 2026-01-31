@@ -124,10 +124,14 @@ export function mapNodeResponse(node: NodeResponse): GraphNode {
 }
 
 export function mapRelationResponse(relation: RelationResponse): GraphRelation {
+  const fromId =
+    relation.source_node_id ?? relation.source_id ?? relation.from_id ?? "";
+  const toId =
+    relation.target_node_id ?? relation.target_id ?? relation.to_id ?? "";
   return {
     id: relation.id,
-    fromId: relation.from_id,
-    toId: relation.to_id,
+    fromId,
+    toId,
     kind: relation.kind,
     createdAt: relation.created_at
   };
@@ -156,8 +160,8 @@ function toNodeResponse(node: GraphNode): NodeResponse {
 function toRelationResponse(relation: GraphRelation): RelationResponse {
   return {
     id: relation.id,
-    from_id: relation.fromId,
-    to_id: relation.toId,
+    source_node_id: relation.fromId,
+    target_node_id: relation.toId,
     kind: relation.kind,
     created_at: relation.createdAt
   };

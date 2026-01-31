@@ -73,8 +73,8 @@ const sampleTreeWithRelations: TreeDetailResponse = {
   relations: [
     {
       id: "relation-1",
-      from_id: "node-1",
-      to_id: "node-2",
+      source_node_id: "node-1",
+      target_node_id: "node-2",
       kind: "why",
       created_at: "2024-04-01T10:00:00Z"
     }
@@ -118,9 +118,27 @@ const causeCandidateTree: TreeDetailResponse = {
     }
   ],
   relations: [
-    { id: "rel-1", from_id: "root-cause", to_id: "branch-1", kind: "why", created_at: "2024-04-01" },
-    { id: "rel-2", from_id: "root-cause", to_id: "branch-2", kind: "why", created_at: "2024-04-01" },
-    { id: "rel-3", from_id: "root-cause", to_id: "branch-3", kind: "why", created_at: "2024-04-01" }
+    {
+      id: "rel-1",
+      source_node_id: "root-cause",
+      target_node_id: "branch-1",
+      kind: "why",
+      created_at: "2024-04-01"
+    },
+    {
+      id: "rel-2",
+      source_node_id: "root-cause",
+      target_node_id: "branch-2",
+      kind: "why",
+      created_at: "2024-04-01"
+    },
+    {
+      id: "rel-3",
+      source_node_id: "root-cause",
+      target_node_id: "branch-3",
+      kind: "why",
+      created_at: "2024-04-01"
+    }
   ]
 };
 
@@ -161,9 +179,21 @@ const effectSpanningTree: TreeDetailResponse = {
     }
   ],
   relations: [
-    { id: "rel-a", from_id: "root", to_id: "mid", kind: "why", created_at: "2024-04-01" },
-    { id: "rel-b", from_id: "mid", to_id: "effect-1", kind: "why", created_at: "2024-04-01" },
-    { id: "rel-c", from_id: "mid", to_id: "effect-2", kind: "why", created_at: "2024-04-01" }
+    { id: "rel-a", source_node_id: "root", target_node_id: "mid", kind: "why", created_at: "2024-04-01" },
+    {
+      id: "rel-b",
+      source_node_id: "mid",
+      target_node_id: "effect-1",
+      kind: "why",
+      created_at: "2024-04-01"
+    },
+    {
+      id: "rel-c",
+      source_node_id: "mid",
+      target_node_id: "effect-2",
+      kind: "why",
+      created_at: "2024-04-01"
+    }
   ]
 };
 
@@ -246,6 +276,27 @@ describe("treeStore", () => {
 
     expect(store.nodes.find((n) => n.id === "node-2")?.relationCounts.up).toBe(1);
     expect(store.nodes.find((n) => n.id === "node-1")?.relationCounts.down).toBe(1);
+  });
+
+  it("preserves relation direction after node drag and persistence", async () => {
+    useTreeStore.getState().setTree(sampleTreeWithRelations);
+    const store = useTreeStore.getState();
+
+    const movedNode = { ...store.nodes[0], position: { x: 42, y: -7 } };
+    store.pushSnapshot();
+    store.upsertNode(movedNode);
+
+    await store.flushPendingPersistence();
+
+    const state = useTreeStore.getState();
+    expect(state.relations[0].fromId).toBe("node-1");
+    expect(state.relations[0].toId).toBe("node-2");
+
+    const saved = localStorage.getItem(`${TREE_DRAFT_PREFIX}${sampleTreeWithRelations.id}`);
+    expect(saved).toBeTruthy();
+    const parsed = saved ? JSON.parse(saved) : null;
+    expect(parsed?.relations?.[0]?.source_node_id).toBe("node-1");
+    expect(parsed?.relations?.[0]?.target_node_id).toBe("node-2");
   });
 
   it("tracks selection and clears it when the selected entity is removed", () => {

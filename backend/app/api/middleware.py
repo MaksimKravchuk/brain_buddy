@@ -48,7 +48,9 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         payload = ErrorResponse(
             message="Missing or invalid API key.", detail={"header": self.header_name}
         )
-        response = JSONResponse(status_code=401, content=payload.model_dump())
+        response = JSONResponse(
+            status_code=401, content=payload.model_dump(by_alias=True)
+        )
         response.headers["WWW-Authenticate"] = "API-Key"
         return response
 
