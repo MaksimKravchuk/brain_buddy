@@ -512,6 +512,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       type?: GraphNode["type"];
       position?: { x: number; y: number };
       relation?: { fromId: string | "new"; toId: string | "new" };
+      relations?: { fromId: string | "new"; toId: string | "new" }[];
     }) => {
       const type = input?.type ?? "child";
       const label = input?.label?.trim() || (type === "parent" ? "Cause" : "Effect");
@@ -544,11 +545,13 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
             const createdNode = mapNodeResponse(nodeResponse);
             upsertNode(createdNode);
             select({ type: "node", id: nodeResponse.id });
-            if (input?.relation) {
-              const sourceId = input.relation.fromId === "new" ? createdNode.id : input.relation.fromId;
-              const targetId = input.relation.toId === "new" ? createdNode.id : input.relation.toId;
+
+            const relationsToCreate = input?.relations ?? (input?.relation ? [input.relation] : []);
+            relationsToCreate.forEach((relation) => {
+              const sourceId = relation.fromId === "new" ? createdNode.id : relation.fromId;
+              const targetId = relation.toId === "new" ? createdNode.id : relation.toId;
               handleConnect({ source: sourceId, target: targetId } as Connection);
-            }
+            });
           },
           onError: (error) => {
             rollbackOptimisticChange(token);
@@ -610,9 +613,13 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         return;
       }
 
-      handleCreateNode({ type: origin.type, position });
+      const parentRelations = relations
+        .filter((relation) => relation.toId === origin.id)
+        .map((relation) => ({ fromId: relation.fromId, toId: "new" as const }));
+
+      handleCreateNode({ type: origin.type, position, relations: parentRelations });
     },
-    [handleCreateNode, nodes]
+    [handleCreateNode, nodes, relations]
   );
 
   const handleCreateChildFromSelection = useCallback(() => {
