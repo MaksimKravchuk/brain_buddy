@@ -108,6 +108,9 @@ export function useDeleteTree() {
   return useMutation({
     mutationFn: (treeId: string) => apiClient.deleteTree(treeId),
     onSuccess: (_, treeId) => {
+      queryClient.setQueryData<TreeListItem[] | undefined>(treeKeys.list(), (trees) =>
+        trees ? trees.filter((tree) => tree.id !== treeId) : trees
+      );
       queryClient.invalidateQueries({ queryKey: treeKeys.list() });
       queryClient.removeQueries({ queryKey: treeKeys.detail(treeId) });
     }
