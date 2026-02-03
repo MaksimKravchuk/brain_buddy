@@ -614,8 +614,8 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       }
 
       const parentRelations = relations
-        .filter((relation) => relation.toId === origin.id)
-        .map((relation) => ({ fromId: relation.fromId, toId: "new" as const }));
+        .filter((relation) => relation.fromId === origin.id)
+        .map((relation) => ({ fromId: "new" as const, toId: relation.toId }));
 
       handleCreateNode({ type: origin.type, position, relations: parentRelations });
     },
