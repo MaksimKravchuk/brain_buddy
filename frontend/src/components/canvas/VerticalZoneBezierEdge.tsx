@@ -9,7 +9,7 @@ const VERTICAL_ZONE_RATIO = 0.2;
 const VERTICAL_ZONE_PX = NODE_HEIGHT_PX * VERTICAL_ZONE_RATIO;
 
 export function VerticalZoneBezierEdge(props: EdgeProps): JSX.Element {
-  const { sourceX, sourceY, targetX, targetY, markerEnd, style, selected } = props;
+  const { sourceX, sourceY, targetX, targetY, markerEnd, style } = props;
 
   const direction = targetY >= sourceY ? 1 : -1;
 
@@ -17,5 +17,5 @@ export function VerticalZoneBezierEdge(props: EdgeProps): JSX.Element {
     targetY - direction * VERTICAL_ZONE_PX
   } ${targetX} ${targetY}`;
 
-  return <BaseEdge path={path} markerEnd={markerEnd} style={style} selected={selected} />;
+  return <BaseEdge path={path} markerEnd={markerEnd} style={style} />;
 }
