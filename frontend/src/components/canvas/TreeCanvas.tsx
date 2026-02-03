@@ -32,6 +32,7 @@ import type { RelationResponse } from "../../api/types";
 import { getErrorContext, getErrorMessage } from "../../utils/error";
 import { useGraphProfiler } from "../../hooks/useGraphProfiler";
 import { BrainNode } from "./BrainNode";
+import { VerticalZoneBezierEdge } from "./VerticalZoneBezierEdge";
 
 type NodeType = Node<{ node: GraphNode }>;
 type EdgeType = Edge<{ relation: GraphRelation }>;
@@ -40,7 +41,11 @@ const nodeTypes = {
   brainNode: BrainNode
 };
 
-const edgeType = "simplebezier";
+const edgeType = "vertical-zone";
+
+const edgeTypes = {
+  [edgeType]: VerticalZoneBezierEdge
+};
 
 const defaultEdgeOptions: Partial<Edge> = {
   type: edgeType,
@@ -785,6 +790,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         edges={flowEdges}
         nodeTypes={nodeTypes}
         defaultEdgeOptions={defaultEdgeOptions}
+        edgeTypes={edgeTypes}
         fitView
         onInit={setReactFlowInstance}
         minZoom={0.1}
