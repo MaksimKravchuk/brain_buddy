@@ -7,6 +7,7 @@ import type { TreeDetailResponse } from "./api/types";
 import { useTree, useTrees, useTreeDownload, useTreeImportWithToasts } from "./api/hooks";
 import { TreeCanvas, type TreeCanvasHandle } from "./components/canvas/TreeCanvas";
 import { CreateTreeModal } from "./components/modals/CreateTreeModal";
+import { DeleteTreeModal } from "./components/modals/DeleteTreeModal";
 import { ToastStack } from "./components/ui/ToastStack";
 import { useTreeStore } from "./stores/treeStore";
 import { useUiStore } from "./stores/uiStore";
@@ -50,7 +51,7 @@ export default function App(): JSX.Element {
       return;
     }
     setTree(treeQuery.data);
-  }, [activeTreeId, treeQuery.data, setTree]);
+  }, [treeQuery.data, activeTreeId, setTree]);
 
   useEffect(() => {
     if (!selectedTreeId) {
@@ -99,7 +100,21 @@ export default function App(): JSX.Element {
     setTree(tree);
   };
 
-  const isTreeLoading = treeQuery.isLoading;
+  const handleTreeDeleted = async (deletedId: string) => {
+    // refresh from backend to be sure the source of truth reflects the deletion
+    const refreshed = await refetchTrees();
+    const remaining = refreshed.data ?? trees?.filter((tree) => tree.id !== deletedId) ?? [];
+
+    if (selectedTreeId === deletedId) {
+      const nextId = remaining[0]?.id ?? null;
+      setSelectedTreeId(nextId);
+      if (!nextId) {
+        resetTree();
+      }
+    }
+  };
+
+  const isTreeLoading = treeQuery.isLoading || treeQuery.isFetching;
 
   const handleZoomIn = () => canvasRef.current?.zoomIn();
   const handleZoomOut = () => canvasRef.current?.zoomOut();
@@ -128,6 +143,14 @@ export default function App(): JSX.Element {
                   className="rounded-md border border-slate-200 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-brand-primary hover:text-brand-primary"
                 >
                   New tree
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openModal("deleteTree")}
+                  disabled={!activeTreeId}
+                  className="rounded-md border border-rose-200 bg-white/80 px-3 py-2 text-xs font-semibold text-rose-700 shadow-sm transition hover:border-rose-300 hover:text-rose-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Delete
                 </button>
                 <button
                   type="button"
@@ -164,7 +187,7 @@ export default function App(): JSX.Element {
 
         <main className="relative flex flex-1 overflow-hidden">
           <div className="absolute inset-0">
-            {treeError && !activeTreeId ? (
+            {treeError ? (
               <ErrorCanvasState
                 message={getErrorMessage(treeError)}
                 correlationId={treeError instanceof ApiError ? treeError.correlationId ?? undefined : undefined}
@@ -184,6 +207,7 @@ export default function App(): JSX.Element {
 
       <ToastStack />
       <CreateTreeModal onCreated={handleTreeCreated} />
+      <DeleteTreeModal trees={trees} onDeleted={handleTreeDeleted} />
     </ReactFlowProvider>
   );
 }
