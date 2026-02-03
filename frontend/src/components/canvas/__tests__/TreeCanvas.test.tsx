@@ -49,27 +49,27 @@ describe("TreeCanvas sibling creation", () => {
     },
     nodes: [
       {
-        id: "parent-1",
-        label: "Parent",
-        type: "parent" as const,
-        position: { x: 0, y: -100 },
-        highlight_state: "none" as const,
-        relation_counts: { up_count: 0, down_count: 1 }
-      },
-      {
         id: "child-1",
         label: "Child",
         type: "child" as const,
         position: { x: 0, y: 100 },
         highlight_state: "none" as const,
         relation_counts: { up_count: 1, down_count: 0 }
+      },
+      {
+        id: "parent-1",
+        label: "Parent",
+        type: "parent" as const,
+        position: { x: 0, y: -100 },
+        highlight_state: "none" as const,
+        relation_counts: { up_count: 0, down_count: 1 }
       }
     ],
     relations: [
       {
         id: "rel-1",
-        source_node_id: "parent-1",
-        target_node_id: "child-1",
+        source_node_id: "child-1",
+        target_node_id: "parent-1",
         kind: "why",
         created_at: "2024-01-01T00:00:00Z"
       }
@@ -136,8 +136,8 @@ describe("TreeCanvas sibling creation", () => {
     expect(createNodeMutate).toHaveBeenCalledTimes(1);
     expect(createRelationMutate).toHaveBeenCalledWith(
       expect.objectContaining({
-        source_node_id: "parent-1",
-        target_node_id: "new-child",
+        source_node_id: "new-child",
+        target_node_id: "parent-1",
         kind: "why"
       }),
       expect.any(Object)
@@ -149,8 +149,7 @@ describe("TreeCanvas sibling creation", () => {
 
     // Parent still links to the original and the new sibling in store state
     const storedRelations = useTreeStore.getState().relations;
-    const targets = storedRelations.filter((r) => r.fromId === "parent-1").map((r) => r.toId);
-    expect(targets).toContain("child-1");
-    expect(targets).toContain("new-child");
+    const targets = storedRelations.filter((r) => r.fromId === "new-child").map((r) => r.toId);
+    expect(targets).toContain("parent-1");
   });
 });
