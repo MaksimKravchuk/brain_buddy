@@ -44,10 +44,14 @@ export default function App(): JSX.Element {
   }, [selectedTreeId, trees]);
 
   useEffect(() => {
-    if (treeQuery.data) {
-      setTree(treeQuery.data);
+    if (!treeQuery.data) {
+      return;
     }
-  }, [treeQuery.data, setTree]);
+    if (treeQuery.data.id === activeTreeId) {
+      return;
+    }
+    setTree(treeQuery.data);
+  }, [treeQuery.data, activeTreeId, setTree]);
 
   useEffect(() => {
     if (!selectedTreeId) {
