@@ -115,7 +115,7 @@ export default function App(): JSX.Element {
     }
   };
 
-  const isTreeLoading = treeQuery.isLoading || treeQuery.isFetching;
+  const isTreeLoading = treeQuery.isLoading;
 
   const handleZoomIn = () => canvasRef.current?.zoomIn();
   const handleZoomOut = () => canvasRef.current?.zoomOut();
