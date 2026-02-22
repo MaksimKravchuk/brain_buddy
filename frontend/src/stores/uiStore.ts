@@ -105,7 +105,7 @@ export const useUiStore = create<UiStoreState>((set, get) => ({
     if (typeof window !== "undefined") {
       window.setTimeout(() => {
         set((state) => ({
-          toasts: state.toasts.filter((t) => t.id !== id)
+          toasts: state.toasts.filter((t) => !(t.id === id && t.dismissing))
         }));
       }, 200);
     }
