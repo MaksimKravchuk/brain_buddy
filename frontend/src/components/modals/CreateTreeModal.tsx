@@ -1,7 +1,9 @@
 import { FormEvent, useState } from "react";
+import { twMerge } from "tailwind-merge";
 
 import { useCreateTree } from "../../api/hooks";
 import type { TreeDetailResponse } from "../../api/types";
+import { useDelayedUnmount } from "../../hooks/useDelayedUnmount";
 import { useUiStore } from "../../stores/uiStore";
 import { getErrorMessage } from "../../utils/error";
 
@@ -14,10 +16,11 @@ export function CreateTreeModal({ onCreated }: CreateTreeModalProps): JSX.Elemen
   const closeModal = useUiStore((state) => state.closeModal);
   const pushToast = useUiStore((state) => state.pushToast);
   const [name, setName] = useState("");
+  const { shouldRender, isAnimatingOut } = useDelayedUnmount(isOpen, 200);
 
   const createTreeMutation = useCreateTree();
 
-  if (!isOpen) {
+  if (!shouldRender) {
     return null;
   }
 
@@ -61,10 +64,18 @@ export function CreateTreeModal({ onCreated }: CreateTreeModalProps): JSX.Elemen
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-surface-base/80 backdrop-blur">
+    <div
+      className={twMerge(
+        "fixed inset-0 z-50 flex items-center justify-center backdrop-blur transition-all duration-200",
+        isAnimatingOut ? "bg-transparent opacity-0" : "bg-surface-base/80 opacity-100"
+      )}
+    >
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-md space-y-5 rounded-2xl border border-slate-200 bg-white/90 p-6 shadow-xl"
+        className={twMerge(
+          "w-full max-w-md space-y-5 rounded-2xl border border-slate-200 bg-white/90 p-6 shadow-xl transition-all duration-200",
+          isAnimatingOut ? "scale-95 opacity-0" : "animate-scale-fade-in"
+        )}
       >
         <header className="space-y-1">
           <h2 className="text-lg font-semibold text-slate-900">Create a new tree</h2>

@@ -1,4 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { Spinner } from "../ui/Spinner";
 import type {
   Connection,
   Edge,
@@ -831,8 +832,9 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       ) : null}
 
       {isLoading ? (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-surface-base/60 text-sm text-slate-500 backdrop-blur">
-          Loading tree…
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center gap-3 bg-surface-base/60 text-sm text-slate-500 backdrop-blur">
+          <Spinner size="lg" />
+          <span>Loading tree…</span>
         </div>
       ) : null}
 

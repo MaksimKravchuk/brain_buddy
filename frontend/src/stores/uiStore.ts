@@ -9,6 +9,7 @@ export interface Toast {
   variant: ToastVariant;
   duration: number;
   createdAt: number;
+  dismissing: boolean;
   action?: {
     label: string;
     onClick: () => void;
@@ -18,7 +19,7 @@ export interface Toast {
 type ModalKey = "createTree" | "deleteTree" | "manageVersions";
 type InspectorTab = "node" | "relation" | "versions";
 
-type ToastPayload = Omit<Toast, "id" | "createdAt" | "duration"> & {
+type ToastPayload = Omit<Toast, "id" | "createdAt" | "duration" | "dismissing"> & {
   id?: string;
   duration?: number;
 };
@@ -77,6 +78,7 @@ export const useUiStore = create<UiStoreState>((set, get) => ({
       variant: payload.variant,
       duration: payload.duration ?? (payload.action ? 0 : 5000),
       createdAt: Date.now(),
+      dismissing: false,
       action: payload.action
     };
     set((state) => ({
@@ -93,9 +95,20 @@ export const useUiStore = create<UiStoreState>((set, get) => ({
   },
 
   dismissToast(id) {
+    const toast = get().toasts.find((t) => t.id === id);
+    if (!toast || toast.dismissing) return;
+
     set((state) => ({
-      toasts: state.toasts.filter((toast) => toast.id !== id)
+      toasts: state.toasts.map((t) => (t.id === id ? { ...t, dismissing: true } : t))
     }));
+
+    if (typeof window !== "undefined") {
+      window.setTimeout(() => {
+        set((state) => ({
+          toasts: state.toasts.filter((t) => !(t.id === id && t.dismissing))
+        }));
+      }, 200);
+    }
   },
 
   clearToasts() {

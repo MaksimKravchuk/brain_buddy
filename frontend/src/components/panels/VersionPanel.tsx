@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
+import { twMerge } from "tailwind-merge";
 
 import { useCreateVersion, useDeleteVersion, useExportTree, useRestoreVersion } from "../../api/hooks";
 import type { VersionListItem } from "../../api/types";
+import { useDelayedUnmount } from "../../hooks/useDelayedUnmount";
 import { mapVersionResponse, useTreeStore, type GraphVersion } from "../../stores/treeStore";
 import { useUiStore } from "../../stores/uiStore";
 import { getErrorMessage } from "../../utils/error";
@@ -203,6 +205,10 @@ export function VersionPanel(): JSX.Element {
 
   const isDeleting = deleteVersionMutation.isPending && confirmState?.action === "delete";
   const isRestoring = restoreVersionMutation.isPending && confirmState?.action === "restore";
+  const { shouldRender: shouldRenderConfirm, isAnimatingOut: isConfirmAnimatingOut } = useDelayedUnmount(
+    confirmState !== null,
+    200
+  );
 
   return (
     <>
@@ -294,7 +300,7 @@ export function VersionPanel(): JSX.Element {
                       {version.author ? <span className="ml-2 text-slate-500">• {version.author}</span> : null}
                     </p>
                     {version.notes ? (
-                      <p className="mt-1 text-xs italic text-slate-500">“{version.notes}”</p>
+                      <p className="mt-1 text-xs italic text-slate-500">"{version.notes}"</p>
                     ) : null}
                   </div>
                   <div className="flex flex-wrap justify-end gap-2">
@@ -340,7 +346,7 @@ export function VersionPanel(): JSX.Element {
         </ul>
       </div>
 
-      {confirmState ? (
+      {shouldRenderConfirm && confirmState ? (
         <ConfirmDialog
           state={confirmState}
           onCancel={() => setConfirmState(null)}
@@ -355,6 +361,7 @@ export function VersionPanel(): JSX.Element {
             }
           }}
           isLoading={confirmState.action === "restore" ? isRestoring : isDeleting}
+          isAnimatingOut={isConfirmAnimatingOut}
         />
       ) : null}
     </>
@@ -389,18 +396,19 @@ interface ConfirmDialogProps {
   onConfirm: () => void;
   onCancel: () => void;
   isLoading: boolean;
+  isAnimatingOut: boolean;
 }
 
-function ConfirmDialog({ state, onConfirm, onCancel, isLoading }: ConfirmDialogProps): JSX.Element {
+function ConfirmDialog({ state, onConfirm, onCancel, isLoading, isAnimatingOut }: ConfirmDialogProps): JSX.Element {
   const { action, version } = state;
   const isRestore = action === "restore";
   const title = isRestore ? "Restore snapshot" : "Delete snapshot";
 
   const baseDescription = isRestore
-    ? `Restoring “${version.label}” will replace the current canvas with the snapshot captured on ${new Date(
+    ? `Restoring "${version.label}" will replace the current canvas with the snapshot captured on ${new Date(
         version.createdAt
       ).toLocaleString()}.`
-    : `Delete “${version.label}”? This permanently removes the snapshot but keeps the tree intact.`;
+    : `Delete "${version.label}"? This permanently removes the snapshot but keeps the tree intact.`;
 
   const conflictNotice =
     isRestore && version.conflictCount > 0
@@ -408,8 +416,18 @@ function ConfirmDialog({ state, onConfirm, onCancel, isLoading }: ConfirmDialogP
       : "";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-surface-base/80 backdrop-blur">
-      <div className="w-full max-w-sm space-y-4 rounded-2xl border border-slate-200 bg-white/90 p-5 shadow-xl">
+    <div
+      className={twMerge(
+        "fixed inset-0 z-50 flex items-center justify-center backdrop-blur transition-all duration-200",
+        isAnimatingOut ? "bg-transparent opacity-0" : "bg-surface-base/80 opacity-100"
+      )}
+    >
+      <div
+        className={twMerge(
+          "w-full max-w-sm space-y-4 rounded-2xl border border-slate-200 bg-white/90 p-5 shadow-xl transition-all duration-200",
+          isAnimatingOut ? "scale-95 opacity-0" : "animate-scale-fade-in"
+        )}
+      >
         <header className="space-y-1">
           <h3 className="text-base font-semibold text-slate-900">{title}</h3>
           <p className="text-sm text-slate-600">
