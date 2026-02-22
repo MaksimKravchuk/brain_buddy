@@ -5,6 +5,7 @@ import "reactflow/dist/style.css";
 import { ApiError } from "./api/client";
 import type { TreeDetailResponse } from "./api/types";
 import { useTree, useTrees, useTreeDownload, useTreeImportWithToasts } from "./api/hooks";
+import { Spinner } from "./components/ui/Spinner";
 import { TreeCanvas, type TreeCanvasHandle } from "./components/canvas/TreeCanvas";
 import { CreateTreeModal } from "./components/modals/CreateTreeModal";
 import { DeleteTreeModal } from "./components/modals/DeleteTreeModal";
@@ -254,8 +255,9 @@ function FloatingZoomControls({
 function EmptyCanvasState({ isLoading, hasTrees }: { isLoading: boolean; hasTrees: boolean }): JSX.Element {
   if (isLoading) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-slate-500">
-        Loading tree…
+      <div className="flex h-full items-center justify-center gap-3 text-sm text-slate-500">
+        <Spinner size="lg" />
+        <span>Loading tree…</span>
       </div>
     );
   }

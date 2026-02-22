@@ -1,7 +1,9 @@
 import { useMemo } from "react";
+import { twMerge } from "tailwind-merge";
 
 import { useDeleteTree } from "../../api/hooks";
 import type { TreeListItem } from "../../api/types";
+import { useDelayedUnmount } from "../../hooks/useDelayedUnmount";
 import { useTreeStore } from "../../stores/treeStore";
 import { useUiStore } from "../../stores/uiStore";
 import { getErrorMessage } from "../../utils/error";
@@ -19,8 +21,9 @@ export function DeleteTreeModal({ trees, onDeleted }: DeleteTreeModalProps): JSX
   const activeTree = useMemo(() => trees?.find((tree) => tree.id === activeTreeId), [trees, activeTreeId]);
 
   const deleteTree = useDeleteTree();
+  const { shouldRender, isAnimatingOut } = useDelayedUnmount(isOpen && !!activeTree, 200);
 
-  if (!isOpen || !activeTree) {
+  if (!shouldRender || !activeTree) {
     return null;
   }
 
@@ -48,8 +51,18 @@ export function DeleteTreeModal({ trees, onDeleted }: DeleteTreeModalProps): JSX
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-surface-base/80 backdrop-blur">
-      <div className="w-full max-w-md space-y-4 rounded-2xl border border-slate-200 bg-white/90 p-6 shadow-xl">
+    <div
+      className={twMerge(
+        "fixed inset-0 z-50 flex items-center justify-center backdrop-blur transition-all duration-200",
+        isAnimatingOut ? "bg-transparent opacity-0" : "bg-surface-base/80 opacity-100"
+      )}
+    >
+      <div
+        className={twMerge(
+          "w-full max-w-md space-y-4 rounded-2xl border border-slate-200 bg-white/90 p-6 shadow-xl transition-all duration-200",
+          isAnimatingOut ? "scale-95 opacity-0" : "animate-scale-fade-in"
+        )}
+      >
         <header className="space-y-1">
           <h2 className="text-lg font-semibold text-slate-900">Delete tree</h2>
           <p className="text-sm text-slate-600">

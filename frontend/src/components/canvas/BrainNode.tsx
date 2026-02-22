@@ -147,8 +147,10 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
     <div
       data-testid="brain-node"
       className={twMerge(
-        "group relative h-[132px] w-[240px] rounded-l-2xl rounded-r-xl border border-slate-200 text-left shadow-sm transition-all duration-150",
-        selected ? "ring-2 ring-brand-primary/30 shadow-glow" : "ring-1 ring-transparent"
+        "group relative h-[132px] w-[240px] rounded-l-2xl rounded-r-xl border border-slate-200 text-left shadow-sm transition-all duration-200",
+        selected
+          ? "ring-2 ring-brand-primary/30 shadow-glow"
+          : "ring-1 ring-transparent hover:shadow-md hover:-translate-y-0.5"
       )}
       style={{ backgroundColor: nodeColors.background, color: nodeColors.text }}
       onMouseDown={() => select({ type: "node", id: node.id })}
@@ -193,8 +195,8 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
         aria-label="Create upstream node"
         onClick={onCreateParent}
         className={twMerge(
-          "absolute left-1/2 top-0 z-10 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-slate-300 bg-white shadow-sm transition-opacity",
-          showControls ? "opacity-100" : "opacity-0"
+          "absolute left-1/2 top-0 z-10 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-slate-300 bg-white shadow-sm transition-all duration-150",
+          showControls ? "opacity-100 scale-100" : "opacity-0 scale-75"
         )}
       />
 
@@ -203,8 +205,8 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
         aria-label="Create right sibling"
         onClick={onCreateRightSibling}
         className={twMerge(
-          "absolute right-0 top-1/2 z-10 h-4 w-4 translate-x-1/2 -translate-y-1/2 rounded-full border border-slate-300 bg-white shadow-sm transition-opacity",
-          showControls ? "opacity-100" : "opacity-0"
+          "absolute right-0 top-1/2 z-10 h-4 w-4 translate-x-1/2 -translate-y-1/2 rounded-full border border-slate-300 bg-white shadow-sm transition-all duration-150",
+          showControls ? "opacity-100 scale-100" : "opacity-0 scale-75"
         )}
       />
 
@@ -213,8 +215,8 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
         aria-label="Create downstream node"
         onClick={onCreateChild}
         className={twMerge(
-          "absolute bottom-0 left-1/2 z-10 h-4 w-4 -translate-x-1/2 translate-y-1/2 rounded-full border border-slate-300 bg-white shadow-sm transition-opacity",
-          showControls ? "opacity-100" : "opacity-0"
+          "absolute bottom-0 left-1/2 z-10 h-4 w-4 -translate-x-1/2 translate-y-1/2 rounded-full border border-slate-300 bg-white shadow-sm transition-all duration-150",
+          showControls ? "opacity-100 scale-100" : "opacity-0 scale-75"
         )}
       />
 
@@ -223,8 +225,8 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
         aria-label="Create left sibling"
         onClick={onCreateLeftSibling}
         className={twMerge(
-          "absolute left-0 top-1/2 z-10 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-slate-300 bg-white shadow-sm transition-opacity",
-          showControls ? "opacity-100" : "opacity-0"
+          "absolute left-0 top-1/2 z-10 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-slate-300 bg-white shadow-sm transition-all duration-150",
+          showControls ? "opacity-100 scale-100" : "opacity-0 scale-75"
         )}
       />
 

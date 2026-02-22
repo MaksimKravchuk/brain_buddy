@@ -1,3 +1,5 @@
+import { twMerge } from "tailwind-merge";
+
 import { useUiStore } from "../../stores/uiStore";
 
 const variantStyles: Record<string, string> = {
@@ -7,13 +9,9 @@ const variantStyles: Record<string, string> = {
   error: "border-red-200 bg-red-50 text-red-800"
 };
 
-export function ToastStack(): JSX.Element | null {
+export function ToastStack(): JSX.Element {
   const toasts = useUiStore((state) => state.toasts);
   const dismiss = useUiStore((state) => state.dismissToast);
-
-  if (toasts.length === 0) {
-    return null;
-  }
 
   return (
     <div className="pointer-events-none fixed inset-x-0 top-4 z-50 flex justify-center">
@@ -21,7 +19,11 @@ export function ToastStack(): JSX.Element | null {
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={`pointer-events-auto rounded-xl border px-4 py-3 text-sm shadow-lg backdrop-blur ${variantStyles[toast.variant]}`}
+            className={twMerge(
+              "pointer-events-auto rounded-xl border px-4 py-3 text-sm shadow-lg backdrop-blur",
+              variantStyles[toast.variant],
+              toast.dismissing ? "animate-slide-up-fade-out" : "animate-slide-down-fade-in"
+            )}
           >
             <div className="flex items-start justify-between gap-3">
               <div>
