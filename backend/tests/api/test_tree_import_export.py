@@ -129,7 +129,8 @@ def test_import_preserves_ids_and_timestamps(api_client) -> None:
     assert _parse(imported["metadata"]["created_at"]) == _parse(created)
     assert _parse(imported["metadata"]["updated_at"]) >= _parse(updated)
     assert imported["metadata"]["layout"] == {"zoom": 0.9}
-    assert imported["owner_id"] == "user-1"
+    # owner_id is forced to the authenticated account's id
+    assert imported["owner_id"] == "acct-test-001"
 
     relation = imported["relations"][0]
     assert relation["id"] == "r1"

@@ -45,10 +45,14 @@ class SecuritySettings(BaseModel):
     """Security-related toggles for API hardening."""
 
     api_key: str | None = Field(
-        default=None, description="Static API key required for requests."
+        default=None, description="Static API key (legacy, unused with accounts)."
     )
     api_key_header: str = Field(
-        default="X-API-Key", description="Header used for the static API key."
+        default="X-API-Key", description="Header used for the API key."
+    )
+    auth_disabled: bool = Field(
+        default=False,
+        description="Disable authentication entirely (for local development).",
     )
 
     model_config = ConfigDict(frozen=True)
@@ -106,6 +110,7 @@ def _build_config() -> AppConfig:
     data_dir_value = os.getenv("BRAIN_BUDDY_DATA_DIR", str(DEFAULT_DATA_DIR))
     api_key = os.getenv("BRAIN_BUDDY_API_KEY")
     api_key_header = os.getenv("BRAIN_BUDDY_API_KEY_HEADER", "X-API-Key")
+    auth_disabled = os.getenv("BRAIN_BUDDY_AUTH_DISABLED", "").lower() in ("1", "true", "yes")
 
     data_dir = Path(data_dir_value).expanduser().resolve()
     try:
@@ -122,7 +127,9 @@ def _build_config() -> AppConfig:
 
     logging_config = LoggingSettings(level=log_level)
     data_config = DataSettings(root_dir=data_dir, schema_version=schema_version)
-    security_config = SecuritySettings(api_key=api_key, api_key_header=api_key_header)
+    security_config = SecuritySettings(
+        api_key=api_key, api_key_header=api_key_header, auth_disabled=auth_disabled
+    )
 
     try:
         environment = AppEnvironment(env_value)

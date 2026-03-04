@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Request
 
 from app.container import Container
+from app.schemas.domain import AccountDocument
 from app.services import (
+    AccountService,
     NodeService,
     RelationService,
     TreeService,
@@ -45,3 +47,17 @@ def get_validation_service(
     container: Container = Depends(get_container),
 ) -> ValidationService:
     return container.validation_service
+
+
+def get_account_service(
+    container: Container = Depends(get_container),
+) -> AccountService:
+    return container.account_service
+
+
+def get_current_account(request: Request) -> AccountDocument:
+    """Extract the authenticated account set by ApiKeyMiddleware."""
+    account = getattr(request.state, "account", None)
+    if account is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    return account

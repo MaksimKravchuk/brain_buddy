@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import { apiClient, getOwnerId, hasApiKey } from "../api/client";
+import { apiClient, hasApiKey } from "../api/client";
 
 import type {
   NodeResponse,
@@ -141,8 +141,6 @@ export const TREE_DRAFT_PREFIX = "brainbuddy:tree-draft:";
 
 const AUTOSAVE_DEBOUNCE_MS = 5000;
 
-const sessionOwnerId = getOwnerId();
-
 function toNodeResponse(node: GraphNode): NodeResponse {
   return {
     id: node.id,
@@ -261,7 +259,7 @@ function mapTreeDetail(state: TreeStoreState): TreeDetailResponse | null {
   }
 
   const updatedAt = new Date().toISOString();
-  const ownerId = state.metadata.ownerId ?? sessionOwnerId ?? null;
+  const ownerId = state.metadata.ownerId ?? null;
 
   return {
     id: state.activeTreeId,
@@ -306,12 +304,6 @@ async function persistTree(get: () => TreeStoreState, set: TreeStoreSet) {
   const detail = mapTreeDetail(get());
   if (!detail) {
     return;
-  }
-
-  const ownerId = detail.owner_id ?? sessionOwnerId ?? null;
-  if (ownerId) {
-    detail.owner_id = ownerId;
-    detail.metadata.owner_id = ownerId;
   }
 
   clearAutosaveTimer();
@@ -469,7 +461,7 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
   setTree(tree) {
     const mappedRelations = tree.relations.map(mapRelationResponse);
     const mappedNodes = applyDerivedNodeState(tree.nodes.map(mapNodeResponse), mappedRelations);
-    const ownerId = tree.owner_id ?? tree.metadata.owner_id ?? sessionOwnerId ?? null;
+    const ownerId = tree.owner_id ?? tree.metadata.owner_id ?? null;
 
     set((state) => {
       let nextSelection = state.activeTreeId === tree.id ? state.selection : initialSelection;

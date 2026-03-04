@@ -87,6 +87,7 @@ class IndexEntry(StorageBaseModel):
     title: str = Field(description="Tree title.")
     description: str | None = Field(default=None, description="Tree description.")
     updated_at: datetime = Field(description="Timestamp of most recent modification.")
+    owner_id: str | None = Field(default=None, description="Account that owns this tree.")
 
 
 class ProviderConfig(StorageBaseModel):
@@ -242,7 +243,25 @@ class VersionDocument(StorageBaseModel):
     tree: TreeDocument = Field(description="Tree data captured at snapshot time.")
 
 
+class AccountDocument(StorageBaseModel):
+    """Stored representation of a user account."""
+
+    id: str = Field(description="Unique account identifier.")
+    name: str = Field(description="Display name for the account.")
+    api_key: str = Field(description="Unique API key for authentication.")
+    has_ai_access: bool = Field(
+        default=False, description="Whether AI features are enabled."
+    )
+    created_at: datetime = Field(
+        description="UTC timestamp when the account was created."
+    )
+    updated_at: datetime = Field(
+        description="UTC timestamp of the most recent update."
+    )
+
+
 __all__ = [
+    "AccountDocument",
     "IndexEntry",
     "NodeDocument",
     "ProviderConfig",

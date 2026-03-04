@@ -11,23 +11,24 @@ from starlette.types import ASGIApp
 
 from app.core.logging import get_logger, reset_correlation_id, set_correlation_id
 from app.schemas import ErrorResponse
+from app.services.account_service import AccountService
 
 CORRELATION_HEADER = "X-Correlation-ID"
 
 
 class ApiKeyMiddleware(BaseHTTPMiddleware):
-    """Lightweight API key enforcement placeholder."""
+    """Resolve per-account API keys and attach the account to the request."""
 
     def __init__(
         self,
         app: ASGIApp,
         *,
-        api_key: str,
+        account_service: AccountService,
         header_name: str = "X-API-Key",
         exempt_paths: tuple[str, ...] | None = None,
     ) -> None:
         super().__init__(app)
-        self.api_key = api_key
+        self.account_service = account_service
         self.header_name = header_name
         self.exempt_paths = exempt_paths or ("/health",)
         self.logger = get_logger(__name__)
@@ -41,10 +42,18 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         provided = request.headers.get(self.header_name)
-        if provided == self.api_key:
-            return await call_next(request)
+        if not provided:
+            return self._unauthorized_response()
 
-        self.logger.info("Blocked request without valid API key for %s", path)
+        account = self.account_service.resolve_by_api_key(provided)
+        if account is None:
+            self.logger.info("Blocked request with invalid API key for %s", path)
+            return self._unauthorized_response()
+
+        request.state.account = account
+        return await call_next(request)
+
+    def _unauthorized_response(self) -> JSONResponse:
         payload = ErrorResponse(
             message="Missing or invalid API key.", detail={"header": self.header_name}
         )

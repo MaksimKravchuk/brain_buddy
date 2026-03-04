@@ -3,7 +3,6 @@ import { renderHook, waitFor, act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 
-import * as clientModule from "../client";
 import { apiClient } from "../client";
 import { useExportTree, useImportTree, useTrees, useTreeImportWithToasts } from "../hooks";
 import type { TreeDetailResponse, TreeImportPayload, TreeListItem } from "../types";
@@ -111,7 +110,7 @@ describe("api hooks", () => {
     expect(cached).toEqual(importPayload);
   });
 
-  it("imports from file with owner mapping and success toast", async () => {
+  it("imports from file with success toast", async () => {
     const tree: TreeDetailResponse = {
       id: "tree-9",
       name: "File Import",
@@ -127,7 +126,6 @@ describe("api hooks", () => {
       owner_id: null
     };
 
-    const ownerSpy = vi.spyOn(clientModule, "getOwnerId").mockReturnValue("owner-123");
     const importSpy = vi.spyOn(apiClient, "importTree").mockResolvedValue(tree);
     const onImported = vi.fn();
 
@@ -144,16 +142,9 @@ describe("api hooks", () => {
       await result.current.importFromFile(file);
     });
 
-    await waitFor(() =>
-      expect(importSpy).toHaveBeenCalledWith({
-        ...tree,
-        owner_id: "owner-123",
-        metadata: { ...tree.metadata, owner_id: "owner-123" }
-      })
-    );
+    await waitFor(() => expect(importSpy).toHaveBeenCalledWith(tree));
     expect(onImported).toHaveBeenCalledWith(tree);
     const toast = useUiStore.getState().toasts.find((t) => t.title === "Imported tree");
     expect(toast?.description).toBe("File Import");
-    ownerSpy.mockRestore();
   });
 });

@@ -176,3 +176,9 @@ export interface AiFeedbackResponse {
   recommendations: string[];
   request_id?: string | null;
 }
+
+export interface AccountResponse {
+  id: string;
+  name: string;
+  has_ai_access: boolean;
+}

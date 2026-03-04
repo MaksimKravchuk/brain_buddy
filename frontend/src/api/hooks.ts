@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { apiClient, getOwnerId } from "./client";
+import { apiClient, hasApiKey } from "./client";
 import type {
+  AccountResponse,
   AiFeedbackRequest,
   AiFeedbackResponse,
   NodeCreateRequest,
@@ -389,20 +390,8 @@ export function useTreeImportWithToasts(onImported?: (tree: TreeDetailResponse) 
       return;
     }
 
-    const ownerId = getOwnerId();
-    const payloadWithOwner = ownerId
-      ? {
-          ...payload,
-          owner_id: payload.owner_id ?? ownerId,
-          metadata: {
-            ...payload.metadata,
-            owner_id: payload.metadata.owner_id ?? ownerId
-          }
-        }
-      : payload;
-
     try {
-      const tree = await importTreeMutation.mutateAsync(payloadWithOwner);
+      const tree = await importTreeMutation.mutateAsync(payload);
       onImported?.(tree);
       pushToast({
         id: toastId,
@@ -423,4 +412,13 @@ export function useTreeImportWithToasts(onImported?: (tree: TreeDetailResponse) 
   };
 
   return { importFromFile, isImporting: importTreeMutation.isPending };
+}
+
+export function useMe() {
+  return useQuery<AccountResponse>({
+    queryKey: ["me"],
+    queryFn: ({ signal }) => apiClient.getMe(signal),
+    enabled: hasApiKey(),
+    staleTime: Infinity
+  });
 }

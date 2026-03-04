@@ -1,6 +1,7 @@
 """Pydantic schema definitions for Brain Buddy."""
 
 from .api import (
+    AccountResponse,
     AiFeedbackRequest,
     AiFeedbackResponse,
     ErrorResponse,
@@ -34,6 +35,7 @@ from .domain import (
 )
 
 __all__ = [
+    "AccountResponse",
     "ErrorResponse",
     "NodeCreateRequest",
     "NodeDocument",

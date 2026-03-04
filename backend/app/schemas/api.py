@@ -342,7 +342,16 @@ class ValidationHistoryResponse(StrictBaseModel):
     )
 
 
+class AccountResponse(StrictBaseModel):
+    """Public account information returned to the client."""
+
+    id: str = Field(description="Account identifier.")
+    name: str = Field(description="Account display name.")
+    has_ai_access: bool = Field(description="Whether AI features are enabled.")
+
+
 __all__ = [
+    "AccountResponse",
     "ErrorResponse",
     "NodeCreateRequest",
     "NodeResponse",

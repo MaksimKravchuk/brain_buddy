@@ -54,8 +54,11 @@ class TreeService:
         self._cache: OrderedDictType[str, TreeDocument] = OrderedDict()
         self._cache_maxsize = max(cache_maxsize, 1)
 
-    def list_trees(self) -> list[IndexEntry]:
-        return self.index_repo.load_all()
+    def list_trees(self, owner_id: str | None = None) -> list[IndexEntry]:
+        entries = self.index_repo.load_all()
+        if owner_id is not None:
+            entries = [e for e in entries if e.owner_id == owner_id]
+        return entries
 
     def create_tree(self, payload: TreeCreateRequest) -> TreeDocument:
         tree_id = generate_tree_id()
@@ -171,12 +174,18 @@ class TreeService:
             request_id=payload.request_id,
         )
 
+    def assert_owner(self, tree: TreeDocument, account_id: str) -> None:
+        """Raise NotFoundError if the tree does not belong to the account."""
+        if tree.owner_id is not None and tree.owner_id != account_id:
+            raise NotFoundError("Tree", tree.id)
+
     def _sync_index(self, tree: TreeDocument) -> None:
         entry = IndexEntry(
             id=tree.id,
             title=tree.title,
             description=tree.description,
             updated_at=tree.updated_at,
+            owner_id=tree.owner_id,
         )
         self.index_repo.upsert(entry)
 

@@ -272,7 +272,74 @@ def test_api_key_middleware_enforces_header(secured_api_client) -> None:
     assert unauthenticated.status_code == 401
     assert unauthenticated.headers.get("X-Correlation-ID")
 
+    bad_key = secured_api_client.get(
+        "/api/trees", headers={"X-API-Key": "wrong-key"}
+    )
+    assert bad_key.status_code == 401
+
     authenticated = secured_api_client.get(
         "/api/trees", headers={"X-API-Key": "test-key"}
     )
     assert authenticated.status_code == 200
+
+
+def test_me_endpoint(secured_api_client) -> None:
+    resp = secured_api_client.get("/api/me", headers={"X-API-Key": "test-key"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == "acct-test-001"
+    assert data["name"] == "Test User"
+    assert data["has_ai_access"] is True
+
+
+def test_tree_ownership_isolation(secured_api_client) -> None:
+    headers_a = {"X-API-Key": "test-key"}
+    headers_b = {"X-API-Key": "test-key-no-ai"}
+
+    create_resp = secured_api_client.post(
+        "/api/trees", json={"name": "Owner A Tree"}, headers=headers_a
+    )
+    assert create_resp.status_code == 201
+    tree_id = create_resp.json()["id"]
+    assert create_resp.json()["owner_id"] == "acct-test-001"
+
+    get_resp = secured_api_client.get(f"/api/trees/{tree_id}", headers=headers_a)
+    assert get_resp.status_code == 200
+
+    get_resp_b = secured_api_client.get(f"/api/trees/{tree_id}", headers=headers_b)
+    assert get_resp_b.status_code == 404
+
+    list_resp_a = secured_api_client.get("/api/trees", headers=headers_a)
+    assert any(t["id"] == tree_id for t in list_resp_a.json())
+
+    list_resp_b = secured_api_client.get("/api/trees", headers=headers_b)
+    assert not any(t["id"] == tree_id for t in list_resp_b.json())
+
+
+def test_ai_gating_rejects_without_access(secured_api_client) -> None:
+    headers_ai = {"X-API-Key": "test-key"}
+    headers_no_ai = {"X-API-Key": "test-key-no-ai"}
+
+    create_resp = secured_api_client.post(
+        "/api/trees", json={"name": "AI Test"}, headers=headers_no_ai
+    )
+    assert create_resp.status_code == 201
+    tree_id = create_resp.json()["id"]
+
+    feedback_resp = secured_api_client.post(
+        f"/api/trees/{tree_id}/ai-feedback",
+        json={"consent": True},
+        headers=headers_no_ai,
+    )
+    assert feedback_resp.status_code == 403
+
+    create_ai = secured_api_client.post(
+        "/api/trees", json={"name": "AI Enabled"}, headers=headers_ai
+    )
+    tree_id_ai = create_ai.json()["id"]
+    feedback_ok = secured_api_client.post(
+        f"/api/trees/{tree_id_ai}/ai-feedback",
+        json={"consent": True},
+        headers=headers_ai,
+    )
+    assert feedback_ok.status_code == 200

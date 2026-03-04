@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ReactFlowProvider } from "reactflow";
 import "reactflow/dist/style.css";
 
-import { ApiError } from "./api/client";
+import { ApiError, setApiKey } from "./api/client";
 import type { TreeDetailResponse } from "./api/types";
-import { useTree, useTrees, useTreeDownload, useTreeImportWithToasts } from "./api/hooks";
+import { useTree, useTrees, useTreeDownload, useTreeImportWithToasts, useMe } from "./api/hooks";
+import { LoginGate } from "./components/LoginGate";
 import { TreeCanvas, type TreeCanvasHandle } from "./components/canvas/TreeCanvas";
 import { CreateTreeModal } from "./components/modals/CreateTreeModal";
 import { DeleteTreeModal } from "./components/modals/DeleteTreeModal";
@@ -14,8 +15,22 @@ import { useUiStore } from "./stores/uiStore";
 import { getErrorMessage } from "./utils/error";
 
 export default function App(): JSX.Element {
+  return (
+    <LoginGate>
+      <AppContent />
+    </LoginGate>
+  );
+}
+
+function AppContent(): JSX.Element {
   const [selectedTreeId, setSelectedTreeId] = useState<string | null>(null);
   const canvasRef = useRef<TreeCanvasHandle | null>(null);
+  const meQuery = useMe();
+
+  const handleSignOut = () => {
+    setApiKey(null);
+    window.location.reload();
+  };
 
   const {
     data: trees,
@@ -181,6 +196,19 @@ export default function App(): JSX.Element {
                   />
                 </label>
               </div>
+            </div>
+
+            <div className="ml-auto flex items-center gap-2">
+              {meQuery.data && (
+                <span className="text-xs text-slate-500">{meQuery.data.name}</span>
+              )}
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="rounded-md border border-slate-200 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
+              >
+                Sign out
+              </button>
             </div>
           </div>
         </header>

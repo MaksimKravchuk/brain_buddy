@@ -1,4 +1,5 @@
 import {
+  AccountResponse,
   AiFeedbackRequest,
   AiFeedbackResponse,
   NodeCreateRequest,
@@ -23,7 +24,6 @@ import {
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const API_KEY_HEADER = import.meta.env.VITE_API_KEY_HEADER ?? "X-API-Key";
 const API_KEY_STORAGE_KEY = "brainbuddy:api-key";
-const SESSION_OWNER_ID = import.meta.env.VITE_OWNER_ID ?? import.meta.env.VITE_API_OWNER_ID ?? null;
 const hasStorage =
   typeof window !== "undefined" &&
   typeof window.localStorage !== "undefined" &&
@@ -81,10 +81,6 @@ export function setApiKey(apiKey: string | null) {
 
 export function getApiKey(): string | null {
   return cachedApiKey;
-}
-
-export function getOwnerId(): string | null {
-  return SESSION_OWNER_ID ?? null;
 }
 
 export function hasApiKey(): boolean {
@@ -163,17 +159,7 @@ export const apiClient = {
   },
 
   createTree(payload: TreeCreateRequest) {
-    const ownerId = getOwnerId();
-    const body = ownerId
-      ? {
-          ...payload,
-          owner_id: payload.owner_id ?? ownerId,
-          metadata: payload.metadata
-            ? { ...payload.metadata, owner_id: payload.metadata.owner_id ?? ownerId }
-            : undefined
-        }
-      : payload;
-    return request<TreeDetailResponse>("/trees", { method: "POST", body });
+    return request<TreeDetailResponse>("/trees", { method: "POST", body: payload });
   },
 
   updateTree(treeId: string, payload: TreeUpdateRequest) {
@@ -252,5 +238,9 @@ export const apiClient = {
 
   getValidationHistory(treeId: string, nodeId: string, signal?: AbortSignal) {
     return request<ValidationHistoryResponse>(`/trees/${treeId}/nodes/${nodeId}/validation-history`, { signal });
+  },
+
+  getMe(signal?: AbortSignal) {
+    return request<AccountResponse>("/me", { signal });
   }
 };

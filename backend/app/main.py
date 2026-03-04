@@ -24,10 +24,10 @@ def create_app() -> FastAPI:
     app.state.config = config
     app.state.container = build_container(config.data_dir)
 
-    if config.security.has_api_key:
+    if not config.security.auth_disabled:
         app.add_middleware(
             ApiKeyMiddleware,
-            api_key=config.security.api_key or "",
+            account_service=app.state.container.account_service,
             header_name=config.security.api_key_header,
             exempt_paths=(
                 "/health",

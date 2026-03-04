@@ -7,6 +7,7 @@ from pathlib import Path
 
 from app.ai.providers import MockValidationProvider, OpenAIValidationProvider
 from app.repositories import (
+    AccountRepository,
     IndexRepository,
     ProviderRepository,
     TreeRepository,
@@ -14,6 +15,7 @@ from app.repositories import (
     VersionRepository,
 )
 from app.services import (
+    AccountService,
     NodeService,
     RelationService,
     TreeService,
@@ -26,11 +28,13 @@ from app.services import (
 class Container:
     """Aggregate repositories and services for dependency wiring."""
 
+    account_repo: AccountRepository
     tree_repo: TreeRepository
     index_repo: IndexRepository
     version_repo: VersionRepository
     validation_repo: ValidationRepository
     provider_repo: ProviderRepository
+    account_service: AccountService
     tree_service: TreeService
     node_service: NodeService
     relation_service: RelationService
@@ -39,12 +43,14 @@ class Container:
 
 
 def build_container(data_root: Path) -> Container:
+    account_repo = AccountRepository(data_root)
     tree_repo = TreeRepository(data_root)
     index_repo = IndexRepository(data_root)
     version_repo = VersionRepository(data_root)
     validation_repo = ValidationRepository(data_root)
     provider_repo = ProviderRepository(data_root)
 
+    account_service = AccountService(account_repo)
     tree_service = TreeService(tree_repo, index_repo)
     node_service = NodeService(tree_repo, tree_service)
     relation_service = RelationService(tree_repo, tree_service)
@@ -61,11 +67,13 @@ def build_container(data_root: Path) -> Container:
     )
 
     return Container(
+        account_repo=account_repo,
         tree_repo=tree_repo,
         index_repo=index_repo,
         version_repo=version_repo,
         validation_repo=validation_repo,
         provider_repo=provider_repo,
+        account_service=account_service,
         tree_service=tree_service,
         node_service=node_service,
         relation_service=relation_service,
