@@ -1,4 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { AlertCircle, Copy, Network, RotateCcw, X } from "lucide-react";
+
+import { Button } from "../ui/Button";
 import { Spinner } from "../ui/Spinner";
 import type {
   Connection,
@@ -826,13 +829,23 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       </ReactFlow>
 
       {!hasContent && !isLoading ? (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-slate-500">
-          <p>No nodes yet. Add a node to start mapping causes and effects.</p>
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center animate-fade-in-up">
+          <div className="flex flex-col items-center gap-3 text-center text-sm text-slate-500">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-primary/10 text-brand-primary shadow-soft">
+              <Network className="h-6 w-6" />
+            </div>
+            <div className="space-y-1">
+              <p className="text-title font-semibold text-slate-900">An empty canvas</p>
+              <p className="max-w-sm text-slate-500">
+                Add a node to start mapping causes and effects.
+              </p>
+            </div>
+          </div>
         </div>
       ) : null}
 
       {isLoading ? (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center gap-3 bg-surface-base/60 text-sm text-slate-500 backdrop-blur">
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center gap-3 bg-surface-base/60 text-sm text-slate-500 backdrop-blur animate-fade-in">
           <Spinner size="lg" />
           <span>Loading tree…</span>
         </div>
@@ -844,57 +857,73 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
           role="alert"
           aria-live="assertive"
           tabIndex={-1}
-          className="pointer-events-auto absolute left-6 bottom-6 z-20 max-w-md rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 shadow-md focus:outline-none focus:ring-2 focus:ring-rose-300"
+          className="pointer-events-auto absolute left-6 bottom-6 z-20 max-w-md rounded-xl border border-rose-200 bg-rose-50/95 px-4 py-3 text-sm text-rose-800 shadow-floating backdrop-blur animate-fade-in-up focus:outline-none"
         >
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="font-semibold">Unable to create link</p>
-              <p className="mt-1 break-words" data-testid="relation-error-message">
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-rose-100 text-rose-600">
+              <AlertCircle className="h-4 w-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start justify-between gap-3">
+                <p className="font-semibold text-rose-900">Unable to create link</p>
+                <button
+                  type="button"
+                  aria-label="Dismiss link error"
+                  onClick={dismissLinkError}
+                  className="-mt-1 -mr-1 inline-flex h-6 w-6 items-center justify-center rounded-md text-rose-500 transition-colors duration-200 ease-smooth hover:bg-rose-100 hover:text-rose-700"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <p
+                className="mt-1 break-words text-rose-700"
+                data-testid="relation-error-message"
+              >
                 {linkError.message}
               </p>
               {linkError.referenceId ? (
-                <p className="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-rose-800">
-                  <span className="rounded bg-white px-2 py-1 shadow-sm">
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                  <span className="rounded-md bg-white px-2 py-1 font-semibold text-rose-800 shadow-soft">
                     Ref: {linkError.referenceId}
                   </span>
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-white px-2 py-1 text-[11px] font-semibold text-rose-800 shadow-sm transition hover:border-rose-300 hover:text-rose-900"
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    leftIcon={<Copy />}
                     onClick={handleCopyReference}
+                    className="text-rose-700 hover:bg-rose-100 hover:text-rose-900"
                   >
                     Copy reference
-                  </button>
+                  </Button>
                   {copiedReference ? (
-                    <span className="text-emerald-700" role="status" aria-live="polite">
+                    <span
+                      className="text-emerald-700"
+                      role="status"
+                      aria-live="polite"
+                    >
                       Copied
                     </span>
                   ) : null}
-                </p>
+                </div>
               ) : null}
-            </div>
-            <div className="flex flex-shrink-0 flex-col gap-2">
               {lastFailedLink.current ? (
-                <button
-                  type="button"
-                  className="inline-flex items-center justify-center rounded-md border border-rose-200 bg-white px-3 py-1 text-xs font-semibold text-rose-700 shadow-sm transition hover:border-rose-300 hover:text-rose-800"
-                  onClick={() => {
-                    const retry = lastFailedLink.current;
-                    dismissLinkError();
-                    if (retry) {
-                      handleConnect(retry);
-                    }
-                  }}
-                >
-                  Retry link
-                </button>
+                <div className="mt-3">
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    leftIcon={<RotateCcw />}
+                    onClick={() => {
+                      const retry = lastFailedLink.current;
+                      dismissLinkError();
+                      if (retry) {
+                        handleConnect(retry);
+                      }
+                    }}
+                  >
+                    Retry link
+                  </Button>
+                </div>
               ) : null}
-              <button
-                type="button"
-                className="inline-flex items-center justify-center rounded-md border border-rose-200 bg-white px-3 py-1 text-xs font-semibold text-rose-700 shadow-sm transition hover:border-rose-300 hover:text-rose-800"
-                onClick={dismissLinkError}
-              >
-                Dismiss
-              </button>
             </div>
           </div>
         </div>
