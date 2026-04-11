@@ -33,7 +33,7 @@ cd backend && mypy app
 cd frontend && npm install
 
 # Dev server
-make dev-frontend         # Vite at localhost:5173
+make dev-frontend         # Vite at localhost:5173 (compose serves at 8080 instead)
 
 # Tests
 make test-frontend        # builds Docker test image and runs Vitest
@@ -84,7 +84,20 @@ HTTP request
 - `useTreeStore` (`src/stores/treeStore.ts`) — active tree, nodes, relations, versions, undo/redo stack, optimistic update queue, 5-second debounced autosave to localStorage
 - `useUiStore` (`src/stores/uiStore.ts`) — modal visibility, toasts
 
-**Canvas** is built on React Flow (`reactflow`). `TreeCanvas` renders nodes and custom edges. Node/relation details are shown in `InspectorTabs` → `NodeInspector` / `RelationInspector`.
+**Canvas** is built on React Flow (`reactflow`); styling is TailwindCSS. `TreeCanvas` renders nodes and custom edges. Node/relation details are shown in `InspectorTabs` → `NodeInspector` / `RelationInspector`.
+
+### Cross-cutting behavior
+
+- **AI consent gating** — AI validation requires an API key *and* an explicit consent toggle in the inspector. Declining consent short-circuits with a validation error rather than calling the provider; tests and new features must respect this gate.
+- **Correlation IDs** — every response carries `X-Correlation-ID`. Error toasts surface it for retry/report flows, and backend logs key off the same ID.
+- **Autosave** — the canvas debounces a 5s local autosave to `localStorage` and warns on page exit when unsaved changes exist.
+
+### Deployment & CI
+
+- **Docker Compose** (local full stack): `docker compose up --build` → backend `:8000`, frontend `:8080`. Smoke via `./scripts/smoke_test.sh`.
+- **Fly.io** — two apps via `fly.backend.toml` and `fly.frontend.toml`. The **backend app is private (Flycast-only)**; the frontend proxies to it via `BACKEND_ORIGIN`. Runbooks: `docs/fly-deployment.md`, `docs/fly-review-apps.md`.
+- **CI** — `.github/workflows/ci.yml` runs backend lint/type/test + coverage, frontend unit tests + build, and Docker image builds on every push/PR to `main`. Wait for CI green before deploying.
+- **Deeper docs** — architecture, API, troubleshooting, performance, and infra runbooks live under `docs/`. Feature specs (e.g. `001-relation-linking-refactor`) live under `specs/`.
 
 ### Environment variables
 
@@ -92,9 +105,12 @@ HTTP request
 |---|---|---|
 | `BRAIN_BUDDY_ENV` | `development` | `development`, `production`, or `test` |
 | `BRAIN_BUDDY_DATA_DIR` | `backend/data` | file storage root |
+| `BRAIN_BUDDY_API_PREFIX` | `/api` | FastAPI router prefix |
 | `BRAIN_BUDDY_API_KEY` | _(unset)_ | enables API key auth when set |
+| `BRAIN_BUDDY_API_KEY_HEADER` | `X-API-Key` | header the backend reads for the API key |
 | `VITE_API_BASE_URL` | `/api` | backend URL from frontend |
 | `VITE_API_KEY` | _(unset)_ | must match backend key when auth is on |
+| `VITE_API_KEY_HEADER` | `X-API-Key` | header the frontend sends the API key in |
 
 ## Conventions
 
