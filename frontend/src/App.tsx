@@ -3,15 +3,12 @@ import { ReactFlowProvider } from "reactflow";
 import "reactflow/dist/style.css";
 import {
   AlertTriangle,
-  Download,
   Maximize2,
   Minus,
   Plus,
   RotateCcw,
   Sparkles,
-  Sprout,
-  Trash2,
-  Upload
+  Sprout
 } from "lucide-react";
 
 import { ApiError } from "./api/client";
@@ -24,8 +21,10 @@ import {
 } from "./api/hooks";
 import { Button } from "./components/ui/Button";
 import { TreeCanvas, type TreeCanvasHandle } from "./components/canvas/TreeCanvas";
+import { TreeMenu } from "./components/layout/TreeMenu";
 import { CreateTreeModal } from "./components/modals/CreateTreeModal";
 import { DeleteTreeModal } from "./components/modals/DeleteTreeModal";
+import { RenameTreeModal } from "./components/modals/RenameTreeModal";
 import { ToastStack } from "./components/ui/ToastStack";
 import { useTreeStore } from "./stores/treeStore";
 import { useUiStore } from "./stores/uiStore";
@@ -138,68 +137,35 @@ export default function App(): JSX.Element {
   return (
     <ReactFlowProvider>
       <div className="flex min-h-screen flex-col bg-surface-base text-slate-900">
-        <header className="border-b border-slate-200 bg-surface-raised/90 px-6 py-3 shadow-floating backdrop-blur">
+        <header className="relative z-30 border-b border-slate-200 bg-surface-raised/90 px-6 py-3 shadow-floating backdrop-blur">
           <div className="flex items-center gap-4">
-            <div className="flex min-w-0 flex-col">
-              <h1 className="truncate text-title font-semibold text-slate-900">
-                {treeName}
-              </h1>
-              <span className="truncate text-xs text-slate-500">
-                {activeTreeId ? `Tree ${activeTreeId}` : "No tree selected"}
-              </span>
-            </div>
-
-            <div className="ml-auto flex items-center gap-2">
-              <Button
-                variant="primary"
-                size="sm"
-                leftIcon={<Plus />}
-                onClick={() => openModal("createTree")}
-              >
-                New tree
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                leftIcon={<Download />}
-                onClick={download}
-                isLoading={isDownloading}
-              >
-                Download
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                leftIcon={<Upload />}
-                isLoading={isImporting}
-                onClick={() => importInputRef.current?.click()}
-              >
-                Import
-              </Button>
-              <input
-                ref={importInputRef}
-                type="file"
-                accept="application/json"
-                className="hidden"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) {
-                    importFromFile(file);
-                  }
-                  event.target.value = "";
-                }}
-                aria-label="Import tree"
-              />
-              <Button
-                variant="danger"
-                size="sm"
-                leftIcon={<Trash2 />}
-                onClick={() => openModal("deleteTree")}
-                disabled={!activeTreeId}
-              >
-                Delete
-              </Button>
-            </div>
+            <TreeMenu
+              treeName={treeName}
+              activeTreeId={activeTreeId}
+              trees={trees}
+              isDownloading={isDownloading}
+              isImporting={isImporting}
+              onCreateTree={() => openModal("createTree")}
+              onRenameTree={() => openModal("renameTree")}
+              onDownload={download}
+              onImportClick={() => importInputRef.current?.click()}
+              onDeleteTree={() => openModal("deleteTree")}
+              onSwitchTree={(treeId) => setSelectedTreeId(treeId)}
+            />
+            <input
+              ref={importInputRef}
+              type="file"
+              accept="application/json"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) {
+                  importFromFile(file);
+                }
+                event.target.value = "";
+              }}
+              aria-label="Import tree"
+            />
           </div>
         </header>
 
@@ -241,6 +207,7 @@ export default function App(): JSX.Element {
 
       <ToastStack />
       <CreateTreeModal onCreated={handleTreeCreated} />
+      <RenameTreeModal />
       <DeleteTreeModal trees={trees} onDeleted={handleTreeDeleted} />
     </ReactFlowProvider>
   );
