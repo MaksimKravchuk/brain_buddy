@@ -109,3 +109,98 @@ def test_get_tree_ignores_unknown_persisted_fields(tree_service) -> None:
     assert "incoming_count" not in dump["nodes"][0]
     assert "legacy_blob" not in dump["nodes"][0]
     assert "legacy_flag" not in dump
+
+
+def _persist_legacy_node(
+    tree_service, tree_id: str, extra: dict[str, object]
+) -> None:
+    """Append a node with the given ``extra`` payload to the stored tree."""
+
+    tree_path = tree_service.tree_repo.tree_path(tree_id)
+    payload = json.loads(tree_path.read_text(encoding="utf-8"))
+    payload["nodes"].append(
+        {
+            "id": "node_legacy",
+            "label": "Legacy Node",
+            "position": {"x": 0, "y": 0},
+            "metadata": {
+                "created_at": "2024-01-01T00:00:00Z",
+                "updated_at": "2024-01-01T00:00:00Z",
+                "author": None,
+            },
+            "extra": extra,
+        }
+    )
+    tree_path.write_text(json.dumps(payload), encoding="utf-8")
+    tree_service._cache.clear()
+
+
+def test_node_to_response_coerces_legacy_extra_values(tree_service) -> None:
+    tree = tree_service.create_tree(TreeCreateRequest(name="Legacy Extra"))
+    _persist_legacy_node(
+        tree_service,
+        tree.id,
+        {"type": "root", "highlight_state": "caused"},
+    )
+
+    loaded = tree_service.get_tree(tree.id)
+    response = tree_service.node_to_response(loaded, "node_legacy")
+
+    assert response.type == "child"
+    assert response.highlight_state == "none"
+
+
+def test_node_to_response_preserves_valid_extra_values(tree_service) -> None:
+    tree = tree_service.create_tree(TreeCreateRequest(name="Valid Extra"))
+    _persist_legacy_node(
+        tree_service,
+        tree.id,
+        {"type": "parent", "highlight_state": "cause_candidate"},
+    )
+
+    loaded = tree_service.get_tree(tree.id)
+    response = tree_service.node_to_response(loaded, "node_legacy")
+
+    assert response.type == "parent"
+    assert response.highlight_state == "cause_candidate"
+
+
+def test_node_to_response_logs_when_coercing(tree_service, caplog) -> None:
+    tree = tree_service.create_tree(TreeCreateRequest(name="Legacy Logged"))
+    _persist_legacy_node(
+        tree_service,
+        tree.id,
+        {"type": "root", "highlight_state": "caused"},
+    )
+
+    loaded = tree_service.get_tree(tree.id)
+
+    with caplog.at_level("WARNING", logger="app.services.tree_service"):
+        tree_service.node_to_response(loaded, "node_legacy")
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("invalid extra.type" in message for message in messages)
+    assert any("invalid extra.highlight_state" in message for message in messages)
+
+
+def test_node_to_response_handles_non_dict_extra(tree_service, caplog) -> None:
+    tree = tree_service.create_tree(TreeCreateRequest(name="Non Dict Extra"))
+    _persist_legacy_node(
+        tree_service,
+        tree.id,
+        {"type": "child", "highlight_state": "none"},
+    )
+
+    loaded = tree_service.get_tree(tree.id)
+    # Bypass pydantic's dict-typed ``extra`` field: simulate an in-memory
+    # document whose ``extra`` was corrupted into a non-dict shape.
+    legacy_node = next(node for node in loaded.nodes if node.id == "node_legacy")
+    legacy_node.extra = ["not", "a", "dict"]  # type: ignore[assignment]
+
+    with caplog.at_level("WARNING", logger="app.services.tree_service"):
+        response = tree_service.node_to_response(loaded, "node_legacy")
+
+    assert response.type == "child"
+    assert response.highlight_state == "none"
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("non-dict extra" in message for message in messages)

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from collections import OrderedDict
 from collections import OrderedDict as OrderedDictType
 from collections.abc import Iterable
 from datetime import datetime
+from typing import Any
 
 from app.exceptions import NotFoundError, ValidationFailure
 from app.repositories import IndexRepository, TreeRepository
@@ -37,6 +39,8 @@ from app.utils.identifiers import (
     generate_tree_id,
 )
 from app.utils.time import utcnow
+
+logger = logging.getLogger(__name__)
 
 
 class TreeService:
@@ -361,16 +365,64 @@ class TreeService:
         down_count = sum(1 for relation in relations if relation.target_id == node_id)
         return up_count, down_count
 
+    _VALID_NODE_TYPES = frozenset({"parent", "child"})
+    _VALID_HIGHLIGHT_STATES = frozenset(
+        {"none", "cause_candidate", "effect_spanning"}
+    )
+
     def node_to_response(self, tree: TreeDocument, node_id: str) -> NodeResponse:
         node = next(node for node in tree.nodes if node.id == node_id)
         counts = self._relation_counts(tree.relations, node_id)
-        extra = node.extra or {}
+
+        # Legacy tree documents may carry pre-refactor enum values in
+        # node.extra (e.g. {"type": "root"} or {"highlight_state": "caused"}).
+        # Coerce unknowns to safe defaults and log WARNINGs so data-integrity
+        # issues surface in logs/Sentry instead of being silently masked.
+        if isinstance(node.extra, dict):
+            extra: dict[str, Any] = node.extra
+        else:
+            if node.extra is not None:
+                logger.warning(
+                    "Node %s in tree %s has non-dict extra (%s); "
+                    "treating as empty.",
+                    node.id,
+                    tree.id,
+                    type(node.extra).__name__,
+                )
+            extra = {}
+
+        raw_type = extra.get("type", "child")
+        if raw_type in self._VALID_NODE_TYPES:
+            node_type = raw_type
+        else:
+            logger.warning(
+                "Node %s in tree %s has invalid extra.type=%r; "
+                "coercing to 'child'.",
+                node.id,
+                tree.id,
+                raw_type,
+            )
+            node_type = "child"
+
+        raw_highlight = extra.get("highlight_state", "none")
+        if raw_highlight in self._VALID_HIGHLIGHT_STATES:
+            highlight_state = raw_highlight
+        else:
+            logger.warning(
+                "Node %s in tree %s has invalid extra.highlight_state=%r; "
+                "coercing to 'none'.",
+                node.id,
+                tree.id,
+                raw_highlight,
+            )
+            highlight_state = "none"
+
         return NodeResponse(
             id=node.id,
             label=node.label,
-            type=extra.get("type", "child"),
+            type=node_type,
             position=node.position,
-            highlight_state=extra.get("highlight_state", "none"),
+            highlight_state=highlight_state,
             relation_counts=RelationCounts(up_count=counts[0], down_count=counts[1]),
         )
 

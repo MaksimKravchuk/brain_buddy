@@ -59,8 +59,8 @@ export function CreateNodeButton({ onCreate, disabled }: CreateNodeButtonProps):
           disabled={disabled}
           onClick={handleSubmit}
           className={twMerge(
-            buttonVariants({ intent: "primary" }),
-            "shrink-0 px-4",
+            buttonVariants({ variant: "primary", size: "sm" }),
+            "shrink-0",
             activeAccent,
             disabled ? "cursor-not-allowed opacity-70" : ""
           )}
