@@ -16,7 +16,7 @@ export interface Toast {
   };
 }
 
-type ModalKey = "createTree" | "deleteTree" | "manageVersions";
+type ModalKey = "createTree" | "renameTree" | "deleteTree" | "manageVersions";
 type InspectorTab = "node" | "relation" | "versions";
 
 type ToastPayload = Omit<Toast, "id" | "createdAt" | "duration" | "dismissing"> & {
@@ -62,6 +62,7 @@ export const useUiStore = create<UiStoreState>((set, get) => ({
   inspectorTab: "node",
   modals: {
     createTree: false,
+    renameTree: false,
     deleteTree: false,
     manageVersions: false
   },
