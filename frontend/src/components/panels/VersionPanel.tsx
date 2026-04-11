@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Download, History, RotateCcw, Save, Trash2 } from "lucide-react";
 import { twMerge } from "tailwind-merge";
 
 import { useCreateVersion, useDeleteVersion, useExportTree, useRestoreVersion } from "../../api/hooks";
@@ -7,6 +8,8 @@ import { useDelayedUnmount } from "../../hooks/useDelayedUnmount";
 import { mapVersionResponse, useTreeStore, type GraphVersion } from "../../stores/treeStore";
 import { useUiStore } from "../../stores/uiStore";
 import { getErrorMessage } from "../../utils/error";
+import { Button } from "../ui/Button";
+import { InspectorPlaceholder } from "./InspectorPlaceholder";
 
 interface ConfirmState {
   action: "restore" | "delete";
@@ -42,9 +45,7 @@ export function VersionPanel(): JSX.Element {
 
   if (!isReady || !metadata) {
     return (
-      <div className="rounded-lg border border-dashed border-slate-200 bg-surface-sunken/40 p-4 text-sm text-slate-500">
-        Select a tree to manage versions.
-      </div>
+      <InspectorPlaceholder icon={History} message="Select a tree to manage versions." />
     );
   }
 
@@ -212,27 +213,28 @@ export function VersionPanel(): JSX.Element {
 
   return (
     <>
-      <div className="space-y-4">
-        <div className="rounded-lg border border-slate-200 bg-surface-sunken/60 p-3 text-xs text-slate-500">
+      <div className="space-y-4 animate-fade-in">
+        <div className="rounded-xl border border-slate-200 bg-surface-sunken/60 p-3 text-xs text-slate-500">
           <p className="font-semibold text-slate-800">{metadata.name}</p>
           <p className="mt-1">Last updated {new Date(metadata.updatedAt).toLocaleString()}</p>
         </div>
 
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-surface-sunken/60 p-3 text-xs text-slate-600">
-          <div>
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-surface-sunken/60 p-3 text-xs text-slate-600">
+          <div className="min-w-0">
             <p className="text-sm font-semibold text-slate-800">Export current state</p>
             <p className="mt-1 text-[11px] text-slate-500">
               Download a JSON export of the live canvas or any stored snapshot.
             </p>
           </div>
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
+            leftIcon={<Download />}
             onClick={() => handleExport()}
-            className="rounded-md border border-brand-primary/60 px-3 py-2 text-xs font-semibold text-brand-primary transition hover:border-brand-primary hover:bg-brand-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={exportTreeMutation.isPending}
+            isLoading={exportTreeMutation.isPending}
           >
-            {exportTreeMutation.isPending ? "Preparing…" : "Export current"}
-          </button>
+            Export
+          </Button>
         </div>
 
         <div className="space-y-2">
@@ -244,7 +246,7 @@ export function VersionPanel(): JSX.Element {
             value={label}
             onChange={(event) => setLabel(event.target.value)}
             placeholder="e.g. Pre-interview notes"
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-soft transition-colors duration-200 ease-smooth focus:border-brand-primary focus:outline-none"
           />
 
           <div className="grid gap-2 sm:grid-cols-2">
@@ -257,7 +259,7 @@ export function VersionPanel(): JSX.Element {
                 value={author}
                 onChange={(event) => setAuthor(event.target.value)}
                 placeholder="e.g. Taylor"
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-soft transition-colors duration-200 ease-smooth focus:border-brand-primary focus:outline-none"
               />
             </div>
             <div className="space-y-2">
@@ -269,32 +271,35 @@ export function VersionPanel(): JSX.Element {
                 value={notes}
                 onChange={(event) => setNotes(event.target.value)}
                 placeholder="Why are you capturing this snapshot?"
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-soft transition-colors duration-200 ease-smooth focus:border-brand-primary focus:outline-none"
               />
             </div>
           </div>
 
-          <button
-            type="button"
+          <Button
+            variant="primary"
+            size="md"
+            leftIcon={<Save />}
             onClick={handleCreate}
-            className="w-full rounded-md bg-brand-secondary/80 px-3 py-2 text-sm font-semibold text-slate-950 transition hover:bg-brand-secondary disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={createVersionMutation.isPending}
+            isLoading={createVersionMutation.isPending}
+            className="w-full"
           >
-            {createVersionMutation.isPending ? "Capturing…" : "Capture snapshot"}
-          </button>
+            Capture snapshot
+          </Button>
         </div>
 
         <ul className="space-y-3">
           {sortedVersions.length === 0 ? (
-            <li className="rounded-lg border border-dashed border-slate-200 bg-surface-sunken/40 p-3 text-sm text-slate-500">
+            <li className="flex items-center gap-3 rounded-xl border border-dashed border-slate-200 bg-surface-sunken/40 p-3 text-sm text-slate-500">
+              <History className="h-4 w-4 text-slate-400" />
               No versions captured yet.
             </li>
           ) : (
             sortedVersions.map((version) => (
-              <li key={version.id} className="rounded-lg border border-slate-200 bg-surface-sunken/60 p-3">
+              <li key={version.id} className="rounded-xl border border-slate-200 bg-surface-sunken/60 p-3">
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-800">{version.label}</p>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-slate-800">{version.label}</p>
                     <p className="text-xs text-slate-500">
                       {new Date(version.createdAt).toLocaleString()}
                       {version.author ? <span className="ml-2 text-slate-500">• {version.author}</span> : null}
@@ -304,28 +309,31 @@ export function VersionPanel(): JSX.Element {
                     ) : null}
                   </div>
                   <div className="flex flex-wrap justify-end gap-2">
-                    <button
-                      type="button"
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      leftIcon={<Download />}
                       onClick={() => handleExport()}
-                      className="rounded-md border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-400 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={exportTreeMutation.isPending}
+                      isLoading={exportTreeMutation.isPending}
                     >
-                      {exportTreeMutation.isPending ? "Exporting…" : "Export"}
-                    </button>
-                    <button
-                      type="button"
+                      Export
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      leftIcon={<RotateCcw />}
                       onClick={() => setConfirmState({ action: "restore", version })}
-                      className="rounded-md border border-brand-primary/50 px-3 py-1 text-xs font-semibold text-brand-primary transition hover:border-brand-primary hover:bg-brand-primary/10"
                     >
                       Restore
-                    </button>
-                    <button
-                      type="button"
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      leftIcon={<Trash2 />}
                       onClick={() => setConfirmState({ action: "delete", version })}
-                      className="rounded-md border border-red-200 px-3 py-1 text-xs font-semibold text-red-700 transition hover:border-red-300 hover:text-red-800"
                     >
                       Delete
-                    </button>
+                    </Button>
                   </div>
                 </div>
 
@@ -418,45 +426,52 @@ function ConfirmDialog({ state, onConfirm, onCancel, isLoading, isAnimatingOut }
   return (
     <div
       className={twMerge(
-        "fixed inset-0 z-50 flex items-center justify-center backdrop-blur transition-all duration-200",
+        "fixed inset-0 z-50 flex items-center justify-center backdrop-blur transition-all duration-200 ease-smooth",
         isAnimatingOut ? "bg-transparent opacity-0" : "bg-surface-base/80 opacity-100"
       )}
     >
       <div
         className={twMerge(
-          "w-full max-w-sm space-y-4 rounded-2xl border border-slate-200 bg-white/90 p-5 shadow-xl transition-all duration-200",
+          "w-full max-w-sm space-y-4 rounded-2xl border border-slate-200 bg-white/95 p-5 shadow-floating transition-all duration-200 ease-smooth",
           isAnimatingOut ? "scale-95 opacity-0" : "animate-scale-fade-in"
         )}
       >
-        <header className="space-y-1">
-          <h3 className="text-base font-semibold text-slate-900">{title}</h3>
-          <p className="text-sm text-slate-600">
-            {baseDescription}
-            {conflictNotice}
-          </p>
+        <header className="flex items-start gap-3">
+          <div
+            className={twMerge(
+              "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl",
+              isRestore ? "bg-brand-primary/10 text-brand-primary" : "bg-rose-100 text-rose-600"
+            )}
+          >
+            {isRestore ? <RotateCcw className="h-5 w-5" /> : <Trash2 className="h-5 w-5" />}
+          </div>
+          <div className="flex-1 space-y-1">
+            <h3 className="text-title font-semibold text-slate-900">{title}</h3>
+            <p className="text-sm text-slate-600">
+              {baseDescription}
+              {conflictNotice}
+            </p>
+          </div>
         </header>
 
         <div className="flex items-center justify-end gap-2">
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="md"
             onClick={onCancel}
-            className="rounded-md border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             disabled={isLoading}
           >
             Cancel
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant={isRestore ? "primary" : "danger"}
+            size="md"
+            leftIcon={isRestore ? <RotateCcw /> : <Trash2 />}
             onClick={onConfirm}
-            className={`rounded-md px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-              isRestore
-                ? "bg-brand-primary/90 text-white hover:bg-brand-primary"
-                : "bg-red-500/90 text-white hover:bg-red-500"
-            }`}
-            disabled={isLoading}
+            isLoading={isLoading}
           >
-            {isLoading ? "Working…" : isRestore ? "Restore" : "Delete"}
-          </button>
+            {isRestore ? "Restore" : "Delete"}
+          </Button>
         </div>
       </div>
     </div>
