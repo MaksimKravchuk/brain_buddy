@@ -1,4 +1,6 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { createRef } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { Button } from "../Button";
@@ -53,5 +55,47 @@ describe("Button", () => {
   it("is disabled when the disabled prop is true", () => {
     render(<Button disabled>Disabled</Button>);
     expect(screen.getByRole("button", { name: "Disabled" })).toBeDisabled();
+  });
+
+  it("calls onClick when enabled", async () => {
+    const onClick = vi.fn();
+    render(<Button onClick={onClick}>Go</Button>);
+    await userEvent.click(screen.getByRole("button", { name: "Go" }));
+    expect(onClick).toHaveBeenCalledOnce();
+  });
+
+  it("defaults to type='button' (never accidentally submits forms)", () => {
+    render(<Button>Default type</Button>);
+    expect(screen.getByRole("button")).toHaveAttribute("type", "button");
+  });
+
+  it("renders the right icon when provided and not loading", () => {
+    render(<Button rightIcon={<svg data-testid="right-icon" />}>Next</Button>);
+    expect(screen.getByTestId("right-icon")).toBeInTheDocument();
+  });
+
+  it("hides the right icon while loading", () => {
+    render(
+      <Button rightIcon={<svg data-testid="right-icon" />} isLoading>
+        Next
+      </Button>
+    );
+    expect(screen.queryByTestId("right-icon")).not.toBeInTheDocument();
+  });
+
+  it("forwards refs to the underlying button element", () => {
+    const ref = createRef<HTMLButtonElement>();
+    render(<Button ref={ref}>Ref</Button>);
+    expect(ref.current).toBeInstanceOf(HTMLButtonElement);
+  });
+
+  it("applies icon variant sizing", () => {
+    render(
+      <Button variant="icon" aria-label="Close">
+        <svg />
+      </Button>
+    );
+    const button = screen.getByRole("button", { name: "Close" });
+    expect(button.className).toMatch(/h-\d|w-\d/);
   });
 });
