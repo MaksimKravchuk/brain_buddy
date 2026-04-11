@@ -54,9 +54,11 @@ export function NodeInspector(): JSX.Element {
 
   const isSignedIn = useMemo(() => hasApiKey(), []);
 
-  // Hooks must run in a stable order, so we always call them even when the
-  // component renders a placeholder. Mutations against an empty tree id never
-  // fire (the inspector only surfaces action buttons once a node is selected).
+  // Hooks must run in a stable order, so we call them above the early returns
+  // even when the component will render a placeholder. Mutations here are
+  // gated by user action (buttons only appear once a node is selected), and
+  // `useValidationHistory` is a `useQuery` gated internally by `nodeId`, so an
+  // empty `safeTreeId` is only reached in states that never issue a request.
   const safeTreeId = activeTreeId ?? "";
   const updateNodeMutation = useUpdateNode(safeTreeId);
   const deleteNodeMutation = useDeleteNode(safeTreeId);
@@ -229,7 +231,7 @@ export function NodeInspector(): JSX.Element {
       pushToast({
         title: "Sign in required",
         description: "Add your API key to request AI feedback.",
-        variant: "warning",
+        variant: "error",
         duration: 5000
       });
       return;
@@ -239,7 +241,7 @@ export function NodeInspector(): JSX.Element {
       pushToast({
         title: "Consent required",
         description: "Confirm consent before sending your tree to the AI provider.",
-        variant: "warning",
+        variant: "error",
         duration: 4500
       });
       return;
@@ -255,6 +257,14 @@ export function NodeInspector(): JSX.Element {
             description: result.summary ?? "Summary available",
             variant: "success",
             duration: 4000
+          });
+        },
+        onError: (error) => {
+          pushToast({
+            title: "AI feedback failed",
+            description: getErrorMessage(error),
+            variant: "error",
+            duration: 6000
           });
         }
       }
