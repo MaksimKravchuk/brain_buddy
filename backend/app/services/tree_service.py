@@ -361,16 +361,29 @@ class TreeService:
         down_count = sum(1 for relation in relations if relation.target_id == node_id)
         return up_count, down_count
 
+    _VALID_NODE_TYPES = frozenset({"parent", "child"})
+    _VALID_HIGHLIGHT_STATES = frozenset(
+        {"none", "cause_candidate", "effect_spanning"}
+    )
+
     def node_to_response(self, tree: TreeDocument, node_id: str) -> NodeResponse:
         node = next(node for node in tree.nodes if node.id == node_id)
         counts = self._relation_counts(tree.relations, node_id)
         extra = node.extra or {}
+        raw_type = extra.get("type", "child")
+        node_type = raw_type if raw_type in self._VALID_NODE_TYPES else "child"
+        raw_highlight = extra.get("highlight_state", "none")
+        highlight_state = (
+            raw_highlight
+            if raw_highlight in self._VALID_HIGHLIGHT_STATES
+            else "none"
+        )
         return NodeResponse(
             id=node.id,
             label=node.label,
-            type=extra.get("type", "child"),
+            type=node_type,
             position=node.position,
-            highlight_state=extra.get("highlight_state", "none"),
+            highlight_state=highlight_state,
             relation_counts=RelationCounts(up_count=counts[0], down_count=counts[1]),
         )
 
