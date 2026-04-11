@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { Trash2 } from "lucide-react";
 import { twMerge } from "tailwind-merge";
 
 import { useDeleteTree } from "../../api/hooks";
@@ -7,6 +8,7 @@ import { useDelayedUnmount } from "../../hooks/useDelayedUnmount";
 import { useTreeStore } from "../../stores/treeStore";
 import { useUiStore } from "../../stores/uiStore";
 import { getErrorMessage } from "../../utils/error";
+import { Button } from "../ui/Button";
 
 interface DeleteTreeModalProps {
   trees: TreeListItem[] | undefined;
@@ -59,16 +61,21 @@ export function DeleteTreeModal({ trees, onDeleted }: DeleteTreeModalProps): JSX
     >
       <div
         className={twMerge(
-          "w-full max-w-md space-y-4 rounded-2xl border border-slate-200 bg-white/90 p-6 shadow-xl transition-all duration-200",
+          "w-full max-w-md space-y-5 rounded-2xl border border-slate-200 bg-white/95 p-6 shadow-floating transition-all duration-200 ease-smooth",
           isAnimatingOut ? "scale-95 opacity-0" : "animate-scale-fade-in"
         )}
       >
-        <header className="space-y-1">
-          <h2 className="text-lg font-semibold text-slate-900">Delete tree</h2>
-          <p className="text-sm text-slate-600">
-            This will permanently delete “{activeTree.name}” including its nodes, relations, and versions. This action
-            cannot be undone.
-          </p>
+        <header className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-100 text-rose-600">
+            <Trash2 className="h-5 w-5" />
+          </div>
+          <div className="flex-1 space-y-1">
+            <h2 className="text-title font-semibold text-slate-900">Delete tree</h2>
+            <p className="text-sm text-slate-600">
+              This will permanently delete “{activeTree.name}” including its nodes,
+              relations, and versions. This action cannot be undone.
+            </p>
+          </div>
         </header>
 
         <div className="rounded-lg border border-amber-200 bg-amber-50/80 p-3 text-xs text-amber-800">
@@ -76,22 +83,23 @@ export function DeleteTreeModal({ trees, onDeleted }: DeleteTreeModalProps): JSX
         </div>
 
         <div className="flex items-center justify-end gap-2">
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="md"
             onClick={() => closeModal("deleteTree")}
-            className="rounded-md border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
             disabled={deleteTree.isPending}
           >
             Cancel
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="danger"
+            size="md"
             onClick={handleConfirm}
-            className="rounded-md bg-rose-500/90 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={deleteTree.isPending}
+            isLoading={deleteTree.isPending}
+            leftIcon={<Trash2 />}
           >
-            {deleteTree.isPending ? "Deleting…" : "Delete"}
-          </button>
+            Delete
+          </Button>
         </div>
       </div>
     </div>

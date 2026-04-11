@@ -12,8 +12,20 @@ export function InspectorTabs(): JSX.Element {
   const setInspectorTab = useUiStore((state) => state.setInspectorTab);
   const selection = useTreeStore((state) => state.selection);
 
+  const activeIndex = tabs.findIndex((tab) => tab.id === inspectorTab);
+  const indicatorWidth = 100 / tabs.length;
+  const indicatorLeft = activeIndex * indicatorWidth;
+
   return (
-    <div className="flex rounded-full border border-slate-200 bg-surface-sunken/80 p-1 text-xs shadow-sm">
+    <div className="relative flex rounded-full border border-slate-200 bg-surface-sunken/80 p-1 text-xs shadow-soft">
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-y-1 rounded-full bg-white shadow-soft transition-[left,width] duration-300 ease-smooth"
+        style={{
+          left: `calc(${indicatorLeft}% + 4px)`,
+          width: `calc(${indicatorWidth}% - 8px)`
+        }}
+      />
       {tabs.map((tab) => {
         const isActive = inspectorTab === tab.id;
         const isDisabled =
@@ -26,9 +38,9 @@ export function InspectorTabs(): JSX.Element {
             type="button"
             disabled={tab.id === "versions" ? false : isDisabled}
             onClick={() => setInspectorTab(tab.id)}
-            className={`flex-1 rounded-full px-3 py-1 font-medium transition ${
-              isActive ? "bg-brand-primary/20 text-slate-900" : "text-slate-600"
-            } ${isDisabled && tab.id !== "versions" ? "cursor-not-allowed opacity-40" : ""}`}
+            className={`relative z-10 flex-1 rounded-full px-3 py-1.5 font-medium transition-colors duration-200 ease-smooth ${
+              isActive ? "text-slate-900" : "text-slate-500 hover:text-slate-700"
+            } ${isDisabled && tab.id !== "versions" ? "cursor-not-allowed opacity-40 hover:text-slate-500" : ""}`}
           >
             {tab.label}
           </button>

@@ -1,12 +1,27 @@
-import { useLayoutEffect, useMemo, useState } from "react";
-import { twMerge } from "tailwind-merge";
+import { useLayoutEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  Highlighter,
+  Layers,
+  ShieldCheck,
+  Sparkles,
+  Tag,
+  Trash2
+} from "lucide-react";
 
 import { hasApiKey } from "../../api/client";
-import { useAiFeedback, useDeleteNode, useUpdateNode, useValidation, useValidationHistory } from "../../api/hooks";
+import {
+  useAiFeedback,
+  useDeleteNode,
+  useUpdateNode,
+  useValidation,
+  useValidationHistory
+} from "../../api/hooks";
 import type { AiFeedbackResponse, ValidationResponse } from "../../api/types";
 import { useTreeStore } from "../../stores/treeStore";
 import { useUiStore } from "../../stores/uiStore";
 import { getErrorMessage } from "../../utils/error";
+import { Button } from "../ui/Button";
+import { InspectorPlaceholder } from "./InspectorPlaceholder";
 
 export function NodeInspector(): JSX.Element {
   const activeTreeId = useTreeStore((state) => state.activeTreeId);
@@ -39,6 +54,16 @@ export function NodeInspector(): JSX.Element {
 
   const isSignedIn = useMemo(() => hasApiKey(), []);
 
+  // Hooks must run in a stable order, so we always call them even when the
+  // component renders a placeholder. Mutations against an empty tree id never
+  // fire (the inspector only surfaces action buttons once a node is selected).
+  const safeTreeId = activeTreeId ?? "";
+  const updateNodeMutation = useUpdateNode(safeTreeId);
+  const deleteNodeMutation = useDeleteNode(safeTreeId);
+  const validationMutation = useValidation(safeTreeId);
+  const historyQuery = useValidationHistory(safeTreeId, node?.id ?? null);
+  const aiFeedbackMutation = useAiFeedback(safeTreeId);
+
   if (!activeTreeId) {
     return <InspectorPlaceholder message="Select a tree to inspect nodes." />;
   }
@@ -46,12 +71,6 @@ export function NodeInspector(): JSX.Element {
   if (!node) {
     return <InspectorPlaceholder message="Select a node on the canvas to view its details." />;
   }
-
-  const updateNodeMutation = useUpdateNode(activeTreeId);
-  const deleteNodeMutation = useDeleteNode(activeTreeId);
-  const validationMutation = useValidation(activeTreeId);
-  const historyQuery = useValidationHistory(activeTreeId, node.id);
-  const aiFeedbackMutation = useAiFeedback(activeTreeId);
 
   const handleLabelSubmit = () => {
     const trimmed = label.trim();
@@ -243,11 +262,11 @@ export function NodeInspector(): JSX.Element {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-2">
-        <label htmlFor="node-label" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-          Node Label
-        </label>
+    <div className="space-y-5 animate-fade-in">
+      <section className="space-y-2">
+        <SectionLabel icon={Tag} htmlFor="node-label">
+          Node label
+        </SectionLabel>
         <input
           id="node-label"
           value={label}
@@ -259,61 +278,69 @@ export function NodeInspector(): JSX.Element {
               handleLabelSubmit();
             }
           }}
-          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
+          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-soft transition-colors duration-200 ease-smooth focus:border-brand-primary focus:outline-none"
         />
         <p className="text-xs text-slate-500">
-          Incoming relations: <strong>{node.relationCounts.up}</strong>, Outgoing relations: <strong>{node.relationCounts.down}</strong>
+          Incoming: <strong className="text-slate-700">{node.relationCounts.up}</strong>
+          {" · "}
+          Outgoing: <strong className="text-slate-700">{node.relationCounts.down}</strong>
         </p>
-      </div>
+      </section>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <div className="space-y-2 rounded-lg border border-slate-200 bg-surface-sunken/60 p-3">
-          <label htmlFor="node-type" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Node Type
-          </label>
+        <section className="space-y-2 rounded-xl border border-slate-200 bg-surface-sunken/60 p-3">
+          <SectionLabel icon={Layers} htmlFor="node-type">
+            Type
+          </SectionLabel>
           <select
             id="node-type"
             value={nodeType}
             onChange={(event) => handleTypeChange(event.target.value as typeof nodeType)}
-            className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
+            className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-soft transition-colors duration-200 ease-smooth focus:border-brand-primary focus:outline-none"
           >
             <option value="parent">Parent</option>
             <option value="child">Child</option>
           </select>
-        </div>
+        </section>
 
-        <div className="space-y-2 rounded-lg border border-slate-200 bg-surface-sunken/60 p-3">
-          <label htmlFor="node-highlight" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Highlight State
-          </label>
+        <section className="space-y-2 rounded-xl border border-slate-200 bg-surface-sunken/60 p-3">
+          <SectionLabel icon={Highlighter} htmlFor="node-highlight">
+            Highlight
+          </SectionLabel>
           <select
             id="node-highlight"
             value={highlightState}
-            onChange={(event) => handleHighlightChange(event.target.value as typeof highlightState)}
-            className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
+            onChange={(event) =>
+              handleHighlightChange(event.target.value as typeof highlightState)
+            }
+            className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-soft transition-colors duration-200 ease-smooth focus:border-brand-primary focus:outline-none"
           >
             <option value="none">None</option>
             <option value="cause_candidate">Cause candidate</option>
             <option value="effect_spanning">Effect spanning</option>
           </select>
-        </div>
+        </section>
       </div>
 
-      <div className="space-y-2 rounded-lg border border-slate-200 bg-surface-sunken/60 p-3">
-        <span className="text-sm font-medium text-slate-700">Validation</span>
-        <p className="text-xs text-slate-500">Run validation against the selected provider and review history.</p>
-        <div className="flex items-center gap-2 pt-2">
-          <button
-            type="button"
+      <section className="space-y-3 rounded-xl border border-slate-200 bg-surface-sunken/60 p-3">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <SectionLabel icon={ShieldCheck}>Validation</SectionLabel>
+            <p className="mt-1 text-xs text-slate-500">
+              Run validation against the selected provider and review history.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="primary"
+            size="sm"
+            leftIcon={<ShieldCheck />}
             onClick={handleTriggerValidation}
-            disabled={validationMutation.isPending}
-            className={twMerge(
-              "rounded-md bg-brand-primary/90 px-3 py-2 text-xs font-semibold text-slate-950 transition",
-              validationMutation.isPending ? "pointer-events-none opacity-70" : "hover:bg-brand-primary"
-            )}
+            isLoading={validationMutation.isPending}
           >
-            {validationMutation.isPending ? "Running…" : "Run Validation"}
-          </button>
+            Run validation
+          </Button>
           <span className="text-[11px] text-slate-500">
             Uses the mock provider when none configured.
           </span>
@@ -323,15 +350,23 @@ export function NodeInspector(): JSX.Element {
           items={historyQuery.data?.items ?? []}
           refetch={historyQuery.refetch}
         />
-      </div>
+      </section>
 
-      <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
-        <div className="flex items-center justify-between gap-3">
+      <section className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/80 p-3">
+        <div className="flex items-start justify-between gap-3">
           <div>
-            <span className="text-sm font-semibold text-emerald-800">AI Feedback</span>
-            <p className="text-xs text-emerald-700/80">Request a quick summary and recommendations.</p>
+            <SectionLabel icon={Sparkles} tone="emerald">
+              AI feedback
+            </SectionLabel>
+            <p className="mt-1 text-xs text-emerald-700/80">
+              Request a quick summary and recommendations.
+            </p>
           </div>
-          {!isSignedIn && <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-semibold text-amber-700">Requires API key</span>}
+          {!isSignedIn && (
+            <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-semibold text-amber-700">
+              Requires API key
+            </span>
+          )}
         </div>
 
         <label className="flex cursor-pointer items-start gap-2 text-xs text-emerald-800">
@@ -339,31 +374,34 @@ export function NodeInspector(): JSX.Element {
             type="checkbox"
             checked={consent}
             onChange={(event) => setConsent(event.target.checked)}
-            className="mt-1 h-4 w-4 rounded border-emerald-300 bg-white text-emerald-500 focus:ring-emerald-300"
+            className="mt-0.5 h-4 w-4 rounded border-emerald-300 bg-white text-emerald-500 focus:ring-emerald-300"
           />
-          <span>I consent to send the current tree to the AI provider for analysis.</span>
+          <span>
+            I consent to send the current tree to the AI provider for analysis.
+          </span>
         </label>
 
-        <div className="flex items-center gap-2 pt-2">
-          <button
-            type="button"
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="primary"
+            size="sm"
+            leftIcon={<Sparkles />}
             onClick={handleAiFeedback}
-            disabled={!consent || aiFeedbackMutation.isPending}
-            className={twMerge(
-              "rounded-md bg-emerald-400/80 px-3 py-2 text-xs font-semibold text-emerald-950 transition",
-              (!consent || aiFeedbackMutation.isPending) && "pointer-events-none opacity-60",
-              aiFeedbackMutation.isPending ? "animate-pulse" : "hover:bg-emerald-400/90"
-            )}
+            disabled={!consent}
+            isLoading={aiFeedbackMutation.isPending}
+            className="bg-emerald-500 hover:bg-emerald-400"
           >
-            {aiFeedbackMutation.isPending ? "Requesting…" : "Request Feedback"}
-          </button>
+            Request feedback
+          </Button>
           {feedback?.status === "success" && (
-            <span className="text-[11px] text-emerald-700/80">{feedback.recommendations.length} tips ready</span>
+            <span className="text-[11px] text-emerald-700/80">
+              {feedback.recommendations.length} tips ready
+            </span>
           )}
         </div>
 
         {feedback && (
-          <div className="rounded-md border border-emerald-200 bg-white p-3 text-sm text-emerald-900">
+          <div className="rounded-md border border-emerald-200 bg-white p-3 text-sm text-emerald-900 animate-fade-in">
             {feedback.summary && <p className="text-emerald-900">{feedback.summary}</p>}
             {feedback.recommendations.length > 0 && (
               <ul className="mt-2 list-disc space-y-1 pl-5 text-emerald-800/90">
@@ -374,26 +412,45 @@ export function NodeInspector(): JSX.Element {
             )}
           </div>
         )}
-      </div>
+      </section>
 
-      <div className="flex gap-3">
-        <button
-          type="button"
+      <div className="pt-1">
+        <Button
+          variant="danger"
+          size="sm"
+          leftIcon={<Trash2 />}
           onClick={handleDelete}
-          className="flex-1 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 transition hover:border-red-300 hover:text-red-800"
+          className="w-full"
+          isLoading={deleteNodeMutation.isPending}
         >
-          Delete Node
-        </button>
+          Delete node
+        </Button>
       </div>
     </div>
   );
 }
 
-function InspectorPlaceholder({ message }: { message: string }): JSX.Element {
+function SectionLabel({
+  icon: Icon,
+  htmlFor,
+  tone = "slate",
+  children
+}: {
+  icon: typeof Tag;
+  htmlFor?: string;
+  tone?: "slate" | "emerald";
+  children: ReactNode;
+}): JSX.Element {
+  const toneClass =
+    tone === "emerald" ? "text-emerald-700" : "text-slate-500";
   return (
-    <div className="rounded-lg border border-dashed border-slate-200 bg-surface-sunken/40 p-4 text-sm text-slate-500">
-      {message}
-    </div>
+    <label
+      htmlFor={htmlFor}
+      className={`inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide ${toneClass}`}
+    >
+      <Icon className="h-3.5 w-3.5" />
+      {children}
+    </label>
   );
 }
 
