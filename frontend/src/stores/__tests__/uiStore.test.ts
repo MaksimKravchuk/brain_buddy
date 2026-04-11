@@ -8,6 +8,7 @@ const resetUiStore = () => {
     inspectorTab: "node",
     modals: {
       createTree: false,
+      renameTree: false,
       deleteTree: false,
       manageVersions: false
     },
