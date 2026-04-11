@@ -255,6 +255,10 @@ function clearAutosaveTimer() {
   }
 }
 
+export function buildTreeDetailFromStore(state: TreeStoreState): TreeDetailResponse | null {
+  return mapTreeDetail(state);
+}
+
 function mapTreeDetail(state: TreeStoreState): TreeDetailResponse | null {
   if (!state.activeTreeId || !state.metadata) {
     return null;

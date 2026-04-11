@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiClient, getOwnerId } from "./client";
+import { buildTreeDetailFromStore, useTreeStore } from "../stores/treeStore";
 import type {
   AiFeedbackRequest,
   AiFeedbackResponse,
@@ -99,6 +100,40 @@ export function useUpdateTree(treeId: string) {
     onSuccess: (tree) => {
       queryClient.invalidateQueries({ queryKey: treeKeys.list() });
       queryClient.setQueryData(treeKeys.detail(treeId), tree);
+    }
+  });
+}
+
+/**
+ * Renames the currently active tree. Rebuilds the full `TreeUpdateRequest`
+ * payload from the live tree store (the backend requires a complete tree on
+ * PUT). On success, it refreshes React Query caches and seeds the store with
+ * the server response so the header name updates immediately.
+ */
+export function useRenameTree(treeId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (newName: string) => {
+      if (!treeId) {
+        throw new Error("No active tree to rename");
+      }
+      const detail = buildTreeDetailFromStore(useTreeStore.getState());
+      if (!detail) {
+        throw new Error("Active tree is not loaded");
+      }
+      const payload: TreeUpdateRequest = {
+        name: newName,
+        metadata: detail.metadata,
+        nodes: detail.nodes,
+        relations: detail.relations,
+        owner_id: detail.owner_id ?? null
+      };
+      return apiClient.updateTree(treeId, payload);
+    },
+    onSuccess: (tree) => {
+      useTreeStore.getState().setTree(tree);
+      queryClient.setQueryData(treeKeys.detail(tree.id), tree);
+      queryClient.invalidateQueries({ queryKey: treeKeys.list() });
     }
   });
 }
