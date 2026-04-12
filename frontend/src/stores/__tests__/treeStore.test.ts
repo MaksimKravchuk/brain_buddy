@@ -1,5 +1,6 @@
 import { describe, expect, beforeEach, afterEach, it, vi } from "vitest";
 
+import { apiClient } from "../../api/client";
 import type { TreeDetailResponse } from "../../api/types";
 import { TREE_DRAFT_PREFIX, useTreeStore } from "../treeStore";
 
@@ -204,10 +205,13 @@ describe("treeStore", () => {
     if (typeof storage.clear === "function") {
       storage.clear();
     }
+    // Silence the cloud-sync path: tests exercise local autosave only.
+    vi.spyOn(apiClient, "updateTree").mockResolvedValue(sampleTree);
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it("hydrates tree metadata and nodes from API response", () => {

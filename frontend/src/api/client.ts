@@ -21,27 +21,18 @@ import {
 } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
-const API_KEY_HEADER = import.meta.env.VITE_API_KEY_HEADER ?? "X-API-Key";
-const API_KEY_STORAGE_KEY = "brainbuddy:api-key";
-const SESSION_OWNER_ID = import.meta.env.VITE_OWNER_ID ?? import.meta.env.VITE_API_OWNER_ID ?? null;
-const hasStorage =
-  typeof window !== "undefined" &&
-  typeof window.localStorage !== "undefined" &&
-  typeof window.localStorage.getItem === "function" &&
-  typeof window.localStorage.setItem === "function";
-
-let cachedApiKey: string | null = import.meta.env.VITE_API_KEY ?? null;
-if (hasStorage) {
-  const stored = window.localStorage.getItem(API_KEY_STORAGE_KEY);
-  if (stored) {
-    cachedApiKey = stored;
-  }
-}
 
 type JsonRequestOptions = Omit<RequestInit, "body"> & {
   body?: unknown;
   signal?: AbortSignal;
 };
+
+type UnauthorizedHandler = () => void;
+let onUnauthorized: UnauthorizedHandler | null = null;
+
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
+  onUnauthorized = handler;
+}
 
 function normalizeRelationCreate(payload: RelationCreateRequest): RelationCreateRequest {
   const sourceNodeId =
@@ -68,29 +59,6 @@ function normalizeRelationUpdate(payload: RelationUpdateRequest): RelationUpdate
   };
 }
 
-export function setApiKey(apiKey: string | null) {
-  cachedApiKey = apiKey;
-  if (hasStorage) {
-    if (apiKey) {
-      window.localStorage.setItem(API_KEY_STORAGE_KEY, apiKey);
-    } else {
-      window.localStorage.removeItem(API_KEY_STORAGE_KEY);
-    }
-  }
-}
-
-export function getApiKey(): string | null {
-  return cachedApiKey;
-}
-
-export function getOwnerId(): string | null {
-  return SESSION_OWNER_ID ?? null;
-}
-
-export function hasApiKey(): boolean {
-  return Boolean(cachedApiKey);
-}
-
 function buildUrl(path: string): string {
   return `${API_BASE_URL.replace(/\/$/, "")}${path}`;
 }
@@ -112,10 +80,6 @@ export class ApiError extends Error {
 async function request<T>(path: string, options: JsonRequestOptions = {}): Promise<T> {
   const { body, ...rest } = options;
   const headers = new Headers(rest.headers);
-  const apiKey = getApiKey();
-  if (apiKey && !headers.has(API_KEY_HEADER)) {
-    headers.set(API_KEY_HEADER, apiKey);
-  }
   const method = options.method ?? "GET";
   const hasBody = body !== undefined && body !== null;
 
@@ -134,8 +98,13 @@ async function request<T>(path: string, options: JsonRequestOptions = {}): Promi
     ...rest,
     method,
     headers,
-    body: requestBody
+    body: requestBody,
+    credentials: "include"
   });
+
+  if (response.status === 401 && onUnauthorized) {
+    onUnauthorized();
+  }
 
   if (response.status === 204) {
     return undefined as T;
@@ -163,17 +132,7 @@ export const apiClient = {
   },
 
   createTree(payload: TreeCreateRequest) {
-    const ownerId = getOwnerId();
-    const body = ownerId
-      ? {
-          ...payload,
-          owner_id: payload.owner_id ?? ownerId,
-          metadata: payload.metadata
-            ? { ...payload.metadata, owner_id: payload.metadata.owner_id ?? ownerId }
-            : undefined
-        }
-      : payload;
-    return request<TreeDetailResponse>("/trees", { method: "POST", body });
+    return request<TreeDetailResponse>("/trees", { method: "POST", body: payload });
   },
 
   updateTree(treeId: string, payload: TreeUpdateRequest) {

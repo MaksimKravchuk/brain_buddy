@@ -12,8 +12,6 @@ env:
   FLY_ORG: ${{ secrets.FLY_ORG }}
   FLY_REVIEW_BACKEND_ORIGIN: ${{ secrets.FLY_REVIEW_BACKEND_ORIGIN }}
   VITE_API_BASE_URL: /api
-  VITE_API_KEY: ${{ secrets.VITE_API_KEY }}
-  VITE_API_KEY_HEADER: ${{ secrets.VITE_API_KEY_HEADER }}
 
 jobs:
   deploy:
@@ -51,12 +49,6 @@ jobs:
         run: |
           deploy_args=(--app "$APP_NAME" --config fly.frontend.toml --remote-only)
           deploy_args+=(--build-arg "VITE_API_BASE_URL=$VITE_API_BASE_URL")
-          if [ -n "$VITE_API_KEY" ]; then
-            deploy_args+=(--build-arg "VITE_API_KEY=$VITE_API_KEY")
-          fi
-          if [ -n "$VITE_API_KEY_HEADER" ]; then
-            deploy_args+=(--build-arg "VITE_API_KEY_HEADER=$VITE_API_KEY_HEADER")
-          fi
           flyctl deploy "${deploy_args[@]}"
 
       - name: Write review URL

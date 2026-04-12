@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 
 from app.schemas import TreeCreateRequest, TreeMetadata, TreeUpdateRequest
+from tests.conftest import TEST_OWNER_ID
 
 
 def test_get_tree_uses_cache(tree_service, monkeypatch) -> None:
     payload = TreeCreateRequest(name="Cached Tree")
-    tree = tree_service.create_tree(payload)
+    tree = tree_service.create_tree(payload, owner_id=TEST_OWNER_ID)
 
     load_calls: list[str] = []
     original_load = tree_service.tree_repo.load
@@ -33,7 +34,7 @@ def test_get_tree_uses_cache(tree_service, monkeypatch) -> None:
 
 def test_create_and_retrieve_tree(tree_service) -> None:
     payload = TreeCreateRequest(name="Test Tree")
-    tree = tree_service.create_tree(payload)
+    tree = tree_service.create_tree(payload, owner_id=TEST_OWNER_ID)
 
     assert tree.title == "Test Tree"
     assert tree.nodes == []
@@ -45,10 +46,14 @@ def test_create_and_retrieve_tree(tree_service) -> None:
 
 
 def test_list_and_update_tree(tree_service) -> None:
-    first = tree_service.create_tree(TreeCreateRequest(name="First"))
-    _second = tree_service.create_tree(TreeCreateRequest(name="Second"))
+    first = tree_service.create_tree(
+        TreeCreateRequest(name="First"), owner_id=TEST_OWNER_ID
+    )
+    _second = tree_service.create_tree(
+        TreeCreateRequest(name="Second"), owner_id=TEST_OWNER_ID
+    )
 
-    entries = tree_service.list_trees()
+    entries = tree_service.list_trees(owner_id=TEST_OWNER_ID)
     assert len(entries) == 2
     assert {entry.id for entry in entries} == {first.id, _second.id}
 
@@ -64,21 +69,26 @@ def test_list_and_update_tree(tree_service) -> None:
             relations=[],
             owner_id=None,
         ),
+        owner_id=TEST_OWNER_ID,
     )
     assert updated.title == "Updated First"
     assert updated.updated_at >= updated.created_at
 
 
 def test_delete_tree(tree_service) -> None:
-    tree = tree_service.create_tree(TreeCreateRequest(name="Deletable"))
-    tree_service.delete_tree(tree.id)
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Deletable"), owner_id=TEST_OWNER_ID
+    )
+    tree_service.delete_tree(tree.id, owner_id=TEST_OWNER_ID)
 
-    entries = tree_service.list_trees()
+    entries = tree_service.list_trees(owner_id=TEST_OWNER_ID)
     assert tree.id not in {entry.id for entry in entries}
 
 
 def test_get_tree_ignores_unknown_persisted_fields(tree_service) -> None:
-    tree = tree_service.create_tree(TreeCreateRequest(name="Legacy Compatible"))
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Legacy Compatible"), owner_id=TEST_OWNER_ID
+    )
     tree_service._cache.clear()
 
     tree_path = tree_service.tree_repo.tree_path(tree.id)
@@ -111,9 +121,7 @@ def test_get_tree_ignores_unknown_persisted_fields(tree_service) -> None:
     assert "legacy_flag" not in dump
 
 
-def _persist_legacy_node(
-    tree_service, tree_id: str, extra: dict[str, object]
-) -> None:
+def _persist_legacy_node(tree_service, tree_id: str, extra: dict[str, object]) -> None:
     """Append a node with the given ``extra`` payload to the stored tree."""
 
     tree_path = tree_service.tree_repo.tree_path(tree_id)
@@ -136,7 +144,9 @@ def _persist_legacy_node(
 
 
 def test_node_to_response_coerces_legacy_extra_values(tree_service) -> None:
-    tree = tree_service.create_tree(TreeCreateRequest(name="Legacy Extra"))
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Legacy Extra"), owner_id=TEST_OWNER_ID
+    )
     _persist_legacy_node(
         tree_service,
         tree.id,
@@ -151,7 +161,9 @@ def test_node_to_response_coerces_legacy_extra_values(tree_service) -> None:
 
 
 def test_node_to_response_preserves_valid_extra_values(tree_service) -> None:
-    tree = tree_service.create_tree(TreeCreateRequest(name="Valid Extra"))
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Valid Extra"), owner_id=TEST_OWNER_ID
+    )
     _persist_legacy_node(
         tree_service,
         tree.id,
@@ -166,7 +178,9 @@ def test_node_to_response_preserves_valid_extra_values(tree_service) -> None:
 
 
 def test_node_to_response_logs_when_coercing(tree_service, caplog) -> None:
-    tree = tree_service.create_tree(TreeCreateRequest(name="Legacy Logged"))
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Legacy Logged"), owner_id=TEST_OWNER_ID
+    )
     _persist_legacy_node(
         tree_service,
         tree.id,
@@ -184,7 +198,9 @@ def test_node_to_response_logs_when_coercing(tree_service, caplog) -> None:
 
 
 def test_node_to_response_handles_non_dict_extra(tree_service, caplog) -> None:
-    tree = tree_service.create_tree(TreeCreateRequest(name="Non Dict Extra"))
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Non Dict Extra"), owner_id=TEST_OWNER_ID
+    )
     _persist_legacy_node(
         tree_service,
         tree.id,

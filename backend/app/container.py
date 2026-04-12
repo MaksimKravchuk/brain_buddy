@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
 from app.ai.providers import MockValidationProvider, OpenAIValidationProvider
+from app.core.config import AppConfig
 from app.repositories import (
     IndexRepository,
+    InviteRepository,
     ProviderRepository,
+    SessionRepository,
     TreeRepository,
+    UserRepository,
     ValidationRepository,
     VersionRepository,
 )
 from app.services import (
+    AuthService,
     NodeService,
     RelationService,
     TreeService,
@@ -31,19 +35,27 @@ class Container:
     version_repo: VersionRepository
     validation_repo: ValidationRepository
     provider_repo: ProviderRepository
+    user_repo: UserRepository
+    session_repo: SessionRepository
+    invite_repo: InviteRepository
     tree_service: TreeService
     node_service: NodeService
     relation_service: RelationService
     version_service: VersionService
     validation_service: ValidationService
+    auth_service: AuthService
 
 
-def build_container(data_root: Path) -> Container:
+def build_container(config: AppConfig) -> Container:
+    data_root = config.data_dir
     tree_repo = TreeRepository(data_root)
     index_repo = IndexRepository(data_root)
     version_repo = VersionRepository(data_root)
     validation_repo = ValidationRepository(data_root)
     provider_repo = ProviderRepository(data_root)
+    user_repo = UserRepository(data_root)
+    session_repo = SessionRepository(data_root)
+    invite_repo = InviteRepository(data_root)
 
     tree_service = TreeService(tree_repo, index_repo)
     node_service = NodeService(tree_repo, tree_service)
@@ -59,6 +71,13 @@ def build_container(data_root: Path) -> Container:
             "openai": OpenAIValidationProvider(),
         },
     )
+    auth_service = AuthService(
+        user_repo=user_repo,
+        session_repo=session_repo,
+        invite_repo=invite_repo,
+        password_policy=config.password_policy,
+        session_settings=config.session,
+    )
 
     return Container(
         tree_repo=tree_repo,
@@ -66,9 +85,13 @@ def build_container(data_root: Path) -> Container:
         version_repo=version_repo,
         validation_repo=validation_repo,
         provider_repo=provider_repo,
+        user_repo=user_repo,
+        session_repo=session_repo,
+        invite_repo=invite_repo,
         tree_service=tree_service,
         node_service=node_service,
         relation_service=relation_service,
         version_service=version_service,
         validation_service=validation_service,
+        auth_service=auth_service,
     )

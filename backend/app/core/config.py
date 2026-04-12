@@ -41,21 +41,34 @@ class LoggingSettings(BaseModel):
         return self.level.upper()
 
 
-class SecuritySettings(BaseModel):
-    """Security-related toggles for API hardening."""
+class SessionSettings(BaseModel):
+    """Cookie-based session configuration."""
 
-    api_key: str | None = Field(
-        default=None, description="Static API key required for requests."
+    cookie_name: str = Field(
+        default="brainbuddy_session", description="Cookie name carrying the session."
     )
-    api_key_header: str = Field(
-        default="X-API-Key", description="Header used for the static API key."
+    max_age_seconds: int = Field(
+        default=30 * 24 * 60 * 60,
+        description="How long a session cookie lives, in seconds.",
+    )
+    secure: bool = Field(
+        default=False,
+        description=(
+            "Whether the session cookie is marked Secure (HTTPS only). "
+            "Enabled automatically in production."
+        ),
     )
 
     model_config = ConfigDict(frozen=True)
 
-    @property
-    def has_api_key(self) -> bool:
-        return bool(self.api_key)
+
+class PasswordPolicy(BaseModel):
+    """Bounds for accepted user passwords."""
+
+    min_length: int = Field(default=12, ge=1)
+    max_length: int = Field(default=128, ge=1)
+
+    model_config = ConfigDict(frozen=True)
 
 
 class DataSettings(BaseModel):
@@ -79,7 +92,8 @@ class AppConfig(BaseModel):
     api_prefix: str = Field(default="/api")
     data: DataSettings = Field(default_factory=DataSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
-    security: SecuritySettings = Field(default_factory=SecuritySettings)
+    session: SessionSettings = Field(default_factory=SessionSettings)
+    password_policy: PasswordPolicy = Field(default_factory=PasswordPolicy)
 
     model_config = ConfigDict(frozen=True)
 
@@ -104,8 +118,6 @@ def _build_config() -> AppConfig:
     api_prefix = os.getenv("BRAIN_BUDDY_API_PREFIX", "/api")
     log_level = os.getenv("BRAIN_BUDDY_LOG_LEVEL", "INFO")
     data_dir_value = os.getenv("BRAIN_BUDDY_DATA_DIR", str(DEFAULT_DATA_DIR))
-    api_key = os.getenv("BRAIN_BUDDY_API_KEY")
-    api_key_header = os.getenv("BRAIN_BUDDY_API_KEY_HEADER", "X-API-Key")
 
     data_dir = Path(data_dir_value).expanduser().resolve()
     try:
@@ -120,21 +132,25 @@ def _build_config() -> AppConfig:
 
     schema_version = _read_schema_version(data_dir)
 
-    logging_config = LoggingSettings(level=log_level)
-    data_config = DataSettings(root_dir=data_dir, schema_version=schema_version)
-    security_config = SecuritySettings(api_key=api_key, api_key_header=api_key_header)
-
     try:
         environment = AppEnvironment(env_value)
     except ValueError as exc:  # pragma: no cover - defensive guard
         raise ValueError(f"Unsupported environment '{env_value}'.") from exc
+
+    logging_config = LoggingSettings(level=log_level)
+    data_config = DataSettings(root_dir=data_dir, schema_version=schema_version)
+    session_config = SessionSettings(
+        secure=environment is AppEnvironment.PRODUCTION,
+    )
+    password_policy = PasswordPolicy()
 
     return AppConfig(
         environment=environment,
         api_prefix=api_prefix,
         data=data_config,
         logging=logging_config,
-        security=security_config,
+        session=session_config,
+        password_policy=password_policy,
     )
 
 
@@ -145,4 +161,10 @@ def get_config() -> AppConfig:
     return _build_config()
 
 
-__all__ = ["AppConfig", "AppEnvironment", "get_config", "SecuritySettings"]
+__all__ = [
+    "AppConfig",
+    "AppEnvironment",
+    "PasswordPolicy",
+    "SessionSettings",
+    "get_config",
+]

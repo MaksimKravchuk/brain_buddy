@@ -13,7 +13,9 @@ from app.schemas import (
 
 
 def test_create_and_update_node(tree_service, node_service) -> None:
-    tree = tree_service.create_tree(TreeCreateRequest(name="Nodes"))
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Nodes"), owner_id="user_test"
+    )
 
     node_payload = NodeCreateRequest(
         label="Root", type="child", position=Position(x=0, y=0)
@@ -34,7 +36,9 @@ def test_create_and_update_node(tree_service, node_service) -> None:
 def test_delete_node_requires_cascade(
     tree_service, node_service, relation_service
 ) -> None:
-    tree = tree_service.create_tree(TreeCreateRequest(name="Cascade"))
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Cascade"), owner_id="user_test"
+    )
     node_a, tree = node_service.create_node(
         tree.id,
         NodeCreateRequest(label="A", type="child", position=Position(x=0, y=0)),

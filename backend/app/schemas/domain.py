@@ -87,6 +87,9 @@ class IndexEntry(StorageBaseModel):
     title: str = Field(description="Tree title.")
     description: str | None = Field(default=None, description="Tree description.")
     updated_at: datetime = Field(description="Timestamp of most recent modification.")
+    owner_id: str | None = Field(
+        default=None, description="Identifier of the user who owns this tree."
+    )
 
 
 class ProviderConfig(StorageBaseModel):

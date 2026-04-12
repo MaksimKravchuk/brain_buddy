@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { apiClient, getOwnerId } from "./client";
+import { apiClient } from "./client";
 import { buildTreeDetailFromStore, useTreeStore } from "../stores/treeStore";
 import type {
   AiFeedbackRequest,
@@ -424,20 +424,8 @@ export function useTreeImportWithToasts(onImported?: (tree: TreeDetailResponse) 
       return;
     }
 
-    const ownerId = getOwnerId();
-    const payloadWithOwner = ownerId
-      ? {
-          ...payload,
-          owner_id: payload.owner_id ?? ownerId,
-          metadata: {
-            ...payload.metadata,
-            owner_id: payload.metadata.owner_id ?? ownerId
-          }
-        }
-      : payload;
-
     try {
-      const tree = await importTreeMutation.mutateAsync(payloadWithOwner);
+      const tree = await importTreeMutation.mutateAsync(payload);
       onImported?.(tree);
       pushToast({
         id: toastId,

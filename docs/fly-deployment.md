@@ -31,11 +31,9 @@ Deploy the Brain Buddy backend and frontend as separate Fly.io apps. The backend
    source="brain-buddy-data"
    destination="/app/data"
    ```
-3. **Configure secrets:** set any API key protection and optional prefix overrides **before** the first deploy.
+3. **Configure secrets (optional):** session auth is cookie-based and needs no signing secret. Set only what you want to override.
    ```bash
    flyctl secrets set \
-     BRAIN_BUDDY_API_KEY=<optional-static-key> \
-     BRAIN_BUDDY_API_KEY_HEADER=X-API-Key \
      BRAIN_BUDDY_API_PREFIX=/api \
      -a <backend-app>
    ```
@@ -55,15 +53,14 @@ When prompted for a volume, select `brain-buddy-data` to mount at `/app/data`.
    ```bash
    flyctl apps create <frontend-app>
    ```
-2. **Point the client at the backend (Flycast) and forward API key settings (if any):**
+2. **Point the client at the backend (Flycast):**
    ```bash
    flyctl secrets set \
      BACKEND_ORIGIN="http://<backend-app>.flycast:8000" \
      VITE_API_BASE_URL="/api" \
-     VITE_API_KEY=<optional-static-key> \
-     VITE_API_KEY_HEADER=X-API-Key \
      -a <frontend-app>
    ```
+   The frontend proxies `/api/*` requests (including `Cookie` and `Set-Cookie` headers) to the private backend, preserving the session cookie end-to-end.
 3. **Deploy:**
   ```bash
   flyctl deploy \
@@ -77,12 +74,16 @@ When prompted for a volume, select `brain-buddy-data` to mount at `/app/data`.
   ```bash
   flyctl ssh console -a <backend-app> -C "curl -f http://127.0.0.1:8000/health"
   ```
+- **Mint an invite for yourself:**
+  ```bash
+  flyctl ssh console -a <backend-app> -C "python -m app.cli create-invite"
+  ```
 - **Frontend reachability and backend wiring:**
   ```bash
   curl -I https://<frontend-app>.fly.dev
   curl -f "https://<frontend-app>.fly.dev/api/health"  # proxied to backend via Flycast
   ```
-  Expect an HTTP 200 from Nginx and the compiled React bundle. Open the URL in a browser to confirm the canvas loads and can fetch data from the private backend.
+  Expect an HTTP 200 from Nginx. Open the URL in a browser, sign up with your invite on `/signup`, and confirm the canvas loads after authentication.
 
 ## Rollback guidance
 - List recent releases for either app:
