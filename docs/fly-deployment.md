@@ -31,12 +31,15 @@ Deploy the Brain Buddy backend and frontend as separate Fly.io apps. The backend
    source="brain-buddy-data"
    destination="/app/data"
    ```
-3. **Configure secrets (optional):** session auth is cookie-based and needs no signing secret. Set only what you want to override.
+3. **Configure secrets:** session auth needs no signing secret, but you almost certainly want to seed your own admin account so you can sign in without SSHing in to mint an invite.
    ```bash
    flyctl secrets set \
+     BRAIN_BUDDY_ADMIN_EMAIL=you@yourdomain.com \
+     BRAIN_BUDDY_ADMIN_PASSWORD='<a-long-random-password>' \
      BRAIN_BUDDY_API_PREFIX=/api \
      -a <backend-app>
    ```
+   On startup the backend will create that account (or rotate its password to match the env var if it already exists). Rotate later by updating the secret and redeploying. See `docs/auth.md` for the full model.
 
 ## Deploy the backend
 Run the deployment from the repository root so the Dockerfile path resolves correctly. The resulting app has no public `fly.dev` hostname; it listens on `http://<backend-app>.flycast:8000` for in-organization callers such as the frontend.

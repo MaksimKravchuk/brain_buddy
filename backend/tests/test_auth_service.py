@@ -117,3 +117,52 @@ def test_logout_invalidates_token(container) -> None:
     assert container.auth_service.get_user_for_token(token) is not None
     container.auth_service.logout(token)
     assert container.auth_service.get_user_for_token(token) is None
+
+
+def test_seed_admin_creates_account_when_missing(container) -> None:
+    user = container.auth_service.seed_admin(
+        email="Admin@Example.com", password="very-long-admin-password"
+    )
+    assert user.email == "admin@example.com"
+    # Can log in with the seeded credentials — no invite required.
+    _, token = container.auth_service.login(
+        email="admin@example.com", password="very-long-admin-password"
+    )
+    assert token
+
+
+def test_seed_admin_rotates_password_when_env_changes(container) -> None:
+    first = container.auth_service.seed_admin(
+        email="admin@example.com", password="very-long-admin-password"
+    )
+    second = container.auth_service.seed_admin(
+        email="admin@example.com", password="different-admin-password"
+    )
+    assert first.id == second.id
+    assert first.password_hash != second.password_hash
+    # Old password is rejected, new one works.
+    with pytest.raises(InvalidCredentialsError):
+        container.auth_service.login(
+            email="admin@example.com", password="very-long-admin-password"
+        )
+    _, token = container.auth_service.login(
+        email="admin@example.com", password="different-admin-password"
+    )
+    assert token
+
+
+def test_seed_admin_is_idempotent_for_unchanged_password(container) -> None:
+    first = container.auth_service.seed_admin(
+        email="admin@example.com", password="very-long-admin-password"
+    )
+    second = container.auth_service.seed_admin(
+        email="admin@example.com", password="very-long-admin-password"
+    )
+    # Same user, same hash — no rotation when the env var is unchanged.
+    assert first.id == second.id
+    assert first.password_hash == second.password_hash
+
+
+def test_seed_admin_rejects_short_password(container) -> None:
+    with pytest.raises(ValidationFailure):
+        container.auth_service.seed_admin(email="admin@example.com", password="short")

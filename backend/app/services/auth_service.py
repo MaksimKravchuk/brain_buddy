@@ -9,6 +9,7 @@ persisted.
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
 import uuid
 from datetime import timedelta
@@ -25,6 +26,8 @@ from app.repositories import (
 )
 from app.schemas.auth import Session, User
 from app.utils.time import utcnow
+
+logger = logging.getLogger(__name__)
 
 
 class InvalidCredentialsError(BrainBuddyError):
@@ -204,6 +207,55 @@ class AuthService:
 
         raw_token, _ = self._create_session(user.id)
         return user, raw_token
+
+    # ------------------------------------------------------------------
+    # Admin seeding
+    # ------------------------------------------------------------------
+
+    def seed_admin(self, *, email: str, password: str) -> User:
+        """Create or update a pre-seeded admin account.
+
+        Driven by ``BRAIN_BUDDY_ADMIN_EMAIL`` and ``BRAIN_BUDDY_ADMIN_PASSWORD``
+        in production. The environment is the source of truth: if the user
+        already exists and the password in the environment differs from the
+        stored hash, the stored hash is rotated. This makes it possible to
+        rotate the admin password by updating the Fly secret and redeploying.
+
+        Password policy is enforced — if the seeded password is too short or
+        too long, we raise at startup rather than silently skipping. That way
+        a misconfigured deploy fails loudly instead of leaving the admin
+        account unseeded.
+
+        Bypasses the invite flow entirely: the admin account is created
+        directly without consuming an invite.
+        """
+
+        self._validate_password_format(password)
+        normalized = self.user_repo.normalize_email(email)
+        existing = self.user_repo.get_by_email(normalized)
+
+        if existing is None:
+            user_id = f"user_{uuid.uuid4().hex[:12]}"
+            user = User(
+                id=user_id,
+                email=normalized,
+                password_hash=self.hash_password(password),
+                created_at=utcnow(),
+            )
+            created = self.user_repo.create(user)
+            logger.info("Seeded admin account %s", normalized)
+            return created
+
+        if not self._verify_password(password, existing.password_hash):
+            updated = existing.model_copy(
+                update={"password_hash": self.hash_password(password)}
+            )
+            self.user_repo.save(updated)
+            logger.info("Rotated admin password for %s", normalized)
+            return updated
+
+        logger.debug("Admin account %s already up to date", normalized)
+        return existing
 
 
 __all__ = [

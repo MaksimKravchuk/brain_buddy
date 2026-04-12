@@ -32,6 +32,30 @@ docker compose exec backend python -m app.cli create-invite
 
 The command prints a URL-safe code. Share it with the user who should sign up — they enter it on `/signup`. It can only be used once.
 
+## Seeding an admin account from environment variables
+
+If you want a known account to exist on startup without SSHing in to mint an invite — useful on Fly where you want to bootstrap your own account from a secret — set both of these environment variables:
+
+- `BRAIN_BUDDY_ADMIN_EMAIL` — the email the seeded account should have
+- `BRAIN_BUDDY_ADMIN_PASSWORD` — the password; must satisfy the password policy (≥12 characters)
+
+On startup the backend will:
+
+1. **Create** the account if no user with that email exists. The invite flow is bypassed entirely.
+2. **Rotate** the stored password hash if the user exists and the password in the env var doesn't match. This gives you "env is the source of truth" semantics — change the Fly secret and redeploy to rotate.
+3. **Refuse to start** if the password is shorter than the policy minimum. A misconfigured deploy fails loudly instead of silently skipping and leaving you locked out.
+
+On Fly:
+
+```bash
+fly secrets set \
+  BRAIN_BUDDY_ADMIN_EMAIL=you@yourdomain.com \
+  BRAIN_BUDDY_ADMIN_PASSWORD='a-long-random-password' \
+  -a <backend-app>
+```
+
+The admin account is a normal account — it has no elevated privileges, it just happens to exist when the app boots. Treat the env vars with the same care as any other secret: a leak of `BRAIN_BUDDY_ADMIN_PASSWORD` is a leak of that account.
+
 ## Known limitations (ordered by urgency if you scale)
 
 | Limitation | How to fix later |

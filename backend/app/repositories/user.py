@@ -70,3 +70,13 @@ class UserRepository(BaseRepository):
         index[normalized] = stored.id
         self._save_email_index(index)
         return stored
+
+    def save(self, user: User) -> None:
+        """Overwrite an existing user record in place.
+
+        The email index is not touched — callers must not change the email
+        here. Used for mutations like password rotation that keep identity
+        stable.
+        """
+
+        self.dump_model(self._user_path(user.id), user)

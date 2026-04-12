@@ -108,6 +108,8 @@ HTTP request
 | `BRAIN_BUDDY_ENV` | `development` | `development`, `production`, or `test` |
 | `BRAIN_BUDDY_DATA_DIR` | `backend/data` | file storage root |
 | `BRAIN_BUDDY_API_PREFIX` | `/api` | FastAPI router prefix |
+| `BRAIN_BUDDY_ADMIN_EMAIL` | _(unset)_ | If set with `BRAIN_BUDDY_ADMIN_PASSWORD`, seeds an admin account on startup (create-or-rotate-password) |
+| `BRAIN_BUDDY_ADMIN_PASSWORD` | _(unset)_ | Password for the seeded admin. Must satisfy the password policy (≥12 chars); startup fails loudly otherwise |
 | `VITE_API_BASE_URL` | `/api` | backend URL from frontend; same-origin proxied via Vite in dev |
 
 ## Conventions
