@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query, status
 
 from app.api.dependencies import (
+    get_current_user,
     get_node_service,
     get_relation_service,
     get_tree_service,
@@ -32,6 +33,7 @@ from app.schemas import (
     VersionCreateRequest,
     VersionListItem,
 )
+from app.schemas.auth import User
 from app.schemas.domain import TreeVersionRef
 
 router = APIRouter(tags=["trees"])
@@ -44,18 +46,25 @@ router = APIRouter(tags=["trees"])
 )
 def create_tree(
     payload: TreeCreateRequest,
+    current_user: User = Depends(get_current_user),
     tree_service=Depends(get_tree_service),
 ) -> TreeDetailResponse:
-    tree = tree_service.create_tree(payload)
+    tree = tree_service.create_tree(payload, owner_id=current_user.id)
     return tree_service.to_response(tree)
 
 
 @router.get("/trees", response_model=list[TreeListItem])
-def list_trees(tree_service=Depends(get_tree_service)) -> list[TreeListItem]:
-    entries = tree_service.list_trees()
+def list_trees(
+    current_user: User = Depends(get_current_user),
+    tree_service=Depends(get_tree_service),
+) -> list[TreeListItem]:
+    entries = tree_service.list_trees(owner_id=current_user.id)
     return [
         TreeListItem(
-            id=entry.id, name=entry.title, updated_at=entry.updated_at, owner_id=None
+            id=entry.id,
+            name=entry.title,
+            updated_at=entry.updated_at,
+            owner_id=entry.owner_id,
         )
         for entry in entries
     ]
@@ -63,9 +72,11 @@ def list_trees(tree_service=Depends(get_tree_service)) -> list[TreeListItem]:
 
 @router.get("/trees/{tree_id}", response_model=TreeDetailResponse)
 def get_tree(
-    tree_id: str, tree_service=Depends(get_tree_service)
+    tree_id: str,
+    current_user: User = Depends(get_current_user),
+    tree_service=Depends(get_tree_service),
 ) -> TreeDetailResponse:
-    tree = tree_service.get_tree(tree_id)
+    tree = tree_service.get_tree_for_owner(tree_id, owner_id=current_user.id)
     return tree_service.to_response(tree)
 
 
@@ -73,15 +84,20 @@ def get_tree(
 def update_tree(
     tree_id: str,
     payload: TreeUpdateRequest,
+    current_user: User = Depends(get_current_user),
     tree_service=Depends(get_tree_service),
 ) -> TreeDetailResponse:
-    tree = tree_service.update_tree(tree_id, payload)
+    tree = tree_service.update_tree(tree_id, payload, owner_id=current_user.id)
     return tree_service.to_response(tree)
 
 
 @router.delete("/trees/{tree_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_tree(tree_id: str, tree_service=Depends(get_tree_service)) -> None:
-    tree_service.delete_tree(tree_id)
+def delete_tree(
+    tree_id: str,
+    current_user: User = Depends(get_current_user),
+    tree_service=Depends(get_tree_service),
+) -> None:
+    tree_service.delete_tree(tree_id, owner_id=current_user.id)
 
 
 @router.post(
@@ -90,17 +106,21 @@ def delete_tree(tree_id: str, tree_service=Depends(get_tree_service)) -> None:
     status_code=status.HTTP_201_CREATED,
 )
 def import_tree(
-    payload: TreeImportRequest, tree_service=Depends(get_tree_service)
+    payload: TreeImportRequest,
+    current_user: User = Depends(get_current_user),
+    tree_service=Depends(get_tree_service),
 ) -> TreeDetailResponse:
-    tree = tree_service.import_tree(payload.tree)
+    tree = tree_service.import_tree(payload.tree, owner_id=current_user.id)
     return tree_service.to_response(tree)
 
 
 @router.post("/trees/{tree_id}/export", response_model=TreeExportResponse)
 def export_tree(
-    tree_id: str, tree_service=Depends(get_tree_service)
+    tree_id: str,
+    current_user: User = Depends(get_current_user),
+    tree_service=Depends(get_tree_service),
 ) -> TreeExportResponse:
-    tree = tree_service.get_tree(tree_id)
+    tree = tree_service.get_tree_for_owner(tree_id, owner_id=current_user.id)
     return TreeExportResponse(tree=tree_service.to_response(tree))
 
 
@@ -112,9 +132,10 @@ def export_tree(
 def ai_feedback(
     tree_id: str,
     payload: AiFeedbackRequest,
+    current_user: User = Depends(get_current_user),
     tree_service=Depends(get_tree_service),
 ) -> AiFeedbackResponse:
-    return tree_service.generate_ai_feedback(tree_id, payload)
+    return tree_service.generate_ai_feedback(tree_id, payload, owner_id=current_user.id)
 
 
 @router.post(
@@ -125,9 +146,11 @@ def ai_feedback(
 def create_node(
     tree_id: str,
     payload: NodeCreateRequest,
+    current_user: User = Depends(get_current_user),
     node_service=Depends(get_node_service),
     tree_service=Depends(get_tree_service),
 ) -> NodeResponse:
+    tree_service.assert_owner(tree_id, owner_id=current_user.id)
     node, tree = node_service.create_node(tree_id, payload)
     return tree_service.node_to_response(tree, node.id)
 
@@ -137,9 +160,11 @@ def update_node(
     tree_id: str,
     node_id: str,
     payload: NodeUpdateRequest,
+    current_user: User = Depends(get_current_user),
     node_service=Depends(get_node_service),
     tree_service=Depends(get_tree_service),
 ) -> NodeResponse:
+    tree_service.assert_owner(tree_id, owner_id=current_user.id)
     node, tree = node_service.update_node(tree_id, node_id, payload)
     return tree_service.node_to_response(tree, node.id)
 
@@ -151,8 +176,11 @@ def delete_node(
     tree_id: str,
     node_id: str,
     cascade: bool = Query(default=False),
+    current_user: User = Depends(get_current_user),
     node_service=Depends(get_node_service),
+    tree_service=Depends(get_tree_service),
 ) -> None:
+    tree_service.assert_owner(tree_id, owner_id=current_user.id)
     node_service.delete_node(tree_id, node_id, cascade=cascade)
 
 
@@ -164,9 +192,11 @@ def delete_node(
 def create_relation(
     tree_id: str,
     payload: RelationCreateRequest,
+    current_user: User = Depends(get_current_user),
     relation_service=Depends(get_relation_service),
     tree_service=Depends(get_tree_service),
 ) -> RelationResponse:
+    tree_service.assert_owner(tree_id, owner_id=current_user.id)
     relation, _tree = relation_service.create_relation(tree_id, payload)
     return tree_service.relation_to_response(relation)
 
@@ -178,9 +208,11 @@ def update_relation(
     tree_id: str,
     relation_id: str,
     payload: RelationUpdateRequest,
+    current_user: User = Depends(get_current_user),
     relation_service=Depends(get_relation_service),
     tree_service=Depends(get_tree_service),
 ) -> RelationResponse:
+    tree_service.assert_owner(tree_id, owner_id=current_user.id)
     relation, _tree = relation_service.update_relation(tree_id, relation_id, payload)
     return tree_service.relation_to_response(relation)
 
@@ -191,8 +223,11 @@ def update_relation(
 def delete_relation(
     tree_id: str,
     relation_id: str,
+    current_user: User = Depends(get_current_user),
     relation_service=Depends(get_relation_service),
+    tree_service=Depends(get_tree_service),
 ) -> None:
+    tree_service.assert_owner(tree_id, owner_id=current_user.id)
     relation_service.delete_relation(tree_id, relation_id)
 
 
@@ -204,8 +239,11 @@ def delete_relation(
 def create_version(
     tree_id: str,
     payload: VersionCreateRequest,
+    current_user: User = Depends(get_current_user),
     version_service=Depends(get_version_service),
+    tree_service=Depends(get_tree_service),
 ) -> VersionListItem:
+    tree_service.assert_owner(tree_id, owner_id=current_user.id)
     version = version_service.create_version(tree_id, payload)
     return VersionListItem(
         id=version.id,
@@ -220,8 +258,12 @@ def create_version(
 
 @router.get("/trees/{tree_id}/versions", response_model=list[VersionListItem])
 def list_versions(
-    tree_id: str, version_service=Depends(get_version_service)
+    tree_id: str,
+    current_user: User = Depends(get_current_user),
+    version_service=Depends(get_version_service),
+    tree_service=Depends(get_tree_service),
 ) -> list[VersionListItem]:
+    tree_service.assert_owner(tree_id, owner_id=current_user.id)
     return [_version_ref_to_item(ref) for ref in version_service.list_versions(tree_id)]
 
 
@@ -232,9 +274,11 @@ def list_versions(
 def restore_version(
     tree_id: str,
     version_id: str,
+    current_user: User = Depends(get_current_user),
     version_service=Depends(get_version_service),
     tree_service=Depends(get_tree_service),
 ) -> TreeDetailResponse:
+    tree_service.assert_owner(tree_id, owner_id=current_user.id)
     tree = version_service.restore_version(tree_id, version_id)
     return tree_service.to_response(tree)
 
@@ -245,8 +289,11 @@ def restore_version(
 def delete_version(
     tree_id: str,
     version_id: str,
+    current_user: User = Depends(get_current_user),
     version_service=Depends(get_version_service),
+    tree_service=Depends(get_tree_service),
 ) -> None:
+    tree_service.assert_owner(tree_id, owner_id=current_user.id)
     version_service.delete_version(tree_id, version_id)
 
 
@@ -259,8 +306,11 @@ def validate_node(
     tree_id: str,
     node_id: str,
     payload: ValidationRequest,
+    current_user: User = Depends(get_current_user),
     validation_service=Depends(get_validation_service),
+    tree_service=Depends(get_tree_service),
 ) -> ValidationResponse:
+    tree_service.assert_owner(tree_id, owner_id=current_user.id)
     return validation_service.trigger_validation(tree_id, node_id, payload)
 
 
@@ -271,8 +321,11 @@ def validate_node(
 def get_validation_history(
     tree_id: str,
     node_id: str,
+    current_user: User = Depends(get_current_user),
     validation_service=Depends(get_validation_service),
+    tree_service=Depends(get_tree_service),
 ) -> ValidationHistoryResponse:
+    tree_service.assert_owner(tree_id, owner_id=current_user.id)
     history = validation_service.get_history(tree_id, node_id)
     items = [
         ValidationResponse(

@@ -3,8 +3,9 @@
 from fastapi import FastAPI
 
 from app.api import api_router
+from app.api.auth import router as auth_router
 from app.api.errors import register_exception_handlers
-from app.api.middleware import ApiKeyMiddleware, CorrelationIdMiddleware
+from app.api.middleware import CorrelationIdMiddleware
 from app.container import build_container
 from app.core import configure_logging, get_config
 
@@ -22,22 +23,11 @@ def create_app() -> FastAPI:
         redoc_url=f"{config.api_prefix}/redoc",
     )
     app.state.config = config
-    app.state.container = build_container(config.data_dir)
+    app.state.container = build_container(config)
 
-    if config.security.has_api_key:
-        app.add_middleware(
-            ApiKeyMiddleware,
-            api_key=config.security.api_key or "",
-            header_name=config.security.api_key_header,
-            exempt_paths=(
-                "/health",
-                f"{config.api_prefix}/docs",
-                f"{config.api_prefix}/openapi.json",
-                f"{config.api_prefix}/redoc",
-            ),
-        )
     app.add_middleware(CorrelationIdMiddleware)
     register_exception_handlers(app)
+    app.include_router(auth_router, prefix=f"{config.api_prefix}/auth")
     app.include_router(api_router, prefix=config.api_prefix)
 
     @app.get("/health", tags=["health"])

@@ -88,7 +88,9 @@ HTTP request
 
 ### Cross-cutting behavior
 
-- **AI consent gating** — AI validation requires an API key *and* an explicit consent toggle in the inspector. Declining consent short-circuits with a validation error rather than calling the provider; tests and new features must respect this gate.
+- **Session auth** — users sign in with email + password; the backend sets an opaque session token in an `HttpOnly`, `SameSite=Lax`, `Secure`-in-prod cookie. Every `/api/trees/*` route requires the cookie and filters by the owning user. Signup is gated by an invite code minted via `python -m app.cli create-invite`. See `docs/auth.md`.
+- **Same-origin fetch** — the frontend hits the backend via `/api` on the same origin. In production the Fly frontend app proxies. In dev, Vite proxies `/api` and `/health` to `http://localhost:8000`. This keeps cookies usable and eliminates CORS.
+- **AI consent gating** — AI validation requires an explicit consent toggle in the inspector. Declining consent short-circuits with a validation error rather than calling the provider.
 - **Correlation IDs** — every response carries `X-Correlation-ID`. Error toasts surface it for retry/report flows, and backend logs key off the same ID.
 - **Autosave** — the canvas debounces a 5s local autosave to `localStorage` and warns on page exit when unsaved changes exist.
 
@@ -106,11 +108,7 @@ HTTP request
 | `BRAIN_BUDDY_ENV` | `development` | `development`, `production`, or `test` |
 | `BRAIN_BUDDY_DATA_DIR` | `backend/data` | file storage root |
 | `BRAIN_BUDDY_API_PREFIX` | `/api` | FastAPI router prefix |
-| `BRAIN_BUDDY_API_KEY` | _(unset)_ | enables API key auth when set |
-| `BRAIN_BUDDY_API_KEY_HEADER` | `X-API-Key` | header the backend reads for the API key |
-| `VITE_API_BASE_URL` | `/api` | backend URL from frontend |
-| `VITE_API_KEY` | _(unset)_ | must match backend key when auth is on |
-| `VITE_API_KEY_HEADER` | `X-API-Key` | header the frontend sends the API key in |
+| `VITE_API_BASE_URL` | `/api` | backend URL from frontend; same-origin proxied via Vite in dev |
 
 ## Conventions
 
