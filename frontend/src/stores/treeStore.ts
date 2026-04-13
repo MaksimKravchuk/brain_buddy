@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import { apiClient, getOwnerId, hasApiKey } from "../api/client";
+import { apiClient } from "../api/client";
 
 import type {
   NodeResponse,
@@ -141,8 +141,6 @@ export const TREE_DRAFT_PREFIX = "brainbuddy:tree-draft:";
 
 const AUTOSAVE_DEBOUNCE_MS = 5000;
 
-const sessionOwnerId = getOwnerId();
-
 function toNodeResponse(node: GraphNode): NodeResponse {
   return {
     id: node.id,
@@ -265,7 +263,7 @@ function mapTreeDetail(state: TreeStoreState): TreeDetailResponse | null {
   }
 
   const updatedAt = new Date().toISOString();
-  const ownerId = state.metadata.ownerId ?? sessionOwnerId ?? null;
+  const ownerId = state.metadata.ownerId ?? null;
 
   return {
     id: state.activeTreeId,
@@ -312,12 +310,6 @@ async function persistTree(get: () => TreeStoreState, set: TreeStoreSet) {
     return;
   }
 
-  const ownerId = detail.owner_id ?? sessionOwnerId ?? null;
-  if (ownerId) {
-    detail.owner_id = ownerId;
-    detail.metadata.owner_id = ownerId;
-  }
-
   clearAutosaveTimer();
 
   const savedLocally = persistDraft(detail);
@@ -327,16 +319,14 @@ async function persistTree(get: () => TreeStoreState, set: TreeStoreSet) {
   let lastSyncError: string | null = savedLocally ? null : "Local draft save failed";
   let lastCloudSyncAt: string | null = null;
 
-  if (hasApiKey()) {
-    try {
-      await apiClient.updateTree(detail.id, buildTreeUpdateRequest(detail));
-      lastCloudSyncAt = timestamp;
-      pendingSync = false;
-      lastSyncError = null;
-    } catch (error) {
-      pendingSync = true;
-      lastSyncError = error instanceof Error ? error.message : "Cloud sync failed";
-    }
+  try {
+    await apiClient.updateTree(detail.id, buildTreeUpdateRequest(detail));
+    lastCloudSyncAt = timestamp;
+    pendingSync = false;
+    lastSyncError = null;
+  } catch (error) {
+    pendingSync = true;
+    lastSyncError = error instanceof Error ? error.message : "Cloud sync failed";
   }
 
   set((state) => ({
@@ -473,7 +463,7 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
   setTree(tree) {
     const mappedRelations = tree.relations.map(mapRelationResponse);
     const mappedNodes = applyDerivedNodeState(tree.nodes.map(mapNodeResponse), mappedRelations);
-    const ownerId = tree.owner_id ?? tree.metadata.owner_id ?? sessionOwnerId ?? null;
+    const ownerId = tree.owner_id ?? tree.metadata.owner_id ?? null;
 
     set((state) => {
       let nextSelection = state.activeTreeId === tree.id ? state.selection : initialSelection;

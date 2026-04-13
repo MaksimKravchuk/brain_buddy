@@ -13,7 +13,9 @@ from app.schemas import (
 
 
 def prepare_tree_with_nodes(tree_service, node_service):
-    tree = tree_service.create_tree(TreeCreateRequest(name="Relations"))
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Relations"), owner_id="user_test"
+    )
     node_a, tree = node_service.create_node(
         tree.id,
         NodeCreateRequest(label="A", type="child", position=Position(x=0, y=0)),

@@ -29,3 +29,5 @@ data/
 
 # Codex
 .codex/
+# CodeSpeak
+.codespeak/ignored/

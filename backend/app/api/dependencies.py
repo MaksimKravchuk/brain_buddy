@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Request, status
 
 from app.container import Container
+from app.core.config import AppConfig
+from app.schemas.auth import User
 from app.services import (
+    AuthService,
     NodeService,
     RelationService,
     TreeService,
@@ -19,6 +22,13 @@ def get_container(request: Request) -> Container:
     if container is None:  # pragma: no cover - application misconfiguration
         raise RuntimeError("Application container has not been configured.")
     return container
+
+
+def get_config_dep(request: Request) -> AppConfig:
+    config = getattr(request.app.state, "config", None)
+    if config is None:  # pragma: no cover - application misconfiguration
+        raise RuntimeError("Application config has not been configured.")
+    return config
 
 
 def get_tree_service(container: Container = Depends(get_container)) -> TreeService:
@@ -45,3 +55,27 @@ def get_validation_service(
     container: Container = Depends(get_container),
 ) -> ValidationService:
     return container.validation_service
+
+
+def get_auth_service(container: Container = Depends(get_container)) -> AuthService:
+    return container.auth_service
+
+
+def get_current_user(
+    request: Request,
+    auth_service: AuthService = Depends(get_auth_service),
+    config: AppConfig = Depends(get_config_dep),
+) -> User:
+    """Resolve the authenticated user from the session cookie.
+
+    Raises 401 if the cookie is missing, unknown, or expired.
+    """
+
+    raw_token = request.cookies.get(config.session.cookie_name)
+    user = auth_service.get_user_for_token(raw_token)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required.",
+        )
+    return user

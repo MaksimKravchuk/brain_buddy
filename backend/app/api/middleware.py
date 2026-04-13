@@ -5,54 +5,12 @@ from __future__ import annotations
 import uuid
 
 from fastapi import Request
-from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
 from app.core.logging import get_logger, reset_correlation_id, set_correlation_id
-from app.schemas import ErrorResponse
 
 CORRELATION_HEADER = "X-Correlation-ID"
-
-
-class ApiKeyMiddleware(BaseHTTPMiddleware):
-    """Lightweight API key enforcement placeholder."""
-
-    def __init__(
-        self,
-        app: ASGIApp,
-        *,
-        api_key: str,
-        header_name: str = "X-API-Key",
-        exempt_paths: tuple[str, ...] | None = None,
-    ) -> None:
-        super().__init__(app)
-        self.api_key = api_key
-        self.header_name = header_name
-        self.exempt_paths = exempt_paths or ("/health",)
-        self.logger = get_logger(__name__)
-
-    async def dispatch(self, request: Request, call_next):
-        if request.method.upper() == "OPTIONS":
-            return await call_next(request)
-
-        path = request.url.path
-        if any(path.startswith(exempt) for exempt in self.exempt_paths):
-            return await call_next(request)
-
-        provided = request.headers.get(self.header_name)
-        if provided == self.api_key:
-            return await call_next(request)
-
-        self.logger.info("Blocked request without valid API key for %s", path)
-        payload = ErrorResponse(
-            message="Missing or invalid API key.", detail={"header": self.header_name}
-        )
-        response = JSONResponse(
-            status_code=401, content=payload.model_dump(by_alias=True)
-        )
-        response.headers["WWW-Authenticate"] = "API-Key"
-        return response
 
 
 class CorrelationIdMiddleware(BaseHTTPMiddleware):
@@ -84,4 +42,4 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
         return response
 
 
-__all__ = ["ApiKeyMiddleware", "CorrelationIdMiddleware", "CORRELATION_HEADER"]
+__all__ = ["CorrelationIdMiddleware", "CORRELATION_HEADER"]

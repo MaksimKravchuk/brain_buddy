@@ -58,19 +58,21 @@ class TreeService:
         self._cache: OrderedDictType[str, TreeDocument] = OrderedDict()
         self._cache_maxsize = max(cache_maxsize, 1)
 
-    def list_trees(self) -> list[IndexEntry]:
-        return self.index_repo.load_all()
+    def list_trees(self, *, owner_id: str) -> list[IndexEntry]:
+        return [
+            entry for entry in self.index_repo.load_all() if entry.owner_id == owner_id
+        ]
 
-    def create_tree(self, payload: TreeCreateRequest) -> TreeDocument:
+    def create_tree(self, payload: TreeCreateRequest, *, owner_id: str) -> TreeDocument:
         tree_id = generate_tree_id()
-        metadata = self._resolve_metadata(payload.metadata, owner_id=payload.owner_id)
+        metadata = self._resolve_metadata(payload.metadata, owner_id=owner_id)
         tree = self._build_tree_document(
             tree_id=tree_id,
             name=payload.name,
             metadata=metadata,
             nodes=payload.nodes,
             relations=payload.relations,
-            owner_id=payload.owner_id,
+            owner_id=owner_id,
         )
         self.tree_repo.create(tree)
         self._sync_index(tree)
@@ -82,6 +84,27 @@ class TreeService:
             return cached.model_copy(deep=True)
         tree = self.tree_repo.load(tree_id)
         return self._store_and_clone(tree)
+
+    def get_tree_for_owner(self, tree_id: str, *, owner_id: str) -> TreeDocument:
+        """Return a tree only if it belongs to the given owner.
+
+        Raises `NotFoundError` both when the tree does not exist and when
+        it belongs to someone else. Returning an indistinguishable 404 in
+        both cases prevents leaking whether a tree ID exists.
+        """
+
+        try:
+            tree = self.get_tree(tree_id)
+        except NotFoundError:
+            raise NotFoundError("Tree", tree_id) from None
+        if tree.owner_id != owner_id:
+            raise NotFoundError("Tree", tree_id)
+        return tree
+
+    def assert_owner(self, tree_id: str, *, owner_id: str) -> None:
+        """Raise `NotFoundError` if the tree doesn't exist or owner differs."""
+
+        self.get_tree_for_owner(tree_id, owner_id=owner_id)
 
     def to_response(self, tree: TreeDocument) -> TreeDetailResponse:
         metadata = self._build_tree_metadata(tree)
@@ -98,10 +121,12 @@ class TreeService:
             owner_id=tree.owner_id,
         )
 
-    def update_tree(self, tree_id: str, payload: TreeUpdateRequest) -> TreeDocument:
-        _ = self.tree_repo.load(tree_id)
+    def update_tree(
+        self, tree_id: str, payload: TreeUpdateRequest, *, owner_id: str
+    ) -> TreeDocument:
+        self.assert_owner(tree_id, owner_id=owner_id)
         metadata = self._resolve_metadata(
-            payload.metadata, owner_id=payload.owner_id, coerce_updated=True
+            payload.metadata, owner_id=owner_id, coerce_updated=True
         )
         tree = self._build_tree_document(
             tree_id=tree_id,
@@ -109,29 +134,36 @@ class TreeService:
             metadata=metadata,
             nodes=payload.nodes,
             relations=payload.relations,
-            owner_id=payload.owner_id,
+            owner_id=owner_id,
         )
         self.tree_repo.save(tree)
         self._sync_index(tree)
         return self._store_and_clone(tree)
 
-    def import_tree(self, payload: TreeDetailResponse) -> TreeDocument:
+    def import_tree(
+        self, payload: TreeDetailResponse, *, owner_id: str
+    ) -> TreeDocument:
+        # Always stamp the importing user as owner — never trust owner_id
+        # embedded in an uploaded payload.
         metadata = self._resolve_metadata(
-            payload.metadata, owner_id=payload.owner_id, coerce_updated=False
+            payload.metadata, owner_id=owner_id, coerce_updated=False
         )
+        # Use a fresh tree id so an import can never overwrite an
+        # existing tree (which might belong to someone else).
         tree = self._build_tree_document(
-            tree_id=payload.id or generate_tree_id(),
+            tree_id=generate_tree_id(),
             name=payload.name,
             metadata=metadata,
             nodes=payload.nodes,
             relations=payload.relations,
-            owner_id=payload.owner_id,
+            owner_id=owner_id,
         )
         self.tree_repo.save(tree)
         self._sync_index(tree)
         return self._store_and_clone(tree)
 
-    def delete_tree(self, tree_id: str) -> None:
+    def delete_tree(self, tree_id: str, *, owner_id: str) -> None:
+        self.assert_owner(tree_id, owner_id=owner_id)
         self.tree_repo.delete(tree_id)
         self._cache.pop(tree_id, None)
         try:
@@ -141,14 +173,14 @@ class TreeService:
             pass
 
     def generate_ai_feedback(
-        self, tree_id: str, payload: AiFeedbackRequest
+        self, tree_id: str, payload: AiFeedbackRequest, *, owner_id: str
     ) -> AiFeedbackResponse:
         if not payload.consent:
             raise ValidationFailure(
                 "Consent is required before requesting AI feedback."
             )
 
-        tree = self.get_tree(tree_id)
+        tree = self.get_tree_for_owner(tree_id, owner_id=owner_id)
         node_count = len(tree.nodes)
         relation_count = len(tree.relations)
         summary = f"Tree '{tree.title}' contains {node_count} nodes and {relation_count} relations."
@@ -181,6 +213,7 @@ class TreeService:
             title=tree.title,
             description=tree.description,
             updated_at=tree.updated_at,
+            owner_id=tree.owner_id,
         )
         self.index_repo.upsert(entry)
 
@@ -366,9 +399,7 @@ class TreeService:
         return up_count, down_count
 
     _VALID_NODE_TYPES = frozenset({"parent", "child"})
-    _VALID_HIGHLIGHT_STATES = frozenset(
-        {"none", "cause_candidate", "effect_spanning"}
-    )
+    _VALID_HIGHLIGHT_STATES = frozenset({"none", "cause_candidate", "effect_spanning"})
 
     def node_to_response(self, tree: TreeDocument, node_id: str) -> NodeResponse:
         node = next(node for node in tree.nodes if node.id == node_id)
@@ -383,8 +414,7 @@ class TreeService:
         else:
             if node.extra is not None:
                 logger.warning(
-                    "Node %s in tree %s has non-dict extra (%s); "
-                    "treating as empty.",
+                    "Node %s in tree %s has non-dict extra (%s); " "treating as empty.",
                     node.id,
                     tree.id,
                     type(node.extra).__name__,
@@ -396,8 +426,7 @@ class TreeService:
             node_type = raw_type
         else:
             logger.warning(
-                "Node %s in tree %s has invalid extra.type=%r; "
-                "coercing to 'child'.",
+                "Node %s in tree %s has invalid extra.type=%r; " "coercing to 'child'.",
                 node.id,
                 tree.id,
                 raw_type,

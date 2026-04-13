@@ -78,7 +78,7 @@ def test_export_includes_highlights_and_layout_metadata(api_client) -> None:
     assert nodes[effect_id]["relation_counts"]["down_count"] == 1
 
 
-def test_import_preserves_ids_and_timestamps(api_client) -> None:
+def test_import_preserves_node_ids_and_assigns_fresh_tree_id(api_client) -> None:
     created = _iso(datetime(2025, 1, 1, 12, 0, 0))
     updated = _iso(datetime(2025, 1, 1, 12, 5, 0))
     tree_payload = {
@@ -89,7 +89,7 @@ def test_import_preserves_ids_and_timestamps(api_client) -> None:
             "created_at": created,
             "updated_at": updated,
             "layout": {"zoom": 0.9},
-            "owner_id": "user-1",
+            "owner_id": "attacker-supplied",
         },
         "nodes": [
             {
@@ -118,18 +118,20 @@ def test_import_preserves_ids_and_timestamps(api_client) -> None:
                 "created_at": created,
             }
         ],
-        "owner_id": "user-1",
+        "owner_id": "attacker-supplied",
     }
 
     import_resp = api_client.post("/api/trees/import", json={"tree": tree_payload})
     assert import_resp.status_code == 201
     imported = import_resp.json()
 
-    assert imported["id"] == tree_payload["id"]
+    # Import must assign a fresh tree id and never trust the uploaded owner.
+    assert imported["id"] != tree_payload["id"]
+    assert imported["owner_id"] != "attacker-supplied"
+    assert imported["owner_id"] is not None
     assert _parse(imported["metadata"]["created_at"]) == _parse(created)
     assert _parse(imported["metadata"]["updated_at"]) >= _parse(updated)
     assert imported["metadata"]["layout"] == {"zoom": 0.9}
-    assert imported["owner_id"] == "user-1"
 
     relation = imported["relations"][0]
     assert relation["id"] == "r1"
@@ -137,7 +139,7 @@ def test_import_preserves_ids_and_timestamps(api_client) -> None:
     assert relation["target_node_id"] == "n2"
     assert _parse(relation["created_at"]) == _parse(created)
 
-    export_resp = api_client.post(f"/api/trees/{tree_payload['id']}/export")
+    export_resp = api_client.post(f"/api/trees/{imported['id']}/export")
     assert export_resp.status_code == 200
     exported = export_resp.json()["tree"]
     assert {node["id"] for node in exported["nodes"]} == {"n1", "n2"}
