@@ -31,7 +31,7 @@
 
 ## Security & Configuration Tips
 - Use `.env.example` as the baseline—copy to `.env` for local compose runs.
-- API key protection is optional; set `BRAIN_BUDDY_API_KEY` (backend) and `VITE_API_KEY` (frontend) together when enabling.
+- Auth is session-based (HTTP-only cookie) and invite-gated. Mint invites with `python -m app.cli create-invite`. See `docs/auth.md` for the threat model and recommended controls.
 - Do not commit real data under `backend/data/`; compose mounts a named volume for local persistence.
 
 ## Active Technologies

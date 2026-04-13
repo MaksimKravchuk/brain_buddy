@@ -22,8 +22,6 @@ Add these secrets in the repository settings before using review apps:
 | --- | --- |
 | `FLY_APP_PREFIX` | Prefix for review apps (default: `brain-buddy-frontend-pr`) |
 | `FLY_REVIEW_BACKEND_ORIGIN` | Backend origin for the Nginx proxy (e.g., `http://<backend-app>.flycast:8000`) |
-| `VITE_API_KEY` | API key injected at build time if the backend requires it |
-| `VITE_API_KEY_HEADER` | Header name for the API key (default from `fly.frontend.toml`) |
 
 ## Notes
 - The workflow skips forks because Fly secrets are not available to them.

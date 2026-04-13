@@ -31,14 +31,15 @@ Deploy the Brain Buddy backend and frontend as separate Fly.io apps. The backend
    source="brain-buddy-data"
    destination="/app/data"
    ```
-3. **Configure secrets:** set any API key protection and optional prefix overrides **before** the first deploy.
+3. **Configure secrets:** session auth needs no signing secret, but you almost certainly want to seed your own admin account so you can sign in without SSHing in to mint an invite.
    ```bash
    flyctl secrets set \
-     BRAIN_BUDDY_API_KEY=<optional-static-key> \
-     BRAIN_BUDDY_API_KEY_HEADER=X-API-Key \
+     BRAIN_BUDDY_ADMIN_EMAIL=you@yourdomain.com \
+     BRAIN_BUDDY_ADMIN_PASSWORD='<a-long-random-password>' \
      BRAIN_BUDDY_API_PREFIX=/api \
      -a <backend-app>
    ```
+   On startup the backend will create that account (or rotate its password to match the env var if it already exists). Rotate later by updating the secret and redeploying. See `docs/auth.md` for the full model.
 
 ## Deploy the backend
 Run the deployment from the repository root so the Dockerfile path resolves correctly. The resulting app has no public `fly.dev` hostname; it listens on `http://<backend-app>.flycast:8000` for in-organization callers such as the frontend.
@@ -55,15 +56,14 @@ When prompted for a volume, select `brain-buddy-data` to mount at `/app/data`.
    ```bash
    flyctl apps create <frontend-app>
    ```
-2. **Point the client at the backend (Flycast) and forward API key settings (if any):**
+2. **Point the client at the backend (Flycast):**
    ```bash
    flyctl secrets set \
      BACKEND_ORIGIN="http://<backend-app>.flycast:8000" \
      VITE_API_BASE_URL="/api" \
-     VITE_API_KEY=<optional-static-key> \
-     VITE_API_KEY_HEADER=X-API-Key \
      -a <frontend-app>
    ```
+   The frontend proxies `/api/*` requests (including `Cookie` and `Set-Cookie` headers) to the private backend, preserving the session cookie end-to-end.
 3. **Deploy:**
   ```bash
   flyctl deploy \
@@ -77,12 +77,16 @@ When prompted for a volume, select `brain-buddy-data` to mount at `/app/data`.
   ```bash
   flyctl ssh console -a <backend-app> -C "curl -f http://127.0.0.1:8000/health"
   ```
+- **Mint an invite for yourself:**
+  ```bash
+  flyctl ssh console -a <backend-app> -C "python -m app.cli create-invite"
+  ```
 - **Frontend reachability and backend wiring:**
   ```bash
   curl -I https://<frontend-app>.fly.dev
   curl -f "https://<frontend-app>.fly.dev/api/health"  # proxied to backend via Flycast
   ```
-  Expect an HTTP 200 from Nginx and the compiled React bundle. Open the URL in a browser to confirm the canvas loads and can fetch data from the private backend.
+  Expect an HTTP 200 from Nginx. Open the URL in a browser, sign up with your invite on `/signup`, and confirm the canvas loads after authentication.
 
 ## Rollback guidance
 - List recent releases for either app:

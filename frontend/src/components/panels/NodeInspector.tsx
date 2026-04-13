@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useState, type ReactNode } from "react";
+import { useLayoutEffect, useState, type ReactNode } from "react";
 import {
   Highlighter,
   Layers,
@@ -8,7 +8,6 @@ import {
   Trash2
 } from "lucide-react";
 
-import { hasApiKey } from "../../api/client";
 import {
   useAiFeedback,
   useDeleteNode,
@@ -51,8 +50,6 @@ export function NodeInspector(): JSX.Element {
     setHighlightState(node?.highlightState ?? "none");
     setFeedback(null);
   }, [node?.id, node?.label, node?.type, node?.highlightState]);
-
-  const isSignedIn = useMemo(() => hasApiKey(), []);
 
   // Hooks must run in a stable order, so we call them above the early returns
   // even when the component will render a placeholder. Mutations here are
@@ -227,16 +224,6 @@ export function NodeInspector(): JSX.Element {
   };
 
   const handleAiFeedback = () => {
-    if (!isSignedIn) {
-      pushToast({
-        title: "Sign in required",
-        description: "Add your API key to request AI feedback.",
-        variant: "error",
-        duration: 5000
-      });
-      return;
-    }
-
     if (!consent) {
       pushToast({
         title: "Consent required",
@@ -372,11 +359,6 @@ export function NodeInspector(): JSX.Element {
               Request a quick summary and recommendations.
             </p>
           </div>
-          {!isSignedIn && (
-            <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-semibold text-amber-700">
-              Requires API key
-            </span>
-          )}
         </div>
 
         <label className="flex cursor-pointer items-start gap-2 text-xs text-emerald-800">

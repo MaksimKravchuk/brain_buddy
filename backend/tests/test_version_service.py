@@ -15,7 +15,9 @@ from app.schemas import (
 def test_create_version_captures_metadata_and_diff(
     tree_service, node_service, version_service
 ) -> None:
-    tree = tree_service.create_tree(TreeCreateRequest(name="Versions"))
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Versions"), owner_id="user_test"
+    )
     node_service.create_node(
         tree.id,
         NodeCreateRequest(label="A", type="child", position=Position(x=0, y=0)),
@@ -43,7 +45,9 @@ def test_create_version_captures_metadata_and_diff(
 def test_create_version_detects_conflicts(
     tree_service, node_service, version_service
 ) -> None:
-    tree = tree_service.create_tree(TreeCreateRequest(name="Conflicts"))
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Conflicts"), owner_id="user_test"
+    )
     node, _ = node_service.create_node(
         tree.id,
         NodeCreateRequest(label="A", type="child", position=Position(x=0, y=0)),
@@ -70,7 +74,9 @@ def test_create_version_detects_conflicts(
 
 
 def test_restore_version(tree_service, node_service, version_service) -> None:
-    tree = tree_service.create_tree(TreeCreateRequest(name="Restore"))
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Restore"), owner_id="user_test"
+    )
     node, tree = node_service.create_node(
         tree.id,
         NodeCreateRequest(label="A", type="child", position=Position(x=0, y=0)),
@@ -89,7 +95,9 @@ def test_restore_version(tree_service, node_service, version_service) -> None:
 def test_export_tree_supports_live_and_version(
     tree_service, node_service, relation_service, version_service
 ) -> None:
-    tree = tree_service.create_tree(TreeCreateRequest(name="Export"))
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Export"), owner_id="user_test"
+    )
     node_a, _ = node_service.create_node(
         tree.id,
         NodeCreateRequest(label="A", type="child", position=Position(x=0, y=0)),

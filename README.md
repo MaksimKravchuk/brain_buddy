@@ -31,7 +31,6 @@ python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
 pip install -e .[dev]
 
-# Optional: require API key by exporting BRAIN_BUDDY_API_KEY=<your-key>
 uvicorn app.main:app --reload
 ```
 
@@ -39,17 +38,27 @@ uvicorn app.main:app --reload
 ```bash
 cd frontend
 npm install
-
-# If the backend enforces an API key, export
-# VITE_API_KEY=<your-key> (and VITE_API_KEY_HEADER if customised)
 npm run dev
 ```
 
-By default the frontend expects the backend at `http://localhost:8000/api`. Configure `VITE_API_BASE_URL` to point elsewhere.
+In dev, Vite proxies `/api` to `http://localhost:8000` so the frontend and backend appear same-origin (required for cookie-based sessions).
+
+### Accounts & invites
+Signup is invite-gated. To create an invite:
+
+```bash
+# local dev
+cd backend && python -m app.cli create-invite
+
+# compose
+docker compose exec backend python -m app.cli create-invite
+```
+
+Hand the printed code to whoever should sign up. They go to `/signup`, enter their email, a ≥12-character password, and the invite code. See `docs/auth.md` for the security model.
 
 ### Autosave & AI Consent
-- The canvas autosaves locally every ~5s (debounced) and warns on exit if unsaved changes exist; signed-in saves still run on-demand.
-- AI feedback requires an API key and explicit consent toggle in the inspector; decline consent to keep data local and receive a validation error instead of sending content.
+- The canvas autosaves locally every ~5s (debounced) and warns on exit if unsaved changes exist.
+- AI feedback requires an explicit consent toggle in the inspector; decline consent to keep data local and receive a validation error instead of sending content.
 - Failures return correlation IDs in error toasts so you can retry or report with context.
 
 ### Smoke Test via Docker Compose
@@ -64,7 +73,7 @@ The backend will listen on `http://localhost:8000`, and the frontend will be ava
 
 Looking for a local-first workflow with refresh/troubleshooting steps? See `docs/runbooks/local-deployment.md`.
 
-**API keys in compose**: set `BRAIN_BUDDY_API_KEY` and `VITE_API_KEY` together in `.env` to require a key end-to-end. The compose stack forwards these into backend/frontend containers and the smoke test will include them automatically.
+Auth is cookie-based and invite-gated — mint an invite via `docker compose exec backend python -m app.cli create-invite`, then sign up on `/signup`. The compose smoke test (`scripts/smoke_test.sh`) mints its own throwaway invite and signs up a temporary user automatically.
 
 ## Deployment
 
@@ -79,10 +88,7 @@ The backend Fly app is private and only reachable over Flycast from other apps i
 # Create or resize the persistent volume
 flyctl volumes create brain_buddy_data --size 1 --region iad
 
-# Set optional API key; other environment values are defined in fly.backend.toml
-flyctl secrets set BRAIN_BUDDY_API_KEY="<your-api-key>"
-
-# Deploy using the backend config
+# Deploy using the backend config (session auth needs no extra secrets)
 flyctl deploy -c fly.backend.toml
 ```
 
@@ -94,11 +100,7 @@ When pairing the private backend with the public frontend, point the frontend pr
 | --- | --- | --- |
 | `BRAIN_BUDDY_API_PREFIX` | `/api` | Route prefix for FastAPI routers |
 | `BRAIN_BUDDY_DATA_DIR` | `<repo>/backend/data` | Root directory for tree storage |
-| `BRAIN_BUDDY_API_KEY` | _unset_ | When set, requests must include the configured API key |
-| `BRAIN_BUDDY_API_KEY_HEADER` | `X-API-Key` | Header expected to carry the static API key |
 | `VITE_API_BASE_URL` | `/api` | Frontend API base path (proxied in dev) |
-| `VITE_API_KEY` | _unset_ | Optional API key forwarded with every fetch |
-| `VITE_API_KEY_HEADER` | `X-API-Key` | Header name used when forwarding the API key |
 
 See `docs/api_usage.md` for request/response details and examples.
 

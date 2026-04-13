@@ -24,6 +24,7 @@ from .api import (
     VersionCreateRequest,
     VersionListItem,
 )
+from .auth import Invite, LoginRequest, MeResponse, Session, SignupRequest, User
 from .common import Position, TimestampMetadata, ValidationState, VisualState
 from .domain import (
     NodeDocument,
@@ -35,6 +36,12 @@ from .domain import (
 
 __all__ = [
     "ErrorResponse",
+    "Invite",
+    "LoginRequest",
+    "MeResponse",
+    "Session",
+    "SignupRequest",
+    "User",
     "NodeCreateRequest",
     "NodeDocument",
     "NodeResponse",

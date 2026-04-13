@@ -126,7 +126,9 @@ def test_create_relation_preserves_direction_after_node_moves(api_client) -> Non
         ),
         strict=True,
     ):
-        update_payload = NodeUpdateRequest(position=new_pos).model_dump(exclude_none=True)
+        update_payload = NodeUpdateRequest(position=new_pos).model_dump(
+            exclude_none=True
+        )
         patch_resp = api_client.patch(
             f"/api/trees/{tree_id}/nodes/{node_id}", json=update_payload
         )
@@ -267,12 +269,7 @@ def test_relation_validation_rejects_self_duplicate_and_cycle(api_client) -> Non
     assert cycle_body["reference_id"] == cycle_resp.headers.get("X-Correlation-ID")
 
 
-def test_api_key_middleware_enforces_header(secured_api_client) -> None:
-    unauthenticated = secured_api_client.get("/api/trees")
+def test_tree_routes_require_authentication(anonymous_api_client) -> None:
+    unauthenticated = anonymous_api_client.get("/api/trees")
     assert unauthenticated.status_code == 401
     assert unauthenticated.headers.get("X-Correlation-ID")
-
-    authenticated = secured_api_client.get(
-        "/api/trees", headers={"X-API-Key": "test-key"}
-    )
-    assert authenticated.status_code == 200

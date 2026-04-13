@@ -12,7 +12,9 @@ from app.schemas import (
 def test_validation_flow(
     container, tree_service, node_service, relation_service, validation_service
 ) -> None:
-    tree = tree_service.create_tree(TreeCreateRequest(name="Validation"))
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Validation"), owner_id="user_test"
+    )
 
     effect_node, tree = node_service.create_node(
         tree.id,
