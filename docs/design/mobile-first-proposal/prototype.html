@@ -127,21 +127,22 @@
     .session-task { min-width: 0; padding: 14px 15px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); box-shadow: 0 1px 2px rgba(15,30,45,.04); }
     .session-task p { overflow-wrap: anywhere; font-size: 16px; line-height: 1.4; font-weight: 650; }
     .session-task footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 9px; color: var(--faint); font-size: 11px; }
-    .session-task.needs-action { border-style: dashed; }
-    .session-task.needs-action footer span:last-child { color: var(--warning); font-weight: 700; }
+    .draft-markers { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px 10px; }
+    .wording-state { color: var(--warning); font-weight: 700; }
+    .proposal-state { color: var(--muted); font-weight: 700; }
     .empty-session { display: grid; place-items: center; min-height: 320px; padding: 32px 20px; border: 1px dashed var(--line-strong); border-radius: var(--radius); text-align: center; }
     .empty-session p { max-width: 30ch; margin-top: 7px; color: var(--muted); }
     .record-panel { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 58px; max-width: 688px; margin: auto; }
-    .record-cue { min-width: 76px; }
+    .record-cue { min-width: 52px; }
     .record-cue strong { display: block; font-size: 12px; }
-    .elapsed { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
     .mini-wave { display: flex; align-items: center; gap: 2px; width: 30px; height: 24px; }
     .mini-wave i { width: 3px; border-radius: 3px; background: var(--accent); }
     .mini-wave i:nth-child(1), .mini-wave i:nth-child(5) { height: 7px; }
     .mini-wave i:nth-child(2), .mini-wave i:nth-child(4) { height: 15px; }
     .mini-wave i:nth-child(3) { height: 22px; }
-    .record-panel .btn { min-height: 44px; padding: 8px 12px; }
-    .record-panel .finish { margin-left: auto; }
+    .record-panel .btn { min-height: 44px; padding: 7px 8px; font-size: 12px; }
+    .record-panel .capture-control { padding-inline: 6px; font-size: 11px; }
+    .record-panel .cancel { margin-left: auto; }
     .finished-panel { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding: 10px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); }
     .finished-panel .btn:first-of-type { margin-left: auto; }
 
@@ -346,22 +347,22 @@
       return shell(main(`
         <div class="session-summary"><div><p class="eyebrow">Current session</p><h1>Tasks from this session</h1></div><span class="session-state finished">Not started</span></div>
         <section class="empty-session" aria-labelledby="empty-title"><div><h2 id="empty-title">Your task list will grow here</h2><p>Keep talking naturally. BrainBuddy adds each task as it understands it.</p></div></section>
-      `, true), { dock: dock(`<div class="record-panel"><div class="record-cue"><strong>Ready</strong><span class="elapsed">00:00</span></div><button class="btn primary finish" aria-label="Start recording" onclick="go('recording')">Start</button></div>`) });
+      `, true), { dock: dock(`<div class="record-panel"><div class="record-cue"><strong>Ready</strong></div><button class="btn primary cancel" aria-label="Start recording" onclick="go('recording')">Start</button></div>`) });
     }
 
     const sessionTasks = [
-      ["Book the dentist appointment for Tuesday morning", "10:41"],
-      ["Send Natasha the release test-flake summary before Friday", "10:42"],
-      ["Plan a 30-minute walk after lunch", "10:43"],
-      ["Write down what keeps making release ownership bounce between teams, including the late-test handoff and who should make the final call", "10:44", "Check wording"]
+      "Book the dentist appointment for Tuesday morning",
+      "Send Natasha the release test-flake summary before Friday",
+      "Plan a 30-minute walk after lunch",
+      "Write down what keeps making release ownership bounce between teams, including the late-test handoff and who should make the final call"
     ];
 
     function sessionTaskList() {
-      return `<ol class="session-list" aria-live="polite" aria-label="Tasks extracted in this session">${sessionTasks.map((task, index) => `<li class="session-task ${task[2] ? "needs-action" : ""}"><p>${task[0]}</p><footer><span>Task ${index + 1}</span><span>${task[2] || task[1]}</span></footer></li>`).join("")}</ol>`;
+      return `<ol class="session-list" aria-live="polite" aria-label="Drafts extracted in this session">${sessionTasks.map((task, index) => `<li class="session-task"><p>${task}</p><footer><strong>#${index + 1}</strong><span class="draft-markers"><span class="wording-state">Wording still changing</span><span class="proposal-state">Provisional</span></span></footer></li>`).join("")}</ol>`;
     }
 
     function recorderDock(paused = false) {
-      return dock(`<div class="record-panel"><div class="mini-wave ${paused ? "paused" : ""}" aria-hidden="true">${"<i></i>".repeat(5)}</div><div class="record-cue"><strong>${paused ? "Paused" : "Recording"}</strong><span class="elapsed">02:18</span></div><button class="btn" onclick="go('${paused ? "recording" : "paused"}')">${paused ? "Resume" : "Pause"}</button><button class="btn primary finish" onclick="go('finished')">Finish</button></div>`);
+      return dock(`<div class="record-panel"><div class="mini-wave ${paused ? "paused" : ""}" aria-hidden="true">${"<i></i>".repeat(5)}</div><div class="record-cue"><strong>${paused ? "Paused" : "Recording"}</strong></div><button class="btn capture-control" onclick="go('${paused ? "recording" : "paused"}')">${paused ? "Resume" : "Pause"}</button><button class="btn capture-control cancel" onclick="go('idle')">Cancel</button><button class="btn capture-control" onclick="go('finished')">Stop</button><button class="btn primary capture-control" onclick="go('drafts')">Review</button></div>`);
     }
 
     function recording(paused = false) {
@@ -392,13 +393,13 @@
     }
 
     const candidateData = [
-      { n: 1, title: "Map why release-quality ownership is unclear", kind: "Problem", status: "Reconciled", cls: "accent" },
-      { n: 2, title: "Send the dentist form tomorrow", kind: "Task", status: "Edited by you", cls: "good" },
-      { n: 3, title: "Ask Natasha for the test-flake trend before Friday", kind: "Task", status: "Review wording", cls: "warn" }
+      { n: 1, title: "Map why release-quality ownership is unclear", status: "Reconciled", cls: "accent" },
+      { n: 2, title: "Send the dentist form tomorrow", status: "Edited by you", cls: "good" },
+      { n: 3, title: "Ask Natasha for the test-flake trend before Friday", status: "Review wording", cls: "warn" }
     ];
 
     function candidateCard(item, checkbox = false) {
-      return `<article class="candidate selected">${checkbox ? `<input type="checkbox" checked aria-label="Select ${item.title}">` : `<div class="pill accent">${item.n}</div>`}<div><h3>${item.title}</h3><div class="candidate-meta"><span class="pill">${item.kind}</span><span class="pill ${item.cls}">${item.status}</span></div><div class="candidate-actions"><button class="btn" onclick="alert('Static prototype: editor would open keyboard-safe full-page.')">Edit</button><button class="btn" onclick="this.closest('.candidate').style.opacity='.5'">Defer</button></div></div></article>`;
+      return `<article class="candidate selected">${checkbox ? `<input type="checkbox" checked aria-label="Select ${item.title}">` : `<div class="pill accent">#${item.n}</div>`}<div><h3>${item.title}</h3><div class="candidate-meta"><span class="pill ${item.cls}">${item.status}</span></div><div class="candidate-actions"><button class="btn" onclick="alert('Static prototype: editor would open keyboard-safe full-page.')">Edit</button><button class="btn" onclick="this.closest('.candidate').style.opacity='.5'">Defer</button></div></div></article>`;
     }
 
     function drafts() {

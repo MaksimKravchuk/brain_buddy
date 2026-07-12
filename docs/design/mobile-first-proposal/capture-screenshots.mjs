@@ -60,22 +60,39 @@ if (!emptyListVisible) throw new Error("Brain Dump empty-list state is missing")
 await journey.getByRole("button", { name: "Start recording" }).click();
 const activeTasks = await journey.getByRole("listitem").count();
 if (activeTasks !== 4) throw new Error(`Expected 4 active session tasks, found ${activeTasks}`);
-const forbiddenActiveCopy = await journey
-  .getByText(/live transcript|chunks uploaded|routing|CRT promotion/i)
+const activeSurface = journey.locator("main, .action-dock");
+const forbiddenActiveCopy = await activeSurface
+  .getByText(/live transcript|chunks uploaded|routing|CRT promotion|\d{2}:\d{2}|\bProblem\b|\bTask \d+\b|Check wording|Finish/i)
   .count();
-if (forbiddenActiveCopy) throw new Error("Active capture exposes transcript or pipeline UI");
+if (forbiddenActiveCopy) throw new Error("Active capture exposes prohibited labels, timer, or pipeline UI");
+for (let index = 1; index <= 4; index += 1) {
+  const card = journey.getByRole("listitem").nth(index - 1);
+  if (!(await card.getByText(`#${index}`, { exact: true }).isVisible())) {
+    throw new Error(`Draft card ${index} is missing its stable ordinal`);
+  }
+  if (!(await card.getByText("Wording still changing", { exact: true }).isVisible())) {
+    throw new Error(`Draft card ${index} is missing the wording-state label`);
+  }
+  if (!(await card.getByText("Provisional", { exact: true }).isVisible())) {
+    throw new Error(`Draft card ${index} is missing the proposal-state label`);
+  }
+}
+for (const control of ["Cancel", "Stop", "Review"]) {
+  if (!(await journey.locator(".action-dock").getByRole("button", { name: control, exact: true }).isVisible())) {
+    throw new Error(`Active capture is missing the ${control} control`);
+  }
+}
 await journey.getByRole("button", { name: "Pause" }).click();
 if (!(await journey.getByText("Paused · 4 tasks").isVisible())) {
   throw new Error("Paused state is not exposed as text");
 }
 await journey.getByRole("button", { name: "Resume" }).click();
-await journey.getByRole("button", { name: "Finish" }).click();
-await journey.getByRole("button", { name: "Review tasks" }).click();
+await journey.locator(".action-dock").getByRole("button", { name: "Review", exact: true }).click();
 await journey.getByRole("button", { name: "Review 3 actions" }).click();
 await journey.getByRole("button", { name: "Confirm selected" }).click();
 const finalHeading = await journey.getByRole("heading", { name: "3 of 4 actions completed" }).isVisible();
 if (!finalHeading) throw new Error("Critical Brain Dump journey did not reach partial-result state");
-console.log("click journey: empty session → recording → paused → resumed → finished → review → result passed");
+console.log("click journey: empty session → recording → paused → resumed → review → result passed");
 await journey.close();
 
 const reviewJourney = await browser.newPage({ viewport: { width: 430, height: 932 } });

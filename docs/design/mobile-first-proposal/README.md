@@ -20,7 +20,7 @@ Use the scenario selector in the top-right corner to jump between representative
 |---|---:|---|
 | `01-brain-dump-active-375.png` | 375×812 | Active capture with chronological session task list and compact recorder |
 | `02-brain-dump-active-430.png` | 430×932 | Active capture at the wider required phone viewport |
-| `03-brain-dump-paused-375.png` | 375×812 | Stable task list with compact paused / resume / finish state |
+| `03-brain-dump-paused-375.png` | 375×812 | Stable draft list with compact paused / resume / cancel / stop / review state |
 | `08-brain-dump-finished-430.png` | 430×932 | Finished session with compact next-step control state |
 | `04-weekly-review-queue-375.png` | 375×812 | Bounded queue and real progress |
 | `05-weekly-review-crt-promotion-430.png` | 430×932 | Item detail and keep/edit/delete/defer/route/promote actions |
@@ -37,7 +37,7 @@ node docs/design/mobile-first-proposal/capture-screenshots.mjs
 
 The script checks each viewport for console/page errors and horizontal overflow, then exercises:
 
-`empty session → recording → paused → resumed → finished → review → partial result`
+`empty session → recording → paused → resumed → review → partial result`
 
 ## Visual self-audit
 
@@ -51,4 +51,4 @@ Initial slop diagnostic: **0/10**.
 - Centering is limited to true empty/completion states; the recorder is a compact dock utility.
 - Typography follows the existing product’s precise sans posture with native fallbacks for a fully offline artifact.
 
-Post-verification score: **0/10**. The 375px and 430px active views keep all four task cards dominant and readable, including the long-text case. The paused view communicates state through text and static bars, and the 430px finished view keeps next steps compact without reintroducing capture diagnostics.
+Post-verification score: **0/10**. The 375px and 430px active views keep all four numbered draft cards dominant and readable, including the long-text case. Every draft retains its provisional and changing-wording authority cues; the compact recorder has no timer and keeps Cancel, Stop, and Review available. The paused view communicates state through text and static bars, and the 430px finished view keeps next steps compact without reintroducing capture diagnostics.

@@ -10,7 +10,7 @@ Scope: static UX direction only; no production feature code
 2. **A mobile bottom bar and desktop left rail with the same four destinations.** Information architecture stays stable while composition changes by viewport.
 3. **A persistent, thumb-reachable action dock.** The active workflow’s primary action remains visible above browser and device safe areas.
 4. **Chronological session task list as the active Brain Dump surface.** The user watches extracted tasks accumulate while speaking; the recorder is a compact utility rather than the page’s focal object.
-5. **Quiet proposal authority during capture.** Extracted tasks remain tentative under ADR-0002, but processing/provisional badges are suppressed unless wording needs the user’s attention. Full provenance and reconciliation move after Finish.
+5. **Explicit proposal authority during capture.** Every extracted draft keeps a stable ordinal plus “Wording still changing” and “Provisional”; full provenance and reconciliation stay out of the active capture view.
 6. **Confirmation before canonical writes.** Safe additions can be selected together; destructive/external/existing-item/CRT actions remain individually visible.
 7. **Resumable async, offline, retry, partial-commit, and terminal-error states.** These are core product behavior, not edge-case polish.
 8. **Weekly Review as a bounded queue with one-item phone focus.** Every item receives an outcome or explicit defer before completion.
@@ -21,7 +21,7 @@ Scope: static UX direction only; no production feature code
 
 - **Keep:** continuous voice capture, incremental extraction, safe tentative-task contract, mobile accessibility, and post-Finish review.
 - **Remove from active capture:** giant record affordance, red live treatment, prominent timer, transcript feed, upload/chunk status, pipeline stages, routing choices, CRT promotion, confirmation flow, and error-state gallery.
-- **Change:** the chronological current-session task list is now the primary content. Session identity and recording state are subtle; Start / Pause / Resume / Finish plus a five-bar audio cue share one compact dock.
+- **Change:** the chronological current-session draft list is now the primary content. Session identity and recording state are subtle; Cancel / Stop / Review remain primary in a compact dock, with Pause / Resume subordinate beside a five-bar audio cue and no elapsed timer.
 - **Accessibility guardrails:** controls remain at least 44px, state is named in text and shape rather than color alone, paused bars stop moving, reduced-motion is honored, long tasks wrap, focus remains visible, and the empty list explains what will happen.
 
 ## Intentionally excluded or deferred

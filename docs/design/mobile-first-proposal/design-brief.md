@@ -26,7 +26,7 @@ A persistent four-item bottom bar provides thumb-reachable destinations:
 - **Trees** — CRT list and focused tree/detail view.
 - **More** — operation history, privacy/retention, task-tracker destination, account, and sign-out.
 
-The current section and compact session title sit in the top app bar. During an active Brain Dump, an understated text state plus a small audio-level cue provides recording confidence without competing with the task list. Contextual back navigation replaces the title on detail/editor screens. A sticky bottom action dock contains compact Start / Pause / Resume / Finish controls above the navigation and safe-area inset.
+The current section and compact session title sit in the top app bar. During an active Brain Dump, an understated text state plus a small audio-level cue provides recording confidence without competing with the draft list. Contextual back navigation replaces the title on detail/editor screens. A sticky bottom action dock keeps Cancel / Stop / Review available above the navigation and safe-area inset; Pause / Resume remains subordinate to those three controls.
 
 ### Desktop (768px and above)
 
@@ -58,11 +58,11 @@ Breakpoints are content-driven. The prototype uses 768px for the shell transitio
 - **One dominant surface per state.** During recording, the chronological session task list—not the recorder—is the product. Confirmation later emphasizes Confirm selected; review detail emphasizes a decision, not navigation.
 - **44px minimum touch targets**, 8px spacing rhythm, 16px phone gutters, and safe-area padding via `env(safe-area-inset-*)`.
 - **State before decoration.** Status labels use text plus shape/icon, never color alone. Unknown-duration work uses stage text and indeterminate progress, not fake percentages.
-- **Proposals are not records.** Extracted tasks remain tentative in the product contract, but the active capture surface does not repeat processing badges. A quiet dashed treatment and explicit “Check wording” cue appear only when user action is useful; detailed states remain available after Finish.
+- **Proposals are not records.** Each extracted draft keeps its stable ordinal plus the explicit “Wording still changing” and “Provisional” cues. Detailed provenance and reconciliation remain outside the active-capture surface.
 - **Destructive and external actions remain explicit.** Delete, route, existing-item edits, and CRT promotion stay individually reviewable even when “select safe additions” is available.
 - **Keyboard and focus.** Logical DOM order, visible `:focus-visible`, Escape closes sheets/dialogs, Enter submits only single-line fields, and text areas preserve newline entry. Sticky controls move above the on-screen keyboard; content remains scrollable.
 - **Resumability.** Closing the app never implies cancellation. Every live operation exposes “Safe to leave” and restores its phase, item, edits, and queue position.
-- **Operational detail stays secondary.** Network, storage, transcript, pipeline, and routing detail is available after Finish or through operation detail—not in the focused active-session view. A blocking capture failure may interrupt the control only when the user must act.
+- **Operational detail stays secondary.** Network, storage, transcript, pipeline, and routing detail is available after capture or through operation detail—not in the focused active-session view. A blocking capture failure may interrupt the control only when the user must act.
 - **Error locality.** Retry is placed beside the failed stage/action. Correlation/reference details are expandable, not primary copy. Terminal microphone/storage errors offer salvage or deletion where possible.
 - **Accessible semantics.** Landmarks, headings, list semantics, `aria-live` for incremental session tasks/progress, explicit button labels, form labels/help, reduced-motion support, and contrast suitable for WCAG AA.
 - **Visual continuity.** Reuse the current slate surfaces, sky accent, soft borders/shadows, and restrained rounded corners. The proposal removes desktop-only hover dependence and does not lean on glass/gradient effects.
@@ -72,9 +72,9 @@ Breakpoints are content-driven. The prototype uses 768px for the shell transitio
 ### Brain Dump
 
 1. Idle: an empty session-task list explains what will appear; compact Start sits in the recorder dock.
-2. Recording: extracted task cards arrive chronologically while a compact waveform, elapsed cue, Pause, and Finish provide confidence without dominating.
+2. Recording: numbered draft cards arrive chronologically while a compact level meter and recording label provide confidence without a timer; Cancel, Stop, and Review stay available.
 3. Pause/resume: the same list remains stable; text, static audio bars, and control labels communicate state without relying on color or motion.
-4. Finish: the recorder collapses to a compact completed state; review, reconciliation, diagnostics, confirmation, and routing continue on subsequent surfaces.
+4. Stop: the recorder collapses to a compact completed state; review, reconciliation, diagnostics, confirmation, and routing continue on subsequent surfaces.
 5. Draft review: inspect/edit/reorder/defer candidates; reconciled changes show source cues and warnings.
 6. Freeze/confirm: safe additions may be grouped; destructive, routing, existing-item, or CRT actions remain individual.
 7. Commit: per-action results remain visible; local completion may coexist with asynchronous routing/promotion.
