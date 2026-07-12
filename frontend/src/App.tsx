@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { setUnauthorizedHandler } from "./api/client";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
+import BrainDumpPage from "./pages/BrainDumpPage";
 import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
 import TreeWorkspace from "./pages/TreeWorkspace";
@@ -28,6 +29,14 @@ export default function App(): JSX.Element {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
+        <Route
+          path="/brain-dump"
+          element={
+            <ProtectedRoute>
+              <BrainDumpPage />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/"
           element={

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from dataclasses import dataclass
 
 from app.ai.providers import MockValidationProvider, OpenAIValidationProvider
+from app.ai.task_tracker import FakeTaskTrackerAdapter
+from app.ai.transcription import MockTranscriptionProvider
 from app.core.config import AppConfig
 from app.repositories import (
     IndexRepository,
@@ -16,6 +20,7 @@ from app.repositories import (
     ValidationRepository,
     VersionRepository,
 )
+from app.repositories.brain_dump import BrainDumpRepository
 from app.services import (
     AuthService,
     NodeService,
@@ -24,6 +29,9 @@ from app.services import (
     ValidationService,
     VersionService,
 )
+from app.services.brain_dump_service import BrainDumpService
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -44,6 +52,8 @@ class Container:
     version_service: VersionService
     validation_service: ValidationService
     auth_service: AuthService
+    brain_dump_repo: BrainDumpRepository
+    brain_dump_service: BrainDumpService
 
 
 def build_container(config: AppConfig) -> Container:
@@ -78,6 +88,44 @@ def build_container(config: AppConfig) -> Container:
         password_policy=config.password_policy,
         session_settings=config.session,
     )
+    brain_dump_repo = BrainDumpRepository(data_root)
+
+    # Production providers: use real OpenAI Whisper + RTM REST when
+    # credentials are present. Fall back to mock/fake with a warning so
+    # the app still runs in dev/test. This is the explicit integration
+    # boundary — we never fake production voice or RTM behaviour.
+    from app.ai.task_tracker import RTMRestAdapter
+    from app.ai.transcription import OpenAITranscriptionProvider
+
+    openai_key = os.getenv("BRAIN_BUDDY_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+    rtm_key = os.getenv("RTM_API_KEY")
+    rtm_secret = os.getenv("RTM_SHARED_SECRET")
+
+    if openai_key:
+        transcription_provider = OpenAITranscriptionProvider(api_key=openai_key)
+        logger.info("Brain Dump: using OpenAI Whisper transcription provider")
+    else:
+        transcription_provider = MockTranscriptionProvider()
+        logger.warning(
+            "Brain Dump: OPENAI_API_KEY not set — using mock transcription. "
+            "Set OPENAI_API_KEY or BRAIN_BUDDY_OPENAI_API_KEY for production."
+        )
+
+    if rtm_key and rtm_secret:
+        task_tracker = RTMRestAdapter(api_key=rtm_key, shared_secret=rtm_secret)
+        logger.info("Brain Dump: using RTM REST adapter for task export")
+    else:
+        task_tracker = FakeTaskTrackerAdapter()
+        logger.warning(
+            "Brain Dump: RTM_API_KEY/RTM_SHARED_SECRET not set — using fake "
+            "task tracker. Set both for production RTM Inbox export."
+        )
+
+    brain_dump_service = BrainDumpService(
+        repo=brain_dump_repo,
+        transcription_provider=transcription_provider,
+        task_tracker=task_tracker,
+    )
 
     return Container(
         tree_repo=tree_repo,
@@ -94,4 +142,6 @@ def build_container(config: AppConfig) -> Container:
         version_service=version_service,
         validation_service=validation_service,
         auth_service=auth_service,
+        brain_dump_repo=brain_dump_repo,
+        brain_dump_service=brain_dump_service,
     )

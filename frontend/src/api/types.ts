@@ -176,3 +176,51 @@ export interface AiFeedbackResponse {
   recommendations: string[];
   request_id?: string | null;
 }
+
+// --- Brain Dump ---
+
+export type BrainDumpSessionStatus = "recording" | "reviewing" | "completed";
+
+export interface BrainDumpDraft {
+  id: string;
+  text: string;
+  created_at: string;
+  updated_at: string;
+  revision: number;
+}
+
+export interface ExportResult {
+  draft_id: string;
+  external_ref: string | null;
+  success: boolean;
+  error?: string | null;
+}
+
+export interface CreateSessionResponse {
+  id: string;
+  status: BrainDumpSessionStatus;
+  drafts: BrainDumpDraft[];
+  revision: number;
+}
+
+export interface SessionDetailResponse {
+  id: string;
+  status: BrainDumpSessionStatus;
+  drafts: BrainDumpDraft[];
+  export_results: ExportResult[];
+  revision: number;
+}
+
+export interface UploadAudioResponse {
+  id: string;
+  status: BrainDumpSessionStatus;
+  drafts: BrainDumpDraft[];
+  revision: number;
+}
+
+export interface SaveSessionResponse {
+  id: string;
+  status: BrainDumpSessionStatus;
+  export_results: ExportResult[];
+  revision: number;
+}

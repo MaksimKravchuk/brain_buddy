@@ -9,6 +9,7 @@ from app.core.config import AppConfig
 from app.schemas.auth import User
 from app.services import (
     AuthService,
+    BrainDumpService,
     NodeService,
     RelationService,
     TreeService,
@@ -59,6 +60,12 @@ def get_validation_service(
 
 def get_auth_service(container: Container = Depends(get_container)) -> AuthService:
     return container.auth_service
+
+
+def get_brain_dump_service(
+    container: Container = Depends(get_container),
+) -> BrainDumpService:
+    return container.brain_dump_service
 
 
 def get_current_user(

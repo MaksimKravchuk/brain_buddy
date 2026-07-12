@@ -7,6 +7,7 @@ from fastapi import FastAPI
 
 from app.api import api_router
 from app.api.auth import router as auth_router
+from app.api.brain_dump import router as brain_dump_router
 from app.api.errors import register_exception_handlers
 from app.api.middleware import CorrelationIdMiddleware
 from app.container import Container, build_container
@@ -50,6 +51,7 @@ def create_app() -> FastAPI:
     app.add_middleware(CorrelationIdMiddleware)
     register_exception_handlers(app)
     app.include_router(auth_router, prefix=f"{config.api_prefix}/auth")
+    app.include_router(brain_dump_router, prefix=f"{config.api_prefix}/brain-dump")
     app.include_router(api_router, prefix=config.api_prefix)
 
     @app.get("/health", tags=["health"])

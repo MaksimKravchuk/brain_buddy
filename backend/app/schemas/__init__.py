@@ -25,6 +25,17 @@ from .api import (
     VersionListItem,
 )
 from .auth import Invite, LoginRequest, MeResponse, Session, SignupRequest, User
+from .brain_dump import (
+    BrainDumpSession,
+    CreateSessionResponse,
+    Draft,
+    DraftUpdateRequest,
+    ExportResult,
+    SaveSessionResponse,
+    SessionDetailResponse,
+    SessionStatus,
+    UploadAudioResponse,
+)
 from .common import Position, TimestampMetadata, ValidationState, VisualState
 from .domain import (
     NodeDocument,
@@ -42,6 +53,15 @@ __all__ = [
     "Session",
     "SignupRequest",
     "User",
+    "BrainDumpSession",
+    "CreateSessionResponse",
+    "Draft",
+    "DraftUpdateRequest",
+    "ExportResult",
+    "SaveSessionResponse",
+    "SessionDetailResponse",
+    "SessionStatus",
+    "UploadAudioResponse",
     "NodeCreateRequest",
     "NodeDocument",
     "NodeResponse",

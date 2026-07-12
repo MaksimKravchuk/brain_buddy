@@ -1,18 +1,23 @@
 import {
   AiFeedbackRequest,
   AiFeedbackResponse,
+  BrainDumpDraft,
+  CreateSessionResponse,
   NodeCreateRequest,
   NodeResponse,
   NodeUpdateRequest,
   RelationCreateRequest,
   RelationResponse,
   RelationUpdateRequest,
+  SaveSessionResponse,
+  SessionDetailResponse,
   TreeCreateRequest,
   TreeDetailResponse,
   TreeExportResponse,
   TreeImportPayload,
   TreeListItem,
   TreeUpdateRequest,
+  UploadAudioResponse,
   ValidationHistoryResponse,
   ValidationRequest,
   ValidationResponse,
@@ -211,5 +216,45 @@ export const apiClient = {
 
   getValidationHistory(treeId: string, nodeId: string, signal?: AbortSignal) {
     return request<ValidationHistoryResponse>(`/trees/${treeId}/nodes/${nodeId}/validation-history`, { signal });
+  },
+
+  // --- Brain Dump (voice-only) ---
+
+  createBrainDumpSession() {
+    return request<CreateSessionResponse>("/brain-dump/sessions", { method: "POST" });
+  },
+
+  getBrainDumpSession(sessionId: string, signal?: AbortSignal) {
+    return request<SessionDetailResponse>(`/brain-dump/sessions/${sessionId}`, { signal });
+  },
+
+  uploadBrainDumpAudio(sessionId: string, file: Blob) {
+    const formData = new FormData();
+    formData.append("file", file);
+    return request<UploadAudioResponse>(`/brain-dump/sessions/${sessionId}/audio`, {
+      method: "POST",
+      body: formData
+    });
+  },
+
+  editBrainDumpDraft(sessionId: string, draftId: string, text: string) {
+    return request<SessionDetailResponse>(
+      `/brain-dump/sessions/${sessionId}/drafts/${draftId}`,
+      { method: "PATCH", body: { text } }
+    );
+  },
+
+  deleteBrainDumpDraft(sessionId: string, draftId: string) {
+    return request<SessionDetailResponse>(
+      `/brain-dump/sessions/${sessionId}/drafts/${draftId}`,
+      { method: "DELETE" }
+    );
+  },
+
+  saveBrainDumpSession(sessionId: string) {
+    return request<SaveSessionResponse>(
+      `/brain-dump/sessions/${sessionId}/save`,
+      { method: "POST" }
+    );
   }
 };
