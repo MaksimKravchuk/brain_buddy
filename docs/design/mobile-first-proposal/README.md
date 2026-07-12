@@ -2,6 +2,8 @@
 
 Open `prototype.html` directly in a modern browser. No backend, build, or network access is required.
 
+Public PR preview: https://brain-buddy-frontend-pr-62.fly.dev/design/mobile-first-proposal.html?screen=recording
+
 Use the scenario selector in the top-right corner to jump between representative states, or follow the clickable paths from Brain Dump and Weekly Review. Stable screenshot routes use `?screen=<name>`.
 
 ## Files
