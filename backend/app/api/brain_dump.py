@@ -18,6 +18,7 @@ from app.schemas.auth import User
 from app.schemas.brain_dump import (
     CreateSessionResponse,
     DraftUpdateRequest,
+    ExportResult,
     SaveSessionResponse,
     SessionDetailResponse,
     UploadAudioResponse,
@@ -176,6 +177,6 @@ def save_session(
     return SaveSessionResponse(
         id=session.id,
         status=session.status,
-        export_results=session.export_results,
+        export_results=[ExportResult(**r) for r in session.export_results],
         revision=session.revision,
     )

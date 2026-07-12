@@ -7,8 +7,8 @@ import os
 from dataclasses import dataclass
 
 from app.ai.providers import MockValidationProvider, OpenAIValidationProvider
-from app.ai.task_tracker import FakeTaskTrackerAdapter
-from app.ai.transcription import MockTranscriptionProvider
+from app.ai.task_tracker import FakeTaskTrackerAdapter, TaskTrackerAdapter
+from app.ai.transcription import MockTranscriptionProvider, TranscriptionProvider
 from app.core.config import AppConfig
 from app.repositories import (
     IndexRepository,
@@ -101,6 +101,7 @@ def build_container(config: AppConfig) -> Container:
     rtm_key = os.getenv("RTM_API_KEY")
     rtm_secret = os.getenv("RTM_SHARED_SECRET")
 
+    transcription_provider: TranscriptionProvider
     if openai_key:
         transcription_provider = OpenAITranscriptionProvider(api_key=openai_key)
         logger.info("Brain Dump: using OpenAI Whisper transcription provider")
@@ -111,6 +112,7 @@ def build_container(config: AppConfig) -> Container:
             "Set OPENAI_API_KEY or BRAIN_BUDDY_OPENAI_API_KEY for production."
         )
 
+    task_tracker: TaskTrackerAdapter
     if rtm_key and rtm_secret:
         task_tracker = RTMRestAdapter(api_key=rtm_key, shared_secret=rtm_secret)
         logger.info("Brain Dump: using RTM REST adapter for task export")
