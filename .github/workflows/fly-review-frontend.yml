@@ -23,6 +23,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Include thinking-assistant prototype in review app
+        run: |
+          prototype="docs/design/thinking-assistant-pivot/prototype.html"
+          if [ -f "$prototype" ]; then
+            mkdir -p frontend/public/design
+            cp "$prototype" frontend/public/design/thinking-assistant-pivot.html
+          fi
+
       - name: Set up Flyctl
         uses: superfly/flyctl-actions/setup-flyctl@v1
 
