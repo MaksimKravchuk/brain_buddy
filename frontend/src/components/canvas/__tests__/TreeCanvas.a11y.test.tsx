@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect } from "react";
-import { act, render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../../api/client";
@@ -122,7 +122,9 @@ describe("TreeCanvas relation error accessibility", () => {
     expect(referenceTag).toHaveTextContent("ref-duplicate");
     const copyButton = screen.getByRole("button", { name: /copy reference/i });
 
-    await userEvent.click(copyButton);
+    await act(async () => {
+      fireEvent.click(copyButton);
+    });
     expect(writeText).toHaveBeenCalledWith("ref-duplicate");
     expect(screen.getByText(/copied/i)).toBeInTheDocument();
   });

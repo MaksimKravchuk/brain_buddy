@@ -22,89 +22,107 @@ class NodeService:
     def create_node(
         self, tree_id: str, payload: NodeCreateRequest
     ) -> tuple[NodeDocument, TreeDocument]:
-        tree = self.tree_repo.load(tree_id)
         now = utcnow()
-        node = NodeDocument(
-            id=generate_node_id(),
-            label=payload.label,
-            position=payload.position,
-            metadata=TimestampMetadata(created_at=now, updated_at=now, author=None),
-            visual=None,
-            validation=None,
-            extra={
-                "type": payload.type,
-                "highlight_state": payload.highlight_state,
-            },
-        )
+        created_node: NodeDocument | None = None
 
-        updated_tree = tree.model_copy(update={"nodes": [*tree.nodes, node]})
-        updated_tree = self.tree_service.touch_tree(updated_tree, timestamp=now)
-        return node, updated_tree
+        def add_node(tree: TreeDocument) -> TreeDocument:
+            nonlocal created_node
+            created_node = NodeDocument(
+                id=generate_node_id(),
+                label=payload.label,
+                position=payload.position,
+                metadata=TimestampMetadata(created_at=now, updated_at=now, author=None),
+                visual=None,
+                validation=None,
+                extra={
+                    "type": payload.type,
+                    "highlight_state": payload.highlight_state,
+                },
+            )
+            return tree.model_copy(update={"nodes": [*tree.nodes, created_node]})
+
+        updated_tree = self.tree_service.mutate_tree(
+            tree_id, add_node, timestamp=now
+        )
+        assert created_node is not None
+        return created_node, updated_tree
 
     def update_node(
         self, tree_id: str, node_id: str, payload: NodeUpdateRequest
     ) -> tuple[NodeDocument, TreeDocument]:
-        tree = self.tree_repo.load(tree_id)
-        nodes = list(tree.nodes)
-        try:
-            index = next(idx for idx, node in enumerate(nodes) if node.id == node_id)
-        except StopIteration as exc:
-            raise NotFoundError("Node", node_id) from exc
-
-        node = nodes[index]
         if not payload.model_fields_set:
+            tree = self.tree_repo.load(tree_id)
+            node = next((node for node in tree.nodes if node.id == node_id), None)
+            if node is None:
+                raise NotFoundError("Node", node_id)
             return node, tree
 
-        updates: dict[str, object] = {}
-        if "label" in payload.model_fields_set:
-            updates["label"] = payload.label
-        if "position" in payload.model_fields_set and payload.position is not None:
-            updates["position"] = payload.position
-        if (
-            "type" in payload.model_fields_set
-            or "highlight_state" in payload.model_fields_set
-        ):
-            extra = {**(node.extra or {})}
-            if "type" in payload.model_fields_set and payload.type is not None:
-                extra["type"] = payload.type
-            if (
-                "highlight_state" in payload.model_fields_set
-                and payload.highlight_state is not None
-            ):
-                extra["highlight_state"] = payload.highlight_state
-            updates["extra"] = extra
+        now = utcnow()
+        updated_node: NodeDocument | None = None
 
-        metadata = node.metadata.model_copy(update={"updated_at": utcnow()})
-        updates["metadata"] = metadata
-        updated_node = node.model_copy(update=updates)
-        nodes[index] = updated_node
-        updated_tree = tree.model_copy(update={"nodes": nodes})
-        updated_tree = self.tree_service.touch_tree(updated_tree)
+        def apply_update(tree: TreeDocument) -> TreeDocument:
+            nonlocal updated_node
+            nodes = list(tree.nodes)
+            try:
+                index = next(idx for idx, node in enumerate(nodes) if node.id == node_id)
+            except StopIteration as exc:
+                raise NotFoundError("Node", node_id) from exc
+
+            node = nodes[index]
+            updates: dict[str, object] = {}
+            if "label" in payload.model_fields_set:
+                updates["label"] = payload.label
+            if "position" in payload.model_fields_set and payload.position is not None:
+                updates["position"] = payload.position
+            if (
+                "type" in payload.model_fields_set
+                or "highlight_state" in payload.model_fields_set
+            ):
+                extra = {**(node.extra or {})}
+                if "type" in payload.model_fields_set and payload.type is not None:
+                    extra["type"] = payload.type
+                if (
+                    "highlight_state" in payload.model_fields_set
+                    and payload.highlight_state is not None
+                ):
+                    extra["highlight_state"] = payload.highlight_state
+                updates["extra"] = extra
+
+            updates["metadata"] = node.metadata.model_copy(
+                update={"updated_at": now}
+            )
+            updated_node = node.model_copy(update=updates)
+            nodes[index] = updated_node
+            return tree.model_copy(update={"nodes": nodes})
+
+        updated_tree = self.tree_service.mutate_tree(
+            tree_id, apply_update, timestamp=now
+        )
+        assert updated_node is not None
         return updated_node, updated_tree
 
     def delete_node(
         self, tree_id: str, node_id: str, *, cascade: bool = False
     ) -> TreeDocument:
-        tree = self.tree_repo.load(tree_id)
-        nodes = [node for node in tree.nodes if node.id != node_id]
-        if len(nodes) == len(tree.nodes):
-            raise NotFoundError("Node", node_id)
+        def remove_node(tree: TreeDocument) -> TreeDocument:
+            nodes = [node for node in tree.nodes if node.id != node_id]
+            if len(nodes) == len(tree.nodes):
+                raise NotFoundError("Node", node_id)
 
-        relations = list(tree.relations)
-        remaining_relations = [
-            relation
-            for relation in relations
-            if relation.source_id != node_id and relation.target_id != node_id
-        ]
-        removed_relations = len(relations) - len(remaining_relations)
-        if removed_relations and not cascade:
-            raise ValidationFailure(
-                f"Node '{node_id}' has {removed_relations} relation(s); "
-                "use cascade=true to remove."
+            relations = list(tree.relations)
+            remaining_relations = [
+                relation
+                for relation in relations
+                if relation.source_id != node_id and relation.target_id != node_id
+            ]
+            removed_relations = len(relations) - len(remaining_relations)
+            if removed_relations and not cascade:
+                raise ValidationFailure(
+                    f"Node '{node_id}' has {removed_relations} relation(s); "
+                    "use cascade=true to remove."
+                )
+            return tree.model_copy(
+                update={"nodes": nodes, "relations": remaining_relations}
             )
 
-        updated_tree = tree.model_copy(
-            update={"nodes": nodes, "relations": remaining_relations}
-        )
-        updated_tree = self.tree_service.touch_tree(updated_tree)
-        return updated_tree
+        return self.tree_service.mutate_tree(tree_id, remove_node)

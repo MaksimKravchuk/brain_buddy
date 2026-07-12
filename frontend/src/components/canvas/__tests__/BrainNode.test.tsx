@@ -73,11 +73,15 @@ describe("BrainNode inline editing", () => {
       </ReactFlowProvider>
     );
 
-    await user.dblClick(screen.getByRole("button", { name: "Original" }));
+    await act(async () => {
+      await user.dblClick(screen.getByRole("button", { name: "Original" }));
+    });
     const textarea = await screen.findByRole("textbox");
-    await user.clear(textarea);
-    await user.type(textarea, "  Updated label  ");
-    await user.tab();
+    await act(async () => {
+      await user.clear(textarea);
+      await user.type(textarea, "  Updated label  ");
+      await user.tab();
+    });
 
     expect(mutateSpy).toHaveBeenCalledWith(
       { nodeId: "node-1", payload: { label: "Updated label" } },
@@ -95,10 +99,14 @@ describe("BrainNode inline editing", () => {
       </ReactFlowProvider>
     );
 
-    await user.dblClick(screen.getByRole("button", { name: "Original" }));
+    await act(async () => {
+      await user.dblClick(screen.getByRole("button", { name: "Original" }));
+    });
     const textarea = await screen.findByRole("textbox");
-    await user.type(textarea, "Changed");
-    await user.keyboard("{Escape}");
+    await act(async () => {
+      await user.type(textarea, "Changed");
+      await user.keyboard("{Escape}");
+    });
 
     expect(mutateSpy).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Original" })).toBeInTheDocument();
