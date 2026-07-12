@@ -54,6 +54,12 @@
 - A successful push to `main` deploys to Fly automatically and runs production smoke checks. Do not perform an ad-hoc production deploy instead of this release path.
 - There are currently no customer or valuable production data: prioritize MVP velocity, but preserve the PR → CI → deploy traceability.
 
+## Agent Delivery Workflow
+- Work in an isolated git worktree and feature branch. Never leave product changes uncommitted in the primary worktree.
+- Every useful product change must be committed, pushed, and opened as a PR against `main`. Review and green CI are the merge gate.
+- A successful push to `main` deploys to Fly automatically and runs production smoke checks. Do not perform an ad-hoc production deploy instead of this release path.
+- There are currently no customer or valuable production data: prioritize MVP velocity, but preserve the PR → CI → deploy traceability.
+
 ## Active Technologies
 - Python 3.11 (backend), TypeScript (strict) + React (frontend) + FastAPI, Pydantic, pytest; React, Vite, Zustand, React Query, React Flow-like canvas, Vitest/Testing Library (001-reality-tree-ui)
 - File-backed tree data under backend/data with LRU caching; cloud persistence for signed-in users (reuse existing storage path) (001-reality-tree-ui)
