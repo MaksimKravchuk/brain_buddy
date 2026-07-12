@@ -22,11 +22,12 @@ flows and must not enlarge the port. A future native tracker may implement the s
 3. Draft IDs are stable; display numbers may change after merge, split, or reorder.
 4. Pause settles the current checkpoint and preserves the session. Resume continues it.
 5. Stop seals input and enters reconciliation/review. It creates no RTM task.
-6. The review shows exact titles and destination. The user may edit/reject drafts and
+6. The review shows exact titles and the fixed RTM Inbox destination. The user may
+   edit/reject drafts and
    confirm one, several selected drafts, or all currently selected drafts.
 7. Editing a frozen batch invalidates it. Confirmation always targets exact draft revisions.
 8. Each accepted task gets an independent durable result: queued, creating, succeeded,
-   failed, reconciliation required, ambiguous, or cancelled.
+   failed, ambiguous, or cancelled.
 9. Success shows the tracker, destination, exact title, immutable external reference, and
    read-back status. Failure and uncertainty remain visible after reload.
 10. The UI never says "created" for a fake, queued, timed-out, or ambiguous result.
@@ -36,14 +37,11 @@ flows and must not enlarge the port. A future native tracker may implement the s
 - destination: RTM Inbox by omitting `list_id`;
 - `parse=0`;
 - title: exact confirmed draft title;
-- `external_id`: deterministic `bb:v1:<route_id>` marker;
-- fixed provenance note with BrainBuddy operation/draft/route IDs only;
-- no `na`, priority, due/start date, tags, recurrence, reminder, location, estimate,
-  assignment, or invented list unless the confirmation explicitly contains it;
-- v1 UI initially exposes no optional RTM metadata controls.
+- no other RTM fields: no `external_id`, tags, notes, URLs, `na`, priority, due/start date,
+  recurrence, reminder, location, estimate, assignment, or list/project move.
 
-The adapter persists the returned RTM `list_id`, `taskseries_id`, and `task_id` before
-adding the provenance note. A note failure cannot trigger another task create.
+The adapter persists the returned RTM `list_id`, `taskseries_id`, and `task_id`. BrainBuddy
+keeps operation/draft/route linkage only in its own storage.
 
 ## API slices
 
@@ -63,8 +61,8 @@ POST /brain-dumps/{operation_id}/confirm        # explicit idempotent confirmati
 GET  /brain-dumps/{operation_id}/results
 POST /task-tracker/rtm/connect
 GET  /task-tracker/status
-POST /task-routes/{route_id}/reconcile
-POST /task-routes/{route_id}/resolve             # link/cancel/checked-absent retry
+GET  /task-routes/{route_id}/candidates          # read-only manual resolution aid
+POST /task-routes/{route_id}/resolve             # link verified ref or cancel ambiguity
 ```
 
 All routes are authenticated and owner-scoped. Mutations use `Idempotency-Key`, an expected
@@ -84,8 +82,6 @@ ConfirmBrainDumpBatch:
     expected_draft_revision
     decision: accept | reject
     exact_title
-    destination
-    explicit_fields
 ```
 
 The server derives one stable route ID and child idempotency key per accepted action. The
@@ -101,21 +97,19 @@ specified by ADR-0003.
 
 An outbox worker leases `prepared` items, writes an attempt, marks `sending`, and then calls
 the adapter. If process state cannot prove the request was never sent, the next state is
-`reconciliation_required`, not retry-ready.
+`ambiguous`, with no path to another create for that route.
 
-## Reconciliation UX
+## Ambiguous-outcome UX
 
 For a potentially accepted RTM create:
 
-- query only the owner binding, destination, and bounded attempt-time window;
-- use exact provenance marker identity when RTM returns it;
-- auto-adopt only one exact marker match;
-- show multiple exact matches as ambiguous;
-- use title/time only to suggest candidates, never to auto-link;
-- after no trustworthy match, explain that absence is unproven;
-- require the user to link an existing task, cancel, or attest they checked RTM before a
-  new create attempt;
-- preserve every attempt and external reference in audit history.
+- query only the owner binding, Inbox, and a bounded attempt-time window to show possible
+  candidates;
+- use title/time only as a visual hint, never as identity or an auto-link signal;
+- explain that zero candidates does not prove the task was not created;
+- allow the user to link a verified complete RTM ref or cancel the unresolved local route;
+- never expose retry-create for that route;
+- preserve the attempt and any manually linked external reference in audit history.
 
 ## Security and privacy
 
@@ -124,8 +118,8 @@ an owner-scoped binding and encrypted or secret-stored. Secrets never enter clie
 operation events, logs, route/outbox records, or external references. Logs contain IDs,
 state, timings, allowlisted remote codes, and retry disposition only.
 
-RTM receives the confirmed title and a fixed provenance note. It does not receive raw
-audio, transcript, discarded drafts, source spans, confidence, model/prompt metadata,
+RTM receives only the confirmed title. It receives no BrainBuddy provenance, notes, URLs,
+raw audio, transcript, discarded drafts, source spans, confidence, model/prompt metadata,
 email, or other BrainBuddy content.
 
 ## Migration contract
@@ -143,8 +137,8 @@ migration rewrites or imports them by default.
    pause/resume/stop, freeze, and explicit confirmation.
 3. Implement Execution DTOs, route/outbox/attempt/result persistence, leases, error
    taxonomy, and a test-only fake adapter.
-4. Implement RTM owner binding and signed client wrapper, then create/get/list/note mapping.
-5. Add reconciliation and ambiguous-outcome UI.
+4. Implement RTM owner binding and signed client wrapper, then plain Inbox create/get/list.
+5. Add durable ambiguous-outcome and manual-resolution UI.
 6. Run deterministic suites and one controlled credentialed sandbox smoke test before
    claiming functional completion.
 
@@ -153,9 +147,8 @@ migration rewrites or imports them by default.
 - every scenario in `acceptance-tests.md` is automated at its specified layer;
 - architecture tests prohibit Execution imports of Organize repositories/domain DTOs;
 - runtime configuration cannot select a success-inventing mock in production;
-- the credentialed smoke creates exactly one uniquely prefixed Inbox task, reads it back,
-  verifies defaults and provenance, and records cleanup without uncontrolled leftovers;
+- the credentialed smoke creates exactly one uniquely titled plain Inbox task, reads it
+  back, verifies no metadata, and records cleanup without uncontrolled leftovers;
 - result reload demonstrates durable success and external refs;
-- a forced timeout-after-send demonstrates reconciliation/ambiguity without an automatic
-  second create;
+- a forced timeout-after-send demonstrates durable ambiguity without any second create;
 - PR #60 is described as foundation-only until these gates pass.
