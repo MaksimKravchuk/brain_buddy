@@ -4,8 +4,9 @@ Status: Design contract
 Decision: [ADR-0002](../../docs/decisions/0002-async-voice-operation-substrate.md)
 
 Release scope: [ADR-0003](../../docs/decisions/0003-brain-dump-task-tracker-port.md)
-ships the Brain Dump subset first. The Weekly Review section remains a future
-shared-substrate conformance contract and is not a gate for the Brain Dump tranche.
+and its acceptance suite supersede this file for the current Brain Dump specialization.
+The broader Brain Dump and Weekly Review scenarios here remain future design and are not
+release gates for the flat session-to-Inbox tranche.
 
 These scenarios are implementation requirements. Unit tests should cover transition and
 merge functions; repository tests should cover append/idempotency recovery; API tests

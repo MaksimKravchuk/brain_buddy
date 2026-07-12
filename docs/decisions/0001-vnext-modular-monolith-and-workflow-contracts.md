@@ -7,9 +7,10 @@ Related: `backend/app/container.py`, `backend/app/schemas/domain.py`, `docs/auth
 ADR-0002, ADR-0003, Kanban task `t_be41d6d7`
 
 Scope refinement: [ADR-0003](0003-brain-dump-task-tracker-port.md) narrows the next
-implementation tranche to Brain Dump and an RTM-backed `TaskTrackerPort`. Weekly Review
-and CRT remain architectural boundaries, not tranche deliverables. Where this record's
-broad MVP sequence conflicts with that release scope or tracker contract, ADR-0003 governs.
+implementation tranche to one flat Brain Dump session and a create-only RTM-backed
+`TaskTrackerPort`. Weekly Review and CRT remain architectural boundaries, not tranche
+deliverables. ADR-0003 is authoritative for Brain Dump product behavior, states, APIs, and
+tracker scope wherever this record describes broader organize/review/route/result flows.
 
 ## Context
 

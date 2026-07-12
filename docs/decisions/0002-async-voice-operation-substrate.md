@@ -5,10 +5,11 @@ Status: Proposed
 Decision owner: BrainBuddy
 Related: ADR-0001, ADR-0003, Kanban task `t_8a1164be`
 
-Scope refinement: [ADR-0003](0003-brain-dump-task-tracker-port.md) ships only the
-`voice_brain_dump` specialization in the next tranche. The shared operation contract is
-preserved so Weekly Review can use it later, but Weekly Review is not an implementation
-deliverable for this release.
+Scope refinement: [ADR-0003](0003-brain-dump-task-tracker-port.md) ships only a flat Brain
+Dump session in the next tranche. This record remains a source of reusable async voice,
+privacy, ordering, and idempotency infrastructure and a future Weekly Review design. Its
+Brain Dump patch/reconciliation/review/confirmation behavior is superseded: ADR-0003 is
+authoritative for the specialization's product states, commands, and acceptance gate.
 
 ## Context
 

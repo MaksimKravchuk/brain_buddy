@@ -1,4 +1,4 @@
-# ADR-0003: Ship Brain Dump through a narrow task-tracker port
+# ADR-0003: Save a flat Brain Dump session to RTM Inbox
 
 Date: 2026-07-12
 Status: Proposed
@@ -7,471 +7,335 @@ Related: ADR-0001, ADR-0002, PR #60, `specs/003-brain-dump-task-tracker/`
 
 ## Context
 
-ADR-0001 defines the modular-monolith boundaries and ADR-0002 defines a shared async
-voice-operation substrate. The next product tranche is narrower: prove the Brain Dump
-loop with Remember The Milk (RTM) as the concrete task tracker. Weekly Review and CRT are
-not deliverables in this tranche. Their existing contracts may remain, but they must not
-expand the implementation or the task-tracker interface.
+The first BrainBuddy product tranche must prove one short loop: capture thoughts, turn them
+into a plain list of task drafts, and deliberately save that list to Remember The Milk
+(RTM) Inbox. Earlier drafts of this decision expanded the loop into review, selection,
+routing, and task-by-task confirmation. That added product concepts which are not required
+to test the value of Brain Dump.
 
-PR #60 (`feat/voice-capture-mvp`) establishes useful module and persistence scaffolding,
-but calls a `MockTaskTrackerAdapter` that invents a successful external reference. It also
-processes each submission synchronously and lets Execution import Organize records and its
-repository. That is not a functional Brain Dump MVP and violates the intended ownership
-boundary. A mock success cannot stand in for a durable external side effect.
+RTM does not promise idempotent `tasks.add`. A timeout after a request may mean either that
+nothing happened or that RTM created the task and the response was lost. BrainBuddy must
+therefore keep enough local export state to avoid silently creating a duplicate, without
+putting provenance or idempotency markers into the RTM task.
 
-RTM's official API supports authenticated task creation, task listing, task references,
-and timelines, but does not promise that `tasks.add` is idempotent. A timeout can therefore
-mean either "not created" or "created but the response was lost". The product requirement
-also forbids adding an RTM-side idempotency or provenance marker: RTM receives only the task
-name. BrainBuddy must represent uncertainty instead of retrying and potentially duplicating
-a task.
+PR #60 (`feat/voice-capture-mvp`) contains useful owner-scoped persistence and module seams,
+but its synchronous mock success is not a functional RTM export. It also includes workflow
+scope beyond this tranche.
 
 ## Decision
 
-Ship only the Brain Dump workflow and a small Execution-owned `TaskTrackerPort` v1. RTM is
-the first adapter. A future BrainBuddy-native tracker implements the same port.
-
-The MVP lifecycle is:
+Ship one flat Brain Dump session and one explicit `Save session` action.
 
 ```text
-create/resume session
-  -> record and append numbered provisional drafts
-  -> pause (settle a checkpoint) / resume the same session
-  -> stop (seal input)
-  -> reconcile and review the numbered drafts
-  -> explicitly confirm selected drafts, individually or as a batch
-  -> create one route/outbox item per accepted task
-  -> dispatch accepted tasks through TaskTrackerPort
-  -> show one durable result per task
+open or resume the user's one open session
+  -> add raw thoughts by voice or text
+  -> append task-name drafts to one flat ordered list
+  -> manually edit wording, delete drafts, or capture more thoughts
+  -> Save session once
+  -> freeze every remaining draft
+  -> create each frozen name as a plain RTM Inbox task
+  -> finish as saved or saved_with_issues
 ```
 
-Models may add, reorder, merge, split, or revise provisional drafts, subject to ADR-0002's
-lineage and user-edit locks. They may not confirm, route, or create an external task. Pause
-is resumable and does not imply confirmation. Stop seals the input but does not write to
-the tracker. Closing the client neither stops nor confirms a session.
+There is no separate stop, reconciliation, review, selection, acceptance, confirmation, or
+destination step. Seeing drafts never closes capture. Until `Save session` begins, the user
+may return to voice or text capture at any time.
 
-### Scope
+### Product scope
 
 In scope:
 
-- create/resume/pause/resume/stop a Brain Dump session;
-- append live, chronological, numbered provisional task drafts;
-- reconcile drafts after pause checkpoints and stop;
-- edit, reject, or accept each draft and batch-confirm the current selection;
-- create accepted tasks in the configured tracker;
-- show durable success, failure, and ambiguous-outcome/manual-resolution results;
-- RTM connect/status, plain Inbox creation, read-back, and manual ambiguity resolution.
+- create or resume one open Brain Dump session per owner;
+- append voice or text input to that session;
+- produce a flat chronological list of provisional task-name drafts;
+- manually edit a draft's wording or delete a draft;
+- perform one explicit bulk save of every remaining draft to RTM Inbox;
+- preserve local export state so partial failures and ambiguous creates do not duplicate
+  tasks or prevent unaffected drafts from being exported.
 
-Out of scope:
+Explicitly out of scope:
 
-- Weekly Review UI or domain implementation;
-- CRT candidate detection or promotion;
-- task completion, editing, deletion, recurrence, reminders, projects, calendars, or sync;
-- tags, notes, URLs, priorities, dates, list selection, or `na` classification;
-- multiple active tracker adapters per user;
-- a proprietary BrainBuddy task schema.
+- Current Reality Tree (CRT), problem candidates, recommendations, or AI advice;
+- decomposition, subtasks, task-type classification, or task hierarchy;
+- destination selection, routing UI, tags, projects, lists, or metadata controls;
+- per-task planner/review decisions or confirmation outcomes;
+- Weekly Review behavior;
+- editing, completing, deleting, or otherwise mutating existing RTM tasks;
+- treating tasks as evidence or attaching execution results to them.
 
-### No-silent-write invariant
+A model may convert newly accepted raw input into zero or more concise task-name drafts. It
+must not revise, merge, split, reorder, classify, enrich, or delete an existing draft.
+After a draft appears, only a direct user edit may change its wording and only a direct user
+delete may remove it. New drafts append after existing drafts.
 
-An external create is allowed only when all of these are true:
+## Session and draft state contract
 
-1. the operation has been stopped or explicitly checkpointed for review;
-2. a proposal batch is frozen at a known revision;
-3. the user explicitly accepts that draft, or selects it in an explicit batch confirmation;
-4. the confirmed projection displays the exact title and fixed RTM Inbox destination;
-5. a durable local route and outbox record exist before the adapter call.
-
-Repeated confirmation with the same key and body returns the original local route/result.
-A changed body under the same key is rejected. Neither model confidence nor a previous
-user preference substitutes for confirmation.
-
-## Brain Dump records and states
-
-ADR-0002 `AsyncOperation` is retained but the first implementation exposes only
-`voice_brain_dump`. The operation projection must include stable draft IDs and display
-numbers. Display numbers are a projection of current chronological order; durable
-references and confirmations use draft IDs, never numbers.
+There is at most one `open` session per owner. Opening Brain Dump returns that session if it
+exists; otherwise it creates one. A `saved` or `saved_with_issues` session is historical and
+cannot be reopened. Opening after terminal save creates a new session.
 
 ```text
-BrainDumpSessionProjection:
-  operation_id, owner_id
-  status: recording | paused | reconciling | awaiting_confirmation |
-          committing | completed | retryable_error | terminal_error | cancelled
-  input_revision, proposal_revision, last_event_sequence
-  drafts: BrainDumpDraft[]
-  active_batch_id?, created_at, updated_at
+BrainDumpSession:
+  id, owner_id
+  state: open | saving | saved | saved_with_issues
+  revision
+  ordered_draft_ids[]
+  active_save_id?
+  created_at, updated_at, saved_at?
 
 BrainDumpDraft:
-  id, display_number, position
-  title
-  state: provisional | reconciled | needs_clarification | rejected | accepted
-  source_segment_ids[], predecessor_draft_ids[]
-  confidence_band, user_edited_fields[]
-  warnings[], revision
-
-DraftConfirmation:
-  action_id, draft_id, draft_revision
-  decision: accept | reject
-  exact_title
-  confirmed_by, confirmed_at
+  id, session_id, owner_id
+  position
+  name
+  state: provisional | deleted | frozen | exporting |
+         exported | failed | ambiguous
+  revision
+  source_capture_ids[]
+  user_edited: bool
+  export_id?
+  created_at, updated_at, deleted_at?
 ```
 
-`pause` drains the current stable input and may run reconciliation, then reaches `paused`
-or `awaiting_confirmation`. New audio cannot append while paused. `resume` continues the
-same operation and preserves events, drafts, edits, and numbering lineage. Any accepted
-but not yet confirmed proposal remains non-authoritative. `stop` seals the input manifest;
-a stopped session cannot resume recording. Edits after a batch is frozen supersede the
-batch and require a new confirmation.
-
-The commit result is per action, not a single optimistic banner:
+Allowed transitions are exact:
 
 ```text
-DraftCommitResult:
-  action_id, draft_id, route_id
-  status: queued | creating | succeeded | failed | ambiguous | cancelled
-  external_ref?: ExternalTaskRef
-  task?: ExternalTaskSnapshot
-  error?: TaskTrackerError
-  attempt_count, updated_at
+Session:
+  (none) -> open
+  open -> open                         add capture, append draft, edit, or delete
+  open -> saving                       Save session freezes the non-deleted snapshot
+  saving -> saved                      every frozen draft exported; empty snapshot is valid
+  saving -> saved_with_issues          at least one draft failed or is ambiguous
+
+Draft:
+  (none) -> provisional                append after current last position
+  provisional -> provisional           direct user wording edit only
+  provisional -> deleted               direct user delete only
+  provisional -> frozen                atomically when Save session begins
+  frozen -> exporting                  durable attempt enters send boundary
+  exporting -> exported                RTM returned a complete task reference
+  frozen -> failed                     terminal or exhausted proven-pre-send failure
+  exporting -> ambiguous               send may have reached RTM but identity is unknown
 ```
 
-The operation may complete its local commit while routes remain queued or creating. The UI
-keeps results durable and reloadable by operation ID. It must never translate `ambiguous`
-into success.
+`deleted`, `exported`, `failed`, and `ambiguous` are terminal for this tranche. Deleted
+drafts stay as local tombstones for ordering and audit but are excluded from export. Draft
+positions and IDs are stable; deletion leaves a gap rather than renumbering durable records.
+The UI may render a compact 1..N order without using that display number as identity.
+
+Capture, edits, and deletion require `session.state == open` and an expected revision. They
+are rejected after save starts. Concurrent stale commands fail without partial mutation.
+There is no transition from `saving` back to `open`.
+
+### Save session semantics
+
+`Save session` is the single confirmation for the whole remaining list. The command:
+
+1. requires an owner-scoped open session and an idempotency key;
+2. atomically records one `BrainDumpSave` and freezes the exact ordered set of every
+   non-deleted draft at its current revision and wording;
+3. creates one local `DraftExport` per frozen draft before any RTM call;
+4. returns the same save and export records when the same command is repeated;
+5. rejects reuse of the key with changed content;
+6. continues processing sibling exports when one export fails or becomes ambiguous;
+7. closes the session only after every export reaches a terminal state.
+
+An empty session may be saved. It makes no RTM calls and becomes `saved`.
+
+```text
+BrainDumpSave:
+  id, session_id, owner_id
+  idempotency_key_hash, frozen_session_revision
+  ordered_export_ids[]
+  state: pending | exporting | saved | saved_with_issues
+  created_at, completed_at?
+
+DraftExport:
+  id, save_id, session_id, draft_id, owner_id
+  frozen_name
+  state: pending | exporting | exported | failed | ambiguous
+  attempt_count
+  external_ref?
+  error_code?
+  created_at, updated_at
+```
+
+The save is one bulk user action, not a set of per-draft approval decisions. Per-draft export
+records are an internal reliability mechanism and a truthful status projection only.
 
 ## TaskTrackerPort v1
 
-The port is owned by Execution and speaks only its own DTOs. It must not accept
-`RouteRecord`, `CaptureItem`, transcript objects, audio, or another module's repository.
-It has exactly three operations needed by Brain Dump:
+Execution owns the replaceable external boundary. Brain Dump supplies only the frozen task
+name and a local export ID. The minimum port is create-only:
 
 ```python
 class TaskTrackerPort(Protocol):
-    def create_task(self, request: CreateExternalTaskRequest) -> CreateExternalTaskResult: ...
-    def get_task(self, owner_id: str, ref: ExternalTaskRef) -> ExternalTaskSnapshot: ...
-    def list_tasks(self, query: ExternalTaskQuery) -> list[ExternalTaskSnapshot]: ...
+    def create_task(
+        self, request: CreateExternalTaskRequest
+    ) -> CreateExternalTaskResult: ...
 ```
-
-These are the exact v1 DTOs:
 
 ```text
 CreateExternalTaskRequest:
   owner_id: str
-  route_id: str                    # local durable id; one task per route
-  title: str                       # exact user-confirmed task title
+  export_id: str
+  name: str
 
 CreateExternalTaskResult:
-  ref: ExternalTaskRef
-  snapshot: ExternalTaskSnapshot
-  remote_transaction_ref?: str
+  external_ref: ExternalTaskRef
 
 ExternalTaskRef:
-  adapter: str                      # `rtm` or future `brainbuddy`
-  account_ref: str                  # opaque, non-secret account binding id
-  container_ref: str
-  task_series_ref?: str
+  adapter: str
+  account_ref: str
+  list_ref: str
+  task_series_ref: str
   task_ref: str
-
-ExternalTaskSnapshot:
-  ref: ExternalTaskRef
-  title: str
-  destination_display_name: str
-  state: open | completed | unknown
-  created_at?: datetime
-  permalink?: str
-
-ExternalTaskQuery:
-  owner_id: str
-  destination: inbox
-  created_from?: datetime
-  created_to?: datetime
-  max_results: int                  # hard-capped by adapter
 ```
 
-`ExternalTaskRef` is immutable linked evidence after a successful create or verified manual
-link.
-Adapter-specific IDs are opaque outside Execution. No port method edits or deletes an
-external task. `get_task` exists for result verification and reopening durable results;
-`list_tasks` exists only for the Brain Dump result view and manual ambiguity-resolution
-support, not as a general task browser. Operation/draft/route linkage is stored exclusively
-in BrainBuddy's local records and never copied into RTM.
+The port has no destination, note, URL, tag, priority, date, recurrence, project, list,
+subtask, classification, update, complete, delete, or query fields or methods. Concrete RTM
+DTOs and credentials do not cross this boundary. A future tracker can replace RTM for new
+sessions by implementing the same create-only contract; existing local RTM references stay
+provider-qualified and unchanged.
 
-### Capabilities
+## RTM export rule
 
-The configured binding records adapter capabilities rather than making callers guess:
+For each frozen draft, the RTM adapter calls `rtm.tasks.add` with:
+
+- `name = frozen_name`;
+- `parse = 0`;
+- no `list_id`, so RTM uses Inbox;
+- no optional task field.
+
+The created RTM object is task-name-only. BrainBuddy sends no tags, notes, URLs,
+`external_id`, priority, dates, recurrence, reminder, estimate, location, assignee,
+project/list move, source text, transcript, or invented metadata. Even information typed
+inside a raw thought is not converted into RTM metadata in this tranche; only the resulting
+plain draft name is exported.
+
+BrainBuddy stores session/draft/export linkage and the returned RTM IDs locally. RTM stores
+none of that linkage.
+
+## Failure, crash, and ambiguity rules
+
+A local `DraftExport` exists before network I/O. Workers may process exports independently,
+but the frozen list order is preserved in the status projection.
+
+- A failure proven to occur before send may be retried within the same save operation under
+  a bounded policy. Exhaustion becomes `failed`.
+- Once request transmission may have begun, a crash, timeout, connection loss, or malformed
+  success becomes `ambiguous` unless a complete returned reference was durably stored.
+- An `ambiguous` export never calls create again automatically or through another
+  `Save session` invocation.
+- No title/time matching is used to infer that an RTM task is the same task.
+- A failed or ambiguous export does not stop pending sibling exports.
+- Replaying the save command or recovering a worker resumes only `pending` exports. It
+  returns stored terminal states for all others.
+
+The UI marks only the affected local draft as failed or ambiguous. For ambiguity it says
+that RTM may have created the task and that BrainBuddy will not create it again
+automatically. Resolution or existing-task mutation is outside this tranche; the user may
+inspect RTM manually. The session finishes `saved_with_issues` after the remaining exports
+finish.
+
+## PR #60 disposition
+
+Retain only useful foundation that fits this contract:
+
+- owner-scoped persistence and authentication fixtures;
+- durable source input separated from user-editable draft wording;
+- command revision and idempotency concepts;
+- modular application and Execution seams;
+- test fakes which never appear as successful production integrations.
+
+Remove or supersede for this tranche:
+
+- synchronous one-shot completion and runtime mock success;
+- pause/stop/review/freeze/selection/per-task confirmation workflow;
+- model-driven merge, split, reorder, classification, recommendation, or enrichment;
+- Weekly Review and Thinking/CRT product behavior;
+- destination routing and broad task-manager APIs;
+- generic retries after a request may have reached RTM.
+
+## Minimal implementation graph
 
 ```text
-TaskTrackerCapabilities:
-  supports_create: true
-  supports_get: true
-  supports_bounded_list: true
-  supports_native_idempotent_create: bool
+A. Flat session domain + API
+   one open session, voice/text capture, append-only drafts, manual edit/delete, projection
+                         |
+B. Save operation + Execution port
+   atomic freeze-all, DraftExport records, create-only port, recovery/idempotency tests
+                         |
+C. RTM adapter
+   owner binding, plain Inbox tasks.add mapping, returned-reference persistence
+                         |
+D. Thin UI + release verification
+   capture/list/edit/delete/Save session, partial status, deterministic suites, one sandbox smoke
 ```
 
-Brain Dump v1 requires create/get/bounded-list. It deliberately has no destination or
-metadata capabilities: create always targets the adapter's safe capture inbox. Native
-idempotency is false for RTM unless a future accepted decision and credentialed contract
-test establish a trustworthy primitive; v1 never relies on one.
-
-### Error taxonomy
-
-Adapters return results or raise a typed `TaskTrackerError`; Execution persists the public
-fields and does not log exception bodies that may contain task text or credentials.
-
-```text
-TaskTrackerError:
-  code: AUTH_REQUIRED | PERMISSION_DENIED | INVALID_REQUEST |
-        RATE_LIMITED | UNAVAILABLE | TIMEOUT |
-        REMOTE_REJECTED | PROTOCOL_ERROR | AMBIGUOUS_OUTCOME
-  retry_disposition: user_action | safe_retry | ambiguous_manual | terminal
-  message_code: str                 # localized/redacted UX key
-  retry_after_ms?: int
-  remote_code?: str                 # allowlisted code only
-```
-
-Authentication and permission failures require user action. Invalid requests are terminal
-for that frozen action and return to review. Rate limits and pre-send unavailability may be
-safely retried. A timeout, connection loss after request bytes were sent, malformed success
-response, or process crash while `sending` is `ambiguous_manual`; it is never retried.
-
-## RTMTaskTrackerAdapter
-
-### Credentials and account binding
-
-Each BrainBuddy owner has one server-side `TaskTrackerBinding` containing an opaque secret
-reference, RTM account/user ID, granted permission (`write` minimum), connection state,
-and last successful token check. API key/shared secret are deployment configuration;
-user auth tokens are encrypted at rest or held in the deployment secret store and are
-never returned by APIs, events, logs, outbox records, or external refs. Every adapter call
-resolves credentials by `owner_id`; credentials are never process-global user state.
-
-Connection uses RTM's supported user authorization flow and `auth.checkToken`. Revoked or
-expired tokens map to `AUTH_REQUIRED`. BrainBuddy requests only the permission needed by
-v1; it does not request delete permission.
-
-### Create mapping
-
-For an accepted draft, the adapter:
-
-1. resolves the owner binding and validates write permission;
-2. obtains/reuses an RTM timeline according to the client policy;
-3. calls `rtm.tasks.add` with:
-   - `name = request.title`;
-   - `parse = 0`, so task text cannot silently create dates, tags, priority, or lists;
-   - no `list_id`, so RTM places the task in Inbox;
-   - no `external_id` or any other optional field;
-4. durably stores the returned `list_id`, `taskseries_id`, `task_id`, and transaction ID;
-5. reads the task back and stores the snapshot before reporting success.
-
-Inbox is the only v1 destination. RTM receives the exact confirmed task name and nothing
-else from BrainBuddy: no `external_id`, tags, notes, URLs, `na`, `@w8`, priority, due/start
-date, recurrence, reminder, location, estimate, assignee, or list/project move. Even
-explicit user choices cannot add those fields through Brain Dump v1. BrainBuddy stores the
-session/draft/route-to-RTM-reference linkage only in its own Execution records; audio,
-transcript, source spans, and model output never leave through this adapter.
-
-### Get and list semantics
-
-`get_task` uses the complete RTM task path in `ExternalTaskRef` and returns a normalized
-snapshot. A not-found response does not erase the immutable reference; it returns
-`state=unknown` or a typed result explaining that linked evidence can no longer be
-verified.
-
-`list_tasks` is bounded to one owner, RTM Inbox, a small attempt-time window, and at most
-100 normalized results. It may support the normal result view and show possible matches
-during manual ambiguity resolution. Because no remote marker exists, title and timestamp
-may narrow candidates but never establish identity or permit automatic adoption.
-
-## Crash, retry, outbox, and ambiguity resolution
-
-Execution persists these records before network I/O:
-
-```text
-TaskRoute:
-  id, owner_id, operation_id, draft_id, confirmation_action_id
-  request_hash, status, external_ref?, created_at, updated_at, revision
-
-TaskOutboxItem:
-  id, owner_id, route_id, adapter
-  status: prepared | sending | succeeded | failed | ambiguous | cancelled
-  next_attempt_at?, lease_owner?, lease_expires_at?
-  attempt_count, last_error?, created_at, updated_at
-
-TaskDispatchAttempt:
-  id, owner_id, route_id, attempt_no
-  status: started | succeeded | failed | outcome_unknown | user_linked
-  request_hash, started_at, completed_at?
-  external_ref?, remote_transaction_ref?
-  error?: TaskTrackerError
-
-TaskRouteResult:
-  route_id, status, external_ref?, snapshot?, error?
-  resolution: direct | user_linked | user_cancelled_ambiguous
-  updated_at
-```
-
-`(owner_id, confirmation_action_id)` and `(owner_id, route_id)` are unique. One worker may
-lease an outbox item at a time. The request hash covers owner, route, and exact title. A
-changed request under the same confirmation key is rejected.
-
-Recovery rules:
-
-Never silently duplicate a task. In particular:
-
-1. `prepared` can call create.
-2. A failure proven to occur before any request was sent may become `failed/safe_retry`.
-3. Any crash or transport/protocol failure after send begins becomes `ambiguous`; neither
-   the worker nor a user-facing command may issue a second create for that route.
-4. A bounded Inbox list may show title/time candidates to help the user inspect RTM, but
-   zero, one, or many candidates never establishes identity automatically.
-5. The UI says: "RTM may have created this task. Check RTM before resolving it here." It
-   offers read-only candidate links, manual linking of a verified provider-qualified ref,
-   and cancellation of the unresolved local route. It offers no retry-create action.
-6. Manual linking reads the chosen complete RTM ref back, then records `user_linked` with
-   the resolving actor/time. Cancellation preserves the ambiguous attempt in audit history
-   and does not delete or modify any RTM task.
-
-There is intentionally no RTM marker or note to make reconciliation easier. A credentialed
-sandbox smoke test validates the plain create/read-back path, while forced timeout tests
-validate that ambiguity is durable and that create call count remains exactly one.
-
-## Future BrainBuddy-native tracker
-
-A future `BrainBuddyTaskTrackerAdapter` implements this same port. It may report native
-idempotent create and provenance lookup, but Brain Dump does not gain tracker-specific
-branches. Migration changes the configured binding only for new routes.
-
-Existing RTM `ExternalTaskRef` values and route results are immutable linked evidence.
-They remain rendered as RTM references even after the default adapter changes. There is no
-bulk import, silent relinking, or rewriting of historical refs. If product evidence later
-justifies a native tracker, its own schema is designed then. This tranche must not build
-lists, calendars, recurrence, reminders, task editing, or completion semantics in advance.
-
-## PR #60 assessment and corrective sequence
-
-PR #60 is reusable foundation, not functional completion.
-
-Retain surgically:
-
-- modular package shape and application-workflow seam;
-- owner-scoped persistence/auth/API test fixtures;
-- immutable source versus mutable draft/item separation;
-- expected revisions, command idempotency records, and decision audit concepts;
-- route/attempt/result separation after moving ownership fully into Execution.
-
-Correct or remove before merge:
-
-- replace synchronous one-shot voice processing with the ADR-0002 operation lifecycle,
-  including live numbered drafts, pause/resume, stop, projection reload, and confirmation;
-- replace sentence heuristics/mock transcription as the claimed functional path (fakes may
-  remain test-only);
-- remove Weekly Review/Thinking/CRT product implementation from this tranche;
-- move `TaskTrackerPort` and all its DTOs under Execution; it must not accept Organize's
-  `RouteRecord` or return an internal `DispatchAttempt`;
-- remove Execution's import of `OrganizeRepository` and direct mutation of routes;
-- replace `MockTaskTrackerAdapter` as runtime default; a fake belongs in tests and must not
-  invent completed external work in product responses;
-- replace generic `except Exception -> retryable ADAPTER_ERROR` with the typed taxonomy and
-  ambiguous-outcome handling;
-- persist outbox/attempt before I/O and surface durable
-  per-draft results;
-- never swallow a completion conflict after external success; repair local state and
-  display the partial result.
-
-Recommended surgical PR graph:
-
-```text
-A. Foundation salvage from #60
-   Capture/Organize records + owner-scoped repositories + test fakes
-   remove runtime mock success, synchronous completion claim, Weekly Review, and CRT scope
-                |
-B. Brain Dump operation and UI
-   live numbered drafts + pause/resume/stop + review/freeze/confirm + reconnect projection
-                |
-C. Execution contract
-   TaskTrackerPort DTOs + route/outbox/attempt/result + fake-client contract tests
-                |
-D. RTM adapter
-   user binding + create/get/list + plain Inbox mapping + ambiguity handling
-                |
-E. Credentialed dogfood gate
-   controlled sandbox task, read-back, cleanup/manual completion, evidence recorded
-```
-
-A and C may be combined if the diff remains reviewable. B can use an Execution fake but
-may report only queued/test state outside production. D cannot merge as functional until
-contract tests pass. E is a release gate, not a unit-test dependency.
+Each step depends on the preceding step. No implementation step may introduce a second
+workflow or a generic task-management domain.
 
 ## Rationale
 
-This scope tests the product's shortest valuable loop without turning BrainBuddy into a
-second task manager. Execution-owned DTOs prevent RTM concepts and Organize records from
-leaking across boundaries. A durable outbox and explicit ambiguity are necessary because
-local idempotency cannot make an uncooperative remote create idempotent. Keeping historical
-external refs immutable preserves evidence and makes a future native tracker a plug-in
-change rather than a migration fiction.
+This design tests the shortest useful BrainBuddy loop and keeps the interaction legible:
+collect, clean up wording, save. One bulk save is a clear external-side-effect boundary.
+A small create-only port keeps RTM replaceable without pretending BrainBuddy already needs
+a task manager. Local export records solve the real reliability problem—uncertain remote
+creates—without polluting the user's RTM Inbox tasks.
 
 ## Alternatives considered
 
-### Merge PR #60 as the MVP and replace the mock later
+### Review and confirm drafts individually
 
-Rejected. It reports fake external success, ignores the asynchronous interaction contract,
-and has no safe crash/retry behavior. That would validate tests, not user value.
+Rejected. It turns a simple capture session into a planner and adds decisions which the
+founder explicitly removed from this tranche.
 
-### Put RTM calls directly in the Brain Dump workflow
+### Add destination or metadata controls
 
-Rejected. It couples product state to one provider, exposes credentials and error semantics
-to Organize, and blocks a future native adapter.
+Rejected. Brain Dump is a plain Inbox capture path. GTD classification belongs later and
+must not be inferred during capture.
 
-### Build a generic task-manager abstraction
+### Retry an ambiguous RTM create
 
-Rejected. Update, complete, delete, recurrence, reminders, projects, and full sync are not
-needed to prove Brain Dump and would create a lowest-common-denominator API.
+Rejected. RTM has no trusted idempotent create primitive for this use. Retrying can silently
+duplicate a task.
 
-### Add a remote marker and retry timeout failures
+### Put a provenance marker in the RTM task
 
-Rejected. RTM documents no trustworthy idempotent create primitive, and the product
-contract requires a plain untouched Inbox task. A marker would alter RTM and still would
-not make automatic retry safe.
+Rejected. The exported object must remain a task-name-only Inbox task. Linkage is
+BrainBuddy-owned data.
 
-### Build the BrainBuddy-native tracker now
+### Build a BrainBuddy-native task manager now
 
-Rejected. There is no evidence yet for a proprietary task-management model. The port and
-immutable external refs preserve the future option without paying for it now.
+Rejected. The create-only port preserves replacement without pre-building lists, projects,
+or task lifecycle behavior.
 
-## Consequences
+## Consequences and guardrails
 
-Positive:
+Positive consequences:
 
-- the tranche has one testable user outcome;
-- no external task exists without explicit confirmation;
-- RTM tasks are deliberately plain and preserve the user's GTD decisions;
-- crashes and timeouts remain recoverable without silent duplication;
-- the adapter can change without rewriting Brain Dump or historical evidence.
+- one understandable workflow and one explicit external write action;
+- no metadata or GTD decisions are invented;
+- unaffected drafts continue exporting after a sibling problem;
+- ambiguous creates cannot be duplicated automatically;
+- RTM can be replaced later behind a deliberately small port.
 
-Costs and risks:
+Tradeoffs:
 
-- local route/outbox/attempt/result records add persistence work;
-- ambiguous outcomes sometimes require the user to inspect RTM;
-- the shared ADR-0002 substrate remains broader than the first shipped specialization.
+- `saved_with_issues` may require the user to inspect RTM manually;
+- no in-product ambiguity resolution exists in this tranche;
+- drafts cannot be changed after save begins.
 
-Future agents must preserve:
-
-- Brain Dump-only product scope until this tranche's acceptance tests pass;
-- live drafts as provisional, with explicit per-draft/batch confirmation;
-- Inbox, `parse=0`, and task name only: no RTM metadata of any kind;
-- Execution ownership of the port, outbox, attempts, refs, and result snapshots;
-- durable manual ambiguity resolution, with no second create after a potentially accepted
-  request;
-- immutable provider-qualified external refs;
-- no proprietary task-manager domain until a separate accepted decision justifies it.
+Future agents must preserve the exact state transitions, create-only port, task-name-only
+RTM mapping, one bulk save, sibling isolation, and no-retry rule for ambiguous creates.
 
 ## Verification
 
 The normative scenarios are in
-`specs/003-brain-dump-task-tracker/acceptance-tests.md`. Implementation is not a functional
-MVP until deterministic tests and one controlled credentialed RTM smoke test pass. PR #60's
-mock success tests do not satisfy that gate.
+`specs/003-brain-dump-task-tracker/acceptance-tests.md`. Documentation review must also
+confirm that ADR-0001 and ADR-0002 defer to this record for the Brain Dump specialization.
+A functional implementation additionally requires deterministic adapter tests and one
+controlled credentialed RTM sandbox smoke which creates at most one task.
 
 ## Related files
 
@@ -480,4 +344,3 @@ mock success tests do not satisfy that gate.
 - `specs/003-brain-dump-task-tracker/spec.md`
 - `specs/003-brain-dump-task-tracker/acceptance-tests.md`
 - PR #60 (`feat/voice-capture-mvp`)
-- RTM API: `rtm.tasks.add`, `rtm.tasks.getList`, `rtm.auth.checkToken`, and timelines
