@@ -3,14 +3,17 @@ import { ReactFlowProvider } from "reactflow";
 import "reactflow/dist/style.css";
 import {
   AlertTriangle,
+  ListChecks,
   LogOut,
   Maximize2,
+  Mic,
   Minus,
   Plus,
   RotateCcw,
   Sparkles,
   Sprout
 } from "lucide-react";
+import { Link } from "react-router-dom";
 
 import { ApiError } from "../api/client";
 import type { TreeDetailResponse } from "../api/types";
@@ -172,6 +175,16 @@ export default function TreeWorkspace(): JSX.Element {
               aria-label="Import tree"
             />
             <div className="ml-auto flex items-center gap-2">
+              <Link to="/capture">
+                <Button variant="secondary" size="sm" leftIcon={<Mic />}>
+                  Capture
+                </Button>
+              </Link>
+              <Link to="/review">
+                <Button variant="secondary" size="sm" leftIcon={<ListChecks />}>
+                  Review
+                </Button>
+              </Link>
               {user ? (
                 <span className="truncate text-xs text-slate-500" title={user.email}>
                   {user.email}

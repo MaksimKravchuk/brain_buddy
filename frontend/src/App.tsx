@@ -6,6 +6,8 @@ import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
 import TreeWorkspace from "./pages/TreeWorkspace";
+import CapturePage from "./pages/CapturePage";
+import WeeklyReviewPage from "./pages/WeeklyReviewPage";
 import { useAuthStore } from "./stores/authStore";
 
 export default function App(): JSX.Element {
@@ -33,6 +35,22 @@ export default function App(): JSX.Element {
           element={
             <ProtectedRoute>
               <TreeWorkspace />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/review"
+          element={
+            <ProtectedRoute>
+              <WeeklyReviewPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/capture"
+          element={
+            <ProtectedRoute>
+              <CapturePage />
             </ProtectedRoute>
           }
         />

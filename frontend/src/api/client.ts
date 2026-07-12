@@ -77,7 +77,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, options: JsonRequestOptions = {}): Promise<T> {
+export async function request<T>(path: string, options: JsonRequestOptions = {}): Promise<T> {
   const { body, ...rest } = options;
   const headers = new Headers(rest.headers);
   const method = options.method ?? "GET";
