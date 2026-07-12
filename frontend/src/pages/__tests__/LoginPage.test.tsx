@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -31,9 +31,12 @@ describe("LoginPage", () => {
       .mockResolvedValue({ id: "u1", email: "a@b.c" });
     renderLogin();
 
-    await userEvent.type(screen.getByLabelText(/email/i), "a@b.c");
-    await userEvent.type(screen.getByLabelText(/password/i), "very-long-password");
-    await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+    const user = userEvent.setup();
+    await act(async () => {
+      await user.type(screen.getByLabelText(/email/i), "a@b.c");
+      await user.type(screen.getByLabelText(/password/i), "very-long-password");
+      await user.click(screen.getByRole("button", { name: /sign in/i }));
+    });
 
     await waitFor(() => expect(loginSpy).toHaveBeenCalled());
     await waitFor(() =>
@@ -47,9 +50,12 @@ describe("LoginPage", () => {
     );
     renderLogin();
 
-    await userEvent.type(screen.getByLabelText(/email/i), "a@b.c");
-    await userEvent.type(screen.getByLabelText(/password/i), "wrong-password");
-    await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+    const user = userEvent.setup();
+    await act(async () => {
+      await user.type(screen.getByLabelText(/email/i), "a@b.c");
+      await user.type(screen.getByLabelText(/password/i), "wrong-password");
+      await user.click(screen.getByRole("button", { name: /sign in/i }));
+    });
 
     await waitFor(() =>
       expect(screen.getByText(/invalid email or password/i)).toBeInTheDocument()
@@ -62,9 +68,12 @@ describe("LoginPage", () => {
     );
     renderLogin();
 
-    await userEvent.type(screen.getByLabelText(/email/i), "a@b.c");
-    await userEvent.type(screen.getByLabelText(/password/i), "password-here");
-    await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+    const user = userEvent.setup();
+    await act(async () => {
+      await user.type(screen.getByLabelText(/email/i), "a@b.c");
+      await user.type(screen.getByLabelText(/password/i), "password-here");
+      await user.click(screen.getByRole("button", { name: /sign in/i }));
+    });
 
     await waitFor(() =>
       expect(screen.getByText(/too many login attempts/i)).toBeInTheDocument()

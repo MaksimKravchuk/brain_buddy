@@ -19,6 +19,7 @@ import {
   VersionCreateRequest,
   VersionListItem
 } from "./types";
+import { nowMs, recordTelemetry } from "../utils/telemetry";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
@@ -94,19 +95,40 @@ async function request<T>(path: string, options: JsonRequestOptions = {}): Promi
     }
   }
 
-  const response = await fetch(buildUrl(path), {
-    ...rest,
-    method,
-    headers,
-    body: requestBody,
-    credentials: "include"
-  });
+  const startMs = nowMs();
+  let response: Response;
+  try {
+    response = await fetch(buildUrl(path), {
+      ...rest,
+      method,
+      headers,
+      body: requestBody,
+      credentials: "include"
+    });
+  } catch (error) {
+    recordTelemetry(
+      {
+        name: "api.request",
+        durationMs: nowMs() - startMs,
+        ok: false,
+        details: { method, path, error: error instanceof Error ? error.message : String(error) }
+      },
+      "warn"
+    );
+    throw error;
+  }
 
   if (response.status === 401 && onUnauthorized) {
     onUnauthorized();
   }
 
   if (response.status === 204) {
+    recordTelemetry({
+      name: "api.request",
+      durationMs: nowMs() - startMs,
+      ok: true,
+      details: { method, path, status: response.status }
+    });
     return undefined as T;
   }
 
@@ -116,8 +138,24 @@ async function request<T>(path: string, options: JsonRequestOptions = {}): Promi
 
   if (!response.ok) {
     const correlationId = response.headers.get("X-Correlation-ID") ?? undefined;
+    recordTelemetry(
+      {
+        name: "api.request",
+        durationMs: nowMs() - startMs,
+        ok: false,
+        details: { method, path, status: response.status, correlationId }
+      },
+      "warn"
+    );
     throw new ApiError(response.statusText || "Request failed", response.status, data, correlationId);
   }
+
+  recordTelemetry({
+    name: "api.request",
+    durationMs: nowMs() - startMs,
+    ok: true,
+    details: { method, path, status: response.status }
+  });
 
   return data as T;
 }

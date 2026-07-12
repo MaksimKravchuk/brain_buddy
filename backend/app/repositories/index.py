@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import fcntl
+from collections.abc import Generator, Iterable
+from contextlib import contextmanager
 from pathlib import Path
 
 from app.exceptions import NotFoundError
@@ -32,18 +34,32 @@ class IndexRepository(BaseRepository):
         self.dump_payload(self.index_path, data)
 
     def upsert(self, entry: IndexEntry) -> None:
-        entries = self.load_all()
-        for idx, existing in enumerate(entries):
-            if existing.id == entry.id:
-                entries[idx] = entry
-                break
-        else:
-            entries.append(entry)
-        self.save_all(entries)
+        with self._exclusive_index_lock():
+            entries = self.load_all()
+            for idx, existing in enumerate(entries):
+                if existing.id == entry.id:
+                    entries[idx] = entry
+                    break
+            else:
+                entries.append(entry)
+            self.save_all(entries)
 
     def delete(self, tree_id: str) -> None:
-        entries = self.load_all()
-        updated = [entry for entry in entries if entry.id != tree_id]
-        if len(updated) == len(entries):
-            raise NotFoundError("Tree", tree_id)
-        self.save_all(updated)
+        with self._exclusive_index_lock():
+            entries = self.load_all()
+            updated = [entry for entry in entries if entry.id != tree_id]
+            if len(updated) == len(entries):
+                raise NotFoundError("Tree", tree_id)
+            self.save_all(updated)
+
+    @contextmanager
+    def _exclusive_index_lock(self) -> Generator[None, None, None]:
+        """Serialize read-modify-write operations for the shared index."""
+
+        lock_path = self.resolve(".index.lock")
+        with lock_path.open("a+", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)

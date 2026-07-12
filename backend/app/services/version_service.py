@@ -38,39 +38,43 @@ class VersionService:
     def create_version(
         self, tree_id: str, payload: VersionCreateRequest
     ) -> VersionDocument:
-        tree = self.tree_repo.load(tree_id)
         now = utcnow()
-        version_id = generate_version_id(tree.id)
-        label = payload.label or f"Snapshot {to_isoformat(now)}"
-        snapshot_tree = tree.model_copy(deep=True)
-        previous_version = self._latest_version(tree_id)
-        diff_summary, conflicts = self._build_diff(
-            previous_version.tree if previous_version else None, tree
-        )
-        version_doc = VersionDocument(
-            id=version_id,
-            label=label,
-            captured_at=now,
-            author=payload.author,
-            notes=payload.notes,
-            diff=diff_summary,
-            conflicts=conflicts,
-            tree=snapshot_tree,
-        )
-        self.version_repo.save(tree_id, version_doc)
+        version_doc: VersionDocument | None = None
 
-        version_ref = TreeVersionRef(
-            id=version_id,
-            label=label,
-            created_at=now,
-            author=payload.author,
-            notes=payload.notes,
-            diff_summary=diff_summary,
-            conflict_count=len(conflicts),
-        )
-        updated_refs = [version_ref, *tree.version_refs]
-        updated_tree = tree.model_copy(update={"version_refs": updated_refs})
-        self.tree_service.touch_tree(updated_tree, timestamp=now)
+        def create_snapshot(tree: TreeDocument) -> TreeDocument:
+            nonlocal version_doc
+            version_id = generate_version_id(tree.id)
+            label = payload.label or f"Snapshot {to_isoformat(now)}"
+            previous_version = self._latest_version(tree_id)
+            diff_summary, conflicts = self._build_diff(
+                previous_version.tree if previous_version else None, tree
+            )
+            version_doc = VersionDocument(
+                id=version_id,
+                label=label,
+                captured_at=now,
+                author=payload.author,
+                notes=payload.notes,
+                diff=diff_summary,
+                conflicts=conflicts,
+                tree=tree.model_copy(deep=True),
+            )
+            self.version_repo.save(tree_id, version_doc)
+            version_ref = TreeVersionRef(
+                id=version_id,
+                label=label,
+                created_at=now,
+                author=payload.author,
+                notes=payload.notes,
+                diff_summary=diff_summary,
+                conflict_count=len(conflicts),
+            )
+            return tree.model_copy(
+                update={"version_refs": [version_ref, *tree.version_refs]}
+            )
+
+        self.tree_service.mutate_tree(tree_id, create_snapshot, timestamp=now)
+        assert version_doc is not None
         return version_doc
 
     def list_versions(self, tree_id: str) -> list[TreeVersionRef]:
@@ -83,14 +87,15 @@ class VersionService:
         return self.version_repo.load(tree_id, version_id)
 
     def restore_version(self, tree_id: str, version_id: str) -> TreeDocument:
-        version = self.load_version(tree_id, version_id)
-        restored_tree = version.tree.model_copy(deep=True)
         now = utcnow()
-        restored_tree = restored_tree.model_copy(update={"updated_at": now})
-        # Ensure version references include the restored version metadata
-        has_ref = any(ref.id == version_id for ref in restored_tree.version_refs)
-        if not has_ref:
-            restored_tree = restored_tree.model_copy(
+
+        def restore_snapshot(_current: TreeDocument) -> TreeDocument:
+            version = self.load_version(tree_id, version_id)
+            restored_tree = version.tree.model_copy(deep=True)
+            has_ref = any(ref.id == version_id for ref in restored_tree.version_refs)
+            if has_ref:
+                return restored_tree
+            return restored_tree.model_copy(
                 update={
                     "version_refs": [
                         TreeVersionRef(
@@ -106,17 +111,28 @@ class VersionService:
                     ]
                 }
             )
-        self.tree_service.touch_tree(restored_tree, timestamp=now)
-        return restored_tree
+
+        return self.tree_service.mutate_tree(
+            tree_id, restore_snapshot, timestamp=now
+        )
 
     def delete_version(self, tree_id: str, version_id: str) -> None:
-        tree = self.tree_repo.load(tree_id)
-        if not any(ref.id == version_id for ref in tree.version_refs):
-            raise NotFoundError("Version", version_id)
-        self.version_repo.delete(tree_id, version_id)
-        updated_refs = [ref for ref in tree.version_refs if ref.id != version_id]
-        updated_tree = tree.model_copy(update={"version_refs": updated_refs})
-        self.tree_service.touch_tree(updated_tree)
+        def remove_version(tree: TreeDocument) -> TreeDocument:
+            if not any(ref.id == version_id for ref in tree.version_refs):
+                raise NotFoundError("Version", version_id)
+            return tree.model_copy(
+                update={
+                    "version_refs": [
+                        ref for ref in tree.version_refs if ref.id != version_id
+                    ]
+                }
+            )
+
+        self.tree_service.mutate_tree(
+            tree_id,
+            remove_version,
+            after_save=lambda _tree: self.version_repo.delete(tree_id, version_id),
+        )
 
     def export_tree(
         self, tree_id: str, version_id: str | None = None
