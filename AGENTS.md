@@ -34,6 +34,11 @@
 - Auth is session-based (HTTP-only cookie) and invite-gated. Mint invites with `python -m app.cli create-invite`. See `docs/auth.md` for the threat model and recommended controls.
 - Do not commit real data under `backend/data/`; compose mounts a named volume for local persistence.
 
+## Architecture Decisions
+- Before changing module boundaries, persistence ownership, workflow state machines, authentication assumptions, or deployment boundaries, inspect accepted/proposed records under `docs/decisions/`.
+- BrainBuddy vNext's modular-monolith boundaries and capture-to-result contracts are defined in `docs/decisions/0001-vnext-modular-monolith-and-workflow-contracts.md`; preserve them unless a new ADR explicitly supersedes the decision.
+- Async voice brain dumps and voice-led Weekly Review share the operation, patch, confirmation, privacy, and idempotency contract in `docs/decisions/0002-async-voice-operation-substrate.md`.
+
 ## Active Technologies
 - Python 3.11 (backend), TypeScript (strict) + React (frontend) + FastAPI, Pydantic, pytest; React, Vite, Zustand, React Query, React Flow-like canvas, Vitest/Testing Library (001-reality-tree-ui)
 - File-backed tree data under backend/data with LRU caching; cloud persistence for signed-in users (reuse existing storage path) (001-reality-tree-ui)
