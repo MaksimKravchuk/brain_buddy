@@ -2,6 +2,12 @@
 
 Status: Proposed design; product implementation is out of scope for this specification.
 Architecture: [ADR-0002](../../docs/decisions/0002-async-voice-operation-substrate.md)
+
+Release scope: [ADR-0003](../../docs/decisions/0003-brain-dump-task-tracker-port.md)
+ships only the Brain Dump specialization in the next tranche. Weekly Review scenarios in
+this shared-substrate specification are future compatibility requirements, not current
+implementation scope.
+
 Acceptance tests: [acceptance-tests.md](acceptance-tests.md)
 
 ## Goal

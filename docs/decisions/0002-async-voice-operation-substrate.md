@@ -3,7 +3,12 @@
 Date: 2026-07-11
 Status: Proposed
 Decision owner: BrainBuddy
-Related: ADR-0001, Kanban task `t_8a1164be`
+Related: ADR-0001, ADR-0003, Kanban task `t_8a1164be`
+
+Scope refinement: [ADR-0003](0003-brain-dump-task-tracker-port.md) ships only the
+`voice_brain_dump` specialization in the next tranche. The shared operation contract is
+preserved so Weekly Review can use it later, but Weekly Review is not an implementation
+deliverable for this release.
 
 ## Context
 

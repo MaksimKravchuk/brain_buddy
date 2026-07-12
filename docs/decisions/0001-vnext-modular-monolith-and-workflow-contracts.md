@@ -4,7 +4,12 @@ Date: 2026-07-11
 Status: Proposed
 Decision owner: BrainBuddy
 Related: `backend/app/container.py`, `backend/app/schemas/domain.py`, `docs/auth.md`,
-ADR-0002, Kanban task `t_be41d6d7`
+ADR-0002, ADR-0003, Kanban task `t_be41d6d7`
+
+Scope refinement: [ADR-0003](0003-brain-dump-task-tracker-port.md) narrows the next
+implementation tranche to Brain Dump and an RTM-backed `TaskTrackerPort`. Weekly Review
+and CRT remain architectural boundaries, not tranche deliverables. Where this record's
+broad MVP sequence conflicts with that release scope or tracker contract, ADR-0003 governs.
 
 ## Context
 

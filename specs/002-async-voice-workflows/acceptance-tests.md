@@ -3,6 +3,10 @@
 Status: Design contract
 Decision: [ADR-0002](../../docs/decisions/0002-async-voice-operation-substrate.md)
 
+Release scope: [ADR-0003](../../docs/decisions/0003-brain-dump-task-tracker-port.md)
+ships the Brain Dump subset first. The Weekly Review section remains a future
+shared-substrate conformance contract and is not a gate for the Brain Dump tranche.
+
 These scenarios are implementation requirements. Unit tests should cover transition and
 merge functions; repository tests should cover append/idempotency recovery; API tests
 should cover owner scoping and command envelopes; frontend tests should use a fake ordered

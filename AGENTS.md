@@ -38,6 +38,7 @@
 - Before changing module boundaries, persistence ownership, workflow state machines, authentication assumptions, or deployment boundaries, inspect accepted/proposed records under `docs/decisions/`.
 - BrainBuddy vNext's modular-monolith boundaries and capture-to-result contracts are defined in `docs/decisions/0001-vnext-modular-monolith-and-workflow-contracts.md`; preserve them unless a new ADR explicitly supersedes the decision.
 - Async voice brain dumps and voice-led Weekly Review share the operation, patch, confirmation, privacy, and idempotency contract in `docs/decisions/0002-async-voice-operation-substrate.md`.
+- The current product tranche is Brain Dump only. Its RTM-backed, replaceable task-tracker boundary and no-silent-duplicate contract are defined in `docs/decisions/0003-brain-dump-task-tracker-port.md`.
 
 ## Agent Delivery Workflow
 - Work in an isolated git worktree and feature branch. Never leave product changes uncommitted in the primary worktree.
