@@ -192,60 +192,61 @@ Legend:
 
 | Affordance | CloudDesign source | Current code/API | ADR contract | Classification |
 |---|---|---|---|---|
-| authenticated shell/account | desktop top bar; mobile avatar | auth store, `ProtectedRoute`, `/api/auth/*` | Identity remains shared policy | **Reuse/T1 integration** |
-| four GTD lists and counts | desktop sidebar/mobile drawer | none | conflicts with external-tracker-only ADR-0001 | **D-01 gate, then T1** |
-| projects navigation/color | sidebar/drawer/project frames | CRT tree selector is not a project system | no native Project contract | **D-01 gate, then T1** |
-| contexts navigation/filter | sidebar/drawer/context frames | none | no native Context contract | **D-01 gate, then T1** |
-| Weekly Review entry/due | sidebar/drawer | none | Review module and operation contract exist on paper | **T2**; placeholder may ship in T1 only if clearly unavailable |
-| search tasks and trees | desktop top bar | no cross-domain search | no search contract | **Deferred**; separate task and tree search before federation |
-| account menu | desktop avatar | only sign-out in `TreeWorkspace` | Identity | **T1 minimal sign-out; Deferred menu** |
-| responsive desktop sidebar/mobile drawer | both prototypes | no task shell | transport/domain neutral | **T1** |
-| design Tweaks panel | desktop prototype | none | none | **Non-goal** |
+| authenticated shell/account | `bb-app.jsx:238-247`; `bbm-app.jsx:115-121` | `frontend/src/App.tsx:26-40`; auth store and `/api/auth/*` | ADR-0001 Identity and authorization sections | **Reuse/T1 integration** |
+| four GTD lists and counts | `bb-app.jsx:252-269`; `bbm-app.jsx:227-247` | no task list API or component; live protected route renders only `TreeWorkspace` | conflicts with ADR-0001 Context/non-goals and external-tracker ownership | **D-01 gate, then T1** |
+| projects navigation/color | `bb-app.jsx:271-283`; `bbm-app.jsx:248-259` | `TreeMenu` selects CRT trees, which are not projects; no Project API | no native Project contract; Thinking owns CRT | **D-01 gate, then T1** |
+| contexts navigation/filter | `bb-app.jsx:286-295`; `bbm-app.jsx:260-268` | no Context model, API, or component | no native Context contract | **D-01 gate, then T1** |
+| Weekly Review entry/due | `bb-app.jsx:266-268`; `bbm-app.jsx:243-246` | none | ADR-0001 WeeklyReview; ADR-0002 Weekly Review specialization | **T2**; placeholder may ship in T1 only if clearly unavailable |
+| search tasks and trees | `bb-app.jsx:240-243` | no cross-domain search; current API client is tree-specific | no search contract | **Deferred**; separate task and tree search before federation |
+| account menu | `bb-app.jsx:244-247` | only sign-out at `TreeWorkspace.tsx:174-189` | ADR-0001 Identity | **T1 minimal sign-out; Deferred menu** |
+| responsive desktop sidebar/mobile drawer | `bb-app.jsx:250-301`; `bbm-app.jsx:207-271` | no task shell; only `TreeWorkspace` at `/` | transport/domain neutral | **T1** |
+| design Tweaks panel | `bb-app.jsx:333-340` | none | none | **Non-goal** |
 
 ### 4.2 Lists, tasks, projects, and contexts
 
-| Affordance | Current implementation mapping | Required contract | Classification |
-|---|---|---|---|
-| list/query/count open tasks | no task model or endpoint | native Task query projection, owner-scoped | **D-01/T1** |
-| add task/next action | mock uses `prompt()` only | create command, idempotency, optimistic UI | **D-01/T1** |
-| open task detail | no task route/component | task detail query and responsive route/panel | **D-01/T1** |
-| complete/reopen task | only local demo toggle | audited command, revision check, completed timestamp | **D-01/T1** |
-| edit title/details/list/project/contexts/due/waiting | absent from mock interaction and live code | task patch/transition commands | **D-01/T1** for fields required to make lists truthful |
-| sort | not-built toast | stable server order plus supported sort keys | **Deferred** beyond manual/list default order |
-| group by project | local prototype projection | client grouping over task query or server `group_by` projection | **T1 desktop**; no new persistence concept |
-| create/edit/archive project | new-project is placeholder | Project commands and owner-scoped repository | **D-01/T1 create/read**, edit/archive **T2** |
-| add task in project | placeholder | create Task with `project_id` | **D-01/T1** |
-| filter by context | local demo filtering | context query parameter and Context records | **D-01/T1** |
-| task subtasks | demo-local component state | TaskSubtask records/commands | **T2** |
-| task comments | demo-local component state | TaskComment append/query; owner actor only in MVP | **T2** |
-| due date / add date | display only | date/time semantics and update command | **T1 date-only**, reminders **Deferred** |
-| waiting age/person | display only | waiting metadata and transition validation | **T1** |
-| AI run log/status/artifact/action | static demo data | Execution-owned run/result projection linked by IDs | autonomous execution is deferred in ADR-0001 | **Deferred**; no fake active AI states |
-| `Think` from project | placeholder | create/link `ProblemCandidate` then user-confirmed CRT promotion | ADR-0001 Thinking port; preserve existing trees | **T2** |
-| `Thinking · N steps` | static demo data | linked tree summary query; count definition D-06 | **T2** |
+| Affordance | CloudDesign source | Current code/API | Required ADR/domain contract | Classification |
+|---|---|---|---|---|
+| list/query/count open tasks | `bb-app.jsx:108-112,175-231`; `bbm-app.jsx:181-203` | no Task schema/route/repository in `backend/app/schemas/domain.py`, `api/routes.py`, or `container.py` | owner-scoped native Task query projection; D-01 must amend ADR-0001 | **D-01/T1** |
+| add task/next action | `bb-app.jsx:114-118,227-230`; `bbm-app.jsx:99-103,199-202` | mock uses `prompt()` and local arrays; live product has no endpoint | idempotent Task create command | **D-01/T1** |
+| open/collapse task detail | `bb-shell.jsx:193-227`; mobile `bbm-app.jsx:127-150,191-196` | no task route/component; current inspectors are CRT node/relation only | Task detail query and responsive route/panel | **D-01/T1** |
+| complete/reopen task | `bb-shell.jsx:197-203`; `bbm-app.jsx:132-136,292-298` | prototype toggles local state; no live Task transition | audited Task command, revision check, completed timestamp, explicit reopen destination | **D-01/T1** |
+| edit title/details/list/project/contexts/due/waiting | metadata rendered by `bb-shell.jsx:204-225` and `bbm-parts.jsx:61-78`; prototype does not persist edits | absent | Task patch/move commands and invariants in Section 6 | **D-01/T1** for fields required to make lists truthful |
+| sort | `bb-app.jsx:196`; static `bb-screens.jsx:152,164` | not-built toast; no query sort | stable default `order_key`; named sort modes need a later contract | **Deferred** beyond manual/list default order |
+| group by project | `bb-app.jsx:72-87,191-224`; static `bb-screens.jsx:184-211` | local projection over complete demo array | fetch every page for the selected state before client grouping, with explicit loading/error; no incomplete group may be presented as complete | **T1 desktop**; no new persistence concept |
+| create/edit/archive project | `bb-app.jsx:271-283` (`New project` is placeholder) | no Project model/API; CRT tree create is not reusable as project create | Project commands and owner-scoped repository | **D-01/T1 create/read**, edit/archive **T2** |
+| project view and add project task | `bb-app.jsx:130-154`; `bbm-app.jsx:156-169` | no Project/Task view; add emits placeholder | Project query plus Task create with `project_id` | **D-01/T1** |
+| context view/filter | `bb-app.jsx:156-173,286-293`; `bbm-app.jsx:171-179,260-266` | no Context model/API | context query parameter and same-owner Context records | **D-01/T1** |
+| task subtasks | `bb-shell.jsx:76-101`; mobile detail uses same component at `bbm-app.jsx:148` | demo-local state only | TaskSubtask records/commands | **T2** |
+| task comments | `bb-shell.jsx:147-171`; mobile detail uses same component at `bbm-app.jsx:148` | demo-local state only | TaskComment append/query; owner actor only in MVP | **T2** |
+| due date / review `Add date` | `bb-shell.jsx:206`; `bbm-app.jsx:139,351`; static review `bbm-screens.jsx:185-193` | display/label only | date-only Task field and proposal patch; D-04 | **T1 date display/edit**, reminders **Deferred** |
+| waiting age/person | demo data `bb-app.jsx:48-54`; render `bb-shell.jsx:222` | display only | waiting metadata and validated state transition; D-05 | **T1** |
+| AI run log/status/artifact/requested action | `bb-shell.jsx:104-145,205-221`; demo states `bb-app.jsx:29-55` | static data/not-built callbacks; current AI endpoint only validates CRT nodes | ADR-0001 Execution-owned run/result projection; autonomous execution is deferred | **Deferred**; no fake active AI states |
+| `Think` from project | `bb-app.jsx:141`; `bbm-app.jsx:162` | placeholder; existing tree APIs are reusable only behind Thinking port | ADR-0001 ProblemCandidate and confirmed CRT promotion; preserve current tree model | **T2** |
+| `Thinking · N steps` | render `bb-shell.jsx:211`; demo data `bb-app.jsx:44` | static demo value | linked existing-tree summary; count remains blocked by D-06 | **T2** |
 
 ### 4.3 Brain Dump and Weekly Review
 
-| Affordance/state | Current code | ADR-0002 mapping | Classification |
-|---|---|---|---|
-| microphone start | none; prototype local state | create `voice_brain_dump` operation after permission/consent | **T1 operation slice** |
-| waveform/local recording feedback | none | client-local `<100 ms` feedback | **T1** |
-| stable transcript | none | ordered `TranscriptSegment` projection | **T1** |
-| growing candidate list/forming item | prototype uses fixed strings | provisional ordered patches with source lineage | **T1** |
-| numbered provisional cards | absent in CloudDesign source | stable candidate identity/order; founder-approved language requested by task | **T1; replace mockup card language** |
-| stop | prototype directly advances to review | seal upload, drain fast stage, reconcile | **T1** |
-| cancel | absent | idempotent `cancelling -> cancelled` | **T1** |
-| processing/reconciliation | absent | operation progress/state projection | **T1** |
-| post-stop review | local fixed task array | frozen reconciled proposal batch | **T1** |
-| edit/remove/reorder candidate | only remove is functional | user patches; edits lock fields; freeze invalidation | edit/remove **T1**, reorder **T2** |
-| add date in review | label only | proposal field patch; exact date semantics | **T2** |
-| explicit confirmation | mock says “Send to inbox” | `confirm` idempotent batch commit | **T1**, relabel as confirm/add |
-| close/reopen/resume | close currently discards review | UI close never cancels; refetch operation projection | **T1** |
-| offline/chunk retry | none | numbered chunks, manifest, missing-chunk resume | **T1 safety requirement** |
-| retryable/terminal errors | none | operation error states and checkpoint retry | **T1** |
-| commit progress/partial result | none | action DAG and per-action results | **T1** |
-| bounded undo | none | ADR-0002 explicit inverse command | **T2 UI**, backend contract must not preclude it |
-| voice Weekly Review | placeholder only | same operation substrate, review snapshot | **T2** |
+| Affordance/state | CloudDesign source | Current code/API | ADR-0002 mapping | Classification |
+|---|---|---|---|---|
+| microphone start | `bb-app.jsx:245,304-319`; `bbm-app.jsx:105,119,273-277` | desktop placeholder/mobile local state only; no operation API | create `voice_brain_dump` operation after permission/consent | **T1 operation slice** |
+| waveform/local recording feedback | `bbm-app.jsx:315-334` | fixed animated bars; no media capture | client-local `<100 ms` feedback | **T1** |
+| stable transcript | `bbm-app.jsx:325-327` | fixed string | ordered `TranscriptSegment` projection | **T1** |
+| growing candidate list/forming item | `bbm-app.jsx:319-323`; static `bbm-screens.jsx:157-172` | fixed strings | provisional ordered patches with source lineage | **T1** |
+| numbered provisional cards | absent from CloudDesign source | absent | stable candidate identity/order; founder-approved language required by this task | **T1; replace mockup card language** |
+| stop | `bbm-app.jsx:331` | local `stopDump` immediately loads fixed review data | seal upload, drain fast stage, reconcile; no canonical write | **T1** |
+| cancel | absent | absent | idempotent `cancelling -> cancelled` | **T1** |
+| processing/reconciliation | absent | absent | operation progress/state projection | **T1** |
+| post-stop review | `bbm-app.jsx:339-363`; static `bbm-screens.jsx:177-203` | local fixed task array | frozen reconciled proposal batch | **T1** |
+| edit/remove/reorder candidate | remove at `bbm-app.jsx:354`; labels imply edit/date but do not implement them | only remove mutates local review array | user patches; edits lock fields; freeze invalidation | edit/remove **T1**, reorder **T2** |
+| add date in review | `bbm-app.jsx:351`; `bbm-screens.jsx:190` | label only | proposal field patch; exact date semantics | **T2** |
+| explicit confirmation | `bbm-app.jsx:360` | appends fixed items directly to local Inbox | `confirm` idempotent batch commit | **T1**, relabel as confirm/add |
+| close/discard/reopen/resume | close/discard at `bbm-app.jsx:342,361`; no resume UI | close currently discards; no persisted operation | UI close never cancels; discard is explicit cancel; refetch projection on reopen | **T1** |
+| offline/chunk retry | absent | absent | numbered chunks, manifest, missing-chunk resume | **T1 safety requirement** |
+| retryable/terminal errors | absent | absent | operation error states and checkpoint retry | **T1** |
+| commit progress/partial result | absent | absent | action DAG and per-action results | **T1** |
+| bounded undo | absent | absent | ADR-0002 explicit inverse command | **T2 UI**, backend contract must not preclude it |
+| retention/raw-audio deletion/consent withdrawal | absent | absent | ADR-0002 provenance, consent, and privacy section | **T1 policy visibility and controls** |
+| voice Weekly Review | Weekly Review placeholders at `bb-app.jsx:122-127`; `bbm-app.jsx:151-155` | absent | same operation substrate, review snapshot | **T2** |
 
 ## 5. First-tranche product contract
 
@@ -423,10 +424,12 @@ POST /tasks/{id}/transitions
 ```
 
 `GET /tasks` returns a flat cursor-paginated projection with total counts by open state.
-Grouping by project is initially a client projection over the returned page; if paging
-makes groups incomplete, add a documented `group_by=project` response rather than
-pretending client groups are exhaustive. Counts exclude completed/cancelled tasks unless
-explicitly requested.
+For T1 group-by-project, the client must fetch every page for the selected state before it
+renders groups and must show aggregate loading/error while doing so. It may not present a
+partially fetched group as complete. If task volume makes full retrieval unacceptable,
+replace that implementation with a server `group_by=project` projection that exposes
+per-group counts and cursors before release; silently incomplete client grouping is never
+conformant. Counts exclude completed/cancelled tasks unless explicitly requested.
 
 The operation confirmation API remains ADR-0002's `/operations/{id}/confirm`. The client
 must not create tasks one by one after confirmation. The server workflow commits
@@ -485,6 +488,13 @@ and recomputes visible numbering.
 | `terminal_error` | plain failure explanation, salvage/delete options, zero claimed canonical writes |
 | `cancelling/cancelled` | explicit cleanup state/result; closing the UI is never treated as cancel |
 
+Every operation view also exposes current processing-consent status and working-artifact
+retention in a privacy/details surface. After successful reconciliation it shows when raw
+audio is scheduled for deletion and offers `Delete raw audio now`. Withdrawing external
+processing consent while active stops future upload/provider calls, transitions to an
+explicit salvage/cancellation choice, and schedules uncommitted media/transcripts for
+deletion; it must not masquerade as an ordinary provider failure.
+
 Desktop must not retain CloudDesign's placeholder modal once Brain Dump ships. It should
 use the same operation projection and commands as mobile, adapted to a dialog or dedicated
 route. Correctness cannot differ by layout.
@@ -498,6 +508,8 @@ route. Correctness cannot differ by layout.
   unrecoverable gap.
 - Continue local chunk capture offline within the configured limit and upload only missing
   chunks on reconnect.
+- Send `withdraw_external_consent` and `delete_raw_audio` through ADR-0002's idempotent
+  `POST /operations/{id}/commands`; the operation projection reports cleanup status.
 - User edits are `user` patches and lock changed fields against model overwrite.
 - Reconciliation may merge/split/reword but must preserve source lineage and surface
   conflicts.
@@ -555,6 +567,8 @@ Deliverable:
 - persisted operation/event/patch projections and deterministic fake stages;
 - microphone permission/consent, local chunk capture, waveform, stop/cancel;
 - reconnect/polling fallback, retryable error, terminal error, and cleanup projections;
+- visible consent/retention state, consent withdrawal, and an immediate
+  post-reconciliation raw-audio deletion command;
 - no canonical capture/task write before confirm.
 
 Exit evidence: acceptance scenarios OP, UP, EV, CO-01, and core privacy tests pass using
@@ -680,7 +694,11 @@ task-comments/{owner_id}/{task_id}.jsonl
 - deterministic operation confirm yields exactly one task/source/item per action after
   duplicate request and timeout-after-accept;
 - no canonical task exists before confirmation;
-- wrong-owner operation, task, project, context, and source references leak nothing.
+- wrong-owner operation, task, project, context, and source references leak nothing;
+- consent withdrawal stops later uploads/provider calls and schedules uncommitted working
+  artifacts for deletion;
+- immediate raw-audio deletion after reconciliation removes media while transcript/source
+  provenance remains valid and the projection reports the updated retention state.
 
 ### 10.3 Frontend
 
@@ -692,6 +710,8 @@ task-comments/{owner_id}/{task_id}.jsonl
 - user edits survive fast/reconciler patches;
 - Stop does not commit, Close does not cancel, Cancel commits nothing, Confirm is
   double-click safe;
+- the privacy/details surface shows consent and retention, supports consent withdrawal,
+  and exposes immediate raw-audio deletion after successful reconciliation;
 - responsive accessibility: keyboard navigation, labeled controls, focus return for
   dialog/drawer, status announcements, reduced-motion waveform fallback.
 
