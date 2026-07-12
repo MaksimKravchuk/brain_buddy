@@ -9,13 +9,20 @@ Scope: static UX direction only; no production feature code
 1. **Brain Dump and Weekly Review as equal first-class destinations.** They are the vNext wedge, not secondary tools hidden behind the CRT canvas.
 2. **A mobile bottom bar and desktop left rail with the same four destinations.** Information architecture stays stable while composition changes by viewport.
 3. **A persistent, thumb-reachable action dock.** The active workflow’s primary action remains visible above browser and device safe areas.
-4. **Live transcript and provisional candidates in one recording screen.** This demonstrates responsiveness without implying that provisional output is committed.
-5. **Explicit proposal provenance and authority.** Provisional, reconciled, low-confidence, user-edited, route/promotion, and conflict states are distinguishable.
+4. **Chronological session task list as the active Brain Dump surface.** The user watches extracted tasks accumulate while speaking; the recorder is a compact utility rather than the page’s focal object.
+5. **Quiet proposal authority during capture.** Extracted tasks remain tentative under ADR-0002, but processing/provisional badges are suppressed unless wording needs the user’s attention. Full provenance and reconciliation move after Finish.
 6. **Confirmation before canonical writes.** Safe additions can be selected together; destructive/external/existing-item/CRT actions remain individually visible.
 7. **Resumable async, offline, retry, partial-commit, and terminal-error states.** These are core product behavior, not edge-case polish.
 8. **Weekly Review as a bounded queue with one-item phone focus.** Every item receives an outcome or explicit defer before completion.
 9. **CRT as focused mobile inspect/edit plus full desktop canvas.** Mobile supports meaningful thinking work but does not pretend a 375px canvas equals desktop.
-10. **Privacy and retention in the product shell.** Microphone permission, external-processing consent, audio retention/deletion, and “safe to leave” are visible at the relevant moment.
+10. **Privacy and retention in the product shell, not the active list.** Permission and blocking errors appear when action is required; diagnostics, retention, upload, and routing details stay behind post-Finish or secondary paths.
+
+## Founder feedback incorporated — 2026-07-12
+
+- **Keep:** continuous voice capture, incremental extraction, safe tentative-task contract, mobile accessibility, and post-Finish review.
+- **Remove from active capture:** giant record affordance, red live treatment, prominent timer, transcript feed, upload/chunk status, pipeline stages, routing choices, CRT promotion, confirmation flow, and error-state gallery.
+- **Change:** the chronological current-session task list is now the primary content. Session identity and recording state are subtle; Start / Pause / Resume / Finish plus a five-bar audio cue share one compact dock.
+- **Accessibility guardrails:** controls remain at least 44px, state is named in text and shape rather than color alone, paused bars stop moving, reduced-motion is honored, long tasks wrap, focus remains visible, and the empty list explains what will happen.
 
 ## Intentionally excluded or deferred
 
@@ -33,7 +40,7 @@ Scope: static UX direction only; no production feature code
 ## Founder questions
 
 1. **Default landing:** Should signed-in phone users land directly on Brain Dump, or on a small Home/activity screen that also exposes “Resume Weekly Review” and completed background work?
-2. **Recording density:** During speech, should provisional candidate cards appear below the live transcript (more reassurance, more motion), or should the recording view stay calm and show only a candidate count until the user stops?
+2. **Recording density — answered:** show the growing chronological task-card list while speaking; remove the transcript and operational status from this view.
 3. **Confirmation speed:** Is “Select all safe additions” acceptable as the default, while route/delete/existing-item/CRT actions always require individual review, or should every candidate start unselected?
 4. **Destination timing:** Should destination/route be chosen while editing each candidate, or only after wording is confirmed in a second lightweight routing step?
 5. **Weekly Review action model:** On phone, do you prefer the explicit action dock shown here, or swipe gestures as optional accelerators after the explicit controls are learned?

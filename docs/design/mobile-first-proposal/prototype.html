@@ -110,16 +110,40 @@
     .button-row > .btn { flex: 1 1 120px; }
     .icon { font-size: 18px; line-height: 1; }
 
-    .record-orb { display: grid; place-items: center; width: 116px; height: 116px; margin: 24px auto 18px; border: 1px solid #eabac0; border-radius: 50%; background: var(--danger-soft); box-shadow: inset 0 0 0 14px var(--surface), 0 14px 36px -24px rgba(161,61,73,.7); }
-    .record-orb::after { content: ""; width: 54px; height: 54px; border-radius: 50%; background: var(--danger); }
-    .record-orb.live::after { width: 36px; height: 36px; border-radius: 9px; }
-    .timer { text-align: center; font-size: 34px; line-height: 1; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
     .center { text-align: center; }
     .wave { display: flex; align-items: center; justify-content: center; gap: 3px; height: 32px; margin: 12px 0; }
     .wave i { width: 3px; border-radius: 4px; background: var(--danger); opacity: .8; }
     .wave i:nth-child(1), .wave i:nth-child(9) { height: 8px; } .wave i:nth-child(2), .wave i:nth-child(8) { height: 14px; } .wave i:nth-child(3), .wave i:nth-child(7) { height: 24px; } .wave i:nth-child(4), .wave i:nth-child(6) { height: 18px; } .wave i:nth-child(5) { height: 30px; }
     .transcript { font-size: 17px; line-height: 1.55; }
     .transcript .interim { color: var(--faint); }
+
+    .session-summary { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 2px 0 14px; }
+    .session-summary h1 { font-size: 23px; }
+    .session-state { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .session-state::before { content: ""; width: 7px; height: 7px; border-radius: 2px; background: var(--success); }
+    .session-state.paused::before { background: var(--warning); }
+    .session-state.finished::before { background: var(--muted); }
+    .session-list { display: grid; gap: 9px; list-style: none; padding: 0; margin: 0; }
+    .session-task { min-width: 0; padding: 14px 15px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); box-shadow: 0 1px 2px rgba(15,30,45,.04); }
+    .session-task p { overflow-wrap: anywhere; font-size: 16px; line-height: 1.4; font-weight: 650; }
+    .session-task footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 9px; color: var(--faint); font-size: 11px; }
+    .session-task.needs-action { border-style: dashed; }
+    .session-task.needs-action footer span:last-child { color: var(--warning); font-weight: 700; }
+    .empty-session { display: grid; place-items: center; min-height: 320px; padding: 32px 20px; border: 1px dashed var(--line-strong); border-radius: var(--radius); text-align: center; }
+    .empty-session p { max-width: 30ch; margin-top: 7px; color: var(--muted); }
+    .record-panel { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 58px; max-width: 688px; margin: auto; }
+    .record-cue { min-width: 76px; }
+    .record-cue strong { display: block; font-size: 12px; }
+    .elapsed { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+    .mini-wave { display: flex; align-items: center; gap: 2px; width: 30px; height: 24px; }
+    .mini-wave i { width: 3px; border-radius: 3px; background: var(--accent); }
+    .mini-wave i:nth-child(1), .mini-wave i:nth-child(5) { height: 7px; }
+    .mini-wave i:nth-child(2), .mini-wave i:nth-child(4) { height: 15px; }
+    .mini-wave i:nth-child(3) { height: 22px; }
+    .record-panel .btn { min-height: 44px; padding: 8px 12px; }
+    .record-panel .finish { margin-left: auto; }
+    .finished-panel { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding: 10px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); }
+    .finished-panel .btn:first-of-type { margin-left: auto; }
 
     .candidate { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 11px; padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); }
     .candidate + .candidate { margin-top: 10px; }
@@ -220,6 +244,9 @@
       .stage-list li.active::before { animation: spin .9s linear infinite; }
       .wave i { animation: pulse 1.1s ease-in-out infinite alternate; }
       .wave i:nth-child(even) { animation-delay: -.5s; }
+      .mini-wave i { animation: pulse 1.1s ease-in-out infinite alternate; }
+      .mini-wave i:nth-child(even) { animation-delay: -.45s; }
+      .mini-wave.paused i { animation: none; height: 3px; }
       .indeterminate::after { animation: indeterminate 1.5s ease-in-out infinite; }
       @keyframes spin { to { transform: rotate(360deg); } }
       @keyframes pulse { to { transform: scaleY(.45); opacity: .45; } }
@@ -232,8 +259,9 @@
   <script>
     const scenarios = [
       ["idle", "Brain Dump · Start"],
-      ["recording", "Brain Dump · Recording"],
-      ["offline", "Brain Dump · Offline recording"],
+      ["recording", "Brain Dump · Active session"],
+      ["paused", "Brain Dump · Paused session"],
+      ["finished", "Brain Dump · Finished session"],
       ["processing", "Brain Dump · Processing"],
       ["drafts", "Brain Dump · Draft candidates"],
       ["confirm", "Brain Dump · Confirm actions"],
@@ -248,7 +276,7 @@
     ];
 
     const titles = {
-      idle: ["Brain Dump", "Ready when you are"], recording: ["Brain Dump", "Recording"], offline: ["Brain Dump", "Recording locally"],
+      idle: ["Brain Dump", "New session"], recording: ["Brain Dump", "Sunday reset"], paused: ["Brain Dump", "Sunday reset"], finished: ["Brain Dump", "Sunday reset"],
       processing: ["Brain Dump", "Preparing your drafts"], drafts: ["Brain Dump", "Review draft candidates"], confirm: ["Brain Dump", "Confirm proposed actions"],
       "commit-error": ["Brain Dump", "3 of 4 actions completed"], "weekly-queue": ["Weekly Review", "7 items left"],
       "weekly-detail": ["Weekly Review", "Item 3 of 9"], "weekly-empty": ["Weekly Review", "You’re clear"], "weekly-error": ["Weekly Review", "Couldn’t load review"],
@@ -316,30 +344,39 @@
 
     function idle() {
       return shell(main(`
-        <div class="section-head"><div><h1>Clear your head.</h1><p class="subhead">Speak naturally. BrainBuddy will prepare drafts for you to review before anything is saved or routed.</p></div></div>
-        <div class="card"><div class="card-body center">
-          <button class="record-orb" aria-label="Start recording" onclick="go('recording')"></button>
-          <h2>Start a Brain Dump</h2><p class="small" style="margin-top:6px">Microphone on only while this screen says Recording.</p>
-        </div></div>
-        <div class="status-strip" style="margin-top:12px"><span class="status-dot"></span><div><h3>Private by design</h3><p class="small">You’ll confirm drafts before they become captures, routes, or CRT problems. Raw audio deletes after 24 hours by default.</p></div></div>
-        <div class="card soft"><div class="card-body"><div class="queue-top"><div><h3>Continue yesterday’s dump</h3><p class="small">4 drafts awaiting confirmation</p></div><button class="btn compact" onclick="go('confirm')">Resume</button></div></div></div>
-      `));
+        <div class="session-summary"><div><p class="eyebrow">Current session</p><h1>Tasks from this session</h1></div><span class="session-state finished">Not started</span></div>
+        <section class="empty-session" aria-labelledby="empty-title"><div><h2 id="empty-title">Your task list will grow here</h2><p>Keep talking naturally. BrainBuddy adds each task as it understands it.</p></div></section>
+      `, true), { dock: dock(`<div class="record-panel"><div class="record-cue"><strong>Ready</strong><span class="elapsed">00:00</span></div><button class="btn primary finish" aria-label="Start recording" onclick="go('recording')">Start</button></div>`) });
     }
 
-    function recording(offline = false) {
-      const network = offline
-        ? `<div class="status-strip warning"><span class="status-dot"></span><div><h3>Offline — recording locally</h3><p class="small">3:42 of safe local capacity remains. Upload resumes automatically when connected.</p></div></div>`
-        : `<div class="status-strip success"><span class="status-dot"></span><div><h3>Audio safe so far</h3><p class="small">8 of 9 chunks uploaded · you can leave after stopping</p></div></div>`;
+    const sessionTasks = [
+      ["Book the dentist appointment for Tuesday morning", "10:41"],
+      ["Send Natasha the release test-flake summary before Friday", "10:42"],
+      ["Plan a 30-minute walk after lunch", "10:43"],
+      ["Write down what keeps making release ownership bounce between teams, including the late-test handoff and who should make the final call", "10:44", "Check wording"]
+    ];
+
+    function sessionTaskList() {
+      return `<ol class="session-list" aria-live="polite" aria-label="Tasks extracted in this session">${sessionTasks.map((task, index) => `<li class="session-task ${task[2] ? "needs-action" : ""}"><p>${task[0]}</p><footer><span>Task ${index + 1}</span><span>${task[2] || task[1]}</span></footer></li>`).join("")}</ol>`;
+    }
+
+    function recorderDock(paused = false) {
+      return dock(`<div class="record-panel"><div class="mini-wave ${paused ? "paused" : ""}" aria-hidden="true">${"<i></i>".repeat(5)}</div><div class="record-cue"><strong>${paused ? "Paused" : "Recording"}</strong><span class="elapsed">02:18</span></div><button class="btn" onclick="go('${paused ? "recording" : "paused"}')">${paused ? "Resume" : "Pause"}</button><button class="btn primary finish" onclick="go('finished')">Finish</button></div>`);
+    }
+
+    function recording(paused = false) {
       return shell(main(`
-        ${network}
-        <button class="record-orb live" aria-label="Stop recording" onclick="go('processing')"></button>
-        <p class="timer" aria-label="Recording time 1 minute 24 seconds">01:24</p><div class="wave" aria-hidden="true">${"<i></i>".repeat(9)}</div>
-        <section aria-labelledby="transcript-title" class="card"><div class="card-header"><div><p class="eyebrow">Live transcript</p><h2 id="transcript-title">I need to sort out the release issue…</h2></div><span class="pill live">Live</span></div><div class="card-body transcript" aria-live="polite">The release keeps slipping because late test failures bounce between teams. I should map why ownership is unclear, <span class="interim">and also remember to send the dentist form tomorrow…</span></div></section>
-        <section style="margin-top:18px"><div class="progress-head"><h2>Drafts appearing</h2><span class="small">2 provisional</span></div>
-          <div class="candidate"><div class="pill accent">1</div><div><h3>Map why release-quality ownership is unclear</h3><div class="candidate-meta"><span class="pill">Problem</span><span class="pill">Provisional</span></div></div></div>
-          <div class="candidate"><div class="pill accent">2</div><div><h3>Send the dentist form tomorrow</h3><div class="candidate-meta"><span class="pill">Task</span><span class="pill warn">Wording still changing</span></div></div></div>
-        </section>
-      `, true), { dock: dock(`<button class="btn ghost" onclick="go('idle')">Cancel</button><button class="btn danger" onclick="go('processing')"><span aria-hidden="true">■</span> Stop & review</button>`) });
+        <div class="session-summary"><div><p class="eyebrow">Current session</p><h1>Tasks from this session</h1></div><span class="session-state ${paused ? "paused" : ""}">${paused ? "Paused" : "Recording"} · 4 tasks</span></div>
+        ${sessionTaskList()}
+      `, true), { dock: recorderDock(paused) });
+    }
+
+    function finished() {
+      return shell(main(`
+        <div class="session-summary"><div><p class="eyebrow">Session complete</p><h1>Tasks from this session</h1></div><span class="session-state finished">Finished · 4 tasks</span></div>
+        ${sessionTaskList()}
+        <div class="finished-panel"><div><strong>Recording finished</strong><p class="micro">4 tasks captured</p></div><button class="btn compact" onclick="go('idle')">New session</button><button class="btn primary compact" onclick="go('drafts')">Review tasks</button></div>
+      `));
     }
 
     function processing() {
@@ -466,7 +503,7 @@
     }
 
     function render() {
-      const views = { idle, recording: () => recording(false), offline: () => recording(true), processing, drafts, confirm: confirmScreen, "commit-error": commitError, "weekly-queue": weeklyQueue, "weekly-detail": weeklyDetail, "weekly-empty": weeklyEmpty, "weekly-error": weeklyError, crt, settings, desktop };
+      const views = { idle, recording: () => recording(false), paused: () => recording(true), finished, processing, drafts, confirm: confirmScreen, "commit-error": commitError, "weekly-queue": weeklyQueue, "weekly-detail": weeklyDetail, "weekly-empty": weeklyEmpty, "weekly-error": weeklyError, crt, settings, desktop };
       document.getElementById("app").innerHTML = views[state]();
       document.title = `${titles[state][1]} — BrainBuddy prototype`;
     }

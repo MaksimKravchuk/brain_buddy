@@ -16,9 +16,10 @@ Use the scenario selector in the top-right corner to jump between representative
 
 | File | Viewport | State |
 |---|---:|---|
-| `01-brain-dump-recording-375.png` | 375×812 | Recording, uploaded chunks, live transcript, stop/review action |
-| `02-brain-dump-confirm-430.png` | 430×932 | Frozen proposal review and separate CRT promotion |
-| `03-brain-dump-error-retry-375.png` | 375×812 | Partial commit, unknown route status, idempotent retry |
+| `01-brain-dump-active-375.png` | 375×812 | Active capture with chronological session task list and compact recorder |
+| `02-brain-dump-active-430.png` | 430×932 | Active capture at the wider required phone viewport |
+| `03-brain-dump-paused-375.png` | 375×812 | Stable task list with compact paused / resume / finish state |
+| `08-brain-dump-finished-430.png` | 430×932 | Finished session with compact next-step control state |
 | `04-weekly-review-queue-375.png` | 375×812 | Bounded queue and real progress |
 | `05-weekly-review-crt-promotion-430.png` | 430×932 | Item detail and keep/edit/delete/defer/route/promote actions |
 | `06-crt-focused-tree-430.png` | 430×932 | Focused mobile CRT subtree and selected-node form |
@@ -34,7 +35,7 @@ node docs/design/mobile-first-proposal/capture-screenshots.mjs
 
 The script checks each viewport for console/page errors and horizontal overflow, then exercises:
 
-`idle → recording → processing → drafts → confirmation → partial result`
+`empty session → recording → paused → resumed → finished → review → partial result`
 
 ## Visual self-audit
 
@@ -44,8 +45,8 @@ Initial slop diagnostic: **0/10**.
 
 - No decorative tech gradient or generic violet accent; sky is inherited from the existing BrainBuddy palette.
 - No equal-weight feature tile grid, accent rails, monument stats, icon toppers, or unearned glass treatment.
-- Composition follows active work: recording feedback, actionable queue, focused item, and desktop panes.
-- Centering is limited to the record control and true empty/completion states.
+- Composition follows active work: the session task list, actionable review queue, focused item, and desktop panes.
+- Centering is limited to true empty/completion states; the recorder is a compact dock utility.
 - Typography follows the existing product’s precise sans posture with native fallbacks for a fully offline artifact.
 
-Post-verification score: **0/10**. Visual inspection found one screenshot-export issue (fixed browser chrome over full-page captures) and one half-visible CRT action; exports now use viewport capture and the redundant inline CRT save control was removed from the overview state.
+Post-verification score: **0/10**. The 375px and 430px active views keep all four task cards dominant and readable, including the long-text case. The paused view communicates state through text and static bars, and the 430px finished view keeps next steps compact without reintroducing capture diagnostics.

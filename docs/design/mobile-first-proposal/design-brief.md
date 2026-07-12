@@ -7,8 +7,8 @@ Primary surface: **Operate** (capture and review queues); secondary surface: **E
 
 BrainBuddy’s mobile wedge is a short loop, not a smaller desktop canvas:
 
-1. **Capture quickly** — start a Brain Dump from anywhere, see that speech is safe, and keep speaking.
-2. **Understand proposals** — distinguish live transcript, provisional candidates, reconciled suggestions, and user edits.
+1. **Capture quickly** — start a Brain Dump from anywhere and keep speaking while a chronological session task list grows in front of you.
+2. **Understand proposals** — use quiet attention cues only where wording needs action; detailed provenance and reconciliation stay available after Finish.
 3. **Confirm intentionally** — nothing is routed, deleted, or promoted until the user confirms a frozen batch.
 4. **Review deliberately** — process a bounded Weekly Review queue one item at a time, with progress and a clear next action.
 5. **Think deeply when warranted** — promote a recurring/complex problem to CRT, then use the tree in a focused mobile viewer/editor or the full desktop workspace.
@@ -26,7 +26,7 @@ A persistent four-item bottom bar provides thumb-reachable destinations:
 - **Trees** — CRT list and focused tree/detail view.
 - **More** — operation history, privacy/retention, task-tracker destination, account, and sign-out.
 
-The current section title and operation status sit in a compact top app bar. Contextual back navigation replaces the title on detail/editor screens. A sticky bottom action dock contains the current primary action; it sits above the navigation and safe-area inset.
+The current section and compact session title sit in the top app bar. During an active Brain Dump, an understated text state plus a small audio-level cue provides recording confidence without competing with the task list. Contextual back navigation replaces the title on detail/editor screens. A sticky bottom action dock contains compact Start / Pause / Resume / Finish controls above the navigation and safe-area inset.
 
 ### Desktop (768px and above)
 
@@ -55,29 +55,30 @@ Breakpoints are content-driven. The prototype uses 768px for the shell transitio
 
 ## Component and layout principles
 
-- **One dominant action per state.** Recording emphasizes Stop; confirmation emphasizes Confirm selected; review detail emphasizes a decision, not navigation.
+- **One dominant surface per state.** During recording, the chronological session task list—not the recorder—is the product. Confirmation later emphasizes Confirm selected; review detail emphasizes a decision, not navigation.
 - **44px minimum touch targets**, 8px spacing rhythm, 16px phone gutters, and safe-area padding via `env(safe-area-inset-*)`.
 - **State before decoration.** Status labels use text plus shape/icon, never color alone. Unknown-duration work uses stage text and indeterminate progress, not fake percentages.
-- **Proposals are not records.** “Provisional,” “Reconciled,” “Edited by you,” low-confidence, conflict, and pending-route states are visibly distinct.
+- **Proposals are not records.** Extracted tasks remain tentative in the product contract, but the active capture surface does not repeat processing badges. A quiet dashed treatment and explicit “Check wording” cue appear only when user action is useful; detailed states remain available after Finish.
 - **Destructive and external actions remain explicit.** Delete, route, existing-item edits, and CRT promotion stay individually reviewable even when “select safe additions” is available.
 - **Keyboard and focus.** Logical DOM order, visible `:focus-visible`, Escape closes sheets/dialogs, Enter submits only single-line fields, and text areas preserve newline entry. Sticky controls move above the on-screen keyboard; content remains scrollable.
 - **Resumability.** Closing the app never implies cancellation. Every live operation exposes “Safe to leave” and restores its phase, item, edits, and queue position.
-- **Offline honesty.** Recording can continue locally within the configured limit, with a persistent offline banner, local duration/storage status, and reconnection upload state. No server progress is implied while offline.
+- **Operational detail stays secondary.** Network, storage, transcript, pipeline, and routing detail is available after Finish or through operation detail—not in the focused active-session view. A blocking capture failure may interrupt the control only when the user must act.
 - **Error locality.** Retry is placed beside the failed stage/action. Correlation/reference details are expandable, not primary copy. Terminal microphone/storage errors offer salvage or deletion where possible.
-- **Accessible semantics.** Landmarks, headings, list semantics, `aria-live` for transcript/progress, explicit button labels, form labels/help, reduced-motion support, and contrast suitable for WCAG AA.
+- **Accessible semantics.** Landmarks, headings, list semantics, `aria-live` for incremental session tasks/progress, explicit button labels, form labels/help, reduced-motion support, and contrast suitable for WCAG AA.
 - **Visual continuity.** Reuse the current slate surfaces, sky accent, soft borders/shadows, and restrained rounded corners. The proposal removes desktop-only hover dependence and does not lean on glass/gradient effects.
 
 ## Critical journeys
 
 ### Brain Dump
 
-1. Idle: concise consent/retention context and one large “Start recording” control.
-2. Recording: duration, upload/network state, waveform feedback, stable partial transcript, and provisional candidates arriving without stealing focus.
-3. Stop: seal upload → drain fast stage → reconcile; stage text is resumable and indeterminate where total work is unknown.
-4. Draft review: inspect/edit/reorder/defer candidates; reconciled changes show source cues and warnings.
-5. Freeze/confirm: safe additions may be grouped; destructive, routing, existing-item, or CRT actions remain individual.
-6. Commit: per-action results remain visible; local completion may coexist with asynchronous routing/promotion.
-7. Failure: retry from checkpoint, review stable unreconciled candidates, use transcript-only fallback, or delete audio as applicable.
+1. Idle: an empty session-task list explains what will appear; compact Start sits in the recorder dock.
+2. Recording: extracted task cards arrive chronologically while a compact waveform, elapsed cue, Pause, and Finish provide confidence without dominating.
+3. Pause/resume: the same list remains stable; text, static audio bars, and control labels communicate state without relying on color or motion.
+4. Finish: the recorder collapses to a compact completed state; review, reconciliation, diagnostics, confirmation, and routing continue on subsequent surfaces.
+5. Draft review: inspect/edit/reorder/defer candidates; reconciled changes show source cues and warnings.
+6. Freeze/confirm: safe additions may be grouped; destructive, routing, existing-item, or CRT actions remain individual.
+7. Commit: per-action results remain visible; local completion may coexist with asynchronous routing/promotion.
+8. Failure: retry from checkpoint, review stable unreconciled candidates, use transcript-only fallback, or delete audio as applicable.
 
 ### Weekly Review
 
@@ -106,8 +107,9 @@ Breakpoints are content-driven. The prototype uses 768px for the shell transitio
 ### Brain Dump
 
 - Permission/consent request and denied/disabled states.
-- Idle/start; recording online; recording offline/local-limit warning.
-- Live partial transcript and provisional candidates.
+- Idle/start; active, paused/resumed, and finished session-task-list states.
+- Incremental extracted-task cards, long-text wrapping, empty list, and quiet wording-attention cue.
+- Transcript, offline/local-limit, diagnostics, and upload detail behind post-Finish operation detail.
 - Uploading, fast processing, reconciling.
 - Candidate list/detail/editor, low confidence, conflict, merge/split lineage.
 - Frozen confirmation batch and committing results.
@@ -145,4 +147,4 @@ Breakpoints are content-driven. The prototype uses 768px for the shell transitio
 
 ## Prototype notes
 
-The static prototype demonstrates representative states rather than simulating the backend. Use its built-in “Scenario” control or the product navigation to jump between states. Query parameters (`?screen=recording`, `?screen=confirm`, etc.) make screenshot states stable.
+The static prototype demonstrates representative states rather than simulating the backend. Use its built-in “Scenario” control or the product navigation to jump between states. Query parameters (`?screen=recording`, `?screen=paused`, `?screen=finished`, etc.) make screenshot states stable. The active-session cards are representative of incremental extraction; no production inference behavior is implemented here.

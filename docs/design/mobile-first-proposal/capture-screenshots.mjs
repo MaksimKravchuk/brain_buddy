@@ -8,9 +8,10 @@ const prototypeUrl = new URL(`file://${path.join(here, "prototype.html")}`);
 const outputDir = path.join(here, "screenshots");
 
 const captures = [
-  { name: "01-brain-dump-recording-375.png", screen: "recording", width: 375, height: 812 },
-  { name: "02-brain-dump-confirm-430.png", screen: "confirm", width: 430, height: 932 },
-  { name: "03-brain-dump-error-retry-375.png", screen: "commit-error", width: 375, height: 812 },
+  { name: "01-brain-dump-active-375.png", screen: "recording", width: 375, height: 812 },
+  { name: "02-brain-dump-active-430.png", screen: "recording", width: 430, height: 932 },
+  { name: "03-brain-dump-paused-375.png", screen: "paused", width: 375, height: 812 },
+  { name: "08-brain-dump-finished-430.png", screen: "finished", width: 430, height: 932 },
   { name: "04-weekly-review-queue-375.png", screen: "weekly-queue", width: 375, height: 812 },
   { name: "05-weekly-review-crt-promotion-430.png", screen: "weekly-detail", width: 430, height: 932 },
   { name: "06-crt-focused-tree-430.png", screen: "crt", width: 430, height: 932 },
@@ -52,14 +53,29 @@ for (const capture of captures) {
 const journey = await browser.newPage({ viewport: { width: 375, height: 812 } });
 prototypeUrl.search = "?screen=idle";
 await journey.goto(prototypeUrl.href);
+const emptyListVisible = await journey
+  .getByRole("heading", { name: "Your task list will grow here" })
+  .isVisible();
+if (!emptyListVisible) throw new Error("Brain Dump empty-list state is missing");
 await journey.getByRole("button", { name: "Start recording" }).click();
-await journey.getByRole("button", { name: /Stop & review/ }).click();
-await journey.getByRole("button", { name: "Prototype: show reconciled drafts" }).click();
+const activeTasks = await journey.getByRole("listitem").count();
+if (activeTasks !== 4) throw new Error(`Expected 4 active session tasks, found ${activeTasks}`);
+const forbiddenActiveCopy = await journey
+  .getByText(/live transcript|chunks uploaded|routing|CRT promotion/i)
+  .count();
+if (forbiddenActiveCopy) throw new Error("Active capture exposes transcript or pipeline UI");
+await journey.getByRole("button", { name: "Pause" }).click();
+if (!(await journey.getByText("Paused · 4 tasks").isVisible())) {
+  throw new Error("Paused state is not exposed as text");
+}
+await journey.getByRole("button", { name: "Resume" }).click();
+await journey.getByRole("button", { name: "Finish" }).click();
+await journey.getByRole("button", { name: "Review tasks" }).click();
 await journey.getByRole("button", { name: "Review 3 actions" }).click();
 await journey.getByRole("button", { name: "Confirm selected" }).click();
 const finalHeading = await journey.getByRole("heading", { name: "3 of 4 actions completed" }).isVisible();
 if (!finalHeading) throw new Error("Critical Brain Dump journey did not reach partial-result state");
-console.log("click journey: idle → recording → processing → drafts → confirmation → result passed");
+console.log("click journey: empty session → recording → paused → resumed → finished → review → result passed");
 await journey.close();
 
 const reviewJourney = await browser.newPage({ viewport: { width: 430, height: 932 } });
