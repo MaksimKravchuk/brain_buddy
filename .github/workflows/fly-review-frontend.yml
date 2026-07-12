@@ -55,7 +55,7 @@ jobs:
 
       - name: Deploy review app
         run: |
-          deploy_args=(--app "$APP_NAME" --config fly.frontend.toml --remote-only)
+          deploy_args=(--app "$APP_NAME" --config fly.frontend.toml --remote-only --ha=false)
           deploy_args+=(--build-arg "VITE_API_BASE_URL=$VITE_API_BASE_URL")
           flyctl deploy "${deploy_args[@]}"
 
