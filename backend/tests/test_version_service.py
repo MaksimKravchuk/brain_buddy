@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from app.schemas import (
     NodeCreateRequest,
     NodeUpdateRequest,
@@ -90,6 +92,31 @@ def test_restore_version(tree_service, node_service, version_service) -> None:
 
     restored_tree = version_service.restore_version(tree.id, version.id)
     assert any(n.id == node.id for n in restored_tree.nodes)
+
+
+def test_delete_version_keeps_snapshot_when_tree_persistence_fails(
+    tree_service, version_service, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Deletion rollback"), owner_id="user_test"
+    )
+    version = version_service.create_version(
+        tree.id, VersionCreateRequest(label="Preserve on failure")
+    )
+
+    def fail_tree_save(_tree) -> None:
+        raise OSError("disk unavailable")
+
+    monkeypatch.setattr(tree_service.tree_repo, "save", fail_tree_save)
+
+    with pytest.raises(OSError, match="disk unavailable"):
+        version_service.delete_version(tree.id, version.id)
+
+    assert version_service.load_version(tree.id, version.id).id == version.id
+    assert any(
+        ref.id == version.id
+        for ref in tree_service.tree_repo.load(tree.id).version_refs
+    )
 
 
 def test_export_tree_supports_live_and_version(

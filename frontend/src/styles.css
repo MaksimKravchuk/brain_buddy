@@ -1,10 +1,12 @@
+@import "./styles/tokens.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
   color-scheme: light;
-  background-color: #f8fafc;
+  background-color: var(--bb-surface-base);
 }
 
 html {

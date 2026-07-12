@@ -97,7 +97,17 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build backend image
-        run: docker build -t brain-buddy-backend-test -f backend/Dockerfile .
+        run: |
+          for attempt in 1 2 3; do
+            docker build -t brain-buddy-backend-test -f backend/Dockerfile . && exit 0
+            if [ "$attempt" = 3 ]; then exit 1; fi
+            sleep "$((attempt * 10))"
+          done
 
       - name: Build frontend image
-        run: docker build -t brain-buddy-frontend-test -f frontend/Dockerfile .
+        run: |
+          for attempt in 1 2 3; do
+            docker build -t brain-buddy-frontend-test -f frontend/Dockerfile . && exit 0
+            if [ "$attempt" = 3 ]; then exit 1; fi
+            sleep "$((attempt * 10))"
+          done

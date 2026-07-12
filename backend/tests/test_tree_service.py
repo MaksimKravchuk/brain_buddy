@@ -1,12 +1,26 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, Event
 
-from app.schemas import TreeCreateRequest, TreeMetadata, TreeUpdateRequest
+import pytest
+
+from app.exceptions import ConflictError, NotFoundError
+from app.schemas import (
+    NodeResponse,
+    Position,
+    RelationCounts,
+    TreeCreateRequest,
+    TreeMetadata,
+    TreeUpdateRequest,
+)
+from app.schemas.common import ValidationState, VisualState
+from app.schemas.domain import TreeVersionRef, VersionDiffSummary
 from tests.conftest import TEST_OWNER_ID
 
 
-def test_get_tree_uses_cache(tree_service, monkeypatch) -> None:
+def test_get_tree_reloads_persisted_state(tree_service, monkeypatch) -> None:
     payload = TreeCreateRequest(name="Cached Tree")
     tree = tree_service.create_tree(payload, owner_id=TEST_OWNER_ID)
 
@@ -26,8 +40,8 @@ def test_get_tree_uses_cache(tree_service, monkeypatch) -> None:
 
     assert first.id == tree.id
     assert second.id == tree.id
-    # Should only hit the repository once thanks to caching
-    assert load_calls == [tree.id]
+    # Always reload: another worker may have persisted a newer tree or deletion.
+    assert load_calls == [tree.id, tree.id]
     # Returned documents are safe copies
     assert first is not second
 
@@ -73,6 +87,245 @@ def test_list_and_update_tree(tree_service) -> None:
     )
     assert updated.title == "Updated First"
     assert updated.updated_at >= updated.created_at
+
+
+def test_full_tree_update_preserves_server_only_tree_data(tree_service) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Preserve Server Data"), owner_id=TEST_OWNER_ID
+    )
+    metadata = TreeMetadata.from_timestamps(
+        created_at=tree.created_at, updated_at=tree.updated_at, owner_id=TEST_OWNER_ID
+    )
+    node = NodeResponse(
+        id="node_keep",
+        label="Keep me",
+        type="child",
+        position=Position(x=1, y=2),
+        highlight_state="none",
+        relation_counts=RelationCounts(up_count=0, down_count=0),
+    )
+    updated = tree_service.update_tree(
+        tree.id,
+        TreeUpdateRequest(
+            name="Preserve Server Data",
+            metadata=metadata,
+            nodes=[node],
+            relations=[],
+            owner_id=TEST_OWNER_ID,
+        ),
+        owner_id=TEST_OWNER_ID,
+    )
+    existing_node = updated.nodes[0]
+    existing_node.validation = ValidationState(
+        confidence=88,
+        provider="test-provider",
+        last_checked=updated.updated_at,
+    )
+    existing_node.visual = VisualState(color="#ffffff", highlight=True)
+    existing_node.extra = {
+        "type": "child",
+        "highlight_state": "none",
+        "server_only": "keep",
+    }
+    updated.version_refs = [
+        TreeVersionRef(
+            id="version_1",
+            label="Before autosave",
+            created_at=updated.updated_at,
+            author="qa",
+            notes="must survive full PUT",
+            diff_summary=VersionDiffSummary(
+                nodes_added=1,
+                nodes_removed=0,
+                nodes_modified=0,
+                relations_added=0,
+                relations_removed=0,
+                relations_modified=0,
+            ),
+            conflict_count=0,
+        )
+    ]
+    tree_service.tree_repo.save(updated)
+    tree_service._cache.clear()
+
+    round_trip = tree_service.update_tree(
+        tree.id,
+        TreeUpdateRequest(
+            name="Renamed by autosave",
+            metadata=TreeMetadata.from_timestamps(
+                created_at=updated.created_at,
+                updated_at=updated.updated_at,
+                owner_id=TEST_OWNER_ID,
+            ),
+            nodes=[
+                NodeResponse(
+                    id="node_keep",
+                    label="Keep me edited",
+                    type="child",
+                    position=Position(x=3, y=4),
+                    highlight_state="none",
+                    relation_counts=RelationCounts(up_count=0, down_count=0),
+                )
+            ],
+            relations=[],
+            owner_id=TEST_OWNER_ID,
+        ),
+        owner_id=TEST_OWNER_ID,
+    )
+
+    assert round_trip.version_refs[0].id == "version_1"
+    assert round_trip.nodes[0].label == "Keep me edited"
+    assert round_trip.nodes[0].validation is not None
+    assert round_trip.nodes[0].validation.provider == "test-provider"
+    assert round_trip.nodes[0].visual is not None
+    assert round_trip.nodes[0].visual.highlight is True
+    assert round_trip.nodes[0].extra is not None
+    assert round_trip.nodes[0].extra["server_only"] == "keep"
+
+
+def test_update_tree_rejects_stale_full_tree_payload(tree_service) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Concurrent Tree"), owner_id=TEST_OWNER_ID
+    )
+    client_seen_metadata = TreeMetadata.from_timestamps(
+        created_at=tree.created_at, updated_at=tree.updated_at, owner_id=TEST_OWNER_ID
+    )
+
+    fresh = tree_service.update_tree(
+        tree.id,
+        TreeUpdateRequest(
+            name="Newer server copy",
+            metadata=client_seen_metadata,
+            nodes=[],
+            relations=[],
+            owner_id=TEST_OWNER_ID,
+        ),
+        owner_id=TEST_OWNER_ID,
+    )
+
+    assert fresh.updated_at > client_seen_metadata.updated_at
+    with pytest.raises(ConflictError):
+        tree_service.update_tree(
+            tree.id,
+            TreeUpdateRequest(
+                name="Stale autosave",
+                metadata=client_seen_metadata,
+                nodes=[],
+                relations=[],
+                owner_id=TEST_OWNER_ID,
+            ),
+            owner_id=TEST_OWNER_ID,
+        )
+
+
+def test_atomic_mutation_preserves_the_latest_tree_after_a_full_tree_update(
+    tree_service,
+) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Concurrent writers"), owner_id=TEST_OWNER_ID
+    )
+    metadata = TreeMetadata.from_timestamps(
+        created_at=tree.created_at, updated_at=tree.updated_at, owner_id=TEST_OWNER_ID
+    )
+    writers_ready = Barrier(2)
+
+    def full_tree_update():
+        writers_ready.wait(timeout=2)
+        return tree_service.update_tree(
+            tree.id,
+            TreeUpdateRequest(
+                name="Full tree update",
+                metadata=metadata,
+                nodes=[],
+                relations=[],
+                owner_id=TEST_OWNER_ID,
+            ),
+            owner_id=TEST_OWNER_ID,
+        )
+
+    def mutate_description():
+        writers_ready.wait(timeout=2)
+        return tree_service.tree_repo.mutate(
+            tree.id,
+            update=lambda current: current.model_copy(
+                update={"description": "concurrent change"}, deep=True
+            ),
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        full_tree = executor.submit(full_tree_update)
+        mutation = executor.submit(mutate_description)
+
+    assert mutation.exception() is None
+    full_tree_error = full_tree.exception()
+    assert full_tree_error is None or isinstance(full_tree_error, ConflictError)
+    assert tree_service.tree_repo.load(tree.id).description == "concurrent change"
+
+
+def test_get_tree_reloads_changes_from_another_service_instance(tree_service) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Cross-process freshness"), owner_id=TEST_OWNER_ID
+    )
+
+    tree_service.tree_repo.mutate(
+        tree.id,
+        update=lambda current: current.model_copy(
+            update={"description": "persisted elsewhere"}
+        ),
+    )
+
+    assert tree_service.get_tree(tree.id).description == "persisted elsewhere"
+
+
+def test_tree_mutation_never_moves_updated_at_backwards(tree_service) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Monotonic timestamp"), owner_id=TEST_OWNER_ID
+    )
+
+    updated = tree_service.mutate_tree(
+        tree.id,
+        lambda current: current.model_copy(update={"description": "updated"}),
+        timestamp=tree.updated_at,
+    )
+
+    assert updated.updated_at > tree.updated_at
+
+
+def test_delete_cannot_resurrect_a_tree_from_an_inflight_mutation(
+    tree_service, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="No resurrection"), owner_id=TEST_OWNER_ID
+    )
+    mutation_started_sync = Event()
+    release_sync = Event()
+    original_sync = tree_service._sync_index
+
+    def block_sync(updated_tree):
+        mutation_started_sync.set()
+        assert release_sync.wait(timeout=2)
+        original_sync(updated_tree)
+
+    monkeypatch.setattr(tree_service, "_sync_index", block_sync)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        mutation = executor.submit(
+            tree_service.mutate_tree,
+            tree.id,
+            lambda current: current.model_copy(update={"description": "changed"}),
+        )
+        assert mutation_started_sync.wait(timeout=2)
+        deletion = executor.submit(
+            tree_service.delete_tree, tree.id, owner_id=TEST_OWNER_ID
+        )
+        release_sync.set()
+        mutation.result(timeout=2)
+        deletion.result(timeout=2)
+
+    with pytest.raises(NotFoundError):
+        tree_service.get_tree(tree.id)
+    assert not tree_service.tree_repo.tree_dir(tree.id).exists()
+    assert tree.id not in {entry.id for entry in tree_service.index_repo.load_all()}
 
 
 def test_delete_tree(tree_service) -> None:
