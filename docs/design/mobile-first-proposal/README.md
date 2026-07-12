@@ -1,33 +1,33 @@
-# BrainBuddy mobile-first proposal artifacts
+# Brain Dump founder-review artifacts
 
 Open `prototype.html` directly in a modern browser. No backend, build, or network access is required.
 
 Public PR preview: https://brain-buddy-frontend-pr-62.fly.dev/design/mobile-first-proposal.html?screen=recording
 
-Use the scenario selector in the top-right corner to jump between representative states, or follow the clickable paths from Brain Dump and Weekly Review. Stable screenshot routes use `?screen=<name>`.
+The prototype is intentionally limited to one flat Brain Dump session: capture, edit/delete, add by voice or text, and save all remaining drafts to RTM Inbox.
 
 ## Files
 
-- `design-brief.md` — hierarchy, navigation, responsive rules, component principles, critical journeys, and whole-product screen inventory.
-- `decision-log.md` — deliberate inclusions, exclusions/deferred scope, and ten founder questions.
+- `design-brief.md` — the narrow product flow, states, responsive rules, and scope guardrail.
+- `decision-log.md` — founder reset, accepted decisions, and explicitly removed concepts.
 - `prototype.html` — self-contained responsive HTML/CSS/JS prototype.
-- `capture-screenshots.mjs` — deterministic Playwright export and click-journey verification.
-- `screenshots/` — compact 1× PNG review exports.
+- `capture-screenshots.mjs` — deterministic Playwright exports and end-to-end interaction checks.
+- `screenshots/` — 375px and 430px exports for every prototype state.
 
 ## Screenshot set
 
 | File | Viewport | State |
 |---|---:|---|
-| `01-brain-dump-active-375.png` | 375×812 | Active capture with chronological session task list and compact recorder |
-| `02-brain-dump-active-430.png` | 430×932 | Active capture at the wider required phone viewport |
-| `03-brain-dump-paused-375.png` | 375×812 | Stable draft list with compact paused / resume / cancel / stop / review state |
-| `08-brain-dump-finished-430.png` | 430×932 | Finished session with compact next-step control state |
-| `04-weekly-review-queue-375.png` | 375×812 | Bounded queue and real progress |
-| `05-weekly-review-crt-promotion-430.png` | 430×932 | Item detail and keep/edit/delete/defer/route/promote actions |
-| `06-crt-focused-tree-430.png` | 430×932 | Focused mobile CRT subtree and selected-node form |
-| `07-desktop-brain-dump-1440.png` | 1440×960 | Three-pane desktop comparison |
+| `01-brain-dump-active-375.png` | 375×812 | Voice capture and flat provisional list |
+| `02-brain-dump-active-430.png` | 430×932 | Voice capture at the wider required phone width |
+| `03-brain-dump-review-375.png` | 375×812 | Plain edit/delete list and three outcomes |
+| `04-brain-dump-review-430.png` | 430×932 | Review at the wider required phone width |
+| `05-brain-dump-add-text-375.png` | 375×812 | Append one draft by text |
+| `06-brain-dump-add-text-430.png` | 430×932 | Add-text state at the wider required phone width |
+| `07-brain-dump-saved-375.png` | 375×812 | Session saved to RTM Inbox |
+| `08-brain-dump-saved-430.png` | 430×932 | Saved state at the wider required phone width |
 
-## Reproduce screenshots
+## Reproduce and verify
 
 From the repository root, after `npm ci` in `frontend/` and `npx playwright install chromium`:
 
@@ -35,20 +35,19 @@ From the repository root, after `npm ci` in `frontend/` and `npx playwright inst
 node docs/design/mobile-first-proposal/capture-screenshots.mjs
 ```
 
-The script checks each viewport for console/page errors and horizontal overflow, then exercises:
+The script checks every state and viewport for console errors and horizontal overflow, verifies the required draft labels and Cancel / Stop / Review controls, and exercises:
 
-`empty session → recording → paused → resumed → review → partial result`
+`capture → edit wording → delete draft → add text → add voice → save session to RTM Inbox`
+
+It also rejects Brain Dump copy containing planning, analysis, hierarchy, routing, promotion, or destination concepts.
 
 ## Visual self-audit
 
-Surface choice: **Operate** for Brain Dump and Weekly Review; **Explore / Inspect** for CRT.
+Surface choice: **Operate**. The flat session list and plain editor dominate; there is no secondary planning composition.
 
-Initial slop diagnostic: **0/10**.
+Slop diagnostic: **0/10**.
 
-- No decorative tech gradient or generic violet accent; sky is inherited from the existing BrainBuddy palette.
-- No equal-weight feature tile grid, accent rails, monument stats, icon toppers, or unearned glass treatment.
-- Composition follows active work: the session task list, actionable review queue, focused item, and desktop panes.
-- Centering is limited to true empty/completion states; the recorder is a compact dock utility.
-- Typography follows the existing product’s precise sans posture with native fallbacks for a fully offline artifact.
-
-Post-verification score: **0/10**. The 375px and 430px active views keep all four numbered draft cards dominant and readable, including the long-text case. Every draft retains its provisional and changing-wording authority cues; the compact recorder has no timer and keeps Cancel, Stop, and Review available. The paused view communicates state through text and static bars, and the 430px finished view keeps next steps compact without reintroducing capture diagnostics.
+- No gradient, generic violet accent, feature-tile grid, accent rail, monument stat, icon topper, or decorative blur.
+- Centering is reserved for the terminal saved state.
+- The existing slate/sky visual vocabulary and native productivity typography are retained.
+- Composition follows the work: capture list, editor, single text form, completion.

@@ -1,150 +1,70 @@
-# BrainBuddy mobile-first UX proposal
+# Brain Dump mobile-first UX proposal
 
 Status: Founder review proposal — not an implementation specification
-Primary surface: **Operate** (capture and review queues); secondary surface: **Explore / Inspect** (CRT)
 
-## Product hierarchy
+Primary surface: **Operate**. This tranche contains one Brain Dump session and nothing else.
 
-BrainBuddy’s mobile wedge is a short loop, not a smaller desktop canvas:
+## Product flow
 
-1. **Capture quickly** — start a Brain Dump from anywhere and keep speaking while a chronological session task list grows in front of you.
-2. **Understand proposals** — use quiet attention cues only where wording needs action; detailed provenance and reconciliation stay available after Finish.
-3. **Confirm intentionally** — nothing is routed, deleted, or promoted until the user confirms a frozen batch.
-4. **Review deliberately** — process a bounded Weekly Review queue one item at a time, with progress and a clear next action.
-5. **Think deeply when warranted** — promote a recurring/complex problem to CRT, then use the tree in a focused mobile viewer/editor or the full desktop workspace.
+1. Open one Brain Dump session.
+2. Dictate or type. Each understood item is appended as a provisional draft in one flat list.
+3. Review the list. Edit wording directly or delete an unwanted draft.
+4. Choose only **Add voice**, **Add text**, or **Save session**.
+5. Save every remaining draft as a plain task in RTM Inbox and close the session.
 
-This preserves ADR-0001’s capture → organize → review → optional CRT path and ADR-0002’s shared asynchronous operation/confirmation contract. It does not turn BrainBuddy into a task manager.
+There is no hierarchy, decomposition, advice, task classification, suggestion, per-item destination, or secondary planning step.
 
-## Navigation model
+## Screen states
 
-### Phone (below 768px)
+### Capture by voice
 
-A persistent four-item bottom bar provides thumb-reachable destinations:
+- The growing chronological list is the dominant surface.
+- Every draft has a stable `#N`, `Wording still changing`, and `Provisional`.
+- A compact recording cue sits in the bottom dock without a transcript, timer, pipeline, or analysis panel.
+- Founder-required **Cancel**, **Stop**, and **Review** controls remain visible.
+- Stop and Review both enter the same plain editor; there is no processing or confirmation detour.
 
-- **Dump** — primary capture action and resumable operation.
-- **Review** — queue, item decisions, and review completion.
-- **Trees** — CRT list and focused tree/detail view.
-- **More** — operation history, privacy/retention, task-tracker destination, account, and sign-out.
+### Edit and review
 
-The current section and compact session title sit in the top app bar. During an active Brain Dump, an understated text state plus a small audio-level cue provides recording confidence without competing with the draft list. Contextual back navigation replaces the title on detail/editor screens. A sticky bottom action dock keeps Cancel / Stop / Review available above the navigation and safe-area inset; Pause / Resume remains subordinate to those three controls.
+- The same flat list becomes a set of text areas.
+- Each draft can be edited or deleted. No other per-item action exists.
+- The sticky dock exposes exactly three outcomes: **Add voice**, **Add text**, **Save session**.
+- Add voice returns to capture and appends to the same session.
+- Add text opens a single-task form and appends to the same session.
 
-### Desktop (768px and above)
+### Add by text
 
-A persistent left rail holds the same information architecture. The primary workspace becomes a two- or three-pane composition:
+- One labelled text area accepts one draft.
+- Cancel returns to the unchanged review list.
+- Add to session appends the draft and returns to review.
 
-- Brain Dump: transcript / candidate list / selected candidate or operation status.
-- Weekly Review: queue / selected item / action or history panel.
-- CRT: tree canvas / inspector, preserving the existing strong canvas-first layout.
+### Session saved
 
-Desktop is not a stretched phone stack: it increases simultaneous context, keeps selection visible, and avoids modal churn.
+- The session closes with a simple count.
+- Copy states that every remaining draft was saved as a plain task to RTM Inbox.
+- The only next action is starting a new Brain Dump session.
 
-## Responsive rules
+## Responsive and accessibility rules
 
-| Concern | Phone | Tablet / desktop |
-|---|---|---|
-| Navigation | Bottom bar; 4 stable destinations | Left rail; labels always visible |
-| Detail | Replaces list; explicit Back | Adjacent pane; selection persists |
-| Primary action | Sticky thumb-zone dock | Inline in active pane/header |
-| CRT | Focused subtree, pan/zoom, selected-node sheet | Full canvas plus inspector |
-| Forms/editor | Full-width page or bottom sheet; keyboard-safe dock | Inspector or centered dialog |
-| Confirmation | One card at a time, optional “confirm safe additions” | Batch list with side-by-side diff |
-| Long text | Natural height, 2-line previews only in lists, explicit expand | Constrained readable measure in detail pane |
-| Transient status | Inline beside affected object; toast only for background completion | Inline plus compact activity area |
+- The task list and editor use one readable column at 375px, 430px, and larger widths.
+- Controls have at least 44px hit targets, visible focus treatment, and safe-area padding.
+- List and form semantics are explicit; incremental drafts use `aria-live`.
+- Long wording wraps naturally and editor text areas can grow vertically.
+- Recording state is communicated in text, not only through animated bars or color.
+- Reduced-motion preference disables the audio-bar animation.
+- There is no horizontal page overflow at the two required phone widths.
 
-Breakpoints are content-driven. The prototype uses 768px for the shell transition and 1120px for a third desktop pane. Support is explicitly checked at 375px and 430px; no horizontal page scroll is allowed.
+## Scope guardrail
 
-## Component and layout principles
-
-- **One dominant surface per state.** During recording, the chronological session task list—not the recorder—is the product. Confirmation later emphasizes Confirm selected; review detail emphasizes a decision, not navigation.
-- **44px minimum touch targets**, 8px spacing rhythm, 16px phone gutters, and safe-area padding via `env(safe-area-inset-*)`.
-- **State before decoration.** Status labels use text plus shape/icon, never color alone. Unknown-duration work uses stage text and indeterminate progress, not fake percentages.
-- **Proposals are not records.** Each extracted draft keeps its stable ordinal plus the explicit “Wording still changing” and “Provisional” cues. Detailed provenance and reconciliation remain outside the active-capture surface.
-- **Destructive and external actions remain explicit.** Delete, route, existing-item edits, and CRT promotion stay individually reviewable even when “select safe additions” is available.
-- **Keyboard and focus.** Logical DOM order, visible `:focus-visible`, Escape closes sheets/dialogs, Enter submits only single-line fields, and text areas preserve newline entry. Sticky controls move above the on-screen keyboard; content remains scrollable.
-- **Resumability.** Closing the app never implies cancellation. Every live operation exposes “Safe to leave” and restores its phase, item, edits, and queue position.
-- **Operational detail stays secondary.** Network, storage, transcript, pipeline, and routing detail is available after capture or through operation detail—not in the focused active-session view. A blocking capture failure may interrupt the control only when the user must act.
-- **Error locality.** Retry is placed beside the failed stage/action. Correlation/reference details are expandable, not primary copy. Terminal microphone/storage errors offer salvage or deletion where possible.
-- **Accessible semantics.** Landmarks, headings, list semantics, `aria-live` for incremental session tasks/progress, explicit button labels, form labels/help, reduced-motion support, and contrast suitable for WCAG AA.
-- **Visual continuity.** Reuse the current slate surfaces, sky accent, soft borders/shadows, and restrained rounded corners. The proposal removes desktop-only hover dependence and does not lean on glass/gradient effects.
-
-## Critical journeys
-
-### Brain Dump
-
-1. Idle: an empty session-task list explains what will appear; compact Start sits in the recorder dock.
-2. Recording: numbered draft cards arrive chronologically while a compact level meter and recording label provide confidence without a timer; Cancel, Stop, and Review stay available.
-3. Pause/resume: the same list remains stable; text, static audio bars, and control labels communicate state without relying on color or motion.
-4. Stop: the recorder collapses to a compact completed state; review, reconciliation, diagnostics, confirmation, and routing continue on subsequent surfaces.
-5. Draft review: inspect/edit/reorder/defer candidates; reconciled changes show source cues and warnings.
-6. Freeze/confirm: safe additions may be grouped; destructive, routing, existing-item, or CRT actions remain individual.
-7. Commit: per-action results remain visible; local completion may coexist with asynchronous routing/promotion.
-8. Failure: retry from checkpoint, review stable unreconciled candidates, use transcript-only fallback, or delete audio as applicable.
-
-### Weekly Review
-
-1. Queue: bounded snapshot, due/reason context, resume position, and explicit empty/error states.
-2. Item detail: full text/provenance, route status/results, and actions: keep, edit, delete, defer, route, promote to CRT.
-3. Confirmation: spoken or tapped choices remain proposals until confirmed; stale targets return a refreshed diff.
-4. Progress: decided/total is real; deferred counts as an explicit outcome.
-5. Completion: blocked while any item is uncovered; summary shows kept, deleted/avoided, deferred, routed, promoted, and completed counts.
-6. Leave/resume or voice failure: the Weekly Review remains open and restores the exact item.
-
-## Whole-product screen inventory
-
-### Authentication
-
-- Sign in: default, submitting, invalid credentials, rate-limited.
-- Invite signup: default, validation errors, submitting, success.
-- Session restoration/expired-session redirect.
-
-### Home / activity
-
-- Resumable operation banner.
-- Brain Dump launch and recent completed/failed operations.
-- Weekly Review due/resume card.
-- Recent routed results/evidence.
-
-### Brain Dump
-
-- Permission/consent request and denied/disabled states.
-- Idle/start; active, paused/resumed, and finished session-task-list states.
-- Incremental extracted-task cards, long-text wrapping, empty list, and quiet wording-attention cue.
-- Transcript, offline/local-limit, diagnostics, and upload detail behind post-Finish operation detail.
-- Uploading, fast processing, reconciling.
-- Candidate list/detail/editor, low confidence, conflict, merge/split lineage.
-- Frozen confirmation batch and committing results.
-- Completed, retryable error, terminal error, cancelled, partial commit, bounded undo.
-
-### Weekly Review
-
-- Start/resume; queue; item detail.
-- Keep/edit/delete/defer/route/CRT-promotion confirmation.
-- Voice review active and new-thought capture.
-- Progress, uncovered-item block, completion summary.
-- Empty, list-load error, item stale/conflict, partial commit/retry.
-
-### CRT / trees
-
-- Tree list: populated, empty, loading, error.
-- Focused mobile tree/subtree with search, pan/zoom, selected-node sheet.
-- Node form: label, type, highlight, relation counts, validation, consent-gated AI feedback, delete.
-- Relation inspector; versions/history; create/rename/import/export/delete tree.
-- Full desktop canvas with inspector and keyboard shortcuts.
-
-### Results / routing
-
-- Pending/dispatching/succeeded/failed route.
-- Evidence/result detail linked to originating capture, review, and CRT.
-- Retry/cancel where allowed; explicit external follow-up where automatic undo is unavailable.
-
-### More / settings
-
-- Task-tracker connection/destination and health.
-- Microphone and external-processing consent.
-- Raw-audio/working-artifact retention and immediate audio deletion.
-- Operation history, account/session, sign out, privacy deletion request.
-- Loading, save success, validation failure, offline/read-only state.
+This prototype intentionally omits all Current Reality, tree, coaching, problem-analysis, recommendation, decomposition, complex-work, suggestion, task-type, routing, promotion, confirmation-batch, and per-task destination concepts. Those do not belong inside Brain Dump.
 
 ## Prototype notes
 
-The static prototype demonstrates representative states rather than simulating the backend. Use its built-in “Scenario” control or the product navigation to jump between states. Query parameters (`?screen=recording`, `?screen=paused`, `?screen=finished`, etc.) make screenshot states stable. The active-session cards are representative of incremental extraction; no production inference behavior is implemented here.
+`prototype.html` is self-contained and does not change production behavior. Stable routes are:
+
+- `?screen=recording`
+- `?screen=review`
+- `?screen=add-text`
+- `?screen=saved`
+
+The state selector exists only for founder review and deterministic screenshots.
