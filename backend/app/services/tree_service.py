@@ -363,15 +363,15 @@ class TreeService:
         existing_relations = {relation.id: relation for relation in existing_tree.relations}
         merged_relations: list[RelationDocument] = []
         for relation in tree.relations:
-            previous = existing_relations.get(relation.id)
-            if previous is None:
+            previous_relation = existing_relations.get(relation.id)
+            if previous_relation is None:
                 merged_relations.append(relation)
                 continue
             merged_relations.append(
                 relation.model_copy(
                     update={
-                        "notes": previous.notes,
-                        "metadata": previous.metadata.model_copy(
+                        "notes": previous_relation.notes,
+                        "metadata": previous_relation.metadata.model_copy(
                             update={"updated_at": relation.metadata.updated_at}
                         ),
                     },
