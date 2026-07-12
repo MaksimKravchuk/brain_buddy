@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f7f8fa">
+  <title>BrainBuddy — mobile-first UX proposal</title>
+  <style>
+    :root {
+      --bg: #f7f8fa;
+      --surface: #ffffff;
+      --surface-2: #f1f4f7;
+      --ink: #16202b;
+      --muted: #627080;
+      --faint: #8995a3;
+      --line: #dbe1e7;
+      --line-strong: #c7d0d9;
+      --accent: #087da8;
+      --accent-strong: #066684;
+      --accent-soft: #e8f5f9;
+      --success: #22745b;
+      --success-soft: #eaf6f1;
+      --warning: #8a5c0a;
+      --warning-soft: #fff5dd;
+      --danger: #a13d49;
+      --danger-soft: #fff0f1;
+      --focus: #0ea5e9;
+      --shadow: 0 12px 30px -24px rgba(15, 30, 45, .55), 0 1px 2px rgba(15, 30, 45, .06);
+      --radius: 14px;
+      --nav-h: 70px;
+      --dock-h: 82px;
+      font-family: "Segoe UI Variable", "Aptos", "Inter", ui-sans-serif, system-ui, sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; margin: 0; background: var(--bg); }
+    body { font-size: 15px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+    button, input, textarea, select { font: inherit; }
+    button, select { min-height: 44px; }
+    button { color: inherit; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, a:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--focus) 45%, transparent);
+      outline-offset: 2px;
+    }
+    button:disabled { opacity: .52; cursor: not-allowed; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+    .app { min-height: 100dvh; }
+    .side-rail { display: none; }
+    .mobile-shell { min-height: 100dvh; display: flex; flex-direction: column; }
+    .topbar {
+      position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 10px;
+      min-height: 60px; padding: max(8px, env(safe-area-inset-top)) 16px 8px;
+      background: color-mix(in srgb, var(--bg) 94%, transparent); border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(12px);
+    }
+    .brand-mark { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 10px; background: var(--accent); color: #fff; font-weight: 800; letter-spacing: -.06em; }
+    .top-copy { min-width: 0; flex: 1; }
+    .eyebrow { margin: 0; color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+    .top-title { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 17px; line-height: 1.25; letter-spacing: -.015em; }
+    .scenario-select { width: 44px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: transparent; padding: 0; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(50% - 4px) 20px, calc(50% + 2px) 20px; background-size: 6px 6px; background-repeat: no-repeat; }
+    .scenario-select option { color: var(--ink); }
+
+    .content { flex: 1; width: 100%; max-width: 720px; margin: 0 auto; padding: 16px 16px calc(var(--nav-h) + 24px + env(safe-area-inset-bottom)); }
+    .content.has-dock { padding-bottom: calc(var(--nav-h) + var(--dock-h) + 24px + env(safe-area-inset-bottom)); }
+    .section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin: 4px 0 16px; }
+    h1, h2, h3, p { text-wrap: pretty; }
+    h1 { margin: 0; font-size: clamp(25px, 8vw, 34px); line-height: 1.08; letter-spacing: -.035em; }
+    h2 { margin: 0; font-size: 19px; line-height: 1.2; letter-spacing: -.02em; }
+    h3 { margin: 0; font-size: 15px; line-height: 1.3; }
+    p { margin: 0; }
+    .subhead { margin-top: 6px; color: var(--muted); max-width: 44ch; }
+    .small { font-size: 13px; color: var(--muted); }
+    .micro { font-size: 11px; color: var(--faint); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+
+    .card { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+    .card + .card { margin-top: 12px; }
+    .card-body { padding: 15px; }
+    .card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 15px 0; }
+    .soft { background: var(--surface-2); box-shadow: none; }
+    .status-strip { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+    .status-strip + .status-strip { margin-top: 10px; }
+    .status-strip.warning { border-color: #e9d39b; background: var(--warning-soft); }
+    .status-strip.danger { border-color: #efc8ce; background: var(--danger-soft); }
+    .status-strip.success { border-color: #b9dfd1; background: var(--success-soft); }
+    .status-dot { width: 9px; height: 9px; margin-top: 5px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; }
+    .warning .status-dot { background: var(--warning); }
+    .danger .status-dot { background: var(--danger); }
+    .success .status-dot { background: var(--success); }
+
+    .pill { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 4px 9px; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 11px; font-weight: 700; white-space: nowrap; }
+    .pill.live { background: var(--danger-soft); color: var(--danger); }
+    .pill.good { background: var(--success-soft); color: var(--success); }
+    .pill.warn { background: var(--warning-soft); color: var(--warning); }
+    .pill.accent { background: var(--accent-soft); color: var(--accent-strong); }
+
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 46px; border: 1px solid var(--line-strong); border-radius: 12px; padding: 10px 14px; background: var(--surface); font-weight: 700; cursor: pointer; }
+    .btn:hover { background: var(--surface-2); }
+    .btn.primary { border-color: var(--accent); background: var(--accent); color: white; }
+    .btn.primary:hover { background: var(--accent-strong); }
+    .btn.danger { border-color: #e7b8bf; color: var(--danger); background: var(--danger-soft); }
+    .btn.ghost { border-color: transparent; background: transparent; }
+    .btn.compact { min-height: 40px; padding: 7px 11px; font-size: 13px; }
+    .btn.full { width: 100%; }
+    .button-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    .button-row > .btn { flex: 1 1 120px; }
+    .icon { font-size: 18px; line-height: 1; }
+
+    .record-orb { display: grid; place-items: center; width: 116px; height: 116px; margin: 24px auto 18px; border: 1px solid #eabac0; border-radius: 50%; background: var(--danger-soft); box-shadow: inset 0 0 0 14px var(--surface), 0 14px 36px -24px rgba(161,61,73,.7); }
+    .record-orb::after { content: ""; width: 54px; height: 54px; border-radius: 50%; background: var(--danger); }
+    .record-orb.live::after { width: 36px; height: 36px; border-radius: 9px; }
+    .timer { text-align: center; font-size: 34px; line-height: 1; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+    .center { text-align: center; }
+    .wave { display: flex; align-items: center; justify-content: center; gap: 3px; height: 32px; margin: 12px 0; }
+    .wave i { width: 3px; border-radius: 4px; background: var(--danger); opacity: .8; }
+    .wave i:nth-child(1), .wave i:nth-child(9) { height: 8px; } .wave i:nth-child(2), .wave i:nth-child(8) { height: 14px; } .wave i:nth-child(3), .wave i:nth-child(7) { height: 24px; } .wave i:nth-child(4), .wave i:nth-child(6) { height: 18px; } .wave i:nth-child(5) { height: 30px; }
+    .transcript { font-size: 17px; line-height: 1.55; }
+    .transcript .interim { color: var(--faint); }
+
+    .candidate { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 11px; padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); }
+    .candidate + .candidate { margin-top: 10px; }
+    .candidate.selected { border-color: #86bdd0; background: #fbfeff; }
+    .candidate input[type="checkbox"] { width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--accent); }
+    .candidate p { margin-top: 6px; overflow-wrap: anywhere; }
+    .candidate-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+    .candidate-actions { display: flex; gap: 6px; margin-top: 12px; }
+    .candidate-actions .btn { flex: 1; min-height: 40px; padding: 7px 9px; font-size: 12px; }
+    textarea, input[type="text"], input[type="email"] { width: 100%; border: 1px solid var(--line-strong); border-radius: 11px; padding: 11px 12px; background: var(--surface); color: var(--ink); }
+    textarea { min-height: 112px; resize: vertical; line-height: 1.5; }
+    label.field { display: block; font-size: 13px; font-weight: 700; }
+    label.field > span { display: block; margin-bottom: 6px; }
+
+    .stage-list { list-style: none; padding: 0; margin: 18px 0 0; }
+    .stage-list li { position: relative; display: flex; align-items: center; gap: 10px; min-height: 42px; color: var(--muted); }
+    .stage-list li::before { content: ""; width: 18px; height: 18px; border: 2px solid var(--line-strong); border-radius: 50%; }
+    .stage-list li.done::before { border-color: var(--success); background: var(--success); box-shadow: inset 0 0 0 4px var(--surface); }
+    .stage-list li.active { color: var(--ink); font-weight: 700; }
+    .stage-list li.active::before { border-color: var(--accent); border-top-color: transparent; }
+    .indeterminate { height: 4px; overflow: hidden; border-radius: 5px; background: var(--line); }
+    .indeterminate::after { content: ""; display: block; width: 35%; height: 100%; border-radius: inherit; background: var(--accent); transform: translateX(85%); }
+
+    .progress-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; margin-bottom: 8px; }
+    .progress-track { height: 7px; overflow: hidden; border-radius: 999px; background: var(--line); }
+    .progress-track > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+    .queue-item { width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 13px; padding: 14px; background: var(--surface); cursor: pointer; }
+    .queue-item + .queue-item { margin-top: 9px; }
+    .queue-item.active { border-color: #7bb7cb; background: #f7fcfe; }
+    .queue-item .preview { display: -webkit-box; margin-top: 5px; overflow: hidden; color: var(--muted); -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+    .queue-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .decision-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
+    .decision-grid .btn { min-height: 50px; font-size: 13px; }
+
+    .tree-stage { position: relative; height: 360px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background-color: #f4f7f9; background-image: radial-gradient(#cbd5df 1px, transparent 1px); background-size: 18px 18px; }
+    .tree-node { position: absolute; width: 178px; min-height: 76px; display: grid; place-items: center; padding: 12px; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); text-align: center; font-weight: 700; }
+    .tree-node.root { left: 50%; top: 28px; transform: translateX(-50%); border-color: #6db2c9; }
+    .tree-node.n1 { left: 14px; top: 168px; }
+    .tree-node.n2 { right: 14px; top: 168px; }
+    .tree-line { position: absolute; left: 50%; top: 104px; width: 2px; height: 94px; background: var(--line-strong); transform-origin: top; }
+    .tree-line.l1 { transform: rotate(49deg); height: 132px; }
+    .tree-line.l2 { transform: rotate(-49deg); height: 132px; }
+    .zoom { position: absolute; right: 10px; bottom: 10px; display: flex; gap: 5px; }
+    .zoom .btn { width: 44px; padding: 0; }
+
+    .settings-list { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+    .setting { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 62px; padding: 11px 14px; border-bottom: 1px solid var(--line); }
+    .setting:last-child { border-bottom: 0; }
+    .switch { width: 46px; height: 28px; border: 0; border-radius: 999px; background: var(--success); padding: 3px; }
+    .switch::after { content: ""; display: block; width: 22px; height: 22px; margin-left: 18px; border-radius: 50%; background: #fff; }
+
+    .action-dock { position: fixed; z-index: 25; left: 0; right: 0; bottom: calc(var(--nav-h) + env(safe-area-inset-bottom)); padding: 10px 16px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 96%, transparent); backdrop-filter: blur(12px); }
+    .dock-inner { max-width: 688px; margin: auto; display: flex; gap: 8px; }
+    .dock-inner > .btn { flex: 1; }
+    .bottom-nav { position: fixed; z-index: 30; left: 0; right: 0; bottom: 0; min-height: calc(var(--nav-h) + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(4, 1fr); padding: 5px 8px env(safe-area-inset-bottom); border-top: 1px solid var(--line); background: var(--surface); }
+    .nav-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 58px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); font-size: 11px; font-weight: 700; cursor: pointer; }
+    .nav-btn .nav-icon { font-size: 19px; font-weight: 500; }
+    .nav-btn.active { color: var(--accent-strong); background: var(--accent-soft); }
+
+    .desktop-grid, .desktop-only { display: none; }
+    .pane { min-width: 0; border-right: 1px solid var(--line); background: var(--surface); }
+    .pane:last-child { border-right: 0; }
+    .pane-head { padding: 18px 20px 12px; border-bottom: 1px solid var(--line); }
+    .pane-body { padding: 18px 20px; overflow: auto; }
+
+    @media (min-width: 768px) {
+      .app { display: grid; grid-template-columns: 220px minmax(0,1fr); height: 100dvh; overflow: hidden; }
+      .side-rail { display: flex; flex-direction: column; gap: 4px; padding: 18px 12px; border-right: 1px solid var(--line); background: #f2f5f7; }
+      .side-brand { display: flex; align-items: center; gap: 10px; padding: 0 8px 22px; font-size: 17px; font-weight: 800; letter-spacing: -.025em; }
+      .rail-btn { display: flex; align-items: center; gap: 10px; min-height: 46px; border: 0; border-radius: 11px; padding: 10px 12px; background: transparent; color: var(--muted); font-weight: 700; cursor: pointer; text-align: left; }
+      .rail-btn.active { background: var(--surface); color: var(--accent-strong); box-shadow: var(--shadow); }
+      .rail-spacer { flex: 1; }
+      .mobile-shell { min-width: 0; height: 100dvh; overflow: hidden; }
+      .topbar { position: static; min-height: 68px; padding: 11px 20px; }
+      .brand-mark { display: none; }
+      .scenario-select { width: 210px; color: var(--ink); padding: 0 36px 0 12px; background-position: calc(100% - 17px) 20px, calc(100% - 11px) 20px; }
+      .content { max-width: none; height: calc(100dvh - 68px); overflow: auto; padding: 24px 28px 40px; }
+      .content.has-dock { padding-bottom: 40px; }
+      .bottom-nav, .action-dock { display: none; }
+      .desktop-only { display: block; }
+      .desktop-grid { display: grid; grid-template-columns: minmax(260px,.8fr) minmax(340px,1.25fr); height: calc(100dvh - 68px); overflow: hidden; }
+      .desktop-grid.three { grid-template-columns: minmax(250px,.75fr) minmax(350px,1.1fr) minmax(280px,.8fr); }
+      .mobile-only { display: none !important; }
+      .tree-stage { height: 480px; }
+    }
+
+    @media (min-width: 1120px) {
+      .app { grid-template-columns: 236px minmax(0,1fr); }
+    }
+
+    @media (max-width: 374px) {
+      .content { padding-left: 12px; padding-right: 12px; }
+      .action-dock { padding-left: 12px; padding-right: 12px; }
+      .decision-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      .stage-list li.active::before { animation: spin .9s linear infinite; }
+      .wave i { animation: pulse 1.1s ease-in-out infinite alternate; }
+      .wave i:nth-child(even) { animation-delay: -.5s; }
+      .indeterminate::after { animation: indeterminate 1.5s ease-in-out infinite; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      @keyframes pulse { to { transform: scaleY(.45); opacity: .45; } }
+      @keyframes indeterminate { from { transform: translateX(-110%); } to { transform: translateX(300%); } }
+    }
+  </style>
+</head>
+<body>
+  <div id="app" class="app"></div>
+  <script>
+    const scenarios = [
+      ["idle", "Brain Dump · Start"],
+      ["recording", "Brain Dump · Recording"],
+      ["offline", "Brain Dump · Offline recording"],
+      ["processing", "Brain Dump · Processing"],
+      ["drafts", "Brain Dump · Draft candidates"],
+      ["confirm", "Brain Dump · Confirm actions"],
+      ["commit-error", "Brain Dump · Partial error"],
+      ["weekly-queue", "Weekly Review · Queue"],
+      ["weekly-detail", "Weekly Review · Item detail"],
+      ["weekly-empty", "Weekly Review · Empty"],
+      ["weekly-error", "Weekly Review · Error"],
+      ["crt", "CRT · Focused tree"],
+      ["settings", "More · Privacy & settings"],
+      ["desktop", "Desktop · Brain Dump workspace"]
+    ];
+
+    const titles = {
+      idle: ["Brain Dump", "Ready when you are"], recording: ["Brain Dump", "Recording"], offline: ["Brain Dump", "Recording locally"],
+      processing: ["Brain Dump", "Preparing your drafts"], drafts: ["Brain Dump", "Review draft candidates"], confirm: ["Brain Dump", "Confirm proposed actions"],
+      "commit-error": ["Brain Dump", "3 of 4 actions completed"], "weekly-queue": ["Weekly Review", "7 items left"],
+      "weekly-detail": ["Weekly Review", "Item 3 of 9"], "weekly-empty": ["Weekly Review", "You’re clear"], "weekly-error": ["Weekly Review", "Couldn’t load review"],
+      crt: ["CRT", "Release quality problems"], settings: ["More", "Privacy & settings"], desktop: ["Brain Dump", "Live workspace"]
+    };
+
+    let state = new URLSearchParams(location.search).get("screen") || "recording";
+    if (!scenarios.some(([key]) => key === state)) state = "recording";
+
+    function go(next) {
+      state = next;
+      const url = new URL(location.href);
+      url.searchParams.set("screen", next);
+      history.replaceState({}, "", url);
+      render();
+      document.querySelector("main")?.focus({ preventScroll: true });
+    }
+
+    function icon(name) {
+      const map = { dump: "●", review: "✓", trees: "⌁", more: "···" };
+      return `<span class="nav-icon" aria-hidden="true">${map[name]}</span>`;
+    }
+
+    function area() {
+      if (state.startsWith("weekly")) return "review";
+      if (state === "crt") return "trees";
+      if (state === "settings") return "more";
+      return "dump";
+    }
+
+    function shell(content, opts = {}) {
+      const [section, title] = titles[state];
+      const active = area();
+      const scenarioOptions = scenarios.map(([key, label]) => `<option value="${key}" ${key === state ? "selected" : ""}>${label}</option>`).join("");
+      return `
+        <aside class="side-rail" aria-label="Primary navigation">
+          <div class="side-brand"><span class="brand-mark" style="display:grid">BB</span> BrainBuddy</div>
+          ${rail("dump", "Brain Dump", active)}${rail("review", "Weekly Review", active)}${rail("trees", "CRT trees", active)}
+          <div class="rail-spacer"></div>${rail("more", "More & settings", active)}
+        </aside>
+        <div class="mobile-shell">
+          <header class="topbar">
+            <span class="brand-mark" aria-hidden="true">BB</span>
+            <div class="top-copy"><p class="eyebrow">${section}</p><h2 class="top-title">${title}</h2></div>
+            <label><span class="sr-only">Prototype scenario</span><select class="scenario-select" aria-label="Prototype scenario" onchange="go(this.value)">${scenarioOptions}</select></label>
+          </header>
+          ${content}
+          ${opts.dock || ""}
+          <nav class="bottom-nav" aria-label="Primary navigation">
+            ${nav("dump", "Dump", active)}${nav("review", "Review", active)}${nav("trees", "Trees", active)}${nav("more", "More", active)}
+          </nav>
+        </div>`;
+    }
+
+    function rail(key, label, active) {
+      const target = key === "dump" ? "idle" : key === "review" ? "weekly-queue" : key === "trees" ? "crt" : "settings";
+      return `<button class="rail-btn ${active === key ? "active" : ""}" onclick="go('${target}')">${icon(key)}<span>${label}</span></button>`;
+    }
+    function nav(key, label, active) {
+      const target = key === "dump" ? "idle" : key === "review" ? "weekly-queue" : key === "trees" ? "crt" : "settings";
+      return `<button class="nav-btn ${active === key ? "active" : ""}" ${active === key ? 'aria-current="page"' : ""} onclick="go('${target}')">${icon(key)}<span>${label}</span></button>`;
+    }
+    function dock(buttons) { return `<div class="action-dock"><div class="dock-inner">${buttons}</div></div>`; }
+    function main(inner, hasDock = false, extraClass = "") { return `<main tabindex="-1" class="content ${hasDock ? "has-dock" : ""} ${extraClass}">${inner}</main>`; }
+
+    function idle() {
+      return shell(main(`
+        <div class="section-head"><div><h1>Clear your head.</h1><p class="subhead">Speak naturally. BrainBuddy will prepare drafts for you to review before anything is saved or routed.</p></div></div>
+        <div class="card"><div class="card-body center">
+          <button class="record-orb" aria-label="Start recording" onclick="go('recording')"></button>
+          <h2>Start a Brain Dump</h2><p class="small" style="margin-top:6px">Microphone on only while this screen says Recording.</p>
+        </div></div>
+        <div class="status-strip" style="margin-top:12px"><span class="status-dot"></span><div><h3>Private by design</h3><p class="small">You’ll confirm drafts before they become captures, routes, or CRT problems. Raw audio deletes after 24 hours by default.</p></div></div>
+        <div class="card soft"><div class="card-body"><div class="queue-top"><div><h3>Continue yesterday’s dump</h3><p class="small">4 drafts awaiting confirmation</p></div><button class="btn compact" onclick="go('confirm')">Resume</button></div></div></div>
+      `));
+    }
+
+    function recording(offline = false) {
+      const network = offline
+        ? `<div class="status-strip warning"><span class="status-dot"></span><div><h3>Offline — recording locally</h3><p class="small">3:42 of safe local capacity remains. Upload resumes automatically when connected.</p></div></div>`
+        : `<div class="status-strip success"><span class="status-dot"></span><div><h3>Audio safe so far</h3><p class="small">8 of 9 chunks uploaded · you can leave after stopping</p></div></div>`;
+      return shell(main(`
+        ${network}
+        <button class="record-orb live" aria-label="Stop recording" onclick="go('processing')"></button>
+        <p class="timer" aria-label="Recording time 1 minute 24 seconds">01:24</p><div class="wave" aria-hidden="true">${"<i></i>".repeat(9)}</div>
+        <section aria-labelledby="transcript-title" class="card"><div class="card-header"><div><p class="eyebrow">Live transcript</p><h2 id="transcript-title">I need to sort out the release issue…</h2></div><span class="pill live">Live</span></div><div class="card-body transcript" aria-live="polite">The release keeps slipping because late test failures bounce between teams. I should map why ownership is unclear, <span class="interim">and also remember to send the dentist form tomorrow…</span></div></section>
+        <section style="margin-top:18px"><div class="progress-head"><h2>Drafts appearing</h2><span class="small">2 provisional</span></div>
+          <div class="candidate"><div class="pill accent">1</div><div><h3>Map why release-quality ownership is unclear</h3><div class="candidate-meta"><span class="pill">Problem</span><span class="pill">Provisional</span></div></div></div>
+          <div class="candidate"><div class="pill accent">2</div><div><h3>Send the dentist form tomorrow</h3><div class="candidate-meta"><span class="pill">Task</span><span class="pill warn">Wording still changing</span></div></div></div>
+        </section>
+      `, true), { dock: dock(`<button class="btn ghost" onclick="go('idle')">Cancel</button><button class="btn danger" onclick="go('processing')"><span aria-hidden="true">■</span> Stop & review</button>`) });
+    }
+
+    function processing() {
+      return shell(main(`
+        <div class="section-head"><div><h1>Your recording is safe.</h1><p class="subhead">You can leave this screen. BrainBuddy will preserve this operation and bring you back to the same stage.</p></div><span class="pill good">Safe to leave</span></div>
+        <div class="card"><div class="card-body">
+          <div class="progress-head"><h2>Reconciling your drafts</h2><span class="small">Stage 3 of 4</span></div><div class="indeterminate" role="progressbar" aria-label="Reconciling drafts; duration unknown"></div>
+          <ol class="stage-list"><li class="done">Recording sealed · 9 chunks</li><li class="done">Fast transcript complete</li><li class="active">Checking wording, merges, and destinations</li><li>Ready for your confirmation</li></ol>
+        </div></div>
+        <div class="status-strip"><span class="status-dot"></span><div><h3>Why no percentage?</h3><p class="small">The remaining model work has no honest fixed total. Stage text shows real progress without inventing precision.</p></div></div>
+        <button class="btn full" style="margin-top:12px" onclick="go('drafts')">Prototype: show reconciled drafts</button>
+      `));
+    }
+
+    const candidateData = [
+      { n: 1, title: "Map why release-quality ownership is unclear", kind: "Problem", status: "Reconciled", cls: "accent" },
+      { n: 2, title: "Send the dentist form tomorrow", kind: "Task", status: "Edited by you", cls: "good" },
+      { n: 3, title: "Ask Natasha for the test-flake trend before Friday", kind: "Task", status: "Review wording", cls: "warn" }
+    ];
+
+    function candidateCard(item, checkbox = false) {
+      return `<article class="candidate selected">${checkbox ? `<input type="checkbox" checked aria-label="Select ${item.title}">` : `<div class="pill accent">${item.n}</div>`}<div><h3>${item.title}</h3><div class="candidate-meta"><span class="pill">${item.kind}</span><span class="pill ${item.cls}">${item.status}</span></div><div class="candidate-actions"><button class="btn" onclick="alert('Static prototype: editor would open keyboard-safe full-page.')">Edit</button><button class="btn" onclick="this.closest('.candidate').style.opacity='.5'">Defer</button></div></div></article>`;
+    }
+
+    function drafts() {
+      return shell(main(`
+        <div class="section-head"><div><h1>3 drafts need you.</h1><p class="subhead">These are proposals only. Edit the words, defer anything unclear, then review the proposed actions.</p></div></div>
+        <div class="status-strip warning"><span class="status-dot"></span><div><h3>One phrase needs attention</h3><p class="small">Low confidence around “test-flake trend.” Check it before confirming.</p></div></div>
+        <section style="margin-top:14px">${candidateData.map(x => candidateCard(x)).join("")}</section>
+      `, true), { dock: dock(`<button class="btn" onclick="go('idle')">Save for later</button><button class="btn primary" onclick="go('confirm')">Review 3 actions</button>`) });
+    }
+
+    function confirmScreen() {
+      return shell(main(`
+        <div class="section-head"><div><h1>Confirm what changes.</h1><p class="subhead">The first two create captures. CRT promotion stays separate because it changes another product area.</p></div></div>
+        <label class="status-strip"><input type="checkbox" checked style="width:20px;height:20px;accent-color:var(--accent)"><div><h3>Select safe additions</h3><p class="small">2 new captures · no external side effects</p></div></label>
+        <section style="margin-top:12px">${candidateCard(candidateData[1], true)}${candidateCard(candidateData[2], true)}</section>
+        <article class="candidate" style="margin-top:10px"><input type="checkbox" aria-label="Select CRT promotion"><div><div class="queue-top"><h3>Promote release-quality problem to CRT</h3><span class="pill warn">Separate review</span></div><p class="small">Creates a new problem tree and links this Brain Dump as source. Nothing is routed externally.</p><div class="candidate-meta"><span class="pill">Complex signal</span><span class="pill">User confirmation required</span></div></div></article>
+        <details class="card soft" style="margin-top:12px"><summary class="card-body" style="cursor:pointer;font-weight:700">Source and retention details</summary><div class="card-body small">All actions link back to the recorded transcript. Raw audio is scheduled for deletion in 24 hours; confirmed text provenance remains.</div></details>
+      `, true), { dock: dock(`<button class="btn" onclick="go('drafts')">Back</button><button class="btn primary" onclick="go('commit-error')">Confirm selected</button>`) });
+    }
+
+    function commitError() {
+      return shell(main(`
+        <div class="status-strip warning"><span class="status-dot"></span><div><h3>Most changes are safe</h3><p class="small">3 actions completed. The external route timed out after accepting; BrainBuddy will check before retrying to avoid a duplicate.</p></div></div>
+        <div class="card" style="margin-top:14px"><div class="card-body"><div class="progress-head"><h2>Action results</h2><span class="pill warn">Partial result</span></div>
+          <ol class="stage-list"><li class="done">Capture created · dentist form</li><li class="done">Capture created · test-flake trend</li><li class="done">CRT problem draft created</li><li style="color:var(--danger)">Route status unknown · retryable</li></ol>
+        </div></div>
+        <div class="card soft"><div class="card-body"><h3>No automatic rollback</h3><p class="small" style="margin-top:5px">Completed local changes remain. Retrying checks the same idempotency key and continues only the unresolved route.</p><p class="micro mono" style="margin-top:10px">Reference: op_7f2 · ROUTE_TIMEOUT_AFTER_ACCEPT</p></div></div>
+      `, true), { dock: dock(`<button class="btn" onclick="go('confirm')">Review result</button><button class="btn primary" onclick="go('weekly-queue')">Check & retry route</button>`) });
+    }
+
+    const queue = [
+      ["Release ownership keeps bouncing", "Problem · repeated in 3 captures", "CRT suggested"],
+      ["Send dentist form tomorrow", "Task · approved", "Keep"],
+      ["Review flaky checkout tests before Friday", "Task · wording uncertain", "Needs review"],
+      ["Investigate CI timeout after image build", "Failed route · retry available", "Route failed"]
+    ];
+
+    function weeklyQueue() {
+      return shell(main(`
+        <div class="progress-head"><div><h1>Weekly Review</h1><p class="subhead">Resume exactly where you stopped.</p></div><span class="pill accent">2 decided</span></div>
+        <div class="progress-head" style="margin-top:18px"><span class="small">2 of 9 outcomes recorded</span><span class="small">22%</span></div><div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="9" aria-valuenow="2"><span style="width:22%"></span></div>
+        <section aria-label="Review queue" style="margin-top:18px">${queue.map((x,i) => `<button class="queue-item ${i===0?'active':''}" onclick="go('weekly-detail')"><div class="queue-top"><span class="pill">${i+3} of 9</span><span class="pill ${i===0?'warn':''}">${x[2]}</span></div><h3 style="margin-top:10px">${x[0]}</h3><p class="preview">${x[1]}</p></button>`).join("")}</section>
+        <button class="btn full" style="margin-top:12px" onclick="go('weekly-empty')">Prototype: show completed/empty state</button>
+      `, true), { dock: dock(`<button class="btn" onclick="go('weekly-error')">Leave safely</button><button class="btn primary" onclick="go('weekly-detail')">Review next item</button>`) });
+    }
+
+    function weeklyDetail() {
+      return shell(main(`
+        <button class="btn ghost compact" onclick="go('weekly-queue')" aria-label="Back to review queue">← Queue</button>
+        <article class="card" style="margin-top:8px"><div class="card-header"><span class="pill">Problem candidate</span><span class="pill warn">Repeated signal</span></div><div class="card-body"><h1 style="font-size:28px">Release ownership keeps bouncing between teams</h1><p class="subhead">Late test failures trigger handoffs without a clear final owner, so each release waits for a new coordination loop.</p><div class="candidate-meta"><span class="pill">3 source captures</span><span class="pill">Deferred last week</span></div></div></article>
+        <div class="status-strip" style="margin-top:12px"><span class="status-dot"></span><div><h3>Why CRT is suggested</h3><p class="small">This problem repeated across three captures and has multiple plausible causes. Promotion still requires your confirmation.</p></div></div>
+        <section style="margin-top:18px"><h2 style="margin-bottom:10px">Choose an outcome</h2><div class="decision-grid">
+          <button class="btn" onclick="go('weekly-queue')">✓ Keep</button><button class="btn" onclick="alert('Static prototype: full-page editor opens.')">Edit wording</button>
+          <button class="btn" onclick="go('weekly-queue')">Defer</button><button class="btn" onclick="alert('Static prototype: destination confirmation opens.')">Route</button>
+          <button class="btn danger" onclick="alert('Static prototype: delete reason confirmation opens.')">Delete</button><button class="btn primary" onclick="go('crt')">Promote to CRT</button>
+        </div></section>
+      `, true), { dock: dock(`<button class="btn" onclick="go('weekly-queue')">Previous</button><button class="btn primary" onclick="go('crt')">Review CRT promotion</button>`) });
+    }
+
+    function weeklyEmpty() {
+      return shell(main(`
+        <div style="max-width:440px;margin:12vh auto 0;text-align:center"><span class="pill good">Review complete</span><h1 style="margin-top:16px">Nothing left uncovered.</h1><p class="subhead" style="margin-left:auto;margin-right:auto">9 outcomes recorded: 3 kept, 2 routed, 1 promoted, 2 deferred, and 1 deleted as obsolete.</p>
+        <div class="card" style="margin-top:24px;text-align:left"><div class="card-body"><h3>What happens next</h3><p class="small" style="margin-top:6px">Routes and CRT promotion continue in the background. Failures will stay visible and retryable without reopening this completed review.</p></div></div>
+        <button class="btn primary full" style="margin-top:14px" onclick="go('idle')">Start a Brain Dump</button></div>
+      `));
+    }
+
+    function weeklyError() {
+      return shell(main(`
+        <div style="max-width:460px;margin:10vh auto 0"><div class="status-strip danger"><span class="status-dot"></span><div><h3>We couldn’t restore this review</h3><p class="small">The connection dropped while loading the current projection. Your 2 recorded outcomes remain safe.</p></div></div>
+        <div class="card" style="margin-top:12px"><div class="card-body"><h2>Resume from item 3</h2><p class="small" style="margin-top:6px">Retry fetches the server projection and checks event order before showing the queue.</p><p class="micro mono" style="margin-top:12px">Reference: wr_2026_27 · PROJECTION_REQUIRED</p><div class="button-row" style="margin-top:16px"><button class="btn" onclick="go('settings')">Work offline elsewhere</button><button class="btn primary" onclick="go('weekly-queue')">Retry</button></div></div></div></div>
+      `));
+    }
+
+    function crt() {
+      return shell(main(`
+        <div class="section-head"><div><h1>Release quality</h1><p class="subhead">Focused mobile view · source → effect</p></div><button class="btn compact" onclick="alert('Tree menu: rename, import, export, delete.')">Tree menu</button></div>
+        <div class="tree-stage" role="img" aria-label="CRT focused subtree showing two causes leading to release ownership bouncing"><span class="tree-line l1"></span><span class="tree-line l2"></span><button class="tree-node root">Release ownership keeps bouncing</button><button class="tree-node n1">No final quality owner</button><button class="tree-node n2">Late test evidence</button><div class="zoom"><button class="btn" aria-label="Zoom out">−</button><button class="btn" aria-label="Center selection">◎</button><button class="btn" aria-label="Zoom in">+</button></div></div>
+        <section class="card" style="margin-top:12px"><div class="card-header"><div><p class="eyebrow">Selected node</p><h2>No final quality owner</h2></div><span class="pill accent">Cause</span></div><div class="card-body"><label class="field"><span>Node label</span><textarea>No final quality owner is accountable after late test failures</textarea></label><div class="button-row" style="margin-top:12px"><button class="btn">Relations · 1</button><button class="btn">Validation</button></div></div></section>
+      `));
+    }
+
+    function settings() {
+      return shell(main(`
+        <div class="section-head"><div><h1>Privacy & settings</h1><p class="subhead">Controls that affect capture are visible here and repeated at the moment they matter.</p></div></div>
+        <section><h2 style="margin-bottom:10px">Voice & data</h2><div class="settings-list">
+          <div class="setting"><div><h3>External voice processing</h3><p class="small">Configured provider category</p></div><button class="switch" aria-label="External voice processing enabled" aria-pressed="true"></button></div>
+          <div class="setting"><div><h3>Delete raw audio</h3><p class="small">24 hours after reconciliation</p></div><button class="btn compact">Change</button></div>
+          <div class="setting"><div><h3>Delete latest audio now</h3><p class="small">Transcript provenance stays</p></div><button class="btn danger compact">Delete</button></div>
+        </div></section>
+        <section style="margin-top:20px"><h2 style="margin-bottom:10px">Destination</h2><div class="settings-list"><div class="setting"><div><h3>Task tracker</h3><p class="small">Connected · last checked 2m ago</p></div><span class="pill good">Healthy</span></div><div class="setting"><div><h3>Route failures</h3><p class="small">1 needs attention</p></div><button class="btn compact" onclick="go('commit-error')">View</button></div></div></section>
+        <section style="margin-top:20px"><div class="settings-list"><div class="setting"><div><h3>Account</h3><p class="small">max@example.test</p></div><button class="btn compact">Sign out</button></div></div></section>
+      `));
+    }
+
+    function desktop() {
+      return shell(`<main tabindex="-1" class="desktop-grid three">
+        <section class="pane"><div class="pane-head"><div class="queue-top"><div><p class="eyebrow">Transcript</p><h2>Release brain dump</h2></div><span class="pill live">Recording · 01:24</span></div></div><div class="pane-body"><div class="status-strip success"><span class="status-dot"></span><div><h3>Audio safe so far</h3><p class="small">8 of 9 chunks uploaded</p></div></div><p class="transcript" style="margin-top:18px">The release keeps slipping because late test failures bounce between teams. I should map why ownership is unclear, and also remember to send the dentist form tomorrow…</p><div class="wave" aria-hidden="true">${"<i></i>".repeat(9)}</div><button class="btn danger full" onclick="go('processing')">■ Stop & review</button></div></section>
+        <section class="pane"><div class="pane-head"><div class="queue-top"><div><p class="eyebrow">Live workspace</p><h2>3 candidate drafts</h2></div><span class="small">Updates preserve your edits</span></div></div><div class="pane-body">${candidateData.map(x => candidateCard(x)).join("")}</div></section>
+        <aside class="pane"><div class="pane-head"><p class="eyebrow">Selected candidate</p><h2>Release ownership</h2></div><div class="pane-body"><label class="field"><span>Wording</span><textarea>Map why release-quality ownership is unclear</textarea></label><div class="candidate-meta"><span class="pill">Problem</span><span class="pill accent">Reconciled</span></div><div class="status-strip" style="margin-top:14px"><span class="status-dot"></span><div><h3>Possible CRT candidate</h3><p class="small">Repeated and complex signal. Confirmation required.</p></div></div><div class="button-row" style="margin-top:14px"><button class="btn">Defer</button><button class="btn primary">Save edit</button></div></div></aside>
+      </main>`);
+    }
+
+    function render() {
+      const views = { idle, recording: () => recording(false), offline: () => recording(true), processing, drafts, confirm: confirmScreen, "commit-error": commitError, "weekly-queue": weeklyQueue, "weekly-detail": weeklyDetail, "weekly-empty": weeklyEmpty, "weekly-error": weeklyError, crt, settings, desktop };
+      document.getElementById("app").innerHTML = views[state]();
+      document.title = `${titles[state][1]} — BrainBuddy prototype`;
+    }
+    addEventListener("popstate", () => { state = new URLSearchParams(location.search).get("screen") || "recording"; render(); });
+    render();
+  </script>
+</body>
+</html>
