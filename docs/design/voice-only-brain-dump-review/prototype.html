@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f7f8fa">
+  <title>Brain Dump — voice-only founder review</title>
+  <style>
+    :root {
+      --bg: #f7f8fa;
+      --surface: #ffffff;
+      --surface-2: #f1f4f7;
+      --ink: #16202b;
+      --muted: #627080;
+      --faint: #8995a3;
+      --line: #dbe1e7;
+      --line-strong: #c7d0d9;
+      --accent: #087da8;
+      --accent-strong: #066684;
+      --success: #22745b;
+      --success-soft: #eaf6f1;
+      --warning: #8a5c0a;
+      --danger: #a13d49;
+      --focus: #0ea5e9;
+      --shadow: 0 12px 30px -24px rgba(15, 30, 45, .55), 0 1px 2px rgba(15, 30, 45, .06);
+      font-family: "Segoe UI Variable", "Aptos", ui-sans-serif, system-ui, sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; margin: 0; background: var(--bg); }
+    body { font-size: 15px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+    button, textarea, select { font: inherit; }
+    button, select { min-height: 44px; }
+    button { color: inherit; }
+    button:focus-visible, textarea:focus-visible, select:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--focus) 45%, transparent);
+      outline-offset: 2px;
+    }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+    .app { min-height: 100dvh; display: flex; flex-direction: column; }
+    .topbar {
+      position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 10px;
+      min-height: 60px; padding: max(8px, env(safe-area-inset-top)) 16px 8px;
+      border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 96%, transparent);
+    }
+    .brand-mark { width: 30px; height: 30px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 10px; background: var(--accent); color: #fff; font-weight: 800; letter-spacing: -.06em; }
+    .top-copy { min-width: 0; flex: 1; }
+    .eyebrow { margin: 0; color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+    .top-title { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 17px; line-height: 1.25; letter-spacing: -.015em; }
+    .scenario-select { width: 44px; border: 1px solid var(--line); border-radius: 10px; color: transparent; padding: 0; background-color: var(--surface); background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(50% - 4px) 20px, calc(50% + 2px) 20px; background-size: 6px 6px; background-repeat: no-repeat; }
+    .scenario-select option { color: var(--ink); }
+
+    .content { flex: 1; width: 100%; max-width: 720px; margin: 0 auto; padding: 18px 16px calc(106px + env(safe-area-inset-bottom)); }
+    .content.no-dock { padding-bottom: calc(28px + env(safe-area-inset-bottom)); }
+    .session-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+    h1, h2, p { text-wrap: pretty; }
+    h1 { margin: 0; font-size: clamp(24px, 7vw, 31px); line-height: 1.08; letter-spacing: -.035em; }
+    h2 { margin: 0; font-size: 17px; line-height: 1.25; letter-spacing: -.015em; }
+    p { margin: 0; }
+    .subhead { margin-top: 7px; color: var(--muted); max-width: 46ch; }
+    .session-state { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; color: var(--muted); font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .session-state::before { content: ""; width: 7px; height: 7px; border-radius: 2px; background: var(--success); }
+    .session-state.review::before { background: var(--warning); }
+
+    .session-list { display: grid; gap: 9px; list-style: none; padding: 0; margin: 0; }
+    .session-draft { min-width: 0; padding: 14px 15px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); box-shadow: var(--shadow); }
+    .session-draft > p { overflow-wrap: anywhere; font-size: 16px; line-height: 1.4; font-weight: 650; }
+    .draft-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 9px; color: var(--faint); font-size: 11px; }
+    .draft-markers { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px 10px; }
+    .wording-state { color: var(--warning); font-weight: 700; }
+    .proposal-state { color: var(--muted); font-weight: 700; }
+
+    .editor-card { padding: 12px; }
+    .editor-card textarea { width: 100%; min-height: 72px; resize: vertical; border: 1px solid var(--line-strong); border-radius: 10px; padding: 10px 11px; background: var(--surface); color: var(--ink); font-size: 16px; line-height: 1.4; }
+    .editor-card .draft-footer { margin-top: 7px; }
+    .delete-btn { min-height: 38px; border: 0; border-radius: 9px; padding: 6px 9px; background: transparent; color: var(--danger); font-size: 12px; font-weight: 700; cursor: pointer; }
+    .delete-btn:hover { background: #fff0f1; }
+
+    .action-dock { position: fixed; z-index: 15; left: 0; right: 0; bottom: 0; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 97%, transparent); }
+    .dock-inner { width: 100%; max-width: 688px; min-height: 58px; margin: auto; display: flex; align-items: center; gap: 8px; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 46px; border: 1px solid var(--line-strong); border-radius: 11px; padding: 9px 12px; background: var(--surface); font-weight: 700; cursor: pointer; }
+    .btn:hover { background: var(--surface-2); }
+    .btn.primary { border-color: var(--accent); background: var(--accent); color: white; }
+    .btn.primary:hover { background: var(--accent-strong); }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    .btn.full { width: 100%; }
+    .record-cue { display: flex; align-items: center; gap: 8px; margin-right: auto; font-size: 12px; font-weight: 700; }
+    .mini-wave { display: flex; align-items: center; gap: 2px; width: 28px; height: 24px; }
+    .mini-wave i { width: 3px; border-radius: 3px; background: var(--accent); }
+    .mini-wave i:nth-child(1), .mini-wave i:nth-child(5) { height: 7px; }
+    .mini-wave i:nth-child(2), .mini-wave i:nth-child(4) { height: 15px; }
+    .mini-wave i:nth-child(3) { height: 22px; }
+    .record-actions { display: flex; gap: 6px; }
+    .record-actions .btn { min-height: 44px; padding: 7px 8px; font-size: 12px; }
+    .review-actions { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); width: 100%; gap: 7px; }
+    .review-actions .btn { padding-inline: 8px; font-size: 12px; }
+
+    .saved { max-width: 480px; margin: 11vh auto 0; text-align: center; }
+    .saved-mark { width: 52px; height: 52px; display: grid; place-items: center; margin: 0 auto 16px; border-radius: 50%; background: var(--success-soft); color: var(--success); font-size: 25px; font-weight: 800; }
+    .saved .subhead { margin-left: auto; margin-right: auto; }
+    .saved-summary { margin: 24px 0 14px; border: 1px solid var(--line); border-radius: 13px; padding: 14px 16px; background: var(--surface); text-align: left; }
+    .saved-summary strong { display: block; }
+    .saved-summary span { color: var(--muted); font-size: 13px; }
+
+    @media (max-width: 390px) {
+      .content { padding-left: 12px; padding-right: 12px; }
+      .action-dock { padding-left: 12px; padding-right: 12px; }
+      .record-cue { gap: 5px; }
+      .record-actions { gap: 4px; }
+      .record-actions .btn { padding-inline: 6px; font-size: 11px; }
+    }
+    @media (min-width: 768px) {
+      .topbar { padding-inline: 24px; }
+      .scenario-select { width: 190px; color: var(--ink); padding: 0 10px; }
+      .content { padding-top: 28px; }
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      .mini-wave i { animation: pulse 1.1s ease-in-out infinite alternate; }
+      .mini-wave i:nth-child(even) { animation-delay: -.45s; }
+      @keyframes pulse { to { transform: scaleY(.45); opacity: .45; } }
+    }
+  </style>
+</head>
+<body>
+  <div id="app" class="app"></div>
+  <script>
+    const scenarios = [
+      ["recording", "Active voice capture"],
+      ["review", "Review drafts"],
+      ["saved", "Saved result"]
+    ];
+    const titles = {
+      recording: "Voice session active",
+      review: "Review session",
+      saved: "Session saved"
+    };
+    let drafts = [
+      "Book the dentist appointment for Tuesday morning",
+      "Send Natasha the release test-flake summary before Friday",
+      "Plan a 30-minute walk after lunch",
+      "Write down who should make the final call on release readiness"
+    ];
+    let state = new URLSearchParams(location.search).get("screen") || "recording";
+    if (!scenarios.some(([key]) => key === state)) state = "recording";
+
+    function escapeHtml(value) {
+      return value.replace(/[&<>'"]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
+    }
+    function go(next) {
+      state = next;
+      const url = new URL(location.href);
+      url.searchParams.set("screen", next);
+      history.replaceState({}, "", url);
+      render();
+      document.querySelector("main")?.focus({ preventScroll: true });
+    }
+    function shell(content, dock = "") {
+      const options = scenarios.map(([key, label]) => `<option value="${key}" ${key === state ? "selected" : ""}>${label}</option>`).join("");
+      return `<header class="topbar"><span class="brand-mark" aria-hidden="true">BB</span><div class="top-copy"><p class="eyebrow">Brain Dump</p><h2 class="top-title">${titles[state]}</h2></div><label><span class="sr-only">Prototype state</span><select class="scenario-select" aria-label="Prototype state" onchange="go(this.value)">${options}</select></label></header>${content}${dock}`;
+    }
+    function main(content, hasDock = true) {
+      return `<main tabindex="-1" class="content ${hasDock ? "" : "no-dock"}">${content}</main>`;
+    }
+    function draftList(editable = false) {
+      return `<ol class="session-list" aria-live="polite" aria-label="Drafts in this session">${drafts.map((draft, index) => editable
+        ? `<li class="session-draft editor-card" data-index="${index}"><label class="sr-only" for="draft-${index}">Edit wording for draft #${index + 1}</label><textarea id="draft-${index}" oninput="updateDraft(${index}, this.value)">${escapeHtml(draft)}</textarea><div class="draft-footer"><strong>#${index + 1}</strong><span class="draft-markers"><span class="wording-state">Wording still changing</span><span class="proposal-state">Provisional</span><button class="delete-btn" onclick="deleteDraft(${index})">Delete</button></span></div></li>`
+        : `<li class="session-draft"><p>${escapeHtml(draft)}</p><div class="draft-footer"><strong>#${index + 1}</strong><span class="draft-markers"><span class="wording-state">Wording still changing</span><span class="proposal-state">Provisional</span></span></div></li>`
+      ).join("")}</ol>`;
+    }
+    function updateDraft(index, value) { drafts[index] = value; }
+    function deleteDraft(index) { drafts.splice(index, 1); render(); }
+    function cancelSession() { drafts = []; render(); }
+    function startNewSession() { drafts = []; go("recording"); }
+    function recording() {
+      const dock = `<div class="action-dock"><div class="dock-inner"><div class="record-cue"><span class="mini-wave" aria-hidden="true">${"<i></i>".repeat(5)}</span><span>Listening</span></div><div class="record-actions"><button class="btn" onclick="cancelSession()">Cancel</button><button class="btn" onclick="go('review')">Stop</button><button class="btn primary" onclick="go('review')">Review</button></div></div></div>`;
+      const empty = `<section class="session-draft"><h2>Session cleared</h2><p class="subhead">Start speaking to create a new draft.</p></section>`;
+      return shell(main(`<div class="session-head"><div><p class="eyebrow">Current session</p><h1>Drafts from your voice</h1></div><span class="session-state">${drafts.length} drafts</span></div>${drafts.length ? draftList() : empty}`), dock);
+    }
+    function review() {
+      const dock = `<div class="action-dock"><div class="dock-inner"><div class="review-actions"><button class="btn" onclick="go('recording')">Return to voice capture</button><button class="btn primary" onclick="go('saved')" ${drafts.length ? "" : "disabled"}>Save session</button></div></div></div>`;
+      const empty = `<section class="session-draft"><h2>No drafts left</h2><p class="subhead">Return to voice capture before saving.</p></section>`;
+      return shell(main(`<div class="session-head"><div><p class="eyebrow">Current session</p><h1>Review your drafts</h1><p class="subhead">Edit the wording inline or delete anything you do not want to keep.</p></div><span class="session-state review">${drafts.length} drafts</span></div>${drafts.length ? draftList(true) : empty}`), dock);
+    }
+    function saved() {
+      return shell(main(`<section class="saved"><div class="saved-mark" aria-hidden="true">✓</div><p class="eyebrow">Session saved</p><h1>${drafts.length} ${drafts.length === 1 ? "draft" : "drafts"} sent to RTM Inbox</h1><p class="subhead">Every remaining draft was exported as a plain Inbox item.</p><div class="saved-summary"><strong>Brain Dump complete</strong><span>The voice session is closed. Start a new one whenever you are ready.</span></div><button class="btn primary full" onclick="startNewSession()">Start new voice session</button></section>`, false));
+    }
+    function render() {
+      document.getElementById("app").innerHTML = ({ recording, review, saved })[state]();
+      document.title = `${titles[state]} — Brain Dump prototype`;
+    }
+    addEventListener("popstate", () => {
+      state = new URLSearchParams(location.search).get("screen") || "recording";
+      render();
+    });
+    render();
+  </script>
+</body>
+</html>
