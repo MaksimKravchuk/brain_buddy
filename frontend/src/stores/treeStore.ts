@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import { apiClient } from "../api/client";
+import { nowMs, recordTelemetry } from "../utils/telemetry";
 
 import type {
   NodeResponse,
@@ -262,7 +263,6 @@ function mapTreeDetail(state: TreeStoreState): TreeDetailResponse | null {
     return null;
   }
 
-  const updatedAt = new Date().toISOString();
   const ownerId = state.metadata.ownerId ?? null;
 
   return {
@@ -271,7 +271,7 @@ function mapTreeDetail(state: TreeStoreState): TreeDetailResponse | null {
     metadata: {
       version: state.metadata.version,
       created_at: state.metadata.createdAt,
-      updated_at: updatedAt,
+      updated_at: state.metadata.updatedAt,
       layout: state.metadata.layout ?? null,
       owner_id: ownerId
     },
@@ -305,6 +305,7 @@ function persistDraft(detail: TreeDetailResponse) {
 }
 
 async function persistTree(get: () => TreeStoreState, set: TreeStoreSet) {
+  const startMs = nowMs();
   const detail = mapTreeDetail(get());
   if (!detail) {
     return;
@@ -312,16 +313,28 @@ async function persistTree(get: () => TreeStoreState, set: TreeStoreSet) {
 
   clearAutosaveTimer();
 
+  const localStartMs = nowMs();
   const savedLocally = persistDraft(detail);
+  recordTelemetry(
+    {
+      name: "tree.local_draft_save",
+      durationMs: nowMs() - localStartMs,
+      ok: savedLocally,
+      details: { treeId: detail.id, nodes: detail.nodes.length, relations: detail.relations.length }
+    },
+    savedLocally ? "info" : "warn"
+  );
 
-  const timestamp = detail.metadata.updated_at;
+  const localSaveAt = new Date().toISOString();
   let pendingSync = !savedLocally;
   let lastSyncError: string | null = savedLocally ? null : "Local draft save failed";
   let lastCloudSyncAt: string | null = null;
+  let serverUpdatedAt: string | null = null;
 
   try {
-    await apiClient.updateTree(detail.id, buildTreeUpdateRequest(detail));
-    lastCloudSyncAt = timestamp;
+    const syncedTree = await apiClient.updateTree(detail.id, buildTreeUpdateRequest(detail));
+    serverUpdatedAt = syncedTree.metadata.updated_at;
+    lastCloudSyncAt = serverUpdatedAt;
     pendingSync = false;
     lastSyncError = null;
   } catch (error) {
@@ -329,12 +342,30 @@ async function persistTree(get: () => TreeStoreState, set: TreeStoreSet) {
     lastSyncError = error instanceof Error ? error.message : "Cloud sync failed";
   }
 
+  recordTelemetry(
+    {
+      name: "tree.cloud_sync",
+      durationMs: nowMs() - startMs,
+      ok: !pendingSync,
+      details: {
+        treeId: detail.id,
+        nodes: detail.nodes.length,
+        relations: detail.relations.length,
+        error: lastSyncError
+      }
+    },
+    pendingSync ? "warn" : "info"
+  );
+
   set((state) => ({
     pendingSync,
-    lastLocalSaveAt: savedLocally ? timestamp : null,
+    lastLocalSaveAt: savedLocally ? localSaveAt : null,
     lastCloudSyncAt,
     lastSyncError,
-    metadata: state.metadata ? { ...state.metadata, updatedAt: timestamp } : state.metadata
+    metadata:
+      state.metadata && serverUpdatedAt
+        ? { ...state.metadata, updatedAt: serverUpdatedAt }
+        : state.metadata
   }));
 }
 

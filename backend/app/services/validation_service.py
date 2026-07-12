@@ -48,7 +48,7 @@ class ValidationService:
         self, tree_id: str, node_id: str, payload: ValidationRequest
     ) -> ValidationResponse:
         tree = self.tree_repo.load(tree_id)
-        node, index = self._resolve_node(tree, node_id)
+        self._resolve_node(tree, node_id)
 
         prompt = self._build_prompt(tree, node_id)
         provider_id, provider_config = self._determine_provider(payload.provider)
@@ -80,10 +80,16 @@ class ValidationService:
         )
 
         self.validation_repo.append_entry(tree_id, node_id, entry)
-        updated_tree = self._update_node_validation(
-            tree, index, validation_state, checked_at
+
+        def apply_validation(current: TreeDocument) -> TreeDocument:
+            _, index = self._resolve_node(current, node_id)
+            return self._update_node_validation(
+                current, index, validation_state, checked_at
+            )
+
+        self.tree_service.mutate_tree(
+            tree_id, apply_validation, timestamp=checked_at
         )
-        self.tree_service.touch_tree(updated_tree, timestamp=checked_at)
 
         return ValidationResponse(
             node_id=node_id,
