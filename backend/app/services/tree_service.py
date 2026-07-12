@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 from collections import OrderedDict
 from collections import OrderedDict as OrderedDictType
-from collections.abc import Iterable
-from datetime import datetime
+from collections.abc import Callable, Iterable
+from datetime import datetime, timedelta
+from threading import RLock
 from typing import Any
 
 from app.exceptions import NotFoundError, ValidationFailure
@@ -56,6 +57,7 @@ class TreeService:
         self.tree_repo = tree_repo
         self.index_repo = index_repo
         self._cache: OrderedDictType[str, TreeDocument] = OrderedDict()
+        self._cache_lock = RLock()
         self._cache_maxsize = max(cache_maxsize, 1)
 
     def list_trees(self, *, owner_id: str) -> list[IndexEntry]:
@@ -79,11 +81,8 @@ class TreeService:
         return self._store_and_clone(tree)
 
     def get_tree(self, tree_id: str) -> TreeDocument:
-        cached = self._cache_get(tree_id)
-        if cached is not None:
-            return cached.model_copy(deep=True)
-        tree = self.tree_repo.load(tree_id)
-        return self._store_and_clone(tree)
+        tree = self.tree_repo.read(tree_id, after_load=self._cache_store)
+        return tree.model_copy(deep=True)
 
     def get_tree_for_owner(self, tree_id: str, *, owner_id: str) -> TreeDocument:
         """Return a tree only if it belongs to the given owner.
@@ -124,21 +123,29 @@ class TreeService:
     def update_tree(
         self, tree_id: str, payload: TreeUpdateRequest, *, owner_id: str
     ) -> TreeDocument:
-        self.assert_owner(tree_id, owner_id=owner_id)
-        metadata = self._resolve_metadata(
-            payload.metadata, owner_id=owner_id, coerce_updated=True
+        def apply_update(existing_tree: TreeDocument) -> TreeDocument:
+            if existing_tree.owner_id != owner_id:
+                raise NotFoundError("Tree", tree_id)
+            metadata = self._resolve_metadata(
+                payload.metadata, owner_id=owner_id, coerce_updated=True
+            )
+            tree = self._build_tree_document(
+                tree_id=tree_id,
+                name=payload.name,
+                metadata=metadata,
+                nodes=payload.nodes,
+                relations=payload.relations,
+                owner_id=owner_id,
+            )
+            return self._preserve_unrepresented_tree_data(tree, existing_tree)
+
+        tree = self.tree_repo.update_if_current(
+            tree_id,
+            expected_updated_at=payload.metadata.updated_at,
+            update=apply_update,
+            after_save=self._commit_tree_state,
         )
-        tree = self._build_tree_document(
-            tree_id=tree_id,
-            name=payload.name,
-            metadata=metadata,
-            nodes=payload.nodes,
-            relations=payload.relations,
-            owner_id=owner_id,
-        )
-        self.tree_repo.save(tree)
-        self._sync_index(tree)
-        return self._store_and_clone(tree)
+        return tree.model_copy(deep=True)
 
     def import_tree(
         self, payload: TreeDetailResponse, *, owner_id: str
@@ -163,14 +170,15 @@ class TreeService:
         return self._store_and_clone(tree)
 
     def delete_tree(self, tree_id: str, *, owner_id: str) -> None:
-        self.assert_owner(tree_id, owner_id=owner_id)
-        self.tree_repo.delete(tree_id)
-        self._cache.pop(tree_id, None)
-        try:
-            self.index_repo.delete(tree_id)
-        except NotFoundError:
-            # Index may have been out of sync; ignore to allow deletion
-            pass
+        def verify_owner(tree: TreeDocument) -> None:
+            if tree.owner_id != owner_id:
+                raise NotFoundError("Tree", tree_id)
+
+        self.tree_repo.delete(
+            tree_id,
+            before_delete=verify_owner,
+            after_delete=lambda: self._remove_tree_state(tree_id),
+        )
 
     def generate_ai_feedback(
         self, tree_id: str, payload: AiFeedbackRequest, *, owner_id: str
@@ -217,37 +225,78 @@ class TreeService:
         )
         self.index_repo.upsert(entry)
 
-    def touch_tree(
-        self, tree: TreeDocument, timestamp: datetime | None = None
+    def mutate_tree(
+        self,
+        tree_id: str,
+        update: Callable[[TreeDocument], TreeDocument],
+        *,
+        timestamp: datetime | None = None,
+        after_save: Callable[[TreeDocument], None] | None = None,
     ) -> TreeDocument:
-        """Return a copy of the tree with updated timestamp and sync index."""
+        """Apply a tree mutation under the shared per-tree transaction lock."""
 
-        ts = timestamp or utcnow()
-        updated_tree = tree.model_copy(
-            update={
-                "updated_at": ts,
-                "metadata": self._merge_metadata(tree.metadata, {"updated_at": ts}),
-            }
+        def touch(current: TreeDocument) -> TreeDocument:
+            ts = max(
+                timestamp or utcnow(),
+                current.updated_at + timedelta(microseconds=1),
+            )
+            updated_tree = update(current)
+            return updated_tree.model_copy(
+                update={
+                    "updated_at": ts,
+                    "metadata": self._merge_metadata(
+                        updated_tree.metadata, {"updated_at": ts}
+                    ),
+                }
+            )
+
+        def publish(updated_tree: TreeDocument) -> None:
+            self._commit_tree_state(updated_tree)
+            if after_save is not None:
+                after_save(updated_tree)
+
+        updated_tree = self.tree_repo.mutate(
+            tree_id, update=touch, after_save=publish
         )
-        self.tree_repo.save(updated_tree)
-        self._sync_index(updated_tree)
-        return self._store_and_clone(updated_tree)
+        return updated_tree.model_copy(deep=True)
+
+    def _commit_tree_state(self, tree: TreeDocument) -> None:
+        """Publish index and cache state while holding the tree transaction lock."""
+
+        self._sync_index(tree)
+        self._cache_store(tree)
+
+    def _remove_tree_state(self, tree_id: str) -> None:
+        """Remove derived local state while holding the tree transaction lock."""
+
+        with self._cache_lock:
+            self._cache.pop(tree_id, None)
+        try:
+            self.index_repo.delete(tree_id)
+        except NotFoundError:
+            # Index may have been out of sync; ignore to allow deletion.
+            pass
+
+    def _cache_store(self, tree: TreeDocument) -> None:
+        with self._cache_lock:
+            self._cache[tree.id] = tree
+            self._cache.move_to_end(tree.id)
+            if len(self._cache) > self._cache_maxsize:
+                self._cache.popitem(last=False)
 
     def _cache_get(self, tree_id: str) -> TreeDocument | None:
-        cached = self._cache.get(tree_id)
-        if cached is None:
-            return None
-        # Maintain LRU ordering
-        self._cache.move_to_end(tree_id)
-        return cached
+        with self._cache_lock:
+            cached = self._cache.get(tree_id)
+            if cached is None:
+                return None
+            # Maintain LRU ordering
+            self._cache.move_to_end(tree_id)
+            return cached
 
     def _store_and_clone(self, tree: TreeDocument) -> TreeDocument:
         """Store a tree document in the local cache and return a safe copy."""
 
-        self._cache[tree.id] = tree
-        self._cache.move_to_end(tree.id)
-        if len(self._cache) > self._cache_maxsize:
-            self._cache.popitem(last=False)
+        self._cache_store(tree)
         return tree.model_copy(deep=True)
 
     def _build_tree_document(
@@ -281,6 +330,64 @@ class TreeService:
             version_refs=[],
         )
         return tree
+
+    def _preserve_unrepresented_tree_data(
+        self, tree: TreeDocument, existing_tree: TreeDocument
+    ) -> TreeDocument:
+        """Carry forward fields that public full-tree PUT cannot represent."""
+
+        existing_nodes = {node.id: node for node in existing_tree.nodes}
+        merged_nodes: list[NodeDocument] = []
+        for node in tree.nodes:
+            previous = existing_nodes.get(node.id)
+            if previous is None:
+                merged_nodes.append(node)
+                continue
+
+            previous_extra = previous.extra if isinstance(previous.extra, dict) else {}
+            next_extra = node.extra if isinstance(node.extra, dict) else {}
+            merged_nodes.append(
+                node.model_copy(
+                    update={
+                        "metadata": previous.metadata.model_copy(
+                            update={"updated_at": node.metadata.updated_at}
+                        ),
+                        "visual": previous.visual,
+                        "validation": previous.validation,
+                        "extra": {**previous_extra, **next_extra},
+                    },
+                    deep=True,
+                )
+            )
+
+        existing_relations = {relation.id: relation for relation in existing_tree.relations}
+        merged_relations: list[RelationDocument] = []
+        for relation in tree.relations:
+            previous = existing_relations.get(relation.id)
+            if previous is None:
+                merged_relations.append(relation)
+                continue
+            merged_relations.append(
+                relation.model_copy(
+                    update={
+                        "notes": previous.notes,
+                        "metadata": previous.metadata.model_copy(
+                            update={"updated_at": relation.metadata.updated_at}
+                        ),
+                    },
+                    deep=True,
+                )
+            )
+
+        return tree.model_copy(
+            update={
+                "description": existing_tree.description,
+                "nodes": merged_nodes,
+                "relations": merged_relations,
+                "version_refs": existing_tree.version_refs,
+            },
+            deep=True,
+        )
 
     def _prepare_metadata_block(self, metadata: TreeMetadata) -> dict[str, object]:
         meta: dict[str, object] = {"version": metadata.version}

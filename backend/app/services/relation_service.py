@@ -21,92 +21,107 @@ class RelationService:
     def create_relation(
         self, tree_id: str, payload: RelationCreateRequest
     ) -> tuple[RelationDocument, TreeDocument]:
-        tree = self.tree_repo.load(tree_id)
-        source_id = payload.source_node_id
-        target_id = payload.target_node_id
-
-        self._ensure_node_exists(tree, source_id)
-        self._ensure_node_exists(tree, target_id)
-        self._ensure_not_duplicate(tree.relations, source_id, target_id)
-
         now = utcnow()
-        relation = RelationDocument(
-            id=generate_relation_id(),
-            source_id=source_id,
-            target_id=target_id,
-            question_label=payload.kind,
-            notes=None,
-            metadata=RelationMetadata(created_at=now, updated_at=now, author=None),
-        )
+        created_relation: RelationDocument | None = None
 
-        candidate_relations = [*tree.relations, relation]
-        self._validate_relations(candidate_relations)
-        updated_tree = tree.model_copy(update={"relations": candidate_relations})
-        updated_tree = self.tree_service.touch_tree(updated_tree, timestamp=now)
-        return relation, updated_tree
+        def add_relation(tree: TreeDocument) -> TreeDocument:
+            nonlocal created_relation
+            source_id = payload.source_node_id
+            target_id = payload.target_node_id
+            self._ensure_node_exists(tree, source_id)
+            self._ensure_node_exists(tree, target_id)
+            self._ensure_not_duplicate(tree.relations, source_id, target_id)
+            created_relation = RelationDocument(
+                id=generate_relation_id(),
+                source_id=source_id,
+                target_id=target_id,
+                question_label=payload.kind,
+                notes=None,
+                metadata=RelationMetadata(created_at=now, updated_at=now, author=None),
+            )
+            candidate_relations = [*tree.relations, created_relation]
+            self._validate_relations(candidate_relations)
+            return tree.model_copy(update={"relations": candidate_relations})
+
+        updated_tree = self.tree_service.mutate_tree(
+            tree_id, add_relation, timestamp=now
+        )
+        assert created_relation is not None
+        return created_relation, updated_tree
 
     def update_relation(
         self, tree_id: str, relation_id: str, payload: RelationUpdateRequest
     ) -> tuple[RelationDocument, TreeDocument]:
-        tree = self.tree_repo.load(tree_id)
-        relations = list(tree.relations)
-        try:
-            index = next(
-                idx
-                for idx, relation in enumerate(relations)
-                if relation.id == relation_id
+        if not payload.model_fields_set:
+            tree = self.tree_repo.load(tree_id)
+            relation = next(
+                (relation for relation in tree.relations if relation.id == relation_id),
+                None,
             )
-        except StopIteration as exc:
-            raise NotFoundError("Relation", relation_id) from exc
-
-        relation = relations[index]
-
-        updates: dict[str, object] = {}
-        if "source_node_id" in payload.model_fields_set:
-            if payload.source_node_id is None:
-                raise ValidationFailure("source_node_id cannot be null")
-            self._ensure_node_exists(tree, payload.source_node_id)
-            updates["source_id"] = payload.source_node_id
-        if "target_node_id" in payload.model_fields_set:
-            if payload.target_node_id is None:
-                raise ValidationFailure("target_node_id cannot be null")
-            self._ensure_node_exists(tree, payload.target_node_id)
-            updates["target_id"] = payload.target_node_id
-        if "kind" in payload.model_fields_set and payload.kind is not None:
-            updates["question_label"] = payload.kind
-
-        if not updates:
+            if relation is None:
+                raise NotFoundError("Relation", relation_id)
             return relation, tree
 
         now = utcnow()
-        metadata = relation.metadata.model_copy(update={"updated_at": now})
-        updates["metadata"] = metadata
-        updated_relation = relation.model_copy(update=updates)
+        updated_relation: RelationDocument | None = None
 
-        # Ensure updated relation does not duplicate existing pair (excluding itself)
-        self._ensure_not_duplicate(
-            relations,
-            updated_relation.source_id,
-            updated_relation.target_id,
-            skip_relation_id=relation_id,
+        def apply_update(tree: TreeDocument) -> TreeDocument:
+            nonlocal updated_relation
+            relations = list(tree.relations)
+            try:
+                index = next(
+                    idx
+                    for idx, relation in enumerate(relations)
+                    if relation.id == relation_id
+                )
+            except StopIteration as exc:
+                raise NotFoundError("Relation", relation_id) from exc
+
+            relation = relations[index]
+            updates: dict[str, object] = {}
+            if "source_node_id" in payload.model_fields_set:
+                if payload.source_node_id is None:
+                    raise ValidationFailure("source_node_id cannot be null")
+                self._ensure_node_exists(tree, payload.source_node_id)
+                updates["source_id"] = payload.source_node_id
+            if "target_node_id" in payload.model_fields_set:
+                if payload.target_node_id is None:
+                    raise ValidationFailure("target_node_id cannot be null")
+                self._ensure_node_exists(tree, payload.target_node_id)
+                updates["target_id"] = payload.target_node_id
+            if "kind" in payload.model_fields_set and payload.kind is not None:
+                updates["question_label"] = payload.kind
+
+            updates["metadata"] = relation.metadata.model_copy(
+                update={"updated_at": now}
+            )
+            updated_relation = relation.model_copy(update=updates)
+            self._ensure_not_duplicate(
+                relations,
+                updated_relation.source_id,
+                updated_relation.target_id,
+                skip_relation_id=relation_id,
+            )
+            relations[index] = updated_relation
+            self._validate_relations(relations)
+            return tree.model_copy(update={"relations": relations})
+
+        updated_tree = self.tree_service.mutate_tree(
+            tree_id, apply_update, timestamp=now
         )
-
-        relations[index] = updated_relation
-        self._validate_relations(relations)
-        updated_tree = tree.model_copy(update={"relations": relations})
-        updated_tree = self.tree_service.touch_tree(updated_tree, timestamp=now)
+        assert updated_relation is not None
         return updated_relation, updated_tree
 
     def delete_relation(self, tree_id: str, relation_id: str) -> TreeDocument:
-        tree = self.tree_repo.load(tree_id)
-        relations = [
-            relation for relation in tree.relations if relation.id != relation_id
-        ]
-        if len(relations) == len(tree.relations):
-            raise NotFoundError("Relation", relation_id)
-        updated_tree = tree.model_copy(update={"relations": relations})
-        updated_tree = self.tree_service.touch_tree(updated_tree)
-        return updated_tree
+        def remove_relation(tree: TreeDocument) -> TreeDocument:
+            relations = [
+                relation for relation in tree.relations if relation.id != relation_id
+            ]
+            if len(relations) == len(tree.relations):
+                raise NotFoundError("Relation", relation_id)
+            return tree.model_copy(update={"relations": relations})
+
+        return self.tree_service.mutate_tree(tree_id, remove_relation)
 
     def _ensure_node_exists(self, tree: TreeDocument, node_id: str) -> None:
         if not any(node.id == node_id for node in tree.nodes):

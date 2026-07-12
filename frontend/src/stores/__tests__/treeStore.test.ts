@@ -2,7 +2,7 @@ import { describe, expect, beforeEach, afterEach, it, vi } from "vitest";
 
 import { apiClient } from "../../api/client";
 import type { TreeDetailResponse } from "../../api/types";
-import { TREE_DRAFT_PREFIX, useTreeStore } from "../treeStore";
+import { TREE_DRAFT_PREFIX, buildTreeDetailFromStore, useTreeStore } from "../treeStore";
 
 function ensureLocalStorage() {
   if (typeof localStorage === "undefined" || typeof localStorage.getItem !== "function") {
@@ -207,9 +207,12 @@ describe("treeStore", () => {
     }
     // Silence the cloud-sync path: tests exercise local autosave only.
     vi.spyOn(apiClient, "updateTree").mockResolvedValue(sampleTree);
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
   });
 
   afterEach(() => {
+    useTreeStore.getState().reset();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -301,6 +304,16 @@ describe("treeStore", () => {
     const parsed = saved ? JSON.parse(saved) : null;
     expect(parsed?.relations?.[0]?.source_node_id).toBe("node-1");
     expect(parsed?.relations?.[0]?.target_node_id).toBe("node-2");
+  });
+
+  it("keeps the last server timestamp in full-tree save payloads for stale-write detection", () => {
+    useTreeStore.getState().setTree(sampleTree);
+    const store = useTreeStore.getState();
+
+    store.upsertNode({ ...store.nodes[0], label: "Local edit" });
+
+    const detail = buildTreeDetailFromStore(useTreeStore.getState());
+    expect(detail?.metadata.updated_at).toBe(sampleTree.metadata.updated_at);
   });
 
   it("tracks selection and clears it when the selected entity is removed", () => {
