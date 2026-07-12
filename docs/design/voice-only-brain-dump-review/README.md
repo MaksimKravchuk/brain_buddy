@@ -2,6 +2,8 @@
 
 Open `prototype.html` directly in a modern browser. No backend, build, or network access is required.
 
+Public PR preview: https://brain-buddy-frontend-pr-64.fly.dev/design/voice-only-brain-dump-review.html?screen=recording
+
 The prototype is intentionally limited to voice capture, inline wording correction/deletion, return to voice capture, and plain RTM Inbox export.
 
 ## Files
