@@ -4,8 +4,40 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 
 import { apiClient } from "../client";
-import { useExportTree, useImportTree, useTrees, useTreeImportWithToasts } from "../hooks";
-import type { TreeDetailResponse, TreeImportPayload, TreeListItem } from "../types";
+import {
+  treeKeys,
+  useAiFeedback,
+  useCreateNode,
+  useCreateRelation,
+  useCreateTree,
+  useCreateVersion,
+  useDeleteNode,
+  useDeleteRelation,
+  useDeleteTree,
+  useDeleteVersion,
+  useExportTree,
+  useImportTree,
+  useRenameTree,
+  useRestoreVersion,
+  useTree,
+  useTreeImportWithToasts,
+  useTrees,
+  useUpdateNode,
+  useUpdateRelation,
+  useUpdateTree,
+  useValidation,
+  useValidationHistory
+} from "../hooks";
+import type {
+  NodeResponse,
+  RelationResponse,
+  TreeDetailResponse,
+  TreeImportPayload,
+  TreeListItem,
+  ValidationResponse,
+  VersionListItem
+} from "../types";
+import { useTreeStore } from "../../stores/treeStore";
 import { useUiStore } from "../../stores/uiStore";
 
 function createWrapper(queryClient: QueryClient) {
@@ -14,10 +46,59 @@ function createWrapper(queryClient: QueryClient) {
   };
 }
 
+const node: NodeResponse = {
+  id: "node-1",
+  label: "Root cause",
+  type: "parent",
+  position: { x: 10, y: 20 },
+  highlight_state: "none",
+  relation_counts: { up_count: 0, down_count: 1 }
+};
+
+const relation: RelationResponse = {
+  id: "relation-1",
+  source_node_id: "node-1",
+  target_node_id: "node-2",
+  kind: "why",
+  created_at: "2025-01-01T00:00:00Z"
+};
+
+const detail: TreeDetailResponse = {
+  id: "tree-1",
+  name: "Current tree",
+  metadata: {
+    version: 1,
+    created_at: "2025-01-01T00:00:00Z",
+    updated_at: "2025-01-01T00:00:00Z",
+    owner_id: null,
+    layout: null
+  },
+  nodes: [node],
+  relations: [relation],
+  owner_id: null
+};
+
+const version: VersionListItem = {
+  id: "version-1",
+  label: "Before change",
+  created_at: "2025-01-01T00:00:00Z",
+  conflict_count: 0
+};
+
+const validation: ValidationResponse = {
+  node_id: node.id,
+  provider: "mock",
+  confidence: 90,
+  summary: "Looks coherent",
+  checked_at: "2025-01-01T00:00:00Z"
+};
+
 describe("api hooks", () => {
   let queryClient: QueryClient;
 
   beforeEach(() => {
+    useTreeStore.getState().reset();
+    useUiStore.getState().clearToasts();
     queryClient = new QueryClient({
       defaultOptions: {
         queries: {
@@ -146,5 +227,87 @@ describe("api hooks", () => {
     expect(onImported).toHaveBeenCalledWith(tree);
     const toast = useUiStore.getState().toasts.find((t) => t.title === "Imported tree");
     expect(toast?.description).toBe("File Import");
+  });
+
+  it("keeps caches and the active tree synchronized across editing actions", async () => {
+    const renamed = { ...detail, name: "Renamed tree" };
+    const feedback = { status: "success" as const, summary: "Useful", recommendations: ["Follow the cause"] };
+    useTreeStore.getState().setTree(detail);
+    queryClient.setQueryData(treeKeys.list(), [
+      { id: detail.id, name: detail.name, updated_at: detail.metadata.updated_at, owner_id: null }
+    ]);
+
+    vi.spyOn(apiClient, "createTree").mockResolvedValue(detail);
+    const updateSpy = vi.spyOn(apiClient, "updateTree").mockResolvedValue(renamed);
+    vi.spyOn(apiClient, "deleteTree").mockResolvedValue(undefined);
+    vi.spyOn(apiClient, "createNode").mockResolvedValue(node);
+    vi.spyOn(apiClient, "updateNode").mockResolvedValue({ ...node, label: "Updated cause" });
+    vi.spyOn(apiClient, "deleteNode").mockResolvedValue(undefined);
+    vi.spyOn(apiClient, "createRelation").mockResolvedValue(relation);
+    vi.spyOn(apiClient, "updateRelation").mockResolvedValue(relation);
+    vi.spyOn(apiClient, "deleteRelation").mockResolvedValue(undefined);
+    vi.spyOn(apiClient, "createVersion").mockResolvedValue(version);
+    vi.spyOn(apiClient, "deleteVersion").mockResolvedValue(undefined);
+    vi.spyOn(apiClient, "restoreVersion").mockResolvedValue(renamed);
+    vi.spyOn(apiClient, "triggerValidation").mockResolvedValue(validation);
+    vi.spyOn(apiClient, "aiFeedback").mockResolvedValue(feedback);
+
+    const { result } = renderHook(
+      () => ({
+        createTree: useCreateTree(),
+        updateTree: useUpdateTree(detail.id),
+        renameTree: useRenameTree(detail.id),
+        deleteTree: useDeleteTree(),
+        createNode: useCreateNode(detail.id),
+        updateNode: useUpdateNode(detail.id),
+        deleteNode: useDeleteNode(detail.id),
+        createRelation: useCreateRelation(detail.id),
+        updateRelation: useUpdateRelation(detail.id),
+        deleteRelation: useDeleteRelation(detail.id),
+        createVersion: useCreateVersion(detail.id),
+        deleteVersion: useDeleteVersion(detail.id),
+        restoreVersion: useRestoreVersion(detail.id),
+        validation: useValidation(detail.id),
+        aiFeedback: useAiFeedback(detail.id)
+      }),
+      { wrapper: createWrapper(queryClient) }
+    );
+
+    await act(async () => {
+      await result.current.createTree.mutateAsync({ name: detail.name });
+      await result.current.updateTree.mutateAsync({
+        name: renamed.name,
+        metadata: detail.metadata,
+        nodes: detail.nodes,
+        relations: detail.relations
+      });
+      await result.current.renameTree.mutateAsync(renamed.name);
+      await result.current.createNode.mutateAsync({ label: node.label, type: node.type, position: node.position });
+      await result.current.updateNode.mutateAsync({ nodeId: node.id, payload: { label: "Updated cause" } });
+      await result.current.deleteNode.mutateAsync({ nodeId: node.id, cascade: true });
+      await result.current.createRelation.mutateAsync({
+        source_node_id: relation.source_node_id,
+        target_node_id: relation.target_node_id
+      });
+      await result.current.updateRelation.mutateAsync({ relationId: relation.id, payload: { kind: relation.kind } });
+      await result.current.deleteRelation.mutateAsync(relation.id);
+      await result.current.createVersion.mutateAsync({ label: version.label });
+      await result.current.deleteVersion.mutateAsync(version.id);
+      await result.current.restoreVersion.mutateAsync(version.id);
+      await result.current.validation.mutateAsync({ nodeId: node.id, payload: {} });
+      await result.current.aiFeedback.mutateAsync({ consent: true });
+    });
+
+    expect(updateSpy).toHaveBeenCalledWith(detail.id, expect.objectContaining({ name: renamed.name }));
+    expect(apiClient.deleteNode).toHaveBeenCalledWith(detail.id, node.id, true);
+    expect(apiClient.triggerValidation).toHaveBeenCalledWith(detail.id, node.id, {});
+    expect(apiClient.aiFeedback).toHaveBeenCalledWith(detail.id, { consent: true });
+    expect(useTreeStore.getState().metadata?.name).toBe(renamed.name);
+    expect(queryClient.getQueryData(treeKeys.detail(detail.id))).toEqual(renamed);
+
+    await act(async () => {
+      await result.current.deleteTree.mutateAsync(detail.id);
+    });
+    expect(queryClient.getQueryData<TreeListItem[]>(treeKeys.list())).toEqual([]);
   });
 });
