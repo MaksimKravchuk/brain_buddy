@@ -142,4 +142,73 @@ describe("BrainNode inline editing", () => {
       });
     });
   });
+
+  it("keeps unchanged and tree-less inline edits local", async () => {
+    const user = userEvent.setup();
+    act(() => useTreeStore.setState({ activeTreeId: null }));
+    render(
+      <ReactFlowProvider>
+        <RenderedBrainNode />
+      </ReactFlowProvider>
+    );
+
+    await act(async () => {
+      await user.dblClick(screen.getByRole("button", { name: "Original" }));
+    });
+    await act(async () => {
+      await user.tab();
+    });
+    expect(mutateSpy).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Original" })).toBeInTheDocument();
+  });
+
+  it("rolls back a failed inline label save and tells the user why", async () => {
+    const user = userEvent.setup();
+    mutateSpy.mockImplementation((_payload, options) => options?.onError(new Error("Save unavailable")));
+    render(
+      <ReactFlowProvider>
+        <RenderedBrainNode />
+      </ReactFlowProvider>
+    );
+
+    await act(async () => {
+      await user.dblClick(screen.getByRole("button", { name: "Original" }));
+    });
+    const textarea = await screen.findByRole("textbox");
+    await act(async () => {
+      await user.clear(textarea);
+      await user.type(textarea, "Updated");
+      await user.tab();
+    });
+
+    expect(useTreeStore.getState().nodes[0].label).toBe("Original");
+    expect(useUiStore.getState().toasts).toContainEqual(
+      expect.objectContaining({ title: "Failed to update node", description: "Save unavailable", variant: "error" })
+    );
+  });
+
+  it("selects a hovered node and forwards relative creation controls", async () => {
+    const user = userEvent.setup();
+    render(
+      <ReactFlowProvider>
+        <RenderedBrainNode />
+      </ReactFlowProvider>
+    );
+
+    const brainNode = screen.getByTestId("brain-node");
+    await act(async () => {
+      await user.hover(brainNode);
+      await user.click(screen.getByRole("button", { name: "Create upstream node" }));
+      await user.click(screen.getByRole("button", { name: "Create downstream node" }));
+      await user.click(screen.getByRole("button", { name: "Create left sibling" }));
+      await user.click(screen.getByRole("button", { name: "Create right sibling" }));
+      await user.pointer({ target: brainNode, keys: "[MouseLeft]" });
+    });
+
+    expect(defaultData.onCreateParent).toHaveBeenCalledOnce();
+    expect(defaultData.onCreateChild).toHaveBeenCalledOnce();
+    expect(defaultData.onCreateLeftSibling).toHaveBeenCalledOnce();
+    expect(defaultData.onCreateRightSibling).toHaveBeenCalledOnce();
+    expect(useTreeStore.getState().selection).toEqual({ type: "node", id: baseNode.id });
+  });
 });
