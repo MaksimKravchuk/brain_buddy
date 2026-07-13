@@ -2,7 +2,7 @@
 
 Date: 2026-07-13
 
-Status: Proposed implementation contract; decision gates below remain open
+Status: Accepted implementation contract; unresolved gates defer only their named slices
 
 Scope: CloudDesign v2, current `main` implementation, ADR-0001, and ADR-0002
 
@@ -13,19 +13,19 @@ and traceability contract. It does not make the mockup executable by treating ev
 as an accepted domain decision. The precedence order is:
 
 1. accepted ADRs and their normative acceptance scenarios;
-2. this contract after its explicit decision gates are resolved;
+2. this contract within its accepted scope and explicit per-slice gates;
 3. CloudDesign interaction intent;
 4. demo text and placeholder behavior in the mockup.
 
-ADR-0001 and ADR-0002 are currently `Proposed`, but they are the repository's most
-specific vNext contracts. Where CloudDesign conflicts with them, this document names the
-conflict rather than silently choosing the mockup.
+ADR-0001 is `Accepted`; ADR-0002 remains `Proposed` and is the most specific voice-operation
+contract. Where CloudDesign conflicts with either, this document names the conflict rather
+than silently choosing the mockup. Unresolved decisions in Section 11 defer only the slices
+named there; they do not reopen D-01 or the native backend boundary.
 
-The largest conflict is deliberate and blocking: CloudDesign depicts BrainBuddy as a
-native GTD task system, while ADR-0001 says that a proprietary task manager is an MVP
-non-goal and that task completion belongs to one external tracker. Section 6 proposes the
-native model needed by the mockup. It is **not authorized for implementation until D-01
-is decided and ADR-0001 is amended or superseded**.
+The original authorization conflict is resolved. ADR-0001 now accepts BrainBuddy-owned
+Tasks, Projects, and Contexts as the canonical first-tranche GTD store. Section 6 is the
+build-level elaboration of that accepted boundary: native task state belongs to Tasks,
+while execution runs/results and optional adapters remain separate and deferred.
 
 This contract preserves the current CRT. A task or project is not a tree or node. The
 project `Think` affordance may open or create a linked CRT through the existing Thinking
@@ -193,9 +193,9 @@ Legend:
 | Affordance | CloudDesign source | Current code/API | ADR contract | Classification |
 |---|---|---|---|---|
 | authenticated shell/account | `bb-app.jsx:238-247`; `bbm-app.jsx:115-121` | `frontend/src/App.tsx:26-40`; auth store and `/api/auth/*` | ADR-0001 Identity and authorization sections | **Reuse/T1 integration** |
-| four GTD lists and counts | `bb-app.jsx:252-269`; `bbm-app.jsx:227-247` | no task list API or component; live protected route renders only `TreeWorkspace` | conflicts with ADR-0001 Context/non-goals and external-tracker ownership | **D-01 gate, then T1** |
-| projects navigation/color | `bb-app.jsx:271-283`; `bbm-app.jsx:248-259` | `TreeMenu` selects CRT trees, which are not projects; no Project API | no native Project contract; Thinking owns CRT | **D-01 gate, then T1** |
-| contexts navigation/filter | `bb-app.jsx:286-295`; `bbm-app.jsx:260-268` | no Context model, API, or component | no native Context contract | **D-01 gate, then T1** |
+| four GTD lists and counts | `bb-app.jsx:252-269`; `bbm-app.jsx:227-247` | no task list API or component; live protected route renders only `TreeWorkspace` | ADR-0001 Tasks ownership and list contract | **T1** |
+| projects navigation/color | `bb-app.jsx:271-283`; `bbm-app.jsx:248-259` | `TreeMenu` selects CRT trees, which are not projects; no Project API | ADR-0001 Tasks owns Project; Thinking owns CRT | **T1** |
+| contexts navigation/filter | `bb-app.jsx:286-295`; `bbm-app.jsx:260-268` | no Context model, API, or component | ADR-0001 Tasks owns Context | **T1** |
 | Weekly Review entry/due | `bb-app.jsx:266-268`; `bbm-app.jsx:243-246` | none | ADR-0001 WeeklyReview; ADR-0002 Weekly Review specialization | **T2**; placeholder may ship in T1 only if clearly unavailable |
 | search tasks and trees | `bb-app.jsx:240-243` | no cross-domain search; current API client is tree-specific | no search contract | **Deferred**; separate task and tree search before federation |
 | account menu | `bb-app.jsx:244-247` | only sign-out at `TreeWorkspace.tsx:174-189` | ADR-0001 Identity | **T1 minimal sign-out; Deferred menu** |
@@ -206,16 +206,16 @@ Legend:
 
 | Affordance | CloudDesign source | Current code/API | Required ADR/domain contract | Classification |
 |---|---|---|---|---|
-| list/query/count open tasks | `bb-app.jsx:108-112,175-231`; `bbm-app.jsx:181-203` | no Task schema/route/repository in `backend/app/schemas/domain.py`, `api/routes.py`, or `container.py` | owner-scoped native Task query projection; D-01 must amend ADR-0001 | **D-01/T1** |
-| add task/next action | `bb-app.jsx:114-118,227-230`; `bbm-app.jsx:99-103,199-202` | mock uses `prompt()` and local arrays; live product has no endpoint | idempotent Task create command | **D-01/T1** |
-| open/collapse task detail | `bb-shell.jsx:193-227`; mobile `bbm-app.jsx:127-150,191-196` | no task route/component; current inspectors are CRT node/relation only | Task detail query and responsive route/panel | **D-01/T1** |
-| complete/reopen task | `bb-shell.jsx:197-203`; `bbm-app.jsx:132-136,292-298` | prototype toggles local state; no live Task transition | audited Task command, revision check, completed timestamp, explicit reopen destination | **D-01/T1** |
-| edit title/details/list/project/contexts/due/waiting | metadata rendered by `bb-shell.jsx:204-225` and `bbm-parts.jsx:61-78`; prototype does not persist edits | absent | Task patch/move commands and invariants in Section 6 | **D-01/T1** for fields required to make lists truthful |
+| list/query/count open tasks | `bb-app.jsx:108-112,175-231`; `bbm-app.jsx:181-203` | no Task schema/route/repository in `backend/app/schemas/domain.py`, `api/routes.py`, or `container.py` | ADR-0001 owner-scoped Task query projection | **T1** |
+| add task/next action | `bb-app.jsx:114-118,227-230`; `bbm-app.jsx:99-103,199-202` | mock uses `prompt()` and local arrays; live product has no endpoint | idempotent Task create command | **T1** |
+| open/collapse task detail | `bb-shell.jsx:193-227`; mobile `bbm-app.jsx:127-150,191-196` | no task route/component; current inspectors are CRT node/relation only | Task detail query and responsive route/panel | **T1** |
+| complete/reopen task | `bb-shell.jsx:197-203`; `bbm-app.jsx:132-136,292-298` | prototype toggles local state; no live Task transition | audited Task command, revision check, completed timestamp, explicit reopen destination | **T1** |
+| edit title/details/list/project/contexts/due/waiting | metadata rendered by `bb-shell.jsx:204-225` and `bbm-parts.jsx:61-78`; prototype does not persist edits | absent | Task patch/move commands and invariants in Section 6 | **T1** for fields required to make lists truthful |
 | sort | `bb-app.jsx:196`; static `bb-screens.jsx:152,164` | not-built toast; no query sort | stable default `order_key`; named sort modes need a later contract | **Deferred** beyond manual/list default order |
 | group by project | `bb-app.jsx:72-87,191-224`; static `bb-screens.jsx:184-211` | local projection over complete demo array | fetch every page for the selected state before client grouping, with explicit loading/error; no incomplete group may be presented as complete | **T1 desktop**; no new persistence concept |
-| create/edit/archive project | `bb-app.jsx:271-283` (`New project` is placeholder) | no Project model/API; CRT tree create is not reusable as project create | Project commands and owner-scoped repository | **D-01/T1 create/read**, edit/archive **T2** |
-| project view and add project task | `bb-app.jsx:130-154`; `bbm-app.jsx:156-169` | no Project/Task view; add emits placeholder | Project query plus Task create with `project_id` | **D-01/T1** |
-| context view/filter | `bb-app.jsx:156-173,286-293`; `bbm-app.jsx:171-179,260-266` | no Context model/API | context query parameter and same-owner Context records | **D-01/T1** |
+| create/edit/archive project | `bb-app.jsx:271-283` (`New project` is placeholder) | no Project model/API; CRT tree create is not reusable as project create | Project commands and owner-scoped repository | **T1 create/read**, edit/archive **T2** |
+| project view and add project task | `bb-app.jsx:130-154`; `bbm-app.jsx:156-169` | no Project/Task view; add emits placeholder | Project query plus Task create with `project_id` | **T1** |
+| context view/filter | `bb-app.jsx:156-173,286-293`; `bbm-app.jsx:171-179,260-266` | no Context model/API | context query parameter and same-owner Context records | **T1** |
 | task subtasks | `bb-shell.jsx:76-101`; mobile detail uses same component at `bbm-app.jsx:148` | demo-local state only | TaskSubtask records/commands | **T2** |
 | task comments | `bb-shell.jsx:147-171`; mobile detail uses same component at `bbm-app.jsx:148` | demo-local state only | TaskComment append/query; owner actor only in MVP | **T2** |
 | due date / review `Add date` | `bb-shell.jsx:206`; `bbm-app.jsx:139,351`; static review `bbm-screens.jsx:185-193` | display/label only | date-only Task field and proposal patch; D-04 | **T1 date display/edit**, reminders **Deferred** |
@@ -250,8 +250,8 @@ Legend:
 
 ## 5. First-tranche product contract
 
-Subject to D-01, the first tranche is the smallest honest version of the CloudDesign
-product loop:
+With D-01 resolved by accepted ADR-0001, the first tranche is the smallest honest version
+of the CloudDesign product loop:
 
 1. signed-in users land in a responsive task shell, with existing CRT reachable as a
    separate Thinking destination;
@@ -277,18 +277,18 @@ First-tranche exclusions:
 The visual shell may reserve unavailable destinations only when they are visibly disabled
 or labeled preview—not populated with fabricated activity.
 
-## 6. Proposed native GTD domain model
+## 6. Accepted native GTD domain model
 
-### 6.1 Required ADR change and ownership
+### 6.1 Accepted ownership decision
 
-If D-01 accepts native tasks, amend ADR-0001 as follows:
+ADR-0001 adopts native tasks with these boundaries:
 
 - add a **Tasks** bounded module owning native GTD records and transitions;
 - keep Organize ownership of `CaptureItem`, clarification, source-preserving edits, and
   confirmation decisions;
 - let the application workflow create a Task through `TaskPort` only after confirmation;
-- add `native_task` as an allowed confirmed destination; retain or defer
-  `external_task_tracker` explicitly rather than aliasing it;
+- add `native_task` as an allowed confirmed destination; reserve but defer
+  `external_task_tracker` rather than aliasing or synchronizing it;
 - define task completion in Tasks while capture completion remains Organize-owned;
 - keep Review outcomes referencing task IDs without copying task state;
 - keep Execution runs and EvidenceResults outside Task;
@@ -368,7 +368,7 @@ All endpoints are under `/api`, use the current session cookie and error envelop
 transitions require `expected_revision` and return `409` on stale state.
 
 ```text
-GET    /tasks?state=&project_id=&context_id=&include_completed=&cursor=
+GET    /tasks?state=&project_id=&context_id=&unassigned_project=&include_completed=&cursor=&limit=
 POST   /tasks
 GET    /tasks/{task_id}
 PATCH  /tasks/{task_id}                       # title/details/metadata/order only
@@ -423,13 +423,16 @@ POST /tasks/{id}/transitions
 }
 ```
 
-`GET /tasks` returns a flat cursor-paginated projection with total counts by open state.
-For T1 group-by-project, the client must fetch every page for the selected state before it
-renders groups and must show aggregate loading/error while doing so. It may not present a
-partially fetched group as complete. If task volume makes full retrieval unacceptable,
-replace that implementation with a server `group_by=project` projection that exposes
-per-group counts and cursors before release; silently incomplete client grouping is never
-conformant. Counts exclude completed/cancelled tasks unless explicitly requested.
+`GET /tasks` follows ADR-0001's normative list contract. It returns a flat `TaskPage` with
+`items`, `next_cursor`, `has_more`, and open `counts_by_state`; default/max limits are
+50/200. Filters are owner-scoped, project/context counts ignore only the state filter, and
+the stable order is `order_key`, `created_at`, then `id`. The opaque cursor binds that sort
+tuple and normalized filters. For T1 group-by-project, the client must fetch every page for
+the selected state before it renders groups and must show aggregate loading/error while
+doing so. It may not present a partially fetched group as complete. If task volume makes
+full retrieval unacceptable, replace that implementation with a server `group_by=project`
+projection that exposes per-group counts and cursors before release; silently incomplete
+client grouping is never conformant.
 
 The operation confirmation API remains ADR-0002's `/operations/{id}/confirm`. The client
 must not create tasks one by one after confirmation. The server workflow commits
@@ -525,11 +528,12 @@ complete” slice may populate fake domain state.
 
 ### Slice 0 — decide and scaffold boundaries
 
-Dependencies: D-01, D-02, D-03.
+Dependencies: D-03 for product landing/deep-link behavior. Native backend work is not
+blocked by an external-tracker decision because that adapter is deferred.
 
 Deliverable:
 
-- amend/supersede ADR-0001 for native Tasks if accepted;
+- consume accepted ADR-0001 native-Tasks ownership and API contracts;
 - package/import architecture test for Identity, Capture, Organize, Tasks, Review,
   Thinking, Execution, and operation workflow ownership;
 - reserve `/` for task shell and move existing CRT workspace to a stable `/trees` route
@@ -722,15 +726,15 @@ normative. A provider-backed release additionally requires the versioned labelle
 confidence evaluation and p50/p95 telemetry described there. Live model calls are never a
 CI dependency.
 
-## 11. Explicit unresolved decisions
+## 11. Decision register
 
 | ID | Decision needed | Options and impact | Owner/gate |
 |---|---|---|---|
-| D-01 | Is BrainBuddy now the canonical native GTD task store? | **A:** accept native Tasks and amend ADR-0001; CloudDesign can be built. **B:** keep external tracker canonical; redesign lists as projections and remove native completion/details semantics. This must not be inferred. | Product + architecture; blocks Slice 0/1 |
-| D-02 | What is the first-tranche external tracker posture after native Tasks? | Remove/defer adapter, export one-way, or keep dual destinations. Dual-write/sync is not allowed without conflict and ownership rules. | Product; before route enum/API amendment |
+| D-01 | Is BrainBuddy now the canonical native GTD task store? | **Resolved A:** accepted ADR-0001 makes Tasks/Projects/Contexts product-owned canonical records. External projections cannot own completion or list state. | Resolved 2026-07-13; unblocks Slice 0/1 |
+| D-02 | What is the first-tranche external tracker posture after native Tasks? | **Resolved: defer.** No external route, import, export, dual write, or synchronization in T1. Existing integrations are later adapter/migration concerns and never the native UI source of truth. | Resolved 2026-07-13; no backend blocker |
 | D-03 | Product landing and CRT navigation | Task shell at `/` with CRT at `/trees` is proposed. Confirm deep-link/back-navigation expectations. | Product; blocks shell routing |
-| D-04 | Date semantics | Proposed first tranche is date-only, user locale, stored as ISO local date; no reminder/timezone promise. Confirm whether time-of-day is required. | Product; before Task schema freeze |
-| D-05 | Waiting semantics | Is free-text `waiting_for` sufficient, or must waiting reference a person/task? Proposed MVP is free text plus timestamp. | Product; before Task schema freeze |
+| D-04 | Date semantics | **Resolved:** first tranche is an ISO local calendar date only; no time-of-day, timezone, or reminder promise. | Resolved in ADR-0001 |
+| D-05 | Waiting semantics | **Resolved:** free-text `waiting_for` or explicit `waiting_since` is sufficient; no person/task reference model in T1. | Resolved in ADR-0001 |
 | D-06 | Meaning of `Thinking · N steps` | Node count, unresolved questions, or operation steps. Proposed: do not ship the number until defined; show `Linked thinking tree`. | Product/CRT; before Slice 5 |
 | D-07 | Project-to-CRT cardinality | Proposed project may link multiple existing trees; `Think` asks link existing vs create new. One automatic tree per project would conflate domains. | Product/CRT; before Slice 5 |
 | D-08 | Comment scope | Owner-only notes vs future collaborators. Proposed T2 owner-authored notes; do not design mentions/permissions now. | Product; before comments |
@@ -743,7 +747,8 @@ CI dependency.
 
 An implementation may claim CloudDesign vNext conformance only when:
 
-- D-01 and all schema-blocking decisions are captured in an accepted ADR;
+- accepted ADR-0001 remains authoritative for native GTD ownership, provenance, list
+  semantics, execution separation, and CRT preservation;
 - every first-tranche affordance in Section 4 is backed by a real owner-scoped API or is
   visibly unavailable;
 - Brain Dump uses the corrected provisional/confirmation language and all ADR-0002 safety,
