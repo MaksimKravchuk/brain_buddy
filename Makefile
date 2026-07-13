@@ -14,6 +14,7 @@ dev-frontend:
 
 test-backend:
 	cd backend && pytest --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results
+	python3 scripts/validate_backend_coverage.py backend/coverage.xml
 	python3 scripts/validate_ci_artifacts.py results --path backend/allure-results --label backend-pytest
 
 lint-backend:

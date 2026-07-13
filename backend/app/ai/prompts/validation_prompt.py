@@ -85,7 +85,7 @@ def _build_downstream_chain(tree: TreeDocument, node: NodeDocument) -> list[Chai
         if relation.target_id in visited:
             break
         visited.add(relation.target_id)
-        current = cause
+        current = effect
 
     return steps
 
@@ -120,7 +120,7 @@ def _build_upstream_chain(tree: TreeDocument, node: NodeDocument) -> list[ChainS
         if relation.source_id in visited:
             break
         visited.add(relation.source_id)
-        current = effect
+        current = cause
 
     steps.reverse()
     return steps
