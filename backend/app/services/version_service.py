@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
+from datetime import datetime
 
 from app.exceptions import NotFoundError
 from app.repositories import TreeRepository, VersionRepository
@@ -112,9 +113,7 @@ class VersionService:
                 }
             )
 
-        return self.tree_service.mutate_tree(
-            tree_id, restore_snapshot, timestamp=now
-        )
+        return self.tree_service.mutate_tree(tree_id, restore_snapshot, timestamp=now)
 
     def delete_version(self, tree_id: str, version_id: str) -> None:
         def remove_version(tree: TreeDocument) -> TreeDocument:
@@ -271,7 +270,7 @@ class VersionService:
 
     @staticmethod
     def _build_export_filename(
-        tree_id: str, exported_at, version_id: str | None
+        tree_id: str, exported_at: datetime, version_id: str | None
     ) -> str:
         timestamp = to_isoformat(exported_at).replace(":", "").replace("-", "")
         suffix = version_id.split("::")[-1] if version_id else "latest"

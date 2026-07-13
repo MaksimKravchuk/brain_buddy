@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 from app.exceptions import ConflictError, NotFoundError
@@ -40,7 +41,7 @@ class InviteRepository(BaseRepository):
 
         self.dump_model(self._invite_path(invite.code), invite)
 
-    def mark_used(self, code: str, *, user_id: str, used_at) -> Invite:
+    def mark_used(self, code: str, *, user_id: str, used_at: datetime) -> Invite:
         """Mark an invite as consumed by a user.
 
         Raises `NotFoundError` if the invite doesn't exist and

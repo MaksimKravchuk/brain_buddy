@@ -77,9 +77,7 @@ class TreeRepository(BaseRepository):
                 )
             return updated
 
-        return self.mutate(
-            tree_id, update=guarded_update, after_save=after_save
-        )
+        return self.mutate(tree_id, update=guarded_update, after_save=after_save)
 
     @contextmanager
     def _exclusive_tree_lock(self, tree_id: str) -> Generator[None, None, None]:
