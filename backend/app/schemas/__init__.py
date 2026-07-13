@@ -33,6 +33,7 @@ from .domain import (
     ValidationEntry,
     VersionDocument,
 )
+from .tasks import TaskCreateRequest, TaskListResponse, TaskResponse
 
 __all__ = [
     "ErrorResponse",
@@ -42,6 +43,9 @@ __all__ = [
     "Session",
     "SignupRequest",
     "User",
+    "TaskCreateRequest",
+    "TaskListResponse",
+    "TaskResponse",
     "NodeCreateRequest",
     "NodeDocument",
     "NodeResponse",
