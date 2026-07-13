@@ -49,4 +49,41 @@ describe("useGraphProfiler", () => {
 
     expect(cancelAnimationFrame).toHaveBeenCalledWith(11);
   });
+
+  it("samples slow render streaks and resets the streak after a fast render", () => {
+    const frames: (() => void)[] = [];
+    vi.stubGlobal("requestAnimationFrame", vi.fn((callback: () => void) => {
+      frames.push(callback);
+      return frames.length;
+    }));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    vi.stubGlobal("performance", {
+      now: vi
+        .fn()
+        .mockReturnValueOnce(10)
+        .mockReturnValueOnce(25)
+        .mockReturnValueOnce(30)
+        .mockReturnValueOnce(45)
+        .mockReturnValueOnce(50)
+        .mockReturnValueOnce(65)
+        .mockReturnValueOnce(70)
+        .mockReturnValueOnce(75)
+    });
+    const onSample = vi.fn();
+    const { rerender } = renderHook(
+      ({ nodeCount }) => useGraphProfiler({ nodeCount, edgeCount: 4, onSample }),
+      { initialProps: { nodeCount: 20 } }
+    );
+
+    act(() => frames[0]?.());
+    rerender({ nodeCount: 21 });
+    act(() => frames[1]?.());
+    rerender({ nodeCount: 22 });
+    act(() => frames[2]?.());
+    rerender({ nodeCount: 23 });
+    act(() => frames[3]?.());
+
+    expect(onSample).toHaveBeenCalledTimes(4);
+    expect(onSample.mock.calls[onSample.mock.calls.length - 1]?.[0].durationMs).toBe(5);
+  });
 });
