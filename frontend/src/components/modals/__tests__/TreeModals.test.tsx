@@ -143,4 +143,59 @@ describe("tree management modals", () => {
     expect(useUiStore.getState().modals.deleteTree).toBe(false);
     expect(lastToast()).toMatchObject({ title: "Tree deleted", variant: "success" });
   });
+
+  it("keeps management modals open and explains mutation failures", async () => {
+    const user = userEvent.setup();
+    hookMocks.createTree.mockImplementation((_payload, options) => options?.onError(new Error("Cannot create")));
+    setModal("createTree", true);
+    const { unmount } = render(<CreateTreeModal onCreated={vi.fn()} />);
+    await act(async () => {
+      await user.type(screen.getByLabelText("Name"), "New tree");
+      await user.click(screen.getByRole("button", { name: "Create tree" }));
+    });
+    expect(lastToast()).toMatchObject({ title: "Failed to create tree", description: "Cannot create" });
+    expect(useUiStore.getState().modals.createTree).toBe(true);
+    unmount();
+
+    act(() => useTreeStore.getState().setTree(tree));
+    hookMocks.renameTree.mockImplementation((_name, options) => options?.onError(new Error("Cannot rename")));
+    setModal("renameTree", true);
+    const renameView = render(<RenameTreeModal />);
+    await act(async () => {
+      await user.clear(screen.getByLabelText("Name"));
+      await user.type(screen.getByLabelText("Name"), "New name");
+      await user.click(screen.getByRole("button", { name: "Save name" }));
+    });
+    expect(lastToast()).toMatchObject({ title: "Failed to rename tree", description: "Cannot rename" });
+    expect(useUiStore.getState().modals.renameTree).toBe(true);
+    renameView.unmount();
+
+    hookMocks.deleteTree.mockImplementation((_id, options) => options?.onError(new Error("Cannot delete")));
+    setModal("deleteTree", true);
+    render(<DeleteTreeModal trees={trees} onDeleted={vi.fn()} />);
+    await act(async () => await user.click(screen.getByRole("button", { name: "Delete" })));
+    expect(lastToast()).toMatchObject({ title: "Failed to delete tree", description: "Cannot delete" });
+    expect(useUiStore.getState().modals.deleteTree).toBe(true);
+  });
+
+  it("cancels creation and rejects empty renamed tree names", async () => {
+    const user = userEvent.setup();
+    setModal("createTree", true);
+    const createView = render(<CreateTreeModal onCreated={vi.fn()} />);
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+    });
+    expect(useUiStore.getState().modals.createTree).toBe(false);
+    createView.unmount();
+
+    act(() => useTreeStore.getState().setTree(tree));
+    setModal("renameTree", true);
+    render(<RenameTreeModal />);
+    await act(async () => {
+      await user.clear(screen.getByLabelText("Name"));
+      await user.click(screen.getByRole("button", { name: "Save name" }));
+    });
+    expect(hookMocks.renameTree).not.toHaveBeenCalled();
+    expect(lastToast()).toMatchObject({ title: "Name required", variant: "warning" });
+  });
 });

@@ -152,4 +152,48 @@ describe("VersionPanel workflows", () => {
     expect(useTreeStore.getState().versions).toEqual([]);
     expect(lastToast()).toMatchObject({ title: "Snapshot deleted" });
   });
+
+  it("explains an empty snapshot history and mutation failures", async () => {
+    const user = userEvent.setup();
+    act(() => useTreeStore.getState().setVersions([]));
+    hookMocks.create.mutate.mockImplementation((_payload, options) => options?.onError(new Error("Capture unavailable")));
+    hookMocks.exportTree.mutate.mockImplementation((_payload, options) => options?.onError(new Error("Export unavailable")));
+    render(<VersionPanel />);
+
+    expect(screen.getByText("No versions captured yet.")).toBeInTheDocument();
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Capture snapshot" }));
+    });
+    expect(lastToast()).toMatchObject({ title: "Failed to create snapshot", description: "Capture unavailable" });
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Export" }));
+    });
+    expect(lastToast()).toMatchObject({ title: "Export failed", description: "Export unavailable" });
+  });
+
+  it("keeps snapshot data intact when restore or deletion fails", async () => {
+    const user = userEvent.setup();
+    hookMocks.restore.mutate.mockImplementation((_id, options) => options?.onError(new Error("Restore unavailable")));
+    hookMocks.remove.mutate.mockImplementation((_id, options) => options?.onError(new Error("Delete unavailable")));
+    render(<VersionPanel />);
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Restore" }));
+    });
+    await act(async () => {
+      await user.click(screen.getAllByRole("button", { name: "Restore" })[1]);
+    });
+    expect(lastToast()).toMatchObject({ title: "Failed to restore version", description: "Restore unavailable" });
+    expect(useTreeStore.getState().versions).toHaveLength(1);
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Delete" }));
+    });
+    await act(async () => {
+      await user.click(screen.getAllByRole("button", { name: "Delete" })[1]);
+    });
+    expect(lastToast()).toMatchObject({ title: "Failed to delete snapshot", description: "Delete unavailable" });
+    expect(useTreeStore.getState().versions).toHaveLength(1);
+  });
 });
