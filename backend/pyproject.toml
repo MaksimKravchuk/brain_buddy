@@ -29,6 +29,7 @@ dev = [
   "black>=24.3,<25.0",
   "ruff>=0.3,<0.4",
   "mypy>=1.8,<2.0",
+  "allure-pytest>=2.15,<3.0",
 ]
 
 [tool.black]
