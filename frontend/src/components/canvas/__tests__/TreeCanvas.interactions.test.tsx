@@ -1,4 +1,4 @@
-import { act, render, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -127,6 +127,39 @@ describe("TreeCanvas interaction callbacks", () => {
     expect(mutations.deleteNode).toHaveBeenCalledWith({ nodeId: "node-2", cascade: true }, expect.any(Object));
     expect(useTreeStore.getState().nodes.map((node) => node.id)).not.toContain("node-2");
     expect(useUiStore.getState().toasts.find((toast) => toast.title === "Node deleted")).toBeTruthy();
+  });
+
+  it("reports failed canvas mutations and offers relation retry feedback", () => {
+    mutations.updateNode.mockImplementation((_payload, options) => options?.onError(new Error("position unavailable")));
+    mutations.deleteNode.mockImplementation((_payload, options) => options?.onError(new Error("delete unavailable")));
+    mutations.createRelation.mockImplementation((_payload, options) => options?.onError(new Error("relation unavailable")));
+    mutations.deleteRelation.mockImplementation((_payload, options) => options?.onError(new Error("edge unavailable")));
+    renderCanvas();
+
+    act(() => flowProps.onNodeDragStop?.({}, { id: "node-1", position: { x: 120, y: 220 } }));
+    act(() => flowProps.onNodesDelete?.([{ id: "node-2", data: { node: { label: "Effect" } } }]));
+    act(() => flowProps.onConnect?.({ source: "node-1", target: "node-2" }));
+    act(() => flowProps.onEdgesDelete?.([{ id: "relation-1" }]));
+
+    expect(useUiStore.getState().toasts.map((toast) => toast.title)).toEqual(
+      expect.arrayContaining([
+        "Unable to update node position",
+        "Failed to delete node",
+        "Failed to create relation",
+        "Failed to delete relation"
+      ])
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("Unable to create link");
+  });
+
+  it("does not delete a node from its context menu when confirmation is declined", () => {
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderCanvas();
+
+    act(() => flowProps.onNodeContextMenu?.({ preventDefault: vi.fn() }, { id: "node-1" }));
+
+    expect(mutations.deleteNode).not.toHaveBeenCalled();
+    expect(useTreeStore.getState().selection).toEqual({ type: "node", id: "node-1" });
   });
 
   it("replaces a temporary relation after a successful connection", () => {
