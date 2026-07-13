@@ -41,9 +41,7 @@ class NodeService:
             )
             return tree.model_copy(update={"nodes": [*tree.nodes, created_node]})
 
-        updated_tree = self.tree_service.mutate_tree(
-            tree_id, add_node, timestamp=now
-        )
+        updated_tree = self.tree_service.mutate_tree(tree_id, add_node, timestamp=now)
         assert created_node is not None
         return created_node, updated_tree
 
@@ -64,7 +62,9 @@ class NodeService:
             nonlocal updated_node
             nodes = list(tree.nodes)
             try:
-                index = next(idx for idx, node in enumerate(nodes) if node.id == node_id)
+                index = next(
+                    idx for idx, node in enumerate(nodes) if node.id == node_id
+                )
             except StopIteration as exc:
                 raise NotFoundError("Node", node_id) from exc
 
@@ -88,9 +88,7 @@ class NodeService:
                     extra["highlight_state"] = payload.highlight_state
                 updates["extra"] = extra
 
-            updates["metadata"] = node.metadata.model_copy(
-                update={"updated_at": now}
-            )
+            updates["metadata"] = node.metadata.model_copy(update={"updated_at": now})
             updated_node = node.model_copy(update=updates)
             nodes[index] = updated_node
             return tree.model_copy(update={"nodes": nodes})

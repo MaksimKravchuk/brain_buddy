@@ -6,7 +6,8 @@ import uuid
 from time import perf_counter
 
 from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.responses import Response
 from starlette.types import ASGIApp
 
 from app.core.logging import get_logger, reset_correlation_id, set_correlation_id
@@ -21,7 +22,9 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.logger = get_logger(__name__)
 
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         incoming = request.headers.get(CORRELATION_HEADER) or request.headers.get(
             "X-Request-ID"
         )

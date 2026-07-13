@@ -60,6 +60,9 @@ jobs:
         run: |
           pytest --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results
 
+      - name: Enforce backend line and branch coverage
+        run: python3 ../scripts/validate_backend_coverage.py coverage.xml
+
       - name: Validate backend Allure results
         if: always()
         working-directory: .

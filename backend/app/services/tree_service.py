@@ -6,6 +6,7 @@ import logging
 from collections import OrderedDict
 from collections import OrderedDict as OrderedDictType
 from collections.abc import Callable, Iterable
+from contextlib import suppress
 from datetime import datetime, timedelta
 from threading import RLock
 from typing import Any
@@ -255,9 +256,7 @@ class TreeService:
             if after_save is not None:
                 after_save(updated_tree)
 
-        updated_tree = self.tree_repo.mutate(
-            tree_id, update=touch, after_save=publish
-        )
+        updated_tree = self.tree_repo.mutate(tree_id, update=touch, after_save=publish)
         return updated_tree.model_copy(deep=True)
 
     def _commit_tree_state(self, tree: TreeDocument) -> None:
@@ -271,11 +270,8 @@ class TreeService:
 
         with self._cache_lock:
             self._cache.pop(tree_id, None)
-        try:
+        with suppress(NotFoundError):
             self.index_repo.delete(tree_id)
-        except NotFoundError:
-            # Index may have been out of sync; ignore to allow deletion.
-            pass
 
     def _cache_store(self, tree: TreeDocument) -> None:
         with self._cache_lock:
@@ -360,7 +356,9 @@ class TreeService:
                 )
             )
 
-        existing_relations = {relation.id: relation for relation in existing_tree.relations}
+        existing_relations = {
+            relation.id: relation for relation in existing_tree.relations
+        }
         merged_relations: list[RelationDocument] = []
         for relation in tree.relations:
             previous_relation = existing_relations.get(relation.id)

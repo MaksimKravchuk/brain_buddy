@@ -17,6 +17,11 @@ node_modules/
 dist/
 build/
 coverage/
+/backend/.coverage
+/backend/coverage.xml
+/backend/allure-results/
+/frontend/allure-results/
+/allure-report/
 *.log
 
 # Editors
