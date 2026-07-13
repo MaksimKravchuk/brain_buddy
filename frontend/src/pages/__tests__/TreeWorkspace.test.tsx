@@ -156,4 +156,33 @@ describe("TreeWorkspace", () => {
     act(() => listError?.action?.onClick());
     expect(retryTrees).toHaveBeenCalledOnce();
   });
+
+  it("shows a loading canvas and allows signed-out visitors to finish a session", async () => {
+    const logout = vi.fn().mockResolvedValue(undefined);
+    hookMocks.treesResult = { data: [], error: null, refetch: vi.fn() };
+    hookMocks.treeResult = { data: undefined, error: null, isLoading: true, isFetching: false, refetch: vi.fn() };
+    act(() => useAuthStore.setState({ user: null, status: "anon", logout }));
+    const user = userEvent.setup();
+    render(<TreeWorkspace />);
+
+    expect(screen.getByText("Loading tree…")).toBeInTheDocument();
+    expect(screen.queryByText("person@example.com")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Sign out" }));
+    expect(logout).toHaveBeenCalledOnce();
+  });
+
+  it("shows retry progress for errors without a correlation reference", () => {
+    hookMocks.treeResult = {
+      data: undefined,
+      error: new Error("Network unavailable"),
+      isLoading: false,
+      isFetching: true,
+      refetch: vi.fn()
+    };
+    render(<TreeWorkspace />);
+
+    expect(screen.getAllByText("Network unavailable")).toHaveLength(2);
+    expect(screen.queryByText(/^Reference:/)).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Loading" }).closest("button")).toBeDisabled();
+  });
 });

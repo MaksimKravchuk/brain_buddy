@@ -20,6 +20,7 @@ import {
   useRenameTree,
   useRestoreVersion,
   useTree,
+  useTreeDownload,
   useTreeImportWithToasts,
   useTrees,
   useUpdateNode,
@@ -332,5 +333,67 @@ describe("api hooks", () => {
     expect(historySpy).toHaveBeenCalledWith(detail.id, node.id, expect.any(AbortSignal));
     expect(result.current.unselectedTree.isFetching).toBe(false);
     expect(result.current.unselectedHistory.isFetching).toBe(false);
+  });
+
+  it("warns instead of exporting when no tree is selected", () => {
+    const exportSpy = vi.spyOn(apiClient, "exportTree");
+    const { result } = renderHook(() => useTreeDownload(null), { wrapper: createWrapper(queryClient) });
+
+    act(() => result.current.download());
+
+    expect(exportSpy).not.toHaveBeenCalled();
+    expect(useUiStore.getState().toasts).toContainEqual(
+      expect.objectContaining({ title: "Select a tree first", variant: "warning" })
+    );
+  });
+
+  it("downloads a selected tree with a timestamped JSON filename", async () => {
+    const createObjectURL = vi.fn(() => "blob:tree");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    vi.spyOn(apiClient, "exportTree").mockResolvedValue({ tree: detail });
+    const { result } = renderHook(() => useTreeDownload(detail.id), { wrapper: createWrapper(queryClient) });
+
+    act(() => result.current.download());
+
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalledOnce());
+    expect(click).toHaveBeenCalledOnce();
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:tree");
+    expect(useUiStore.getState().toasts).toContainEqual(
+      expect.objectContaining({ title: "Download ready", description: "Current tree-2025-01-01T000000Z.json" })
+    );
+  });
+
+  it("explains unreadable, incomplete, and rejected import files", async () => {
+    const onImported = vi.fn();
+    const importSpy = vi.spyOn(apiClient, "importTree").mockRejectedValue(new Error("Service unavailable"));
+    const { result } = renderHook(() => useTreeImportWithToasts(onImported), {
+      wrapper: createWrapper(queryClient)
+    });
+
+    const invalidJson = { name: "broken.json", text: () => Promise.resolve("{") } as unknown as File;
+    await act(async () => result.current.importFromFile(invalidJson));
+    expect(useUiStore.getState().toasts).toContainEqual(
+      expect.objectContaining({ title: "Invalid import file", variant: "error" })
+    );
+
+    const incomplete = {
+      name: "incomplete.json",
+      text: () => Promise.resolve(JSON.stringify({ id: "tree-2", name: "Incomplete" }))
+    } as unknown as File;
+    await act(async () => result.current.importFromFile(incomplete));
+    expect(useUiStore.getState().toasts).toContainEqual(
+      expect.objectContaining({ title: "Import failed", description: "Import file is missing required fields" })
+    );
+
+    const validButRejected = { name: "tree.json", text: () => Promise.resolve(JSON.stringify(detail)) } as unknown as File;
+    await act(async () => result.current.importFromFile(validButRejected));
+
+    expect(importSpy).toHaveBeenCalledWith(detail);
+    expect(onImported).not.toHaveBeenCalled();
+    expect(useUiStore.getState().toasts).toContainEqual(
+      expect.objectContaining({ title: "Import failed", description: "Service unavailable", variant: "error" })
+    );
   });
 });
