@@ -114,14 +114,14 @@ jobs:
       - name: Validate frontend Allure results
         if: always()
         working-directory: .
-        run: python3 scripts/validate_ci_artifacts.py results --path frontend/allure-results --label frontend-vitest
+        run: python3 scripts/validate_ci_artifacts.py results --path frontend/allure-results/vitest --label frontend-vitest
 
       - name: Upload frontend Allure results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: frontend-allure-results
-          path: frontend/allure-results
+          path: frontend/allure-results/vitest
           if-no-files-found: error
           retention-days: 30
 

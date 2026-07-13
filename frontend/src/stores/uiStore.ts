@@ -146,12 +146,8 @@ export const useUiStore = create<UiStoreState>((set, get) => ({
 
   unregisterHotkey(id) {
     set((state) => {
-      if (!state.hotkeys[id]) {
-        return {};
-      }
-      const next = { ...state.hotkeys };
-      delete next[id];
-      return { hotkeys: next };
+      const { [id]: removedBinding, ...hotkeys } = state.hotkeys;
+      return removedBinding ? { hotkeys } : {};
     });
   },
 

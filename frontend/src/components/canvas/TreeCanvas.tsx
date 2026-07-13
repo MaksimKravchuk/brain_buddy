@@ -328,7 +328,8 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       resolveOptimisticChange,
       rollbackOptimisticChange,
       updateNodeMutation,
-      upsertNode
+      upsertNode,
+      nodes
     ]
   );
 

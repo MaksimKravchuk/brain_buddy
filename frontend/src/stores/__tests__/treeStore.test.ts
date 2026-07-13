@@ -8,7 +8,7 @@ function ensureLocalStorage() {
   if (typeof localStorage === "undefined" || typeof localStorage.getItem !== "function") {
     const memory = new Map<string, string>();
     const mockStorage = {
-      getItem: (key: string) => (memory.has(key) ? memory.get(key)! : null),
+      getItem: (key: string) => memory.get(key) ?? null,
       setItem: (key: string, value: string) => {
         memory.set(key, value);
       },
