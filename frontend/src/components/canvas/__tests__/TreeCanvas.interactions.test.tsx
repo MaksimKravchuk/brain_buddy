@@ -1,4 +1,4 @@
-import { act, render } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -148,6 +148,45 @@ describe("TreeCanvas interaction callbacks", () => {
       expect.any(Object)
     );
     expect(useTreeStore.getState().relations.map((relation) => relation.id)).toContain("relation-new");
+  });
+
+  it("guides keyboard link mode from a selected source to a different target", async () => {
+    mutations.createRelation.mockImplementation((_payload, options) =>
+      options?.onSuccess({
+        id: "keyboard-relation",
+        source_node_id: "node-1",
+        target_node_id: "node-2",
+        kind: "why",
+        created_at: "2025-01-02T00:00:00Z"
+      })
+    );
+    renderCanvas();
+
+    const initialLinkHandler = useUiStore.getState().hotkeys["link-nodes-ctrl"]?.handler;
+    act(() => useUiStore.getState().hotkeys["link-nodes-ctrl"]?.handler());
+    expect(useUiStore.getState().toasts.find((toast) => toast.title === "Select a node first")).toBeTruthy();
+
+    act(() => {
+      useTreeStore.getState().select({ type: "node", id: "node-1" });
+    });
+    await waitFor(() =>
+      expect(useUiStore.getState().hotkeys["link-nodes-ctrl"]?.handler).not.toBe(initialLinkHandler)
+    );
+    const sourceLinkHandler = useUiStore.getState().hotkeys["link-nodes-ctrl"]?.handler;
+    act(() => sourceLinkHandler?.());
+    expect(useUiStore.getState().toasts.find((toast) => toast.title === "Link mode")).toBeTruthy();
+
+    act(() => {
+      useTreeStore.getState().select({ type: "node", id: "node-2" });
+    });
+    await waitFor(() =>
+      expect(useUiStore.getState().hotkeys["link-nodes-ctrl"]?.handler).not.toBe(sourceLinkHandler)
+    );
+    act(() => useUiStore.getState().hotkeys["link-nodes-ctrl"]?.handler());
+    expect(mutations.createRelation).toHaveBeenCalledWith(
+      { source_node_id: "node-1", target_node_id: "node-2", kind: "why" },
+      expect.any(Object)
+    );
   });
 
   it("creates a default cause when an initialized canvas has no nodes", async () => {
