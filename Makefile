@@ -1,4 +1,4 @@
-.PHONY: install-backend install-frontend dev-backend dev-frontend test-backend test-frontend
+.PHONY: install-backend install-frontend dev-backend dev-frontend lint-backend test-backend ci-backend test-frontend build-frontend ci-frontend validate-ci
 
 install-backend:
 	cd backend && python -m pip install -e .[dev]
@@ -13,9 +13,24 @@ dev-frontend:
 	cd frontend && npm run dev
 
 test-backend:
-	docker build --target tests -t brain-buddy-backend-tests -f backend/Dockerfile .
-	docker run --rm brain-buddy-backend-tests
+	cd backend && pytest --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results
+	python3 scripts/validate_ci_artifacts.py results --path backend/allure-results --label backend-pytest
+
+lint-backend:
+	cd backend && ruff check app tests
+	cd backend && mypy app
+
+ci-backend: lint-backend test-backend
 
 test-frontend:
-	docker build --target tests -t brain-buddy-frontend-tests -f frontend/Dockerfile .
-	docker run --rm brain-buddy-frontend-tests
+	cd frontend && npm run test -- --coverage
+	python3 scripts/validate_ci_artifacts.py results --path frontend/allure-results --label frontend-vitest
+
+build-frontend:
+	cd frontend && npm run build
+
+ci-frontend: test-frontend build-frontend
+
+validate-ci:
+	python3 -m unittest scripts/test_validate_ci_artifacts.py -v
+	python3 scripts/validate_ci_artifacts.py workflow --ci .github/workflows/ci.yml --disallow-workflow frontend/.github/workflows/playwright.yml
