@@ -1,66 +1,115 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, apiClient } from "../client";
+import { apiClient, setUnauthorizedHandler } from "../client";
+import type { RelationCreateRequest, TreeMetadata } from "../types";
 
-describe("apiClient telemetry", () => {
+const metadata: TreeMetadata = {
+  version: 1,
+  created_at: "2025-01-01T00:00:00Z",
+  updated_at: "2025-01-01T00:00:00Z"
+};
+
+function response(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
+  return new Response(body === undefined ? null : JSON.stringify(body), {
+    status,
+    statusText: status >= 400 ? "Request failed" : "OK",
+    headers: { "Content-Type": "application/json", ...headers }
+  });
+}
+
+describe("apiClient", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    setUnauthorizedHandler(null);
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
-    vi.restoreAllMocks();
+    setUnauthorizedHandler(null);
   });
 
-  it("records latency telemetry for successful requests", async () => {
-    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify([]), {
-          status: 200,
-          headers: { "Content-Type": "application/json" }
-        })
-      )
+  it("normalizes relation aliases before submitting a relation", async () => {
+    fetchMock.mockResolvedValue(response({ id: "relation-1" }));
+
+    await apiClient.createRelation(
+      "tree-1",
+      { source_id: "source-1", target_id: "target-1", kind: "why" } as RelationCreateRequest
     );
 
-    await expect(apiClient.listTrees()).resolves.toEqual([]);
-
-    expect(info).toHaveBeenCalledWith(
-      "[telemetry]",
-      expect.objectContaining({
-        name: "api.request",
-        ok: true,
-        durationMs: expect.any(Number),
-        details: expect.objectContaining({ method: "GET", path: "/trees", status: 200 })
-      })
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/trees/tree-1/relations",
+      expect.objectContaining({ credentials: "include", method: "POST" })
+    );
+    expect(init.body).toBe(
+      JSON.stringify({ source_node_id: "source-1", target_node_id: "target-1", kind: "why" })
     );
   });
 
-  it("records failure telemetry with correlation ids", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ message: "stale" }), {
-          status: 409,
-          statusText: "Conflict",
-          headers: { "Content-Type": "application/json", "X-Correlation-ID": "corr-1" }
-        })
-      )
+  it("rejects relations without both endpoints before issuing a request", () => {
+    expect(() => apiClient.createRelation("tree-1", { kind: "why" } as RelationCreateRequest)).toThrow(
+      "source_node_id and target_node_id are required"
     );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 
-    await expect(apiClient.getTree("tree-1")).rejects.toBeInstanceOf(ApiError);
+  it("sends the complete tree workflow through its typed endpoints", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(response({ id: "result" })));
 
-    expect(warn).toHaveBeenCalledWith(
-      "[telemetry]",
-      expect.objectContaining({
-        name: "api.request",
-        ok: false,
-        durationMs: expect.any(Number),
-        details: expect.objectContaining({
-          method: "GET",
-          path: "/trees/tree-1",
-          status: 409,
-          correlationId: "corr-1"
-        })
-      })
+    await apiClient.listTrees();
+    await apiClient.getTree("tree-1");
+    await apiClient.createTree({ name: "New tree" });
+    await apiClient.updateTree("tree-1", { name: "Renamed", metadata, nodes: [], relations: [] });
+    await apiClient.createNode("tree-1", { label: "Root", type: "child", position: { x: 1, y: 2 } });
+    await apiClient.updateNode("tree-1", "node-1", { label: "Updated" });
+    await apiClient.updateRelation("tree-1", "relation-1", { from_id: "source-1", kind: "why" });
+    await apiClient.createVersion("tree-1", { label: "Before", author: null, notes: null });
+    await apiClient.listVersions("tree-1");
+    await apiClient.restoreVersion("tree-1", "version-1");
+    await apiClient.exportTree("tree-1");
+    await apiClient.aiFeedback("tree-1", { consent: true });
+    await apiClient.importTree({ id: "tree-2", name: "Imported", metadata, nodes: [], relations: [] });
+    await apiClient.triggerValidation("tree-1", "node-1", { provider: "mock" });
+    await apiClient.getValidationHistory("tree-1", "node-1");
+
+    expect(fetchMock).toHaveBeenCalledTimes(15);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(
+      expect.arrayContaining([
+        "/api/trees",
+        "/api/trees/tree-1/nodes",
+        "/api/trees/tree-1/versions",
+        "/api/trees/tree-1/validate/node-1"
+      ])
     );
+    const [, createNodeInit] = fetchMock.mock.calls[4] as [string, RequestInit];
+    expect(createNodeInit.body).toBe(
+      JSON.stringify({ highlight_state: "none", label: "Root", type: "child", position: { x: 1, y: 2 } })
+    );
+  });
+
+  it("notifies the session handler and preserves correlation IDs for failed requests", async () => {
+    const onUnauthorized = vi.fn();
+    setUnauthorizedHandler(onUnauthorized);
+    fetchMock.mockResolvedValue(response({ detail: "expired" }, 401, { "X-Correlation-ID": "corr-1" }));
+
+    await expect(apiClient.listTrees()).rejects.toMatchObject({
+      status: 401,
+      correlationId: "corr-1",
+      payload: { detail: "expired" }
+    });
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats delete responses without content as successful", async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+
+    await expect(apiClient.deleteTree("tree-1")).resolves.toBeUndefined();
+    await expect(apiClient.deleteNode("tree-1", "node-1", true)).resolves.toBeUndefined();
+    await expect(apiClient.deleteRelation("tree-1", "relation-1")).resolves.toBeUndefined();
+    await expect(apiClient.deleteVersion("tree-1", "version-1")).resolves.toBeUndefined();
+    expect(fetchMock.mock.calls.map(([url]) => url)).toContain("/api/trees/tree-1/nodes/node-1?cascade=true");
   });
 });
