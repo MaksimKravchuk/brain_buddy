@@ -1,11 +1,11 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { createRef, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { TreeDetailResponse } from "../../../api/types";
 import { useTreeStore } from "../../../stores/treeStore";
 import { useUiStore } from "../../../stores/uiStore";
-import { TreeCanvas } from "../TreeCanvas";
+import { TreeCanvas, type TreeCanvasHandle } from "../TreeCanvas";
 
 type FlowHandlers = Record<string, (...args: unknown[]) => unknown>;
 
@@ -261,5 +261,60 @@ describe("TreeCanvas interaction callbacks", () => {
 
     expect(mutations.deleteRelation).toHaveBeenCalledWith("relation-1", expect.any(Object));
     expect(useTreeStore.getState().relations).toEqual([]);
+  });
+
+  it("ignores incomplete connections and empty delete batches", () => {
+    renderCanvas();
+
+    act(() => {
+      flowProps.onConnect?.({ source: "node-1", target: null });
+      flowProps.onNodesDelete?.([]);
+      flowProps.onEdgesDelete?.([]);
+    });
+
+    expect(mutations.createRelation).not.toHaveBeenCalled();
+    expect(mutations.deleteNode).not.toHaveBeenCalled();
+    expect(mutations.deleteRelation).not.toHaveBeenCalled();
+  });
+
+  it("exposes viewport controls for the selected node and the whole canvas", () => {
+    const ref = createRef<TreeCanvasHandle>();
+    const zoomIn = vi.fn();
+    const zoomOut = vi.fn();
+    const setCenter = vi.fn();
+    const fitView = vi.fn();
+    render(<TreeCanvas ref={ref} treeId={tree.id} isLoading={false} />);
+
+    act(() =>
+      flowProps.onInit?.({
+        screenToFlowPosition: () => ({ x: 0, y: 0 }),
+        zoomIn,
+        zoomOut,
+        setCenter,
+        fitView
+      })
+    );
+    act(() => ref.current?.zoomIn());
+    act(() => ref.current?.zoomOut());
+    expect(zoomIn).toHaveBeenCalledWith({ duration: 150 });
+    expect(zoomOut).toHaveBeenCalledWith({ duration: 150 });
+
+    act(() => useTreeStore.getState().select({ type: "node", id: "node-1" }));
+    act(() => ref.current?.centerOnSelection());
+    expect(setCenter).toHaveBeenCalledWith(10, 20, { zoom: 1.1, duration: 250 });
+
+    act(() => useTreeStore.getState().select({ type: "relation", id: "relation-1" }));
+    act(() => ref.current?.centerOnSelection());
+    expect(fitView).toHaveBeenCalledWith({ padding: 0.2, duration: 250 });
+  });
+
+  it("distinguishes an empty canvas from a loading canvas", () => {
+    act(() => useTreeStore.getState().reset());
+    const { rerender } = render(<TreeCanvas treeId="empty-tree" isLoading={false} />);
+    expect(screen.getByText("An empty canvas")).toBeInTheDocument();
+
+    rerender(<TreeCanvas treeId="empty-tree" isLoading />);
+    expect(screen.getByText("Loading tree…")).toBeInTheDocument();
+    expect(screen.queryByText("An empty canvas")).not.toBeInTheDocument();
   });
 });
