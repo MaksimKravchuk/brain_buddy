@@ -149,4 +149,45 @@ describe("TreeCanvas interaction callbacks", () => {
     );
     expect(useTreeStore.getState().relations.map((relation) => relation.id)).toContain("relation-new");
   });
+
+  it("creates a default cause when an initialized canvas has no nodes", async () => {
+    mutations.createNode.mockImplementation((_payload, options) =>
+      options?.onSuccess({
+        id: "node-default",
+        label: "Cause",
+        type: "parent",
+        position: { x: 50, y: 60 },
+        highlight_state: "none",
+        relation_counts: { up_count: 0, down_count: 0 }
+      })
+    );
+    act(() => useTreeStore.getState().reset());
+    render(<TreeCanvas treeId="empty-tree" isLoading={false} />);
+
+    act(() =>
+      flowProps.onInit?.({
+        screenToFlowPosition: () => ({ x: 50, y: 60 }),
+        zoomIn: vi.fn(),
+        zoomOut: vi.fn(),
+        fitView: vi.fn(),
+        setCenter: vi.fn()
+      })
+    );
+
+    expect(mutations.createNode).toHaveBeenCalledWith(
+      expect.objectContaining({ label: "Cause", type: "parent", highlight_state: "none" }),
+      expect.any(Object)
+    );
+    expect(useTreeStore.getState().nodes.map((node) => node.id)).toContain("node-default");
+  });
+
+  it("deletes selected edges through the relation mutation", () => {
+    mutations.deleteRelation.mockImplementation((_id, options) => options?.onSuccess());
+    renderCanvas();
+
+    act(() => flowProps.onEdgesDelete?.([{ id: "relation-1" }]));
+
+    expect(mutations.deleteRelation).toHaveBeenCalledWith("relation-1", expect.any(Object));
+    expect(useTreeStore.getState().relations).toEqual([]);
+  });
 });
