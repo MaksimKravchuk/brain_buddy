@@ -310,4 +310,27 @@ describe("api hooks", () => {
     });
     expect(queryClient.getQueryData<TreeListItem[]>(treeKeys.list())).toEqual([]);
   });
+
+  it("loads selected tree details and validation history without fetching unselected records", async () => {
+    const treeSpy = vi.spyOn(apiClient, "getTree").mockResolvedValue(detail);
+    const historySpy = vi.spyOn(apiClient, "getValidationHistory").mockResolvedValue({ items: [validation] });
+
+    const { result } = renderHook(
+      () => ({
+        tree: useTree(detail.id),
+        history: useValidationHistory(detail.id, node.id),
+        unselectedTree: useTree(null),
+        unselectedHistory: useValidationHistory(detail.id, null)
+      }),
+      { wrapper: createWrapper(queryClient) }
+    );
+
+    await waitFor(() => expect(result.current.tree.isSuccess).toBe(true));
+    await waitFor(() => expect(result.current.history.isSuccess).toBe(true));
+
+    expect(treeSpy).toHaveBeenCalledWith(detail.id, expect.any(AbortSignal));
+    expect(historySpy).toHaveBeenCalledWith(detail.id, node.id, expect.any(AbortSignal));
+    expect(result.current.unselectedTree.isFetching).toBe(false);
+    expect(result.current.unselectedHistory.isFetching).toBe(false);
+  });
 });
