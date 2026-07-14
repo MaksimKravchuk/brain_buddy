@@ -19,6 +19,7 @@ class IdempotencyRecord(StorageBaseModel):
     command: str
     request_hash: str
     resource_id: str
+    response_body: dict[str, object]
     created_at: datetime
 
 

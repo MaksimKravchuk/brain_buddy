@@ -255,6 +255,112 @@ def test_update_task_replays_idempotent_record(service: TaskService) -> None:
     assert first.details == replayed.details
 
 
+def test_update_task_replay_returns_original_snapshot(service: TaskService) -> None:
+    task = _make_task(service, key="snapshot-update-task", title="Original")
+
+    first = service.update_task(
+        task.id,
+        TaskUpdateRequest(details="First result", expected_revision=1),
+        owner_id=OWNER,
+        idempotency_key="snapshot-update",
+    )
+    later = service.update_task(
+        task.id,
+        TaskUpdateRequest(title="Later edit", expected_revision=2),
+        owner_id=OWNER,
+        idempotency_key="snapshot-later-update",
+    )
+    replayed = service.update_task(
+        task.id,
+        TaskUpdateRequest(details="First result", expected_revision=1),
+        owner_id=OWNER,
+        idempotency_key="snapshot-update",
+    )
+
+    assert replayed == first
+    assert later.title == service.get_task(task.id, owner_id=OWNER).title
+
+
+def test_update_task_idempotency_hash_includes_field_presence(
+    service: TaskService,
+) -> None:
+    task = _make_task(service, key="field-presence-task")
+    service.update_task(
+        task.id,
+        TaskUpdateRequest(expected_revision=1),
+        owner_id=OWNER,
+        idempotency_key="field-presence-update",
+    )
+
+    with pytest.raises(ConflictError):
+        service.update_task(
+            task.id,
+            TaskUpdateRequest(details=None, expected_revision=1),
+            owner_id=OWNER,
+            idempotency_key="field-presence-update",
+        )
+
+
+def test_create_task_replay_recovers_missing_resource_after_crash(
+    monkeypatch: pytest.MonkeyPatch, service: TaskService
+) -> None:
+    original_create = service.task_repo.create
+    calls = 0
+
+    def fail_once(task: TaskDocument) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("simulated crash after idempotency write")
+        original_create(task)
+
+    monkeypatch.setattr(service.task_repo, "create", fail_once)
+    payload = TaskCreateRequest(title="Crash recover")
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        service.create_task(
+            payload, owner_id=OWNER, idempotency_key="crash-create-task"
+        )
+
+    replayed = service.create_task(
+        payload, owner_id=OWNER, idempotency_key="crash-create-task"
+    )
+
+    assert replayed.title == "Crash recover"
+    assert [task.id for task in service.task_repo.list_for_owner(owner_id=OWNER)] == [
+        replayed.id
+    ]
+
+
+def test_update_task_replay_applies_recorded_result_after_crash(
+    monkeypatch: pytest.MonkeyPatch, service: TaskService
+) -> None:
+    task = _make_task(service, key="crash-update-task")
+    original_save = service.task_repo.save
+    calls = 0
+
+    def fail_once(updated: TaskDocument) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("simulated crash after idempotency write")
+        original_save(updated)
+
+    monkeypatch.setattr(service.task_repo, "save", fail_once)
+    payload = TaskUpdateRequest(details="Recovered update", expected_revision=1)
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        service.update_task(
+            task.id, payload, owner_id=OWNER, idempotency_key="crash-update"
+        )
+
+    replayed = service.update_task(
+        task.id, payload, owner_id=OWNER, idempotency_key="crash-update"
+    )
+
+    assert replayed.details == "Recovered update"
+    assert replayed.revision == 2
+    assert service.get_task(task.id, owner_id=OWNER).details == "Recovered update"
+
+
 # --- transition branches ---------------------------------------------------
 
 

@@ -76,9 +76,7 @@ class TaskService:
             request_hash=request_hash,
         )
         if record is not None:
-            return self.task_repo.get_project_for_owner(
-                record.resource_id, owner_id=owner_id
-            )
+            return self._project_result(record, owner_id=owner_id)
 
         now = utcnow()
         project = ProjectDocument(
@@ -89,14 +87,15 @@ class TaskService:
             created_at=now,
             updated_at=now,
         )
-        self.task_repo.create_project(project)
         self._store_idempotency(
             owner_id=owner_id,
             key=idempotency_key,
             command=command,
             request_hash=request_hash,
             resource_id=project.id,
+            response=project,
         )
+        self.task_repo.create_project(project)
         return project
 
     @_serialized_write
@@ -116,9 +115,7 @@ class TaskService:
             request_hash=request_hash,
         )
         if record is not None:
-            return self.task_repo.get_context_for_owner(
-                record.resource_id, owner_id=owner_id
-            )
+            return self._context_result(record, owner_id=owner_id)
 
         now = utcnow()
         context = ContextDocument(
@@ -128,14 +125,15 @@ class TaskService:
             created_at=now,
             updated_at=now,
         )
-        self.task_repo.create_context(context)
         self._store_idempotency(
             owner_id=owner_id,
             key=idempotency_key,
             command=command,
             request_hash=request_hash,
             resource_id=context.id,
+            response=context,
         )
+        self.task_repo.create_context(context)
         return context
 
     @_serialized_write
@@ -155,7 +153,7 @@ class TaskService:
             request_hash=request_hash,
         )
         if record is not None:
-            return self.get_task(record.resource_id, owner_id=owner_id)
+            return self._task_result(record, owner_id=owner_id)
 
         self._assert_active_references(
             owner_id=owner_id,
@@ -186,14 +184,15 @@ class TaskService:
             created_at=now,
             updated_at=now,
         )
-        self.task_repo.create(task)
         self._store_idempotency(
             owner_id=owner_id,
             key=idempotency_key,
             command=command,
             request_hash=request_hash,
             resource_id=task.id,
+            response=task,
         )
+        self.task_repo.create(task)
         return task
 
     @_serialized_write
@@ -215,9 +214,7 @@ class TaskService:
             request_hash=request_hash,
         )
         if record is not None:
-            return self.task_repo.get_subtask_for_owner(
-                record.resource_id, owner_id=owner_id, task_id=task_id
-            )
+            return self._subtask_result(record, owner_id=owner_id, task_id=task_id)
 
         now = utcnow()
         subtasks = self.task_repo.list_subtasks(owner_id=owner_id, task_id=task_id)
@@ -230,14 +227,15 @@ class TaskService:
             created_at=now,
             updated_at=now,
         )
-        self.task_repo.create_subtask(subtask)
         self._store_idempotency(
             owner_id=owner_id,
             key=idempotency_key,
             command=command,
             request_hash=request_hash,
             resource_id=subtask.id,
+            response=subtask,
         )
+        self.task_repo.create_subtask(subtask)
         return subtask
 
     @_serialized_write
@@ -260,9 +258,7 @@ class TaskService:
             request_hash=request_hash,
         )
         if record is not None:
-            return self.task_repo.get_comment_for_owner(
-                record.resource_id, owner_id=owner_id, task_id=task_id
-            )
+            return self._comment_result(record, owner_id=owner_id, task_id=task_id)
 
         now = utcnow()
         comment = TaskCommentDocument(
@@ -273,14 +269,15 @@ class TaskService:
             body=payload.body,
             created_at=now,
         )
-        self.task_repo.create_comment(comment)
         self._store_idempotency(
             owner_id=owner_id,
             key=idempotency_key,
             command=command,
             request_hash=request_hash,
             resource_id=comment.id,
+            response=comment,
         )
+        self.task_repo.create_comment(comment)
         return comment
 
     def get_task_detail(
@@ -317,7 +314,7 @@ class TaskService:
             request_hash=request_hash,
         )
         if record is not None:
-            return self.get_task(record.resource_id, owner_id=owner_id)
+            return self._task_result(record, owner_id=owner_id)
 
         task = self.get_task(task_id, owner_id=owner_id)
         self._assert_current(task, payload.expected_revision)
@@ -343,14 +340,15 @@ class TaskService:
             updated_at=utcnow(),
             revision=task.revision + 1,
         )
-        self.task_repo.save(updated)
         self._store_idempotency(
             owner_id=owner_id,
             key=idempotency_key,
             command=command,
             request_hash=request_hash,
             resource_id=updated.id,
+            response=updated,
         )
+        self.task_repo.save(updated)
         return updated
 
     @_serialized_write
@@ -371,7 +369,7 @@ class TaskService:
             request_hash=request_hash,
         )
         if record is not None:
-            return self.get_task(record.resource_id, owner_id=owner_id)
+            return self._task_result(record, owner_id=owner_id)
 
         task = self.get_task(task_id, owner_id=owner_id)
         self._assert_current(task, payload.expected_revision)
@@ -432,14 +430,15 @@ class TaskService:
             updated_at=now,
             revision=task.revision + 1,
         )
-        self.task_repo.save(updated)
         self._store_idempotency(
             owner_id=owner_id,
             key=idempotency_key,
             command=command,
             request_hash=request_hash,
             resource_id=updated.id,
+            response=updated,
         )
+        self.task_repo.save(updated)
         return updated
 
     def get_task(self, task_id: str, *, owner_id: str) -> TaskDocument:
@@ -543,6 +542,13 @@ class TaskService:
         command: str,
         request_hash: str,
         resource_id: str,
+        response: (
+            ProjectDocument
+            | ContextDocument
+            | TaskDocument
+            | TaskSubtaskDocument
+            | TaskCommentDocument
+        ),
     ) -> None:
         self.task_repo.save_idempotency(
             owner_id=owner_id,
@@ -551,9 +557,57 @@ class TaskService:
                 command=command,
                 request_hash=request_hash,
                 resource_id=resource_id,
+                response_body=response.model_dump(mode="json"),
                 created_at=utcnow(),
             ),
         )
+
+    def _project_result(
+        self, record: IdempotencyRecord, *, owner_id: str
+    ) -> ProjectDocument:
+        project = ProjectDocument.model_validate(record.response_body)
+        path = self.task_repo.project_path(owner_id, project.id)
+        if not path.exists():
+            self.task_repo.create_project(project)
+        return project
+
+    def _context_result(
+        self, record: IdempotencyRecord, *, owner_id: str
+    ) -> ContextDocument:
+        context = ContextDocument.model_validate(record.response_body)
+        path = self.task_repo.context_path(owner_id, context.id)
+        if not path.exists():
+            self.task_repo.create_context(context)
+        return context
+
+    def _task_result(self, record: IdempotencyRecord, *, owner_id: str) -> TaskDocument:
+        task = TaskDocument.model_validate(record.response_body)
+        path = self.task_repo.task_path(owner_id, task.id)
+        if not path.exists():
+            self.task_repo.create(task)
+        else:
+            current = self.task_repo.get_for_owner(task.id, owner_id=owner_id)
+            if current.revision < task.revision:
+                self.task_repo.save(task)
+        return task
+
+    def _subtask_result(
+        self, record: IdempotencyRecord, *, owner_id: str, task_id: str
+    ) -> TaskSubtaskDocument:
+        subtask = TaskSubtaskDocument.model_validate(record.response_body)
+        path = self.task_repo.subtask_path(owner_id, task_id, subtask.id)
+        if not path.exists():
+            self.task_repo.create_subtask(subtask)
+        return subtask
+
+    def _comment_result(
+        self, record: IdempotencyRecord, *, owner_id: str, task_id: str
+    ) -> TaskCommentDocument:
+        comment = TaskCommentDocument.model_validate(record.response_body)
+        path = self.task_repo.comment_path(owner_id, task_id, comment.id)
+        if not path.exists():
+            self.task_repo.create_comment(comment)
+        return comment
 
     @staticmethod
     def _request_hash(
@@ -570,7 +624,13 @@ class TaskService:
     ) -> str:
         body = payload.model_dump(mode="json")
         encoded = json.dumps(
-            {"command": command, "body": body}, sort_keys=True, separators=(",", ":")
+            {
+                "command": command,
+                "body": body,
+                "fields_set": sorted(payload.model_fields_set),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
         ).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
 
