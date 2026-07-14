@@ -1,6 +1,6 @@
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { MutableRefObject } from "react";
 
 import {
@@ -10,7 +10,7 @@ import {
 
 describe("DropdownMenu ref forwarding and navigation edge cases", () => {
   it("forwards an object ref to the trigger element", async () => {
-    const refObject: MutableRefObject<HTMLElement | null> = { current: null };
+    const refObject: MutableRefObject<HTMLButtonElement | null> = { current: null };
     const user = userEvent.setup();
     render(
       <DropdownMenu trigger={<button type="button" ref={refObject}>Open</button>}>
