@@ -51,7 +51,14 @@ vi.mock("../../components/canvas/TreeCanvas", async () => {
 
 vi.mock("../../components/modals/CreateTreeModal", () => ({ CreateTreeModal: () => null }));
 vi.mock("../../components/modals/RenameTreeModal", () => ({ RenameTreeModal: () => null }));
-vi.mock("../../components/modals/DeleteTreeModal", () => ({ DeleteTreeModal: () => null }));
+
+const deleteModalProps = vi.hoisted(() => ({ onDeleted: vi.fn() as (treeId: string) => Promise<void> }));
+vi.mock("../../components/modals/DeleteTreeModal", () => ({
+  DeleteTreeModal: (props: { trees: unknown; onDeleted: (treeId: string) => Promise<void> }) => {
+    deleteModalProps.onDeleted = props.onDeleted;
+    return null;
+  }
+}));
 
 const tree: TreeDetailResponse = {
   id: "tree-1",
@@ -184,5 +191,85 @@ describe("TreeWorkspace", () => {
     expect(screen.getAllByText("Network unavailable")).toHaveLength(2);
     expect(screen.queryByText(/^Reference:/)).not.toBeInTheDocument();
     expect(screen.getByRole("status", { name: "Loading" }).closest("button")).toBeDisabled();
+  });
+
+  it("skips tree detail sync when the loaded tree already matches the active tree", async () => {
+    act(() => useTreeStore.getState().setTree(tree));
+    hookMocks.treeResult = { ...hookMocks.treeResult, data: tree };
+    render(<TreeWorkspace />);
+
+    await waitFor(() => expect(useTreeStore.getState().activeTreeId).toBe(tree.id));
+    // The effect should not call setTree again because the active tree ID already matches
+    const state = useTreeStore.getState();
+    expect(state.metadata?.name).toBe(tree.name);
+  });
+
+  it("resets the store when no tree is selected on mount", async () => {
+    hookMocks.treesResult = { data: [], error: null, refetch: vi.fn() };
+    hookMocks.treeResult = { data: undefined, error: null, isLoading: false, isFetching: false, refetch: vi.fn() };
+    act(() => useTreeStore.setState({ activeTreeId: "stale-id", metadata: { id: "stale-id", name: "Stale", version: 1, createdAt: "", updatedAt: "", ownerId: null } }));
+
+    render(<TreeWorkspace />);
+
+    await waitFor(() => expect(useTreeStore.getState().activeTreeId).toBeNull());
+    expect(useTreeStore.getState().metadata).toBeNull();
+  });
+
+  it("switches to the next tree when the active tree is deleted", async () => {
+    const treeB: TreeListItem = { id: "tree-2", name: "Other tree", updated_at: "2025-01-03T00:00:00Z", owner_id: null };
+    hookMocks.treesResult = {
+      data: [...treeList, treeB],
+      error: null,
+      refetch: vi.fn().mockResolvedValue({ data: [treeB] })
+    };
+    const treeBDetail: TreeDetailResponse = { ...tree, id: "tree-2", name: "Other tree" };
+    render(<TreeWorkspace />);
+    await waitFor(() => expect(useTreeStore.getState().activeTreeId).toBe(tree.id));
+
+    hookMocks.treeResult = { data: treeBDetail, error: null, isLoading: false, isFetching: false, refetch: vi.fn() };
+    await act(async () => {
+      await deleteModalProps.onDeleted(tree.id);
+    });
+
+    await waitFor(() => expect(useTreeStore.getState().activeTreeId).toBe("tree-2"));
+  });
+
+  it("selects the next remaining tree after the active tree is deleted", async () => {
+    const treeB: TreeListItem = { id: "tree-2", name: "Other tree", updated_at: "2025-01-03T00:00:00Z", owner_id: null };
+    hookMocks.treesResult = {
+      data: [...treeList, treeB],
+      error: null,
+      refetch: vi.fn().mockResolvedValue({ data: [treeB] })
+    };
+    const treeBDetail: TreeDetailResponse = { ...tree, id: "tree-2", name: "Other tree" };
+    const treeResultForTree1 = { data: tree, error: null, isLoading: false, isFetching: false, refetch: vi.fn() };
+    const treeResultForTree2 = { data: treeBDetail, error: null, isLoading: false, isFetching: false, refetch: vi.fn() };
+    hookMocks.treeResult = treeResultForTree1;
+    render(<TreeWorkspace />);
+    await waitFor(() => expect(useTreeStore.getState().activeTreeId).toBe(tree.id));
+
+    hookMocks.treeResult = treeResultForTree2;
+    await act(async () => {
+      await deleteModalProps.onDeleted(tree.id);
+    });
+
+    await waitFor(() => expect(useTreeStore.getState().activeTreeId).toBe("tree-2"));
+  });
+
+  it("does not change selection when a non-active tree is deleted", async () => {
+    const treeB: TreeListItem = { id: "tree-2", name: "Other tree", updated_at: "2025-01-03T00:00:00Z", owner_id: null };
+    hookMocks.treesResult = {
+      data: [...treeList, treeB],
+      error: null,
+      refetch: vi.fn().mockResolvedValue({ data: [...treeList, treeB] })
+    };
+    render(<TreeWorkspace />);
+    await waitFor(() => expect(useTreeStore.getState().activeTreeId).toBe(tree.id));
+
+    await act(async () => {
+      await deleteModalProps.onDeleted("tree-2");
+    });
+
+    expect(useTreeStore.getState().activeTreeId).toBe(tree.id);
   });
 });

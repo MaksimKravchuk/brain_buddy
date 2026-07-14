@@ -340,6 +340,74 @@ describe("TreeCanvas interaction callbacks", () => {
     expect(screen.queryByText("An empty canvas")).not.toBeInTheDocument();
   });
 
+  it("creates relative parent and child nodes from a selected origin", async () => {
+    mutations.createNode.mockImplementation((_payload, options) =>
+      options?.onSuccess({
+        id: "node-new",
+        label: "New node",
+        type: "parent",
+        position: { x: 10, y: -160 },
+        highlight_state: "none",
+        relation_counts: { up_count: 0, down_count: 0 }
+      })
+    );
+    mutations.createRelation.mockImplementation((_payload, options) =>
+      options?.onSuccess({
+        id: "rel-new",
+        source_node_id: "node-new",
+        target_node_id: "node-1",
+        kind: "why",
+        created_at: "2025-01-02T00:00:00Z"
+      })
+    );
+    renderCanvas();
+    act(() => useTreeStore.getState().select({ type: "node", id: "node-1" }));
+
+    await waitFor(() => expect(useUiStore.getState().hotkeys["create-node-meta"]?.handler).toBeTruthy());
+    act(() => useUiStore.getState().hotkeys["create-node-meta"]?.handler());
+    await waitFor(() => expect(mutations.createNode).toHaveBeenCalled());
+    expect(mutations.createNode).toHaveBeenCalledWith(
+      expect.objectContaining({ highlight_state: "none" }),
+      expect.any(Object)
+    );
+    expect(useTreeStore.getState().nodes.map((node) => node.id)).toContain("node-new");
+  });
+
+  it("rolls back a failed node creation and reports the error", () => {
+    mutations.createNode.mockImplementation((_payload, options) => options?.onError(new Error("Create unavailable")));
+    renderCanvas();
+    act(() => useTreeStore.getState().select({ type: "node", id: "node-1" }));
+
+    act(() => useUiStore.getState().hotkeys["create-node-meta"]?.handler());
+
+    expect(useUiStore.getState().toasts).toContainEqual(
+      expect.objectContaining({ title: "Failed to create node", description: "Create unavailable" })
+    );
+  });
+
+  it("copies a reference using the fallback path when the clipboard API is unavailable", async () => {
+    const user = userEvent.setup();
+    const execCommand = vi.fn(() => true);
+    vi.stubGlobal("navigator", { clipboard: undefined });
+    document.execCommand = execCommand;
+    mutations.createRelation.mockImplementationOnce((_payload, options) =>
+      options?.onError(new ApiError("Relation unavailable", 503, {}, "fallback-ref"))
+    );
+    renderCanvas();
+
+    await act(async () => {
+      flowProps.onConnect?.({ source: "node-1", target: "node-2" });
+    });
+    expect(await screen.findByText("Ref: fallback-ref")).toBeInTheDocument();
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Copy reference" }));
+    });
+    expect(execCommand).toHaveBeenCalledWith("copy");
+    expect(screen.getByRole("status")).toHaveTextContent("Copied");
+    delete (document as Partial<Document>).execCommand;
+  });
+
   it("copies a failed link reference and retries the preserved connection", async () => {
     const user = userEvent.setup();
     const clipboard = { writeText: vi.fn().mockResolvedValue(undefined) };
