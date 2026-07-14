@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useUiStore } from "../uiStore";
 
@@ -21,6 +21,18 @@ const resetUiStore = () => {
 describe("uiStore hotkeys", () => {
   beforeEach(() => {
     resetUiStore();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("falls back to a generated toast ID when crypto is unavailable", () => {
+    vi.stubGlobal("crypto", undefined);
+
+    const id = useUiStore.getState().pushToast({ title: "Saved", variant: "success" });
+
+    expect(id).toMatch(/^toast-/);
   });
 
   it("registers and triggers hotkeys case-insensitively", () => {

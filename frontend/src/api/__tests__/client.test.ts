@@ -148,7 +148,7 @@ describe("apiClient", () => {
 
     await apiClient.importTree(payload);
 
-    const [, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit];
+    const [, init] = fetchMock.mock.calls[fetchMock.mock.calls.length - 1] as [string, RequestInit];
     const headers = new Headers(init.headers);
     expect(headers.get("Content-Type")).toBe("application/json");
     expect(init.body).toBe(JSON.stringify({ tree: payload }));

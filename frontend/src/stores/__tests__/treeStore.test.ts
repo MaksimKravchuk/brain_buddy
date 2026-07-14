@@ -431,7 +431,7 @@ describe("treeStore", () => {
         }
       ]
     };
-    useTreeStore.getState().setTree(legacySource);
+    useTreeStore.getState().setTree(legacySource as unknown as TreeDetailResponse);
     expect(useTreeStore.getState().relations[0].fromId).toBe("node-1");
     expect(useTreeStore.getState().relations[0].toId).toBe("node-2");
 
@@ -447,7 +447,7 @@ describe("treeStore", () => {
         }
       ]
     };
-    useTreeStore.getState().setTree(fromIdShape);
+    useTreeStore.getState().setTree(fromIdShape as unknown as TreeDetailResponse);
     expect(useTreeStore.getState().relations[0].fromId).toBe("node-2");
     expect(useTreeStore.getState().relations[0].toId).toBe("node-1");
   });

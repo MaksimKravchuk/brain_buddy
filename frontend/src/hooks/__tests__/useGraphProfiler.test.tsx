@@ -19,6 +19,46 @@ describe("useGraphProfiler", () => {
     expect(requestAnimationFrame).not.toHaveBeenCalled();
   });
 
+  it("does not schedule a large graph when animation frames are unavailable", () => {
+    vi.stubGlobal("requestAnimationFrame", undefined);
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    renderHook(() => useGraphProfiler({ nodeCount: 20, edgeCount: 4 }));
+  });
+
+  it("uses the higher threshold for very large graphs", () => {
+    let frame: (() => void) | undefined;
+    const requestAnimationFrame = vi.fn((callback: () => void) => {
+      frame = callback;
+      return 8;
+    });
+    const onSample = vi.fn();
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    vi.stubGlobal("requestAnimationFrame", requestAnimationFrame);
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    vi.spyOn(performance, "now").mockReturnValueOnce(100).mockReturnValueOnce(119);
+
+    renderHook(() => useGraphProfiler({ nodeCount: 200, edgeCount: 0, onSample }));
+    act(() => frame?.());
+
+    expect(info).not.toHaveBeenCalled();
+    expect(onSample).toHaveBeenCalledOnce();
+  });
+
+  it("samples a large graph without requiring an onSample callback", () => {
+    let frame: (() => void) | undefined;
+    vi.stubGlobal("requestAnimationFrame", vi.fn((callback: () => void) => {
+      frame = callback;
+      return 9;
+    }));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    vi.spyOn(performance, "now").mockReturnValueOnce(100).mockReturnValueOnce(101);
+
+    renderHook(() => useGraphProfiler({ nodeCount: 20, edgeCount: 4 }));
+
+    expect(() => act(() => frame?.())).not.toThrow();
+  });
+
   it("reports a completed large-graph render to the supplied sampler", () => {
     let frame: (() => void) | undefined;
     const requestAnimationFrame = vi.fn((callback: () => void) => {
