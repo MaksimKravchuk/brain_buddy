@@ -697,9 +697,9 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   }, [handleCreateNode, isLoading, nodes.length, reactFlowInstance]);
 
   const buildCombo = useCallback((event: KeyboardEvent) => {
-    const target = event.target as HTMLElement | null;
-    if (target) {
-      const tag = target.tagName?.toLowerCase();
+    const target = event.target;
+    if (target instanceof HTMLElement) {
+      const tag = target.tagName.toLowerCase();
       if (
         tag === "input" ||
         tag === "textarea" ||
