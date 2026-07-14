@@ -1,7 +1,9 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { createRef, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "../../../api/client";
 import type { TreeDetailResponse } from "../../../api/types";
 import { useTreeStore } from "../../../stores/treeStore";
 import { useUiStore } from "../../../stores/uiStore";
@@ -162,6 +164,15 @@ describe("TreeCanvas interaction callbacks", () => {
     expect(useTreeStore.getState().selection).toEqual({ type: "node", id: "node-1" });
   });
 
+  it("ignores context-menu actions for unknown nodes", () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderCanvas();
+
+    act(() => flowProps.onNodeContextMenu?.({ preventDefault: vi.fn() }, { id: "missing-node" }));
+
+    expect(mutations.deleteNode).not.toHaveBeenCalled();
+  });
+
   it("replaces a temporary relation after a successful connection", () => {
     mutations.createRelation.mockImplementation((_payload, options) =>
       options?.onSuccess({
@@ -263,6 +274,17 @@ describe("TreeCanvas interaction callbacks", () => {
     expect(useTreeStore.getState().relations).toEqual([]);
   });
 
+  it("deletes a node from the context menu after confirmation", () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    mutations.deleteNode.mockImplementation((_payload, options) => options?.onSuccess());
+    renderCanvas();
+
+    act(() => flowProps.onNodeContextMenu?.({ preventDefault: vi.fn() }, { id: "node-1" }));
+
+    expect(mutations.deleteNode).toHaveBeenCalledWith({ nodeId: "node-1", cascade: true }, expect.any(Object));
+    expect(useTreeStore.getState().nodes.map((node) => node.id)).not.toContain("node-1");
+  });
+
   it("ignores incomplete connections and empty delete batches", () => {
     renderCanvas();
 
@@ -316,5 +338,43 @@ describe("TreeCanvas interaction callbacks", () => {
     rerender(<TreeCanvas treeId="empty-tree" isLoading />);
     expect(screen.getByText("Loading tree…")).toBeInTheDocument();
     expect(screen.queryByText("An empty canvas")).not.toBeInTheDocument();
+  });
+
+  it("copies a failed link reference and retries the preserved connection", async () => {
+    const user = userEvent.setup();
+    const clipboard = { writeText: vi.fn().mockResolvedValue(undefined) };
+    vi.stubGlobal("navigator", { clipboard });
+    mutations.createRelation
+      .mockImplementationOnce((_payload, options) =>
+        options?.onError(new ApiError("Relation unavailable", 503, {}, "corr-link"))
+      )
+      .mockImplementationOnce((_payload, options) =>
+        options?.onSuccess({
+          id: "relation-retried",
+          source_node_id: "node-1",
+          target_node_id: "node-2",
+          kind: "why",
+          created_at: "2025-01-02T00:00:00Z"
+        })
+      );
+    renderCanvas();
+
+    await act(async () => {
+      flowProps.onConnect?.({ source: "node-1", target: "node-2" });
+    });
+    expect(await screen.findByText("Ref: corr-link")).toBeInTheDocument();
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Copy reference" }));
+    });
+    expect(clipboard.writeText).toHaveBeenCalledWith("corr-link");
+    expect(screen.getByRole("status")).toHaveTextContent("Copied");
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Retry link" }));
+    });
+    expect(mutations.createRelation).toHaveBeenCalledTimes(2);
+    expect(useTreeStore.getState().relations.map((relation) => relation.id)).toContain("relation-retried");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
