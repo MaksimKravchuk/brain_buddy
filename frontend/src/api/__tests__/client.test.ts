@@ -112,4 +112,34 @@ describe("apiClient", () => {
     await expect(apiClient.deleteVersion("tree-1", "version-1")).resolves.toBeUndefined();
     expect(fetchMock.mock.calls.map(([url]) => url)).toContain("/api/trees/tree-1/nodes/node-1?cascade=true");
   });
+
+  it("serializes JSON bodies with a JSON content type", async () => {
+    fetchMock.mockResolvedValue(response({ ok: true }));
+    const payload = {
+      id: "tree-1",
+      name: "Imported",
+      metadata: { version: 1, created_at: "2025-01-01", updated_at: "2025-01-01" },
+      nodes: [],
+      relations: []
+    };
+
+    await apiClient.importTree(payload);
+
+    const [, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit];
+    const headers = new Headers(init.headers);
+    expect(headers.get("Content-Type")).toBe("application/json");
+    expect(init.body).toBe(JSON.stringify({ tree: payload }));
+  });
+
+  it("returns text payloads verbatim when the response is not JSON", async () => {
+    fetchMock.mockResolvedValue(new Response("plain failure", { status: 500, headers: { "Content-Type": "text/plain" } }));
+
+    await expect(apiClient.listTrees()).rejects.toMatchObject({ status: 500, payload: "plain failure" });
+  });
+
+  it("rethrows network failures without wrapping them", async () => {
+    fetchMock.mockRejectedValue(new Error("Network down"));
+
+    await expect(apiClient.getTree("tree-1")).rejects.toThrow("Network down");
+  });
 });
