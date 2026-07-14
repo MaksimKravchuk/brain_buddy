@@ -44,7 +44,9 @@ def _require_idempotency_key(idempotency_key: str | None) -> str:
     return idempotency_key
 
 
-@router.post("/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED
+)
 def create_project(
     payload: ProjectCreateRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
@@ -76,10 +78,14 @@ def get_project(
     current_user: User = Depends(get_current_user),
     task_service: TaskService = Depends(get_task_service),
 ) -> ProjectResponse:
-    return _to_project_response(task_service.get_project(project_id, owner_id=current_user.id))
+    return _to_project_response(
+        task_service.get_project(project_id, owner_id=current_user.id)
+    )
 
 
-@router.post("/contexts", response_model=ContextResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/contexts", response_model=ContextResponse, status_code=status.HTTP_201_CREATED
+)
 def create_context(
     payload: ContextCreateRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
@@ -111,7 +117,9 @@ def get_context(
     current_user: User = Depends(get_current_user),
     task_service: TaskService = Depends(get_task_service),
 ) -> ContextResponse:
-    return _to_context_response(task_service.get_context(context_id, owner_id=current_user.id))
+    return _to_context_response(
+        task_service.get_context(context_id, owner_id=current_user.id)
+    )
 
 
 @router.get("/tasks/{task_id}", response_model=TaskResponse)

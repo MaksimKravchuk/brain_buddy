@@ -76,7 +76,9 @@ class TaskService:
             request_hash=request_hash,
         )
         if record is not None:
-            return self.task_repo.get_project_for_owner(record.resource_id, owner_id=owner_id)
+            return self.task_repo.get_project_for_owner(
+                record.resource_id, owner_id=owner_id
+            )
 
         now = utcnow()
         project = ProjectDocument(
@@ -114,7 +116,9 @@ class TaskService:
             request_hash=request_hash,
         )
         if record is not None:
-            return self.task_repo.get_context_for_owner(record.resource_id, owner_id=owner_id)
+            return self.task_repo.get_context_for_owner(
+                record.resource_id, owner_id=owner_id
+            )
 
         now = utcnow()
         context = ContextDocument(
@@ -158,7 +162,11 @@ class TaskService:
             project_id=payload.project_id,
             context_ids=payload.context_ids,
         )
-        waiting_for = self._waiting_for(payload.waiting_for) if payload.state == "waiting" else None
+        waiting_for = (
+            self._waiting_for(payload.waiting_for)
+            if payload.state == "waiting"
+            else None
+        )
         now = utcnow()
         task = TaskDocument(
             id=generate_id("task"),
@@ -171,7 +179,9 @@ class TaskService:
             due_date=payload.due_date,
             waiting_for=waiting_for,
             waiting_since=now if waiting_for else None,
-            order_key=self.task_repo.next_order_key(owner_id=owner_id, state=payload.state),
+            order_key=self.task_repo.next_order_key(
+                owner_id=owner_id, state=payload.state
+            ),
             source_capture_ids=self._source_capture_ids(payload.source_capture_ids),
             created_at=now,
             updated_at=now,
@@ -388,7 +398,9 @@ class TaskService:
             }
         elif payload.action == "reopen":
             if task.state not in {"completed", "cancelled"} or payload.to_state is None:
-                raise ValidationFailure("Reopen requires a terminal task and an open destination.")
+                raise ValidationFailure(
+                    "Reopen requires a terminal task and an open destination."
+                )
             waiting_for = (
                 self._waiting_for(payload.waiting_for)
                 if payload.to_state == "waiting"
@@ -446,7 +458,9 @@ class TaskService:
         limit: int,
     ) -> tuple[list[TaskDocument], str | None, bool, dict[str, int]]:
         if project_id is not None and unassigned_project:
-            raise ValidationFailure("project_id and unassigned_project cannot be used together.")
+            raise ValidationFailure(
+                "project_id and unassigned_project cannot be used together."
+            )
         if project_id is not None:
             self.task_repo.get_project_for_owner(project_id, owner_id=owner_id)
         if context_id is not None:
@@ -596,13 +610,17 @@ class TaskService:
         context_ids: list[str],
     ) -> None:
         if project_id is not None:
-            project = self.task_repo.get_project_for_owner(project_id, owner_id=owner_id)
+            project = self.task_repo.get_project_for_owner(
+                project_id, owner_id=owner_id
+            )
             if project.state != "active":
                 raise ValidationFailure("Task project must be active.")
         if len(set(context_ids)) != len(context_ids):
             raise ValidationFailure("Task contexts cannot contain duplicates.")
         for context_id in context_ids:
-            context = self.task_repo.get_context_for_owner(context_id, owner_id=owner_id)
+            context = self.task_repo.get_context_for_owner(
+                context_id, owner_id=owner_id
+            )
             if context.state != "active":
                 raise ValidationFailure("Task contexts must be active.")
 
@@ -651,7 +669,10 @@ class TaskService:
             and (context_id is None or context_id in task.context_ids)
             and (not unassigned_project or task.project_id is None)
         ]
-        return {state: sum(task.state == state for task in filtered) for state in _OPEN_STATES}
+        return {
+            state: sum(task.state == state for task in filtered)
+            for state in _OPEN_STATES
+        }
 
     @staticmethod
     def _sort_key(task: TaskDocument) -> tuple[int, datetime, str]:
@@ -665,7 +686,9 @@ class TaskService:
             "filters": filters,
             "last": [last_sort_key[0], last_sort_key[1].isoformat(), last_sort_key[2]],
         }
-        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
         return base64.urlsafe_b64encode(encoded).decode("ascii").rstrip("=")
 
     @staticmethod
@@ -683,5 +706,11 @@ class TaskService:
             if not isinstance(task_id, str) or not task_id:
                 raise ValueError("invalid cursor task id")
             return order_key, datetime.fromisoformat(created_at), task_id
-        except (KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        except (
+            KeyError,
+            TypeError,
+            ValueError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+        ) as exc:
             raise ValidationFailure("Invalid or mismatched task cursor.") from exc

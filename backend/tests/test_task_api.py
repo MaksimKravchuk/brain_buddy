@@ -19,6 +19,13 @@ def _create_task(api_client, title: str, *, key: str, **payload):
     return response.json()
 
 
+def test_task_mutation_requires_an_idempotency_key(api_client) -> None:
+    response = api_client.post("/api/tasks", json={"title": "Plan appointment"})
+
+    assert response.status_code == 400
+    assert "Idempotency-Key header is required" in response.json()["message"]
+
+
 def test_create_task_lists_it_in_its_open_state(api_client) -> None:
     created = _create_task(
         api_client, "Call the dentist", key="create-call-dentist", state="next"
@@ -416,7 +423,9 @@ def test_task_list_filters_counts_and_stable_cursor(api_client) -> None:
         "/api/tasks", params={"limit": 2, "cursor": first_page.json()["next_cursor"]}
     )
     assert second_page.status_code == 200, second_page.text
-    ids = [item["id"] for item in first_page.json()["items"] + second_page.json()["items"]]
+    ids = [
+        item["id"] for item in first_page.json()["items"] + second_page.json()["items"]
+    ]
     assert first["id"] in ids and second["id"] in ids
     assert completed["id"] not in ids and cancelled["id"] not in ids
     assert (
@@ -441,15 +450,16 @@ def test_task_list_filters_counts_and_stable_cursor(api_client) -> None:
     }
     assert (
         api_client.get(
-            "/api/tasks", params={"project_id": project["id"], "unassigned_project": True}
+            "/api/tasks",
+            params={"project_id": project["id"], "unassigned_project": True},
         ).status_code
         == 400
     )
     assert completed["id"] in {
         item["id"]
-        for item in api_client.get("/api/tasks", params={"include_completed": True}).json()[
-            "items"
-        ]
+        for item in api_client.get(
+            "/api/tasks", params={"include_completed": True}
+        ).json()["items"]
     }
     assert cancelled["id"] in {
         item["id"]

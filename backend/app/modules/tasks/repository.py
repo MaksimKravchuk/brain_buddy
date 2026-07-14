@@ -38,7 +38,10 @@ class TaskRepository(BaseRepository):
         lock_key = str(lock_dir)
         with self._owner_locks_guard:
             thread_lock = self._owner_locks.setdefault(lock_key, RLock())
-        with thread_lock, (lock_dir / ".command.lock").open("a+", encoding="utf-8") as file_lock:
+        with (
+            thread_lock,
+            (lock_dir / ".command.lock").open("a+", encoding="utf-8") as file_lock,
+        ):
             fcntl.flock(file_lock.fileno(), fcntl.LOCK_EX)
             try:
                 yield
@@ -56,11 +59,16 @@ class TaskRepository(BaseRepository):
             self.subtask_path(subtask.owner_id, subtask.task_id, subtask.id), subtask
         )
 
-    def list_subtasks(self, *, owner_id: str, task_id: str) -> list[TaskSubtaskDocument]:
+    def list_subtasks(
+        self, *, owner_id: str, task_id: str
+    ) -> list[TaskSubtaskDocument]:
         directory = self.resolve("task-subtasks", owner_id, task_id)
         if not directory.exists():
             return []
-        return [self.load_model(path, TaskSubtaskDocument) for path in directory.glob("*.json")]
+        return [
+            self.load_model(path, TaskSubtaskDocument)
+            for path in directory.glob("*.json")
+        ]
 
     def get_subtask_for_owner(
         self, subtask_id: str, *, owner_id: str, task_id: str
@@ -75,11 +83,16 @@ class TaskRepository(BaseRepository):
             self.comment_path(comment.owner_id, comment.task_id, comment.id), comment
         )
 
-    def list_comments(self, *, owner_id: str, task_id: str) -> list[TaskCommentDocument]:
+    def list_comments(
+        self, *, owner_id: str, task_id: str
+    ) -> list[TaskCommentDocument]:
         directory = self.resolve("task-comments", owner_id, task_id)
         if not directory.exists():
             return []
-        return [self.load_model(path, TaskCommentDocument) for path in directory.glob("*.json")]
+        return [
+            self.load_model(path, TaskCommentDocument)
+            for path in directory.glob("*.json")
+        ]
 
     def get_comment_for_owner(
         self, comment_id: str, *, owner_id: str, task_id: str
@@ -93,9 +106,7 @@ class TaskRepository(BaseRepository):
         key_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
         return self.resolve("task-commands", owner_id, f"{key_hash}.json")
 
-    def get_idempotency(
-        self, *, owner_id: str, key: str
-    ) -> IdempotencyRecord | None:
+    def get_idempotency(self, *, owner_id: str, key: str) -> IdempotencyRecord | None:
         path = self.idempotency_path(owner_id, key)
         return self.load_model(path, IdempotencyRecord) if path.exists() else None
 
@@ -120,13 +131,17 @@ class TaskRepository(BaseRepository):
             raise ConflictError("Context", context.id)
         self.dump_model(path, context)
 
-    def get_project_for_owner(self, project_id: str, *, owner_id: str) -> ProjectDocument:
+    def get_project_for_owner(
+        self, project_id: str, *, owner_id: str
+    ) -> ProjectDocument:
         path = self.project_path(owner_id, project_id)
         if not path.exists():
             raise NotFoundError("Project", project_id)
         return self.load_model(path, ProjectDocument)
 
-    def get_context_for_owner(self, context_id: str, *, owner_id: str) -> ContextDocument:
+    def get_context_for_owner(
+        self, context_id: str, *, owner_id: str
+    ) -> ContextDocument:
         path = self.context_path(owner_id, context_id)
         if not path.exists():
             raise NotFoundError("Context", context_id)
@@ -136,13 +151,17 @@ class TaskRepository(BaseRepository):
         directory = self.resolve("projects", owner_id)
         if not directory.exists():
             return []
-        return [self.load_model(path, ProjectDocument) for path in directory.glob("*.json")]
+        return [
+            self.load_model(path, ProjectDocument) for path in directory.glob("*.json")
+        ]
 
     def list_contexts_for_owner(self, *, owner_id: str) -> list[ContextDocument]:
         directory = self.resolve("contexts", owner_id)
         if not directory.exists():
             return []
-        return [self.load_model(path, ContextDocument) for path in directory.glob("*.json")]
+        return [
+            self.load_model(path, ContextDocument) for path in directory.glob("*.json")
+        ]
 
     def task_path(self, owner_id: str, task_id: str) -> Path:
         return self.resolve("tasks", owner_id, f"{task_id}.json")
@@ -166,7 +185,9 @@ class TaskRepository(BaseRepository):
         directory = self.resolve("tasks", owner_id)
         if not directory.exists():
             return []
-        return [self.load_model(path, TaskDocument) for path in directory.glob("*.json")]
+        return [
+            self.load_model(path, TaskDocument) for path in directory.glob("*.json")
+        ]
 
     def next_order_key(self, *, owner_id: str, state: str) -> int:
         matching = [
