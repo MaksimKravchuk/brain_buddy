@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from fastapi import APIRouter, Depends, Header, Query, status
 
 from app.api.dependencies import get_current_user, get_task_service
 from app.exceptions import ValidationFailure
+from app.modules.tasks import TaskService
+from app.modules.tasks.domain import (
+    ContextDocument,
+    ProjectDocument,
+    TaskCommentDocument,
+    TaskDocument,
+    TaskSubtaskDocument,
+)
 from app.schemas.auth import User
 from app.schemas.tasks import (
     ContextCreateRequest,
@@ -39,7 +49,7 @@ def create_project(
     payload: ProjectCreateRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
-    task_service=Depends(get_task_service),
+    task_service: TaskService = Depends(get_task_service),
 ) -> ProjectResponse:
     project = task_service.create_project(
         payload,
@@ -52,7 +62,7 @@ def create_project(
 @router.get("/projects", response_model=list[ProjectResponse])
 def list_projects(
     current_user: User = Depends(get_current_user),
-    task_service=Depends(get_task_service),
+    task_service: TaskService = Depends(get_task_service),
 ) -> list[ProjectResponse]:
     return [
         _to_project_response(project)
@@ -64,7 +74,7 @@ def list_projects(
 def get_project(
     project_id: str,
     current_user: User = Depends(get_current_user),
-    task_service=Depends(get_task_service),
+    task_service: TaskService = Depends(get_task_service),
 ) -> ProjectResponse:
     return _to_project_response(task_service.get_project(project_id, owner_id=current_user.id))
 
@@ -74,7 +84,7 @@ def create_context(
     payload: ContextCreateRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
-    task_service=Depends(get_task_service),
+    task_service: TaskService = Depends(get_task_service),
 ) -> ContextResponse:
     context = task_service.create_context(
         payload,
@@ -87,7 +97,7 @@ def create_context(
 @router.get("/contexts", response_model=list[ContextResponse])
 def list_contexts(
     current_user: User = Depends(get_current_user),
-    task_service=Depends(get_task_service),
+    task_service: TaskService = Depends(get_task_service),
 ) -> list[ContextResponse]:
     return [
         _to_context_response(context)
@@ -99,7 +109,7 @@ def list_contexts(
 def get_context(
     context_id: str,
     current_user: User = Depends(get_current_user),
-    task_service=Depends(get_task_service),
+    task_service: TaskService = Depends(get_task_service),
 ) -> ContextResponse:
     return _to_context_response(task_service.get_context(context_id, owner_id=current_user.id))
 
@@ -108,7 +118,7 @@ def get_context(
 def get_task(
     task_id: str,
     current_user: User = Depends(get_current_user),
-    task_service=Depends(get_task_service),
+    task_service: TaskService = Depends(get_task_service),
 ) -> TaskResponse:
     task, subtasks, comments = task_service.get_task_detail(
         task_id, owner_id=current_user.id
@@ -126,7 +136,7 @@ def create_subtask(
     payload: TaskSubtaskCreateRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
-    task_service=Depends(get_task_service),
+    task_service: TaskService = Depends(get_task_service),
 ) -> TaskSubtaskResponse:
     subtask = task_service.create_subtask(
         task_id,
@@ -147,7 +157,7 @@ def create_comment(
     payload: TaskCommentCreateRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
-    task_service=Depends(get_task_service),
+    task_service: TaskService = Depends(get_task_service),
 ) -> TaskCommentResponse:
     comment = task_service.create_comment(
         task_id,
@@ -165,7 +175,7 @@ def update_task(
     payload: TaskUpdateRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
-    task_service=Depends(get_task_service),
+    task_service: TaskService = Depends(get_task_service),
 ) -> TaskResponse:
     return _to_response(
         task_service.update_task(
@@ -183,7 +193,7 @@ def transition_task(
     payload: TaskTransitionRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
-    task_service=Depends(get_task_service),
+    task_service: TaskService = Depends(get_task_service),
 ) -> TaskResponse:
     return _to_response(
         task_service.transition_task(
@@ -200,7 +210,7 @@ def create_task(
     payload: TaskCreateRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
-    task_service=Depends(get_task_service),
+    task_service: TaskService = Depends(get_task_service),
 ) -> TaskResponse:
     return _to_response(
         task_service.create_task(
@@ -221,7 +231,7 @@ def list_tasks(
     cursor: str | None = None,
     limit: int = Query(default=50, ge=1, le=200),
     current_user: User = Depends(get_current_user),
-    task_service=Depends(get_task_service),
+    task_service: TaskService = Depends(get_task_service),
 ) -> TaskListResponse:
     items, next_cursor, has_more, counts_by_state = task_service.list_tasks(
         owner_id=current_user.id,
@@ -241,7 +251,12 @@ def list_tasks(
     )
 
 
-def _to_response(task, *, subtasks=(), comments=()) -> TaskResponse:
+def _to_response(
+    task: TaskDocument,
+    *,
+    subtasks: Sequence[TaskSubtaskDocument] = (),
+    comments: Sequence[TaskCommentDocument] = (),
+) -> TaskResponse:
     return TaskResponse(
         id=task.id,
         title=task.title,
@@ -263,7 +278,7 @@ def _to_response(task, *, subtasks=(), comments=()) -> TaskResponse:
     )
 
 
-def _to_project_response(project) -> ProjectResponse:
+def _to_project_response(project: ProjectDocument) -> ProjectResponse:
     return ProjectResponse(
         id=project.id,
         name=project.name,
@@ -273,7 +288,7 @@ def _to_project_response(project) -> ProjectResponse:
     )
 
 
-def _to_context_response(context) -> ContextResponse:
+def _to_context_response(context: ContextDocument) -> ContextResponse:
     return ContextResponse(
         id=context.id,
         name=context.name,
@@ -282,7 +297,7 @@ def _to_context_response(context) -> ContextResponse:
     )
 
 
-def _to_subtask_response(subtask) -> TaskSubtaskResponse:
+def _to_subtask_response(subtask: TaskSubtaskDocument) -> TaskSubtaskResponse:
     return TaskSubtaskResponse(
         id=subtask.id,
         title=subtask.title,
@@ -292,7 +307,7 @@ def _to_subtask_response(subtask) -> TaskSubtaskResponse:
     )
 
 
-def _to_comment_response(comment) -> TaskCommentResponse:
+def _to_comment_response(comment: TaskCommentDocument) -> TaskCommentResponse:
     return TaskCommentResponse(
         id=comment.id,
         body=comment.body,

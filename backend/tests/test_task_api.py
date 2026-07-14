@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
+
+from app.exceptions import ConflictError
+from app.schemas.tasks import TaskCreateRequest, TaskUpdateRequest
+
 
 def _create_task(api_client, title: str, *, key: str, **payload):
     response = api_client.post(
@@ -86,14 +92,22 @@ def test_project_and_context_creation_are_idempotent_and_listed_by_normalized_na
     )
 
 
-def test_task_preserves_provenance_and_all_nested_writes_are_idempotent(api_client) -> None:
+def test_task_rejects_unverifiable_provenance_and_nested_writes_are_idempotent(
+    api_client,
+) -> None:
+    unverifiable_provenance = api_client.post(
+        "/api/tasks",
+        headers={"Idempotency-Key": "unverifiable-provenance"},
+        json={"title": "Plan appointment", "source_capture_ids": ["capture_one"]},
+    )
+    assert unverifiable_provenance.status_code == 400
+
     task = _create_task(
         api_client,
         "Plan appointment",
         key="create-detail-task",
-        source_capture_ids=["capture_one", "capture_two"],
     )
-    assert task["source_capture_ids"] == ["capture_one", "capture_two"]
+    assert task["source_capture_ids"] == []
 
     subtask_headers = {"Idempotency-Key": "create-detail-subtask"}
     first_subtask = api_client.post(
@@ -268,6 +282,91 @@ def test_task_updates_transitions_and_rejects_stale_revisions(api_client) -> Non
     )
     assert stale.status_code == 409, stale.text
     assert api_client.get(f"/api/tasks/{task['id']}").json()["state"] == "completed"
+
+
+def test_task_mutations_are_serialized_for_revision_and_idempotency(
+    container, monkeypatch
+) -> None:
+    service = container.task_service
+    repository = container.task_repo
+    owner_id = "user_test_owner"
+    task = service.create_task(
+        TaskCreateRequest(title="Concurrent update"),
+        owner_id=owner_id,
+        idempotency_key="initial-task",
+    )
+
+    first_save_started = Event()
+    second_task_read = Event()
+    original_save = repository.save
+    original_get_for_owner = repository.get_for_owner
+
+    def signal_second_task_read(task_id: str, *, owner_id: str):
+        task_document = original_get_for_owner(task_id, owner_id=owner_id)
+        if first_save_started.is_set():
+            second_task_read.set()
+        return task_document
+
+    def block_first_save(updated_task):
+        if not first_save_started.is_set():
+            first_save_started.set()
+            second_task_read.wait(timeout=0.25)
+        original_save(updated_task)
+
+    monkeypatch.setattr(repository, "get_for_owner", signal_second_task_read)
+    monkeypatch.setattr(repository, "save", block_first_save)
+
+    def update(details: str, key: str):
+        return service.update_task(
+            task.id,
+            TaskUpdateRequest(details=details, expected_revision=1),
+            owner_id=owner_id,
+            idempotency_key=key,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first_update = executor.submit(update, "first", "first-update")
+        assert first_save_started.wait(timeout=2)
+        second_update = executor.submit(update, "second", "second-update")
+        first_result = first_update.result(timeout=2)
+        second_error = second_update.exception(timeout=2)
+
+    assert first_result.revision == 2
+    assert isinstance(second_error, ConflictError)
+
+    first_create_started = Event()
+    release_first_create = Event()
+    original_create = repository.create
+
+    def block_first_create(created_task):
+        if not first_create_started.is_set():
+            first_create_started.set()
+            assert release_first_create.wait(timeout=2)
+        original_create(created_task)
+
+    monkeypatch.setattr(repository, "create", block_first_create)
+
+    def create_with_same_key():
+        return service.create_task(
+            TaskCreateRequest(title="Idempotent create"),
+            owner_id=owner_id,
+            idempotency_key="concurrent-create",
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first_create = executor.submit(create_with_same_key)
+        assert first_create_started.wait(timeout=2)
+        second_create = executor.submit(create_with_same_key)
+        release_first_create.set()
+        first_created = first_create.result(timeout=2)
+        second_created = second_create.result(timeout=2)
+
+    assert first_created.id == second_created.id
+    assert [
+        item
+        for item in repository.list_for_owner(owner_id=owner_id)
+        if item.title == "Idempotent create"
+    ] == [first_created]
 
 
 def test_task_list_filters_counts_and_stable_cursor(api_client) -> None:

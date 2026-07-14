@@ -5,8 +5,9 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime
+from typing import Concatenate, ParamSpec, TypeVar, cast
 
 from app.exceptions import ConflictError, ValidationFailure
 from app.schemas.tasks import (
@@ -33,6 +34,24 @@ from .repository import TaskRepository
 
 _OPEN_STATES = ("inbox", "next", "waiting", "someday")
 
+_P = ParamSpec("_P")
+_Result = TypeVar("_Result")
+
+
+def _serialized_write(
+    command: Callable[Concatenate[TaskService, _P], _Result],
+) -> Callable[Concatenate[TaskService, _P], _Result]:
+    """Hold the owner command lock over idempotency and resource persistence."""
+
+    def wrapped(
+        service: TaskService, /, *args: _P.args, **kwargs: _P.kwargs
+    ) -> _Result:
+        owner_id = cast(str, kwargs["owner_id"])
+        with service.task_repo.command_lock(owner_id):
+            return command(service, *args, **kwargs)
+
+    return wrapped
+
 
 class TaskService:
     """Owns canonical GTD records and their owner-scoped projections."""
@@ -40,6 +59,7 @@ class TaskService:
     def __init__(self, task_repo: TaskRepository) -> None:
         self.task_repo = task_repo
 
+    @_serialized_write
     def create_project(
         self,
         payload: ProjectCreateRequest,
@@ -77,6 +97,7 @@ class TaskService:
         )
         return project
 
+    @_serialized_write
     def create_context(
         self,
         payload: ContextCreateRequest,
@@ -113,6 +134,7 @@ class TaskService:
         )
         return context
 
+    @_serialized_write
     def create_task(
         self,
         payload: TaskCreateRequest,
@@ -164,6 +186,7 @@ class TaskService:
         )
         return task
 
+    @_serialized_write
     def create_subtask(
         self,
         task_id: str,
@@ -207,6 +230,7 @@ class TaskService:
         )
         return subtask
 
+    @_serialized_write
     def create_comment(
         self,
         task_id: str,
@@ -265,6 +289,7 @@ class TaskService:
             ),
         )
 
+    @_serialized_write
     def update_task(
         self,
         task_id: str,
@@ -318,6 +343,7 @@ class TaskService:
         )
         return updated
 
+    @_serialized_write
     def transition_task(
         self,
         task_id: str,
@@ -552,12 +578,11 @@ class TaskService:
 
     @staticmethod
     def _source_capture_ids(source_capture_ids: list[str]) -> list[str]:
-        normalized = [source_capture_id.strip() for source_capture_id in source_capture_ids]
-        if any(not source_capture_id for source_capture_id in normalized):
-            raise ValidationFailure("source_capture_ids cannot contain empty values.")
-        if len(set(normalized)) != len(normalized):
-            raise ValidationFailure("source_capture_ids cannot contain duplicates.")
-        return normalized
+        if source_capture_ids:
+            raise ValidationFailure(
+                "source_capture_ids require owner-scoped Capture validation."
+            )
+        return []
 
     @staticmethod
     def _validated_task_update(task: TaskDocument, **updates: object) -> TaskDocument:

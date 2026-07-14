@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from threading import Lock, RLock
+from typing import ClassVar
 
 from app.exceptions import ConflictError, NotFoundError
 from app.repositories.base import BaseRepository
@@ -21,6 +26,24 @@ from .domain import (
 
 class TaskRepository(BaseRepository):
     """Store task-module records independently in owner-scoped directories."""
+
+    _owner_locks: ClassVar[dict[str, RLock]] = {}
+    _owner_locks_guard: ClassVar[Lock] = Lock()
+
+    @contextmanager
+    def command_lock(self, owner_id: str) -> Iterator[None]:
+        """Serialize every owner-scoped command across threads and processes."""
+
+        lock_dir = ensure_directory(self.resolve("task-commands", owner_id))
+        lock_key = str(lock_dir)
+        with self._owner_locks_guard:
+            thread_lock = self._owner_locks.setdefault(lock_key, RLock())
+        with thread_lock, (lock_dir / ".command.lock").open("a+", encoding="utf-8") as file_lock:
+            fcntl.flock(file_lock.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(file_lock.fileno(), fcntl.LOCK_UN)
 
     def subtask_path(self, owner_id: str, task_id: str, subtask_id: str) -> Path:
         return self.resolve("task-subtasks", owner_id, task_id, f"{subtask_id}.json")
