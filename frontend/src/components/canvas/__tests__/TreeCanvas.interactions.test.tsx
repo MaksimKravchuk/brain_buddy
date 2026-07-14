@@ -445,4 +445,166 @@ describe("TreeCanvas interaction callbacks", () => {
     expect(useTreeStore.getState().relations.map((relation) => relation.id)).toContain("relation-retried");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
+
+  it("ignores viewport controls before the React Flow instance initializes", () => {
+    const ref = createRef<TreeCanvasHandle>();
+    render(<TreeCanvas ref={ref} treeId={tree.id} isLoading={false} />);
+    act(() => ref.current?.zoomIn());
+    act(() => ref.current?.zoomOut());
+    act(() => ref.current?.centerOnSelection());
+    expect(useTreeStore.getState().nodes.length).toBeGreaterThan(0);
+  });
+
+  it("returns early when centering on a missing node selection", () => {
+    const ref = createRef<TreeCanvasHandle>();
+    const fitView = vi.fn();
+    const setCenter = vi.fn();
+    render(<TreeCanvas ref={ref} treeId={tree.id} isLoading={false} />);
+    act(() =>
+      flowProps.onInit?.({
+        screenToFlowPosition: () => ({ x: 0, y: 0 }),
+        zoomIn: vi.fn(),
+        zoomOut: vi.fn(),
+        setCenter,
+        fitView
+      })
+    );
+    act(() => useTreeStore.getState().select({ type: "node", id: "nonexistent" }));
+    act(() => ref.current?.centerOnSelection());
+    expect(setCenter).not.toHaveBeenCalled();
+    expect(fitView).not.toHaveBeenCalled();
+  });
+
+  it("ignores drag stop for unknown nodes and selection-only onSelectionChange", () => {
+    renderCanvas();
+    act(() => flowProps.onNodeDragStop?.({}, { id: "missing", position: { x: 0, y: 0 } }));
+    expect(mutations.updateNode).not.toHaveBeenCalled();
+    act(() => flowProps.onSelectionChange?.({ nodes: [], edges: [] }));
+    expect(useTreeStore.getState().selection).toEqual({ type: null, id: null });
+  });
+
+  it("warns when linking a node to itself", async () => {
+    renderCanvas();
+    act(() => useTreeStore.getState().select({ type: "node", id: "node-1" }));
+
+    const sourceLinkHandler = useUiStore.getState().hotkeys["link-nodes-ctrl"]?.handler;
+    act(() => sourceLinkHandler?.());
+    expect(useUiStore.getState().toasts.find((toast) => toast.title === "Link mode")).toBeTruthy();
+
+    act(() => useTreeStore.getState().select({ type: "node", id: "node-1" }));
+    await waitFor(() =>
+      expect(useUiStore.getState().hotkeys["link-nodes-ctrl"]?.handler).not.toBe(sourceLinkHandler)
+    );
+    act(() => useUiStore.getState().hotkeys["link-nodes-ctrl"]?.handler());
+    expect(useUiStore.getState().toasts.find((toast) => toast.title === "Pick a different node")).toBeTruthy();
+  });
+
+  it("creates a child node from a selected parent via keyboard shortcut", async () => {
+    mutations.createNode.mockImplementation((_payload, options) =>
+      options?.onSuccess({
+        id: "child-new",
+        label: "Effect",
+        type: "child",
+        position: { x: 10, y: 200 },
+        highlight_state: "none",
+        relation_counts: { up_count: 0, down_count: 0 }
+      })
+    );
+    mutations.createRelation.mockImplementation((_payload, options) =>
+      options?.onSuccess({
+        id: "rel-child",
+        source_node_id: "node-1",
+        target_node_id: "child-new",
+        kind: "why",
+        created_at: "2025-01-02T00:00:00Z"
+      })
+    );
+    renderCanvas();
+    act(() => useTreeStore.getState().select({ type: "node", id: "node-1" }));
+
+    const enterHandler = useUiStore.getState().hotkeys["create-child-enter"]?.handler;
+    expect(enterHandler).toBeTruthy();
+    await act(async () => {
+      enterHandler?.();
+    });
+    await waitFor(() => expect(mutations.createNode).toHaveBeenCalled());
+  });
+
+  it("ignores the create-child shortcut when no node is selected", () => {
+    renderCanvas();
+    const enterHandler = useUiStore.getState().hotkeys["create-child-enter"]?.handler;
+    act(() => enterHandler?.());
+    expect(mutations.createNode).not.toHaveBeenCalled();
+  });
+
+  it("creates sibling nodes that inherit parent relations", async () => {
+    mutations.createNode.mockImplementation((_payload, options) =>
+      options?.onSuccess({
+        id: "sibling-new",
+        label: "Cause",
+        type: "parent",
+        position: { x: 250, y: 20 },
+        highlight_state: "none",
+        relation_counts: { up_count: 0, down_count: 0 }
+      })
+    );
+    mutations.createRelation.mockImplementation((_payload, options) =>
+      options?.onSuccess({
+        id: "rel-sibling",
+        source_node_id: "sibling-new",
+        target_node_id: "node-2",
+        kind: "why",
+        created_at: "2025-01-02T00:00:00Z"
+      })
+    );
+    renderCanvas();
+    act(() => useTreeStore.getState().select({ type: "node", id: "node-1" }));
+
+    const siblingHandler = useUiStore.getState().hotkeys["create-sibling-tab"]?.handler;
+    expect(siblingHandler).toBeTruthy();
+    await act(async () => {
+      siblingHandler?.();
+    });
+    await waitFor(() => expect(mutations.createNode).toHaveBeenCalled());
+  });
+
+  it("ignores sibling creation when no node is selected", () => {
+    renderCanvas();
+    const siblingHandler = useUiStore.getState().hotkeys["create-sibling-tab"]?.handler;
+    act(() => siblingHandler?.());
+    expect(mutations.createNode).not.toHaveBeenCalled();
+  });
+
+  it("ignores create relative node for an unknown origin", () => {
+    renderCanvas();
+    act(() => useTreeStore.getState().select({ type: "node", id: "nonexistent" }));
+    const enterHandler = useUiStore.getState().hotkeys["create-child-enter"]?.handler;
+    act(() => enterHandler?.());
+    expect(mutations.createNode).not.toHaveBeenCalled();
+  });
+
+  it("skips keyboard hotkeys when focus is inside an input element", () => {
+    renderCanvas();
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+
+    const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true });
+    input.dispatchEvent(event);
+    expect(mutations.createNode).not.toHaveBeenCalled();
+    document.body.removeChild(input);
+  });
+
+  it("builds combos with modifier keys and ignores unknown combos", () => {
+    renderCanvas();
+    const enterEvent = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, metaKey: true });
+    window.dispatchEvent(enterEvent);
+
+    const unknownEvent = new KeyboardEvent("keydown", { key: "F22", bubbles: true });
+    window.dispatchEvent(unknownEvent);
+
+    const combo = new KeyboardEvent("keydown", { key: "n", bubbles: true, ctrlKey: true, altKey: true, shiftKey: true });
+    window.dispatchEvent(combo);
+    expect(useTreeStore.getState().selection).toEqual({ type: null, id: null });
+  });
 });
