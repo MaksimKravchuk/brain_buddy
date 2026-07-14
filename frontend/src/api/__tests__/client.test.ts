@@ -31,6 +31,29 @@ describe("apiClient", () => {
     setUnauthorizedHandler(null);
   });
 
+  it("preserves form bodies and omits absent relation update fields", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(response({ id: "result" })));
+
+    await apiClient.createRelation("tree-1", {
+      source_node_id: "source-1",
+      target_node_id: "target-1"
+    });
+    await apiClient.updateRelation("tree-1", "relation-1", {});
+    const form = new FormData();
+    form.append("tree", "export");
+    await apiClient.createTree(form as unknown as Parameters<typeof apiClient.createTree>[0]);
+
+    const [, createRelationInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(createRelationInit.body).toBe(
+      JSON.stringify({ source_node_id: "source-1", target_node_id: "target-1", kind: "why" })
+    );
+    const [, updateRelationInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(updateRelationInit.body).toBe(JSON.stringify({}));
+    const [, formInit] = fetchMock.mock.calls[2] as [string, RequestInit];
+    expect(formInit.body).toBe(form);
+    expect(new Headers(formInit.headers).has("Content-Type")).toBe(false);
+  });
+
   it("normalizes relation aliases before submitting a relation", async () => {
     fetchMock.mockResolvedValue(response({ id: "relation-1" }));
 

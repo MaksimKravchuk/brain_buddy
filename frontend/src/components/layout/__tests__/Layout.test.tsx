@@ -1,5 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Layout } from "../Layout";
@@ -10,7 +9,10 @@ describe("Layout beforeunload guard", () => {
     useTreeStore.getState().reset();
   });
   afterEach(() => {
-    useTreeStore.getState().reset();
+    cleanup();
+    act(() => {
+      useTreeStore.getState().reset();
+    });
     vi.restoreAllMocks();
   });
 
