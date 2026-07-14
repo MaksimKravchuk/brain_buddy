@@ -8,9 +8,11 @@ import pytest
 
 from app.exceptions import ConflictError, NotFoundError
 from app.schemas import (
+    NodeCreateRequest,
     NodeResponse,
     Position,
     RelationCounts,
+    RelationCreateRequest,
     TreeCreateRequest,
     TreeMetadata,
     TreeUpdateRequest,
@@ -428,6 +430,89 @@ def test_node_to_response_preserves_valid_extra_values(tree_service) -> None:
 
     assert response.type == "parent"
     assert response.highlight_state == "cause_candidate"
+
+
+def test_tree_response_preserves_metadata_owner_and_directional_relation_counts(
+    tree_service, node_service, relation_service
+) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Exact response"), owner_id=TEST_OWNER_ID
+    )
+    node_a, _ = node_service.create_node(
+        tree.id,
+        NodeCreateRequest(
+            label="A", type="parent", position=Position(x=1, y=2),
+            highlight_state="cause_candidate",
+        ),
+    )
+    node_b, _ = node_service.create_node(
+        tree.id,
+        NodeCreateRequest(label="B", type="child", position=Position(x=3, y=4)),
+    )
+    node_c, _ = node_service.create_node(
+        tree.id,
+        NodeCreateRequest(label="C", type="child", position=Position(x=5, y=6)),
+    )
+    first_relation, _ = relation_service.create_relation(
+        tree.id,
+        RelationCreateRequest(
+            source_node_id=node_a.id, target_node_id=node_b.id, kind="why"
+        ),
+    )
+    second_relation, persisted = relation_service.create_relation(
+        tree.id,
+        RelationCreateRequest(
+            source_node_id=node_c.id, target_node_id=node_a.id, kind="why"
+        ),
+    )
+    persisted = tree_service.tree_repo.mutate(
+        tree.id,
+        update=lambda current: current.model_copy(
+            update={
+                "metadata": {
+                    "version": 4,
+                    "layout": {"viewport": "wide"},
+                    "owner_id": "ignored-metadata-owner",
+                }
+            },
+            deep=True,
+        ),
+    )
+
+    response = tree_service.to_response(persisted)
+    nodes = {node.id: node for node in response.nodes}
+
+    assert response.id == tree.id
+    assert response.name == "Exact response"
+    assert response.owner_id == TEST_OWNER_ID
+    assert response.metadata.model_dump(mode="json") == {
+        "version": 4,
+        "created_at": persisted.created_at.isoformat().replace("+00:00", "Z"),
+        "updated_at": persisted.updated_at.isoformat().replace("+00:00", "Z"),
+        "layout": {"viewport": "wide"},
+        "owner_id": TEST_OWNER_ID,
+    }
+    assert nodes[node_a.id].model_dump() == {
+        "id": node_a.id,
+        "label": "A",
+        "type": "parent",
+        "position": {"x": 1.0, "y": 2.0},
+        "highlight_state": "cause_candidate",
+        "relation_counts": {"up_count": 1, "down_count": 1},
+    }
+    assert nodes[node_b.id].relation_counts == RelationCounts(up_count=0, down_count=1)
+    assert nodes[node_c.id].relation_counts == RelationCounts(up_count=1, down_count=0)
+    assert [relation.id for relation in response.relations] == [
+        first_relation.id,
+        second_relation.id,
+    ]
+    assert response.relations[0].model_dump() == {
+        "id": first_relation.id,
+        "source_node_id": node_a.id,
+        "target_node_id": node_b.id,
+        "kind": "why",
+        "created_at": first_relation.metadata.created_at,
+    }
 
 
 def test_node_to_response_logs_when_coercing(tree_service, caplog) -> None:
