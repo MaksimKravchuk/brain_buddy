@@ -98,7 +98,7 @@ def get_tree(
 @router.put(
     "/trees/{tree_id}",
     response_model=TreeDetailResponse,
-    responses=error_responses(401, 404, 422),
+    responses=error_responses(400, 401, 404, 409, 422),
 )
 def update_tree(
     tree_id: str,
@@ -206,7 +206,7 @@ def update_node(
 @router.delete(
     "/trees/{tree_id}/nodes/{node_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    responses=error_responses(401, 404, 422),
+    responses=error_responses(400, 401, 404, 422),
 )
 def delete_node(
     tree_id: str,
@@ -350,7 +350,7 @@ def delete_version(
     "/trees/{tree_id}/validate/{node_id}",
     response_model=ValidationResponse,
     status_code=status.HTTP_200_OK,
-    responses=error_responses(401, 404, 422),
+    responses=error_responses(400, 401, 404, 422),
 )
 def validate_node(
     tree_id: str,
