@@ -48,4 +48,18 @@ describe("authStore", () => {
     expect(useAuthStore.getState().status).toBe("anon");
     expect(useAuthStore.getState().user).toBeNull();
   });
+
+  it("signup stores the returned user and marks the session authed", async () => {
+    vi.spyOn(authApi, "signup").mockResolvedValue({ id: "u2", email: "new@example.com" });
+    await useAuthStore.getState().signup({ email: "new@example.com", password: "secret", invite_code: "invite" });
+    expect(useAuthStore.getState().status).toBe("authed");
+    expect(useAuthStore.getState().user?.email).toBe("new@example.com");
+  });
+
+  it("clearSession resets to anon without a network call", () => {
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    useAuthStore.getState().clearSession();
+    expect(useAuthStore.getState().status).toBe("anon");
+    expect(useAuthStore.getState().user).toBeNull();
+  });
 });

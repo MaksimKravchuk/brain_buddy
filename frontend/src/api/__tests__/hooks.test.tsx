@@ -396,4 +396,50 @@ describe("api hooks", () => {
       expect.objectContaining({ title: "Import failed", description: "Service unavailable", variant: "error" })
     );
   });
+
+  it("rejects rename attempts when no active tree is available", async () => {
+    const { result } = renderHook(() => useRenameTree(null), { wrapper: createWrapper(queryClient) });
+
+    await expect(
+      act(async () => {
+        await result.current.mutateAsync("New name");
+      })
+    ).rejects.toThrow("No active tree to rename");
+  });
+
+  it("rejects rename attempts when the tree is not loaded yet", async () => {
+    useTreeStore.setState({ activeTreeId: "tree-2" });
+    const { result } = renderHook(() => useRenameTree("tree-2"), { wrapper: createWrapper(queryClient) });
+
+    await expect(
+      act(async () => {
+        await result.current.mutateAsync("New name");
+      })
+    ).rejects.toThrow("Active tree is not loaded");
+  });
+
+  it("rejects AI feedback when no tree id is set", async () => {
+    const { result } = renderHook(() => useAiFeedback(null), { wrapper: createWrapper(queryClient) });
+
+    await expect(
+      act(async () => {
+        await result.current.mutateAsync({ consent: true });
+      })
+    ).rejects.toThrow("Tree ID is required");
+  });
+
+  it("surfaces export download failures with a toast", async () => {
+    vi.spyOn(apiClient, "exportTree").mockRejectedValue(new Error("Service unavailable"));
+    const { result } = renderHook(() => useTreeDownload(detail.id), { wrapper: createWrapper(queryClient) });
+
+    await act(async () => {
+      result.current.download();
+    });
+
+    await waitFor(() =>
+      expect(useUiStore.getState().toasts).toContainEqual(
+        expect.objectContaining({ title: "Download failed", description: "Service unavailable" })
+      )
+    );
+  });
 });

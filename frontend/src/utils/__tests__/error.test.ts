@@ -31,4 +31,18 @@ describe("getErrorMessage", () => {
     expect(getErrorContext("Plain failure")).toEqual({ message: "Plain failure" });
     expect(getErrorContext({ unknown: true }, "Fallback text")).toEqual({ message: "Fallback text" });
   });
+
+  it("uses the fallback message when the payload is empty and error has no message", () => {
+    expect(getErrorMessage(undefined, "Something went wrong")).toBe("Something went wrong");
+    expect(getErrorContext(null, "Default fallback")).toEqual({ message: "Default fallback" });
+  });
+
+  it("joins detail arrays nested under an ApiError payload detail field", () => {
+    const apiError = new ApiError("Invalid", 422, { detail: [{ msg: "Missing field" }, "Extra problem"] });
+    expect(getErrorMessage(apiError)).toBe("Missing field; Extra problem");
+  });
+
+  it("keeps a string payload with only whitespace from falling back", () => {
+    expect(getErrorMessage(new ApiError("Empty", 400, "   "))).toBe("400: Empty");
+  });
 });
