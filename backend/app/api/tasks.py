@@ -6,6 +6,7 @@ from collections.abc import Sequence
 
 from fastapi import APIRouter, Depends, Header, Query, status
 
+from app.api.contracts import error_responses
 from app.api.dependencies import get_current_user, get_task_service
 from app.exceptions import ValidationFailure
 from app.modules.tasks import TaskService
@@ -45,7 +46,10 @@ def _require_idempotency_key(idempotency_key: str | None) -> str:
 
 
 @router.post(
-    "/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED
+    "/projects",
+    response_model=ProjectResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses=error_responses(400, 401, 409, 422),
 )
 def create_project(
     payload: ProjectCreateRequest,
@@ -61,7 +65,9 @@ def create_project(
     return _to_project_response(project)
 
 
-@router.get("/projects", response_model=list[ProjectResponse])
+@router.get(
+    "/projects", response_model=list[ProjectResponse], responses=error_responses(401)
+)
 def list_projects(
     current_user: User = Depends(get_current_user),
     task_service: TaskService = Depends(get_task_service),
@@ -72,7 +78,11 @@ def list_projects(
     ]
 
 
-@router.get("/projects/{project_id}", response_model=ProjectResponse)
+@router.get(
+    "/projects/{project_id}",
+    response_model=ProjectResponse,
+    responses=error_responses(401, 404, 422),
+)
 def get_project(
     project_id: str,
     current_user: User = Depends(get_current_user),
@@ -84,7 +94,10 @@ def get_project(
 
 
 @router.post(
-    "/contexts", response_model=ContextResponse, status_code=status.HTTP_201_CREATED
+    "/contexts",
+    response_model=ContextResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses=error_responses(400, 401, 409, 422),
 )
 def create_context(
     payload: ContextCreateRequest,
@@ -100,7 +113,9 @@ def create_context(
     return _to_context_response(context)
 
 
-@router.get("/contexts", response_model=list[ContextResponse])
+@router.get(
+    "/contexts", response_model=list[ContextResponse], responses=error_responses(401)
+)
 def list_contexts(
     current_user: User = Depends(get_current_user),
     task_service: TaskService = Depends(get_task_service),
@@ -111,7 +126,11 @@ def list_contexts(
     ]
 
 
-@router.get("/contexts/{context_id}", response_model=ContextResponse)
+@router.get(
+    "/contexts/{context_id}",
+    response_model=ContextResponse,
+    responses=error_responses(401, 404, 422),
+)
 def get_context(
     context_id: str,
     current_user: User = Depends(get_current_user),
@@ -122,7 +141,11 @@ def get_context(
     )
 
 
-@router.get("/tasks/{task_id}", response_model=TaskResponse)
+@router.get(
+    "/tasks/{task_id}",
+    response_model=TaskResponse,
+    responses=error_responses(401, 404, 422),
+)
 def get_task(
     task_id: str,
     current_user: User = Depends(get_current_user),
@@ -138,6 +161,7 @@ def get_task(
     "/tasks/{task_id}/subtasks",
     response_model=TaskSubtaskResponse,
     status_code=status.HTTP_201_CREATED,
+    responses=error_responses(400, 401, 404, 409, 422),
 )
 def create_subtask(
     task_id: str,
@@ -159,6 +183,7 @@ def create_subtask(
     "/tasks/{task_id}/comments",
     response_model=TaskCommentResponse,
     status_code=status.HTTP_201_CREATED,
+    responses=error_responses(400, 401, 404, 409, 422),
 )
 def create_comment(
     task_id: str,
@@ -177,7 +202,11 @@ def create_comment(
     return _to_comment_response(comment)
 
 
-@router.patch("/tasks/{task_id}", response_model=TaskResponse)
+@router.patch(
+    "/tasks/{task_id}",
+    response_model=TaskResponse,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
 def update_task(
     task_id: str,
     payload: TaskUpdateRequest,
@@ -195,7 +224,11 @@ def update_task(
     )
 
 
-@router.post("/tasks/{task_id}/transitions", response_model=TaskResponse)
+@router.post(
+    "/tasks/{task_id}/transitions",
+    response_model=TaskResponse,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
 def transition_task(
     task_id: str,
     payload: TaskTransitionRequest,
@@ -213,7 +246,12 @@ def transition_task(
     )
 
 
-@router.post("/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/tasks",
+    response_model=TaskResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
 def create_task(
     payload: TaskCreateRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
@@ -229,7 +267,11 @@ def create_task(
     )
 
 
-@router.get("/tasks", response_model=TaskListResponse)
+@router.get(
+    "/tasks",
+    response_model=TaskListResponse,
+    responses=error_responses(400, 401, 404, 422),
+)
 def list_tasks(
     state: TaskState | None = None,
     project_id: str | None = None,
