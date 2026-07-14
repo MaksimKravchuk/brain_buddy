@@ -356,6 +356,25 @@ def test_validate_relation_targets_duplicate_detail_has_exact_fields(
 # ---------------------------------------------------------------------------
 
 
+def _create_tree_with_three_nodes(tree_service, node_service):
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Relation trio"), owner_id="owner"
+    )
+    node_a, _ = node_service.create_node(
+        tree.id,
+        NodeCreateRequest(label="A", type="child", position=Position(x=0, y=0)),
+    )
+    node_b, _ = node_service.create_node(
+        tree.id,
+        NodeCreateRequest(label="B", type="child", position=Position(x=1, y=1)),
+    )
+    node_c, _ = node_service.create_node(
+        tree.id,
+        NodeCreateRequest(label="C", type="child", position=Position(x=2, y=2)),
+    )
+    return tree, node_a, node_b, node_c
+
+
 def test_update_relation_kind_update_changes_question_label(
     tree_service, node_service, relation_service
 ) -> None:
@@ -382,6 +401,28 @@ def test_update_relation_kind_update_changes_question_label(
     )
 
     assert updated.question_label == "why"
+
+
+def test_update_relation_honors_constructed_future_kind_value(
+    tree_service, node_service, relation_service
+) -> None:
+    tree, node_a, node_b, _ = _create_tree_with_three_nodes(tree_service, node_service)
+    relation, _ = relation_service.create_relation(
+        tree.id,
+        RelationCreateRequest(
+            source_node_id=node_a.id, target_node_id=node_b.id, kind="why"
+        ),
+    )
+    future_payload = RelationUpdateRequest.model_construct(
+        kind="because", _fields_set={"kind"}
+    )
+
+    updated, updated_tree = relation_service.update_relation(
+        tree.id, relation.id, future_payload
+    )
+
+    assert updated.question_label == "because"
+    assert updated_tree.relations[0].question_label == "because"
 
 
 def test_update_relation_kind_none_does_not_change_label(
@@ -580,6 +621,68 @@ def test_update_relation_target_null_raises_exact_validation_message(
         )
 
     assert str(exc_info.value) == "target_node_id cannot be null"
+
+
+def test_update_relation_rejects_duplicate_after_source_change(
+    tree_service, node_service, relation_service
+) -> None:
+    tree, node_a, node_b, node_c = _create_tree_with_three_nodes(
+        tree_service, node_service
+    )
+    relation_service.create_relation(
+        tree.id,
+        RelationCreateRequest(
+            source_node_id=node_a.id, target_node_id=node_b.id, kind="why"
+        ),
+    )
+    second, _ = relation_service.create_relation(
+        tree.id,
+        RelationCreateRequest(
+            source_node_id=node_c.id, target_node_id=node_b.id, kind="why"
+        ),
+    )
+
+    with pytest.raises(ValidationFailure) as exc_info:
+        relation_service.update_relation(
+            tree.id, second.id, RelationUpdateRequest(source_node_id=node_a.id)
+        )
+
+    assert exc_info.value.detail == {
+        "reason": "duplicate_relation",
+        "source_node_id": node_a.id,
+        "target_node_id": node_b.id,
+    }
+
+
+def test_update_relation_rejects_duplicate_after_target_change(
+    tree_service, node_service, relation_service
+) -> None:
+    tree, node_a, node_b, node_c = _create_tree_with_three_nodes(
+        tree_service, node_service
+    )
+    relation_service.create_relation(
+        tree.id,
+        RelationCreateRequest(
+            source_node_id=node_a.id, target_node_id=node_b.id, kind="why"
+        ),
+    )
+    second, _ = relation_service.create_relation(
+        tree.id,
+        RelationCreateRequest(
+            source_node_id=node_a.id, target_node_id=node_c.id, kind="why"
+        ),
+    )
+
+    with pytest.raises(ValidationFailure) as exc_info:
+        relation_service.update_relation(
+            tree.id, second.id, RelationUpdateRequest(target_node_id=node_b.id)
+        )
+
+    assert exc_info.value.detail == {
+        "reason": "duplicate_relation",
+        "source_node_id": node_a.id,
+        "target_node_id": node_b.id,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -803,6 +906,51 @@ def test_create_tree_resolves_metadata_with_exact_owner_id(tree_service) -> None
     assert meta.get("owner_id") == "user_42"
 
 
+def test_create_tree_preserves_payload_metadata_timestamps_and_layout(
+    tree_service,
+) -> None:
+    from app.schemas.api import TreeMetadata
+
+    created_at = datetime(2026, 1, 1, tzinfo=UTC)
+    updated_at = datetime(2026, 1, 2, tzinfo=UTC)
+    metadata = TreeMetadata(
+        version=7,
+        created_at=created_at,
+        updated_at=updated_at,
+        layout={"viewport": {"x": 1, "y": 2}},
+        owner_id="payload_owner",
+    )
+
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Payload metadata", metadata=metadata),
+        owner_id="actor_owner",
+    )
+
+    assert tree.created_at == created_at
+    assert tree.updated_at == updated_at
+    assert tree.metadata == {
+        "version": 7,
+        "layout": {"viewport": {"x": 1, "y": 2}},
+        "owner_id": "payload_owner",
+    }
+    assert tree.owner_id == "actor_owner"
+
+
+def test_delete_tree_wrong_owner_raises_not_found_and_preserves_tree(
+    tree_service,
+) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Delete owner"), owner_id="owner_a"
+    )
+
+    with pytest.raises(NotFoundError) as exc_info:
+        tree_service.delete_tree(tree.id, owner_id="owner_b")
+
+    assert exc_info.value.resource == "Tree"
+    assert exc_info.value.identifier == tree.id
+    assert tree_service.get_tree(tree.id).owner_id == "owner_a"
+
+
 # ---------------------------------------------------------------------------
 # RelationService.create_relation — exact duplicate detail
 # ---------------------------------------------------------------------------
@@ -840,6 +988,31 @@ def test_create_relation_duplicate_raises_exact_detail(
         "reason": "duplicate_relation",
         "source_node_id": node_a.id,
         "target_node_id": node_b.id,
+    }
+
+
+def test_validate_relations_duplicate_pair_raises_exact_detail(
+    relation_service,
+) -> None:
+    from app.schemas.domain import RelationDocument, RelationMetadata
+
+    timestamp = datetime(2026, 1, 1, tzinfo=UTC)
+    relation = RelationDocument(
+        id="dup",
+        source_id="a",
+        target_id="b",
+        question_label="why",
+        metadata=RelationMetadata(created_at=timestamp, updated_at=timestamp),
+    )
+
+    with pytest.raises(ValidationFailure) as exc_info:
+        relation_service._validate_relations([relation, relation])
+
+    assert str(exc_info.value) == "A link already exists between these nodes."
+    assert exc_info.value.detail == {
+        "reason": "duplicate_relation",
+        "source_node_id": "a",
+        "target_node_id": "b",
     }
 
 
@@ -940,6 +1113,34 @@ def test_create_version_captures_one_timestamp_and_full_reference_metadata(
     assert reference.notes == "keep me"
     assert reference.diff_summary == version.diff
     assert reference.conflict_count == len(version.conflicts)
+
+
+def test_create_version_without_label_uses_captured_timestamp_label(
+    monkeypatch: pytest.MonkeyPatch, tree_service, version_service
+) -> None:
+    from app.services import version_service as version_service_module
+    from app.utils.time import to_isoformat
+
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Default snapshot label"), owner_id="owner"
+    )
+    captured_at = datetime(2051, 2, 3, 4, 5, 6, tzinfo=UTC)
+    monkeypatch.setattr(version_service_module, "utcnow", lambda: captured_at)
+
+    version = version_service.create_version(tree.id, VersionCreateRequest())
+
+    assert version.label == f"Snapshot {to_isoformat(captured_at)}"
+    assert tree_service.get_tree(tree.id).version_refs[0].label == version.label
+
+
+def test_load_version_missing_tree_reports_tree_before_version_lookup(
+    version_service,
+) -> None:
+    with pytest.raises(NotFoundError) as exc_info:
+        version_service.load_version("missing_tree", "missing::version")
+
+    assert exc_info.value.resource == "Tree"
+    assert exc_info.value.identifier == "missing_tree"
 
 
 def test_restore_version_restores_exact_node_state(
@@ -1746,6 +1947,61 @@ def test_build_diff_counts_relation_modifications_correctly(version_service) -> 
     assert "question_label" in conflicts[0].fields
 
 
+def test_build_diff_node_conflict_carries_exact_changed_fields(
+    version_service,
+) -> None:
+    from app.schemas.common import TimestampMetadata, ValidationState, VisualState
+    from app.schemas.domain import NodeDocument, TreeDocument
+
+    timestamp = datetime(2026, 1, 1, tzinfo=UTC)
+    previous = NodeDocument(
+        id="node",
+        label="Before",
+        position=Position(x=0, y=0),
+        metadata=TimestampMetadata(created_at=timestamp, updated_at=timestamp),
+        visual=VisualState(color="#111", highlight=False),
+        validation=ValidationState(
+            confidence=10, provider="old", last_checked=timestamp
+        ),
+        extra={"type": "child"},
+    )
+    current = previous.model_copy(
+        update={
+            "label": "After",
+            "position": Position(x=1, y=2),
+            "visual": VisualState(color="#222", highlight=True),
+            "validation": ValidationState(
+                confidence=90, provider="new", last_checked=timestamp
+            ),
+            "extra": {"type": "parent"},
+        }
+    )
+    previous_tree = TreeDocument(
+        id="tree",
+        title="Tree",
+        owner_id="owner",
+        created_at=timestamp,
+        updated_at=timestamp,
+        nodes=[previous],
+        relations=[],
+    )
+    current_tree = previous_tree.model_copy(update={"nodes": [current]})
+
+    diff, conflicts = version_service._build_diff(previous_tree, current_tree)
+
+    assert diff.nodes_modified == 1
+    assert len(conflicts) == 1
+    assert conflicts[0].entity_type == "node"
+    assert conflicts[0].entity_id == "node"
+    assert conflicts[0].fields == [
+        "label",
+        "position",
+        "visual",
+        "validation",
+        "extra",
+    ]
+
+
 def test_preserve_unrepresented_keeps_original_created_and_incoming_updated_times(
     tree_service,
 ) -> None:
@@ -2001,6 +2257,31 @@ def test_relation_to_document_preserves_response_fields_and_legacy_defaults(
     assert legacy_document.question_label == "why"
     assert legacy_document.metadata.created_at == updated_at
     assert legacy_document.metadata.updated_at == updated_at
+
+
+def test_relation_to_document_preserves_constructed_future_kind_value(
+    tree_service,
+) -> None:
+    from app.schemas.api import RelationResponse, TreeMetadata
+
+    timestamp = datetime(2026, 1, 1, tzinfo=UTC)
+    metadata = TreeMetadata(
+        version=1,
+        created_at=timestamp,
+        updated_at=timestamp,
+        owner_id="owner",
+    )
+    future_relation = RelationResponse.model_construct(
+        id="future",
+        source_node_id="source",
+        target_node_id="target",
+        kind="because",
+        created_at=timestamp,
+    )
+
+    document = tree_service._relation_to_document(future_relation, metadata)
+
+    assert document.question_label == "because"
 
 
 # ---------------------------------------------------------------------------
