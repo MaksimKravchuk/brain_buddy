@@ -132,4 +132,55 @@ describe("DropdownMenu", () => {
     expect(screen.getByText("Commands")).toBeInTheDocument();
     expect(screen.getByRole("separator")).toBeInTheDocument();
   });
+
+  it("navigates to the last and first items with End and ArrowUp keys", async () => {
+    const user = userEvent.setup();
+    render(
+      <DropdownMenu trigger={<button type="button">Actions</button>}>
+        <DropdownMenuItem>First</DropdownMenuItem>
+        <DropdownMenuItem>Second</DropdownMenuItem>
+        <DropdownMenuItem>Third</DropdownMenuItem>
+      </DropdownMenu>
+    );
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Actions" }));
+    });
+    await act(async () => {
+      await user.keyboard("{End}");
+    });
+    expect(screen.getByRole("menuitem", { name: "Third" })).toHaveFocus();
+    await act(async () => {
+      await user.keyboard("{ArrowUp}");
+    });
+    expect(screen.getByRole("menuitem", { name: "Second" })).toHaveFocus();
+  });
+
+  it("activates items with Space and forwards ref callbacks on the trigger", async () => {
+    const user = userEvent.setup();
+    const refCallback = vi.fn();
+    const onSelect = vi.fn();
+    render(
+      <DropdownMenu trigger={<button type="button" ref={refCallback}>Actions</button>}>
+        <DropdownMenuItem onSelect={onSelect}>Activate</DropdownMenuItem>
+      </DropdownMenu>
+    );
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Actions" }));
+    });
+    expect(refCallback).toHaveBeenCalled();
+    await act(async () => {
+      await user.keyboard(" ");
+    });
+    expect(onSelect).toHaveBeenCalledOnce();
+  });
+
+  it("throws when an item is rendered outside a DropdownMenu", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(() => render(<DropdownMenuItem>Orphan</DropdownMenuItem>)).toThrow(
+      "DropdownMenuItem must be used inside a DropdownMenu"
+    );
+    spy.mockRestore();
+  });
 });
