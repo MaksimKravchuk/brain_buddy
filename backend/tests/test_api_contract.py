@@ -31,24 +31,82 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
 
     expected_error_statuses = {
         ("/api/auth/login", "post"): {"401", "422", "429"},
+        ("/api/auth/logout", "post"): set(),
         ("/api/auth/me", "get"): {"401"},
+        ("/api/auth/signup", "post"): {"400", "409", "422"},
+        ("/api/trees", "get"): {"401", "422"},
         ("/api/trees", "post"): {"400", "401", "422"},
+        ("/api/trees/import", "post"): {"400", "401", "422"},
+        ("/api/trees/{tree_id}", "delete"): {"401", "404", "422"},
         ("/api/trees/{tree_id}", "get"): {"401", "404", "422"},
         ("/api/trees/{tree_id}", "put"): {"400", "401", "404", "409", "422"},
+        ("/api/trees/{tree_id}/ai-feedback", "post"): {
+            "400",
+            "401",
+            "404",
+            "422",
+        },
+        ("/api/trees/{tree_id}/export", "post"): {"401", "404", "422"},
+        ("/api/trees/{tree_id}/nodes", "post"): {"401", "404", "422"},
         ("/api/trees/{tree_id}/nodes/{node_id}", "delete"): {
             "400",
             "401",
             "404",
             "422",
         },
-        ("/api/trees/{tree_id}/relations", "post"): {"400", "401", "404", "422"},
+        ("/api/trees/{tree_id}/nodes/{node_id}", "patch"): {
+            "401",
+            "404",
+            "422",
+        },
+        (
+            "/api/trees/{tree_id}/nodes/{node_id}/validation-history",
+            "get",
+        ): {"401", "404", "422"},
+        ("/api/trees/{tree_id}/relations", "post"): {
+            "400",
+            "401",
+            "404",
+            "422",
+        },
+        ("/api/trees/{tree_id}/relations/{relation_id}", "delete"): {
+            "401",
+            "404",
+            "422",
+        },
+        ("/api/trees/{tree_id}/relations/{relation_id}", "patch"): {
+            "400",
+            "401",
+            "404",
+            "422",
+        },
         ("/api/trees/{tree_id}/validate/{node_id}", "post"): {
             "400",
             "401",
             "404",
             "422",
         },
+        ("/api/trees/{tree_id}/versions", "get"): {"401", "404", "422"},
+        ("/api/trees/{tree_id}/versions", "post"): {"401", "404", "422"},
+        ("/api/trees/{tree_id}/versions/{version_id}", "delete"): {
+            "401",
+            "404",
+            "422",
+        },
+        ("/api/trees/{tree_id}/versions/{version_id}/restore", "post"): {
+            "401",
+            "404",
+            "422",
+        },
     }
+    discovered_operations = {
+        (path, method)
+        for path, path_item in schema["paths"].items()
+        if path.startswith("/api/")
+        for method in path_item
+        if method in {"delete", "get", "patch", "post", "put"}
+    }
+    assert set(expected_error_statuses) == discovered_operations
     for (path, method), expected_statuses in expected_error_statuses.items():
         responses = schema["paths"][path][method]["responses"]
         documented_4xx_statuses = {
