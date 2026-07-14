@@ -8,6 +8,7 @@ from fastapi import Depends, HTTPException, Request, status
 
 from app.container import Container
 from app.core.config import AppConfig
+from app.modules.tasks import TaskService
 from app.schemas.auth import User
 from app.services import (
     AuthService,
@@ -61,6 +62,10 @@ def get_validation_service(
 
 def get_auth_service(container: Container = Depends(get_container)) -> AuthService:
     return container.auth_service
+
+
+def get_task_service(container: Container = Depends(get_container)) -> TaskService:
+    return container.task_service
 
 
 def get_current_user(
