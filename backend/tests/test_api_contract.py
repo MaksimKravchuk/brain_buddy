@@ -33,7 +33,7 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
         ("/api/auth/login", "post"): {"401", "422", "429"},
         ("/api/auth/me", "get"): {"401"},
         ("/api/trees", "post"): {"400", "401", "422"},
-        ("/api/trees/{tree_id}", "get"): {"401", "404"},
+        ("/api/trees/{tree_id}", "get"): {"401", "404", "422"},
         ("/api/trees/{tree_id}", "put"): {"400", "401", "404", "409", "422"},
         ("/api/trees/{tree_id}/nodes/{node_id}", "delete"): {
             "400",
@@ -51,7 +51,10 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
     }
     for (path, method), expected_statuses in expected_error_statuses.items():
         responses = schema["paths"][path][method]["responses"]
-        assert expected_statuses <= responses.keys()
+        documented_4xx_statuses = {
+            status_code for status_code in responses if 400 <= int(status_code) < 500
+        }
+        assert documented_4xx_statuses == expected_statuses
         for status_code in expected_statuses:
             content = responses[status_code]["content"]
             assert content["application/json"]["schema"] == {
@@ -82,6 +85,30 @@ def test_public_errors_use_the_documented_envelope_and_correlation_id(
         assert response.headers["X-Correlation-ID"] == correlation_id
         assert response.json().keys() >= ERROR_ENVELOPE
         assert response.json()["reference_id"] == correlation_id
+
+
+@allure.epic("Quality spine")
+@allure.feature("API contract")
+@allure.story("Error envelope and correlation ID")
+def test_routing_errors_use_the_documented_envelope_and_correlation_id(
+    anonymous_api_client,
+) -> None:
+    """Router-generated 404 and 405 errors obey the public error contract."""
+
+    correlation_id = "routing-correlation-id"
+    unknown_path = anonymous_api_client.get(
+        "/api/does-not-exist", headers={"X-Correlation-ID": correlation_id}
+    )
+    wrong_method = anonymous_api_client.get(
+        "/api/auth/login", headers={"X-Correlation-ID": correlation_id}
+    )
+
+    for response, status_code in ((unknown_path, 404), (wrong_method, 405)):
+        assert response.status_code == status_code
+        assert response.headers["X-Correlation-ID"] == correlation_id
+        assert response.json().keys() >= ERROR_ENVELOPE
+        assert response.json()["reference_id"] == correlation_id
+    assert wrong_method.headers["allow"] == "POST"
 
 
 @allure.epic("Quality spine")
