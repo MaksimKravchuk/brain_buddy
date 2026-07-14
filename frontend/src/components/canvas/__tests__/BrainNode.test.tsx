@@ -211,4 +211,123 @@ describe("BrainNode inline editing", () => {
     expect(defaultData.onCreateRightSibling).toHaveBeenCalledOnce();
     expect(useTreeStore.getState().selection).toEqual({ type: "node", id: baseNode.id });
   });
+
+  it("renders default node colors when both incoming and outgoing relations exist", () => {
+    act(() => {
+      useTreeStore.getState().upsertRelation({
+        id: "rel-in",
+        fromId: "upstream-node",
+        toId: baseNode.id,
+        kind: "why",
+        createdAt: "2024-04-01"
+      });
+      useTreeStore.getState().upsertRelation({
+        id: "rel-out",
+        fromId: baseNode.id,
+        toId: "downstream-node",
+        kind: "why",
+        createdAt: "2024-04-01"
+      });
+    });
+
+    render(
+      <ReactFlowProvider>
+        <RenderedBrainNode />
+      </ReactFlowProvider>
+    );
+
+    const node = screen.getByTestId("brain-node");
+    expect(node).toHaveStyle({
+      backgroundColor: nodeColorConfig.default.background,
+      color: nodeColorConfig.default.text
+    });
+  });
+
+  it("hides control buttons when not selected or hovered", () => {
+    render(
+      <ReactFlowProvider>
+        <BrainNode {...nodeProps} selected={false} data={{ ...defaultData }} />
+      </ReactFlowProvider>
+    );
+
+    const createButton = screen.getByRole("button", { name: "Create upstream node" });
+    expect(createButton).toHaveClass("opacity-0");
+  });
+
+  it("does not submit when the label is unchanged or empty", async () => {
+    const user = userEvent.setup();
+    render(
+      <ReactFlowProvider>
+        <RenderedBrainNode />
+      </ReactFlowProvider>
+    );
+
+    await act(async () => {
+      await user.dblClick(screen.getByRole("button", { name: "Original" }));
+    });
+    const textarea = await screen.findByRole("textbox");
+    await act(async () => {
+      await user.clear(textarea);
+      await user.type(textarea, "   ");
+      await user.tab();
+    });
+    expect(mutateSpy).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Original" })).toBeInTheDocument();
+  });
+
+  it("starts editing with Enter on the label button", async () => {
+    const user = userEvent.setup();
+    render(
+      <ReactFlowProvider>
+        <RenderedBrainNode />
+      </ReactFlowProvider>
+    );
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Original" }));
+      await user.keyboard("{Enter}");
+    });
+    expect(await screen.findByRole("textbox")).toBeInTheDocument();
+  });
+
+  it("submits inline edits with Enter (without shift) in the textarea", async () => {
+    const user = userEvent.setup();
+    render(
+      <ReactFlowProvider>
+        <RenderedBrainNode />
+      </ReactFlowProvider>
+    );
+
+    await act(async () => {
+      await user.dblClick(screen.getByRole("button", { name: "Original" }));
+    });
+    const textarea = await screen.findByRole("textbox");
+    await act(async () => {
+      await user.clear(textarea);
+      await user.type(textarea, "New Label{Enter}");
+    });
+    expect(mutateSpy).toHaveBeenCalledWith(
+      { nodeId: "node-1", payload: { label: "New Label" } },
+      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) })
+    );
+  });
+
+  it("preserves newlines with Shift+Enter in the textarea", async () => {
+    const user = userEvent.setup();
+    render(
+      <ReactFlowProvider>
+        <RenderedBrainNode />
+      </ReactFlowProvider>
+    );
+
+    await act(async () => {
+      await user.dblClick(screen.getByRole("button", { name: "Original" }));
+    });
+    const textarea = await screen.findByRole("textbox");
+    await act(async () => {
+      await user.clear(textarea);
+      await user.type(textarea, "Line 1{Shift>}{Enter}{/Shift}Line 2");
+    });
+    expect(textarea).toHaveValue("Line 1\nLine 2");
+  });
 });
