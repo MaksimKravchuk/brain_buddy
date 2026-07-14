@@ -361,6 +361,49 @@ def test_update_task_replay_applies_recorded_result_after_crash(
     assert service.get_task(task.id, owner_id=OWNER).details == "Recovered update"
 
 
+def test_pending_update_result_is_reconciled_before_next_command(
+    monkeypatch: pytest.MonkeyPatch, service: TaskService
+) -> None:
+    task = _make_task(service, key="intervening-update-task")
+    original_save = service.task_repo.save
+    calls = 0
+
+    def fail_once(updated: TaskDocument) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("simulated crash after idempotency write")
+        original_save(updated)
+
+    monkeypatch.setattr(service.task_repo, "save", fail_once)
+    first_payload = TaskUpdateRequest(details="A", expected_revision=1)
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        service.update_task(
+            task.id,
+            first_payload,
+            owner_id=OWNER,
+            idempotency_key="intervening-update-a",
+        )
+
+    with pytest.raises(ConflictError):
+        service.update_task(
+            task.id,
+            TaskUpdateRequest(details="B", expected_revision=1),
+            owner_id=OWNER,
+            idempotency_key="intervening-update-b",
+        )
+
+    canonical = service.get_task(task.id, owner_id=OWNER)
+    replayed = service.update_task(
+        task.id,
+        first_payload,
+        owner_id=OWNER,
+        idempotency_key="intervening-update-a",
+    )
+    assert canonical.details == replayed.details == "A"
+    assert canonical.revision == replayed.revision == 2
+
+
 # --- transition branches ---------------------------------------------------
 
 

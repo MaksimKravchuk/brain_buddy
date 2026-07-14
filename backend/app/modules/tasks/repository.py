@@ -113,6 +113,15 @@ class TaskRepository(BaseRepository):
     def save_idempotency(self, *, owner_id: str, record: IdempotencyRecord) -> None:
         self.dump_model(self.idempotency_path(owner_id, record.key), record)
 
+    def list_idempotency_for_owner(self, *, owner_id: str) -> list[IdempotencyRecord]:
+        directory = self.resolve("task-commands", owner_id)
+        if not directory.exists():
+            return []
+        return [
+            self.load_model(path, IdempotencyRecord)
+            for path in directory.glob("*.json")
+        ]
+
     def project_path(self, owner_id: str, project_id: str) -> Path:
         return self.resolve("projects", owner_id, f"{project_id}.json")
 

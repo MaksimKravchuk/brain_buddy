@@ -48,6 +48,7 @@ def _serialized_write(
     ) -> _Result:
         owner_id = cast(str, kwargs["owner_id"])
         with service.task_repo.command_lock(owner_id):
+            service._reconcile_idempotent_results(owner_id=owner_id)
             return command(service, *args, **kwargs)
 
     return wrapped
@@ -533,6 +534,23 @@ class TaskService:
         if record.command != command or record.request_hash != request_hash:
             raise ConflictError("Idempotency-Key", key)
         return record
+
+    def _reconcile_idempotent_results(self, *, owner_id: str) -> None:
+        """Apply recorded results left durable before their resource write."""
+
+        for record in self.task_repo.list_idempotency_for_owner(owner_id=owner_id):
+            if record.command == "create_project":
+                self._project_result(record, owner_id=owner_id)
+            elif record.command == "create_context":
+                self._context_result(record, owner_id=owner_id)
+            elif record.command.startswith("create_subtask:"):
+                subtask = TaskSubtaskDocument.model_validate(record.response_body)
+                self._subtask_result(record, owner_id=owner_id, task_id=subtask.task_id)
+            elif record.command.startswith("create_comment:"):
+                comment = TaskCommentDocument.model_validate(record.response_body)
+                self._comment_result(record, owner_id=owner_id, task_id=comment.task_id)
+            else:
+                self._task_result(record, owner_id=owner_id)
 
     def _store_idempotency(
         self,
