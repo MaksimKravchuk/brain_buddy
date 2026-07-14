@@ -404,6 +404,43 @@ def test_pending_update_result_is_reconciled_before_next_command(
     assert canonical.revision == replayed.revision == 2
 
 
+def test_reconcile_restores_pending_create_results(service: TaskService) -> None:
+    assert service.task_repo.list_idempotency_for_owner(owner_id="never-seen") == []
+
+    project = _make_project(service, key="restore-project")
+    context = _make_context(service, key="restore-context")
+    task = _make_task(service, key="restore-task")
+    subtask = service.create_subtask(
+        task.id,
+        TaskSubtaskCreateRequest(title="Restore subtask"),
+        owner_id=OWNER,
+        idempotency_key="restore-subtask",
+    )
+    comment = service.create_comment(
+        task.id,
+        TaskCommentCreateRequest(body="Restore comment"),
+        owner_id=OWNER,
+        actor_id=OWNER,
+        idempotency_key="restore-comment",
+    )
+
+    service.task_repo.project_path(OWNER, project.id).unlink()
+    service.task_repo.context_path(OWNER, context.id).unlink()
+    service.task_repo.subtask_path(OWNER, task.id, subtask.id).unlink()
+    service.task_repo.comment_path(OWNER, task.id, comment.id).unlink()
+
+    service._reconcile_idempotent_results(owner_id=OWNER)
+
+    assert service.get_project(project.id, owner_id=OWNER).name == project.name
+    assert service.get_context(context.id, owner_id=OWNER).name == context.name
+    restored_task, restored_subtasks, restored_comments = service.get_task_detail(
+        task.id, owner_id=OWNER
+    )
+    assert restored_task.id == task.id
+    assert [item.id for item in restored_subtasks] == [subtask.id]
+    assert [item.id for item in restored_comments] == [comment.id]
+
+
 # --- transition branches ---------------------------------------------------
 
 
