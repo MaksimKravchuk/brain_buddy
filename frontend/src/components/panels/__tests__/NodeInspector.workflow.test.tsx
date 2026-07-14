@@ -161,4 +161,52 @@ describe("NodeInspector workflows", () => {
     expect(useTreeStore.getState().nodes).toHaveLength(1);
     expect(lastToast()).toMatchObject({ title: "Failed to delete node", description: "Offline" });
   });
+
+  it("restores editable node fields after update failures", async () => {
+    const user = userEvent.setup();
+    hookMocks.update.mutate.mockImplementation((_payload, options) => options?.onError(new Error("Save unavailable")));
+    selectNode();
+    render(<NodeInspector />);
+
+    const label = screen.getByLabelText("Node label");
+    await act(async () => {
+      await user.clear(label);
+      await user.type(label, "Replacement label");
+      await user.tab();
+    });
+    expect(label).toHaveValue("Initial cause");
+    expect(lastToast()).toMatchObject({ title: "Failed to update node", description: "Save unavailable" });
+
+    await act(async () => {
+      await user.selectOptions(screen.getByLabelText("Type"), "parent");
+    });
+    expect(screen.getByLabelText("Type")).toHaveValue("child");
+    expect(lastToast()).toMatchObject({ title: "Failed to update node", description: "Save unavailable" });
+
+    await act(async () => {
+      await user.selectOptions(screen.getByLabelText("Highlight"), "cause_candidate");
+    });
+    expect(screen.getByLabelText("Highlight")).toHaveValue("none");
+    expect(lastToast()).toMatchObject({ title: "Failed to update highlight", description: "Save unavailable" });
+  });
+
+  it("clears selection after deleting a node and exposes validation recovery", async () => {
+    const user = userEvent.setup();
+    hookMocks.remove.mutate.mockImplementation((_payload, options) => options?.onSuccess());
+    hookMocks.validate.mutate.mockImplementation((_payload, options) => options?.onError(new Error("Provider offline")));
+    selectNode();
+    render(<NodeInspector />);
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Run validation" }));
+    });
+    expect(lastToast()).toMatchObject({ title: "Validation failed", description: "Provider offline" });
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Delete node" }));
+    });
+    expect(useTreeStore.getState().nodes).toEqual([]);
+    expect(useTreeStore.getState().selection).toEqual({ type: null, id: null });
+    expect(lastToast()).toMatchObject({ title: "Node removed", description: "Node deleted from the tree." });
+  });
 });

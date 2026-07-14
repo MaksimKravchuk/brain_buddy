@@ -44,24 +44,32 @@ describe("TreeMenu", () => {
 
     await act(async () => {
       await user.click(screen.getByRole("button", { name: "Tree menu" }));
+    });
+    await act(async () => {
       await user.click(screen.getByRole("menuitem", { name: /Rename tree/ }));
     });
     expect(props.onRenameTree).toHaveBeenCalledOnce();
 
     await act(async () => {
       await user.click(screen.getByRole("button", { name: "Tree menu" }));
+    });
+    await act(async () => {
       await user.click(screen.getByRole("menuitem", { name: /Export to file/ }));
     });
     expect(props.onDownload).toHaveBeenCalledOnce();
 
     await act(async () => {
       await user.click(screen.getByRole("button", { name: "Tree menu" }));
+    });
+    await act(async () => {
       await user.click(screen.getByRole("menuitem", { name: /Import from file/ }));
     });
     expect(props.onImportClick).toHaveBeenCalledOnce();
 
     await act(async () => {
       await user.click(screen.getByRole("button", { name: "Tree menu" }));
+    });
+    await act(async () => {
       await user.click(screen.getByRole("menuitem", { name: /Delete tree/ }));
     });
     expect(props.onDeleteTree).toHaveBeenCalledOnce();

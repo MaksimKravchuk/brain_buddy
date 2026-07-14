@@ -172,6 +172,26 @@ describe("VersionPanel workflows", () => {
     expect(lastToast()).toMatchObject({ title: "Export failed", description: "Export unavailable" });
   });
 
+  it("downloads an exported tree using its current update timestamp", async () => {
+    const user = userEvent.setup();
+    const createObjectURL = vi.fn(() => "blob:tree-export");
+    const revokeObjectURL = vi.fn();
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
+    hookMocks.exportTree.mutate.mockImplementation((_payload, options) => options?.onSuccess({ tree }));
+    render(<VersionPanel />);
+
+    await act(async () => {
+      await user.click(screen.getAllByRole("button", { name: "Export" })[0]);
+    });
+
+    expect(hookMocks.exportTree.mutate).toHaveBeenCalledWith(undefined, expect.any(Object));
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    expect(click).toHaveBeenCalledOnce();
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:tree-export");
+    expect(lastToast()).toMatchObject({ title: "Export ready", description: "Current tree-2025-01-02T000000Z.json" });
+  });
+
   it("keeps snapshot data intact when restore or deletion fails", async () => {
     const user = userEvent.setup();
     hookMocks.restore.mutate.mockImplementation((_id, options) => options?.onError(new Error("Restore unavailable")));
