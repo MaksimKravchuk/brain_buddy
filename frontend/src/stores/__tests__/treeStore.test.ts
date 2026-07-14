@@ -417,4 +417,106 @@ describe("treeStore", () => {
     expect(saved).toContain("Immediate save");
     expect(useTreeStore.getState().pendingSync).toBe(false);
   });
+
+  it("maps relation aliases from legacy response shapes", () => {
+    const legacySource = {
+      ...sampleTreeWithRelations,
+      relations: [
+        {
+          id: "rel-legacy",
+          source_id: "node-1",
+          target_id: "node-2",
+          kind: "why" as const,
+          created_at: "2024-04-01"
+        }
+      ]
+    };
+    useTreeStore.getState().setTree(legacySource);
+    expect(useTreeStore.getState().relations[0].fromId).toBe("node-1");
+    expect(useTreeStore.getState().relations[0].toId).toBe("node-2");
+
+    const fromIdShape = {
+      ...sampleTreeWithRelations,
+      relations: [
+        {
+          id: "rel-from-id",
+          from_id: "node-2",
+          to_id: "node-1",
+          kind: "why" as const,
+          created_at: "2024-04-01"
+        }
+      ]
+    };
+    useTreeStore.getState().setTree(fromIdShape);
+    expect(useTreeStore.getState().relations[0].fromId).toBe("node-2");
+    expect(useTreeStore.getState().relations[0].toId).toBe("node-1");
+  });
+
+  it("does nothing on undo/redo with empty stacks", () => {
+    useTreeStore.getState().setTree(sampleTree);
+    const before = useTreeStore.getState().nodes;
+    useTreeStore.getState().undo();
+    expect(useTreeStore.getState().nodes).toBe(before);
+    useTreeStore.getState().redo();
+    expect(useTreeStore.getState().nodes).toBe(before);
+  });
+
+  it("ignores rollback for an unknown optimistic token", () => {
+    useTreeStore.getState().setTree(sampleTree);
+    const before = useTreeStore.getState().nodes;
+    useTreeStore.getState().rollbackOptimisticChange("nonexistent");
+    expect(useTreeStore.getState().nodes).toBe(before);
+  });
+
+  it("tracks cloud sync failure state when the server is unavailable", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(apiClient, "updateTree").mockRejectedValue(new Error("Server unavailable"));
+    useTreeStore.getState().setTree(sampleTree);
+    const store = useTreeStore.getState();
+    store.upsertNode({ ...store.nodes[0], label: "Updated label" });
+    await vi.runOnlyPendingTimersAsync();
+    expect(useTreeStore.getState().pendingSync).toBe(true);
+    expect(useTreeStore.getState().lastSyncError).toBe("Server unavailable");
+  });
+
+  it("falls back to Math.random when crypto.randomUUID is unavailable", () => {
+    const originalCrypto = globalThis.crypto;
+    Object.defineProperty(globalThis, "crypto", { value: {}, writable: true, configurable: true });
+    useTreeStore.getState().setTree(sampleTree);
+    const token = useTreeStore.getState().beginOptimisticChange("test");
+    expect(token).toMatch(/^opt-/);
+    useTreeStore.getState().resolveOptimisticChange(token);
+    Object.defineProperty(globalThis, "crypto", { value: originalCrypto, writable: true, configurable: true });
+  });
+
+  it("tracks both local and cloud sync failure state when storage is unavailable", async () => {
+    const originalSetItem = localStorage.setItem;
+    localStorage.setItem = vi.fn(() => {
+      throw new DOMException("Quota exceeded");
+    });
+    useTreeStore.getState().setTree(sampleTree);
+    const store = useTreeStore.getState();
+    store.upsertNode({ ...store.nodes[0], label: "Updated" });
+    vi.useFakeTimers();
+    await vi.runOnlyPendingTimersAsync();
+    vi.useRealTimers();
+    expect(useTreeStore.getState().pendingSync).toBe(true);
+    localStorage.setItem = originalSetItem;
+  });
+
+  it("prunes selection when the active tree changes to a new tree without the selected entity", () => {
+    useTreeStore.getState().setTree(sampleTreeWithRelations);
+    useTreeStore.getState().select({ type: "node", id: "node-2" });
+    useTreeStore.getState().setTree(sampleTree);
+    expect(useTreeStore.getState().selection).toEqual({ type: null, id: null });
+  });
+
+  it("preserves version selection metadata across snapshots", () => {
+    useTreeStore.getState().setTree(sampleTree);
+    const versions = [
+      { id: "v1", label: "V1", createdAt: "2024-04-01", conflictCount: 0, diffSummary: null }
+    ];
+    useTreeStore.getState().setVersions(versions);
+    expect(useTreeStore.getState().versions).toEqual(versions);
+  });
 });
