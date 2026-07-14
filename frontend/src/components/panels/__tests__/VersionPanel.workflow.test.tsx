@@ -88,6 +88,25 @@ describe("VersionPanel workflows", () => {
     });
   });
 
+  it("describes an initial unlabeled snapshot and renders versions without optional metadata", async () => {
+    const user = userEvent.setup();
+    const initialVersion = { ...version, label: "Initial", author: null, notes: null, conflict_count: 0, diff_summary: null };
+    hookMocks.create.mutate.mockImplementation((_payload, options) => options?.onSuccess(initialVersion));
+    render(<VersionPanel />);
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Capture snapshot" }));
+    });
+
+    expect(hookMocks.create.mutate).toHaveBeenCalledWith(
+      { label: null, author: null, notes: null },
+      expect.any(Object)
+    );
+    expect(lastToast()).toMatchObject({ description: "Initial snapshot captured." });
+    expect(screen.getByText("Initial snapshot of this tree.")).toBeInTheDocument();
+    expect(screen.queryByText(/potential conflicts/)).not.toBeInTheDocument();
+  });
+
   it("captures a labeled snapshot and reports its change summary", async () => {
     const user = userEvent.setup();
     hookMocks.create.mutate.mockImplementation((_payload, options) => options?.onSuccess(version));

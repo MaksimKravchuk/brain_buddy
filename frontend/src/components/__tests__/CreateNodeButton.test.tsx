@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -10,8 +10,12 @@ describe("CreateNodeButton branches", () => {
     const user = userEvent.setup();
     render(<CreateNodeButton onCreate={onCreate} />);
 
-    await user.click(screen.getByRole("button", { name: "Parent" }));
-    await user.click(screen.getByRole("button", { name: "Add" }));
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Parent" }));
+    });
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Add" }));
+    });
 
     expect(onCreate).toHaveBeenCalledWith({ type: "parent", label: "Parent" });
     expect(screen.getByPlaceholderText("Node label")).toHaveValue("");
@@ -22,7 +26,9 @@ describe("CreateNodeButton branches", () => {
     const user = userEvent.setup();
     render(<CreateNodeButton onCreate={onCreate} />);
 
-    await user.click(screen.getByRole("button", { name: "Add" }));
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Add" }));
+    });
     expect(onCreate).toHaveBeenCalledWith({ type: "child", label: "Child" });
   });
 
