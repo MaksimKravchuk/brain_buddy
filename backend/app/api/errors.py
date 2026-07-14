@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.exceptions import (
     BrainBuddyError,
@@ -38,9 +39,8 @@ def register_exception_handlers(app: FastAPI) -> None:
             response.headers[CORRELATION_HEADER] = correlation_id
         return response
 
-    @app.exception_handler(HTTPException)
-    async def handle_http_exception(
-        request: Request, exc: HTTPException
+    async def build_http_error_response(
+        request: Request, exc: StarletteHTTPException
     ) -> JSONResponse:
         correlation_id = getattr(request.state, "correlation_id", None)
         detail = exc.detail if not isinstance(exc.detail, str) else None
@@ -55,6 +55,18 @@ def register_exception_handlers(app: FastAPI) -> None:
         if correlation_id:
             response.headers[CORRELATION_HEADER] = correlation_id
         return response
+
+    @app.exception_handler(HTTPException)
+    async def handle_http_exception(
+        request: Request, exc: HTTPException
+    ) -> JSONResponse:
+        return await build_http_error_response(request, exc)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def handle_starlette_http_exception(
+        request: Request, exc: StarletteHTTPException
+    ) -> JSONResponse:
+        return await build_http_error_response(request, exc)
 
     @app.exception_handler(NotFoundError)
     async def handle_not_found(request: Request, exc: NotFoundError) -> JSONResponse:
