@@ -34,7 +34,20 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
         ("/api/auth/me", "get"): {"401"},
         ("/api/trees", "post"): {"400", "401", "422"},
         ("/api/trees/{tree_id}", "get"): {"401", "404"},
+        ("/api/trees/{tree_id}", "put"): {"400", "401", "404", "409", "422"},
+        ("/api/trees/{tree_id}/nodes/{node_id}", "delete"): {
+            "400",
+            "401",
+            "404",
+            "422",
+        },
         ("/api/trees/{tree_id}/relations", "post"): {"400", "401", "404", "422"},
+        ("/api/trees/{tree_id}/validate/{node_id}", "post"): {
+            "400",
+            "401",
+            "404",
+            "422",
+        },
     }
     for (path, method), expected_statuses in expected_error_statuses.items():
         responses = schema["paths"][path][method]["responses"]
