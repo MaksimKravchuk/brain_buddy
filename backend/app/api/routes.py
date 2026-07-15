@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, status
 
+from app.api.contracts import error_responses
 from app.api.dependencies import (
     get_current_user,
     get_node_service,
@@ -50,6 +51,7 @@ router = APIRouter(tags=["trees"])
     "/trees",
     response_model=TreeDetailResponse,
     status_code=status.HTTP_201_CREATED,
+    responses=error_responses(400, 401, 422),
 )
 def create_tree(
     payload: TreeCreateRequest,
@@ -60,7 +62,9 @@ def create_tree(
     return tree_service.to_response(tree)
 
 
-@router.get("/trees", response_model=list[TreeListItem])
+@router.get(
+    "/trees", response_model=list[TreeListItem], responses=error_responses(401, 422)
+)
 def list_trees(
     current_user: User = Depends(get_current_user),
     tree_service: TreeService = Depends(get_tree_service),
@@ -77,7 +81,11 @@ def list_trees(
     ]
 
 
-@router.get("/trees/{tree_id}", response_model=TreeDetailResponse)
+@router.get(
+    "/trees/{tree_id}",
+    response_model=TreeDetailResponse,
+    responses=error_responses(401, 404, 422),
+)
 def get_tree(
     tree_id: str,
     current_user: User = Depends(get_current_user),
@@ -87,7 +95,11 @@ def get_tree(
     return tree_service.to_response(tree)
 
 
-@router.put("/trees/{tree_id}", response_model=TreeDetailResponse)
+@router.put(
+    "/trees/{tree_id}",
+    response_model=TreeDetailResponse,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
 def update_tree(
     tree_id: str,
     payload: TreeUpdateRequest,
@@ -98,7 +110,11 @@ def update_tree(
     return tree_service.to_response(tree)
 
 
-@router.delete("/trees/{tree_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/trees/{tree_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(401, 404, 422),
+)
 def delete_tree(
     tree_id: str,
     current_user: User = Depends(get_current_user),
@@ -111,6 +127,7 @@ def delete_tree(
     "/trees/import",
     response_model=TreeDetailResponse,
     status_code=status.HTTP_201_CREATED,
+    responses=error_responses(400, 401, 422),
 )
 def import_tree(
     payload: TreeImportRequest,
@@ -121,7 +138,11 @@ def import_tree(
     return tree_service.to_response(tree)
 
 
-@router.post("/trees/{tree_id}/export", response_model=TreeExportResponse)
+@router.post(
+    "/trees/{tree_id}/export",
+    response_model=TreeExportResponse,
+    responses=error_responses(401, 404, 422),
+)
 def export_tree(
     tree_id: str,
     current_user: User = Depends(get_current_user),
@@ -135,6 +156,7 @@ def export_tree(
     "/trees/{tree_id}/ai-feedback",
     response_model=AiFeedbackResponse,
     status_code=status.HTTP_200_OK,
+    responses=error_responses(400, 401, 404, 422),
 )
 def ai_feedback(
     tree_id: str,
@@ -149,6 +171,7 @@ def ai_feedback(
     "/trees/{tree_id}/nodes",
     response_model=NodeResponse,
     status_code=status.HTTP_201_CREATED,
+    responses=error_responses(401, 404, 422),
 )
 def create_node(
     tree_id: str,
@@ -162,7 +185,11 @@ def create_node(
     return tree_service.node_to_response(tree, node.id)
 
 
-@router.patch("/trees/{tree_id}/nodes/{node_id}", response_model=NodeResponse)
+@router.patch(
+    "/trees/{tree_id}/nodes/{node_id}",
+    response_model=NodeResponse,
+    responses=error_responses(401, 404, 422),
+)
 def update_node(
     tree_id: str,
     node_id: str,
@@ -177,7 +204,9 @@ def update_node(
 
 
 @router.delete(
-    "/trees/{tree_id}/nodes/{node_id}", status_code=status.HTTP_204_NO_CONTENT
+    "/trees/{tree_id}/nodes/{node_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(400, 401, 404, 422),
 )
 def delete_node(
     tree_id: str,
@@ -195,6 +224,7 @@ def delete_node(
     "/trees/{tree_id}/relations",
     response_model=RelationResponse,
     status_code=status.HTTP_201_CREATED,
+    responses=error_responses(400, 401, 404, 422),
 )
 def create_relation(
     tree_id: str,
@@ -209,7 +239,9 @@ def create_relation(
 
 
 @router.patch(
-    "/trees/{tree_id}/relations/{relation_id}", response_model=RelationResponse
+    "/trees/{tree_id}/relations/{relation_id}",
+    response_model=RelationResponse,
+    responses=error_responses(400, 401, 404, 422),
 )
 def update_relation(
     tree_id: str,
@@ -225,7 +257,9 @@ def update_relation(
 
 
 @router.delete(
-    "/trees/{tree_id}/relations/{relation_id}", status_code=status.HTTP_204_NO_CONTENT
+    "/trees/{tree_id}/relations/{relation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(401, 404, 422),
 )
 def delete_relation(
     tree_id: str,
@@ -242,6 +276,7 @@ def delete_relation(
     "/trees/{tree_id}/versions",
     response_model=VersionListItem,
     status_code=status.HTTP_201_CREATED,
+    responses=error_responses(401, 404, 422),
 )
 def create_version(
     tree_id: str,
@@ -263,7 +298,11 @@ def create_version(
     )
 
 
-@router.get("/trees/{tree_id}/versions", response_model=list[VersionListItem])
+@router.get(
+    "/trees/{tree_id}/versions",
+    response_model=list[VersionListItem],
+    responses=error_responses(401, 404, 422),
+)
 def list_versions(
     tree_id: str,
     current_user: User = Depends(get_current_user),
@@ -277,6 +316,7 @@ def list_versions(
 @router.post(
     "/trees/{tree_id}/versions/{version_id}/restore",
     response_model=TreeDetailResponse,
+    responses=error_responses(401, 404, 422),
 )
 def restore_version(
     tree_id: str,
@@ -291,7 +331,9 @@ def restore_version(
 
 
 @router.delete(
-    "/trees/{tree_id}/versions/{version_id}", status_code=status.HTTP_204_NO_CONTENT
+    "/trees/{tree_id}/versions/{version_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(401, 404, 422),
 )
 def delete_version(
     tree_id: str,
@@ -308,6 +350,7 @@ def delete_version(
     "/trees/{tree_id}/validate/{node_id}",
     response_model=ValidationResponse,
     status_code=status.HTTP_200_OK,
+    responses=error_responses(400, 401, 404, 422),
 )
 def validate_node(
     tree_id: str,
@@ -324,6 +367,7 @@ def validate_node(
 @router.get(
     "/trees/{tree_id}/nodes/{node_id}/validation-history",
     response_model=ValidationHistoryResponse,
+    responses=error_responses(401, 404, 422),
 )
 def get_validation_history(
     tree_id: str,
