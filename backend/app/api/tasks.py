@@ -21,8 +21,13 @@ from app.schemas.auth import User
 from app.schemas.tasks import (
     ContextCreateRequest,
     ContextResponse,
+    ExpectedRevisionRequest,
     ProjectCreateRequest,
     ProjectResponse,
+    ProjectUpdateRequest,
+    TagCreateRequest,
+    TagResponse,
+    TagUpdateRequest,
     TaskCommentCreateRequest,
     TaskCommentResponse,
     TaskCounts,
@@ -62,7 +67,7 @@ def create_project(
         owner_id=current_user.id,
         idempotency_key=_require_idempotency_key(idempotency_key),
     )
-    return _to_project_response(project)
+    return _to_project_response(project, task_service=task_service, owner_id=current_user.id)
 
 
 @router.get(
@@ -73,9 +78,51 @@ def list_projects(
     task_service: TaskService = Depends(get_task_service),
 ) -> list[ProjectResponse]:
     return [
-        _to_project_response(project)
+        _to_project_response(project, task_service=task_service, owner_id=current_user.id)
         for project in task_service.list_projects(owner_id=current_user.id)
     ]
+
+
+@router.patch(
+    "/projects/{project_id}",
+    response_model=ProjectResponse,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
+def update_project(
+    project_id: str,
+    payload: ProjectUpdateRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    task_service: TaskService = Depends(get_task_service),
+) -> ProjectResponse:
+    project = task_service.update_project(
+        project_id,
+        payload,
+        owner_id=current_user.id,
+        idempotency_key=_require_idempotency_key(idempotency_key),
+    )
+    return _to_project_response(project, task_service=task_service, owner_id=current_user.id)
+
+
+@router.post(
+    "/projects/{project_id}/archive",
+    response_model=ProjectResponse,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
+def archive_project(
+    project_id: str,
+    payload: ExpectedRevisionRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    task_service: TaskService = Depends(get_task_service),
+) -> ProjectResponse:
+    project = task_service.archive_project(
+        project_id,
+        payload,
+        owner_id=current_user.id,
+        idempotency_key=_require_idempotency_key(idempotency_key),
+    )
+    return _to_project_response(project, task_service=task_service, owner_id=current_user.id)
 
 
 @router.get(
@@ -89,7 +136,99 @@ def get_project(
     task_service: TaskService = Depends(get_task_service),
 ) -> ProjectResponse:
     return _to_project_response(
-        task_service.get_project(project_id, owner_id=current_user.id)
+        task_service.get_project(project_id, owner_id=current_user.id),
+        task_service=task_service,
+        owner_id=current_user.id,
+    )
+
+
+@router.post(
+    "/tags",
+    response_model=TagResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses=error_responses(400, 401, 409, 422),
+)
+def create_tag(
+    payload: TagCreateRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    task_service: TaskService = Depends(get_task_service),
+) -> TagResponse:
+    tag = task_service.create_tag(
+        payload,
+        owner_id=current_user.id,
+        idempotency_key=_require_idempotency_key(idempotency_key),
+    )
+    return _to_tag_response(tag, task_service=task_service, owner_id=current_user.id)
+
+
+@router.get("/tags", response_model=list[TagResponse], responses=error_responses(401))
+def list_tags(
+    current_user: User = Depends(get_current_user),
+    task_service: TaskService = Depends(get_task_service),
+) -> list[TagResponse]:
+    return [
+        _to_tag_response(tag, task_service=task_service, owner_id=current_user.id)
+        for tag in task_service.list_tags(owner_id=current_user.id)
+    ]
+
+
+@router.patch(
+    "/tags/{tag_id}",
+    response_model=TagResponse,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
+def update_tag(
+    tag_id: str,
+    payload: TagUpdateRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    task_service: TaskService = Depends(get_task_service),
+) -> TagResponse:
+    tag = task_service.update_tag(
+        tag_id,
+        payload,
+        owner_id=current_user.id,
+        idempotency_key=_require_idempotency_key(idempotency_key),
+    )
+    return _to_tag_response(tag, task_service=task_service, owner_id=current_user.id)
+
+
+@router.delete(
+    "/tags/{tag_id}",
+    response_model=TagResponse,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
+def delete_tag(
+    tag_id: str,
+    expected_revision: int = Query(ge=1),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    task_service: TaskService = Depends(get_task_service),
+) -> TagResponse:
+    tag = task_service.delete_tag(
+        tag_id,
+        ExpectedRevisionRequest(expected_revision=expected_revision),
+        owner_id=current_user.id,
+        idempotency_key=_require_idempotency_key(idempotency_key),
+    )
+    return _to_tag_response(tag, task_service=task_service, owner_id=current_user.id)
+
+
+@router.get(
+    "/tags/{tag_id}",
+    response_model=TagResponse,
+    responses=error_responses(401, 404, 422),
+)
+def get_tag(
+    tag_id: str,
+    current_user: User = Depends(get_current_user),
+    task_service: TaskService = Depends(get_task_service),
+) -> TagResponse:
+    return _to_tag_response(
+        task_service.get_tag(tag_id, owner_id=current_user.id),
+        task_service=task_service,
+        owner_id=current_user.id,
     )
 
 
@@ -276,6 +415,7 @@ def list_tasks(
     state: TaskState | None = None,
     project_id: str | None = None,
     context_id: str | None = None,
+    tag_id: str | None = None,
     unassigned_project: bool = False,
     include_completed: bool = False,
     cursor: str | None = None,
@@ -288,6 +428,7 @@ def list_tasks(
         state=state,
         project_id=project_id,
         context_id=context_id,
+        tag_id=tag_id,
         unassigned_project=unassigned_project,
         include_completed=include_completed,
         cursor=cursor,
@@ -313,7 +454,7 @@ def _to_response(
         details=task.details,
         state=task.state,
         project_id=task.project_id,
-        context_ids=task.context_ids,
+        tag_ids=task.tag_ids,
         due_date=task.due_date,
         waiting_for=task.waiting_for,
         waiting_since=task.waiting_since,
@@ -328,13 +469,30 @@ def _to_response(
     )
 
 
-def _to_project_response(project: ProjectDocument) -> ProjectResponse:
+def _to_project_response(
+    project: ProjectDocument, *, task_service: TaskService, owner_id: str
+) -> ProjectResponse:
     return ProjectResponse(
         id=project.id,
         name=project.name,
         color=project.color,
         state=project.state,
         revision=project.revision,
+        open_task_count=task_service.open_task_count_for_project(
+            project.id, owner_id=owner_id
+        ),
+    )
+
+
+def _to_tag_response(
+    tag: ContextDocument, *, task_service: TaskService, owner_id: str
+) -> TagResponse:
+    return TagResponse(
+        id=tag.id,
+        name=tag.name,
+        state=tag.state,
+        revision=tag.revision,
+        open_task_count=task_service.open_task_count_for_tag(tag.id, owner_id=owner_id),
     )
 
 
@@ -344,6 +502,7 @@ def _to_context_response(context: ContextDocument) -> ContextResponse:
         name=context.name,
         state=context.state,
         revision=context.revision,
+        open_task_count=0,
     )
 
 
