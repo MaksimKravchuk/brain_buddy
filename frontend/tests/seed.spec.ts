@@ -1,7 +1,6 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from "@playwright/test";
 
-test.describe('Test group', () => {
-  test('seed', async ({ page }) => {
-    // generate code here.
-  });
+test("local app serves the React root", async ({ page }) => {
+  await page.goto("/login");
+  await expect(page.locator("#root")).toBeAttached();
 });
