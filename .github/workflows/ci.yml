@@ -24,6 +24,7 @@ jobs:
         run: |
           python3 scripts/validate_ci_artifacts.py workflow \
             --ci .github/workflows/ci.yml \
+            --frontend-vite-config frontend/vite.config.ts \
             --disallow-workflow frontend/.github/workflows/playwright.yml
           python3 scripts/validate_ci_artifacts.py mutation-workflow \
             --workflow .github/workflows/mutation-quality.yml
@@ -110,8 +111,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: ESLint lint
+        run: npm run lint
+
       - name: Run unit tests with coverage and Allure
-        run: npm run test -- --coverage
+        run: npm run test:coverage
 
       - name: Validate frontend Allure results
         if: always()
