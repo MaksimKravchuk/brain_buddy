@@ -92,3 +92,30 @@ def test_delete_relation(tree_service, node_service, relation_service) -> None:
 
     with pytest.raises(NotFoundError):
         relation_service.delete_relation(tree.id, relation.id)
+
+
+def test_relation_endpoint_update_preserves_kind_and_persists_exact_relation(
+    tree_service, node_service, relation_service
+) -> None:
+    tree, node_a, node_b, node_c = prepare_tree_with_nodes(tree_service, node_service)
+    relation, _ = relation_service.create_relation(
+        tree.id,
+        RelationCreateRequest(
+            source_node_id=node_a.id, target_node_id=node_b.id, kind="why"
+        ),
+    )
+
+    updated, updated_tree = relation_service.update_relation(
+        tree.id,
+        relation.id,
+        RelationUpdateRequest(source_node_id=node_c.id),
+    )
+
+    assert updated.id == relation.id
+    assert updated.source_id == node_c.id
+    assert updated.target_id == node_b.id
+    assert updated.question_label == "why"
+    assert updated.metadata.created_at == relation.metadata.created_at
+    assert updated.metadata.updated_at > relation.metadata.updated_at
+    assert updated_tree.relations == [updated]
+    assert tree_service.tree_repo.load(tree.id).relations == [updated]

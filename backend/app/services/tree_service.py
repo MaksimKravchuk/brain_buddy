@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 class TreeService:
     """High-level operations for managing trees."""
 
-    def __init__(
+    def __init__(  # pragma: no mutate block
         self,
         tree_repo: TreeRepository,
         index_repo: IndexRepository,

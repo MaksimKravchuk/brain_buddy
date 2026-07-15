@@ -32,6 +32,7 @@ dev = [
   "allure-pytest>=2.15,<3.0",
   "hypothesis>=6.0,<7.0",
   "schemathesis>=3.34,<4.0",
+  "mutmut>=3.6,<4.0",
 ]
 
 [tool.black]
@@ -57,6 +58,33 @@ strict = true
 [tool.pytest.ini_options]
 addopts = "-ra --alluredir=allure-results --cov=app --cov-branch --cov-fail-under=95 --cov-report=term-missing --cov-report=xml"
 testpaths = ["tests"]
+
+[tool.mutmut]
+source_paths = ["app"]
+only_mutate = [
+  "app/services/tree_service.py",
+  "app/services/version_service.py",
+  "app/services/relation_service.py",
+  "app/repositories/tree.py",
+  "app/repositories/version.py",
+  "app/repositories/index.py",
+]
+pytest_add_cli_args_test_selection = [
+  "tests/test_tree_service.py",
+  "tests/test_relation_service.py",
+  "tests/test_version_service.py",
+  "tests/test_version_repository.py",
+  "tests/test_index_repository.py",
+  "tests/test_property_invariants.py",
+  "tests/test_service_edge_cases.py",
+  "tests/test_branch_invariants.py",
+  "tests/test_repository_and_cli_edges.py",
+  "tests/test_node_service.py",
+  "tests/test_mutation_survivor_exact.py",
+]
+pytest_add_cli_args = ["-c", "mutmut_pytest.ini"]
+also_copy = ["mutmut_pytest.ini"]
+mutate_only_covered_lines = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
