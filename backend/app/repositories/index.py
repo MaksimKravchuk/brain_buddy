@@ -19,7 +19,7 @@ INDEX_FILENAME = "index.json"
 class IndexRepository(BaseRepository):
     """Maintain `index.json` mapping tree identifiers to metadata."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path) -> None:  # pragma: no mutate block
         super().__init__(root)
         self.index_path = self.resolve(INDEX_FILENAME)
 

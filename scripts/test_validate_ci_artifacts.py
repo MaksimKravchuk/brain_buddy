@@ -7,6 +7,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "validate_ci_artifacts.py"
+MUTATION_EVIDENCE_SCRIPT = REPO_ROOT / "scripts" / "create_mutation_allure_evidence.py"
 
 
 class ValidateCiArtifactsTests(unittest.TestCase):
@@ -67,6 +68,55 @@ class ValidateCiArtifactsTests(unittest.TestCase):
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("nested workflow", completed.stderr)
         self.assertIn("backend-allure-results", completed.stderr)
+
+    def test_mutation_workflow_rejects_a_non_nightly_workflow_without_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "mutation.yml"
+            workflow.write_text(
+                "name: Mutation\non:\n  pull_request:\njobs: {}\n",
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("mutation-workflow", "--workflow", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("schedule", completed.stderr)
+        self.assertIn("report-only", completed.stderr)
+        self.assertIn("mutation-summary", completed.stderr)
+
+    def test_mutation_evidence_is_explicitly_informational_not_a_product_test(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            summary = root / "mutation-summary.txt"
+            survivors = root / "mutation-survivors.txt"
+            output = root / "mutation-evidence-result.json"
+            summary.write_text("Mutation score: 95.0%\n", encoding="utf-8")
+            survivors.write_text("No surviving mutants\n", encoding="utf-8")
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(MUTATION_EVIDENCE_SCRIPT),
+                    "--summary",
+                    str(summary),
+                    "--survivors",
+                    str(survivors),
+                    "--output",
+                    str(output),
+                ],
+                cwd=REPO_ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            evidence = output.read_text(encoding="utf-8") if output.exists() else ""
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("Mutation campaign evidence", evidence)
+        self.assertIn("not a product test", evidence)
+        self.assertIn("mutation-summary.txt", evidence)
+        self.assertIn("mutation-survivors.txt", evidence)
 
 
 if __name__ == "__main__":

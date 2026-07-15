@@ -25,6 +25,8 @@ jobs:
           python3 scripts/validate_ci_artifacts.py workflow \
             --ci .github/workflows/ci.yml \
             --disallow-workflow frontend/.github/workflows/playwright.yml
+          python3 scripts/validate_ci_artifacts.py mutation-workflow \
+            --workflow .github/workflows/mutation-quality.yml
 
   backend:
     name: Backend
