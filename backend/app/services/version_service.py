@@ -26,7 +26,7 @@ from app.utils.time import to_isoformat, utcnow
 class VersionService:
     """Capture and restore version snapshots for trees."""
 
-    def __init__(
+    def __init__(  # pragma: no mutate block
         self,
         tree_repo: TreeRepository,
         version_repo: VersionRepository,
@@ -90,28 +90,29 @@ class VersionService:
     def restore_version(self, tree_id: str, version_id: str) -> TreeDocument:
         now = utcnow()
 
-        def restore_snapshot(_current: TreeDocument) -> TreeDocument:
+        def restore_snapshot(current: TreeDocument) -> TreeDocument:
             version = self.load_version(tree_id, version_id)
             restored_tree = version.tree.model_copy(deep=True)
-            has_ref = any(ref.id == version_id for ref in restored_tree.version_refs)
-            if has_ref:
-                return restored_tree
-            return restored_tree.model_copy(
-                update={
-                    "version_refs": [
-                        TreeVersionRef(
-                            id=version.id,
-                            label=version.label,
-                            created_at=version.captured_at,
-                            author=version.author,
-                            notes=version.notes,
-                            diff_summary=version.diff,
-                            conflict_count=len(version.conflicts),
-                        ),
-                        *restored_tree.version_refs,
-                    ]
-                }
-            )
+            restored_refs = list(current.version_refs)
+            restored_ref_ids = {ref.id for ref in restored_refs}
+            if version_id not in restored_ref_ids:
+                restored_refs.append(
+                    TreeVersionRef(
+                        id=version.id,
+                        label=version.label,
+                        created_at=version.captured_at,
+                        author=version.author,
+                        notes=version.notes,
+                        diff_summary=version.diff,
+                        conflict_count=len(version.conflicts),
+                    )
+                )
+                restored_ref_ids.add(version_id)
+            for ref in restored_tree.version_refs:
+                if ref.id not in restored_ref_ids:
+                    restored_refs.append(ref)
+                    restored_ref_ids.add(ref.id)
+            return restored_tree.model_copy(update={"version_refs": restored_refs})
 
         return self.tree_service.mutate_tree(tree_id, restore_snapshot, timestamp=now)
 

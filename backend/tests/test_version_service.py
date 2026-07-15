@@ -12,6 +12,7 @@ from app.schemas import (
     TreeCreateRequest,
     VersionCreateRequest,
 )
+from app.utils.time import to_isoformat
 
 
 def test_create_version_captures_metadata_and_diff(
@@ -159,3 +160,55 @@ def test_export_tree_supports_live_and_version(
     assert version_payload["tree"]["id"] == tree.id
     assert version_payload["tree"]["relations"][0]["source_node_id"]
     assert version_payload["tree"]["relations"][0]["target_node_id"]
+
+
+def test_version_lifecycle_restores_exact_snapshot_then_deletes_its_storage(
+    tree_service, node_service, version_service
+) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Lifecycle"), owner_id="user_test"
+    )
+    node, _ = node_service.create_node(
+        tree.id,
+        NodeCreateRequest(
+            label="Before", type="child", position=Position(x=1, y=2)
+        ),
+    )
+    baseline = version_service.create_version(
+        tree.id,
+        VersionCreateRequest(label="Baseline", author="Alex", notes="restore me"),
+    )
+    node_service.update_node(
+        tree.id,
+        node.id,
+        NodeUpdateRequest(label="After", position=Position(x=9, y=9)),
+    )
+    later = version_service.create_version(
+        tree.id, VersionCreateRequest(label="Later")
+    )
+
+    assert [ref.id for ref in version_service.list_versions(tree.id)] == [
+        later.id,
+        baseline.id,
+    ]
+    filename, content = version_service.export_tree(tree.id, baseline.id)
+    exported = json.loads(content)
+    assert filename.endswith(".json")
+    assert exported["source"] == {
+        "type": "version",
+        "version_id": baseline.id,
+        "label": "Baseline",
+        "captured_at": to_isoformat(baseline.captured_at),
+    }
+    assert exported["tree"] == tree_service.to_response(baseline.tree).model_dump(
+        mode="json", by_alias=True
+    )
+
+    restored = version_service.restore_version(tree.id, baseline.id)
+
+    assert restored.nodes[0].label == "Before"
+    assert restored.nodes[0].position == Position(x=1, y=2)
+    assert [ref.id for ref in restored.version_refs].count(baseline.id) == 1
+    version_service.delete_version(tree.id, baseline.id)
+    assert [ref.id for ref in version_service.list_versions(tree.id)] == [later.id]
+    assert not version_service.version_repo.version_path(tree.id, baseline.id).exists()
