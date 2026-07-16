@@ -1,4 +1,4 @@
-.PHONY: install-backend install-frontend dev-backend dev-frontend lint-backend lint-frontend test-backend ci-backend test-frontend build-frontend ci-frontend validate-ci
+.PHONY: install-backend install-frontend dev-backend dev-frontend lint-backend lint-frontend test-backend ci-backend test-frontend build-frontend ci-frontend validate-ci check-specs
 
 install-backend:
 	cd backend && python -m pip install -e .[dev]
@@ -39,3 +39,6 @@ validate-ci:
 	python3 -m unittest scripts/test_validate_ci_artifacts.py -v
 	python3 scripts/validate_ci_artifacts.py workflow --ci .github/workflows/ci.yml --frontend-vite-config frontend/vite.config.ts --disallow-workflow frontend/.github/workflows/playwright.yml
 	python3 scripts/validate_ci_artifacts.py mutation-workflow --workflow .github/workflows/mutation-quality.yml
+
+check-specs:
+	python3 scripts/check_spec_kit_specs.py
