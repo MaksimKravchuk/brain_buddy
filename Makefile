@@ -1,4 +1,4 @@
-.PHONY: install-backend install-frontend dev-backend dev-frontend lint-backend lint-frontend test-backend ci-backend test-frontend build-frontend ci-frontend validate-ci check-specs
+.PHONY: install-backend install-frontend dev-backend dev-frontend lint-backend lint-frontend test-backend ci-backend test-frontend test-e2e build-frontend ci-frontend validate-ci check-specs
 
 install-backend:
 	cd backend && python -m pip install -e .[dev]
@@ -15,7 +15,7 @@ dev-frontend:
 test-backend:
 	cd backend && pytest --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results
 	python3 scripts/validate_backend_coverage.py backend/coverage.xml
-	python3 scripts/validate_ci_artifacts.py results --path backend/allure-results --label backend-pytest
+	python3 scripts/validate_allure_taxonomy.py --path backend/allure-results --label backend-pytest
 
 lint-backend:
 	cd backend && ruff check app tests
@@ -25,7 +25,11 @@ ci-backend: lint-backend test-backend
 
 test-frontend:
 	cd frontend && npm run test:coverage
-	python3 scripts/validate_ci_artifacts.py results --path frontend/allure-results/vitest --label frontend-vitest
+	python3 scripts/validate_allure_taxonomy.py --path frontend/allure-results/vitest --label frontend-vitest
+
+test-e2e:
+	cd frontend && npm run test:e2e
+	python3 scripts/validate_allure_taxonomy.py --path frontend/allure-results/playwright --label frontend-playwright
 
 lint-frontend:
 	cd frontend && npm run lint
@@ -37,6 +41,7 @@ ci-frontend: lint-frontend test-frontend build-frontend
 
 validate-ci:
 	python3 -m unittest scripts/test_validate_ci_artifacts.py -v
+	python3 -m unittest scripts/test_validate_allure_taxonomy.py -v
 	python3 scripts/validate_ci_artifacts.py workflow --ci .github/workflows/ci.yml --frontend-vite-config frontend/vite.config.ts --disallow-workflow frontend/.github/workflows/playwright.yml
 	python3 scripts/validate_ci_artifacts.py mutation-workflow --workflow .github/workflows/mutation-quality.yml
 

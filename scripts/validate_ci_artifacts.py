@@ -15,6 +15,7 @@ from pathlib import Path
 REQUIRED_ARTIFACTS = {
     "backend-allure-results": "backend/allure-results",
     "frontend-allure-results": "frontend/allure-results",
+    "e2e-allure-results": "frontend/allure-results/playwright",
     "allure-report-html": "allure-report",
 }
 
@@ -39,6 +40,7 @@ FRONTEND_CI_REQUIREMENTS = (
     ("frontend lint step", "npm run lint"),
     ("frontend coverage test step", "npm run test:coverage"),
     ("frontend build step", "npm run build"),
+    ("Playwright e2e test step", "npm run test:e2e"),
 )
 FRONTEND_COVERAGE_THRESHOLD = 95
 FRONTEND_COVERAGE_METRICS = ("statements", "branches", "functions", "lines")
@@ -121,8 +123,8 @@ def validate_workflow(
             errors.append("missing 30-day artifact retention")
         if "if: always()" not in workflow_text:
             errors.append("missing if: always() artifact upload guard")
-        if "validate_ci_artifacts.py results" not in workflow_text:
-            errors.append("missing artifact-specific Allure results validation")
+        if "validate_allure_taxonomy.py" not in workflow_text:
+            errors.append("missing generated Allure taxonomy validation")
         if "allure generate" not in workflow_text:
             errors.append("missing aggregate Allure report generation")
 

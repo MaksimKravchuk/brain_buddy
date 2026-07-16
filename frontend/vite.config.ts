@@ -27,14 +27,18 @@ export default defineConfig({
     globals: true,
     reporters: ["default", ["allure-vitest/reporter", { resultsDir: "allure-results/vitest" }]],
     css: true,
-    setupFiles: "./src/setupTests.ts",
+    setupFiles: [
+      "allure-vitest/setup",
+      "./src/setupTests.ts",
+      "./src/test/allureTaxonomy.ts"
+    ],
     include: ["src/**/*.test.{ts,tsx}", "src/**/*.spec.{ts,tsx}"],
     exclude: ["tests/**"],
     coverage: {
       provider: "istanbul",
       reporter: ["text", "lcov"],
       include: ["src/**/*.{ts,tsx}"],
-      exclude: ["src/main.tsx"],
+      exclude: ["src/main.tsx", "src/test/allureTaxonomy.ts"],
       thresholds: {
         statements: 95,
         branches: 95,
