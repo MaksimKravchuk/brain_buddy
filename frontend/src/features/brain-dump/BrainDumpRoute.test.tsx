@@ -240,6 +240,37 @@ describe("BrainDumpRoute", () => {
     await waitFor(() => expect(recognition?.stop).toHaveBeenCalledTimes(1));
   });
 
+  it("keeps recognition alive when discarding fails", async () => {
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
+        return jsonResponse(operation(), 201);
+      }
+      if (url.endsWith("/brain_dump_1/cancel")) {
+        return Promise.reject(new Error("cancel failed"));
+      }
+      if (url.endsWith("/brain_dump_1/transcript")) {
+        const body = JSON.parse(String(init?.body));
+        expect(body.segments[0]).toMatchObject({ sequence: 1, text: "Still recording after failed discard", stability: "stable" });
+        return jsonResponse(operation({ revision: 2, proposals: [proposal("proposal_1", 1, "Still recording after failed discard")] }));
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump();
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+    const activeRecognition = recognition;
+    await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("cancel failed");
+    expect(screen.getByText("Recording")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pause" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Stop & review" })).toBeEnabled();
+    expect(activeRecognition?.stop).not.toHaveBeenCalled();
+    act(() => emitSpeech("Still recording after failed discard"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/brain_dump_1/transcript"), expect.anything()));
+  });
+
   it("stops active recognition when the recording route unmounts", async () => {
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
