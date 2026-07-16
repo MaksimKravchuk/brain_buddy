@@ -113,6 +113,28 @@ describe("apiClient", () => {
     );
   });
 
+  it("uses the public task, project, and tag API contracts", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(response({ items: [], counts_by_state: {} })));
+
+    await apiClient.listTasks({ state: "next", projectId: "project-1", tagId: "tag-1" });
+    await apiClient.listProjects();
+    await apiClient.listTags();
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/tasks?state=next&project_id=project-1&tag_id=tag-1",
+      "/api/projects",
+      "/api/tags"
+    ]);
+  });
+
+  it("omits task query parameters when filters are absent", async () => {
+    fetchMock.mockResolvedValue(response({ items: [], counts_by_state: {} }));
+
+    await apiClient.listTasks();
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/tasks");
+  });
+
   it("notifies the session handler and preserves correlation IDs for failed requests", async () => {
     const onUnauthorized = vi.fn();
     setUnauthorizedHandler(onUnauthorized);
