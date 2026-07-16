@@ -18,7 +18,7 @@ const taskResponse = {
       details: null,
       state: "next",
       project_id: "project-onboarding",
-      context_ids: ["tag-deep-work"],
+      tag_ids: ["tag-deep-work"],
       due_date: null,
       waiting_for: null,
       waiting_since: null,
@@ -38,19 +38,20 @@ const taskResponse = {
 };
 
 const projectsResponse = [
-  { id: "project-launch", name: "Launch v2", color: "#0ea5e9", state: "active", revision: 1 },
+  { id: "project-launch", name: "Launch v2", color: "#0ea5e9", state: "active", revision: 1, open_task_count: 2 },
   {
     id: "project-onboarding",
     name: "Onboarding drop-off",
     color: "#6366f1",
     state: "active",
-    revision: 1
+    revision: 1,
+    open_task_count: 1
   }
 ];
 
 const tagsResponse = [
-  { id: "tag-calls", name: "calls", state: "active", revision: 1 },
-  { id: "tag-deep-work", name: "deep-work", state: "active", revision: 1 }
+  { id: "tag-calls", name: "calls", state: "active", revision: 1, open_task_count: 2 },
+  { id: "tag-deep-work", name: "deep-work", state: "active", revision: 1, open_task_count: 1 }
 ];
 
 function renderRoutes(initialEntry: string) {
@@ -90,7 +91,7 @@ beforeEach(() => {
       if (url.includes("/projects")) {
         return Promise.resolve(jsonResponse(projectsResponse));
       }
-      if (url.includes("/contexts")) {
+      if (url.includes("/tags")) {
         return Promise.resolve(jsonResponse(tagsResponse));
       }
       return Promise.resolve(jsonResponse(null));

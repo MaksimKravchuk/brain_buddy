@@ -15,6 +15,8 @@ const stateLabels: Record<OpenTaskState, string> = {
 };
 
 const emptyCounts: TaskCounts = { inbox: 0, next: 0, waiting: 0, someday: 0 };
+const emptyProjects: ProjectResponse[] = [];
+const emptyTags: TagResponse[] = [];
 
 export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): JSX.Element {
   const params = useParams();
@@ -26,8 +28,8 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const projectsQuery = useProjects();
   const tagsQuery = useTags();
 
-  const projects = projectsQuery.data ?? [];
-  const tags = tagsQuery.data ?? [];
+  const projects = projectsQuery.data ?? emptyProjects;
+  const tags = tagsQuery.data ?? emptyTags;
   const tasks = taskQuery.data?.items ?? [];
   const counts = taskQuery.data?.counts_by_state ?? emptyCounts;
 
@@ -101,7 +103,7 @@ function TaskList({ tasks, projects, tags }: { tasks: TaskResponse[]; projects: 
     <div className="flex flex-col gap-2" role="list" aria-label="Tasks">
       {tasks.map((task) => {
         const project = task.project_id ? projectById.get(task.project_id) : undefined;
-        const taskTags = task.context_ids.map((id) => tagById.get(id)).filter((tag): tag is TagResponse => Boolean(tag));
+        const taskTags = task.tag_ids.map((id) => tagById.get(id)).filter((tag): tag is TagResponse => Boolean(tag));
         return <TaskRow key={task.id} task={task} project={project} tags={taskTags} />;
       })}
       <button

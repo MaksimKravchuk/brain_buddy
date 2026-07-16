@@ -14,7 +14,7 @@ export interface TaskResponse {
   details: string | null;
   state: TaskState;
   project_id: string | null;
-  context_ids: string[];
+  tag_ids: string[];
   due_date: string | null;
   waiting_for: string | null;
   waiting_since: string | null;
@@ -41,13 +41,15 @@ export interface ProjectResponse {
   color: string | null;
   state: "active" | "completed" | "archived";
   revision: number;
+  open_task_count: number;
 }
 
 export interface TagResponse {
   id: string;
   name: string;
-  state: "active" | "archived";
+  state: "active" | "archived" | "deleted";
   revision: number;
+  open_task_count: number;
 }
 
 export interface TaskListFilters {
