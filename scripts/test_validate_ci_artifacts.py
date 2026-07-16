@@ -69,6 +69,72 @@ class ValidateCiArtifactsTests(unittest.TestCase):
         self.assertIn("nested workflow", completed.stderr)
         self.assertIn("backend-allure-results", completed.stderr)
 
+    def test_workflow_rejects_missing_frontend_lint_and_coverage_thresholds(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflow = root / ".github" / "workflows" / "ci.yml"
+            vite_config = root / "frontend" / "vite.config.ts"
+            workflow.parent.mkdir(parents=True)
+            vite_config.parent.mkdir(parents=True)
+            workflow.write_text(
+                """
+name: CI
+jobs:
+  frontend:
+    steps:
+      - run: npm run test -- --coverage
+      - run: npm run build
+  allure-report:
+    steps:
+      - run: python3 scripts/validate_ci_artifacts.py results --path frontend/allure-results/vitest --label frontend-vitest
+      - run: npx allure generate ../allure-results -o ../allure-report
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-allure-results
+          path: backend/allure-results
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-allure-results
+          path: frontend/allure-results
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: allure-report-html
+          path: allure-report
+          retention-days: 30
+""".strip(),
+                encoding="utf-8",
+            )
+            vite_config.write_text(
+                """
+export default defineConfig({
+  test: {
+    coverage: {
+      provider: "istanbul",
+      reporter: ["text", "lcov"]
+    }
+  }
+});
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(vite_config),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("frontend lint", completed.stderr)
+        self.assertIn("frontend coverage threshold statements", completed.stderr)
+
     def test_mutation_workflow_rejects_a_non_nightly_workflow_without_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workflow = Path(tmp) / "mutation.yml"

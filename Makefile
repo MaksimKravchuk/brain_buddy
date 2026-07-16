@@ -1,4 +1,4 @@
-.PHONY: install-backend install-frontend dev-backend dev-frontend lint-backend test-backend ci-backend test-frontend build-frontend ci-frontend validate-ci
+.PHONY: install-backend install-frontend dev-backend dev-frontend lint-backend lint-frontend test-backend ci-backend test-frontend build-frontend ci-frontend validate-ci
 
 install-backend:
 	cd backend && python -m pip install -e .[dev]
@@ -24,14 +24,18 @@ lint-backend:
 ci-backend: lint-backend test-backend
 
 test-frontend:
-	cd frontend && npm run test -- --coverage
-	python3 scripts/validate_ci_artifacts.py results --path frontend/allure-results --label frontend-vitest
+	cd frontend && npm run test:coverage
+	python3 scripts/validate_ci_artifacts.py results --path frontend/allure-results/vitest --label frontend-vitest
+
+lint-frontend:
+	cd frontend && npm run lint
 
 build-frontend:
 	cd frontend && npm run build
 
-ci-frontend: test-frontend build-frontend
+ci-frontend: lint-frontend test-frontend build-frontend
 
 validate-ci:
 	python3 -m unittest scripts/test_validate_ci_artifacts.py -v
-	python3 scripts/validate_ci_artifacts.py workflow --ci .github/workflows/ci.yml --disallow-workflow frontend/.github/workflows/playwright.yml
+	python3 scripts/validate_ci_artifacts.py workflow --ci .github/workflows/ci.yml --frontend-vite-config frontend/vite.config.ts --disallow-workflow frontend/.github/workflows/playwright.yml
+	python3 scripts/validate_ci_artifacts.py mutation-workflow --workflow .github/workflows/mutation-quality.yml
