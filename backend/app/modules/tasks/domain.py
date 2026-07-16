@@ -119,3 +119,64 @@ class TaskDocument(StorageBaseModel):
         """Deprecated compatibility accessor for service tests and /contexts shim."""
 
         return self.tag_ids
+
+
+BrainDumpStatus = Literal[
+    "recording",
+    "paused",
+    "awaiting_confirmation",
+    "committing",
+    "completed",
+    "cancelled",
+]
+BrainDumpProposalStatus = Literal[
+    "provisional",
+    "wording_changing",
+    "ready_to_review",
+    "user_edited",
+]
+
+
+class BrainDumpConsent(StorageBaseModel):
+    microphone: bool
+    external_processing_allowed: bool = False
+    recorded_at: datetime
+    provider: str | None = None
+
+
+class BrainDumpTranscriptSegmentDocument(StorageBaseModel):
+    id: str
+    sequence: int = Field(ge=1)
+    text: str = Field(min_length=1, max_length=20_000)
+    stability: Literal["interim", "stable"]
+    created_at: datetime
+
+
+class BrainDumpProposalDocument(StorageBaseModel):
+    id: str
+    ordinal: int = Field(ge=1)
+    title: str = Field(min_length=1, max_length=500)
+    status: BrainDumpProposalStatus = "provisional"
+    source_segment_ids: list[str] = Field(default_factory=list)
+    deleted: bool = False
+    user_edited: bool = False
+    created_at: datetime
+    updated_at: datetime
+    revision: int = Field(default=1, ge=1)
+
+
+class BrainDumpOperationDocument(StorageBaseModel):
+    """Operation-private workspace for native voice Brain Dump capture."""
+
+    id: str
+    owner_id: str
+    kind: Literal["voice_brain_dump"] = "voice_brain_dump"
+    status: BrainDumpStatus
+    consent: BrainDumpConsent
+    segments: list[BrainDumpTranscriptSegmentDocument] = Field(default_factory=list)
+    proposals: list[BrainDumpProposalDocument] = Field(default_factory=list)
+    committed_task_ids: list[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+    schema_version: int = Field(default=1, ge=1)
+    revision: int = Field(default=1, ge=1)

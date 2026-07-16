@@ -20,6 +20,7 @@ from app.utils.file_ops import ensure_directory
 from app.utils.time import utcnow
 
 from .domain import (
+    BrainDumpOperationDocument,
     ContextDocument,
     IdempotencyRecord,
     ProjectDocument,
@@ -256,6 +257,9 @@ class TaskRepository(BaseRepository):
     def comment_path(self, owner_id: str, task_id: str, comment_id: str) -> Path:
         return self.resolve("task-comments", owner_id, task_id, f"{comment_id}.json")
 
+    def brain_dump_operation_path(self, owner_id: str, operation_id: str) -> Path:
+        return self.resolve("brain-dump-operations", owner_id, f"{operation_id}.json")
+
     def project_path(self, owner_id: str, project_id: str) -> Path:
         return self.resolve("projects", owner_id, f"{project_id}.json")
 
@@ -404,6 +408,19 @@ class TaskRepository(BaseRepository):
 
     def list_for_owner(self, *, owner_id: str) -> list[TaskDocument]:
         return self._list("tasks", TaskDocument, owner_id=owner_id)
+
+    def save_brain_dump_operation(self, operation: BrainDumpOperationDocument) -> None:
+        BaseRepository.dump_model(
+            self.brain_dump_operation_path(operation.owner_id, operation.id), operation
+        )
+
+    def get_brain_dump_operation_for_owner(
+        self, operation_id: str, *, owner_id: str
+    ) -> BrainDumpOperationDocument:
+        path = self.brain_dump_operation_path(owner_id, operation_id)
+        if not path.exists():
+            raise NotFoundError("Brain dump operation", operation_id)
+        return self.load_model(path, BrainDumpOperationDocument)
 
     def create_subtask(self, subtask: TaskSubtaskDocument) -> None:
         with self._connection() as conn:
@@ -557,6 +574,7 @@ class TaskRepository(BaseRepository):
 
         BaseRepository.dump_model(path, model)
         storage_roots = {
+            "brain-dump-operations",
             "projects",
             "contexts",
             "tasks",

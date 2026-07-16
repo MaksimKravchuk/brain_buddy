@@ -11,6 +11,9 @@ from app.api.dependencies import get_current_user, get_task_service
 from app.exceptions import ValidationFailure
 from app.modules.tasks import TaskService
 from app.modules.tasks.domain import (
+    BrainDumpOperationDocument,
+    BrainDumpProposalDocument,
+    BrainDumpTranscriptSegmentDocument,
     ContextDocument,
     ProjectDocument,
     TaskCommentDocument,
@@ -19,6 +22,13 @@ from app.modules.tasks.domain import (
 )
 from app.schemas.auth import User
 from app.schemas.tasks import (
+    BrainDumpConsentResponse,
+    BrainDumpOperationResponse,
+    BrainDumpOperationStartRequest,
+    BrainDumpProposalResponse,
+    BrainDumpProposalUpdateRequest,
+    BrainDumpTranscriptAppendRequest,
+    BrainDumpTranscriptSegmentResponse,
     ContextCreateRequest,
     ContextResponse,
     ExpectedRevisionRequest,
@@ -48,6 +58,119 @@ def _require_idempotency_key(idempotency_key: str | None) -> str:
     if not idempotency_key:
         raise ValidationFailure("Idempotency-Key header is required.")
     return idempotency_key
+
+
+@router.post(
+    "/brain-dump-operations",
+    response_model=BrainDumpOperationResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses=error_responses(400, 401, 409, 422),
+)
+def start_brain_dump_operation(
+    payload: BrainDumpOperationStartRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    task_service: TaskService = Depends(get_task_service),
+) -> BrainDumpOperationResponse:
+    return _to_brain_dump_response(
+        task_service.start_brain_dump_operation(
+            payload,
+            owner_id=current_user.id,
+            idempotency_key=_require_idempotency_key(idempotency_key),
+        )
+    )
+
+
+@router.get(
+    "/brain-dump-operations/{operation_id}",
+    response_model=BrainDumpOperationResponse,
+    responses=error_responses(401, 404, 422),
+)
+def get_brain_dump_operation(
+    operation_id: str,
+    current_user: User = Depends(get_current_user),
+    task_service: TaskService = Depends(get_task_service),
+) -> BrainDumpOperationResponse:
+    return _to_brain_dump_response(
+        task_service.get_brain_dump_operation(operation_id, owner_id=current_user.id)
+    )
+
+
+@router.post(
+    "/brain-dump-operations/{operation_id}/transcript",
+    response_model=BrainDumpOperationResponse,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
+def append_brain_dump_transcript(
+    operation_id: str,
+    payload: BrainDumpTranscriptAppendRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    task_service: TaskService = Depends(get_task_service),
+) -> BrainDumpOperationResponse:
+    return _to_brain_dump_response(
+        task_service.append_brain_dump_transcript(
+            operation_id,
+            payload,
+            owner_id=current_user.id,
+            idempotency_key=_require_idempotency_key(idempotency_key),
+        )
+    )
+
+
+@router.patch(
+    "/brain-dump-operations/{operation_id}/proposals/{proposal_id}",
+    response_model=BrainDumpOperationResponse,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
+def update_brain_dump_proposal(
+    operation_id: str,
+    proposal_id: str,
+    payload: BrainDumpProposalUpdateRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    task_service: TaskService = Depends(get_task_service),
+) -> BrainDumpOperationResponse:
+    return _to_brain_dump_response(
+        task_service.update_brain_dump_proposal(
+            operation_id,
+            proposal_id,
+            payload,
+            owner_id=current_user.id,
+            idempotency_key=_require_idempotency_key(idempotency_key),
+        )
+    )
+
+
+@router.post(
+    "/brain-dump-operations/{operation_id}/{action}",
+    response_model=BrainDumpOperationResponse,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
+def command_brain_dump_operation(
+    operation_id: str,
+    action: str,
+    payload: ExpectedRevisionRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    task_service: TaskService = Depends(get_task_service),
+) -> BrainDumpOperationResponse:
+    idempotency = _require_idempotency_key(idempotency_key)
+    if action == "commit":
+        operation = task_service.commit_brain_dump_operation(
+            operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
+        )
+    elif action in {"pause", "resume", "finish", "cancel"}:
+        operation = task_service.transition_brain_dump_operation(
+            operation_id,
+            payload,
+            owner_id=current_user.id,
+            idempotency_key=idempotency,
+            action=action,
+        )
+    else:
+        raise ValidationFailure("Unsupported brain dump operation command.")
+    return _to_brain_dump_response(operation)
 
 
 @router.post(
@@ -439,6 +562,56 @@ def list_tasks(
         next_cursor=next_cursor,
         has_more=has_more,
         counts_by_state=TaskCounts(**counts_by_state),
+    )
+
+
+def _to_brain_dump_response(
+    operation: BrainDumpOperationDocument,
+) -> BrainDumpOperationResponse:
+    return BrainDumpOperationResponse(
+        id=operation.id,
+        owner_id=operation.owner_id,
+        kind=operation.kind,
+        status=operation.status,
+        consent=BrainDumpConsentResponse(
+            microphone=operation.consent.microphone,
+            external_processing_allowed=operation.consent.external_processing_allowed,
+            provider=operation.consent.provider,
+            recorded_at=operation.consent.recorded_at,
+        ),
+        segments=[_to_brain_dump_segment_response(segment) for segment in operation.segments],
+        proposals=[_to_brain_dump_proposal_response(item) for item in operation.proposals],
+        committed_task_ids=operation.committed_task_ids,
+        created_at=operation.created_at,
+        updated_at=operation.updated_at,
+        revision=operation.revision,
+    )
+
+
+def _to_brain_dump_segment_response(
+    segment: BrainDumpTranscriptSegmentDocument,
+) -> BrainDumpTranscriptSegmentResponse:
+    return BrainDumpTranscriptSegmentResponse(
+        id=segment.id,
+        sequence=segment.sequence,
+        text=segment.text,
+        stability=segment.stability,
+        created_at=segment.created_at,
+    )
+
+
+def _to_brain_dump_proposal_response(
+    proposal: BrainDumpProposalDocument,
+) -> BrainDumpProposalResponse:
+    return BrainDumpProposalResponse(
+        id=proposal.id,
+        ordinal=proposal.ordinal,
+        title=proposal.title,
+        status=proposal.status,
+        source_segment_ids=proposal.source_segment_ids,
+        deleted=proposal.deleted,
+        user_edited=proposal.user_edited,
+        revision=proposal.revision,
     )
 
 
