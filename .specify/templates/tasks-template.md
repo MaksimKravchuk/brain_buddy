@@ -6,11 +6,15 @@ description: "Task list template for feature implementation"
 # Tasks: [FEATURE NAME]
 
 **Input**: Design documents from `/specs/[###-feature-name]/`
+
 **Prerequisites**: plan.md (required), spec.md (required for user stories), research.md, data-model.md, contracts/
 
-**Tests**: Tests are expected for behavior changes; include backend pytest/FastAPI TestClient and frontend Vitest coverage unless the spec explicitly waives them.
+**Tests**: Tests are expected for behavior changes; include backend pytest/FastAPI
+TestClient, frontend Vitest/Testing Library, operation-state, or deterministic
+repository checks unless the spec explicitly waives tests for a docs/tooling-only
+change.
 
-**Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story. Include consent enforcement, observability (correlation IDs, actionable errors), and responsiveness/data-safety safeguards where relevant.
+**Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story. Include consent enforcement, mobile/resilience handling, observability (correlation IDs, actionable errors/progress), release/smoke validation, and data-safety safeguards where relevant.
 
 ## Format: `[ID] [P?] [Story] Description`
 
@@ -25,21 +29,21 @@ description: "Task list template for feature implementation"
 - **Mobile**: `api/src/`, `ios/src/` or `android/src/`
 - Paths shown below assume single project - adjust based on plan.md structure
 
-<!-- 
+<!--
   ============================================================================
   IMPORTANT: The tasks below are SAMPLE TASKS for illustration purposes only.
-  
-  The /speckit.tasks command MUST replace these with actual tasks based on:
+
+  The /speckit-tasks command MUST replace these with actual tasks based on:
   - User stories from spec.md (with their priorities P1, P2, P3...)
   - Feature requirements from plan.md
   - Entities from data-model.md
   - Endpoints from contracts/
-  
+
   Tasks MUST be organized by user story so each story can be:
   - Implemented independently
   - Tested independently
   - Delivered as an MVP increment
-  
+
   DO NOT keep these sample tasks in the generated tasks.md file.
   ============================================================================
 -->
@@ -249,3 +253,6 @@ With multiple developers:
 - Commit after each task or logical group
 - Stop at any checkpoint to validate story independently
 - Avoid: vague tasks, same file conflicts, cross-story dependencies that break independence
+- Generated tasks.md is planning input only. Do not use it to bypass Hermes
+  Kanban ownership, isolated worktrees, TDD, independent review, CI, PR, merge,
+  or release gates.

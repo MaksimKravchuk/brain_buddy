@@ -53,6 +53,34 @@ docker compose up --build        # backend:8000, frontend:8080
 docker compose down --volumes
 ```
 
+### Spec Kit feature authoring (mandatory)
+
+Use GitHub Spec Kit v0.12.17 for every new or materially changed feature spec.
+Install or refresh the CLI with isolated uv tooling, never pip inside Hermes:
+
+```bash
+uv tool install specify-cli --force --from git+https://github.com/github/spec-kit.git@v0.12.17
+specify --version          # expect: specify 0.12.17
+specify check              # verifies Claude Code and other agent prerequisites
+specify integration list   # confirms claude is available/installed
+```
+
+Claude Code uses the skills installed under `.claude/skills/`:
+
+```text
+/speckit-constitution
+/speckit-specify <what and why, not implementation>
+/speckit-clarify
+/speckit-checklist
+/speckit-plan <how and architecture>
+/speckit-tasks
+```
+
+Read `docs/spec-kit-workflow.md` before authoring specs. Spec Kit maintains
+versioned artifacts under `specs/`; Hermes Kanban still owns execution,
+isolated worktrees, TDD, review, CI, PR, merge, and release gates. Generated
+`tasks.md` is planning input only.
+
 ## Architecture
 
 ### Backend — layered design

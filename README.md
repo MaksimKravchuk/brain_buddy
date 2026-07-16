@@ -107,8 +107,17 @@ See `docs/api_usage.md` for request/response details and examples.
 ## Testing & Tooling
 - Backend: `cd backend && pytest`
 - Frontend unit tests: `cd frontend && npm test`
+- Spec Kit artifact check: `python3 scripts/check_spec_kit_specs.py` or `make check-specs`
 - Linting/formatting: Black, Ruff, and Mypy on the backend; ESLint/Prettier via Vite on the frontend.
 - Continuous improvement scripts live in the root `Makefile` (`make test-backend`, `make test-frontend`).
+
+## Feature Specs
+GitHub Spec Kit v0.12.17 is the mandatory workflow for new or materially changed
+feature specs: constitution → `/speckit-specify` → `/speckit-clarify` or
+`/speckit-checklist` → `/speckit-plan` → `/speckit-tasks`. See
+`docs/spec-kit-workflow.md` for the exact Claude Code commands, uv/uvx setup,
+historical spec grandfathering, and the boundary between Spec Kit planning and
+Hermes Kanban execution/review.
 
 ## Performance & Observability
 - File-backed caches reduce repeated tree loads during read-heavy sessions.
