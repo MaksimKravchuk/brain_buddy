@@ -57,3 +57,44 @@ export interface TaskListFilters {
   projectId?: string;
   tagId?: string;
 }
+
+export type BrainDumpStatus = "recording" | "paused" | "awaiting_confirmation" | "committing" | "completed" | "cancelled";
+export type BrainDumpProposalStatus = "provisional" | "wording_changing" | "ready_to_review" | "user_edited";
+
+export interface BrainDumpProposal {
+  id: string;
+  ordinal: number;
+  title: string;
+  status: BrainDumpProposalStatus;
+  source_segment_ids: string[];
+  deleted: boolean;
+  user_edited: boolean;
+  revision: number;
+}
+
+export interface BrainDumpOperationResponse {
+  id: string;
+  owner_id: string;
+  kind: "voice_brain_dump";
+  status: BrainDumpStatus;
+  consent: {
+    microphone: boolean;
+    external_processing_allowed: boolean;
+    provider: string | null;
+    recorded_at: string;
+  };
+  segments: Array<{ id: string; sequence: number; text: string; stability: "interim" | "stable"; created_at: string }>;
+  proposals: BrainDumpProposal[];
+  committed_task_ids: string[];
+  created_at: string;
+  updated_at: string;
+  revision: number;
+}
+
+export interface BrainDumpStartRequest {
+  consent: { microphone: boolean; external_processing_allowed: boolean; provider?: string | null };
+}
+
+export interface BrainDumpTranscriptAppendRequest {
+  segments: Array<{ sequence: number; text: string; stability: "interim" | "stable" }>;
+}

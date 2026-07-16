@@ -19,7 +19,15 @@ import {
   VersionCreateRequest,
   VersionListItem
 } from "./types";
-import type { ProjectResponse, TagResponse, TaskListFilters, TaskListResponse } from "./taskTypes";
+import type {
+  BrainDumpOperationResponse,
+  BrainDumpStartRequest,
+  BrainDumpTranscriptAppendRequest,
+  ProjectResponse,
+  TagResponse,
+  TaskListFilters,
+  TaskListResponse
+} from "./taskTypes";
 import { nowMs, recordTelemetry } from "../utils/telemetry";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
@@ -183,6 +191,47 @@ export const apiClient = {
 
   listTags(signal?: AbortSignal) {
     return request<TagResponse[]>("/tags", { signal });
+  },
+
+  startBrainDump(payload: BrainDumpStartRequest, idempotencyKey: string) {
+    return request<BrainDumpOperationResponse>("/brain-dump-operations", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  getBrainDump(operationId: string, signal?: AbortSignal) {
+    return request<BrainDumpOperationResponse>(`/brain-dump-operations/${operationId}`, { signal });
+  },
+
+  appendBrainDumpTranscript(operationId: string, payload: BrainDumpTranscriptAppendRequest, idempotencyKey: string) {
+    return request<BrainDumpOperationResponse>(`/brain-dump-operations/${operationId}/transcript`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  updateBrainDumpProposal(
+    operationId: string,
+    proposalId: string,
+    payload: { title?: string; deleted?: boolean; expected_revision: number },
+    idempotencyKey: string
+  ) {
+    return request<BrainDumpOperationResponse>(`/brain-dump-operations/${operationId}/proposals/${proposalId}`, {
+      method: "PATCH",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  commandBrainDump(operationId: string, action: "pause" | "resume" | "finish" | "cancel" | "commit", expectedRevision: number, idempotencyKey: string) {
+    return request<BrainDumpOperationResponse>(`/brain-dump-operations/${operationId}/${action}`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: { expected_revision: expectedRevision }
+    });
   },
 
   listTrees(signal?: AbortSignal) {

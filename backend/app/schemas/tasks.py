@@ -164,3 +164,85 @@ class TaskListResponse(StrictBaseModel):
     next_cursor: str | None = None
     has_more: bool
     counts_by_state: TaskCounts
+
+
+BrainDumpStatus = Literal[
+    "recording",
+    "paused",
+    "awaiting_confirmation",
+    "committing",
+    "completed",
+    "cancelled",
+]
+BrainDumpProposalStatus = Literal[
+    "provisional",
+    "wording_changing",
+    "ready_to_review",
+    "user_edited",
+]
+
+
+class BrainDumpConsentRequest(StrictBaseModel):
+    microphone: bool
+    external_processing_allowed: bool = False
+    provider: str | None = Field(default=None, max_length=100)
+
+
+class BrainDumpOperationStartRequest(StrictBaseModel):
+    consent: BrainDumpConsentRequest
+
+
+class BrainDumpTranscriptSegmentRequest(StrictBaseModel):
+    sequence: int = Field(ge=1)
+    text: str = Field(min_length=1, max_length=20_000)
+    stability: Literal["interim", "stable"] = "stable"
+
+
+class BrainDumpTranscriptAppendRequest(StrictBaseModel):
+    segments: list[BrainDumpTranscriptSegmentRequest] = Field(min_length=1, max_length=50)
+
+
+class BrainDumpProposalUpdateRequest(StrictBaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=500)
+    deleted: bool | None = None
+    expected_revision: int = Field(ge=1)
+
+
+class BrainDumpConsentResponse(StrictBaseModel):
+    microphone: bool
+    external_processing_allowed: bool
+    provider: str | None = None
+    recorded_at: datetime
+
+
+class BrainDumpTranscriptSegmentResponse(StrictBaseModel):
+    id: str
+    sequence: int
+    text: str
+    stability: Literal["interim", "stable"]
+    created_at: datetime
+
+
+class BrainDumpProposalResponse(StrictBaseModel):
+    id: str
+    ordinal: int
+    title: str
+    status: BrainDumpProposalStatus
+    source_segment_ids: list[str] = Field(default_factory=list)
+    deleted: bool
+    user_edited: bool
+    revision: int
+
+
+class BrainDumpOperationResponse(StrictBaseModel):
+    id: str
+    owner_id: str
+    kind: Literal["voice_brain_dump"]
+    status: BrainDumpStatus
+    consent: BrainDumpConsentResponse
+    segments: list[BrainDumpTranscriptSegmentResponse] = Field(default_factory=list)
+    proposals: list[BrainDumpProposalResponse] = Field(default_factory=list)
+    committed_task_ids: list[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+    revision: int
