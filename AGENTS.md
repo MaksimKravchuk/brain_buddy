@@ -40,11 +40,11 @@
 - Async voice brain dumps and voice-led Weekly Review share the operation, patch, confirmation, privacy, and idempotency contract in `docs/decisions/0002-async-voice-operation-substrate.md`.
 - Autonomous delivery, visual preview eligibility, and production release/rollback authority are governed by `docs/decisions/0003-autonomous-delivery-guardrails.md` and `docs/autonomous-delivery-runbook.md`.
 
-## Agent Delivery Workflow
-- Work in an isolated git worktree and feature branch. Never leave product changes uncommitted in the primary worktree.
-- Every useful product change must be committed, pushed, and opened as a PR against `main`. Review and green CI are the merge gate.
-- A successful push to `main` deploys to Fly automatically and runs production smoke checks. Do not perform an ad-hoc production deploy instead of this release path.
-- There are currently no customer or valuable production data: prioritize MVP velocity, but preserve the PR → CI → deploy traceability.
+## Mandatory Spec Kit Workflow
+- GitHub Spec Kit is the canonical authoring workflow for every new or materially changed BrainBuddy feature spec; use the repo-pinned official CLI version documented in `docs/spec-kit-workflow.md`.
+- The required sequence is constitution → `/speckit-specify` (what/why) → `/speckit-clarify` and/or `/speckit-checklist` → `/speckit-plan` (how/architecture) → `/speckit-tasks`. Amend the spec first whenever implementation intent changes.
+- Spec Kit owns versioned planning artifacts under `specs/` plus `.specify/`; Hermes Kanban remains the execution/orchestration and PR-review system. Generated `tasks.md` is planning input, not permission to bypass isolated worktrees, TDD, review, CI, merge, or release gates.
+- Before adding or changing a feature spec, run `python3 scripts/check_spec_kit_specs.py` (or `make check-specs`) and preserve documented grandfathering for historical specs.
 
 ## Agent Delivery Workflow
 - Work in an isolated git worktree and feature branch. Never leave product changes uncommitted in the primary worktree.
