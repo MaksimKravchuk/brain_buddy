@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Generator
 from pathlib import Path
 
+import allure
 import pytest
 from fastapi.testclient import TestClient
 
@@ -14,6 +15,8 @@ from app.core.rate_limit import login_rate_limiter
 from app.main import create_app
 from app.schemas.auth import Invite
 from app.utils.time import utcnow
+
+from .allure_taxonomy import resolve
 
 TEST_OWNER_ID = "user_test_owner"
 TEST_USER_EMAIL = "primary@example.com"
@@ -29,6 +32,58 @@ def _reset_login_rate_limiter() -> Generator[None, None, None]:
     login_rate_limiter.reset()
     yield
     login_rate_limiter.reset()
+
+
+def _declared_label_types(item: pytest.Item) -> set[str]:
+    """Label types (epic/feature/story) a test already set via decorators."""
+
+    declared: set[str] = set()
+    for marker in item.iter_markers(name="allure_label"):
+        label_type = marker.kwargs.get("label_type")
+        if isinstance(label_type, str):
+            declared.add(label_type)
+    return declared
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_call(item: pytest.Item) -> Generator[None, None, None]:
+    """Apply the deterministic Allure taxonomy to every backend test.
+
+    Runs in the *call* phase so the dynamic title and the wrapping step attach to
+    the test result itself (labels applied during fixture setup stick, but the
+    result name and steps must be set while the test body executes). epic/feature/
+    story are filled from the module map unless the test declared its own; the
+    title is humanised from the docstring/name unless a ``@allure.title`` is
+    present; and the body is wrapped in one named step so every emitted result
+    satisfies the taxonomy gate. Explicit decorators always win — this only fills
+    what a test did not set for itself.
+    """
+
+    func = getattr(item, "function", None)
+    if func is None:  # non-python item; nothing to tag
+        yield
+        return
+
+    param_id = getattr(getattr(item, "callspec", None), "id", None)
+    meta = resolve(
+        module_name=item.module.__name__,
+        function_name=getattr(item, "originalname", None) or item.name,
+        docstring=getattr(func, "__doc__", None),
+        param_id=param_id,
+    )
+
+    declared = _declared_label_types(item)
+    if "epic" not in declared:
+        allure.dynamic.epic(meta.epic)
+    if "feature" not in declared:
+        allure.dynamic.feature(meta.feature)
+    if "story" not in declared:
+        allure.dynamic.story(meta.story)
+    if not getattr(func, "__allure_display_name__", None):
+        allure.dynamic.title(meta.title)
+
+    with allure.step(meta.step):
+        yield
 
 
 @pytest.fixture

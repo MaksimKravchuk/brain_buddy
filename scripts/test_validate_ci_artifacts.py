@@ -86,7 +86,9 @@ jobs:
       - run: npm run build
   allure-report:
     steps:
-      - run: python3 scripts/validate_ci_artifacts.py results --path frontend/allure-results/vitest --label frontend-vitest
+      - run: python3 scripts/validate_allure_taxonomy.py --path frontend/allure-results/vitest --label frontend-vitest
+      - run: npm run test:e2e
+      - run: python3 scripts/validate_allure_taxonomy.py --path frontend/allure-results/playwright --label frontend-playwright
       - run: npx allure generate ../allure-results -o ../allure-report
       - uses: actions/upload-artifact@v4
         if: always()
@@ -99,6 +101,12 @@ jobs:
         with:
           name: frontend-allure-results
           path: frontend/allure-results
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-allure-results
+          path: frontend/allure-results/playwright
           retention-days: 30
       - uses: actions/upload-artifact@v4
         if: always()
