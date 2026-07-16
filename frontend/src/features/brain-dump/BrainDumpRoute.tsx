@@ -54,6 +54,20 @@ export function BrainDumpRoute(): JSX.Element {
   const activeProposals = useMemo(() => (operation?.proposals ?? []).filter((proposal) => !proposal.deleted), [operation]);
 
   useEffect(() => {
+    if (!operation) {
+      return;
+    }
+    sequenceRef.current = Math.max(sequenceRef.current, ...operation.segments.map((segment) => segment.sequence), 0);
+  }, [operation]);
+
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.stop();
+      recognitionRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
     const operationId = params.operationId;
     if (!operationId || operationId === "new" || operation?.id === operationId) {
       return;
@@ -67,43 +81,65 @@ export function BrainDumpRoute(): JSX.Element {
     return () => controller.abort();
   }, [operation?.id, params.operationId]);
 
-  async function startRecording() {
-    setError(null);
-    setIsStarting(true);
-    try {
-      const permissionProbe = await navigator.mediaDevices.getUserMedia({ audio: true });
-      permissionProbe.getTracks().forEach((track) => track.stop());
-      const started = operation ?? (await apiClient.startBrainDump({ consent: { microphone: true, external_processing_allowed: false } }, idempotencyKey("start")));
-      setOperation(started);
-      const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
-      if (!Recognition) {
-        setError("Browser speech recognition is unavailable; try Chrome or Edge.");
+  function speechRecognitionConstructor() {
+    const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+    if (!Recognition) {
+      setError("Browser speech recognition is unavailable; try Chrome or Edge.");
+      return null;
+    }
+    return Recognition;
+  }
+
+  function stopRecognition() {
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+  }
+
+  async function probeMicrophone() {
+    const permissionProbe = await navigator.mediaDevices.getUserMedia({ audio: true });
+    permissionProbe.getTracks().forEach((track) => track.stop());
+  }
+
+  function startRecognitionFor(started: BrainDumpOperationResponse, Recognition: SpeechRecognitionConstructor) {
+    stopRecognition();
+    const recognition = new Recognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = navigator.language || "en-US";
+    recognition.onresult = (event) => {
+      const latest = event.results[event.results.length - 1];
+      const transcript = latest?.[0]?.transcript?.trim();
+      if (!transcript) {
         return;
       }
-      const recognition = new Recognition();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = navigator.language || "en-US";
-      recognition.onresult = (event) => {
-        const latest = event.results[event.results.length - 1];
-        const transcript = latest?.[0]?.transcript?.trim();
-        if (!transcript) {
-          return;
-        }
-        setLastTranscript(transcript);
-        sequenceRef.current += 1;
-        void apiClient
-          .appendBrainDumpTranscript(
-            started.id,
-            { segments: [{ sequence: sequenceRef.current, text: transcript, stability: latest.isFinal === false ? "interim" : "stable" }] },
-            idempotencyKey(`segment-${sequenceRef.current}`)
-          )
-          .then(setOperation)
-          .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "Transcript upload failed."));
-      };
-      recognition.onerror = (event) => setError(event.error === "not-allowed" ? "Microphone permission was denied." : `Microphone error: ${event.error}`);
-      recognition.start();
-      recognitionRef.current = recognition;
+      setLastTranscript(transcript);
+      sequenceRef.current += 1;
+      void apiClient
+        .appendBrainDumpTranscript(
+          started.id,
+          { segments: [{ sequence: sequenceRef.current, text: transcript, stability: latest.isFinal === false ? "interim" : "stable" }] },
+          idempotencyKey(`segment-${sequenceRef.current}`)
+        )
+        .then(setOperation)
+        .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "Transcript upload failed."));
+    };
+    recognition.onerror = (event) => setError(event.error === "not-allowed" ? "Microphone permission was denied." : `Microphone error: ${event.error}`);
+    recognition.start();
+    recognitionRef.current = recognition;
+  }
+
+  async function startRecording() {
+    setError(null);
+    const Recognition = speechRecognitionConstructor();
+    if (!Recognition) {
+      return;
+    }
+    setIsStarting(true);
+    try {
+      await probeMicrophone();
+      const started = operation ?? (await apiClient.startBrainDump({ consent: { microphone: true, external_processing_allowed: false } }, idempotencyKey("start")));
+      setOperation(started);
+      startRecognitionFor(started, Recognition);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Microphone permission was denied.");
     } finally {
@@ -115,20 +151,41 @@ export function BrainDumpRoute(): JSX.Element {
     if (!operation) {
       return;
     }
-    const updated = await apiClient.commandBrainDump(operation.id, action, operation.revision, idempotencyKey(action));
-    setOperation(updated);
-    if (action === "pause") {
-      recognitionRef.current?.stop();
-    }
+    setError(null);
+    const Recognition = action === "resume" ? speechRecognitionConstructor() : null;
     if (action === "resume") {
-      recognitionRef.current?.start();
+      if (!Recognition) {
+        return;
+      }
+      try {
+        await probeMicrophone();
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "Microphone permission was denied.");
+        return;
+      }
     }
-    if (action === "finish") {
-      recognitionRef.current?.stop();
-      navigate(`/brain-dump/${operation.id}/review`, { replace: true });
+    if (action === "pause" || action === "finish" || action === "cancel") {
+      stopRecognition();
     }
-    if (action === "commit") {
-      setSavedCount(updated.committed_task_ids.length);
+    try {
+      const updated = await apiClient.commandBrainDump(operation.id, action, operation.revision, idempotencyKey(action));
+      setOperation(updated);
+      if (action === "resume" && Recognition) {
+        startRecognitionFor(updated, Recognition);
+      }
+      if (action === "finish") {
+        navigate(`/brain-dump/${operation.id}/review`, { replace: true });
+      }
+      if (action === "cancel") {
+        setOperation(null);
+        setLastTranscript("");
+        navigate("/brain-dump/new", { replace: true });
+      }
+      if (action === "commit") {
+        setSavedCount(updated.committed_task_ids.length);
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Brain dump command failed.");
     }
   }
 
@@ -176,6 +233,7 @@ export function BrainDumpRoute(): JSX.Element {
         proposals={activeProposals}
         onBack={() => navigate(`/brain-dump/${operation?.id ?? "new"}`, { replace: true })}
         onDelete={deleteProposal}
+        onDiscard={() => void command("cancel")}
         onSave={() => void command("commit")}
         onUpdateTitle={updateProposal}
       />
@@ -303,12 +361,14 @@ function ReviewSurface({
   proposals,
   onBack,
   onDelete,
+  onDiscard,
   onSave,
   onUpdateTitle
 }: {
   proposals: BrainDumpProposal[];
   onBack: () => void;
   onDelete: (proposal: BrainDumpProposal) => void;
+  onDiscard: () => void;
   onSave: () => void;
   onUpdateTitle: (proposal: BrainDumpProposal, title: string) => void;
 }): JSX.Element {
@@ -348,7 +408,7 @@ function ReviewSurface({
       </main>
 
       <footer className="flex shrink-0 items-center gap-3 border-t border-slate-100 bg-white/95 px-4 py-3 pb-[max(12px,env(safe-area-inset-bottom))]">
-        <button type="button" className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600">
+        <button type="button" className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600" onClick={onDiscard}>
           Discard
         </button>
         <button type="button" className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-brand-primary text-[15px] font-semibold text-white shadow-glow" onClick={onSave}>

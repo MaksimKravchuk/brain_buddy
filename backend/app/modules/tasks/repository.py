@@ -175,6 +175,14 @@ class TaskRepository(BaseRepository):
                         REFERENCES tasks(owner_id, id)
                         ON DELETE CASCADE
                 );
+                CREATE TABLE IF NOT EXISTS brain_dump_operations (
+                    owner_id TEXT NOT NULL,
+                    id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    PRIMARY KEY (owner_id, id)
+                );
                 CREATE TABLE IF NOT EXISTS idempotency_records (
                     owner_id TEXT NOT NULL,
                     key_hash TEXT NOT NULL,
@@ -195,6 +203,8 @@ class TaskRepository(BaseRepository):
                     ON tasks(owner_id, state, order_key, created_at, id);
                 CREATE INDEX IF NOT EXISTS idx_task_tags_owner_tag
                     ON task_tags(owner_id, tag_id, task_id);
+                CREATE INDEX IF NOT EXISTS idx_brain_dump_operations_owner_status
+                    ON brain_dump_operations(owner_id, status, updated_at, id);
                 """
             )
 
@@ -207,7 +217,7 @@ class TaskRepository(BaseRepository):
                 return
             conn.execute("BEGIN IMMEDIATE")
             try:
-                counts = {"projects": 0, "tags": 0, "tasks": 0}
+                counts = {"projects": 0, "tags": 0, "tasks": 0, "brain_dump_operations": 0}
                 for path in self.resolve("projects").glob("*/*.json"):
                     project = self.load_model(path, ProjectDocument)
                     project = project.model_copy(
@@ -237,6 +247,10 @@ class TaskRepository(BaseRepository):
                     task = task.model_copy(update={"tag_ids": task.tag_ids})
                     self._upsert_task(conn, task)
                     counts["tasks"] += 1
+                for path in self.resolve("brain-dump-operations").glob("*/*.json"):
+                    operation = self.load_model(path, BrainDumpOperationDocument)
+                    self._upsert_brain_dump_operation(conn, operation)
+                    counts["brain_dump_operations"] += 1
                 conn.execute(
                     "INSERT INTO migration_ledger (id, migrated_at, payload) VALUES (?, ?, ?)",
                     (
@@ -350,6 +364,31 @@ class TaskRepository(BaseRepository):
         )
         BaseRepository.dump_model(self.task_path(task.owner_id, task.id), task)
 
+    def _upsert_brain_dump_operation(
+        self, conn: sqlite3.Connection, operation: BrainDumpOperationDocument
+    ) -> None:
+        conn.execute(
+            """
+            INSERT INTO brain_dump_operations
+                (owner_id, id, status, updated_at, payload)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(owner_id, id) DO UPDATE SET
+                status = excluded.status,
+                updated_at = excluded.updated_at,
+                payload = excluded.payload
+            """,
+            (
+                operation.owner_id,
+                operation.id,
+                operation.status,
+                operation.updated_at.isoformat(),
+                self._payload(operation),
+            ),
+        )
+        BaseRepository.dump_model(
+            self.brain_dump_operation_path(operation.owner_id, operation.id), operation
+        )
+
     def create_project(self, project: ProjectDocument) -> None:
         with self._connection() as conn:
             if self._exists(conn, "projects", project.owner_id, project.id):
@@ -410,17 +449,29 @@ class TaskRepository(BaseRepository):
         return self._list("tasks", TaskDocument, owner_id=owner_id)
 
     def save_brain_dump_operation(self, operation: BrainDumpOperationDocument) -> None:
-        BaseRepository.dump_model(
-            self.brain_dump_operation_path(operation.owner_id, operation.id), operation
-        )
+        with self._connection() as conn:
+            self._upsert_brain_dump_operation(conn, operation)
 
     def get_brain_dump_operation_for_owner(
         self, operation_id: str, *, owner_id: str
     ) -> BrainDumpOperationDocument:
+        with self._connection() as conn:
+            row = conn.execute(
+                """
+                SELECT payload FROM brain_dump_operations
+                WHERE owner_id = ? AND id = ?
+                """,
+                (owner_id, operation_id),
+            ).fetchone()
+        if row is not None:
+            return BrainDumpOperationDocument.model_validate(json.loads(row["payload"]))
+
         path = self.brain_dump_operation_path(owner_id, operation_id)
         if not path.exists():
             raise NotFoundError("Brain dump operation", operation_id)
-        return self.load_model(path, BrainDumpOperationDocument)
+        operation = self.load_model(path, BrainDumpOperationDocument)
+        self.save_brain_dump_operation(operation)
+        return operation
 
     def create_subtask(self, subtask: TaskSubtaskDocument) -> None:
         with self._connection() as conn:
@@ -598,6 +649,8 @@ class TaskRepository(BaseRepository):
                 repo._upsert_tag(conn, model)
             elif isinstance(model, TaskDocument):
                 repo._upsert_task(conn, model)
+            elif isinstance(model, BrainDumpOperationDocument):
+                repo._upsert_brain_dump_operation(conn, model)
             elif isinstance(model, TaskSubtaskDocument):
                 conn.execute(
                     """
