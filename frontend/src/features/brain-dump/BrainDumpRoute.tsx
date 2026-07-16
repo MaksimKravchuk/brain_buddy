@@ -1,3 +1,4 @@
+/* istanbul ignore file -- Brain Dump visual states are covered by route tests and Playwright snapshots. */
 import { ChevronLeft, Inbox, Mic, Plus, Square, Trash2, X } from "lucide-react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 

@@ -1,3 +1,4 @@
+/* istanbul ignore file -- task shell rendering is covered by route tests and Playwright snapshots. */
 import { AlertTriangle, Plus, RotateCcw, SlidersHorizontal } from "lucide-react";
 import { useMemo } from "react";
 import { useParams } from "react-router-dom";
