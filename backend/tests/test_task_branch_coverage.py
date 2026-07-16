@@ -23,6 +23,9 @@ from app.modules.tasks.domain import (
     TaskDocument,
 )
 from app.schemas.tasks import (
+    BrainDumpOperationStartRequest,
+    BrainDumpProposalUpdateRequest,
+    BrainDumpTranscriptAppendRequest,
     ContextCreateRequest,
     ExpectedRevisionRequest,
     ProjectCreateRequest,
@@ -590,6 +593,439 @@ def test_reconcile_restores_pending_create_results(service: TaskService) -> None
     assert restored_task.id == task.id
     assert [item.id for item in restored_subtasks] == [subtask.id]
     assert [item.id for item in restored_comments] == [comment.id]
+
+
+def test_brain_dump_operation_uses_sqlite_canonical_when_json_mirror_is_missing(
+    data_dir: Path,
+) -> None:
+    service = TaskService(TaskRepository(data_dir))
+    operation = service.start_brain_dump_operation(
+        BrainDumpOperationStartRequest.model_validate(
+            {"consent": {"microphone": True, "external_processing_allowed": False}}
+        ),
+        owner_id=OWNER,
+        idempotency_key="sqlite-canonical-brain-dump",
+    )
+    service.task_repo.brain_dump_operation_path(OWNER, operation.id).unlink()
+
+    reloaded = TaskService(TaskRepository(data_dir))
+
+    assert reloaded.get_brain_dump_operation(operation.id, owner_id=OWNER) == operation
+
+
+def test_brain_dump_append_retry_after_idempotency_crash_does_not_advance_revision(
+    monkeypatch: pytest.MonkeyPatch, service: TaskService
+) -> None:
+    operation = service.start_brain_dump_operation(
+        BrainDumpOperationStartRequest.model_validate(
+            {"consent": {"microphone": True, "external_processing_allowed": False}}
+        ),
+        owner_id=OWNER,
+        idempotency_key="crash-start-brain-dump",
+    )
+    original_store_idempotency = service._store_idempotency
+    calls = 0
+
+    def fail_once_after_operation_write(**kwargs: object) -> None:
+        nonlocal calls
+        if kwargs["command"] == f"brain_dump_append:{operation.id}" and calls == 0:
+            calls += 1
+            raise RuntimeError("simulated crash after brain dump write")
+        original_store_idempotency(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(service, "_store_idempotency", fail_once_after_operation_write)
+    payload = BrainDumpTranscriptAppendRequest.model_validate(
+        {"segments": [{"sequence": 1, "text": "Pay VAT.", "stability": "stable"}]}
+    )
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        service.append_brain_dump_transcript(
+            operation.id,
+            payload,
+            owner_id=OWNER,
+            idempotency_key="crash-append-brain-dump",
+        )
+
+    monkeypatch.setattr(service, "_store_idempotency", original_store_idempotency)
+    replayed = service.append_brain_dump_transcript(
+        operation.id,
+        payload,
+        owner_id=OWNER,
+        idempotency_key="crash-append-brain-dump",
+    )
+
+    assert replayed.revision == operation.revision + 1
+    assert [segment.sequence for segment in replayed.segments] == [1]
+
+
+def test_brain_dump_start_replay_and_consent_validation(service: TaskService) -> None:
+    payload = BrainDumpOperationStartRequest.model_validate(
+        {"consent": {"microphone": True, "external_processing_allowed": False}}
+    )
+
+    started = service.start_brain_dump_operation(
+        payload,
+        owner_id=OWNER,
+        idempotency_key="brain-dump-start-replay",
+    )
+    replayed = service.start_brain_dump_operation(
+        payload,
+        owner_id=OWNER,
+        idempotency_key="brain-dump-start-replay",
+    )
+
+    assert replayed == started
+
+    with pytest.raises(ValidationFailure, match="Microphone consent"):
+        service.start_brain_dump_operation(
+            BrainDumpOperationStartRequest.model_validate(
+                {"consent": {"microphone": False, "external_processing_allowed": False}}
+            ),
+            owner_id=OWNER,
+            idempotency_key="brain-dump-no-mic-consent",
+        )
+
+
+def test_brain_dump_append_replay_state_and_duplicate_segment_branches(
+    service: TaskService,
+) -> None:
+    start_payload = BrainDumpOperationStartRequest.model_validate(
+        {"consent": {"microphone": True, "external_processing_allowed": False}}
+    )
+    append_payload = BrainDumpTranscriptAppendRequest.model_validate(
+        {"segments": [{"sequence": 1, "text": "Pay VAT.", "stability": "stable"}]}
+    )
+    operation = service.start_brain_dump_operation(
+        start_payload,
+        owner_id=OWNER,
+        idempotency_key="brain-dump-append-branches-start",
+    )
+
+    appended = service.append_brain_dump_transcript(
+        operation.id,
+        append_payload,
+        owner_id=OWNER,
+        idempotency_key="brain-dump-append-replay",
+    )
+    replayed = service.append_brain_dump_transcript(
+        operation.id,
+        append_payload,
+        owner_id=OWNER,
+        idempotency_key="brain-dump-append-replay",
+    )
+
+    assert replayed == appended
+
+    duplicate = service.append_brain_dump_transcript(
+        operation.id,
+        append_payload,
+        owner_id=OWNER,
+        idempotency_key="brain-dump-append-duplicate-same",
+    )
+    assert duplicate.segments == appended.segments
+
+    with pytest.raises(ConflictError, match="Brain dump segment"):
+        service.append_brain_dump_transcript(
+            operation.id,
+            BrainDumpTranscriptAppendRequest.model_validate(
+                {"segments": [{"sequence": 1, "text": "Pay taxes.", "stability": "stable"}]}
+            ),
+            owner_id=OWNER,
+            idempotency_key="brain-dump-append-duplicate-conflict",
+        )
+
+    cancelled = service.transition_brain_dump_operation(
+        operation.id,
+        ExpectedRevisionRequest(expected_revision=duplicate.revision),
+        owner_id=OWNER,
+        idempotency_key="brain-dump-cancel-before-append",
+        action="cancel",
+    )
+    with pytest.raises(ValidationFailure, match="Transcript can only"):
+        service.append_brain_dump_transcript(
+            cancelled.id,
+            BrainDumpTranscriptAppendRequest.model_validate(
+                {"segments": [{"sequence": 2, "text": "Call bank.", "stability": "stable"}]}
+            ),
+            owner_id=OWNER,
+            idempotency_key="brain-dump-append-cancelled",
+        )
+
+
+def test_brain_dump_proposal_update_replay_not_found_and_invalid_state(
+    service: TaskService,
+) -> None:
+    operation = service.start_brain_dump_operation(
+        BrainDumpOperationStartRequest.model_validate(
+            {"consent": {"microphone": True, "external_processing_allowed": False}}
+        ),
+        owner_id=OWNER,
+        idempotency_key="brain-dump-proposal-start",
+    )
+    operation = service.append_brain_dump_transcript(
+        operation.id,
+        BrainDumpTranscriptAppendRequest.model_validate(
+            {"segments": [{"sequence": 1, "text": "Email broker.", "stability": "stable"}]}
+        ),
+        owner_id=OWNER,
+        idempotency_key="brain-dump-proposal-segment",
+    )
+    proposal_id = operation.proposals[0].id
+    payload = BrainDumpProposalUpdateRequest(title="Email mortgage broker", expected_revision=operation.revision)
+
+    updated = service.update_brain_dump_proposal(
+        operation.id,
+        proposal_id,
+        payload,
+        owner_id=OWNER,
+        idempotency_key="brain-dump-proposal-update-replay",
+    )
+    replayed = service.update_brain_dump_proposal(
+        operation.id,
+        proposal_id,
+        payload,
+        owner_id=OWNER,
+        idempotency_key="brain-dump-proposal-update-replay",
+    )
+    assert replayed == updated
+
+    with pytest.raises(NotFoundError, match="Brain dump proposal"):
+        service.update_brain_dump_proposal(
+            operation.id,
+            "missing-proposal",
+            BrainDumpProposalUpdateRequest(deleted=True, expected_revision=updated.revision),
+            owner_id=OWNER,
+            idempotency_key="brain-dump-proposal-missing",
+        )
+
+    cancelled = service.transition_brain_dump_operation(
+        operation.id,
+        ExpectedRevisionRequest(expected_revision=updated.revision),
+        owner_id=OWNER,
+        idempotency_key="brain-dump-proposal-cancel",
+        action="cancel",
+    )
+    with pytest.raises(ValidationFailure, match="Proposal cannot"):
+        service.update_brain_dump_proposal(
+            cancelled.id,
+            proposal_id,
+            BrainDumpProposalUpdateRequest(title="Ignored", expected_revision=cancelled.revision),
+            owner_id=OWNER,
+            idempotency_key="brain-dump-proposal-cancelled-edit",
+        )
+
+
+def test_brain_dump_transition_validation_and_replay_branches(service: TaskService) -> None:
+    start_payload = BrainDumpOperationStartRequest.model_validate(
+        {"consent": {"microphone": True, "external_processing_allowed": False}}
+    )
+    operation = service.start_brain_dump_operation(
+        start_payload,
+        owner_id=OWNER,
+        idempotency_key="brain-dump-transition-start",
+    )
+
+    paused = service.transition_brain_dump_operation(
+        operation.id,
+        ExpectedRevisionRequest(expected_revision=operation.revision),
+        owner_id=OWNER,
+        idempotency_key="brain-dump-pause-replay",
+        action="pause",
+    )
+    replayed = service.transition_brain_dump_operation(
+        operation.id,
+        ExpectedRevisionRequest(expected_revision=operation.revision),
+        owner_id=OWNER,
+        idempotency_key="brain-dump-pause-replay",
+        action="pause",
+    )
+    assert replayed == paused
+
+    with pytest.raises(ValidationFailure, match="Unsupported"):
+        service.transition_brain_dump_operation(
+            operation.id,
+            ExpectedRevisionRequest(expected_revision=paused.revision),
+            owner_id=OWNER,
+            idempotency_key="brain-dump-unsupported-transition",
+            action="archive",
+        )
+    with pytest.raises(ValidationFailure, match="Only a recording"):
+        service.transition_brain_dump_operation(
+            operation.id,
+            ExpectedRevisionRequest(expected_revision=paused.revision),
+            owner_id=OWNER,
+            idempotency_key="brain-dump-pause-paused",
+            action="pause",
+        )
+
+    resumed = service.transition_brain_dump_operation(
+        operation.id,
+        ExpectedRevisionRequest(expected_revision=paused.revision),
+        owner_id=OWNER,
+        idempotency_key="brain-dump-resume-once",
+        action="resume",
+    )
+    with pytest.raises(ValidationFailure, match="Only a paused"):
+        service.transition_brain_dump_operation(
+            operation.id,
+            ExpectedRevisionRequest(expected_revision=resumed.revision),
+            owner_id=OWNER,
+            idempotency_key="brain-dump-resume-recording",
+            action="resume",
+        )
+
+    cancelled = service.transition_brain_dump_operation(
+        operation.id,
+        ExpectedRevisionRequest(expected_revision=resumed.revision),
+        owner_id=OWNER,
+        idempotency_key="brain-dump-cancel-once",
+        action="cancel",
+    )
+    cancelled_again = service.transition_brain_dump_operation(
+        operation.id,
+        ExpectedRevisionRequest(expected_revision=cancelled.revision),
+        owner_id=OWNER,
+        idempotency_key="brain-dump-cancel-terminal",
+        action="cancel",
+    )
+    assert cancelled_again.status == "cancelled"
+
+    with pytest.raises(ValidationFailure, match="Only an active"):
+        service.transition_brain_dump_operation(
+            operation.id,
+            ExpectedRevisionRequest(expected_revision=cancelled_again.revision),
+            owner_id=OWNER,
+            idempotency_key="brain-dump-finish-cancelled",
+            action="finish",
+        )
+
+
+def test_brain_dump_commit_replay_invalid_state_and_deleted_proposals(
+    service: TaskService,
+) -> None:
+    operation = service.start_brain_dump_operation(
+        BrainDumpOperationStartRequest.model_validate(
+            {"consent": {"microphone": True, "external_processing_allowed": False}}
+        ),
+        owner_id=OWNER,
+        idempotency_key="brain-dump-commit-start",
+    )
+    with pytest.raises(ValidationFailure, match="awaiting confirmation"):
+        service.commit_brain_dump_operation(
+            operation.id,
+            ExpectedRevisionRequest(expected_revision=operation.revision),
+            owner_id=OWNER,
+            idempotency_key="brain-dump-commit-too-soon",
+        )
+
+    operation = service.append_brain_dump_transcript(
+        operation.id,
+        BrainDumpTranscriptAppendRequest.model_validate(
+            {"segments": [{"sequence": 1, "text": "Book dentist. Call bank.", "stability": "stable"}]}
+        ),
+        owner_id=OWNER,
+        idempotency_key="brain-dump-commit-segments",
+    )
+    deleted = service.update_brain_dump_proposal(
+        operation.id,
+        operation.proposals[0].id,
+        BrainDumpProposalUpdateRequest(deleted=True, expected_revision=operation.revision),
+        owner_id=OWNER,
+        idempotency_key="brain-dump-delete-first-proposal",
+    )
+    finished = service.transition_brain_dump_operation(
+        operation.id,
+        ExpectedRevisionRequest(expected_revision=deleted.revision),
+        owner_id=OWNER,
+        idempotency_key="brain-dump-finish-before-commit",
+        action="finish",
+    )
+    committed = service.commit_brain_dump_operation(
+        operation.id,
+        ExpectedRevisionRequest(expected_revision=finished.revision),
+        owner_id=OWNER,
+        idempotency_key="brain-dump-commit-replay",
+    )
+    replayed = service.commit_brain_dump_operation(
+        operation.id,
+        ExpectedRevisionRequest(expected_revision=finished.revision),
+        owner_id=OWNER,
+        idempotency_key="brain-dump-commit-replay",
+    )
+
+    assert replayed == committed
+    assert committed.status == "completed"
+    assert len(committed.committed_task_ids) == 1
+
+
+def test_idempotent_result_replay_repairs_stale_canonical_records(
+    service: TaskService,
+) -> None:
+    project = _make_project(service, name="Replay Project", key="replay-project-old")
+    newer_project = project.model_copy(update={"name": "Replay Project v2", "revision": 2})
+    assert service._project_result(
+        IdempotencyRecord(
+            key="project-replay-newer",
+            command="update_project",
+            request_hash="hash",
+            resource_id=project.id,
+            response_body=newer_project.model_dump(mode="json"),
+            created_at=utcnow(),
+        ),
+        owner_id=OWNER,
+    ).revision == 2
+
+    tag = _make_tag(service, name="replay-tag", key="replay-tag-old")
+    newer_tag = tag.model_copy(update={"name": "replay-tag-v2", "revision": 2})
+    assert service._tag_result(
+        IdempotencyRecord(
+            key="tag-replay-newer",
+            command="update_tag",
+            request_hash="hash",
+            resource_id=tag.id,
+            response_body=newer_tag.model_dump(mode="json"),
+            created_at=utcnow(),
+        ),
+        owner_id=OWNER,
+    ).revision == 2
+
+    task = _make_task(service, title="Replay task", key="replay-task-old")
+    newer_task = task.model_copy(update={"title": "Replay task v2", "revision": 2})
+    assert service._task_result(
+        IdempotencyRecord(
+            key="task-replay-newer",
+            command="update_task",
+            request_hash="hash",
+            resource_id=task.id,
+            response_body=newer_task.model_dump(mode="json"),
+            created_at=utcnow(),
+        ),
+        owner_id=OWNER,
+    ).revision == 2
+
+    operation = service.start_brain_dump_operation(
+        BrainDumpOperationStartRequest.model_validate(
+            {"consent": {"microphone": True, "external_processing_allowed": False}}
+        ),
+        owner_id=OWNER,
+        idempotency_key="replay-operation-old",
+    )
+    newer_operation = operation.model_copy(update={"status": "paused", "revision": 2})
+    assert service._brain_dump_operation_result(
+        IdempotencyRecord(
+            key="operation-replay-newer",
+            command="brain_dump_pause",
+            request_hash="hash",
+            resource_id=operation.id,
+            response_body=newer_operation.model_dump(mode="json"),
+            created_at=utcnow(),
+        ),
+        owner_id=OWNER,
+    ).revision == 2
+
+
+def test_brain_dump_title_extraction_ignores_blank_and_duplicate_items() -> None:
+    assert TaskService._extract_task_titles("   \n  ") == []
+    assert TaskService._extract_task_titles("call bank. Call bank.") == ["Call bank"]
 
 
 # --- transition branches ---------------------------------------------------

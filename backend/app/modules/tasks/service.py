@@ -5,12 +5,16 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Concatenate, ParamSpec, TypeVar, cast
 
 from app.exceptions import ConflictError, NotFoundError, ValidationFailure
 from app.schemas.tasks import (
+    BrainDumpOperationStartRequest,
+    BrainDumpProposalUpdateRequest,
+    BrainDumpTranscriptAppendRequest,
     ContextCreateRequest,
     ExpectedRevisionRequest,
     ProjectCreateRequest,
@@ -27,6 +31,10 @@ from app.utils.identifiers import generate_id
 from app.utils.time import utcnow
 
 from .domain import (
+    BrainDumpConsent,
+    BrainDumpOperationDocument,
+    BrainDumpProposalDocument,
+    BrainDumpTranscriptSegmentDocument,
     ContextDocument,
     IdempotencyRecord,
     ProjectDocument,
@@ -253,6 +261,298 @@ class TaskService:
         )
         self.task_repo.create(task)
         return task
+
+    @_serialized_write
+    def start_brain_dump_operation(
+        self,
+        payload: BrainDumpOperationStartRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> BrainDumpOperationDocument:
+        command = "brain_dump_start"
+        request_hash = self._request_hash(command, payload)
+        record = self._idempotency_record(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+        )
+        if record is not None:
+            return self._brain_dump_operation_result(record, owner_id=owner_id)
+
+        if not payload.consent.microphone:
+            raise ValidationFailure("Microphone consent is required to start a brain dump.")
+        now = utcnow()
+        operation = BrainDumpOperationDocument(
+            id=generate_id("brain_dump"),
+            owner_id=owner_id,
+            status="recording",
+            consent=BrainDumpConsent(
+                microphone=payload.consent.microphone,
+                external_processing_allowed=payload.consent.external_processing_allowed,
+                provider=payload.consent.provider,
+                recorded_at=now,
+            ),
+            created_at=now,
+            updated_at=now,
+        )
+        self.task_repo.save_brain_dump_operation(operation)
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=operation.id,
+            response=operation,
+        )
+        return operation
+
+    def get_brain_dump_operation(
+        self, operation_id: str, *, owner_id: str
+    ) -> BrainDumpOperationDocument:
+        return self.task_repo.get_brain_dump_operation_for_owner(
+            operation_id, owner_id=owner_id
+        )
+
+    @_serialized_write
+    def append_brain_dump_transcript(
+        self,
+        operation_id: str,
+        payload: BrainDumpTranscriptAppendRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> BrainDumpOperationDocument:
+        command = f"brain_dump_append:{operation_id}"
+        request_hash = self._request_hash(command, payload)
+        record = self._idempotency_record(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+        )
+        if record is not None:
+            return self._brain_dump_operation_result(record, owner_id=owner_id)
+
+        operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
+        if operation.status not in {"recording", "paused"}:
+            raise ValidationFailure("Transcript can only be appended while recording or paused.")
+        now = utcnow()
+        segments_by_sequence = {segment.sequence: segment for segment in operation.segments}
+        for segment in payload.segments:
+            existing = segments_by_sequence.get(segment.sequence)
+            if existing is not None:
+                if existing.text != segment.text or existing.stability != segment.stability:
+                    raise ConflictError("Brain dump segment", str(segment.sequence))
+                continue
+            segments_by_sequence[segment.sequence] = BrainDumpTranscriptSegmentDocument(
+                id=generate_id("segment"),
+                sequence=segment.sequence,
+                text=segment.text,
+                stability=segment.stability,
+                created_at=now,
+            )
+        segments = sorted(segments_by_sequence.values(), key=lambda item: item.sequence)
+        proposals = self._proposals_from_segments(operation.proposals, segments, now=now)
+        updated = operation.model_copy(
+            update={
+                "segments": segments,
+                "proposals": proposals,
+                "updated_at": now,
+                "revision": operation.revision + 1,
+            }
+        )
+        self.task_repo.save_brain_dump_operation(updated)
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=updated.id,
+            response=updated,
+        )
+        return updated
+
+    @_serialized_write
+    def update_brain_dump_proposal(
+        self,
+        operation_id: str,
+        proposal_id: str,
+        payload: BrainDumpProposalUpdateRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> BrainDumpOperationDocument:
+        command = f"brain_dump_update_proposal:{operation_id}:{proposal_id}"
+        request_hash = self._request_hash(command, payload)
+        record = self._idempotency_record(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+        )
+        if record is not None:
+            return self._brain_dump_operation_result(record, owner_id=owner_id)
+        operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
+        self._assert_revision("Brain dump operation", operation.id, operation.revision, payload.expected_revision)
+        if operation.status not in {"recording", "paused", "awaiting_confirmation"}:
+            raise ValidationFailure("Proposal cannot be edited in this operation state.")
+        now = utcnow()
+        changed = False
+        proposals: list[BrainDumpProposalDocument] = []
+        for proposal in operation.proposals:
+            if proposal.id != proposal_id:
+                proposals.append(proposal)
+                continue
+            update: dict[str, object] = {"updated_at": now, "revision": proposal.revision + 1}
+            if "title" in payload.model_fields_set and payload.title:
+                update.update({"title": payload.title.strip(), "status": "user_edited", "user_edited": True})
+            if "deleted" in payload.model_fields_set and payload.deleted is not None:
+                update["deleted"] = payload.deleted
+            proposals.append(proposal.model_copy(update=update))
+            changed = True
+        if not changed:
+            raise NotFoundError("Brain dump proposal", proposal_id)
+        updated = operation.model_copy(
+            update={"proposals": proposals, "updated_at": now, "revision": operation.revision + 1}
+        )
+        self.task_repo.save_brain_dump_operation(updated)
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=updated.id,
+            response=updated,
+        )
+        return updated
+
+    @_serialized_write
+    def transition_brain_dump_operation(
+        self,
+        operation_id: str,
+        payload: ExpectedRevisionRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+        action: str,
+    ) -> BrainDumpOperationDocument:
+        command = f"brain_dump_{action}:{operation_id}"
+        request_hash = self._request_hash(command, payload)
+        record = self._idempotency_record(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+        )
+        if record is not None:
+            return self._brain_dump_operation_result(record, owner_id=owner_id)
+        operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
+        self._assert_revision("Brain dump operation", operation.id, operation.revision, payload.expected_revision)
+        status_by_action = {
+            "pause": "paused",
+            "resume": "recording",
+            "finish": "awaiting_confirmation",
+            "cancel": "cancelled",
+        }
+        next_status = status_by_action.get(action)
+        if next_status is None:
+            raise ValidationFailure("Unsupported brain dump operation transition.")
+        if action == "pause" and operation.status != "recording":
+            raise ValidationFailure("Only a recording brain dump can be paused.")
+        if action == "resume" and operation.status != "paused":
+            raise ValidationFailure("Only a paused brain dump can be resumed.")
+        if action == "finish" and operation.status not in {"recording", "paused"}:
+            raise ValidationFailure("Only an active brain dump can be finished.")
+        if action == "cancel" and operation.status in {"completed", "cancelled"}:
+            next_status = operation.status
+        now = utcnow()
+        updated = operation.model_copy(
+            update={"status": next_status, "updated_at": now, "revision": operation.revision + 1}
+        )
+        self.task_repo.save_brain_dump_operation(updated)
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=updated.id,
+            response=updated,
+        )
+        return updated
+
+    @_serialized_write
+    def commit_brain_dump_operation(
+        self,
+        operation_id: str,
+        payload: ExpectedRevisionRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> BrainDumpOperationDocument:
+        command = f"brain_dump_commit:{operation_id}"
+        request_hash = self._request_hash(command, payload)
+        record = self._idempotency_record(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+        )
+        if record is not None:
+            return self._brain_dump_operation_result(record, owner_id=owner_id)
+        operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
+        if operation.status == "completed":
+            self._store_idempotency(
+                owner_id=owner_id,
+                key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+                resource_id=operation.id,
+                response=operation,
+            )
+            return operation
+        self._assert_revision("Brain dump operation", operation.id, operation.revision, payload.expected_revision)
+        if operation.status != "awaiting_confirmation":
+            raise ValidationFailure("Brain dump must be awaiting confirmation before save.")
+        now = utcnow()
+        committed_task_ids: list[str] = []
+        for proposal in operation.proposals:
+            if proposal.deleted:
+                continue
+            task = TaskDocument(
+                id=generate_id("task"),
+                owner_id=owner_id,
+                title=proposal.title,
+                details=None,
+                state="inbox",
+                project_id=None,
+                tag_ids=[],
+                order_key=self.task_repo.next_order_key(owner_id=owner_id, state="inbox"),
+                source_capture_ids=[f"brain_dump:{operation.id}:{proposal.id}"],
+                created_at=now,
+                updated_at=now,
+            )
+            self.task_repo.create(task)
+            committed_task_ids.append(task.id)
+        updated = operation.model_copy(
+            update={
+                "status": "completed",
+                "committed_task_ids": committed_task_ids,
+                "updated_at": now,
+                "revision": operation.revision + 1,
+            }
+        )
+        self.task_repo.save_brain_dump_operation(updated)
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=updated.id,
+            response=updated,
+        )
+        return updated
 
     @_serialized_write
     def create_subtask(
@@ -783,7 +1083,9 @@ class TaskService:
         """Apply recorded results left durable before their resource write."""
 
         for record in self.task_repo.list_idempotency_for_owner(owner_id=owner_id):
-            if record.command == "create_project" or record.command.startswith(
+            if record.command.startswith("brain_dump_"):
+                self._brain_dump_operation_result(record, owner_id=owner_id)
+            elif record.command == "create_project" or record.command.startswith(
                 ("update_project:", "archive_project:")
             ):
                 self._project_result(record, owner_id=owner_id)
@@ -809,7 +1111,8 @@ class TaskService:
         request_hash: str,
         resource_id: str,
         response: (
-            ProjectDocument
+            BrainDumpOperationDocument
+            | ProjectDocument
             | ContextDocument
             | TaskDocument
             | TaskSubtaskDocument
@@ -840,6 +1143,22 @@ class TaskService:
         if current.revision < project.revision:
             self.task_repo.save_project(project)
         return project
+
+    def _brain_dump_operation_result(
+        self, record: IdempotencyRecord, *, owner_id: str
+    ) -> BrainDumpOperationDocument:
+        operation = BrainDumpOperationDocument.model_validate(record.response_body)
+        try:
+            current = self.task_repo.get_brain_dump_operation_for_owner(
+                operation.id, owner_id=owner_id
+            )
+        except NotFoundError:
+            self.task_repo.save_brain_dump_operation(operation)
+            return operation
+        if current.revision < operation.revision:
+            self.task_repo.save_brain_dump_operation(operation)
+            return operation
+        return current
 
     def _context_result(
         self, record: IdempotencyRecord, *, owner_id: str
@@ -896,7 +1215,10 @@ class TaskService:
     def _request_hash(
         command: str,
         payload: (
-            ProjectCreateRequest
+            BrainDumpOperationStartRequest
+            | BrainDumpProposalUpdateRequest
+            | BrainDumpTranscriptAppendRequest
+            | ProjectCreateRequest
             | ContextCreateRequest
             | ExpectedRevisionRequest
             | ProjectUpdateRequest
@@ -948,6 +1270,88 @@ class TaskService:
     @staticmethod
     def _validated_task_update(task: TaskDocument, **updates: object) -> TaskDocument:
         return TaskDocument.model_validate({**task.model_dump(), **updates})
+
+    def _proposals_from_segments(
+        self,
+        existing: list[BrainDumpProposalDocument],
+        segments: list[BrainDumpTranscriptSegmentDocument],
+        *,
+        now: datetime,
+    ) -> list[BrainDumpProposalDocument]:
+        stable_segments = [segment for segment in segments if segment.stability == "stable"]
+        candidates = self._extract_task_titles(" ".join(segment.text for segment in stable_segments))
+        segment_ids = [segment.id for segment in stable_segments]
+        proposals = list(existing)
+        for index, title in enumerate(candidates):
+            if index < len(proposals):
+                proposal = proposals[index]
+                if proposal.user_edited or proposal.deleted:
+                    continue
+                if proposal.title == title and proposal.source_segment_ids == segment_ids:
+                    continue
+                proposals[index] = proposal.model_copy(
+                    update={
+                        "title": title,
+                        "status": "provisional",
+                        "source_segment_ids": segment_ids,
+                        "updated_at": now,
+                        "revision": proposal.revision + 1,
+                    }
+                )
+                continue
+            if any(
+                self._titles_refer_to_same_item(title, proposal.title)
+                or ((proposal.user_edited or proposal.deleted) and self._titles_share_first_word(title, proposal.title))
+                for proposal in proposals
+            ):
+                continue
+            proposals.append(
+                BrainDumpProposalDocument(
+                    id=generate_id("proposal"),
+                    ordinal=len(proposals) + 1,
+                    title=title,
+                    status="provisional",
+                    source_segment_ids=segment_ids,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        return proposals
+
+    @staticmethod
+    def _extract_task_titles(text: str) -> list[str]:
+        normalized = re.sub(r"\s+", " ", text).strip()
+        if not normalized:
+            return []
+        rough_parts = re.split(r"(?:\s*\d+[.)]\s+|[.;\n]+)", normalized)
+        titles: list[str] = []
+        seen: set[str] = set()
+        for part in rough_parts:
+            title = re.sub(r"^[-*•\s]+", "", part).strip(" ,")
+            title = re.sub(r"^(?:and\s+)?(?:i\s+)?(?:need|should|must|have)\s+to\s+", "", title, flags=re.IGNORECASE)
+            if not title:
+                continue
+            title = title[0].upper() + title[1:]
+            key = title.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            titles.append(title)
+        return titles
+
+    @staticmethod
+    def _titles_refer_to_same_item(candidate: str, existing: str) -> bool:
+        candidate_words = candidate.casefold().split()
+        existing_words = existing.casefold().split()
+        if len(candidate_words) < 2 or len(existing_words) < 2:
+            return candidate.casefold() == existing.casefold()
+        return candidate_words[:2] == existing_words[:2]
+
+    @staticmethod
+    def _titles_share_first_word(candidate: str, existing: str) -> bool:
+        candidate_words = candidate.casefold().split()
+        existing_words = existing.casefold().split()
+        return bool(candidate_words and existing_words and candidate_words[0] == existing_words[0])
 
     def _assert_active_references(
         self,
