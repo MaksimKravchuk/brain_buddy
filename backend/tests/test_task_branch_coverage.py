@@ -18,12 +18,17 @@ from app.exceptions import ConflictError, NotFoundError, ValidationFailure
 from app.modules.tasks import TaskRepository, TaskService
 from app.modules.tasks.domain import (
     ContextDocument,
+    IdempotencyRecord,
     ProjectDocument,
     TaskDocument,
 )
 from app.schemas.tasks import (
     ContextCreateRequest,
+    ExpectedRevisionRequest,
     ProjectCreateRequest,
+    ProjectUpdateRequest,
+    TagCreateRequest,
+    TagUpdateRequest,
     TaskCommentCreateRequest,
     TaskCreateRequest,
     TaskSubtaskCreateRequest,
@@ -54,6 +59,14 @@ def _make_context(
 ) -> ContextDocument:
     return service.create_context(
         ContextCreateRequest(name=name), owner_id=OWNER, idempotency_key=key
+    )
+
+
+def _make_tag(
+    service: TaskService, *, name: str = "phone", key: str = "tag"
+) -> ContextDocument:
+    return service.create_tag(
+        TagCreateRequest(name=name), owner_id=OWNER, idempotency_key=key
     )
 
 
@@ -166,6 +179,141 @@ def test_idempotency_key_replay_with_mismatched_command_raises_conflict(
             owner_id=OWNER,
             idempotency_key="cross-command-key",
         )
+
+
+def test_project_and_tag_updates_archive_delete_and_replay_are_idempotent(
+    service: TaskService,
+) -> None:
+    project = _make_project(service, name="Home", key="update-project-source")
+    updated_project = service.update_project(
+        project.id,
+        ProjectUpdateRequest(name="Home Ops", color="blue", expected_revision=1),
+        owner_id=OWNER,
+        idempotency_key="update-project-once",
+    )
+    replayed_project = service.update_project(
+        project.id,
+        ProjectUpdateRequest(name="Home Ops", color="blue", expected_revision=1),
+        owner_id=OWNER,
+        idempotency_key="update-project-once",
+    )
+    assert replayed_project == updated_project
+
+    archived_project = service.archive_project(
+        project.id,
+        ExpectedRevisionRequest(expected_revision=2),
+        owner_id=OWNER,
+        idempotency_key="archive-project-once",
+    )
+    replayed_archived_project = service.archive_project(
+        project.id,
+        ExpectedRevisionRequest(expected_revision=2),
+        owner_id=OWNER,
+        idempotency_key="archive-project-once",
+    )
+    assert replayed_archived_project == archived_project
+    assert archived_project.state == "archived"
+
+    tag = _make_tag(service, name="calls", key="update-tag-source")
+    first_tag_replay = service.create_tag(
+        TagCreateRequest(name="calls"), owner_id=OWNER, idempotency_key="update-tag-source"
+    )
+    assert first_tag_replay == tag
+
+    updated_tag = service.update_tag(
+        tag.id,
+        TagUpdateRequest(name="Deep Calls", expected_revision=1),
+        owner_id=OWNER,
+        idempotency_key="update-tag-once",
+    )
+    replayed_tag = service.update_tag(
+        tag.id,
+        TagUpdateRequest(name="Deep Calls", expected_revision=1),
+        owner_id=OWNER,
+        idempotency_key="update-tag-once",
+    )
+    assert replayed_tag == updated_tag
+
+    deleted_tag = service.delete_tag(
+        tag.id,
+        ExpectedRevisionRequest(expected_revision=2),
+        owner_id=OWNER,
+        idempotency_key="delete-tag-once",
+    )
+    replayed_deleted_tag = service.delete_tag(
+        tag.id,
+        ExpectedRevisionRequest(expected_revision=2),
+        owner_id=OWNER,
+        idempotency_key="delete-tag-once",
+    )
+    assert replayed_deleted_tag == deleted_tag
+    assert deleted_tag.state == "deleted"
+
+
+def test_project_and_tag_names_must_be_unique_per_active_owner(
+    service: TaskService,
+) -> None:
+    _make_project(service, name="Home", key="unique-project-a")
+    with pytest.raises(ConflictError):
+        _make_project(service, name=" home ", key="unique-project-b")
+
+    _make_tag(service, name="@Calls", key="unique-tag-a")
+    with pytest.raises(ConflictError):
+        _make_tag(service, name="calls", key="unique-tag-b")
+
+
+def test_repository_dump_model_mirrors_task_nested_and_idempotency_records(
+    data_dir: Path,
+) -> None:
+    repository = TaskRepository(data_dir)
+    service = TaskService(repository)
+    task = _make_task(service, key="dump-task")
+    subtask = service.create_subtask(
+        task.id,
+        TaskSubtaskCreateRequest(title="Original subtask"),
+        owner_id=OWNER,
+        idempotency_key="dump-subtask",
+    )
+    comment = service.create_comment(
+        task.id,
+        TaskCommentCreateRequest(body="Original comment"),
+        owner_id=OWNER,
+        actor_id=OWNER,
+        idempotency_key="dump-comment",
+    )
+
+    mirrored_task = task.model_copy(update={"details": "Mirrored", "revision": 2})
+    repository.dump_model(repository.task_path(OWNER, task.id), mirrored_task)
+    assert repository.get_for_owner(task.id, owner_id=OWNER).details == "Mirrored"
+
+    mirrored_subtask = subtask.model_copy(update={"title": "Mirrored subtask"})
+    repository.dump_model(
+        repository.subtask_path(OWNER, task.id, subtask.id), mirrored_subtask
+    )
+    assert (
+        repository.get_subtask_for_owner(subtask.id, owner_id=OWNER, task_id=task.id).title
+        == "Mirrored subtask"
+    )
+
+    mirrored_comment = comment.model_copy(update={"body": "Mirrored comment"})
+    repository.dump_model(
+        repository.comment_path(OWNER, task.id, comment.id), mirrored_comment
+    )
+    assert (
+        repository.get_comment_for_owner(comment.id, owner_id=OWNER, task_id=task.id).body
+        == "Mirrored comment"
+    )
+
+    record = IdempotencyRecord(
+        key="dump-record",
+        command="create_task",
+        request_hash="hash",
+        resource_id=task.id,
+        response_body=task.model_dump(mode="json"),
+        created_at=utcnow(),
+    )
+    repository.dump_model(repository.idempotency_path(OWNER, record.key), record)
+    assert repository.get_idempotency(owner_id=OWNER, key=record.key) == record
 
 
 # --- active-reference validation branches ---------------------------------
@@ -361,7 +509,7 @@ def test_update_task_replay_applies_recorded_result_after_crash(
     assert service.get_task(task.id, owner_id=OWNER).details == "Recovered update"
 
 
-def test_pending_update_result_is_reconciled_before_next_command(
+def test_failed_update_rolls_back_idempotency_and_allows_retry(
     monkeypatch: pytest.MonkeyPatch, service: TaskService
 ) -> None:
     task = _make_task(service, key="intervening-update-task")
@@ -385,23 +533,26 @@ def test_pending_update_result_is_reconciled_before_next_command(
             idempotency_key="intervening-update-a",
         )
 
+    updated = service.update_task(
+        task.id,
+        TaskUpdateRequest(details="B", expected_revision=1),
+        owner_id=OWNER,
+        idempotency_key="intervening-update-b",
+    )
+    assert updated.details == "B"
+    assert updated.revision == 2
+
     with pytest.raises(ConflictError):
         service.update_task(
             task.id,
-            TaskUpdateRequest(details="B", expected_revision=1),
+            first_payload,
             owner_id=OWNER,
-            idempotency_key="intervening-update-b",
+            idempotency_key="intervening-update-a",
         )
 
     canonical = service.get_task(task.id, owner_id=OWNER)
-    replayed = service.update_task(
-        task.id,
-        first_payload,
-        owner_id=OWNER,
-        idempotency_key="intervening-update-a",
-    )
-    assert canonical.details == replayed.details == "A"
-    assert canonical.revision == replayed.revision == 2
+    assert canonical.details == "B"
+    assert canonical.revision == 2
 
 
 def test_reconcile_restores_pending_create_results(service: TaskService) -> None:

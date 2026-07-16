@@ -4,7 +4,6 @@ import { BaseEdge, Position } from "reactflow";
 // BrainNode height is fixed at 132px (see BrainNode component). We keep a small
 // vertical "launch/landing" zone so arrows always leave and enter nodes
 // vertically, even when nodes sit at the same y-position.
-const NODE_HEIGHT_PX = 132;
 // Default vertical band: 120px (~90% of node height). Adjustable at runtime via:
 //   window.__BB_VERTICAL_ZONE_PX = 80; // in Chrome console, then jiggle a node to re-render
 const DEFAULT_VERTICAL_ZONE_PX = 120;

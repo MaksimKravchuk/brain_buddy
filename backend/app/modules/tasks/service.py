@@ -9,10 +9,14 @@ from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Concatenate, ParamSpec, TypeVar, cast
 
-from app.exceptions import ConflictError, ValidationFailure
+from app.exceptions import ConflictError, NotFoundError, ValidationFailure
 from app.schemas.tasks import (
     ContextCreateRequest,
+    ExpectedRevisionRequest,
     ProjectCreateRequest,
+    ProjectUpdateRequest,
+    TagCreateRequest,
+    TagUpdateRequest,
     TaskCommentCreateRequest,
     TaskCreateRequest,
     TaskSubtaskCreateRequest,
@@ -26,11 +30,18 @@ from .domain import (
     ContextDocument,
     IdempotencyRecord,
     ProjectDocument,
+    TagDocument,
     TaskCommentDocument,
     TaskDocument,
     TaskSubtaskDocument,
 )
-from .repository import TaskRepository
+from .repository import (
+    TaskRepository,
+    display_context_name,
+    display_project_name,
+    display_tag_name,
+    normalize_task_name,
+)
 
 _OPEN_STATES = ("inbox", "next", "waiting", "someday")
 
@@ -80,14 +91,17 @@ class TaskService:
             return self._project_result(record, owner_id=owner_id)
 
         now = utcnow()
+        name = display_project_name(payload.name)
         project = ProjectDocument(
             id=generate_id("project"),
             owner_id=owner_id,
-            name=payload.name,
+            name=name,
+            normalized_name=normalize_task_name(name),
             color=payload.color,
             created_at=now,
             updated_at=now,
         )
+        self._assert_unique_project_name(owner_id=owner_id, project=project)
         self._store_idempotency(
             owner_id=owner_id,
             key=idempotency_key,
@@ -119,13 +133,16 @@ class TaskService:
             return self._context_result(record, owner_id=owner_id)
 
         now = utcnow()
+        name = display_context_name(payload.name)
         context = ContextDocument(
-            id=generate_id("context"),
+            id=generate_id("tag"),
             owner_id=owner_id,
-            name=payload.name if payload.name.startswith("@") else f"@{payload.name}",
+            name=name,
+            normalized_name=normalize_task_name(name, strip_tag_prefix=True),
             created_at=now,
             updated_at=now,
         )
+        self._assert_unique_tag_name(owner_id=owner_id, tag=context)
         self._store_idempotency(
             owner_id=owner_id,
             key=idempotency_key,
@@ -136,6 +153,47 @@ class TaskService:
         )
         self.task_repo.create_context(context)
         return context
+
+    @_serialized_write
+    def create_tag(
+        self,
+        payload: TagCreateRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> TagDocument:
+        command = "create_tag"
+        request_hash = self._request_hash(command, payload)
+        record = self._idempotency_record(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+        )
+        if record is not None:
+            return self._tag_result(record, owner_id=owner_id)
+
+        now = utcnow()
+        name = display_tag_name(payload.name)
+        tag = TagDocument(
+            id=generate_id("tag"),
+            owner_id=owner_id,
+            name=name,
+            normalized_name=normalize_task_name(name, strip_tag_prefix=True),
+            created_at=now,
+            updated_at=now,
+        )
+        self._assert_unique_tag_name(owner_id=owner_id, tag=tag)
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=tag.id,
+            response=tag,
+        )
+        self.task_repo.create_tag(tag)
+        return tag
 
     @_serialized_write
     def create_task(
@@ -159,7 +217,7 @@ class TaskService:
         self._assert_active_references(
             owner_id=owner_id,
             project_id=payload.project_id,
-            context_ids=payload.context_ids,
+            tag_ids=payload.tag_ids,
         )
         waiting_for = (
             self._waiting_for(payload.waiting_for)
@@ -174,7 +232,7 @@ class TaskService:
             details=payload.details,
             state=payload.state,
             project_id=payload.project_id,
-            context_ids=payload.context_ids,
+            tag_ids=payload.tag_ids,
             due_date=payload.due_date,
             waiting_for=waiting_for,
             waiting_since=now if waiting_for else None,
@@ -323,20 +381,18 @@ class TaskService:
         if "title" in fields and payload.title is None:
             raise ValidationFailure("Task title cannot be null.")
         project_id = payload.project_id if "project_id" in fields else task.project_id
-        context_ids = (
-            payload.context_ids if "context_ids" in fields else task.context_ids
-        )
+        tag_ids = payload.tag_ids if "tag_ids" in fields else task.tag_ids
         self._assert_active_references(
             owner_id=owner_id,
             project_id=project_id,
-            context_ids=context_ids or [],
+            tag_ids=tag_ids or [],
         )
         updated = self._validated_task_update(
             task,
             title=payload.title if "title" in fields else task.title,
             details=payload.details if "details" in fields else task.details,
             project_id=project_id,
-            context_ids=context_ids or [],
+            tag_ids=tag_ids or [],
             due_date=payload.due_date if "due_date" in fields else task.due_date,
             updated_at=utcnow(),
             revision=task.revision + 1,
@@ -456,20 +512,22 @@ class TaskService:
         include_completed: bool,
         cursor: str | None,
         limit: int,
+        tag_id: str | None = None,
     ) -> tuple[list[TaskDocument], str | None, bool, dict[str, int]]:
+        effective_tag_id = tag_id if tag_id is not None else context_id
         if project_id is not None and unassigned_project:
             raise ValidationFailure(
                 "project_id and unassigned_project cannot be used together."
             )
         if project_id is not None:
             self.task_repo.get_project_for_owner(project_id, owner_id=owner_id)
-        if context_id is not None:
-            self.task_repo.get_context_for_owner(context_id, owner_id=owner_id)
+        if effective_tag_id is not None:
+            self.task_repo.get_tag_for_owner(effective_tag_id, owner_id=owner_id)
 
         filters = {
             "state": state,
             "project_id": project_id,
-            "context_id": context_id,
+            "tag_id": effective_tag_id,
             "unassigned_project": unassigned_project,
             "include_completed": include_completed,
         }
@@ -478,7 +536,7 @@ class TaskService:
             self.task_repo.list_for_owner(owner_id=owner_id),
             state=state,
             project_id=project_id,
-            context_id=context_id,
+            tag_id=effective_tag_id,
             unassigned_project=unassigned_project,
             include_completed=include_completed,
         )
@@ -494,7 +552,7 @@ class TaskService:
         counts = self._open_counts(
             owner_id=owner_id,
             project_id=project_id,
-            context_id=context_id,
+            tag_id=effective_tag_id,
             unassigned_project=unassigned_project,
         )
         return page, next_cursor, has_more, counts
@@ -510,20 +568,206 @@ class TaskService:
         )
 
     def list_contexts(self, *, owner_id: str) -> list[ContextDocument]:
+        return self.list_tags(owner_id=owner_id)
+
+    def list_tags(self, *, owner_id: str) -> list[TagDocument]:
         return sorted(
             (
-                context
-                for context in self.task_repo.list_contexts_for_owner(owner_id=owner_id)
-                if context.state == "active"
+                tag
+                for tag in self.task_repo.list_tags_for_owner(owner_id=owner_id)
+                if tag.state == "active"
             ),
-            key=lambda context: (context.name.strip().casefold(), context.id),
+            key=lambda tag: (tag.name.strip().casefold(), tag.id),
         )
 
     def get_project(self, project_id: str, *, owner_id: str) -> ProjectDocument:
         return self.task_repo.get_project_for_owner(project_id, owner_id=owner_id)
 
     def get_context(self, context_id: str, *, owner_id: str) -> ContextDocument:
-        return self.task_repo.get_context_for_owner(context_id, owner_id=owner_id)
+        return self.get_tag(context_id, owner_id=owner_id)
+
+    def get_tag(self, tag_id: str, *, owner_id: str) -> TagDocument:
+        return self.task_repo.get_tag_for_owner(tag_id, owner_id=owner_id)
+
+    def open_task_count_for_project(self, project_id: str, *, owner_id: str) -> int:
+        return sum(
+            task.project_id == project_id and task.state in _OPEN_STATES
+            for task in self.task_repo.list_for_owner(owner_id=owner_id)
+        )
+
+    def open_task_count_for_tag(self, tag_id: str, *, owner_id: str) -> int:
+        return sum(
+            tag_id in task.tag_ids and task.state in _OPEN_STATES
+            for task in self.task_repo.list_for_owner(owner_id=owner_id)
+        )
+
+    @_serialized_write
+    def update_project(
+        self,
+        project_id: str,
+        payload: ProjectUpdateRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> ProjectDocument:
+        command = f"update_project:{project_id}"
+        request_hash = self._request_hash(command, payload)
+        record = self._idempotency_record(
+            owner_id=owner_id, key=idempotency_key, command=command, request_hash=request_hash
+        )
+        if record is not None:
+            return self._project_result(record, owner_id=owner_id)
+        project = self.get_project(project_id, owner_id=owner_id)
+        self._assert_revision("Project", project.id, project.revision, payload.expected_revision)
+        fields = payload.model_fields_set
+        name = display_project_name(payload.name) if "name" in fields and payload.name else project.name
+        updated = project.model_copy(
+            update={
+                "name": name,
+                "normalized_name": normalize_task_name(name),
+                "color": payload.color if "color" in fields else project.color,
+                "updated_at": utcnow(),
+                "revision": project.revision + 1,
+            }
+        )
+        self._assert_unique_project_name(owner_id=owner_id, project=updated)
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=updated.id,
+            response=updated,
+        )
+        self.task_repo.save_project(updated)
+        return updated
+
+    @_serialized_write
+    def archive_project(
+        self,
+        project_id: str,
+        payload: ExpectedRevisionRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> ProjectDocument:
+        command = f"archive_project:{project_id}"
+        request_hash = self._request_hash(command, payload)
+        record = self._idempotency_record(
+            owner_id=owner_id, key=idempotency_key, command=command, request_hash=request_hash
+        )
+        if record is not None:
+            return self._project_result(record, owner_id=owner_id)
+        project = self.get_project(project_id, owner_id=owner_id)
+        self._assert_revision("Project", project.id, project.revision, payload.expected_revision)
+        now = utcnow()
+        updated_project = project.model_copy(
+            update={"state": "archived", "updated_at": now, "revision": project.revision + 1}
+        )
+        affected = [
+            task for task in self.task_repo.list_for_owner(owner_id=owner_id)
+            if task.project_id == project_id and task.state != "cancelled"
+        ]
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=updated_project.id,
+            response=updated_project,
+        )
+        self.task_repo.save_project(updated_project)
+        for task in affected:
+            self.task_repo.save(
+                task.model_copy(
+                    update={"project_id": None, "updated_at": now, "revision": task.revision + 1}
+                )
+            )
+        return updated_project
+
+    @_serialized_write
+    def update_tag(
+        self,
+        tag_id: str,
+        payload: TagUpdateRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> TagDocument:
+        command = f"update_tag:{tag_id}"
+        request_hash = self._request_hash(command, payload)
+        record = self._idempotency_record(
+            owner_id=owner_id, key=idempotency_key, command=command, request_hash=request_hash
+        )
+        if record is not None:
+            return self._tag_result(record, owner_id=owner_id)
+        tag = self.get_tag(tag_id, owner_id=owner_id)
+        self._assert_revision("Tag", tag.id, tag.revision, payload.expected_revision)
+        fields = payload.model_fields_set
+        name = display_tag_name(payload.name) if "name" in fields and payload.name else tag.name
+        updated = tag.model_copy(
+            update={
+                "name": name,
+                "normalized_name": normalize_task_name(name, strip_tag_prefix=True),
+                "updated_at": utcnow(),
+                "revision": tag.revision + 1,
+            }
+        )
+        self._assert_unique_tag_name(owner_id=owner_id, tag=updated)
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=updated.id,
+            response=updated,
+        )
+        self.task_repo.save_tag(updated)
+        return updated
+
+    @_serialized_write
+    def delete_tag(
+        self,
+        tag_id: str,
+        payload: ExpectedRevisionRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> TagDocument:
+        command = f"delete_tag:{tag_id}"
+        request_hash = self._request_hash(command, payload)
+        record = self._idempotency_record(
+            owner_id=owner_id, key=idempotency_key, command=command, request_hash=request_hash
+        )
+        if record is not None:
+            return self._tag_result(record, owner_id=owner_id)
+        tag = self.get_tag(tag_id, owner_id=owner_id)
+        self._assert_revision("Tag", tag.id, tag.revision, payload.expected_revision)
+        now = utcnow()
+        updated_tag = tag.model_copy(
+            update={"state": "deleted", "updated_at": now, "revision": tag.revision + 1}
+        )
+        affected = [task for task in self.task_repo.list_for_owner(owner_id=owner_id) if tag_id in task.tag_ids]
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=updated_tag.id,
+            response=updated_tag,
+        )
+        self.task_repo.save_tag(updated_tag)
+        for task in affected:
+            self.task_repo.save(
+                task.model_copy(
+                    update={
+                        "tag_ids": [existing for existing in task.tag_ids if existing != tag_id],
+                        "updated_at": now,
+                        "revision": task.revision + 1,
+                    }
+                )
+            )
+        return updated_tag
 
     def _idempotency_record(
         self, *, owner_id: str, key: str, command: str, request_hash: str
@@ -539,10 +783,14 @@ class TaskService:
         """Apply recorded results left durable before their resource write."""
 
         for record in self.task_repo.list_idempotency_for_owner(owner_id=owner_id):
-            if record.command == "create_project":
+            if record.command == "create_project" or record.command.startswith(
+                ("update_project:", "archive_project:")
+            ):
                 self._project_result(record, owner_id=owner_id)
-            elif record.command == "create_context":
-                self._context_result(record, owner_id=owner_id)
+            elif record.command in {"create_context", "create_tag"} or record.command.startswith(
+                ("update_tag:", "delete_tag:")
+            ):
+                self._tag_result(record, owner_id=owner_id)
             elif record.command.startswith("create_subtask:"):
                 subtask = TaskSubtaskDocument.model_validate(record.response_body)
                 self._subtask_result(record, owner_id=owner_id, task_id=subtask.task_id)
@@ -584,48 +832,65 @@ class TaskService:
         self, record: IdempotencyRecord, *, owner_id: str
     ) -> ProjectDocument:
         project = ProjectDocument.model_validate(record.response_body)
-        path = self.task_repo.project_path(owner_id, project.id)
-        if not path.exists():
+        try:
+            current = self.task_repo.get_project_for_owner(project.id, owner_id=owner_id)
+        except NotFoundError:
             self.task_repo.create_project(project)
+            return project
+        if current.revision < project.revision:
+            self.task_repo.save_project(project)
         return project
 
     def _context_result(
         self, record: IdempotencyRecord, *, owner_id: str
     ) -> ContextDocument:
-        context = ContextDocument.model_validate(record.response_body)
-        path = self.task_repo.context_path(owner_id, context.id)
-        if not path.exists():
-            self.task_repo.create_context(context)
-        return context
+        return self._tag_result(record, owner_id=owner_id)
+
+    def _tag_result(self, record: IdempotencyRecord, *, owner_id: str) -> TagDocument:
+        tag = TagDocument.model_validate(record.response_body)
+        try:
+            current = self.task_repo.get_tag_for_owner(tag.id, owner_id=owner_id)
+        except NotFoundError:
+            self.task_repo.create_tag(tag)
+            return tag
+        if current.revision < tag.revision:
+            self.task_repo.save_tag(tag)
+        return tag
 
     def _task_result(self, record: IdempotencyRecord, *, owner_id: str) -> TaskDocument:
         task = TaskDocument.model_validate(record.response_body)
-        path = self.task_repo.task_path(owner_id, task.id)
-        if not path.exists():
-            self.task_repo.create(task)
-        else:
+        try:
             current = self.task_repo.get_for_owner(task.id, owner_id=owner_id)
-            if current.revision < task.revision:
-                self.task_repo.save(task)
+        except NotFoundError:
+            self.task_repo.create(task)
+            return task
+        if current.revision < task.revision:
+            self.task_repo.save(task)
         return task
 
     def _subtask_result(
         self, record: IdempotencyRecord, *, owner_id: str, task_id: str
     ) -> TaskSubtaskDocument:
         subtask = TaskSubtaskDocument.model_validate(record.response_body)
-        path = self.task_repo.subtask_path(owner_id, task_id, subtask.id)
-        if not path.exists():
+        try:
+            return self.task_repo.get_subtask_for_owner(
+                subtask.id, owner_id=owner_id, task_id=task_id
+            )
+        except NotFoundError:
             self.task_repo.create_subtask(subtask)
-        return subtask
+            return subtask
 
     def _comment_result(
         self, record: IdempotencyRecord, *, owner_id: str, task_id: str
     ) -> TaskCommentDocument:
         comment = TaskCommentDocument.model_validate(record.response_body)
-        path = self.task_repo.comment_path(owner_id, task_id, comment.id)
-        if not path.exists():
+        try:
+            return self.task_repo.get_comment_for_owner(
+                comment.id, owner_id=owner_id, task_id=task_id
+            )
+        except NotFoundError:
             self.task_repo.create_comment(comment)
-        return comment
+            return comment
 
     @staticmethod
     def _request_hash(
@@ -633,6 +898,10 @@ class TaskService:
         payload: (
             ProjectCreateRequest
             | ContextCreateRequest
+            | ExpectedRevisionRequest
+            | ProjectUpdateRequest
+            | TagCreateRequest
+            | TagUpdateRequest
             | TaskCreateRequest
             | TaskSubtaskCreateRequest
             | TaskCommentCreateRequest
@@ -685,7 +954,7 @@ class TaskService:
         *,
         owner_id: str,
         project_id: str | None,
-        context_ids: list[str],
+        tag_ids: list[str],
     ) -> None:
         if project_id is not None:
             project = self.task_repo.get_project_for_owner(
@@ -693,14 +962,12 @@ class TaskService:
             )
             if project.state != "active":
                 raise ValidationFailure("Task project must be active.")
-        if len(set(context_ids)) != len(context_ids):
-            raise ValidationFailure("Task contexts cannot contain duplicates.")
-        for context_id in context_ids:
-            context = self.task_repo.get_context_for_owner(
-                context_id, owner_id=owner_id
-            )
-            if context.state != "active":
-                raise ValidationFailure("Task contexts must be active.")
+        if len(set(tag_ids)) != len(tag_ids):
+            raise ValidationFailure("Task contexts/tags cannot contain duplicates.")
+        for tag_id in tag_ids:
+            tag = self.task_repo.get_tag_for_owner(tag_id, owner_id=owner_id)
+            if tag.state != "active":
+                raise ValidationFailure("Task contexts must be active; task tags must be active.")
 
     def _filter_tasks(
         self,
@@ -708,7 +975,7 @@ class TaskService:
         *,
         state: str | None,
         project_id: str | None,
-        context_id: str | None,
+        tag_id: str | None,
         unassigned_project: bool,
         include_completed: bool,
     ) -> list[TaskDocument]:
@@ -725,7 +992,7 @@ class TaskService:
                 for task in tasks
                 if task.state in allowed_states
                 and (project_id is None or task.project_id == project_id)
-                and (context_id is None or context_id in task.context_ids)
+                and (tag_id is None or tag_id in task.tag_ids)
                 and (not unassigned_project or task.project_id is None)
             ),
             key=self._sort_key,
@@ -736,7 +1003,7 @@ class TaskService:
         *,
         owner_id: str,
         project_id: str | None,
-        context_id: str | None,
+        tag_id: str | None,
         unassigned_project: bool,
     ) -> dict[str, int]:
         tasks = self.task_repo.list_for_owner(owner_id=owner_id)
@@ -744,13 +1011,48 @@ class TaskService:
             task
             for task in tasks
             if (project_id is None or task.project_id == project_id)
-            and (context_id is None or context_id in task.context_ids)
+            and (tag_id is None or tag_id in task.tag_ids)
             and (not unassigned_project or task.project_id is None)
         ]
         return {
             state: sum(task.state == state for task in filtered)
             for state in _OPEN_STATES
         }
+
+    def _assert_unique_project_name(
+        self, *, owner_id: str, project: ProjectDocument
+    ) -> None:
+        if project.state != "active":
+            return
+        for existing in self.task_repo.list_projects_for_owner(owner_id=owner_id):
+            if (
+                existing.id != project.id
+                and existing.state == "active"
+                and existing.normalized_name == project.normalized_name
+            ):
+                raise ConflictError("Project", project.name)
+
+    def _assert_unique_tag_name(self, *, owner_id: str, tag: TagDocument) -> None:
+        if tag.state != "active":
+            return
+        for existing in self.task_repo.list_tags_for_owner(owner_id=owner_id):
+            if (
+                existing.id != tag.id
+                and existing.state == "active"
+                and existing.normalized_name == tag.normalized_name
+            ):
+                raise ConflictError("Tag", tag.name)
+
+    @staticmethod
+    def _assert_revision(
+        resource: str, resource_id: str, actual_revision: int, expected_revision: int
+    ) -> None:
+        if actual_revision != expected_revision:
+            raise ConflictError(
+                resource,
+                resource_id,
+                f"{resource} '{resource_id}' has newer changes; reload before saving.",
+            )
 
     @staticmethod
     def _sort_key(task: TaskDocument) -> tuple[int, datetime, str]:

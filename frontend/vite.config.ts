@@ -25,7 +25,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
-    reporters: ["default", ["allure-vitest/reporter", { resultsDir: "allure-results" }]],
+    reporters: ["default", ["allure-vitest/reporter", { resultsDir: "allure-results/vitest" }]],
     css: true,
     setupFiles: "./src/setupTests.ts",
     include: ["src/**/*.test.{ts,tsx}", "src/**/*.spec.{ts,tsx}"],
@@ -34,7 +34,13 @@ export default defineConfig({
       provider: "istanbul",
       reporter: ["text", "lcov"],
       include: ["src/**/*.{ts,tsx}"],
-      exclude: ["src/main.tsx"]
+      exclude: ["src/main.tsx"],
+      thresholds: {
+        statements: 95,
+        branches: 95,
+        functions: 95,
+        lines: 95
+      }
     }
   }
 });
