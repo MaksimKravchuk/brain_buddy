@@ -34,3 +34,9 @@ data/
 .codex/
 # CodeSpeak
 .codespeak/ignored/
+
+# Claude Code project-private state (track .claude/skills for Spec Kit)
+.claude/settings.local.json
+.claude/CLAUDE.local.md
+.claude/**/*.local.*
+.claude/**/.credentials*

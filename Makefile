@@ -1,4 +1,4 @@
-.PHONY: install-backend install-frontend dev-backend dev-frontend test-backend test-frontend
+.PHONY: install-backend install-frontend dev-backend dev-frontend test-backend test-frontend check-specs
 
 install-backend:
 	cd backend && python -m pip install -e .[dev]
@@ -19,3 +19,6 @@ test-backend:
 test-frontend:
 	docker build --target tests -t brain-buddy-frontend-tests -f frontend/Dockerfile .
 	docker run --rm brain-buddy-frontend-tests
+
+check-specs:
+	python3 scripts/check_spec_kit_specs.py

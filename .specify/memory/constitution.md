@@ -1,64 +1,86 @@
 <!--
 Sync Impact Report:
-- Version change: unversioned -> 1.0.0
-- Modified principles: New -> I. Data Consent & Safety; II. Tested Delivery Across Stack; III. Contract-First Interfaces; IV. Traceable & Actionable Observability; V. Responsive, Resilient Experience
-- Added sections: Operational Guardrails; Development Workflow & Quality Gates
+- Version change: 1.0.0 -> 1.1.0
+- Modified principles: I. Data Consent & Safety; II. Tested Delivery Across Stack; III. Contract-First Interfaces; IV. Traceable & Actionable Observability; V. Responsive, Resilient Experience -> Responsive, Resilient, Mobile-First Experience
+- Added sections: Spec-Driven Development Workflow; Historical Spec Grandfathering
 - Removed sections: None
-- Templates requiring updates: ✅ .specify/templates/plan-template.md; ✅ .specify/templates/spec-template.md; ✅ .specify/templates/tasks-template.md; ⚠ .specify/templates/commands (directory absent)
+- Templates requiring updates: ✅ .specify/templates/plan-template.md; ✅ .specify/templates/spec-template.md; ✅ .specify/templates/tasks-template.md; ✅ .specify/templates/checklist-template.md; ✅ .claude/skills/speckit-* installed from github/spec-kit v0.12.17
 - Follow-up TODOs: None
 -->
-# Brain Buddy Constitution
+# BrainBuddy Constitution
 
 ## Core Principles
 
 ### I. Data Consent & Safety
-Protect user trust by defaulting to local control and explicit consent before sending data anywhere.
-- AI or remote processing MUST require per-request consent and API key pairing (`BRAIN_BUDDY_API_KEY` + `VITE_API_KEY` when enforced); decline requests if consent or keys are missing.
-- Data remains local-first with 5s autosave and exit warnings; cloud sync only when signed in and confirmed.
-- Never commit real user data or secrets; use `.env.example`, local volumes under `backend/data`, and scrub logs to avoid sensitive payloads.
+Protect user trust by defaulting to local control, explicit consent, and reversible user authority before data leaves the device or becomes a durable side effect.
+- AI, transcription, or other remote processing MUST require current user consent and configured provider credentials; requests without consent or required configuration MUST fail visibly instead of silently uploading or degrading.
+- Voice brain dumps and voice-led Weekly Review MUST preserve the ADR-0002 operation contract: provisional model output stays in the operation workspace until explicit confirmation applies frozen actions through domain ports.
+- Raw audio, transcripts, credentials, local file paths, content hashes usable as fingerprints, and real user data MUST NOT enter logs, metrics, committed fixtures, or PR evidence.
+- Cloud persistence, external task routing, CRT promotion, destructive edits, and delete/undo behavior MUST be user-visible, idempotent where applicable, and auditable.
 
 ### II. Tested Delivery Across Stack
-Changes ship only with targeted, automated validation covering both backend and frontend.
-- New or changed behavior MUST include failing-then-passing tests (pytest/FastAPI TestClient, Vitest + Testing Library); run `make test-backend` and `make test-frontend` before merge.
-- AI or persistence flows MUST carry contract/edge-case coverage (invalid payloads, timeouts, consent required).
-- Refactors without behavior change still require guardrails (smoke/contract tests) proving parity.
+Changes ship only with targeted automated validation covering the affected backend, frontend, workflow, and documentation gates.
+- New or changed behavior MUST include failing-then-passing tests or an explicitly documented non-code verification path when the change is docs/tooling only.
+- Backend behavior uses pytest/FastAPI TestClient; frontend behavior uses Vitest + Testing Library; CI coverage, lint, type, build, and smoke gates MUST be kept green before merge.
+- AI, persistence, voice, routing, and operation flows MUST cover edge cases for invalid payloads, timeouts, consent denial, idempotency, retries, cancellation, and partial failure.
+- Refactors without behavior change still require deterministic guardrails proving parity.
 
 ### III. Contract-First Interfaces
-Shared JSON payloads and schemas are the source of truth and cannot drift across tiers.
-- Define and evolve schemas in `backend/app/schemas`; any breaking change requires migration notes, frontend alignment, and backwards-compatibility strategy.
-- APIs MUST return actionable errors with correlation IDs; client handling MUST preserve these for reporting and retries.
-- Exports/imports MUST round-trip node types, relations, and colors without loss.
+Shared contracts are the source of truth and cannot drift across tiers, agents, or planning artifacts.
+- Backend schemas and API contracts MUST be updated before frontend/client code depends on changed shapes; breaking changes require migration notes and compatibility strategy.
+- ADR-0001 module ownership and ADR-0002 async-operation contracts are binding until superseded by a new accepted decision record.
+- Specs, plans, and tasks MUST reference real file paths and explicit contracts rather than vague placeholders once a feature moves past specification.
+- APIs and client-visible failures MUST return actionable errors with correlation IDs that remain usable for retry and reporting.
 
 ### IV. Traceable & Actionable Observability
-Every request and client action must be traceable, diagnosable, and recoverable.
-- Emit structured logs with `X-Correlation-ID` through backend and surface the ID in user-facing errors/toasts.
-- Add progress and retry affordances for networked/AI actions; failures MUST not drop user work.
-- Profiling and debug hooks (e.g., canvas render timings) stay available in development without polluting production UX.
+Every request, operation, route, and review action must be diagnosable without exposing user content.
+- Backend responses MUST include `X-Correlation-ID`; accepted client-supplied IDs are observability labels only and never authorization or idempotency inputs.
+- Long-running capture, review, AI, import/export, and save flows MUST expose progress, retry state, cancellation state, and partial-failure evidence.
+- Logs, metrics, and operation events MUST contain IDs, timings, coarse confidence/error bands, and stage names rather than raw user text or media.
+- Debug/profiling hooks may exist in development, but production UX must remain clean and privacy-preserving.
 
-### V. Responsive, Resilient Experience
-The canvas and API must remain responsive for large trees and never trade speed for data safety.
-- Interactions (zoom, select, highlight) MUST remain perceptually responsive on ~200-node trees; regressions require remediation before release.
-- Long-running actions (AI, import/export, saves) MUST stream or signal status and be cancellable or safely retryable.
-- Local drafts and cloud saves MUST avoid data loss; warnings are mandatory before any destructive navigation.
+### V. Responsive, Resilient, Mobile-First Experience
+BrainBuddy vNext is optimized for fast capture and review from mobile-first voice workflows while preserving the existing responsive CRT canvas.
+- The primary product loop is voice/text capture -> atomic items -> clarify/approve -> route or CRT candidate -> smart Weekly Review -> evidence/results. Feature specs MUST state how they affect this loop or declare no impact.
+- Recording, upload, provisional transcript/candidate display, confirmation, cancellation, and resume behavior MUST tolerate mobile interruptions, offline windows, and UI closure per ADR-0002.
+- Canvas interactions MUST remain perceptually responsive on approximately 200-node trees; regressions require remediation before release.
+- Local drafts, operation checkpoints, and confirmed domain records MUST avoid data loss and warn before destructive navigation or side effects.
+
+## Spec-Driven Development Workflow
+GitHub Spec Kit is the mandatory authoring workflow for every new or materially changed BrainBuddy feature spec.
+- The canonical artifact flow is constitution -> `/speckit-specify` (what/why) -> `/speckit-clarify` and/or `/speckit-checklist` -> `/speckit-plan` (how/architecture) -> `/speckit-tasks`.
+- Use the official `github/spec-kit` CLI pinned to the repository-documented version through isolated `uv tool`/`uvx`; never install it with pip inside the Hermes runtime.
+- `specs/` contains the versioned Spec Kit artifacts. Implementation intent changes MUST amend the relevant spec/plan/tasks before product code proceeds.
+- Generated `tasks.md` is planning input. It does not bypass Hermes Kanban ownership, isolated worktrees, TDD, independent review, CI, PR merge gates, or release gates.
+- Spec Kit is not an execution orchestrator for BrainBuddy. Hermes Kanban remains responsible for task routing, implementation ownership, review handoffs, and release traceability.
+
+## Historical Spec Grandfathering
+The repository contains pre-adoption specs and requirements that must remain readable without forcing unsafe regeneration.
+- `specs/001-relation-linking-refactor/` is already a complete historical Spec Kit-style directory and remains valid.
+- `specs/002-async-voice-workflows/` predates this v0.12.17 adoption and is grandfathered with `spec.md` plus `acceptance-tests.md`; do not fabricate missing generated artifacts unless the feature is materially changed.
+- Historical `requirements/` documents are background context only where they conflict with ADR-0001, ADR-0002, the current constitution, or current specs.
+- New `specs/[NNN-feature]/` directories after this adoption MUST include the documented minimum Spec Kit artifacts and pass the repository spec check.
 
 ## Operational Guardrails
-Security, configuration, and data-handling constraints that apply to all work.
-- Follow `.env.example` for environment setup; never hardcode secrets. Compose and Fly deployments MUST respect API key pair enforcement when enabled.
-- Backend data persists under `backend/data` with an LRU cache; treat the volume as sensitive and keep it out of version control.
-- Frontend defaults to `/api`; configure `VITE_API_BASE_URL` when pointing to remote stacks and ensure matching CORS/API key headers.
-- CI gates (lint/type/test/build) are required before deploys; smoke tests via `./scripts/smoke_test.sh` or compose MUST pass for release candidates.
+Security, configuration, delivery, and release constraints apply to all work.
+- Follow `.env.example` for environment setup; never hardcode secrets. Compose and Fly deployments MUST respect API key and session-auth controls.
+- Backend data persists under `backend/data` with an LRU cache and optional volumes; treat stored data as sensitive and keep it out of version control.
+- Frontend defaults to `/api`; remote stacks require explicit proxy/origin configuration that preserves cookies and same-origin behavior where expected.
+- PRs are the merge gate: work happens in isolated branches/worktrees, CI must pass, review must complete, and `main` deploys through the normal Fly release path.
 
 ## Development Workflow & Quality Gates
-How features are specified, planned, implemented, and reviewed.
-- Specs MUST define independently testable user stories and acceptance scenarios; plans/tasks MUST keep stories deliverable in isolation.
-- Tasks and commits MUST reference real file paths and group work by user story; tests for each story are expected unless explicitly waived in the spec.
-- Reviews MUST block on constitution compliance: consent enforcement, contract alignment, dual-stack tests, observability hooks, and performance budgets.
-- Use `make dev-backend` / `make dev-frontend` for local work; run backend/frontend test suites plus targeted smoke checks before merge or deploy.
+How features are specified, planned, implemented, reviewed, and released.
+- Start feature work by inspecting `.specify/memory/constitution.md`, `docs/decisions/`, and the relevant `specs/` directory before editing code.
+- Specs MUST define independently testable user stories, acceptance scenarios, edge cases, consent/privacy impact, observability impact, and success criteria.
+- Plans MUST document architecture, contract changes, persistence ownership, test strategy, release/smoke validation, and any justified constitution complexity.
+- Tasks MUST be grouped by independently shippable user story, include concrete file paths, and preserve tests-before-implementation ordering unless the spec explicitly waives tests.
+- Reviews MUST block on constitution compliance, Spec Kit artifact completeness, ADR alignment, consent enforcement, contract alignment, dual-stack validation, observability, and performance/mobile resilience.
 
 ## Governance
-This constitution supersedes other practices where conflicts exist and guides all reviews.
-- Amendments require a documented proposal referencing affected principles, impact analysis, and updated templates; maintain change history in this file.
-- Versioning follows semantic rules: MAJOR for breaking governance changes, MINOR for new principles/sections, PATCH for clarifications.
-- Compliance reviews occur on every PR and before releases; violations need documented justification plus a remediation plan and timeline.
+This constitution supersedes conflicting local practices and guides all reviews.
+- Amendments require a documented proposal or PR rationale referencing affected principles, impact analysis, updated dependent templates/docs, and preserved history in this file.
+- Versioning follows semantic rules: MAJOR for breaking governance changes, MINOR for new principles/sections or materially expanded requirements, PATCH for clarifications.
+- Compliance reviews occur on every PR and before releases; violations need documented justification plus a remediation plan and owner.
+- Accepted ADRs under `docs/decisions/` may refine this constitution for their decision scope, but broad governance changes belong here.
 
-**Version**: 1.0.0 | **Ratified**: 2025-12-20 | **Last Amended**: 2025-12-20
+**Version**: 1.1.0 | **Ratified**: 2025-12-20 | **Last Amended**: 2026-07-16
