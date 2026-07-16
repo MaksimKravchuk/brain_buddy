@@ -8,6 +8,7 @@ backend or frontend dependencies are installed in GitHub Actions.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -33,6 +34,14 @@ MUTATION_EVIDENCE = (
     "name: mutation-raw-results",
     "retention-days: 30",
 )
+
+FRONTEND_CI_REQUIREMENTS = (
+    ("frontend lint step", "npm run lint"),
+    ("frontend coverage test step", "npm run test:coverage"),
+    ("frontend build step", "npm run build"),
+)
+FRONTEND_COVERAGE_THRESHOLD = 95
+FRONTEND_COVERAGE_METRICS = ("statements", "branches", "functions", "lines")
 
 
 def _fail(message: str) -> int:
@@ -65,7 +74,41 @@ def _missing_artifact_errors(workflow_text: str) -> list[str]:
     return errors
 
 
-def validate_workflow(ci: Path, disallowed_workflows: list[Path]) -> int:
+def _missing_frontend_ci_errors(workflow_text: str) -> list[str]:
+    errors: list[str] = []
+    if "  frontend:" not in workflow_text:
+        errors.append("missing frontend CI job")
+    for label, snippet in FRONTEND_CI_REQUIREMENTS:
+        if snippet not in workflow_text:
+            errors.append(f"missing {label}: {snippet}")
+    if "- frontend" not in workflow_text:
+        errors.append("missing frontend job dependency in downstream CI gates")
+    return errors
+
+
+def _coverage_threshold_errors(vite_config: Path) -> list[str]:
+    if not vite_config.is_file():
+        return [f"frontend Vitest config does not exist: {vite_config}"]
+
+    config_text = vite_config.read_text(encoding="utf-8")
+    errors: list[str] = []
+    if "thresholds" not in config_text:
+        errors.append("missing frontend coverage thresholds")
+    for metric in FRONTEND_COVERAGE_METRICS:
+        matches = [
+            int(match)
+            for match in re.findall(rf"\b{metric}\s*:\s*(\d+)", config_text)
+        ]
+        if not matches or max(matches) < FRONTEND_COVERAGE_THRESHOLD:
+            errors.append(
+                f"frontend coverage threshold {metric} must be >= {FRONTEND_COVERAGE_THRESHOLD}"
+            )
+    return errors
+
+
+def validate_workflow(
+    ci: Path, disallowed_workflows: list[Path], frontend_vite_config: Path | None
+) -> int:
     errors: list[str] = []
     if not ci.is_file():
         errors.append(f"CI workflow does not exist: {ci}")
@@ -73,6 +116,7 @@ def validate_workflow(ci: Path, disallowed_workflows: list[Path]) -> int:
     else:
         workflow_text = ci.read_text(encoding="utf-8")
         errors.extend(_missing_artifact_errors(workflow_text))
+        errors.extend(_missing_frontend_ci_errors(workflow_text))
         if "retention-days: 30" not in workflow_text:
             errors.append("missing 30-day artifact retention")
         if "if: always()" not in workflow_text:
@@ -81,6 +125,9 @@ def validate_workflow(ci: Path, disallowed_workflows: list[Path]) -> int:
             errors.append("missing artifact-specific Allure results validation")
         if "allure generate" not in workflow_text:
             errors.append("missing aggregate Allure report generation")
+
+    if frontend_vite_config is not None:
+        errors.extend(_coverage_threshold_errors(frontend_vite_config))
 
     for workflow in disallowed_workflows:
         if workflow.exists():
@@ -144,6 +191,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="workflow path that must not exist (repeatable)",
     )
+    workflow.add_argument(
+        "--frontend-vite-config",
+        type=Path,
+        help="frontend Vite/Vitest config that must enforce coverage thresholds",
+    )
 
     mutation_workflow = subparsers.add_parser(
         "mutation-workflow", help="validate report-only mutation workflow requirements"
@@ -158,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "results":
         return validate_results(args.path, args.label)
     if args.command == "workflow":
-        return validate_workflow(args.ci, args.disallow_workflow)
+        return validate_workflow(args.ci, args.disallow_workflow, args.frontend_vite_config)
     if args.command == "mutation-workflow":
         return validate_mutation_workflow(args.workflow)
     raise AssertionError(f"unknown command: {args.command}")

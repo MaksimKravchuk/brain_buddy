@@ -1,15 +1,17 @@
-"""Canonical records owned by the native GTD task module."""
+"""Canonical records owned by the native task module."""
 
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from app.schemas.common import StorageBaseModel
 
 TaskState = Literal["inbox", "next", "waiting", "someday", "completed", "cancelled"]
+TagState = Literal["active", "archived", "deleted"]
+ProjectState = Literal["active", "completed", "archived"]
 
 
 class IdempotencyRecord(StorageBaseModel):
@@ -24,13 +26,14 @@ class IdempotencyRecord(StorageBaseModel):
 
 
 class ProjectDocument(StorageBaseModel):
-    """An owner-scoped project that may link existing CRT trees by ID."""
+    """An owner-scoped project; it is deliberately not linked to CRT trees."""
 
     id: str
     owner_id: str
     name: str = Field(min_length=1, max_length=500)
+    normalized_name: str = Field(default="", max_length=500)
     color: str | None = Field(default=None, max_length=64)
-    state: Literal["active", "completed", "archived"] = "active"
+    state: ProjectState = "active"
     linked_tree_ids: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
@@ -38,17 +41,22 @@ class ProjectDocument(StorageBaseModel):
     revision: int = Field(default=1, ge=1)
 
 
-class ContextDocument(StorageBaseModel):
-    """An owner-scoped GTD context."""
+class TagDocument(StorageBaseModel):
+    """An owner-scoped first-class task tag."""
 
     id: str
     owner_id: str
     name: str = Field(min_length=1, max_length=500)
-    state: Literal["active", "archived"] = "active"
+    normalized_name: str = Field(default="", max_length=500)
+    state: TagState = "active"
     created_at: datetime
     updated_at: datetime
     schema_version: int = Field(default=1, ge=1)
     revision: int = Field(default=1, ge=1)
+
+
+# Compatibility alias for the one-release hidden /contexts migration shim.
+ContextDocument = TagDocument
 
 
 class TaskSubtaskDocument(StorageBaseModel):
@@ -78,7 +86,7 @@ class TaskCommentDocument(StorageBaseModel):
 
 
 class TaskDocument(StorageBaseModel):
-    """A mutable, owner-scoped GTD task; it is never a CRT node."""
+    """A mutable, owner-scoped task; it is never a CRT node."""
 
     id: str
     owner_id: str
@@ -86,7 +94,7 @@ class TaskDocument(StorageBaseModel):
     details: str | None = Field(default=None, max_length=20_000)
     state: TaskState
     project_id: str | None = None
-    context_ids: list[str] = Field(default_factory=list)
+    tag_ids: list[str] = Field(default_factory=list)
     due_date: date | None = None
     waiting_for: str | None = Field(default=None, max_length=500)
     waiting_since: datetime | None = None
@@ -98,3 +106,16 @@ class TaskDocument(StorageBaseModel):
     cancelled_at: datetime | None = None
     schema_version: int = Field(default=1, ge=1)
     revision: int = Field(default=1, ge=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_context_ids(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "tag_ids" not in data and "context_ids" in data:
+            data = {**data, "tag_ids": data.get("context_ids") or []}
+        return data
+
+    @property
+    def context_ids(self) -> list[str]:
+        """Deprecated compatibility accessor for service tests and /contexts shim."""
+
+        return self.tag_ids

@@ -418,7 +418,10 @@ function reachesAllChildren(
   const queue: string[] = [nodeId];
 
   while (queue.length > 0) {
-    const current = queue.shift()!;
+    const current = queue.shift();
+    if (current === undefined) {
+      break;
+    }
     if (visited.has(current)) {
       continue;
     }

@@ -1,11 +1,11 @@
-"""HTTP contracts for the native GTD task module."""
+"""HTTP contracts for the native task module."""
 
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .common import StrictBaseModel
 
@@ -18,8 +18,27 @@ class ProjectCreateRequest(StrictBaseModel):
     color: str | None = Field(default=None, max_length=64)
 
 
-class ContextCreateRequest(StrictBaseModel):
+class ProjectUpdateRequest(StrictBaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=500)
+    color: str | None = Field(default=None, max_length=64)
+    expected_revision: int = Field(ge=1)
+
+
+class ExpectedRevisionRequest(StrictBaseModel):
+    expected_revision: int = Field(ge=1)
+
+
+class TagCreateRequest(StrictBaseModel):
     name: str = Field(min_length=1, max_length=500)
+
+
+class TagUpdateRequest(StrictBaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=500)
+    expected_revision: int = Field(ge=1)
+
+
+# Hidden compatibility shim for deprecated Context terminology.
+ContextCreateRequest = TagCreateRequest
 
 
 class ProjectResponse(StrictBaseModel):
@@ -28,35 +47,56 @@ class ProjectResponse(StrictBaseModel):
     color: str | None = None
     state: Literal["active", "completed", "archived"]
     revision: int
+    open_task_count: int = Field(default=0, ge=0)
 
 
-class ContextResponse(StrictBaseModel):
+class TagResponse(StrictBaseModel):
     id: str
     name: str
-    state: Literal["active", "archived"]
+    state: Literal["active", "archived", "deleted"]
     revision: int
+    open_task_count: int = Field(default=0, ge=0)
+
+
+ContextResponse = TagResponse
 
 
 class TaskCreateRequest(StrictBaseModel):
-    """Create a task in one of the supported GTD lists."""
+    """Create a task in one of the supported lists."""
 
     title: str = Field(min_length=1, max_length=500)
     details: str | None = Field(default=None, max_length=20_000)
     state: OpenTaskState = "inbox"
     project_id: str | None = None
-    context_ids: list[str] = Field(default_factory=list)
+    tag_ids: list[str] = Field(default_factory=list)
     due_date: date | None = None
     waiting_for: str | None = Field(default=None, max_length=500)
     source_capture_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_context_ids_alias(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "tag_ids" not in data and "context_ids" in data:
+            data = {**data}
+            data["tag_ids"] = data.pop("context_ids") or []
+        return data
 
 
 class TaskUpdateRequest(StrictBaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=500)
     details: str | None = Field(default=None, max_length=20_000)
     project_id: str | None = None
-    context_ids: list[str] | None = None
+    tag_ids: list[str] | None = None
     due_date: date | None = None
     expected_revision: int = Field(ge=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_context_ids_alias(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "tag_ids" not in data and "context_ids" in data:
+            data = {**data}
+            data["tag_ids"] = data.pop("context_ids")
+        return data
 
 
 class TaskTransitionRequest(StrictBaseModel):
@@ -98,7 +138,7 @@ class TaskResponse(StrictBaseModel):
     details: str | None = None
     state: TaskState
     project_id: str | None = None
-    context_ids: list[str] = Field(default_factory=list)
+    tag_ids: list[str] = Field(default_factory=list)
     due_date: date | None = None
     waiting_for: str | None = None
     waiting_since: datetime | None = None
