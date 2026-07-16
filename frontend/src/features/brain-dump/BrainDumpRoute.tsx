@@ -164,12 +164,12 @@ export function BrainDumpRoute(): JSX.Element {
         return;
       }
     }
-    if (action === "pause" || action === "finish" || action === "cancel") {
-      stopRecognition();
-    }
     try {
       const updated = await apiClient.commandBrainDump(operation.id, action, operation.revision, idempotencyKey(action));
       setOperation(updated);
+      if (action === "pause" || action === "finish" || action === "cancel") {
+        stopRecognition();
+      }
       if (action === "resume" && Recognition) {
         startRecognitionFor(updated, Recognition);
       }

@@ -387,15 +387,24 @@ describe("BrainDumpRoute", () => {
       if (url.endsWith("/brain_dump_1/pause")) {
         return Promise.reject(new Error("pause failed"));
       }
+      if (url.endsWith("/brain_dump_1/transcript")) {
+        const body = JSON.parse(String(init?.body));
+        expect(body.segments[0]).toMatchObject({ sequence: 1, text: "Still recording after failed pause", stability: "stable" });
+        return jsonResponse(operation({ revision: 2, proposals: [proposal("proposal_1", 1, "Still recording after failed pause")] }));
+      }
       throw new Error(`unexpected fetch ${url}`);
     });
 
     renderBrainDump();
     await userEvent.click(screen.getByRole("button", { name: "Record" }));
+    const activeRecognition = recognition;
     await userEvent.click(screen.getByRole("button", { name: "Pause" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("pause failed");
     expect(screen.getByText("Recording")).toBeInTheDocument();
+    expect(activeRecognition?.stop).not.toHaveBeenCalled();
+    act(() => emitSpeech("Still recording after failed pause"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/brain_dump_1/transcript"), expect.anything()));
   });
 
   it("shows a generic command failure for non-error rejections", async () => {
@@ -415,6 +424,35 @@ describe("BrainDumpRoute", () => {
     await userEvent.click(screen.getByRole("button", { name: "Pause" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Brain dump command failed.");
+  });
+
+  it("keeps recognition alive when finishing fails", async () => {
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
+        return jsonResponse(operation(), 201);
+      }
+      if (url.endsWith("/brain_dump_1/finish")) {
+        return Promise.reject(new Error("finish failed"));
+      }
+      if (url.endsWith("/brain_dump_1/transcript")) {
+        const body = JSON.parse(String(init?.body));
+        expect(body.segments[0]).toMatchObject({ sequence: 1, text: "Still recording after failed finish", stability: "stable" });
+        return jsonResponse(operation({ revision: 2, proposals: [proposal("proposal_1", 1, "Still recording after failed finish")] }));
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump();
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+    const activeRecognition = recognition;
+    await userEvent.click(screen.getByRole("button", { name: "Stop & review" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("finish failed");
+    expect(screen.getByText("Recording")).toBeInTheDocument();
+    expect(activeRecognition?.stop).not.toHaveBeenCalled();
+    act(() => emitSpeech("Still recording after failed finish"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/brain_dump_1/transcript"), expect.anything()));
   });
 
   it("keeps unchanged and blank review edits local", async () => {
