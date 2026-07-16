@@ -19,6 +19,7 @@ import {
   VersionCreateRequest,
   VersionListItem
 } from "./types";
+import type { ProjectResponse, TagResponse, TaskListFilters, TaskListResponse } from "./taskTypes";
 import { nowMs, recordTelemetry } from "../utils/telemetry";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
@@ -161,6 +162,29 @@ async function request<T>(path: string, options: JsonRequestOptions = {}): Promi
 }
 
 export const apiClient = {
+  listTasks(filters: TaskListFilters = {}, signal?: AbortSignal) {
+    const params = new URLSearchParams();
+    if (filters.state) {
+      params.set("state", filters.state);
+    }
+    if (filters.projectId) {
+      params.set("project_id", filters.projectId);
+    }
+    if (filters.tagId) {
+      params.set("tag_id", filters.tagId);
+    }
+    const query = params.toString();
+    return request<TaskListResponse>(`/tasks${query ? `?${query}` : ""}`, { signal });
+  },
+
+  listProjects(signal?: AbortSignal) {
+    return request<ProjectResponse[]>("/projects", { signal });
+  },
+
+  listTags(signal?: AbortSignal) {
+    return request<TagResponse[]>("/tags", { signal });
+  },
+
   listTrees(signal?: AbortSignal) {
     return request<TreeListItem[]>("/trees", { signal });
   },
