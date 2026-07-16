@@ -171,7 +171,7 @@ export const apiClient = {
       params.set("project_id", filters.projectId);
     }
     if (filters.tagId) {
-      params.set("context_id", filters.tagId);
+      params.set("tag_id", filters.tagId);
     }
     const query = params.toString();
     return request<TaskListResponse>(`/tasks${query ? `?${query}` : ""}`, { signal });
@@ -182,7 +182,7 @@ export const apiClient = {
   },
 
   listTags(signal?: AbortSignal) {
-    return request<TagResponse[]>("/contexts", { signal });
+    return request<TagResponse[]>("/tags", { signal });
   },
 
   listTrees(signal?: AbortSignal) {
