@@ -71,15 +71,19 @@ Claude Code uses the skills installed under `.claude/skills/`:
 /speckit-constitution
 /speckit-specify <what and why, not implementation>
 /speckit-clarify
-/speckit-checklist
 /speckit-plan <how and architecture>
+/speckit-checklist
 /speckit-tasks
 ```
 
 Read `docs/spec-kit-workflow.md` before authoring specs. Spec Kit maintains
 versioned artifacts under `specs/`; Hermes Kanban still owns execution,
 isolated worktrees, TDD, review, CI, PR, merge, and release gates. Generated
-`tasks.md` is planning input only.
+`tasks.md` is planning input only. Do not run `/speckit-implement`; it is
+disabled in BrainBuddy and implementation must be routed through Hermes Kanban.
+Architect-profile agents own technical planning, module boundaries, ADR
+alignment, and architecture handoff before implementation agents consume the
+artifacts from assigned Kanban cards.
 
 ## Architecture
 

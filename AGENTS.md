@@ -42,8 +42,9 @@
 
 ## Mandatory Spec Kit Workflow
 - GitHub Spec Kit is the canonical authoring workflow for every new or materially changed BrainBuddy feature spec; use the repo-pinned official CLI version documented in `docs/spec-kit-workflow.md`.
-- The required sequence is constitution → `/speckit-specify` (what/why) → `/speckit-clarify` and/or `/speckit-checklist` → `/speckit-plan` (how/architecture) → `/speckit-tasks`. Amend the spec first whenever implementation intent changes.
-- Spec Kit owns versioned planning artifacts under `specs/` plus `.specify/`; Hermes Kanban remains the execution/orchestration and PR-review system. Generated `tasks.md` is planning input, not permission to bypass isolated worktrees, TDD, review, CI, merge, or release gates.
+- The required sequence is constitution → `/speckit-specify` (what/why) → `/speckit-clarify` → `/speckit-plan` (how/architecture) → `/speckit-checklist` → `/speckit-tasks` → Hermes Kanban handoff. Upstream v0.12.17 checklist setup requires `plan.md`, so run checklist after planning. Amend the spec first whenever implementation intent changes.
+- Spec Kit owns versioned planning artifacts under `specs/` plus `.specify/`; Hermes Kanban remains the execution/orchestration and PR-review system. Generated `tasks.md` is planning input, not permission to bypass isolated worktrees, TDD, review, CI, merge, or release gates. `/speckit-implement` is disabled for BrainBuddy.
+- Architect-profile agents own Spec Kit technical planning, module boundaries, ADR alignment, and architecture handoff for new/materially changed architecture or feature specs. Implementation agents consume those artifacts from their Kanban cards rather than inventing architecture.
 - Before adding or changing a feature spec, run `python3 scripts/check_spec_kit_specs.py` (or `make check-specs`) and preserve documented grandfathering for historical specs.
 
 ## Agent Delivery Workflow
