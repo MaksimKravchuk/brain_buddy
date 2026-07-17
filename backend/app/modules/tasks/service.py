@@ -33,6 +33,7 @@ from .domain import (
     BrainDumpConsent,
     BrainDumpOperationDocument,
     BrainDumpProposalDocument,
+    BrainDumpProposalStatus,
     BrainDumpTranscriptSegmentDocument,
     IdempotencyRecord,
     ProjectDocument,
@@ -1260,7 +1261,9 @@ class TaskService:
         latest_is_interim = segments[-1].stability == "interim"
         candidates = self._extract_task_titles(" ".join(segment.text for segment in segments))
         segment_ids = [segment.id for segment in segments]
-        status = "wording_changing" if latest_is_interim else "provisional"
+        status: BrainDumpProposalStatus = (
+            "wording_changing" if latest_is_interim else "provisional"
+        )
         proposals = list(existing)
         for index, title in enumerate(candidates):
             if index < len(proposals):
