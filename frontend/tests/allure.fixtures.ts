@@ -19,10 +19,52 @@ type EpicFeatureStory = { epic: string; feature: string; story: string };
 /** Ordered spec-path rules: the first match wins. */
 const PATH_RULES: Array<{ match: RegExp } & EpicFeatureStory> = [
   {
+    match: /e2e\/auth/,
+    epic: "End-to-end journeys",
+    feature: "Authentication & access",
+    story: "Invite signup and session routing",
+  },
+  {
     match: /claude-design-shell/,
     epic: "End-to-end journeys",
     feature: "Claude Design task shell",
     story: "Source-faithful task shell & brain dump",
+  },
+  {
+    match: /e2e\/mobile/,
+    epic: "End-to-end journeys",
+    feature: "Responsive shell",
+    story: "Mobile auth and navigation",
+  },
+  {
+    match: /e2e\/security/,
+    epic: "End-to-end journeys",
+    feature: "Data isolation",
+    story: "Cross-user access boundaries",
+  },
+  {
+    match: /e2e\/tree-crud/,
+    epic: "End-to-end journeys",
+    feature: "Reality tree workspace",
+    story: "Tree lifecycle from browser",
+  },
+  {
+    match: /e2e\/tree-relations/,
+    epic: "End-to-end journeys",
+    feature: "Reality tree canvas",
+    story: "Node and relation persistence",
+  },
+  {
+    match: /e2e\/versioning/,
+    epic: "End-to-end journeys",
+    feature: "Version history",
+    story: "Snapshot capture and restore",
+  },
+  {
+    match: /e2e\/vnext/,
+    epic: "End-to-end journeys",
+    feature: "vNext operations",
+    story: "Confirmation-gated proposals",
   },
 ];
 
