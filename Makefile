@@ -45,4 +45,5 @@ validate-ci:
 	python3 scripts/validate_ci_artifacts.py mutation-workflow --workflow .github/workflows/mutation-quality.yml
 
 check-specs:
+	python3 -m unittest scripts/test_check_spec_kit_specs.py -v
 	python3 scripts/check_spec_kit_specs.py

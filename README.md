@@ -3,11 +3,12 @@
 [![CI](https://github.com/MVkravchuk/brain_buddy/actions/workflows/ci.yml/badge.svg)](https://github.com/MVkravchuk/brain_buddy/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/badge/coverage-artifacts-blue)](https://github.com/MVkravchuk/brain_buddy/actions/workflows/ci.yml)
 
-Brain Buddy is a collaborative knowledge-graph workspace that helps product teams capture research trees, validate assumptions with AI guidance, and preserve historical versions of their thinking.
+Brain Buddy is a collaborative knowledge-graph workspace that helps product teams capture research trees, validate assumptions with AI guidance, and preserve historical versions of their thinking. It also ships a GTD-style task tracker for turning that thinking into action.
 
 ## Highlights
 - **Interactive canvas** powered by React Flow with undo/redo, optimistic updates, and large-graph tuning for 200+ nodes.
-- **FastAPI backend** persisting trees on the filesystem with LRU caching and version history snapshots.
+- **GTD task tracker** with inbox/next/waiting/someday lists, due dates, projects, tags, and voice brain-dump capture that drafts tasks from speech.
+- **FastAPI backend** persisting trees on the filesystem with LRU caching and version history snapshots; task data lives in SQLite (`tasks.sqlite3`) under the same data dir.
 - **AI validation pipeline** with provider abstraction and mock provider for offline workflows.
 - **Operational polish** including correlation-ID tracing, optional API key guardrails, and expanded troubleshooting guides.
 - **Data safety by default** with 5s local autosave, exit warnings, and explicit consent gating before any AI request.
@@ -99,7 +100,7 @@ When pairing the private backend with the public frontend, point the frontend pr
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `BRAIN_BUDDY_API_PREFIX` | `/api` | Route prefix for FastAPI routers |
-| `BRAIN_BUDDY_DATA_DIR` | `<repo>/backend/data` | Root directory for tree storage |
+| `BRAIN_BUDDY_DATA_DIR` | `<repo>/backend/data` | Root directory for data storage: tree JSON documents plus the task tracker's `tasks.sqlite3` |
 | `VITE_API_BASE_URL` | `/api` | Frontend API base path (proxied in dev) |
 
 See `docs/api_usage.md` for request/response details and examples.
@@ -113,8 +114,9 @@ See `docs/api_usage.md` for request/response details and examples.
 
 ## Feature Specs
 GitHub Spec Kit v0.12.17 is the mandatory workflow for new or materially changed
-feature specs: constitution → `/speckit-specify` → `/speckit-clarify` or
-`/speckit-checklist` → `/speckit-plan` → `/speckit-tasks`. See
+feature specs: constitution → `/speckit-specify` → `/speckit-clarify` →
+`/speckit-plan` → `/speckit-checklist` → `/speckit-tasks` → Hermes Kanban
+handoff. See
 `docs/spec-kit-workflow.md` for the exact Claude Code commands, uv/uvx setup,
 historical spec grandfathering, and the boundary between Spec Kit planning and
 Hermes Kanban execution/review.
