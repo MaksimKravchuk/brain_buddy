@@ -66,8 +66,10 @@ def _serialized_write(
         service: TaskService, /, *args: _P.args, **kwargs: _P.kwargs
     ) -> _Result:
         owner_id = cast(str, kwargs["owner_id"])
+        idempotency_key = cast(str, kwargs["idempotency_key"])
         with service.task_repo.command_lock(owner_id):
-            service._reconcile_idempotent_results(owner_id=owner_id)
+            service.task_repo.purge_expired_idempotency(owner_id=owner_id, now=utcnow())
+            service._reconcile_idempotent_result(owner_id=owner_id, key=idempotency_key)
             return command(service, *args, **kwargs)
 
     return wrapped
@@ -1079,28 +1081,41 @@ class TaskService:
             raise ConflictError("Idempotency-Key", key)
         return record
 
+    def _reconcile_idempotent_result(self, *, owner_id: str, key: str) -> None:
+        """Apply one key's recorded result left durable before its write."""
+
+        record = self.task_repo.get_idempotency(owner_id=owner_id, key=key)
+        if record is not None:
+            self._apply_idempotent_record(record, owner_id=owner_id)
+
     def _reconcile_idempotent_results(self, *, owner_id: str) -> None:
-        """Apply recorded results left durable before their resource write."""
+        """Repair all recorded results for an owner (maintenance path only)."""
 
         for record in self.task_repo.list_idempotency_for_owner(owner_id=owner_id):
-            if record.command.startswith("brain_dump_"):
-                self._brain_dump_operation_result(record, owner_id=owner_id)
-            elif record.command == "create_project" or record.command.startswith(
-                ("update_project:", "archive_project:")
-            ):
-                self._project_result(record, owner_id=owner_id)
-            elif record.command in {"create_context", "create_tag"} or record.command.startswith(
-                ("update_tag:", "delete_tag:")
-            ):
-                self._tag_result(record, owner_id=owner_id)
-            elif record.command.startswith("create_subtask:"):
-                subtask = TaskSubtaskDocument.model_validate(record.response_body)
-                self._subtask_result(record, owner_id=owner_id, task_id=subtask.task_id)
-            elif record.command.startswith("create_comment:"):
-                comment = TaskCommentDocument.model_validate(record.response_body)
-                self._comment_result(record, owner_id=owner_id, task_id=comment.task_id)
-            else:
-                self._task_result(record, owner_id=owner_id)
+            self._apply_idempotent_record(record, owner_id=owner_id)
+
+    def _apply_idempotent_record(
+        self, record: IdempotencyRecord, *, owner_id: str
+    ) -> None:
+        if record.command.startswith("brain_dump_"):
+            self._brain_dump_operation_result(record, owner_id=owner_id)
+        elif record.command == "create_project" or record.command.startswith(
+            ("update_project:", "archive_project:")
+        ):
+            self._project_result(record, owner_id=owner_id)
+        elif record.command in {
+            "create_context",
+            "create_tag",
+        } or record.command.startswith(("update_tag:", "delete_tag:")):
+            self._tag_result(record, owner_id=owner_id)
+        elif record.command.startswith("create_subtask:"):
+            subtask = TaskSubtaskDocument.model_validate(record.response_body)
+            self._subtask_result(record, owner_id=owner_id, task_id=subtask.task_id)
+        elif record.command.startswith("create_comment:"):
+            comment = TaskCommentDocument.model_validate(record.response_body)
+            self._comment_result(record, owner_id=owner_id, task_id=comment.task_id)
+        else:
+            self._task_result(record, owner_id=owner_id)
 
     def _store_idempotency(
         self,
