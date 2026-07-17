@@ -426,8 +426,27 @@ class TaskService:
         if action == "cancel" and operation.status in {"completed", "cancelled"}:
             next_status = operation.status
         now = utcnow()
+        proposals = operation.proposals
+        if action == "finish":
+            proposals = [
+                proposal.model_copy(
+                    update={
+                        "status": "ready_to_review",
+                        "updated_at": now,
+                        "revision": proposal.revision + 1,
+                    }
+                )
+                if not proposal.deleted and not proposal.user_edited
+                else proposal
+                for proposal in operation.proposals
+            ]
         updated = operation.model_copy(
-            update={"status": next_status, "updated_at": now, "revision": operation.revision + 1}
+            update={
+                "status": next_status,
+                "proposals": proposals,
+                "updated_at": now,
+                "revision": operation.revision + 1,
+            }
         )
         self.task_repo.save_brain_dump_operation(updated)
         self._store_idempotency(
@@ -1236,9 +1255,12 @@ class TaskService:
         *,
         now: datetime,
     ) -> list[BrainDumpProposalDocument]:
-        stable_segments = [segment for segment in segments if segment.stability == "stable"]
-        candidates = self._extract_task_titles(" ".join(segment.text for segment in stable_segments))
-        segment_ids = [segment.id for segment in stable_segments]
+        if not segments:
+            return existing
+        latest_is_interim = segments[-1].stability == "interim"
+        candidates = self._extract_task_titles(" ".join(segment.text for segment in segments))
+        segment_ids = [segment.id for segment in segments]
+        status = "wording_changing" if latest_is_interim else "provisional"
         proposals = list(existing)
         for index, title in enumerate(candidates):
             if index < len(proposals):
@@ -1250,7 +1272,7 @@ class TaskService:
                 proposals[index] = proposal.model_copy(
                     update={
                         "title": title,
-                        "status": "provisional",
+                        "status": status,
                         "source_segment_ids": segment_ids,
                         "updated_at": now,
                         "revision": proposal.revision + 1,
@@ -1268,7 +1290,7 @@ class TaskService:
                     id=generate_id("proposal"),
                     ordinal=len(proposals) + 1,
                     title=title,
-                    status="provisional",
+                    status=status,
                     source_segment_ids=segment_ids,
                     created_at=now,
                     updated_at=now,
@@ -1344,6 +1366,8 @@ class TaskService:
         allowed_states: set[str]
         if state is not None:
             allowed_states = {state}
+            if include_completed:
+                allowed_states.add("completed")
         else:
             allowed_states = set(_OPEN_STATES)
             if include_completed:

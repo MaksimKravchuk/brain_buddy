@@ -2,6 +2,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import json
 from pathlib import Path
 
 
@@ -46,6 +47,57 @@ class ValidateCiArtifactsTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("frontend-vitest", completed.stdout)
+
+    def test_product_e2e_results_require_active_native_story_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results_dir = Path(tmp) / "allure-results"
+            results_dir.mkdir()
+            (results_dir / "legacy-result.json").write_text(
+                json.dumps({"name": "legacy /crt smoke", "status": "passed", "labels": []}),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator(
+                "product-e2e-results", "--path", str(results_dir)
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("expected active native product scenarios", completed.stderr)
+
+    def test_product_e2e_results_accept_native_tasks_and_voice_brain_dump_matrix(self) -> None:
+        stories = [
+            "Native task shell navigation",
+            "Minimal native task management",
+            "Voice Brain Dump happy path",
+            "Voice Brain Dump idempotency and recovery",
+            "Voice Brain Dump failure recovery",
+            "Owner isolation",
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            results_dir = Path(tmp) / "allure-results"
+            results_dir.mkdir()
+            for index, story in enumerate(stories):
+                (results_dir / f"case-{index}-result.json").write_text(
+                    json.dumps(
+                        {
+                            "name": story,
+                            "status": "passed",
+                            "labels": [
+                                {"name": "epic", "value": "BrainBuddy MVP loop"},
+                                {"name": "feature", "value": "Native tasks and Voice Brain Dump"},
+                                {"name": "story", "value": story},
+                            ],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+            completed = self.run_validator(
+                "product-e2e-results", "--path", str(results_dir)
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("native-product-e2e", completed.stdout)
 
     def test_workflow_rejects_nested_workflow_and_missing_required_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -134,6 +186,7 @@ export default defineConfig({
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("frontend lint", completed.stderr)
         self.assertIn("frontend coverage threshold statements", completed.stderr)
+        self.assertIn("native product Compose E2E", completed.stderr)
 
     def test_mutation_workflow_rejects_a_non_nightly_workflow_without_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -56,6 +56,29 @@ export interface TaskListFilters {
   state?: OpenTaskState;
   projectId?: string;
   tagId?: string;
+  includeCompleted?: boolean;
+}
+
+export interface TaskCreateRequest {
+  title: string;
+  details?: string | null;
+  state?: OpenTaskState;
+  project_id?: string | null;
+  tag_ids?: string[];
+}
+
+export interface TaskUpdateRequest {
+  title?: string;
+  details?: string | null;
+  project_id?: string | null;
+  tag_ids?: string[];
+  expected_revision: number;
+}
+
+export interface TaskTransitionRequest {
+  action: "move" | "complete" | "reopen" | "cancel";
+  to_state?: OpenTaskState;
+  expected_revision: number;
 }
 
 export type BrainDumpStatus = "recording" | "paused" | "awaiting_confirmation" | "committing" | "completed" | "cancelled";

@@ -1,4 +1,4 @@
-.PHONY: install-backend install-frontend dev-backend dev-frontend lint-backend lint-frontend test-backend ci-backend test-frontend build-frontend ci-frontend validate-ci check-specs
+.PHONY: install-backend install-frontend dev-backend dev-frontend lint-backend lint-frontend test-backend ci-backend test-frontend test-e2e-compose build-frontend ci-frontend validate-ci check-specs
 
 install-backend:
 	cd backend && python -m pip install -e .[dev]
@@ -26,6 +26,11 @@ ci-backend: lint-backend test-backend
 test-frontend:
 	cd frontend && npm run test:coverage
 	python3 scripts/validate_ci_artifacts.py results --path frontend/allure-results/vitest --label frontend-vitest
+
+test-e2e-compose:
+	cd frontend && npm run test:e2e:compose
+	python3 scripts/validate_ci_artifacts.py results --path frontend/allure-results/playwright --label native-product-e2e
+	python3 scripts/validate_ci_artifacts.py product-e2e-results --path frontend/allure-results/playwright
 
 lint-frontend:
 	cd frontend && npm run lint
