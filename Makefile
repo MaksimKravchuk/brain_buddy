@@ -31,6 +31,7 @@ test-e2e:
 	./scripts/run_playwright_e2e.sh
 	python3 scripts/validate_ci_artifacts.py results --path frontend/allure-results/playwright --label playwright-e2e --since-file frontend/allure-results/playwright/.run-started-at
 	python3 scripts/validate_allure_taxonomy.py --path frontend/allure-results/playwright --label playwright-e2e
+	python3 scripts/validate_ci_artifacts.py product-e2e-results --path frontend/allure-results/playwright
 
 lint-frontend:
 	cd frontend && npm run lint

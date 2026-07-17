@@ -33,6 +33,7 @@ from .domain import (
     BrainDumpConsent,
     BrainDumpOperationDocument,
     BrainDumpProposalDocument,
+    BrainDumpProposalStatus,
     BrainDumpTranscriptSegmentDocument,
     IdempotencyRecord,
     ProjectDocument,
@@ -302,6 +303,14 @@ class TaskService:
             existing = segments_by_sequence.get(segment.sequence)
             if existing is not None:
                 if existing.text != segment.text or existing.stability != segment.stability:
+                    if existing.stability == "interim":
+                        segments_by_sequence[segment.sequence] = existing.model_copy(
+                            update={
+                                "text": segment.text,
+                                "stability": segment.stability,
+                            }
+                        )
+                        continue
                     raise ConflictError("Brain dump segment", str(segment.sequence))
                 continue
             segments_by_sequence[segment.sequence] = BrainDumpTranscriptSegmentDocument(
@@ -426,8 +435,27 @@ class TaskService:
         if action == "cancel" and operation.status in {"completed", "cancelled"}:
             next_status = operation.status
         now = utcnow()
+        proposals = operation.proposals
+        if action == "finish":
+            proposals = [
+                proposal.model_copy(
+                    update={
+                        "status": "ready_to_review",
+                        "updated_at": now,
+                        "revision": proposal.revision + 1,
+                    }
+                )
+                if not proposal.deleted and not proposal.user_edited
+                else proposal
+                for proposal in operation.proposals
+            ]
         updated = operation.model_copy(
-            update={"status": next_status, "updated_at": now, "revision": operation.revision + 1}
+            update={
+                "status": next_status,
+                "proposals": proposals,
+                "updated_at": now,
+                "revision": operation.revision + 1,
+            }
         )
         self.task_repo.save_brain_dump_operation(updated)
         self._store_idempotency(
@@ -1236,9 +1264,19 @@ class TaskService:
         *,
         now: datetime,
     ) -> list[BrainDumpProposalDocument]:
-        stable_segments = [segment for segment in segments if segment.stability == "stable"]
-        candidates = self._extract_task_titles(" ".join(segment.text for segment in stable_segments))
-        segment_ids = [segment.id for segment in stable_segments]
+        if not segments:
+            return existing
+        proposal_segments = self._segments_for_proposal_extraction(segments)
+        if not proposal_segments:
+            return existing
+        latest_is_interim = proposal_segments[-1].stability == "interim"
+        candidates = self._extract_task_titles(
+            " ".join(segment.text for segment in proposal_segments)
+        )
+        segment_ids = [segment.id for segment in proposal_segments]
+        status: BrainDumpProposalStatus = (
+            "wording_changing" if latest_is_interim else "provisional"
+        )
         proposals = list(existing)
         for index, title in enumerate(candidates):
             if index < len(proposals):
@@ -1250,7 +1288,7 @@ class TaskService:
                 proposals[index] = proposal.model_copy(
                     update={
                         "title": title,
-                        "status": "provisional",
+                        "status": status,
                         "source_segment_ids": segment_ids,
                         "updated_at": now,
                         "revision": proposal.revision + 1,
@@ -1268,13 +1306,38 @@ class TaskService:
                     id=generate_id("proposal"),
                     ordinal=len(proposals) + 1,
                     title=title,
-                    status="provisional",
+                    status=status,
                     source_segment_ids=segment_ids,
                     created_at=now,
                     updated_at=now,
                 )
             )
         return proposals
+
+    @classmethod
+    def _segments_for_proposal_extraction(
+        cls, segments: list[BrainDumpTranscriptSegmentDocument]
+    ) -> list[BrainDumpTranscriptSegmentDocument]:
+        proposal_segments: list[BrainDumpTranscriptSegmentDocument] = []
+        for segment in segments:
+            if segment.stability == "stable":
+                stable_text = cls._normalized_transcript_for_replacement(segment.text)
+                proposal_segments = [
+                    existing
+                    for existing in proposal_segments
+                    if not (
+                        existing.stability == "interim"
+                        and stable_text.startswith(
+                            cls._normalized_transcript_for_replacement(existing.text)
+                        )
+                    )
+                ]
+            proposal_segments.append(segment)
+        return proposal_segments
+
+    @staticmethod
+    def _normalized_transcript_for_replacement(text: str) -> str:
+        return re.sub(r"\s+", " ", text).strip().casefold()
 
     @staticmethod
     def _extract_task_titles(text: str) -> list[str]:
@@ -1344,6 +1407,8 @@ class TaskService:
         allowed_states: set[str]
         if state is not None:
             allowed_states = {state}
+            if include_completed:
+                allowed_states.add("completed")
         else:
             allowed_states = set(_OPEN_STATES)
             if include_completed:

@@ -116,15 +116,29 @@ describe("apiClient", () => {
   it("uses the public task, project, and tag API contracts", async () => {
     fetchMock.mockImplementation(() => Promise.resolve(response({ items: [], counts_by_state: {} })));
 
-    await apiClient.listTasks({ state: "next", projectId: "project-1", tagId: "tag-1" });
+    await apiClient.listTasks({ state: "next", projectId: "project-1", tagId: "tag-1", includeCompleted: true });
     await apiClient.listProjects();
     await apiClient.listTags();
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      "/api/tasks?state=next&project_id=project-1&tag_id=tag-1",
+      "/api/tasks?state=next&project_id=project-1&tag_id=tag-1&include_completed=true",
       "/api/projects",
       "/api/tags"
     ]);
+  });
+
+  it("sends native task create, update, and transition idempotency contracts", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(response({ id: "task-1", revision: 2 })));
+
+    await apiClient.createTask({ title: "New task", state: "inbox" }, "create-key");
+    await apiClient.updateTask("task-1", { title: "Updated task", expected_revision: 1 }, "update-key");
+    await apiClient.transitionTask("task-1", { action: "move", to_state: "next", expected_revision: 2 }, "move-key");
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/tasks", "/api/tasks/task-1", "/api/tasks/task-1/transitions"]);
+    const inits = fetchMock.mock.calls.map(([, init]) => init as RequestInit);
+    expect(inits.map((init) => new Headers(init.headers).get("Idempotency-Key"))).toEqual(["create-key", "update-key", "move-key"]);
+    expect(inits.map((init) => init.method)).toEqual(["POST", "PATCH", "POST"]);
+    expect(inits[2].body).toBe(JSON.stringify({ action: "move", to_state: "next", expected_revision: 2 }));
   });
 
   it("omits task query parameters when filters are absent", async () => {

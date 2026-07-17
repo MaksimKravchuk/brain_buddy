@@ -2,6 +2,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import json
 from pathlib import Path
 
 
@@ -18,6 +19,40 @@ class ValidateCiArtifactsTests(unittest.TestCase):
             text=True,
             capture_output=True,
             check=False,
+        )
+
+    def write_native_product_result(
+        self,
+        results_dir: Path,
+        index: int,
+        story: str,
+        *,
+        status: str = "passed",
+        include_evidence: bool = True,
+    ) -> None:
+        payload: dict[str, object] = {
+            "uuid": f"case-{index}",
+            "name": story,
+            "fullName": f"native product {story}",
+            "status": status,
+            "labels": [
+                {"name": "epic", "value": "BrainBuddy MVP loop"},
+                {"name": "feature", "value": "Native tasks and Voice Brain Dump"},
+                {"name": "story", "value": story},
+            ],
+        }
+        if include_evidence:
+            payload.update(
+                {
+                    "start": 1_784_324_000_000 + index,
+                    "stop": 1_784_324_001_000 + index,
+                    "steps": [
+                        {"name": f"execute {story}", "status": "passed", "start": 1, "stop": 2}
+                    ],
+                }
+            )
+        (results_dir / f"case-{index}-result.json").write_text(
+            json.dumps(payload), encoding="utf-8"
         )
 
     def test_results_requires_non_empty_allure_result_json(self) -> None:
@@ -125,6 +160,106 @@ class ValidateCiArtifactsTests(unittest.TestCase):
 
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("stale", completed.stderr)
+
+    def test_product_e2e_results_require_active_native_story_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results_dir = Path(tmp) / "allure-results"
+            results_dir.mkdir()
+            (results_dir / "legacy-result.json").write_text(
+                json.dumps(
+                    {
+                        "name": "legacy /crt smoke",
+                        "fullName": "legacy /crt smoke",
+                        "status": "passed",
+                        "start": 100,
+                        "stop": 125,
+                        "steps": [{"name": "execute", "status": "passed", "start": 1, "stop": 2}],
+                        "labels": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator(
+                "product-e2e-results", "--path", str(results_dir)
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("expected active native product scenarios", completed.stderr)
+
+    def test_product_e2e_results_accept_native_tasks_and_voice_brain_dump_matrix(self) -> None:
+        stories = [
+            "Native task shell navigation",
+            "Minimal native task management",
+            "Voice Brain Dump happy path",
+            "Voice Brain Dump idempotency and recovery",
+            "Voice Brain Dump failure recovery",
+            "Owner isolation",
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            results_dir = Path(tmp) / "allure-results"
+            results_dir.mkdir()
+            for index, story in enumerate(stories):
+                self.write_native_product_result(results_dir, index, story)
+
+            completed = self.run_validator(
+                "product-e2e-results", "--path", str(results_dir)
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("native-product-e2e", completed.stdout)
+
+    def test_product_e2e_results_reject_failed_required_story_evidence(self) -> None:
+        stories = [
+            "Native task shell navigation",
+            "Minimal native task management",
+            "Voice Brain Dump happy path",
+            "Voice Brain Dump idempotency and recovery",
+            "Voice Brain Dump failure recovery",
+            "Owner isolation",
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            results_dir = Path(tmp) / "allure-results"
+            results_dir.mkdir()
+            for index, story in enumerate(stories):
+                self.write_native_product_result(
+                    results_dir,
+                    index,
+                    story,
+                    status="failed" if story == "Voice Brain Dump happy path" else "passed",
+                )
+
+            completed = self.run_validator(
+                "product-e2e-results", "--path", str(results_dir)
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("must pass", completed.stderr)
+        self.assertIn("Voice Brain Dump happy path", completed.stderr)
+
+    def test_product_e2e_results_reject_label_only_placeholder_evidence(self) -> None:
+        stories = [
+            "Native task shell navigation",
+            "Minimal native task management",
+            "Voice Brain Dump happy path",
+            "Voice Brain Dump idempotency and recovery",
+            "Voice Brain Dump failure recovery",
+            "Owner isolation",
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            results_dir = Path(tmp) / "allure-results"
+            results_dir.mkdir()
+            for index, story in enumerate(stories):
+                self.write_native_product_result(
+                    results_dir, index, story, include_evidence=False
+                )
+
+            completed = self.run_validator(
+                "product-e2e-results", "--path", str(results_dir)
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("meaningful Playwright evidence", completed.stderr)
 
     def test_workflow_rejects_nested_workflow_and_missing_required_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

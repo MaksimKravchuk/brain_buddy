@@ -222,7 +222,9 @@ jobs:
 
       - name: Validate Playwright Allure results
         if: always()
-        run: python3 scripts/validate_ci_artifacts.py results --path frontend/allure-results/playwright --label playwright-e2e --since-file frontend/allure-results/playwright/.run-started-at
+        run: |
+          python3 scripts/validate_ci_artifacts.py results --path frontend/allure-results/playwright --label playwright-e2e --since-file frontend/allure-results/playwright/.run-started-at
+          python3 scripts/validate_ci_artifacts.py product-e2e-results --path frontend/allure-results/playwright
 
       - name: Upload Playwright Allure results
         if: always()
