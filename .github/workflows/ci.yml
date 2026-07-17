@@ -187,11 +187,72 @@ jobs:
             sleep "$((attempt * 10))"
           done
 
+  e2e:
+    name: Compose Playwright E2E
+    runs-on: ubuntu-latest
+    needs:
+      - backend
+      - frontend
+      - docker
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Chromium browser
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Compose smoke and Playwright E2E
+        run: make test-e2e
+
+      - name: Validate Playwright Allure results
+        if: always()
+        run: python3 scripts/validate_ci_artifacts.py results --path frontend/allure-results/playwright --label playwright-e2e
+
+      - name: Upload Playwright Allure results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-allure-results
+          path: frontend/allure-results/playwright
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-html-report
+          path: frontend/playwright-report
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Playwright failure artifacts and Compose logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: frontend/test-results
+          if-no-files-found: warn
+          retention-days: 30
+
   allure-report:
     name: Allure Report
     runs-on: ubuntu-latest
     needs:
       - backend
+      - e2e
       - frontend
     if: always()
     permissions:
@@ -262,10 +323,11 @@ jobs:
       - backend
       - frontend
       - docker
+      - e2e
       - allure-report
     if: always()
     steps:
-      - name: Require successful CI, Docker, and Allure report
+      - name: Require successful CI, Docker, E2E, and Allure report
         run: |
           if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ] || [ "${{ contains(needs.*.result, 'cancelled') }}" = "true" ]; then
             echo "One or more required CI jobs failed or were cancelled." >&2

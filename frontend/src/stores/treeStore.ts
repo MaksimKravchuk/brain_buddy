@@ -330,10 +330,12 @@ async function persistTree(get: () => TreeStoreState, set: TreeStoreSet) {
   let lastSyncError: string | null = savedLocally ? null : "Local draft save failed";
   let lastCloudSyncAt: string | null = null;
   let serverUpdatedAt: string | null = null;
+  let serverVersion: number | null = null;
 
   try {
     const syncedTree = await apiClient.updateTree(detail.id, buildTreeUpdateRequest(detail));
     serverUpdatedAt = syncedTree.metadata.updated_at;
+    serverVersion = syncedTree.metadata.version;
     lastCloudSyncAt = serverUpdatedAt;
     pendingSync = false;
     lastSyncError = null;
@@ -364,7 +366,11 @@ async function persistTree(get: () => TreeStoreState, set: TreeStoreSet) {
     lastSyncError,
     metadata:
       state.metadata && serverUpdatedAt
-        ? { ...state.metadata, updatedAt: serverUpdatedAt }
+        ? {
+            ...state.metadata,
+            version: serverVersion ?? state.metadata.version,
+            updatedAt: serverUpdatedAt
+          }
         : state.metadata
   }));
 }
@@ -523,7 +529,7 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
         },
         nodes: mappedNodes,
         relations: mappedRelations,
-        versions: [],
+        versions: state.activeTreeId === tree.id ? state.versions : [],
         selection: nextSelection,
         undoStack: [],
         redoStack: [],
