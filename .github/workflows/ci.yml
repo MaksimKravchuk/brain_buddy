@@ -38,7 +38,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Validate feature specs
-        run: python3 scripts/check_spec_kit_specs.py
+        run: |
+          python3 -m unittest scripts/test_check_spec_kit_specs.py -v
+          python3 scripts/check_spec_kit_specs.py
 
   backend:
     name: Backend
