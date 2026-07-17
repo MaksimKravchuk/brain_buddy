@@ -22,12 +22,10 @@ from app.exceptions import (
     StorageUnavailableError,
 )
 from app.repositories.base import BaseRepository
-from app.utils.file_ops import ensure_directory
 from app.utils.time import utcnow
 
 from .domain import (
     BrainDumpOperationDocument,
-    ContextDocument,
     IdempotencyRecord,
     ProjectDocument,
     TagDocument,
@@ -78,11 +76,6 @@ def display_tag_name(value: str) -> str:
     if display.startswith("@"):
         display = display[1:].strip()
     return " ".join(display.split())
-
-
-def display_context_name(value: str) -> str:
-    display = display_tag_name(value)
-    return f"@{display}" if display else "@"
 
 
 def display_project_name(value: str) -> str:
@@ -266,7 +259,6 @@ class TaskRepository(BaseRepository):
                             "name": display_project_name(project.name),
                             "normalized_name": project.normalized_name
                             or normalize_task_name(project.name),
-                            "linked_tree_ids": [],
                         }
                     )
                     self._upsert_project(conn, project)
@@ -320,8 +312,6 @@ class TaskRepository(BaseRepository):
 
     def context_path(self, owner_id: str, context_id: str) -> Path:
         return self.resolve("contexts", owner_id, f"{context_id}.json")
-
-    tag_path = context_path
 
     def task_path(self, owner_id: str, task_id: str) -> Path:
         return self.resolve("tasks", owner_id, f"{task_id}.json")
@@ -440,9 +430,6 @@ class TaskRepository(BaseRepository):
         with self._connection() as conn, _sqlite_guard("Project", project.id):
             self._upsert_project(conn, project)
 
-    def create_context(self, context: ContextDocument) -> None:
-        self.create_tag(context)
-
     def create_tag(self, tag: TagDocument) -> None:
         with self._connection() as conn, _sqlite_guard("Tag", tag.id):
             if self._exists(conn, "tags", tag.owner_id, tag.id):
@@ -458,17 +445,11 @@ class TaskRepository(BaseRepository):
     ) -> ProjectDocument:
         return self._get("projects", ProjectDocument, "Project", project_id, owner_id=owner_id)
 
-    def get_context_for_owner(self, context_id: str, *, owner_id: str) -> ContextDocument:
-        return self.get_tag_for_owner(context_id, owner_id=owner_id)
-
     def get_tag_for_owner(self, tag_id: str, *, owner_id: str) -> TagDocument:
         return self._get("tags", TagDocument, "Tag", tag_id, owner_id=owner_id)
 
     def list_projects_for_owner(self, *, owner_id: str) -> list[ProjectDocument]:
         return self._list("projects", ProjectDocument, owner_id=owner_id)
-
-    def list_contexts_for_owner(self, *, owner_id: str) -> list[ContextDocument]:
-        return self.list_tags_for_owner(owner_id=owner_id)
 
     def list_tags_for_owner(self, *, owner_id: str) -> list[TagDocument]:
         return self._list("tags", TagDocument, owner_id=owner_id)
@@ -699,60 +680,6 @@ class TaskRepository(BaseRepository):
                 (owner_id, state),
             ).fetchone()[0]
         return (value if value is not None else -1) + 1
-
-    def ensure_owner_dir(self, owner_id: str) -> Path:
-        return ensure_directory(self.resolve("tasks", owner_id))
-
-    @staticmethod
-    def dump_model(path: Path, model: BaseModel) -> None:
-        """Mirror legacy JSON fixture writes into the canonical SQLite store."""
-
-        BaseRepository.dump_model(path, model)
-        storage_roots = {
-            "brain-dump-operations",
-            "projects",
-            "contexts",
-            "tasks",
-            "task-subtasks",
-            "task-comments",
-            "task-commands",
-        }
-        root: Path | None = None
-        for index, part in enumerate(path.parts):
-            if part in storage_roots:
-                root = Path(*path.parts[:index])
-                break
-        if root is None:
-            return
-
-        repo = TaskRepository(root)
-        with repo._connection() as conn:
-            if isinstance(model, ProjectDocument):
-                repo._upsert_project(conn, model)
-            elif isinstance(model, TagDocument):
-                repo._upsert_tag(conn, model)
-            elif isinstance(model, TaskDocument):
-                repo._upsert_task(conn, model)
-            elif isinstance(model, BrainDumpOperationDocument):
-                repo._upsert_brain_dump_operation(conn, model)
-            elif isinstance(model, TaskSubtaskDocument):
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO subtasks (owner_id, task_id, id, payload)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (model.owner_id, model.task_id, model.id, repo._payload(model)),
-                )
-            elif isinstance(model, TaskCommentDocument):
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO comments (owner_id, task_id, id, payload)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (model.owner_id, model.task_id, model.id, repo._payload(model)),
-                )
-            elif isinstance(model, IdempotencyRecord):
-                repo.save_idempotency(owner_id=path.parent.name, record=model)
 
     def _exists(
         self, conn: sqlite3.Connection, table: str, owner_id: str, record_id: str

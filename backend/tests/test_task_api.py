@@ -45,7 +45,7 @@ def test_create_task_lists_it_in_its_open_state(api_client) -> None:
     assert body["next_cursor"] is None
 
 
-def test_project_and_context_creation_are_idempotent_and_listed_by_normalized_name(
+def test_project_and_tag_creation_are_idempotent_and_listed_by_normalized_name(
     api_client,
 ) -> None:
     project_headers = {"Idempotency-Key": "create-project"}
@@ -70,33 +70,31 @@ def test_project_and_context_creation_are_idempotent_and_listed_by_normalized_na
     )
     assert second_project.status_code == 201
 
-    context_headers = {"Idempotency-Key": "create-context"}
-    first_context = api_client.post(
-        "/api/contexts", headers=context_headers, json={"name": "Calls"}
+    tag_headers = {"Idempotency-Key": "create-tag"}
+    first_tag = api_client.post(
+        "/api/tags", headers=tag_headers, json={"name": "Calls"}
     )
-    duplicate_context = api_client.post(
-        "/api/contexts", headers=context_headers, json={"name": "Calls"}
+    duplicate_tag = api_client.post(
+        "/api/tags", headers=tag_headers, json={"name": "Calls"}
     )
-    assert first_context.status_code == duplicate_context.status_code == 201
-    assert duplicate_context.json()["id"] == first_context.json()["id"]
+    assert first_tag.status_code == duplicate_tag.status_code == 201
+    assert duplicate_tag.json()["id"] == first_tag.json()["id"]
     assert (
         api_client.post(
-            "/api/contexts", headers=context_headers, json={"name": "Home"}
+            "/api/tags", headers=tag_headers, json={"name": "Home"}
         ).status_code
         == 409
     )
 
     projects = api_client.get("/api/projects")
-    contexts = api_client.get("/api/contexts")
-    assert projects.status_code == contexts.status_code == 200
+    tags = api_client.get("/api/tags")
+    assert projects.status_code == tags.status_code == 200
     assert [item["name"] for item in projects.json()] == ["alpha", "Zoo"]
-    assert contexts.json()[0]["name"] == "@Calls"
+    assert tags.json()[0]["name"] == "Calls"
     assert (
         api_client.get(f"/api/projects/{first_project.json()['id']}").status_code == 200
     )
-    assert (
-        api_client.get(f"/api/contexts/{first_context.json()['id']}").status_code == 200
-    )
+    assert api_client.get(f"/api/tags/{first_tag.json()['id']}").status_code == 200
 
 
 def test_task_rejects_unverifiable_provenance_and_nested_writes_are_idempotent(
@@ -382,9 +380,9 @@ def test_task_list_filters_counts_and_stable_cursor(api_client) -> None:
         headers={"Idempotency-Key": "list-project"},
         json={"name": "Health"},
     ).json()
-    context = api_client.post(
-        "/api/contexts",
-        headers={"Idempotency-Key": "list-context"},
+    tag = api_client.post(
+        "/api/tags",
+        headers={"Idempotency-Key": "list-tag"},
         json={"name": "phone"},
     ).json()
     first = _create_task(api_client, "First", key="page-first")
@@ -394,7 +392,7 @@ def test_task_list_filters_counts_and_stable_cursor(api_client) -> None:
         "Assigned",
         key="page-assigned",
         project_id=project["id"],
-        context_ids=[context["id"]],
+        tag_ids=[tag["id"]],
     )
     completed = _create_task(api_client, "Done", key="page-completed")
     assert (
@@ -438,7 +436,7 @@ def test_task_list_filters_counts_and_stable_cursor(api_client) -> None:
 
     assigned = api_client.get(
         "/api/tasks",
-        params={"project_id": project["id"], "context_id": context["id"]},
+        params={"project_id": project["id"], "tag_id": tag["id"]},
     )
     assert assigned.status_code == 200
     assert [item["title"] for item in assigned.json()["items"]] == ["Assigned"]
@@ -470,7 +468,7 @@ def test_task_list_filters_counts_and_stable_cursor(api_client) -> None:
 
 
 def test_task_endpoints_require_authentication(anonymous_api_client) -> None:
-    for path in ("/api/tasks", "/api/projects", "/api/contexts"):
+    for path in ("/api/tasks", "/api/projects", "/api/tags"):
         response = anonymous_api_client.get(path)
         assert response.status_code == 401
         assert response.headers.get("X-Correlation-ID")
@@ -484,16 +482,16 @@ def test_task_endpoints_require_authentication(anonymous_api_client) -> None:
     )
 
 
-def test_task_project_context_and_filters_hide_other_owners(second_api_client) -> None:
+def test_task_project_tag_and_filters_hide_other_owners(second_api_client) -> None:
     client_a, client_b = second_api_client
     project = client_a.post(
         "/api/projects",
         headers={"Idempotency-Key": "owner-project"},
         json={"name": "Private"},
     ).json()
-    context = client_a.post(
-        "/api/contexts",
-        headers={"Idempotency-Key": "owner-context"},
+    tag = client_a.post(
+        "/api/tags",
+        headers={"Idempotency-Key": "owner-tag"},
         json={"name": "private"},
     ).json()
     task = _create_task(
@@ -501,19 +499,19 @@ def test_task_project_context_and_filters_hide_other_owners(second_api_client) -
         "Private task",
         key="owner-task",
         project_id=project["id"],
-        context_ids=[context["id"]],
+        tag_ids=[tag["id"]],
     )
 
     assert client_b.get("/api/tasks").json()["items"] == []
     for path in (
         f"/api/tasks/{task['id']}",
         f"/api/projects/{project['id']}",
-        f"/api/contexts/{context['id']}",
+        f"/api/tags/{tag['id']}",
     ):
         assert client_b.get(path).status_code == 404
     for params in (
         {"project_id": project["id"]},
-        {"context_id": context["id"]},
+        {"tag_id": tag["id"]},
     ):
         assert client_b.get("/api/tasks", params=params).status_code == 404
     assert (
@@ -527,8 +525,8 @@ def test_task_project_context_and_filters_hide_other_owners(second_api_client) -
     assert (
         client_b.post(
             "/api/tasks",
-            headers={"Idempotency-Key": "wrong-owner-context-assignment"},
-            json={"title": "Nope", "context_ids": [context["id"]]},
+            headers={"Idempotency-Key": "wrong-owner-tag-assignment"},
+            json={"title": "Nope", "tag_ids": [tag["id"]]},
         ).status_code
         == 404
     )
