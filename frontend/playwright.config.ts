@@ -5,7 +5,7 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:5173";
 const usesExternalComposeStack = Boolean(process.env.BRAIN_BUDDY_E2E_COMPOSE_PROJECT);
 
 export default defineConfig({
-  testDir: "./tests/e2e",
+  testDir: "./tests",
   fullyParallel: false,
   forbidOnly: isCI,
   retries: isCI ? 1 : 0,
@@ -26,12 +26,12 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testIgnore: /mobile\.spec\.ts/,
+      testMatch: /(?:e2e\/(?!mobile).*|native-tasks-voice-brain-dump\.compose)\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] }
     },
     {
       name: "mobile-chromium",
-      testMatch: /mobile\.spec\.ts/,
+      testMatch: /e2e\/mobile\.spec\.ts/,
       use: { ...devices["Pixel 5"] }
     }
   ],
