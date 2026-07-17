@@ -84,7 +84,7 @@ jobs:
       - name: Validate backend Allure results
         if: always()
         working-directory: .
-        run: python3 scripts/validate_ci_artifacts.py results --path backend/allure-results --label backend-pytest
+        run: python3 scripts/validate_allure_taxonomy.py --path backend/allure-results --label backend-pytest
 
       - name: Upload backend Allure results
         if: always()
@@ -137,7 +137,7 @@ jobs:
       - name: Validate frontend Allure results
         if: always()
         working-directory: .
-        run: python3 scripts/validate_ci_artifacts.py results --path frontend/allure-results/vitest --label frontend-vitest
+        run: python3 scripts/validate_allure_taxonomy.py --path frontend/allure-results/vitest --label frontend-vitest
 
       - name: Upload frontend Allure results
         if: always()
@@ -216,7 +216,9 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run Compose smoke and Playwright E2E
-        run: make test-e2e
+        run: |
+          # make test-e2e invokes npm run test:e2e after the Compose stack is ready.
+          make test-e2e
 
       - name: Validate Playwright Allure results
         if: always()
@@ -256,8 +258,8 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - backend
-      - e2e
       - frontend
+      - e2e
     if: always()
     permissions:
       contents: read
@@ -274,7 +276,7 @@ jobs:
           merge-multiple: true
 
       - name: Validate aggregate Allure results
-        run: python3 scripts/validate_ci_artifacts.py results --path allure-results --label aggregate-allure
+        run: python3 scripts/validate_allure_taxonomy.py --path allure-results --label aggregate-allure
 
       - name: Set up Node.js
         uses: actions/setup-node@v4

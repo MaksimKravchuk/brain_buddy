@@ -32,6 +32,23 @@ async function productLabels(story: string): Promise<void> {
   await allure.owner("brainbuddydev");
 }
 
+function assertCondition(condition: unknown, message: string): asserts condition {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+function assertArrayLength<T>(items: T[], expected: number, label: string): void {
+  assertCondition(items.length === expected, `${label}: expected ${expected}, received ${items.length}`);
+}
+
+function assertStringArrayEquals(actual: string[], expected: string[], label: string): void {
+  assertCondition(
+    JSON.stringify(actual) === JSON.stringify(expected),
+    `${label}: expected ${JSON.stringify(expected)}, received ${JSON.stringify(actual)}`
+  );
+}
+
 function createInvite(): string {
   const composeProject = process.env.BRAIN_BUDDY_E2E_COMPOSE_PROJECT ?? process.env.COMPOSE_PROJECT_NAME;
   const env = { ...process.env };
@@ -46,7 +63,9 @@ function createInvite(): string {
 }
 
 async function expectOk(response: Awaited<ReturnType<Page["request"]["post"]>>, label: string): Promise<void> {
-  expect(response.ok(), `${label} failed with ${response.status()} ${await response.text()}`).toBeTruthy();
+  if (!response.ok()) {
+    throw new Error(`${label} failed with ${response.status()} ${await response.text()}`);
+  }
 }
 
 async function signup(page: Page, label = unique("user")): Promise<{ email: string; password: string }> {
@@ -262,7 +281,7 @@ test("Voice Brain Dump records provisional cards, reviews edits/deletes and save
     await expect(page.getByRole("article", { name: "Draft task 2: Call dentist" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Stop & review" })).toBeVisible();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-    expect(overflow).toBeLessThanOrEqual(0);
+    assertCondition(overflow <= 0, `mobile viewport should not horizontally overflow; overflow=${overflow}`);
   });
 
   await test.step("pause, resume and stop for review", async () => {
@@ -281,7 +300,7 @@ test("Voice Brain Dump records provisional cards, reviews edits/deletes and save
     await page.getByRole("button", { name: "Delete Call dentist" }).click();
     await expect(page.getByText("Call dentist")).toHaveCount(0);
     const beforeSave = await listInboxTasks(page);
-    expect(beforeSave).toHaveLength(0);
+    assertArrayLength(beforeSave, 0, "Inbox should remain empty before saving reviewed drafts");
   });
 
   await test.step("save creates exactly one real Inbox task with edited wording", async () => {
@@ -290,7 +309,7 @@ test("Voice Brain Dump records provisional cards, reviews edits/deletes and save
     await page.goto("/tasks/inbox");
     await expect(page.getByText("Buy oat milk for breakfast")).toBeVisible();
     const inbox = await listInboxTasks(page);
-    expect(inbox.map((task) => task.title)).toEqual(["Buy oat milk for breakfast"]);
+    assertStringArrayEquals(inbox.map((task) => task.title), ["Buy oat milk for breakfast"], "Inbox titles after saving brain dump");
   });
 });
 
@@ -307,7 +326,7 @@ test("Voice Brain Dump resume and commit idempotency do not create duplicate Inb
     await emitSpeech(page, "write weekly update", true);
     await expect(page.getByRole("article", { name: "Draft task 1: Write weekly update" })).toBeVisible();
     operationId = (await page.locator("[data-operation-id]").getAttribute("data-operation-id")) ?? "";
-    expect(operationId).toMatch(/^brain_dump_/);
+    assertCondition(/^brain_dump_/.test(operationId), `expected persisted brain dump operation id, received ${operationId}`);
     await page.getByRole("button", { name: "Pause" }).click();
     await expect(page.getByText("Paused")).toBeVisible();
     await page.reload();
@@ -323,19 +342,19 @@ test("Voice Brain Dump resume and commit idempotency do not create duplicate Inb
     await page.getByRole("button", { name: "Save 1 to inbox" }).click();
     await expect(page.getByRole("heading", { name: "Saved 1 task to Inbox" })).toBeVisible();
     const completed = await apiGet<BrainDumpOperation>(page, `/api/brain-dump-operations/${operationId}`);
-    expect(completed.committed_task_ids).toHaveLength(1);
+    assertArrayLength(completed.committed_task_ids, 1, "Committed task ids after first save");
     const retried = await apiPost<BrainDumpOperation>(
       page,
       `/api/brain-dump-operations/${operationId}/commit`,
       { expected_revision: completed.revision },
       unique("retry-commit")
     );
-    expect(retried.committed_task_ids).toEqual(completed.committed_task_ids);
+    assertStringArrayEquals(retried.committed_task_ids, completed.committed_task_ids, "Idempotent commit task ids");
     await relogin(page, account.email);
     await page.goto("/tasks/inbox");
     await expect(page.getByText("Write weekly update")).toBeVisible();
     const inbox = await listInboxTasks(page);
-    expect(inbox.map((task) => task.title)).toEqual(["Write weekly update"]);
+    assertStringArrayEquals(inbox.map((task) => task.title), ["Write weekly update"], "Recovered Inbox titles");
   });
 });
 
@@ -354,7 +373,7 @@ test("Voice Brain Dump failures are visible and preserve recoverable live sessio
     await page.goto("/brain-dump/new");
     await page.getByRole("button", { name: "Record" }).click();
     await expect(page.getByRole("alert")).toContainText("speech recognition is unavailable");
-    expect(startRequests).toHaveLength(0);
+    assertArrayLength(startRequests, 0, "Unavailable speech recognition should not start backend operations");
   });
 
   await test.step("denied microphone creates no backend operation", async () => {
@@ -370,7 +389,7 @@ test("Voice Brain Dump failures are visible and preserve recoverable live sessio
     await deniedPage.goto("/brain-dump/new");
     await deniedPage.getByRole("button", { name: "Record" }).click();
     await expect(deniedPage.getByRole("alert")).toContainText("Microphone");
-    expect(startRequests).toHaveLength(0);
+    assertArrayLength(startRequests, 0, "Denied microphone should not start backend operations");
     await deniedPage.close();
   });
 
@@ -453,11 +472,14 @@ test("owner isolation hides tasks, brain dump operations, drafts and committed l
     const secondPage = await page.context().newPage();
     await signup(secondPage, unique("owner-b"));
     const taskResponse = await secondPage.request.get(`/api/tasks/${task.id}`);
-    expect(taskResponse.status()).toBe(404);
+    assertCondition(taskResponse.status() === 404, `second owner task fetch should 404, got ${taskResponse.status()}`);
     const operationResponse = await secondPage.request.get(`/api/brain-dump-operations/${operation.id}`);
-    expect(operationResponse.status()).toBe(404);
+    assertCondition(operationResponse.status() === 404, `second owner operation fetch should 404, got ${operationResponse.status()}`);
     const committedTaskResponse = await secondPage.request.get(`/api/tasks/${committed.committed_task_ids[0]}`);
-    expect(committedTaskResponse.status()).toBe(404);
+    assertCondition(
+      committedTaskResponse.status() === 404,
+      `second owner committed task fetch should 404, got ${committedTaskResponse.status()}`
+    );
     await secondPage.goto("/tasks/inbox");
     await expect(secondPage.getByText("Owner A private task")).toHaveCount(0);
     await expect(secondPage.getByText("Owner a private draft")).toHaveCount(0);
