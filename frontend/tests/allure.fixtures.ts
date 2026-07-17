@@ -3,16 +3,16 @@
  *
  * Import `test`/`expect` from this module instead of `@playwright/test`. An
  * auto-fixture applies a deterministic epic/feature/story derived from the spec
- * path plus one named step, so every emitted Allure result satisfies the
- * taxonomy gate (`scripts/validate_allure_taxonomy.py`) without per-test
- * boilerplate.
+ * path, so every emitted Allure result has product taxonomy without per-test
+ * boilerplate. It intentionally does not create a placeholder step: real
+ * Playwright actions/assertions must provide the scenario evidence.
  *
  * A spec can override any dimension by calling `epic()`, `feature()`, `story()`,
  * `displayName()`, or `step()` from `allure-js-commons` inside the test body —
  * those run after this fixture, so the last write wins.
  */
 import { expect, test as base } from "@playwright/test";
-import { epic, feature, step, story } from "allure-js-commons";
+import { epic, feature, story } from "allure-js-commons";
 
 type EpicFeatureStory = { epic: string; feature: string; story: string };
 
@@ -49,9 +49,6 @@ export const test = base.extend<{ allureTaxonomy: void }>({
       await epic(meta.epic);
       await feature(meta.feature);
       await story(meta.story);
-      await step(`Verify: ${testInfo.title}`, async () => {
-        /* scenario boundary — assertions run in the test body */
-      });
       await use();
     },
     { auto: true },
