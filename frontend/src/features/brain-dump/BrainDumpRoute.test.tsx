@@ -1,7 +1,8 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useParams } from "react-router-dom";
 
 import { BrainDumpRoute } from "./BrainDumpRoute";
 
@@ -65,14 +66,22 @@ function proposal(id: string, ordinal: number, title: string, extras: Record<str
   };
 }
 
-function renderBrainDump(initialEntry = "/brain-dump/new") {
+function TaskListProbe(): JSX.Element {
+  const routeParams = useParams();
+  return <div>{`Task list route: ${routeParams.state ?? "unknown"}`}</div>;
+}
+
+function renderBrainDump(initialEntry = "/brain-dump/new", queryClient = new QueryClient()) {
   return render(
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <Routes>
-        <Route path="/brain-dump/:operationId" element={<BrainDumpRoute />} />
-        <Route path="/brain-dump/:operationId/review" element={<BrainDumpRoute />} />
-      </Routes>
-    </MemoryRouter>
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <Routes>
+          <Route path="/brain-dump/:operationId" element={<BrainDumpRoute />} />
+          <Route path="/brain-dump/:operationId/review" element={<BrainDumpRoute />} />
+          <Route path="/tasks/:state" element={<TaskListProbe />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>
   );
 }
 
@@ -636,5 +645,184 @@ describe("BrainDumpRoute", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save 1 to inbox" }));
     expect(await screen.findByText("Saved 1 task to Inbox")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/brain_dump_1/commit"), expect.anything());
+  });
+
+  it("ignores discard clicks before a brain dump operation exists", async () => {
+    fetchMock.mockImplementation(() => Promise.reject(new Error("no requests expected")));
+
+    renderBrainDump();
+    await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reports load failures when an existing brain dump cannot be resumed", async () => {
+    fetchMock.mockImplementationOnce(() => Promise.reject(new Error("load failed")));
+    const first = renderBrainDump("/brain-dump/brain_dump_missing");
+    expect(await screen.findByRole("alert")).toHaveTextContent("load failed");
+    first.unmount();
+
+    fetchMock.mockImplementationOnce(() => Promise.reject("load blew up"));
+    renderBrainDump("/brain-dump/brain_dump_missing");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not resume brain dump.");
+  });
+
+  it("surfaces rename failures on the review screen instead of swallowing them", async () => {
+    const captured = operation({
+      id: "brain_dump_existing",
+      status: "awaiting_confirmation",
+      revision: 4,
+      proposals: [proposal("proposal_1", 1, "Renew car insurance")]
+    });
+    let renameAttempts = 0;
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_existing") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(captured);
+      }
+      if (url.includes("/proposals/proposal_1")) {
+        renameAttempts += 1;
+        return renameAttempts === 1 ? Promise.reject(new Error("rename failed")) : Promise.reject("rename blew up");
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_existing/review");
+    const titleInput = await screen.findByDisplayValue("Renew car insurance");
+    await userEvent.clear(titleInput);
+    await userEvent.type(titleInput, "Renew car insurance before Friday");
+    await userEvent.tab();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("rename failed");
+    expect(screen.getByRole("main", { name: "Review brain dump proposals" })).toBeInTheDocument();
+
+    titleInput.focus();
+    await userEvent.tab();
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Could not update the task title."));
+  });
+
+  it("surfaces delete failures including stale-revision conflicts and keeps the proposal visible", async () => {
+    const captured = operation({
+      id: "brain_dump_existing",
+      status: "awaiting_confirmation",
+      revision: 4,
+      proposals: [proposal("proposal_1", 1, "Renew car insurance")]
+    });
+    let deleteAttempts = 0;
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_existing") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(captured);
+      }
+      if (url.includes("/proposals/proposal_1")) {
+        deleteAttempts += 1;
+        return deleteAttempts === 1 ? jsonResponse({ detail: "revision conflict" }, 409) : Promise.reject("delete blew up");
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_existing/review");
+    const deleteButton = await screen.findByRole("button", { name: "Delete Renew car insurance" });
+
+    await userEvent.click(deleteButton);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Request failed");
+    expect(screen.getByDisplayValue("Renew car insurance")).toBeInTheDocument();
+
+    await userEvent.click(deleteButton);
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Could not delete the task."));
+    expect(screen.getByDisplayValue("Renew car insurance")).toBeInTheDocument();
+  });
+
+  it("sends the freshest revision when a rename and delete land back-to-back", async () => {
+    const captured = operation({
+      id: "brain_dump_existing",
+      status: "awaiting_confirmation",
+      revision: 4,
+      proposals: [proposal("proposal_1", 1, "Renew car insurance"), proposal("proposal_2", 2, "Reply to Anna")]
+    });
+    const renamed = proposal("proposal_1", 1, "Renew car insurance before Friday", { status: "user_edited", user_edited: true });
+    const sentRevisions: number[] = [];
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_existing") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(captured);
+      }
+      if (url.includes("/proposals/proposal_1")) {
+        sentRevisions.push(JSON.parse(String(init?.body)).expected_revision);
+        return jsonResponse(operation({ ...captured, revision: 5, proposals: [renamed, proposal("proposal_2", 2, "Reply to Anna")] }));
+      }
+      if (url.includes("/proposals/proposal_2")) {
+        sentRevisions.push(JSON.parse(String(init?.body)).expected_revision);
+        return jsonResponse(operation({ ...captured, revision: 6, proposals: [renamed, proposal("proposal_2", 2, "Reply to Anna", { deleted: true })] }));
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_existing/review");
+    const titleInput = await screen.findByDisplayValue("Renew car insurance");
+    const deleteButton = screen.getByRole("button", { name: "Delete Reply to Anna" });
+    await userEvent.clear(titleInput);
+    await userEvent.type(titleInput, "Renew car insurance before Friday");
+
+    await act(async () => {
+      fireEvent.blur(titleInput);
+      fireEvent.click(deleteButton);
+    });
+
+    await waitFor(() => expect(sentRevisions).toEqual([4, 5]));
+    expect(screen.queryByText("Reply to Anna")).not.toBeInTheDocument();
+  });
+
+  it("refreshes cached task queries after committing a brain dump", async () => {
+    const captured = operation({
+      id: "brain_dump_existing",
+      status: "awaiting_confirmation",
+      revision: 4,
+      proposals: [proposal("proposal_1", 1, "Renew car insurance")]
+    });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_existing") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(captured);
+      }
+      if (url.endsWith("/brain_dump_existing/commit")) {
+        return jsonResponse(operation({ ...captured, status: "completed", revision: 5, committed_task_ids: ["task_1"] }));
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    const queryClient = new QueryClient();
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+    renderBrainDump("/brain-dump/brain_dump_existing/review", queryClient);
+    await userEvent.click(await screen.findByRole("button", { name: "Save 1 to inbox" }));
+
+    expect(await screen.findByText("Saved 1 task to Inbox")).toBeInTheDocument();
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["tasks"] });
+  });
+
+  it("navigates to the inbox from the saved confirmation", async () => {
+    const captured = operation({
+      id: "brain_dump_existing",
+      status: "awaiting_confirmation",
+      revision: 4,
+      proposals: [proposal("proposal_1", 1, "Renew car insurance")]
+    });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_existing") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(captured);
+      }
+      if (url.endsWith("/brain_dump_existing/commit")) {
+        return jsonResponse(operation({ ...captured, status: "completed", revision: 5, committed_task_ids: ["task_1"] }));
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_existing/review");
+    await userEvent.click(await screen.findByRole("button", { name: "Save 1 to inbox" }));
+    await userEvent.click(await screen.findByRole("button", { name: "View inbox" }));
+
+    expect(await screen.findByText("Task list route: inbox")).toBeInTheDocument();
   });
 });
