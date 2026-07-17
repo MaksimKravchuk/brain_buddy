@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import { apiClient } from "./client";
 import { buildTreeDetailFromStore, useTreeStore } from "../stores/treeStore";
@@ -78,6 +78,12 @@ export function useTree(treeId: string | null) {
   });
 }
 
+async function applyServerAcknowledgedTree(queryClient: QueryClient, treeId: string) {
+  const tree = await apiClient.getTree(treeId);
+  queryClient.setQueryData(treeKeys.detail(treeId), tree);
+  useTreeStore.getState().setTree(tree, { restoreSafe: true });
+}
+
 export function useCreateTree() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -127,7 +133,7 @@ export function useRenameTree(treeId: string | null) {
       return apiClient.updateTree(treeId, payload);
     },
     onSuccess: (tree) => {
-      useTreeStore.getState().setTree(tree);
+      useTreeStore.getState().setTree(tree, { restoreSafe: true });
       queryClient.setQueryData(treeKeys.detail(tree.id), tree);
       queryClient.invalidateQueries({ queryKey: treeKeys.list() });
     }
@@ -152,8 +158,8 @@ export function useCreateNode(treeId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (payload: NodeCreateRequest) => apiClient.createNode(treeId, payload),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: treeKeys.detail(treeId) });
+    onSuccess: async () => {
+      await applyServerAcknowledgedTree(queryClient, treeId);
     }
   });
 }
@@ -163,8 +169,8 @@ export function useUpdateNode(treeId: string) {
   return useMutation({
     mutationFn: ({ nodeId, payload }: { nodeId: string; payload: NodeUpdateRequest }) =>
       apiClient.updateNode(treeId, nodeId, payload),
-    onSuccess: (_data, { nodeId }) => {
-      queryClient.invalidateQueries({ queryKey: treeKeys.detail(treeId) });
+    onSuccess: async (_data, { nodeId }) => {
+      await applyServerAcknowledgedTree(queryClient, treeId);
       queryClient.invalidateQueries({ queryKey: treeKeys.validationHistory(treeId, nodeId) });
     }
   });
@@ -175,8 +181,8 @@ export function useDeleteNode(treeId: string) {
   return useMutation({
     mutationFn: ({ nodeId, cascade }: { nodeId: string; cascade?: boolean }) =>
       apiClient.deleteNode(treeId, nodeId, cascade),
-    onSuccess: (_data, { nodeId }) => {
-      queryClient.invalidateQueries({ queryKey: treeKeys.detail(treeId) });
+    onSuccess: async (_data, { nodeId }) => {
+      await applyServerAcknowledgedTree(queryClient, treeId);
       queryClient.invalidateQueries({ queryKey: treeKeys.validationHistory(treeId, nodeId) });
     }
   });
@@ -186,8 +192,8 @@ export function useCreateRelation(treeId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (payload: RelationCreateRequest) => apiClient.createRelation(treeId, payload),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: treeKeys.detail(treeId) });
+    onSuccess: async () => {
+      await applyServerAcknowledgedTree(queryClient, treeId);
     }
   });
 }
@@ -197,8 +203,8 @@ export function useUpdateRelation(treeId: string) {
   return useMutation({
     mutationFn: ({ relationId, payload }: { relationId: string; payload: RelationUpdateRequest }) =>
       apiClient.updateRelation(treeId, relationId, payload),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: treeKeys.detail(treeId) });
+    onSuccess: async () => {
+      await applyServerAcknowledgedTree(queryClient, treeId);
     }
   });
 }
@@ -207,8 +213,8 @@ export function useDeleteRelation(treeId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (relationId: string) => apiClient.deleteRelation(treeId, relationId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: treeKeys.detail(treeId) });
+    onSuccess: async () => {
+      await applyServerAcknowledgedTree(queryClient, treeId);
     }
   });
 }

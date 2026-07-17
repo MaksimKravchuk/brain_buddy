@@ -21,8 +21,12 @@ PY
 BACKEND_URL="http://127.0.0.1:${BACKEND_PORT}"
 FRONTEND_URL="http://127.0.0.1:${FRONTEND_PORT}"
 COMPOSE_LOG_DIR="${ROOT_DIR}/frontend/test-results/compose"
+PLAYWRIGHT_ALLURE_DIR="${ROOT_DIR}/frontend/allure-results/playwright"
+PLAYWRIGHT_REPORT_DIR="${ROOT_DIR}/frontend/playwright-report"
 
-mkdir -p "${COMPOSE_LOG_DIR}" "${ROOT_DIR}/frontend/allure-results/playwright" "${ROOT_DIR}/frontend/playwright-report"
+rm -rf "${PLAYWRIGHT_ALLURE_DIR}" "${PLAYWRIGHT_REPORT_DIR}"
+mkdir -p "${COMPOSE_LOG_DIR}" "${PLAYWRIGHT_ALLURE_DIR}" "${PLAYWRIGHT_REPORT_DIR}"
+touch "${PLAYWRIGHT_ALLURE_DIR}/.run-started-at"
 
 cleanup() {
   local status=$?
