@@ -22,6 +22,7 @@
 ## Testing Guidelines
 - Backend uses pytest with FastAPI TestClient; mirror test names after module under test (`test_tree_service.py`).
 - Frontend leverages Vitest + Testing Library; place component specs beside feature folders.
+- Every pytest, Vitest, and Playwright product test must emit Allure Report 3 taxonomy: non-empty `epic`, `feature`, `story`, a human-readable title, and at least one named step. Use the central helpers in `backend/tests/allure_taxonomy.py`, `frontend/src/test/allureTaxonomy.ts`, and `frontend/tests/allure.fixtures.ts`; override explicitly only when a test needs narrower labels. See `docs/test-allure-taxonomy.md`.
 - Ensure new features include targeted tests; run both test suites before pushing.
 
 ## Commit & Pull Request Guidelines

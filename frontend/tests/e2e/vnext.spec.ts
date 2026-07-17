@@ -1,4 +1,4 @@
-import { test } from "@playwright/test";
+import { test } from "../allure.fixtures";
 
 test.describe("vNext operation proposal acceptance", () => {
   test.fixme(
