@@ -31,7 +31,7 @@ export function ToastStack(): JSX.Element {
             <div
               key={toast.id}
               className={twMerge(
-                "pointer-events-auto rounded-xl border px-4 py-3 text-sm shadow-floating backdrop-blur",
+                "pointer-events-none rounded-xl border px-4 py-3 text-sm shadow-floating backdrop-blur",
                 variantStyles[toast.variant],
                 toast.dismissing
                   ? "animate-slide-up-fade-out"
@@ -71,7 +71,7 @@ export function ToastStack(): JSX.Element {
                   type="button"
                   onClick={() => dismiss(toast.id)}
                   aria-label="Dismiss notification"
-                  className="-mt-1 -mr-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-500 transition-colors duration-200 ease-smooth hover:bg-slate-100 hover:text-slate-700"
+                  className="pointer-events-auto -mt-1 -mr-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-500 transition-colors duration-200 ease-smooth hover:bg-slate-100 hover:text-slate-700"
                 >
                   <X className="h-4 w-4" />
                 </button>
