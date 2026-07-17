@@ -51,6 +51,12 @@ vi.mock("../../components/canvas/TreeCanvas", async () => {
 
 vi.mock("../../components/modals/CreateTreeModal", () => ({ CreateTreeModal: () => null }));
 vi.mock("../../components/modals/RenameTreeModal", () => ({ RenameTreeModal: () => null }));
+vi.mock("../../components/panels/InspectorTabs", () => ({
+  InspectorTabs: () => <div data-testid="inspector-tabs" />
+}));
+vi.mock("../../components/panels/NodeInspector", () => ({ NodeInspector: () => null }));
+vi.mock("../../components/panels/RelationInspector", () => ({ RelationInspector: () => null }));
+vi.mock("../../components/panels/VersionPanel", () => ({ VersionPanel: () => null }));
 
 const deleteModalProps = vi.hoisted(() => ({ onDeleted: vi.fn() as (treeId: string) => Promise<void> }));
 vi.mock("../../components/modals/DeleteTreeModal", () => ({

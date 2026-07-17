@@ -54,7 +54,7 @@ if [[ -z "${INVITE_CODE}" ]]; then
 fi
 
 echo "[smoke] Signing up smoke-test user..."
-EMAIL="smoke+$(date +%s)@example.test"
+EMAIL="smoke+$(date +%s)@example.com"
 PASSWORD="smoke-test-password-12chars"
 signup_payload=$(printf '{"email":"%s","password":"%s","invite_code":"%s"}' \
   "${EMAIL}" "${PASSWORD}" "${INVITE_CODE}")

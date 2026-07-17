@@ -520,6 +520,21 @@ describe("treeStore", () => {
     expect(useTreeStore.getState().versions).toEqual(versions);
   });
 
+  it("preserves versions when refreshing the active tree detail", () => {
+    useTreeStore.getState().setTree(sampleTree);
+    const versions = [
+      { id: "v1", label: "V1", createdAt: "2024-04-01", conflictCount: 0, diffSummary: null }
+    ];
+    useTreeStore.getState().setVersions(versions);
+
+    useTreeStore.getState().setTree({
+      ...sampleTree,
+      metadata: { ...sampleTree.metadata, updated_at: "2024-04-01T12:00:00Z" }
+    });
+
+    expect(useTreeStore.getState().versions).toEqual(versions);
+  });
+
   it("maps version conflict_count to 0 when undefined via mapVersionResponse", () => {
     const input = {
       id: "v2",

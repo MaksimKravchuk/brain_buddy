@@ -15,6 +15,7 @@ from pathlib import Path
 REQUIRED_ARTIFACTS = {
     "backend-allure-results": "backend/allure-results",
     "frontend-allure-results": "frontend/allure-results",
+    "playwright-allure-results": "frontend/allure-results/playwright",
     "allure-report-html": "allure-report",
 }
 
@@ -42,6 +43,16 @@ FRONTEND_CI_REQUIREMENTS = (
 )
 FRONTEND_COVERAGE_THRESHOLD = 95
 FRONTEND_COVERAGE_METRICS = ("statements", "branches", "functions", "lines")
+E2E_CI_REQUIREMENTS = (
+    ("e2e CI job", "  e2e:"),
+    ("Compose Playwright E2E job name", "Compose Playwright E2E"),
+    ("e2e Makefile target", "make test-e2e"),
+    ("Playwright Chromium install", "npx playwright install --with-deps chromium"),
+    (
+        "Playwright Allure validation",
+        "--path frontend/allure-results/playwright --label playwright-e2e",
+    ),
+)
 
 
 def _fail(message: str) -> int:
@@ -106,6 +117,14 @@ def _coverage_threshold_errors(vite_config: Path) -> list[str]:
     return errors
 
 
+def _missing_e2e_ci_errors(workflow_text: str) -> list[str]:
+    errors: list[str] = []
+    for label, snippet in E2E_CI_REQUIREMENTS:
+        if snippet not in workflow_text:
+            errors.append(f"missing {label}: {snippet}")
+    return errors
+
+
 def validate_workflow(
     ci: Path, disallowed_workflows: list[Path], frontend_vite_config: Path | None
 ) -> int:
@@ -117,6 +136,7 @@ def validate_workflow(
         workflow_text = ci.read_text(encoding="utf-8")
         errors.extend(_missing_artifact_errors(workflow_text))
         errors.extend(_missing_frontend_ci_errors(workflow_text))
+        errors.extend(_missing_e2e_ci_errors(workflow_text))
         if "retention-days: 30" not in workflow_text:
             errors.append("missing 30-day artifact retention")
         if "if: always()" not in workflow_text:
