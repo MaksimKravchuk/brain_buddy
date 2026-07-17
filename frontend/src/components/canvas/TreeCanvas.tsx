@@ -792,7 +792,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   const hasContent = nodes.length > 0 || relations.length > 0;
 
   return (
-    <div ref={canvasRef} className="relative h-full w-full">
+    <div ref={canvasRef} className="relative h-full w-full" data-testid="tree-canvas">
       <div aria-live="assertive" className="sr-only" data-testid="relation-error-live">
         {linkError?.message ?? ""}
       </div>

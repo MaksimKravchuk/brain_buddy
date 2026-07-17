@@ -239,6 +239,7 @@ describe("api hooks", () => {
     ]);
 
     vi.spyOn(apiClient, "createTree").mockResolvedValue(detail);
+    vi.spyOn(apiClient, "getTree").mockResolvedValue(renamed);
     const updateSpy = vi.spyOn(apiClient, "updateTree").mockResolvedValue(renamed);
     vi.spyOn(apiClient, "deleteTree").mockResolvedValue(undefined);
     vi.spyOn(apiClient, "createNode").mockResolvedValue(node);
