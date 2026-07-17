@@ -60,6 +60,10 @@ export function BrainDumpRoute(): JSX.Element {
   const activeProposals = useMemo(() => (operation?.proposals ?? []).filter((proposal) => !proposal.deleted), [operation]);
 
   const applyOperation = useCallback((next: BrainDumpOperationResponse | null) => {
+    const current = operationRef.current;
+    if (next && current?.id === next.id && next.revision < current.revision) {
+      return;
+    }
     operationRef.current = next;
     setOperation(next);
   }, []);

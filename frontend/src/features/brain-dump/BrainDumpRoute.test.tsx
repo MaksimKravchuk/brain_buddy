@@ -172,6 +172,40 @@ describe("BrainDumpRoute", () => {
     expect(await screen.findByRole("button", { name: "Pause" })).toBeEnabled();
   });
 
+  it("ignores stale transcript responses that arrive after a newer pause", async () => {
+    let resolveTranscript: ((response: Response) => void) | undefined;
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
+        return jsonResponse(operation(), 201);
+      }
+      if (url.endsWith("/brain_dump_1/transcript")) {
+        return new Promise<Response>((resolve) => {
+          resolveTranscript = resolve;
+        });
+      }
+      if (url.endsWith("/brain_dump_1/pause")) {
+        return jsonResponse(operation({ status: "paused", revision: 3, proposals: [proposal("proposal_1", 1, "Renew car insurance")] }));
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump();
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+    act(() => emitSpeech("Renew car insurance"));
+    await waitFor(() => expect(resolveTranscript).toBeDefined());
+
+    await userEvent.click(screen.getByRole("button", { name: "Pause" }));
+    expect(await screen.findByRole("button", { name: "Resume" })).toBeEnabled();
+
+    await act(async () => {
+      resolveTranscript?.(await jsonResponse(operation({ revision: 2, proposals: [proposal("proposal_1", 1, "Renew car insurance")] })));
+    });
+
+    expect(screen.getByRole("button", { name: "Resume" })).toBeEnabled();
+    expect(screen.queryByText("Recording")).not.toBeInTheDocument();
+  });
+
   it("replaces an interim speech result with the cumulative final transcript sequence", async () => {
     const uploaded: Array<{ sequence: number; text: string; stability: string }> = [];
     fetchMock.mockImplementation((input, init) => {
