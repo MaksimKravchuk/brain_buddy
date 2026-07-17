@@ -50,6 +50,85 @@ def test_brain_dump_operation_collects_provisional_tasks_without_inbox_writes(ap
     assert still_empty.json()["counts_by_state"]["inbox"] == 0
 
 
+def test_brain_dump_cumulative_final_replaces_interim_words(api_client) -> None:
+    operation = _start_operation(api_client, key="start-cumulative-final-operation")
+
+    interim = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/transcript",
+        headers={"Idempotency-Key": "append-cumulative-interim"},
+        json={
+            "segments": [
+                {"sequence": 1, "text": "buy oat milk", "stability": "interim"}
+            ]
+        },
+    )
+    assert interim.status_code == 200, interim.text
+    assert [proposal["title"] for proposal in interim.json()["proposals"]] == [
+        "Buy oat milk"
+    ]
+    assert interim.json()["proposals"][0]["status"] == "wording_changing"
+
+    final = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/transcript",
+        headers={"Idempotency-Key": "append-cumulative-final"},
+        json={
+            "segments": [
+                {
+                    "sequence": 2,
+                    "text": "buy oat milk. call dentist",
+                    "stability": "stable",
+                }
+            ]
+        },
+    )
+    assert final.status_code == 200, final.text
+    assert [proposal["title"] for proposal in final.json()["proposals"]] == [
+        "Buy oat milk",
+        "Call dentist",
+    ]
+    assert "Buy oat milk buy oat milk" not in {
+        proposal["title"] for proposal in final.json()["proposals"]
+    }
+
+
+def test_brain_dump_same_sequence_interim_can_be_replaced_by_final(api_client) -> None:
+    operation = _start_operation(api_client, key="start-replace-interim-operation")
+
+    interim = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/transcript",
+        headers={"Idempotency-Key": "append-replaceable-interim"},
+        json={
+            "segments": [
+                {"sequence": 1, "text": "buy oat milk", "stability": "interim"}
+            ]
+        },
+    )
+    assert interim.status_code == 200, interim.text
+
+    final = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/transcript",
+        headers={"Idempotency-Key": "replace-interim-with-final"},
+        json={
+            "segments": [
+                {
+                    "sequence": 1,
+                    "text": "buy oat milk. call dentist",
+                    "stability": "stable",
+                }
+            ]
+        },
+    )
+    assert final.status_code == 200, final.text
+    body = final.json()
+    assert [(segment["sequence"], segment["text"], segment["stability"]) for segment in body["segments"]] == [
+        (1, "buy oat milk. call dentist", "stable")
+    ]
+    assert [proposal["title"] for proposal in body["proposals"]] == [
+        "Buy oat milk",
+        "Call dentist",
+    ]
+
+
 def test_user_edits_survive_later_transcript_reconciliation_and_delete_before_save(api_client) -> None:
     operation = _start_operation(api_client, key="start-edit-operation")
     append = api_client.post(

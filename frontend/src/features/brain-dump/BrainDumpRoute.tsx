@@ -53,6 +53,7 @@ export function BrainDumpRoute(): JSX.Element {
   const [savedCount, setSavedCount] = useState<number | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const sequenceRef = useRef(0);
+  const pendingInterimSequenceRef = useRef<number | null>(null);
   const operationRef = useRef<BrainDumpOperationResponse | null>(null);
   const proposalMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const isReviewPath = location.pathname.endsWith("/review");
@@ -103,6 +104,7 @@ export function BrainDumpRoute(): JSX.Element {
   function stopRecognition() {
     recognitionRef.current?.stop();
     recognitionRef.current = null;
+    pendingInterimSequenceRef.current = null;
   }
 
   async function probeMicrophone() {
@@ -122,13 +124,19 @@ export function BrainDumpRoute(): JSX.Element {
       if (!transcript) {
         return;
       }
+      const stability = latest.isFinal === false ? "interim" : "stable";
+      let sequence = pendingInterimSequenceRef.current;
+      if (sequence === null) {
+        sequenceRef.current += 1;
+        sequence = sequenceRef.current;
+      }
+      pendingInterimSequenceRef.current = stability === "interim" ? sequence : null;
       setLastTranscript(transcript);
-      sequenceRef.current += 1;
       void apiClient
         .appendBrainDumpTranscript(
           started.id,
-          { segments: [{ sequence: sequenceRef.current, text: transcript, stability: latest.isFinal === false ? "interim" : "stable" }] },
-          idempotencyKey(`segment-${sequenceRef.current}`)
+          { segments: [{ sequence, text: transcript, stability }] },
+          idempotencyKey(`segment-${sequence}`)
         )
         .then(applyOperation)
         .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "Transcript upload failed."));
@@ -149,6 +157,9 @@ export function BrainDumpRoute(): JSX.Element {
       await probeMicrophone();
       const started = operationRef.current ?? (await apiClient.startBrainDump({ consent: { microphone: true, external_processing_allowed: false } }, idempotencyKey("start")));
       applyOperation(started);
+      if (params.operationId === "new") {
+        navigate(`/brain-dump/${started.id}`, { replace: true });
+      }
       startRecognitionFor(started, Recognition);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Microphone permission was denied.");
@@ -387,7 +398,7 @@ function RecordingSurface({
 
 function ProposalCard({ proposal }: { proposal: BrainDumpProposal }): JSX.Element {
   return (
-    <article className={`flex items-center gap-2 rounded-[10px] border px-3.5 py-2.5 shadow-soft ${proposal.status === "wording_changing" ? "border-dashed border-slate-300 bg-slate-50" : "border-slate-200 bg-white"}`}>
+    <article aria-label={`Draft task ${proposal.ordinal}: ${proposal.title}`} className={`flex items-center gap-2 rounded-[10px] border px-3.5 py-2.5 shadow-soft ${proposal.status === "wording_changing" ? "border-dashed border-slate-300 bg-slate-50" : "border-slate-200 bg-white"}`}>
       <span className="text-[11px] font-semibold text-slate-500">#{proposal.ordinal}</span>
       <div className="min-w-0 flex-1 text-sm font-medium text-slate-900">{proposal.title}</div>
       <span className={proposal.status === "wording_changing" ? "text-[11px] text-slate-500" : "rounded-full bg-sky-50 px-2 py-0.5 text-[11px] text-sky-700"}>{statusLabels[proposal.status]}</span>
