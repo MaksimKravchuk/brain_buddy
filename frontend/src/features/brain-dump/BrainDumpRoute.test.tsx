@@ -172,6 +172,56 @@ describe("BrainDumpRoute", () => {
     expect(await screen.findByRole("button", { name: "Pause" })).toBeEnabled();
   });
 
+  it("replaces an interim speech result with the cumulative final transcript sequence", async () => {
+    const uploaded: Array<{ sequence: number; text: string; stability: string }> = [];
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
+        return jsonResponse(operation(), 201);
+      }
+      if (url.endsWith("/brain_dump_1/transcript")) {
+        const body = JSON.parse(String(init?.body));
+        uploaded.push(body.segments[0]);
+        return jsonResponse(
+          operation({
+            revision: uploaded.length + 1,
+            segments: [
+              {
+                id: "segment_1",
+                sequence: 1,
+                text: body.segments[0].text,
+                stability: body.segments[0].stability,
+                created_at: "2026-07-16T00:00:00Z"
+              }
+            ],
+            proposals:
+              body.segments[0].stability === "interim"
+                ? [proposal("proposal_1", 1, "Buy oat milk", { status: "wording_changing" })]
+                : [proposal("proposal_1", 1, "Buy oat milk"), proposal("proposal_2", 2, "Call dentist")]
+          })
+        );
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump();
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+    act(() => emitSpeech("buy oat milk", false));
+    expect(await screen.findByRole("article", { name: "Draft task 1: Buy oat milk" })).toBeInTheDocument();
+
+    act(() => emitSpeech("buy oat milk. call dentist", true));
+
+    await waitFor(() =>
+      expect(uploaded.map((segment) => [segment.sequence, segment.stability, segment.text])).toEqual([
+        [1, "interim", "buy oat milk"],
+        [1, "stable", "buy oat milk. call dentist"]
+      ])
+    );
+    expect(await screen.findByRole("article", { name: "Draft task 1: Buy oat milk" })).toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Draft task 2: Call dentist" })).toBeInTheDocument();
+    expect(screen.queryByText("Buy oat milk buy oat milk")).not.toBeInTheDocument();
+  });
+
   it("replaces the new recording route with the created operation route", async () => {
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
