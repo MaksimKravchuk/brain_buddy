@@ -47,6 +47,18 @@ vi.mock("../../components/canvas/TreeCanvas", async () => {
 
 vi.mock("../../components/modals/CreateTreeModal", () => ({ CreateTreeModal: () => null }));
 vi.mock("../../components/modals/RenameTreeModal", () => ({ RenameTreeModal: () => null }));
+vi.mock("../../components/panels/InspectorTabs", () => ({
+  InspectorTabs: () => <div data-testid="inspector-tabs" />
+}));
+vi.mock("../../components/panels/NodeInspector", () => ({
+  NodeInspector: () => <div data-testid="node-inspector" />
+}));
+vi.mock("../../components/panels/RelationInspector", () => ({
+  RelationInspector: () => <div data-testid="relation-inspector" />
+}));
+vi.mock("../../components/panels/VersionPanel", () => ({
+  VersionPanel: () => <div data-testid="version-panel" />
+}));
 
 const deleteModalProps = vi.hoisted(() => ({ onDeleted: vi.fn() as (treeId: string) => Promise<void> }));
 vi.mock("../../components/modals/DeleteTreeModal", () => ({
@@ -186,6 +198,24 @@ describe("TreeWorkspace branch coverage", () => {
     fireEvent.change(screen.getByLabelText("Import tree"), { target: { files: [] } });
 
     expect(hookMocks.importFromFile).not.toHaveBeenCalled();
+  });
+
+  it("renders the relation inspector when the relation tab is selected", () => {
+    act(() => useUiStore.setState({ inspectorTab: "relation" }));
+
+    render(<TreeWorkspace />);
+
+    expect(screen.getByTestId("relation-inspector")).toBeInTheDocument();
+    expect(screen.queryByTestId("node-inspector")).not.toBeInTheDocument();
+  });
+
+  it("renders the version panel when the versions tab is selected", () => {
+    act(() => useUiStore.setState({ inspectorTab: "versions" }));
+
+    render(<TreeWorkspace />);
+
+    expect(screen.getByTestId("version-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("relation-inspector")).not.toBeInTheDocument();
   });
 
   it("omits the reference label for an ApiError without a correlation ID", () => {

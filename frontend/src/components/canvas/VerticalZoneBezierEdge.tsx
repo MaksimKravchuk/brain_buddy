@@ -17,7 +17,7 @@ const getVerticalZonePx = () => {
 };
 
 export function VerticalZoneBezierEdge(props: EdgeProps): JSX.Element {
-  const { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, style } = props;
+  const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, style } = props;
 
   const verticalZonePx = getVerticalZonePx();
   const sourceDir = sourcePosition === Position.Bottom ? 1 : sourcePosition === Position.Top ? -1 : 0;
@@ -27,5 +27,9 @@ export function VerticalZoneBezierEdge(props: EdgeProps): JSX.Element {
     targetY + targetDir * verticalZonePx
   } ${targetX} ${targetY}`;
 
-  return <BaseEdge path={path} markerEnd={markerEnd} style={style} />;
+  return (
+    <g data-testid="relation-edge" data-relation-id={id}>
+      <BaseEdge path={path} markerEnd={markerEnd} style={style} />
+    </g>
+  );
 }

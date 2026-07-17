@@ -16,7 +16,7 @@ from pathlib import Path
 REQUIRED_ARTIFACTS = {
     "backend-allure-results": "backend/allure-results",
     "frontend-allure-results": "frontend/allure-results",
-    "native-product-e2e-allure-results": "frontend/allure-results/playwright",
+    "playwright-allure-results": "frontend/allure-results/playwright",
     "allure-report-html": "allure-report",
 }
 
@@ -44,6 +44,18 @@ FRONTEND_CI_REQUIREMENTS = (
 )
 FRONTEND_COVERAGE_THRESHOLD = 95
 FRONTEND_COVERAGE_METRICS = ("statements", "branches", "functions", "lines")
+EXECUTED_ALLURE_STATUSES = {"passed", "failed", "broken"}
+E2E_CI_REQUIREMENTS = (
+    ("e2e CI job", "  e2e:"),
+    ("Compose Playwright E2E job name", "Compose Playwright E2E"),
+    ("e2e Makefile target", "make test-e2e"),
+    ("Playwright Chromium install", "npx playwright install --with-deps chromium"),
+    (
+        "Playwright Allure validation",
+        "--path frontend/allure-results/playwright --label playwright-e2e",
+    ),
+    ("native product E2E Allure validator", "product-e2e-results"),
+)
 NATIVE_PRODUCT_E2E_STORIES = (
     "Native task shell navigation",
     "Minimal native task management",
@@ -59,9 +71,44 @@ def _fail(message: str) -> int:
     return 1
 
 
-def validate_results(path: Path, label: str) -> int:
+def _is_non_empty_string(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _executed_result_error(result: object) -> str | None:
+    if not isinstance(result, dict):
+        return "result JSON must be an object"
+
+    status = result.get("status")
+    if status not in EXECUTED_ALLURE_STATUSES:
+        return f"expected an executed status, got {status!r}"
+
+    name = result.get("name")
+    if not _is_non_empty_string(name):
+        return "executed scenario is missing a non-empty name"
+
+    if not any(_is_non_empty_string(result.get(key)) for key in ("fullName", "historyId", "testCaseId")):
+        return "result looks list-only: missing fullName/historyId/testCaseId"
+
+    start = result.get("start")
+    stop = result.get("stop")
+    if not isinstance(start, (int, float)) or not isinstance(stop, (int, float)):
+        return "executed scenario is missing start/stop timestamps"
+    if stop <= start:
+        return "zero executed scenario duration"
+
+    return None
+
+
+def validate_results(path: Path, label: str, since_file: Path | None = None) -> int:
     if not path.is_dir():
         return _fail(f"{label}: Allure results directory does not exist: {path}")
+
+    since_mtime = None
+    if since_file is not None:
+        if not since_file.is_file():
+            return _fail(f"{label}: freshness marker does not exist: {since_file}")
+        since_mtime = since_file.stat().st_mtime
 
     result_files = sorted(path.glob("*-result.json"))
     non_empty = [file for file in result_files if file.is_file() and file.stat().st_size > 0]
@@ -70,7 +117,32 @@ def validate_results(path: Path, label: str) -> int:
             f"{label}: expected at least one non-empty Allure *-result.json in {path}"
         )
 
-    print(f"{label}: found {len(non_empty)} non-empty Allure result file(s) in {path}")
+    executed_files: list[Path] = []
+    invalid_errors: list[str] = []
+    for file in non_empty:
+        if since_mtime is not None and file.stat().st_mtime <= since_mtime:
+            invalid_errors.append(f"{file.name}: stale result older than {since_file}")
+            continue
+
+        try:
+            result = json.loads(file.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as error:
+            invalid_errors.append(f"{file.name}: invalid JSON: {error.msg}")
+            continue
+
+        error = _executed_result_error(result)
+        if error is None:
+            executed_files.append(file)
+        else:
+            invalid_errors.append(f"{file.name}: {error}")
+
+    if not executed_files:
+        details = "; ".join(invalid_errors[:5])
+        return _fail(
+            f"{label}: expected at least one fresh executed Allure scenario in {path}. {details}"
+        )
+
+    print(f"{label}: found {len(executed_files)} executed Allure result file(s) in {path}")
     return 0
 
 
@@ -111,7 +183,9 @@ def _has_meaningful_allure_step(steps: object) -> bool:
         status = step.get("status")
         start = step.get("start")
         stop = step.get("stop")
-        has_timing = isinstance(start, int) and isinstance(stop, int) and stop >= start
+        has_timing = isinstance(start, (int, float)) and isinstance(
+            stop, (int, float)
+        ) and stop >= start
         if isinstance(name, str) and name.strip() and status == "passed" and has_timing:
             return True
         if _has_meaningful_allure_step(step.get("steps")):
@@ -122,12 +196,14 @@ def _has_meaningful_allure_step(steps: object) -> bool:
 def _has_meaningful_playwright_evidence(payload: dict[str, object]) -> bool:
     start = payload.get("start")
     stop = payload.get("stop")
-    has_timing = isinstance(start, int) and isinstance(stop, int) and stop > start
+    has_timing = isinstance(start, (int, float)) and isinstance(
+        stop, (int, float)
+    ) and stop > start
     return has_timing and _has_meaningful_allure_step(payload.get("steps"))
 
 
 def validate_native_product_e2e_results(path: Path) -> int:
-    """Require active Playwright evidence for the native tasks/voice product suite."""
+    """Require passing Playwright evidence for the native tasks/voice product suite."""
 
     if not path.is_dir():
         return _fail(f"native-product-e2e: Allure results directory does not exist: {path}")
@@ -224,12 +300,6 @@ def _missing_frontend_ci_errors(workflow_text: str) -> list[str]:
             errors.append(f"missing {label}: {snippet}")
     if "- frontend" not in workflow_text:
         errors.append("missing frontend job dependency in downstream CI gates")
-    if "native-product-e2e:" not in workflow_text:
-        errors.append("missing native product Compose E2E CI job")
-    if "npm run test:e2e:compose" not in workflow_text:
-        errors.append("missing native product Compose E2E test command")
-    if "product-e2e-results" not in workflow_text:
-        errors.append("missing native product E2E Allure validator")
     return errors
 
 
@@ -253,6 +323,14 @@ def _coverage_threshold_errors(vite_config: Path) -> list[str]:
     return errors
 
 
+def _missing_e2e_ci_errors(workflow_text: str) -> list[str]:
+    errors: list[str] = []
+    for label, snippet in E2E_CI_REQUIREMENTS:
+        if snippet not in workflow_text:
+            errors.append(f"missing {label}: {snippet}")
+    return errors
+
+
 def validate_workflow(
     ci: Path, disallowed_workflows: list[Path], frontend_vite_config: Path | None
 ) -> int:
@@ -264,6 +342,7 @@ def validate_workflow(
         workflow_text = ci.read_text(encoding="utf-8")
         errors.extend(_missing_artifact_errors(workflow_text))
         errors.extend(_missing_frontend_ci_errors(workflow_text))
+        errors.extend(_missing_e2e_ci_errors(workflow_text))
         if "retention-days: 30" not in workflow_text:
             errors.append("missing 30-day artifact retention")
         if "if: always()" not in workflow_text:
@@ -328,12 +407,11 @@ def build_parser() -> argparse.ArgumentParser:
     results = subparsers.add_parser("results", help="validate an Allure results directory")
     results.add_argument("--path", type=Path, required=True)
     results.add_argument("--label", required=True)
-
-    product_e2e = subparsers.add_parser(
-        "product-e2e-results",
-        help="validate native tasks and Voice Brain Dump Playwright Allure evidence",
+    results.add_argument(
+        "--since-file",
+        type=Path,
+        help="optional marker file; result JSON must be newer than this run marker",
     )
-    product_e2e.add_argument("--path", type=Path, required=True)
 
     workflow = subparsers.add_parser("workflow", help="validate CI workflow requirements")
     workflow.add_argument("--ci", type=Path, required=True)
@@ -355,19 +433,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     mutation_workflow.add_argument("--workflow", type=Path, required=True)
 
+    product_e2e_results = subparsers.add_parser(
+        "product-e2e-results",
+        help="validate native tasks and Voice Brain Dump Playwright evidence",
+    )
+    product_e2e_results.add_argument("--path", type=Path, required=True)
+
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "results":
-        return validate_results(args.path, args.label)
-    if args.command == "product-e2e-results":
-        return validate_native_product_e2e_results(args.path)
+        return validate_results(args.path, args.label, args.since_file)
     if args.command == "workflow":
         return validate_workflow(args.ci, args.disallow_workflow, args.frontend_vite_config)
     if args.command == "mutation-workflow":
         return validate_mutation_workflow(args.workflow)
+    if args.command == "product-e2e-results":
+        return validate_native_product_e2e_results(args.path)
     raise AssertionError(f"unknown command: {args.command}")
 
 
