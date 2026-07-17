@@ -303,6 +303,14 @@ class TaskService:
             existing = segments_by_sequence.get(segment.sequence)
             if existing is not None:
                 if existing.text != segment.text or existing.stability != segment.stability:
+                    if existing.stability == "interim":
+                        segments_by_sequence[segment.sequence] = existing.model_copy(
+                            update={
+                                "text": segment.text,
+                                "stability": segment.stability,
+                            }
+                        )
+                        continue
                     raise ConflictError("Brain dump segment", str(segment.sequence))
                 continue
             segments_by_sequence[segment.sequence] = BrainDumpTranscriptSegmentDocument(
@@ -1258,9 +1266,14 @@ class TaskService:
     ) -> list[BrainDumpProposalDocument]:
         if not segments:
             return existing
-        latest_is_interim = segments[-1].stability == "interim"
-        candidates = self._extract_task_titles(" ".join(segment.text for segment in segments))
-        segment_ids = [segment.id for segment in segments]
+        proposal_segments = self._segments_for_proposal_extraction(segments)
+        if not proposal_segments:
+            return existing
+        latest_is_interim = proposal_segments[-1].stability == "interim"
+        candidates = self._extract_task_titles(
+            " ".join(segment.text for segment in proposal_segments)
+        )
+        segment_ids = [segment.id for segment in proposal_segments]
         status: BrainDumpProposalStatus = (
             "wording_changing" if latest_is_interim else "provisional"
         )
@@ -1300,6 +1313,31 @@ class TaskService:
                 )
             )
         return proposals
+
+    @classmethod
+    def _segments_for_proposal_extraction(
+        cls, segments: list[BrainDumpTranscriptSegmentDocument]
+    ) -> list[BrainDumpTranscriptSegmentDocument]:
+        proposal_segments: list[BrainDumpTranscriptSegmentDocument] = []
+        for segment in segments:
+            if segment.stability == "stable":
+                stable_text = cls._normalized_transcript_for_replacement(segment.text)
+                proposal_segments = [
+                    existing
+                    for existing in proposal_segments
+                    if not (
+                        existing.stability == "interim"
+                        and stable_text.startswith(
+                            cls._normalized_transcript_for_replacement(existing.text)
+                        )
+                    )
+                ]
+            proposal_segments.append(segment)
+        return proposal_segments
+
+    @staticmethod
+    def _normalized_transcript_for_replacement(text: str) -> str:
+        return re.sub(r"\s+", " ", text).strip().casefold()
 
     @staticmethod
     def _extract_task_titles(text: str) -> list[str]:

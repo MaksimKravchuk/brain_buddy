@@ -101,6 +101,31 @@ def _allure_label_values(payload: dict[str, object], name: str) -> set[str]:
     return values
 
 
+def _has_meaningful_allure_step(steps: object) -> bool:
+    if not isinstance(steps, list):
+        return False
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        name = step.get("name")
+        status = step.get("status")
+        start = step.get("start")
+        stop = step.get("stop")
+        has_timing = isinstance(start, int) and isinstance(stop, int) and stop >= start
+        if isinstance(name, str) and name.strip() and status == "passed" and has_timing:
+            return True
+        if _has_meaningful_allure_step(step.get("steps")):
+            return True
+    return False
+
+
+def _has_meaningful_playwright_evidence(payload: dict[str, object]) -> bool:
+    start = payload.get("start")
+    stop = payload.get("stop")
+    has_timing = isinstance(start, int) and isinstance(stop, int) and stop > start
+    return has_timing and _has_meaningful_allure_step(payload.get("steps"))
+
+
 def validate_native_product_e2e_results(path: Path) -> int:
     """Require active Playwright evidence for the native tasks/voice product suite."""
 
@@ -121,16 +146,48 @@ def validate_native_product_e2e_results(path: Path) -> int:
             f"found {len(active)} active result(s)"
         )
 
-    stories = set().union(*(_allure_label_values(payload, "story") for payload in active))
+    required_story_payloads: dict[str, list[dict[str, object]]] = {
+        story: [] for story in NATIVE_PRODUCT_E2E_STORIES
+    }
+    for payload in active:
+        for story in _allure_label_values(payload, "story"):
+            if story in required_story_payloads:
+                required_story_payloads[story].append(payload)
+
+    failed_stories = [
+        story
+        for story, story_payloads in required_story_payloads.items()
+        if any(payload.get("status") != "passed" for payload in story_payloads)
+    ]
+    if failed_stories:
+        return _fail(
+            "native-product-e2e: required story result(s) must pass: "
+            + ", ".join(failed_stories)
+        )
+
+    missing_meaningful_evidence = [
+        story
+        for story, story_payloads in required_story_payloads.items()
+        if story_payloads
+        and not any(_has_meaningful_playwright_evidence(payload) for payload in story_payloads)
+    ]
+    if missing_meaningful_evidence:
+        return _fail(
+            "native-product-e2e: required story result(s) need meaningful Playwright evidence: "
+            + ", ".join(missing_meaningful_evidence)
+        )
+
+    meaningful = [payload for payload in active if _has_meaningful_playwright_evidence(payload)]
+    stories = set().union(*(_allure_label_values(payload, "story") for payload in meaningful))
     missing_stories = [story for story in NATIVE_PRODUCT_E2E_STORIES if story not in stories]
     if missing_stories:
         return _fail(
-            "native-product-e2e: missing required active Allure story label(s): "
+            "native-product-e2e: missing required passing Allure story label(s): "
             + ", ".join(missing_stories)
         )
 
-    epics = set().union(*(_allure_label_values(payload, "epic") for payload in active))
-    features = set().union(*(_allure_label_values(payload, "feature") for payload in active))
+    epics = set().union(*(_allure_label_values(payload, "epic") for payload in meaningful))
+    features = set().union(*(_allure_label_values(payload, "feature") for payload in meaningful))
     if "BrainBuddy MVP loop" not in epics:
         return _fail("native-product-e2e: missing BrainBuddy MVP loop epic label")
     if "Native tasks and Voice Brain Dump" not in features:
@@ -142,7 +199,8 @@ def validate_native_product_e2e_results(path: Path) -> int:
 
     print(
         "native-product-e2e: found "
-        f"{len(active)} active result(s) covering {len(NATIVE_PRODUCT_E2E_STORIES)} required stories"
+        f"{len(meaningful)} meaningful passing result(s) covering "
+        f"{len(NATIVE_PRODUCT_E2E_STORIES)} required stories"
     )
     return 0
 

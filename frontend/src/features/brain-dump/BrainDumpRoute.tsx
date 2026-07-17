@@ -53,6 +53,7 @@ export function BrainDumpRoute(): JSX.Element {
   const [savedCount, setSavedCount] = useState<number | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const sequenceRef = useRef(0);
+  const pendingInterimSequenceRef = useRef<number | null>(null);
   const operationRef = useRef<BrainDumpOperationResponse | null>(null);
   const proposalMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const isReviewPath = location.pathname.endsWith("/review");
@@ -103,6 +104,7 @@ export function BrainDumpRoute(): JSX.Element {
   function stopRecognition() {
     recognitionRef.current?.stop();
     recognitionRef.current = null;
+    pendingInterimSequenceRef.current = null;
   }
 
   async function probeMicrophone() {
@@ -122,13 +124,19 @@ export function BrainDumpRoute(): JSX.Element {
       if (!transcript) {
         return;
       }
+      const stability = latest.isFinal === false ? "interim" : "stable";
+      let sequence = pendingInterimSequenceRef.current;
+      if (sequence === null) {
+        sequenceRef.current += 1;
+        sequence = sequenceRef.current;
+      }
+      pendingInterimSequenceRef.current = stability === "interim" ? sequence : null;
       setLastTranscript(transcript);
-      sequenceRef.current += 1;
       void apiClient
         .appendBrainDumpTranscript(
           started.id,
-          { segments: [{ sequence: sequenceRef.current, text: transcript, stability: latest.isFinal === false ? "interim" : "stable" }] },
-          idempotencyKey(`segment-${sequenceRef.current}`)
+          { segments: [{ sequence, text: transcript, stability }] },
+          idempotencyKey(`segment-${sequence}`)
         )
         .then(applyOperation)
         .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "Transcript upload failed."));
