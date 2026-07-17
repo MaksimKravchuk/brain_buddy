@@ -1,4 +1,5 @@
 import { expect, test } from "./allure.fixtures";
+import { ContentType, attachment } from "allure-js-commons";
 
 const taskResponse = {
   items: [
@@ -162,8 +163,13 @@ test("mobile task shell uses the labelled drawer and avoids horizontal overflow"
   await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
   await page.getByRole("button", { name: "Open task navigation" }).click();
   await expect(page.getByRole("dialog", { name: "Task navigation" })).toBeVisible();
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-  expect(overflow).toBeLessThanOrEqual(0);
+  await test.step("Verify the mobile task drawer fits inside the viewport", async () => {
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    await attachment("Viewport overflow", `Horizontal overflow: ${overflow}px`, ContentType.TEXT);
+    if (overflow > 0) {
+      throw new Error(`Expected no horizontal overflow, received ${overflow}px`);
+    }
+  });
   await expect(page.locator("body")).toHaveScreenshot("claude-design-shell-mobile-402x874.png", {
     animations: "disabled",
     maxDiffPixelRatio: 0.08

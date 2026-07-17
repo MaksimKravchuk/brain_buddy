@@ -83,6 +83,11 @@ def pytest_runtest_call(item: pytest.Item) -> Generator[None, None, None]:
         allure.dynamic.title(meta.title)
 
     with allure.step(meta.step):
+        allure.attach(
+            f"Taxonomy evidence for: {meta.title}",
+            name="Taxonomy evidence",
+            attachment_type=allure.attachment_type.TEXT,
+        )
         yield
 
 
