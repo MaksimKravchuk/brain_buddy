@@ -37,15 +37,11 @@ class TagUpdateRequest(StrictBaseModel):
     expected_revision: int = Field(ge=1)
 
 
-# Hidden compatibility shim for deprecated Context terminology.
-ContextCreateRequest = TagCreateRequest
-
-
 class ProjectResponse(StrictBaseModel):
     id: str
     name: str
     color: str | None = None
-    state: Literal["active", "completed", "archived"]
+    state: Literal["active", "archived"]
     revision: int
     open_task_count: int = Field(default=0, ge=0)
 
@@ -53,12 +49,9 @@ class ProjectResponse(StrictBaseModel):
 class TagResponse(StrictBaseModel):
     id: str
     name: str
-    state: Literal["active", "archived", "deleted"]
+    state: Literal["active", "deleted"]
     revision: int
     open_task_count: int = Field(default=0, ge=0)
-
-
-ContextResponse = TagResponse
 
 
 class TaskCreateRequest(StrictBaseModel):
@@ -176,8 +169,6 @@ BrainDumpStatus = Literal[
 ]
 BrainDumpProposalStatus = Literal[
     "provisional",
-    "wording_changing",
-    "ready_to_review",
     "user_edited",
 ]
 

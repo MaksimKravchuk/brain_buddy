@@ -15,7 +15,7 @@ def _post(client, path: str, key: str, payload: dict[str, object]):
     return client.post(path, headers={"Idempotency-Key": key}, json=payload)
 
 
-def test_tags_are_first_class_task_assignments_and_context_alias_is_hidden(api_client) -> None:
+def test_tags_are_first_class_task_assignments(api_client) -> None:
     tag = _post(api_client, "/api/tags", "tag-calls", {"name": "@Calls"})
     assert tag.status_code == 201, tag.text
     assert tag.json()["name"] == "Calls"
@@ -45,9 +45,8 @@ def test_tags_are_first_class_task_assignments_and_context_alias_is_hidden(api_c
     assert tags.status_code == 200, tags.text
     assert tags.json()[0]["open_task_count"] == 1
 
-    legacy_context = _post(api_client, "/api/contexts", "legacy-context", {"name": "Errands"})
-    assert legacy_context.status_code == 201, legacy_context.text
-    assert legacy_context.json()["name"] == "@Errands"
+    retired_context_routes = api_client.get("/api/contexts")
+    assert retired_context_routes.status_code == 404
 
 
 def test_project_archive_and_tag_delete_unassign_tasks_atomically(api_client) -> None:
@@ -153,6 +152,7 @@ def test_task_repository_migrates_existing_json_contexts_to_sqlite_tags(
     migrated = container.task_service.get_task("task_legacy", owner_id=owner_id)
     assert migrated.tag_ids == ["context_legacy"]
     assert container.task_service.get_tag("context_legacy", owner_id=owner_id).name == "Calls"
-    assert container.task_service.get_project("project_legacy", owner_id=owner_id).linked_tree_ids == []
+    migrated_project = container.task_service.get_project("project_legacy", owner_id=owner_id)
+    assert "linked_tree_ids" not in migrated_project.model_dump()
 
     get_config.cache_clear()
