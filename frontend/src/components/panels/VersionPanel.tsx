@@ -145,7 +145,7 @@ export function VersionPanel(): JSX.Element {
 
     restoreVersionMutation.mutate(version.id, {
       onSuccess: (tree) => {
-        setTree(tree);
+        setTree(tree, { restoreSafe: true });
         pushToast({
           id: toastId,
           title: "Version restored",
