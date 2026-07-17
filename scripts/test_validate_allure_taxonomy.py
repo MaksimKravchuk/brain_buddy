@@ -113,6 +113,31 @@ class ValidateAllureTaxonomyTests(unittest.TestCase):
         self.assertIn("placeholder", completed.stderr.lower())
         self.assertIn("meaningful step", completed.stderr.lower())
 
+    def test_rejects_generic_childless_zero_duration_step_without_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results = Path(tmp)
+            payload = _valid_result()
+            payload["steps"] = [
+                {
+                    "name": "Click login button",
+                    "status": "passed",
+                    "start": 100,
+                    "stop": 100,
+                    "steps": [],
+                    "attachments": [],
+                    "parameters": [],
+                }
+            ]
+            self._write(results, "a-result.json", payload)
+
+            completed = self.run_validator(
+                "--path", str(results), "--label", "frontend-playwright"
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("no-op", completed.stderr.lower())
+        self.assertIn("meaningful step", completed.stderr.lower())
+
     def test_rejects_fixture_hook_scaffolding_as_only_step_content(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             results = Path(tmp)

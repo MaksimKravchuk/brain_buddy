@@ -89,10 +89,15 @@ def _step_errors(result: dict) -> list[str]:
         if not isinstance(name, str) or not name.strip():
             errors.append(f"step {path} has an empty name")
             continue
-        if _is_no_op_placeholder_step(step):
-            errors.append(f"step {path} is an empty placeholder: {name!r}")
-            continue
         if _is_fixture_or_hook_scaffolding_step(step):
+            continue
+        if _is_zero_duration_childless_step_without_evidence(step):
+            if _is_placeholder_step_name(name):
+                errors.append(f"step {path} is an empty placeholder: {name!r}")
+            else:
+                errors.append(
+                    f"step {path} is a zero-duration no-op without evidence: {name!r}"
+                )
             continue
         meaningful_steps += 1
     if meaningful_steps == 0:
@@ -116,10 +121,11 @@ def _walk_steps(steps: list, prefix: str = "") -> list[tuple[str, dict]]:
     return found
 
 
-def _is_no_op_placeholder_step(step: dict) -> bool:
-    name = step.get("name")
-    if not isinstance(name, str) or not _PLACEHOLDER_STEP_NAME.match(name.strip()):
-        return False
+def _is_placeholder_step_name(name: str) -> bool:
+    return bool(_PLACEHOLDER_STEP_NAME.match(name.strip()))
+
+
+def _is_zero_duration_childless_step_without_evidence(step: dict) -> bool:
     start = step.get("start")
     stop = step.get("stop")
     has_zero_duration = isinstance(start, int) and isinstance(stop, int) and start == stop
