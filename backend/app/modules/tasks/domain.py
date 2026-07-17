@@ -10,8 +10,10 @@ from pydantic import Field, model_validator
 from app.schemas.common import StorageBaseModel
 
 TaskState = Literal["inbox", "next", "waiting", "someday", "completed", "cancelled"]
+# "archived" is a legacy-only stored value; the SQLite migration rewrites it to
+# "deleted" on load and no code path writes it. Kept for deserialization only.
 TagState = Literal["active", "archived", "deleted"]
-ProjectState = Literal["active", "completed", "archived"]
+ProjectState = Literal["active", "archived"]
 
 
 class IdempotencyRecord(StorageBaseModel):
@@ -34,7 +36,6 @@ class ProjectDocument(StorageBaseModel):
     normalized_name: str = Field(default="", max_length=500)
     color: str | None = Field(default=None, max_length=64)
     state: ProjectState = "active"
-    linked_tree_ids: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
     schema_version: int = Field(default=1, ge=1)
@@ -53,10 +54,6 @@ class TagDocument(StorageBaseModel):
     updated_at: datetime
     schema_version: int = Field(default=1, ge=1)
     revision: int = Field(default=1, ge=1)
-
-
-# Compatibility alias for the one-release hidden /contexts migration shim.
-ContextDocument = TagDocument
 
 
 class TaskSubtaskDocument(StorageBaseModel):
@@ -114,12 +111,6 @@ class TaskDocument(StorageBaseModel):
             data = {**data, "tag_ids": data.get("context_ids") or []}
         return data
 
-    @property
-    def context_ids(self) -> list[str]:
-        """Deprecated compatibility accessor for service tests and /contexts shim."""
-
-        return self.tag_ids
-
 
 BrainDumpStatus = Literal[
     "recording",
@@ -131,8 +122,6 @@ BrainDumpStatus = Literal[
 ]
 BrainDumpProposalStatus = Literal[
     "provisional",
-    "wording_changing",
-    "ready_to_review",
     "user_edited",
 ]
 

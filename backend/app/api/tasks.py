@@ -14,8 +14,8 @@ from app.modules.tasks.domain import (
     BrainDumpOperationDocument,
     BrainDumpProposalDocument,
     BrainDumpTranscriptSegmentDocument,
-    ContextDocument,
     ProjectDocument,
+    TagDocument,
     TaskCommentDocument,
     TaskDocument,
     TaskSubtaskDocument,
@@ -29,8 +29,6 @@ from app.schemas.tasks import (
     BrainDumpProposalUpdateRequest,
     BrainDumpTranscriptAppendRequest,
     BrainDumpTranscriptSegmentResponse,
-    ContextCreateRequest,
-    ContextResponse,
     ExpectedRevisionRequest,
     ProjectCreateRequest,
     ProjectResponse,
@@ -355,54 +353,6 @@ def get_tag(
     )
 
 
-@router.post(
-    "/contexts",
-    response_model=ContextResponse,
-    status_code=status.HTTP_201_CREATED,
-    responses=error_responses(400, 401, 409, 422),
-)
-def create_context(
-    payload: ContextCreateRequest,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    current_user: User = Depends(get_current_user),
-    task_service: TaskService = Depends(get_task_service),
-) -> ContextResponse:
-    context = task_service.create_context(
-        payload,
-        owner_id=current_user.id,
-        idempotency_key=_require_idempotency_key(idempotency_key),
-    )
-    return _to_context_response(context)
-
-
-@router.get(
-    "/contexts", response_model=list[ContextResponse], responses=error_responses(401)
-)
-def list_contexts(
-    current_user: User = Depends(get_current_user),
-    task_service: TaskService = Depends(get_task_service),
-) -> list[ContextResponse]:
-    return [
-        _to_context_response(context)
-        for context in task_service.list_contexts(owner_id=current_user.id)
-    ]
-
-
-@router.get(
-    "/contexts/{context_id}",
-    response_model=ContextResponse,
-    responses=error_responses(401, 404, 422),
-)
-def get_context(
-    context_id: str,
-    current_user: User = Depends(get_current_user),
-    task_service: TaskService = Depends(get_task_service),
-) -> ContextResponse:
-    return _to_context_response(
-        task_service.get_context(context_id, owner_id=current_user.id)
-    )
-
-
 @router.get(
     "/tasks/{task_id}",
     response_model=TaskResponse,
@@ -537,7 +487,6 @@ def create_task(
 def list_tasks(
     state: TaskState | None = None,
     project_id: str | None = None,
-    context_id: str | None = None,
     tag_id: str | None = None,
     unassigned_project: bool = False,
     include_completed: bool = False,
@@ -550,7 +499,6 @@ def list_tasks(
         owner_id=current_user.id,
         state=state,
         project_id=project_id,
-        context_id=context_id,
         tag_id=tag_id,
         unassigned_project=unassigned_project,
         include_completed=include_completed,
@@ -658,24 +606,16 @@ def _to_project_response(
 
 
 def _to_tag_response(
-    tag: ContextDocument, *, task_service: TaskService, owner_id: str
+    tag: TagDocument, *, task_service: TaskService, owner_id: str
 ) -> TagResponse:
     return TagResponse(
         id=tag.id,
         name=tag.name,
-        state=tag.state,
+        # Legacy stored rows may still carry "archived"; the public contract
+        # only exposes "active" and "deleted".
+        state="deleted" if tag.state == "archived" else tag.state,
         revision=tag.revision,
         open_task_count=task_service.open_task_count_for_tag(tag.id, owner_id=owner_id),
-    )
-
-
-def _to_context_response(context: ContextDocument) -> ContextResponse:
-    return ContextResponse(
-        id=context.id,
-        name=context.name,
-        state=context.state,
-        revision=context.revision,
-        open_task_count=0,
     )
 
 
