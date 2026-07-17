@@ -30,13 +30,20 @@ history.
 The canonical path for new or materially changed feature specs is:
 
 ```text
-constitution -> /speckit-specify -> /speckit-clarify or /speckit-checklist -> /speckit-plan -> /speckit-tasks
+constitution -> /speckit-specify -> /speckit-clarify -> /speckit-plan -> /speckit-checklist -> /speckit-tasks -> Hermes Kanban handoff
 ```
 
 Spec Kit owns versioned planning artifacts under `specs/` and project workflow
 infrastructure under `.specify/` plus `.claude/skills/`. Hermes Kanban remains
 responsible for task routing, implementation ownership, review handoffs, CI/PR
-traceability, and release gates.
+traceability, and release gates. BrainBuddy disables `/speckit-implement` and
+keeps the runnable `speckit` workflow planning-only.
+
+Architect-profile agents own Spec Kit technical planning for new or materially
+changed architecture/feature specs: module boundaries, contracts, ADR alignment,
+data handling, observability, release gates, and implementation handoff. The
+implementation profiles consume the architect-owned artifacts from their Kanban
+cards rather than inventing architecture during delivery.
 
 ## Rationale
 
@@ -82,13 +89,16 @@ Positive consequences:
 - Claude Code receives first-class Spec Kit skills in the repository.
 - BrainBuddy quality gates are encoded in the constitution, templates, docs, and
   CI check rather than relying on memory.
+- The installed workflow cannot advance into implementation outside Hermes
+  Kanban, PR review, and CI gates.
 
 Tradeoffs / risks:
 - Spec Kit refreshes can overwrite templates, so future updates require `git diff`
   review and reapplication of project-specific gates.
 - Historical specs are not uniform; the check explicitly documents grandfathering.
-- Agents must remember that `/speckit-implement` is optional and subordinate to
-  Kanban/PR workflow.
+- Future Spec Kit refreshes may reinstall implementation commands, so reviews
+  must preserve the local disabled `/speckit-implement` stub and planning-only
+  workflow.
 
 What future agents must preserve:
 - Pin and document the Spec Kit release used for repository refreshes.
@@ -96,6 +106,10 @@ What future agents must preserve:
 - Amend specs before changing implementation intent.
 - Keep generated `tasks.md` subordinate to Kanban, TDD, review, CI, PR, merge,
   and release gates.
+- Keep checklist invocation after plan generation unless the checklist skill is
+  intentionally customized to work before `plan.md` exists.
+- Keep architecture ownership in the architect profile; implementation agents
+  should consume spec/plan/task artifacts, not create unreviewed architecture.
 
 ## Verification / tests
 
@@ -104,8 +118,13 @@ What future agents must preserve:
 - `specify check` reports Claude Code available.
 - `uvx --from git+https://github.com/github/spec-kit.git@v0.12.17 specify init --here --integration claude --force`
   refreshes the repository while preserving the existing constitution.
-- `python3 scripts/check_spec_kit_specs.py` validates required new-spec artifacts
-  and documented grandfathering.
+- The local `.specify/workflows/speckit/workflow.yml` ends at tasks plus Hermes
+  Kanban handoff and does not call `speckit.implement`.
+- `python3 scripts/check_spec_kit_specs.py` validates required new-spec artifacts,
+  regular nonempty files, and documented grandfathering baselines.
+- `python3 -m unittest scripts/test_check_spec_kit_specs.py -v` covers missing
+  grandfathered normative files, modified grandfathered content, and
+  directory-shaped artifact paths.
 - CI runs the same deterministic spec check before backend/frontend jobs.
 
 ## Related files

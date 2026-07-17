@@ -53,8 +53,10 @@ After any future refresh:
 2. Preserve `.specify/memory/constitution.md` and project-specific template gates.
 3. Confirm `.specify/init-options.json` keeps `speckit_version` at the intended
    version and `ai_skills`/`integration` for Claude.
-4. Run `python3 scripts/check_spec_kit_specs.py`.
-5. Run any affected backend/frontend checks before opening a PR.
+4. Confirm the local `speckit` workflow remains planning-only and does not call
+   `speckit.implement`.
+5. Run `python3 scripts/check_spec_kit_specs.py`.
+6. Run any affected backend/frontend checks before opening a PR.
 
 ## Canonical feature-spec path
 
@@ -66,13 +68,17 @@ For every new or materially changed BrainBuddy feature:
    templates need a real amendment.
 3. Use `/speckit-specify` to create or update the feature's `spec.md` with the
    what and why. Do not include implementation design here except as constraints.
-4. Use `/speckit-clarify` and/or `/speckit-checklist` to de-risk ambiguous
-   requirements before planning.
+4. Use `/speckit-clarify` to resolve ambiguous requirements before planning.
 5. Use `/speckit-plan` to describe architecture, module ownership, contracts,
    tests, data handling, observability, mobile/resilience, and release gates.
-6. Use `/speckit-tasks` to generate implementation tasks grouped by independently
+6. Use `/speckit-checklist` after `/speckit-plan`. Upstream v0.12.17 checklist
+   setup calls `.specify/scripts/bash/check-prerequisites.sh --json`, which
+   requires `plan.md`; do not document or run checklist as a pre-plan command.
+7. Use `/speckit-tasks` to generate implementation tasks grouped by independently
    testable user story.
-7. Amend the spec/plan/tasks first whenever implementation intent changes.
+8. Hand the resulting artifacts to Hermes Kanban implementation cards instead of
+   executing implementation in Spec Kit.
+9. Amend the spec/plan/tasks first whenever implementation intent changes.
 
 For Claude Code in this repository, Spec Kit is installed as skills, so the
 invocation names use hyphens:
@@ -81,17 +87,38 @@ invocation names use hyphens:
 /speckit-constitution
 /speckit-specify
 /speckit-clarify
-/speckit-checklist
 /speckit-plan
+/speckit-checklist
 /speckit-tasks
 /speckit-analyze
-/speckit-implement
 /speckit-converge
 ```
 
-`/speckit-implement` is optional and does not replace BrainBuddy delivery rules.
-If used, it must still operate inside the assigned branch/worktree and obey TDD,
-review, CI, PR, and release gates.
+`/speckit-implement` is installed only as a disabled compatibility stub in this
+repository. It must not run implementation tasks, hooks, commits, or source
+edits. Implementation starts only when Hermes Kanban dispatches the owning
+specialist profile into an isolated worktree with TDD, review, CI, PR, and
+release gates.
+
+## Architect-owned Kanban path
+
+When a BrainBuddy architecture or feature spec is new or materially changed, the
+architect profile owns the Spec Kit planning lane before implementation begins.
+The runnable Kanban path is:
+
+1. Create or claim an architect-owned Kanban card for spec authoring/planning.
+2. In that card's worktree, run the canonical Spec Kit sequence through Claude
+   Code skills: `/speckit-specify`, `/speckit-clarify`, `/speckit-plan`,
+   `/speckit-checklist`, and `/speckit-tasks`.
+3. In `/speckit-plan`, the architect profile owns technical planning,
+   architecture boundaries, module ownership, contracts, ADR alignment, data
+   handling, observability, and release gates.
+4. If an architecture decision changes, update or add the relevant ADR before
+   handing implementation to another profile.
+5. Create implementation Kanban cards from `tasks.md` with the spec directory,
+   plan path, owning specialist profile, review gate, and required checks.
+6. Implementation agents consume those artifacts; they do not invent module
+   boundaries or architecture that conflicts with the architect handoff.
 
 ## Artifact minimum for new specs
 

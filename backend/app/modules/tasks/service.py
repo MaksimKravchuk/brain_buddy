@@ -15,7 +15,6 @@ from app.schemas.tasks import (
     BrainDumpOperationStartRequest,
     BrainDumpProposalUpdateRequest,
     BrainDumpTranscriptAppendRequest,
-    ContextCreateRequest,
     ExpectedRevisionRequest,
     ProjectCreateRequest,
     ProjectUpdateRequest,
@@ -35,7 +34,6 @@ from .domain import (
     BrainDumpOperationDocument,
     BrainDumpProposalDocument,
     BrainDumpTranscriptSegmentDocument,
-    ContextDocument,
     IdempotencyRecord,
     ProjectDocument,
     TagDocument,
@@ -45,7 +43,6 @@ from .domain import (
 )
 from .repository import (
     TaskRepository,
-    display_context_name,
     display_project_name,
     display_tag_name,
     normalize_task_name,
@@ -66,8 +63,10 @@ def _serialized_write(
         service: TaskService, /, *args: _P.args, **kwargs: _P.kwargs
     ) -> _Result:
         owner_id = cast(str, kwargs["owner_id"])
+        idempotency_key = cast(str, kwargs["idempotency_key"])
         with service.task_repo.command_lock(owner_id):
-            service._reconcile_idempotent_results(owner_id=owner_id)
+            service.task_repo.purge_expired_idempotency(owner_id=owner_id, now=utcnow())
+            service._reconcile_idempotent_result(owner_id=owner_id, key=idempotency_key)
             return command(service, *args, **kwargs)
 
     return wrapped
@@ -120,47 +119,6 @@ class TaskService:
         )
         self.task_repo.create_project(project)
         return project
-
-    @_serialized_write
-    def create_context(
-        self,
-        payload: ContextCreateRequest,
-        *,
-        owner_id: str,
-        idempotency_key: str,
-    ) -> ContextDocument:
-        command = "create_context"
-        request_hash = self._request_hash(command, payload)
-        record = self._idempotency_record(
-            owner_id=owner_id,
-            key=idempotency_key,
-            command=command,
-            request_hash=request_hash,
-        )
-        if record is not None:
-            return self._context_result(record, owner_id=owner_id)
-
-        now = utcnow()
-        name = display_context_name(payload.name)
-        context = ContextDocument(
-            id=generate_id("tag"),
-            owner_id=owner_id,
-            name=name,
-            normalized_name=normalize_task_name(name, strip_tag_prefix=True),
-            created_at=now,
-            updated_at=now,
-        )
-        self._assert_unique_tag_name(owner_id=owner_id, tag=context)
-        self._store_idempotency(
-            owner_id=owner_id,
-            key=idempotency_key,
-            command=command,
-            request_hash=request_hash,
-            resource_id=context.id,
-            response=context,
-        )
-        self.task_repo.create_context(context)
-        return context
 
     @_serialized_write
     def create_tag(
@@ -807,27 +765,25 @@ class TaskService:
         owner_id: str,
         state: str | None,
         project_id: str | None,
-        context_id: str | None,
+        tag_id: str | None,
         unassigned_project: bool,
         include_completed: bool,
         cursor: str | None,
         limit: int,
-        tag_id: str | None = None,
     ) -> tuple[list[TaskDocument], str | None, bool, dict[str, int]]:
-        effective_tag_id = tag_id if tag_id is not None else context_id
         if project_id is not None and unassigned_project:
             raise ValidationFailure(
                 "project_id and unassigned_project cannot be used together."
             )
         if project_id is not None:
             self.task_repo.get_project_for_owner(project_id, owner_id=owner_id)
-        if effective_tag_id is not None:
-            self.task_repo.get_tag_for_owner(effective_tag_id, owner_id=owner_id)
+        if tag_id is not None:
+            self.task_repo.get_tag_for_owner(tag_id, owner_id=owner_id)
 
         filters = {
             "state": state,
             "project_id": project_id,
-            "tag_id": effective_tag_id,
+            "tag_id": tag_id,
             "unassigned_project": unassigned_project,
             "include_completed": include_completed,
         }
@@ -836,7 +792,7 @@ class TaskService:
             self.task_repo.list_for_owner(owner_id=owner_id),
             state=state,
             project_id=project_id,
-            tag_id=effective_tag_id,
+            tag_id=tag_id,
             unassigned_project=unassigned_project,
             include_completed=include_completed,
         )
@@ -852,7 +808,7 @@ class TaskService:
         counts = self._open_counts(
             owner_id=owner_id,
             project_id=project_id,
-            tag_id=effective_tag_id,
+            tag_id=tag_id,
             unassigned_project=unassigned_project,
         )
         return page, next_cursor, has_more, counts
@@ -867,9 +823,6 @@ class TaskService:
             key=lambda project: (project.name.strip().casefold(), project.id),
         )
 
-    def list_contexts(self, *, owner_id: str) -> list[ContextDocument]:
-        return self.list_tags(owner_id=owner_id)
-
     def list_tags(self, *, owner_id: str) -> list[TagDocument]:
         return sorted(
             (
@@ -882,9 +835,6 @@ class TaskService:
 
     def get_project(self, project_id: str, *, owner_id: str) -> ProjectDocument:
         return self.task_repo.get_project_for_owner(project_id, owner_id=owner_id)
-
-    def get_context(self, context_id: str, *, owner_id: str) -> ContextDocument:
-        return self.get_tag(context_id, owner_id=owner_id)
 
     def get_tag(self, tag_id: str, *, owner_id: str) -> TagDocument:
         return self.task_repo.get_tag_for_owner(tag_id, owner_id=owner_id)
@@ -1079,28 +1029,42 @@ class TaskService:
             raise ConflictError("Idempotency-Key", key)
         return record
 
+    def _reconcile_idempotent_result(self, *, owner_id: str, key: str) -> None:
+        """Apply one key's recorded result left durable before its write."""
+
+        record = self.task_repo.get_idempotency(owner_id=owner_id, key=key)
+        if record is not None:
+            self._apply_idempotent_record(record, owner_id=owner_id)
+
     def _reconcile_idempotent_results(self, *, owner_id: str) -> None:
-        """Apply recorded results left durable before their resource write."""
+        """Repair all recorded results for an owner (maintenance path only)."""
 
         for record in self.task_repo.list_idempotency_for_owner(owner_id=owner_id):
-            if record.command.startswith("brain_dump_"):
-                self._brain_dump_operation_result(record, owner_id=owner_id)
-            elif record.command == "create_project" or record.command.startswith(
-                ("update_project:", "archive_project:")
-            ):
-                self._project_result(record, owner_id=owner_id)
-            elif record.command in {"create_context", "create_tag"} or record.command.startswith(
-                ("update_tag:", "delete_tag:")
-            ):
-                self._tag_result(record, owner_id=owner_id)
-            elif record.command.startswith("create_subtask:"):
-                subtask = TaskSubtaskDocument.model_validate(record.response_body)
-                self._subtask_result(record, owner_id=owner_id, task_id=subtask.task_id)
-            elif record.command.startswith("create_comment:"):
-                comment = TaskCommentDocument.model_validate(record.response_body)
-                self._comment_result(record, owner_id=owner_id, task_id=comment.task_id)
-            else:
-                self._task_result(record, owner_id=owner_id)
+            self._apply_idempotent_record(record, owner_id=owner_id)
+
+    def _apply_idempotent_record(
+        self, record: IdempotencyRecord, *, owner_id: str
+    ) -> None:
+        if record.command.startswith("brain_dump_"):
+            self._brain_dump_operation_result(record, owner_id=owner_id)
+        elif record.command == "create_project" or record.command.startswith(
+            ("update_project:", "archive_project:")
+        ):
+            self._project_result(record, owner_id=owner_id)
+        # "create_context" records can persist from the retired /contexts shim.
+        elif record.command in {
+            "create_context",
+            "create_tag",
+        } or record.command.startswith(("update_tag:", "delete_tag:")):
+            self._tag_result(record, owner_id=owner_id)
+        elif record.command.startswith("create_subtask:"):
+            subtask = TaskSubtaskDocument.model_validate(record.response_body)
+            self._subtask_result(record, owner_id=owner_id, task_id=subtask.task_id)
+        elif record.command.startswith("create_comment:"):
+            comment = TaskCommentDocument.model_validate(record.response_body)
+            self._comment_result(record, owner_id=owner_id, task_id=comment.task_id)
+        else:
+            self._task_result(record, owner_id=owner_id)
 
     def _store_idempotency(
         self,
@@ -1113,7 +1077,7 @@ class TaskService:
         response: (
             BrainDumpOperationDocument
             | ProjectDocument
-            | ContextDocument
+            | TagDocument
             | TaskDocument
             | TaskSubtaskDocument
             | TaskCommentDocument
@@ -1159,11 +1123,6 @@ class TaskService:
             self.task_repo.save_brain_dump_operation(operation)
             return operation
         return current
-
-    def _context_result(
-        self, record: IdempotencyRecord, *, owner_id: str
-    ) -> ContextDocument:
-        return self._tag_result(record, owner_id=owner_id)
 
     def _tag_result(self, record: IdempotencyRecord, *, owner_id: str) -> TagDocument:
         tag = TagDocument.model_validate(record.response_body)
@@ -1219,7 +1178,6 @@ class TaskService:
             | BrainDumpProposalUpdateRequest
             | BrainDumpTranscriptAppendRequest
             | ProjectCreateRequest
-            | ContextCreateRequest
             | ExpectedRevisionRequest
             | ProjectUpdateRequest
             | TagCreateRequest
