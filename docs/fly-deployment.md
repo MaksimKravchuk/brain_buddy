@@ -26,7 +26,7 @@ Deploy the Brain Buddy backend and frontend as separate Fly.io apps. The backend
    ```bash
    flyctl apps create <backend-app>
    ```
-2. **Provision persistent storage for tree data:**
+2. **Provision persistent storage for tree and task data:**
    ```bash
    flyctl volumes create brain-buddy-data \
      --size 1 \
@@ -48,6 +48,14 @@ Deploy the Brain Buddy backend and frontend as separate Fly.io apps. The backend
      -a <backend-app>
    ```
    On startup the backend will create that account (or rotate its password to match the env var if it already exists). Rotate later by updating the secret and redeploying. See `docs/auth.md` for the full model.
+
+## Data storage, backups, and seeding
+The data directory (`BRAIN_BUDDY_DATA_DIR`, mounted at `/app/data` in production) holds two distinct stores:
+
+- **Trees** — one JSON file per tree plus an index file. Tree version snapshots, export/import, and `scripts/load_dataset.py` operate on these JSON files only.
+- **Tasks, projects, tags, and brain-dump operations** — a single SQLite database, `tasks.sqlite3`, managed by the task module (`backend/app/modules/tasks/repository.py`).
+
+`tasks.sqlite3` is **not** covered by tree JSON snapshots, tree export/import, or `scripts/load_dataset.py`. Any backup, restore, or seeding procedure that copies tree JSON files must also include `tasks.sqlite3` (plus its `-wal`/`-shm` sidecar files when copying a live database), or all task-tracker data is silently dropped. Prefer backing up the entire data directory — e.g. a Fly volume snapshot (`flyctl volumes snapshots create <volume-id> -a <backend-app>`) or copying the whole mount via `flyctl ssh sftp` — over cherry-picking individual files.
 
 ## Bootstrap/reference: deploy the backend
 Run the deployment from the repository root so the Dockerfile path resolves correctly. The resulting app has no public `fly.dev` hostname; it listens on `http://<backend-app>.flycast:8000` for in-organization callers such as the frontend.
