@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:e2e:compose": "rm -rf allure-results/playwright playwright-report test-results && PLAYWRIGHT_COMPOSE=1 playwright test tests/native-tasks-voice-brain-dump.compose.spec.ts --project=chromium",
     "test:watch": "vitest"
   },
   "dependencies": {
@@ -36,6 +37,7 @@
     "@vitejs/plugin-react-swc": "^3.5.0",
     "@vitest/coverage-istanbul": "^4.0.15",
     "allure": "^3.14.2",
+    "allure-playwright": "^3.10.2",
     "allure-vitest": "^3.10.2",
     "autoprefixer": "^10.4.17",
     "eslint": "^9.39.5",

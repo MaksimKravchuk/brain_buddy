@@ -8,6 +8,7 @@ backend or frontend dependencies are installed in GitHub Actions.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -15,6 +16,7 @@ from pathlib import Path
 REQUIRED_ARTIFACTS = {
     "backend-allure-results": "backend/allure-results",
     "frontend-allure-results": "frontend/allure-results",
+    "native-product-e2e-allure-results": "frontend/allure-results/playwright",
     "allure-report-html": "allure-report",
 }
 
@@ -42,6 +44,14 @@ FRONTEND_CI_REQUIREMENTS = (
 )
 FRONTEND_COVERAGE_THRESHOLD = 95
 FRONTEND_COVERAGE_METRICS = ("statements", "branches", "functions", "lines")
+NATIVE_PRODUCT_E2E_STORIES = (
+    "Native task shell navigation",
+    "Minimal native task management",
+    "Voice Brain Dump happy path",
+    "Voice Brain Dump idempotency and recovery",
+    "Voice Brain Dump failure recovery",
+    "Owner isolation",
+)
 
 
 def _fail(message: str) -> int:
@@ -64,6 +74,79 @@ def validate_results(path: Path, label: str) -> int:
     return 0
 
 
+def _allure_result_payloads(path: Path) -> list[dict[str, object]]:
+    payloads: list[dict[str, object]] = []
+    for file in sorted(path.glob("*-result.json")):
+        if not file.is_file() or file.stat().st_size == 0:
+            continue
+        try:
+            payload = json.loads(file.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid Allure result JSON in {file}: {exc}") from exc
+        if isinstance(payload, dict):
+            payloads.append(payload)
+    return payloads
+
+
+def _allure_label_values(payload: dict[str, object], name: str) -> set[str]:
+    labels = payload.get("labels")
+    if not isinstance(labels, list):
+        return set()
+    values: set[str] = set()
+    for label in labels:
+        if not isinstance(label, dict):
+            continue
+        if label.get("name") == name and isinstance(label.get("value"), str):
+            values.add(str(label["value"]))
+    return values
+
+
+def validate_native_product_e2e_results(path: Path) -> int:
+    """Require active Playwright evidence for the native tasks/voice product suite."""
+
+    if not path.is_dir():
+        return _fail(f"native-product-e2e: Allure results directory does not exist: {path}")
+
+    try:
+        payloads = _allure_result_payloads(path)
+    except ValueError as exc:
+        return _fail(f"native-product-e2e: {exc}")
+    if not payloads:
+        return _fail(f"native-product-e2e: expected non-empty Allure result JSON in {path}")
+
+    active = [payload for payload in payloads if payload.get("status") != "skipped"]
+    if len(active) < len(NATIVE_PRODUCT_E2E_STORIES):
+        return _fail(
+            "native-product-e2e: expected active native product scenarios, "
+            f"found {len(active)} active result(s)"
+        )
+
+    stories = set().union(*(_allure_label_values(payload, "story") for payload in active))
+    missing_stories = [story for story in NATIVE_PRODUCT_E2E_STORIES if story not in stories]
+    if missing_stories:
+        return _fail(
+            "native-product-e2e: missing required active Allure story label(s): "
+            + ", ".join(missing_stories)
+        )
+
+    epics = set().union(*(_allure_label_values(payload, "epic") for payload in active))
+    features = set().union(*(_allure_label_values(payload, "feature") for payload in active))
+    if "BrainBuddy MVP loop" not in epics:
+        return _fail("native-product-e2e: missing BrainBuddy MVP loop epic label")
+    if "Native tasks and Voice Brain Dump" not in features:
+        return _fail("native-product-e2e: missing Native tasks and Voice Brain Dump feature label")
+
+    names = "\n".join(str(payload.get("name", "")) for payload in active).lower()
+    if "/crt" in names or "crt" in names:
+        return _fail("native-product-e2e: legacy CRT evidence cannot satisfy this suite")
+
+    print(
+        "native-product-e2e: found "
+        f"{len(active)} active result(s) covering {len(NATIVE_PRODUCT_E2E_STORIES)} required stories"
+    )
+    return 0
+
+
 def _missing_artifact_errors(workflow_text: str) -> list[str]:
     errors: list[str] = []
     for name, path in REQUIRED_ARTIFACTS.items():
@@ -83,6 +166,12 @@ def _missing_frontend_ci_errors(workflow_text: str) -> list[str]:
             errors.append(f"missing {label}: {snippet}")
     if "- frontend" not in workflow_text:
         errors.append("missing frontend job dependency in downstream CI gates")
+    if "native-product-e2e:" not in workflow_text:
+        errors.append("missing native product Compose E2E CI job")
+    if "npm run test:e2e:compose" not in workflow_text:
+        errors.append("missing native product Compose E2E test command")
+    if "product-e2e-results" not in workflow_text:
+        errors.append("missing native product E2E Allure validator")
     return errors
 
 
@@ -182,6 +271,12 @@ def build_parser() -> argparse.ArgumentParser:
     results.add_argument("--path", type=Path, required=True)
     results.add_argument("--label", required=True)
 
+    product_e2e = subparsers.add_parser(
+        "product-e2e-results",
+        help="validate native tasks and Voice Brain Dump Playwright Allure evidence",
+    )
+    product_e2e.add_argument("--path", type=Path, required=True)
+
     workflow = subparsers.add_parser("workflow", help="validate CI workflow requirements")
     workflow.add_argument("--ci", type=Path, required=True)
     workflow.add_argument(
@@ -209,6 +304,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "results":
         return validate_results(args.path, args.label)
+    if args.command == "product-e2e-results":
+        return validate_native_product_e2e_results(args.path)
     if args.command == "workflow":
         return validate_workflow(args.ci, args.disallow_workflow, args.frontend_vite_config)
     if args.command == "mutation-workflow":

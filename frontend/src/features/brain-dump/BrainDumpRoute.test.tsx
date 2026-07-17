@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter, Route, Routes, useParams } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-router-dom";
 
 import { BrainDumpRoute } from "./BrainDumpRoute";
 
@@ -75,6 +75,7 @@ function renderBrainDump(initialEntry = "/brain-dump/new", queryClient = new Que
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialEntry]}>
+        <LocationProbe />
         <Routes>
           <Route path="/brain-dump/:operationId" element={<BrainDumpRoute />} />
           <Route path="/brain-dump/:operationId/review" element={<BrainDumpRoute />} />
@@ -83,6 +84,11 @@ function renderBrainDump(initialEntry = "/brain-dump/new", queryClient = new Que
       </MemoryRouter>
     </QueryClientProvider>
   );
+}
+
+function LocationProbe(): JSX.Element {
+  const location = useLocation();
+  return <output aria-label="current route">{location.pathname}</output>;
 }
 
 function emitSpeech(text: string, isFinal = true) {
@@ -164,6 +170,21 @@ describe("BrainDumpRoute", () => {
     expect(await screen.findByRole("button", { name: "Resume" })).toBeEnabled();
     await userEvent.click(screen.getByRole("button", { name: "Resume" }));
     expect(await screen.findByRole("button", { name: "Pause" })).toBeEnabled();
+  });
+
+  it("replaces the new recording route with the created operation route", async () => {
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
+        return jsonResponse(operation(), 201);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump();
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+
+    await waitFor(() => expect(screen.getByLabelText("current route")).toHaveTextContent("/brain-dump/brain_dump_1"));
   });
 
   it("does not create a backend operation when browser speech recognition is unavailable", async () => {
@@ -416,6 +437,17 @@ describe("BrainDumpRoute", () => {
     await userEvent.click(screen.getByRole("button", { name: "Back to recording" }));
 
     expect(await screen.findByRole("button", { name: "Record" })).toBeEnabled();
+  });
+
+  it("keeps empty review commands as no-ops until an operation exists", async () => {
+    fetchMock.mockImplementation(() => Promise.reject(new Error("should not command a new operation")));
+
+    renderBrainDump("/brain-dump/new/review");
+    await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save 0 to inbox" }));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: "Review 0 tasks" })).toBeInTheDocument();
   });
 
   it("reports command failures without losing the current recording", async () => {

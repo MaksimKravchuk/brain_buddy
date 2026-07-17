@@ -122,6 +122,8 @@ BrainDumpStatus = Literal[
 ]
 BrainDumpProposalStatus = Literal[
     "provisional",
+    "wording_changing",
+    "ready_to_review",
     "user_edited",
 ]
 
