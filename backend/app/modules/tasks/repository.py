@@ -9,19 +9,23 @@ import threading
 import unicodedata
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import ClassVar, TypeVar
 
 from pydantic import BaseModel
 
-from app.exceptions import ConflictError, NotFoundError, RepositoryError
+from app.exceptions import (
+    ConflictError,
+    NotFoundError,
+    RepositoryError,
+    StorageUnavailableError,
+)
 from app.repositories.base import BaseRepository
-from app.utils.file_ops import ensure_directory
 from app.utils.time import utcnow
 
 from .domain import (
     BrainDumpOperationDocument,
-    ContextDocument,
     IdempotencyRecord,
     ProjectDocument,
     TagDocument,
@@ -31,6 +35,31 @@ from .domain import (
 )
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
+
+IDEMPOTENCY_RETENTION = timedelta(hours=24)
+"""How long replayed command results stay addressable by their key."""
+
+
+@contextmanager
+def _sqlite_guard(resource: str, identifier: str) -> Iterator[None]:
+    """Translate raw ``sqlite3`` failures into the app's domain exceptions."""
+
+    try:
+        yield
+    except sqlite3.IntegrityError as exc:
+        raise ConflictError(
+            resource,
+            identifier,
+            f"{resource} '{identifier}' conflicts with existing records.",
+        ) from exc
+    except sqlite3.OperationalError as exc:
+        raise StorageUnavailableError(
+            "Task storage is temporarily unavailable; retry the request."
+        ) from exc
+    except sqlite3.Error as exc:
+        raise RepositoryError(
+            f"Task storage failed while writing {resource} '{identifier}'."
+        ) from exc
 
 
 def normalize_task_name(value: str, *, strip_tag_prefix: bool = False) -> str:
@@ -47,11 +76,6 @@ def display_tag_name(value: str) -> str:
     if display.startswith("@"):
         display = display[1:].strip()
     return " ".join(display.split())
-
-
-def display_context_name(value: str) -> str:
-    display = display_tag_name(value)
-    return f"@{display}" if display else "@"
 
 
 def display_project_name(value: str) -> str:
@@ -74,15 +98,16 @@ class TaskRepository(BaseRepository):
     def command_lock(self, owner_id: str) -> Iterator[None]:
         """Serialize owner-scoped commands and wrap writes in one transaction."""
 
-        del owner_id  # owner serialization is global for SQLite's single writer.
+        # Owner serialization is global for SQLite's single writer.
         with self._process_lock:
             conn = self._connect()
             previous = getattr(self._thread_state, "conn", None)
             self._thread_state.conn = conn
             try:
-                conn.execute("BEGIN IMMEDIATE")
-                yield
-                conn.commit()
+                with _sqlite_guard("Task command", owner_id):
+                    conn.execute("BEGIN IMMEDIATE")
+                    yield
+                    conn.commit()
             except BaseException:
                 conn.rollback()
                 raise
@@ -99,19 +124,26 @@ class TaskRepository(BaseRepository):
         return conn
 
     @contextmanager
-    def _connection(self) -> Iterator[sqlite3.Connection]:
-        active = getattr(self._thread_state, "conn", None)
-        if active is not None:
-            yield active
-            return
+    def _owned_connection(self) -> Iterator[sqlite3.Connection]:
+        """Open a private connection and always close it on exit."""
+
         conn = self._connect()
         try:
             yield conn
         finally:
             conn.close()
 
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        active = getattr(self._thread_state, "conn", None)
+        if active is not None:
+            yield active
+            return
+        with self._owned_connection() as conn:
+            yield conn
+
     def _initialize_database(self) -> None:
-        with self._connect() as conn:
+        with self._owned_connection() as conn:
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS projects (
@@ -205,11 +237,13 @@ class TaskRepository(BaseRepository):
                     ON task_tags(owner_id, tag_id, task_id);
                 CREATE INDEX IF NOT EXISTS idx_brain_dump_operations_owner_status
                     ON brain_dump_operations(owner_id, status, updated_at, id);
+                CREATE INDEX IF NOT EXISTS idx_idempotency_owner_created
+                    ON idempotency_records(owner_id, created_at);
                 """
             )
 
     def _migrate_legacy_json_once(self) -> None:
-        with self._connect() as conn:
+        with self._owned_connection() as conn:
             seen = conn.execute(
                 "SELECT 1 FROM migration_ledger WHERE id = ?", ("legacy-json-v1",)
             ).fetchone()
@@ -225,7 +259,6 @@ class TaskRepository(BaseRepository):
                             "name": display_project_name(project.name),
                             "normalized_name": project.normalized_name
                             or normalize_task_name(project.name),
-                            "linked_tree_ids": [],
                         }
                     )
                     self._upsert_project(conn, project)
@@ -279,8 +312,6 @@ class TaskRepository(BaseRepository):
 
     def context_path(self, owner_id: str, context_id: str) -> Path:
         return self.resolve("contexts", owner_id, f"{context_id}.json")
-
-    tag_path = context_path
 
     def task_path(self, owner_id: str, task_id: str) -> Path:
         return self.resolve("tasks", owner_id, f"{task_id}.json")
@@ -390,26 +421,23 @@ class TaskRepository(BaseRepository):
         )
 
     def create_project(self, project: ProjectDocument) -> None:
-        with self._connection() as conn:
+        with self._connection() as conn, _sqlite_guard("Project", project.id):
             if self._exists(conn, "projects", project.owner_id, project.id):
                 raise ConflictError("Project", project.id)
             self._upsert_project(conn, project)
 
     def save_project(self, project: ProjectDocument) -> None:
-        with self._connection() as conn:
+        with self._connection() as conn, _sqlite_guard("Project", project.id):
             self._upsert_project(conn, project)
 
-    def create_context(self, context: ContextDocument) -> None:
-        self.create_tag(context)
-
     def create_tag(self, tag: TagDocument) -> None:
-        with self._connection() as conn:
+        with self._connection() as conn, _sqlite_guard("Tag", tag.id):
             if self._exists(conn, "tags", tag.owner_id, tag.id):
                 raise ConflictError("Tag", tag.id)
             self._upsert_tag(conn, tag)
 
     def save_tag(self, tag: TagDocument) -> None:
-        with self._connection() as conn:
+        with self._connection() as conn, _sqlite_guard("Tag", tag.id):
             self._upsert_tag(conn, tag)
 
     def get_project_for_owner(
@@ -417,29 +445,23 @@ class TaskRepository(BaseRepository):
     ) -> ProjectDocument:
         return self._get("projects", ProjectDocument, "Project", project_id, owner_id=owner_id)
 
-    def get_context_for_owner(self, context_id: str, *, owner_id: str) -> ContextDocument:
-        return self.get_tag_for_owner(context_id, owner_id=owner_id)
-
     def get_tag_for_owner(self, tag_id: str, *, owner_id: str) -> TagDocument:
         return self._get("tags", TagDocument, "Tag", tag_id, owner_id=owner_id)
 
     def list_projects_for_owner(self, *, owner_id: str) -> list[ProjectDocument]:
         return self._list("projects", ProjectDocument, owner_id=owner_id)
 
-    def list_contexts_for_owner(self, *, owner_id: str) -> list[ContextDocument]:
-        return self.list_tags_for_owner(owner_id=owner_id)
-
     def list_tags_for_owner(self, *, owner_id: str) -> list[TagDocument]:
         return self._list("tags", TagDocument, owner_id=owner_id)
 
     def create(self, task: TaskDocument) -> None:
-        with self._connection() as conn:
+        with self._connection() as conn, _sqlite_guard("Task", task.id):
             if self._exists(conn, "tasks", task.owner_id, task.id):
                 raise ConflictError("Task", task.id)
             self._upsert_task(conn, task)
 
     def save(self, task: TaskDocument) -> None:
-        with self._connection() as conn:
+        with self._connection() as conn, _sqlite_guard("Task", task.id):
             self._upsert_task(conn, task)
 
     def get_for_owner(self, task_id: str, *, owner_id: str) -> TaskDocument:
@@ -449,12 +471,39 @@ class TaskRepository(BaseRepository):
         return self._list("tasks", TaskDocument, owner_id=owner_id)
 
     def save_brain_dump_operation(self, operation: BrainDumpOperationDocument) -> None:
-        with self._connection() as conn:
+        with (
+            self._connection() as conn,
+            _sqlite_guard("Brain dump operation", operation.id),
+        ):
             self._upsert_brain_dump_operation(conn, operation)
 
     def get_brain_dump_operation_for_owner(
         self, operation_id: str, *, owner_id: str
     ) -> BrainDumpOperationDocument:
+        operation = self._load_brain_dump_operation(operation_id, owner_id=owner_id)
+        if operation is not None:
+            return operation
+
+        path = self.brain_dump_operation_path(owner_id, operation_id)
+        if not path.exists():
+            raise NotFoundError("Brain dump operation", operation_id)
+        legacy = self.load_model(path, BrainDumpOperationDocument)
+        if getattr(self._thread_state, "conn", None) is not None:
+            # Already inside this thread's serialized command transaction.
+            self.save_brain_dump_operation(legacy)
+            return legacy
+        with self.command_lock(owner_id):
+            # Re-check under the lock so a concurrent write is never clobbered
+            # by the stale legacy JSON snapshot.
+            current = self._load_brain_dump_operation(operation_id, owner_id=owner_id)
+            if current is not None:
+                return current
+            self.save_brain_dump_operation(legacy)
+            return legacy
+
+    def _load_brain_dump_operation(
+        self, operation_id: str, *, owner_id: str
+    ) -> BrainDumpOperationDocument | None:
         with self._connection() as conn:
             row = conn.execute(
                 """
@@ -463,18 +512,12 @@ class TaskRepository(BaseRepository):
                 """,
                 (owner_id, operation_id),
             ).fetchone()
-        if row is not None:
-            return BrainDumpOperationDocument.model_validate(json.loads(row["payload"]))
-
-        path = self.brain_dump_operation_path(owner_id, operation_id)
-        if not path.exists():
-            raise NotFoundError("Brain dump operation", operation_id)
-        operation = self.load_model(path, BrainDumpOperationDocument)
-        self.save_brain_dump_operation(operation)
-        return operation
+        if row is None:
+            return None
+        return BrainDumpOperationDocument.model_validate(json.loads(row["payload"]))
 
     def create_subtask(self, subtask: TaskSubtaskDocument) -> None:
-        with self._connection() as conn:
+        with self._connection() as conn, _sqlite_guard("Task subtask", subtask.id):
             conn.execute(
                 "INSERT INTO subtasks (owner_id, task_id, id, payload) VALUES (?, ?, ?, ?)",
                 (subtask.owner_id, subtask.task_id, subtask.id, self._payload(subtask)),
@@ -509,7 +552,7 @@ class TaskRepository(BaseRepository):
         return TaskSubtaskDocument.model_validate(json.loads(row["payload"]))
 
     def create_comment(self, comment: TaskCommentDocument) -> None:
-        with self._connection() as conn:
+        with self._connection() as conn, _sqlite_guard("Task comment", comment.id):
             conn.execute(
                 "INSERT INTO comments (owner_id, task_id, id, payload) VALUES (?, ?, ?, ?)",
                 (comment.owner_id, comment.task_id, comment.id, self._payload(comment)),
@@ -566,7 +609,7 @@ class TaskRepository(BaseRepository):
 
     def save_idempotency(self, *, owner_id: str, record: IdempotencyRecord) -> None:
         key_hash = hashlib.sha256(record.key.encode("utf-8")).hexdigest()
-        with self._connection() as conn:
+        with self._connection() as conn, _sqlite_guard("Idempotency-Key", record.key):
             conn.execute(
                 """
                 INSERT OR REPLACE INTO idempotency_records
@@ -586,6 +629,28 @@ class TaskRepository(BaseRepository):
                 ),
             )
         BaseRepository.dump_model(self.idempotency_path(owner_id, record.key), record)
+
+    def purge_expired_idempotency(self, *, owner_id: str, now: datetime) -> int:
+        """Drop idempotency records past retention so history stays bounded."""
+
+        cutoff = (now - IDEMPOTENCY_RETENTION).isoformat()
+        with self._connection() as conn, _sqlite_guard("Idempotency-Key", owner_id):
+            rows = conn.execute(
+                """
+                SELECT key FROM idempotency_records
+                WHERE owner_id = ? AND created_at < ?
+                """,
+                (owner_id, cutoff),
+            ).fetchall()
+            if not rows:
+                return 0
+            conn.execute(
+                "DELETE FROM idempotency_records WHERE owner_id = ? AND created_at < ?",
+                (owner_id, cutoff),
+            )
+        for row in rows:
+            self.idempotency_path(owner_id, row["key"]).unlink(missing_ok=True)
+        return len(rows)
 
     def list_idempotency_for_owner(self, *, owner_id: str) -> list[IdempotencyRecord]:
         with self._connection() as conn:
@@ -616,60 +681,6 @@ class TaskRepository(BaseRepository):
             ).fetchone()[0]
         return (value if value is not None else -1) + 1
 
-    def ensure_owner_dir(self, owner_id: str) -> Path:
-        return ensure_directory(self.resolve("tasks", owner_id))
-
-    @staticmethod
-    def dump_model(path: Path, model: BaseModel) -> None:
-        """Mirror legacy JSON fixture writes into the canonical SQLite store."""
-
-        BaseRepository.dump_model(path, model)
-        storage_roots = {
-            "brain-dump-operations",
-            "projects",
-            "contexts",
-            "tasks",
-            "task-subtasks",
-            "task-comments",
-            "task-commands",
-        }
-        root: Path | None = None
-        for index, part in enumerate(path.parts):
-            if part in storage_roots:
-                root = Path(*path.parts[:index])
-                break
-        if root is None:
-            return
-
-        repo = TaskRepository(root)
-        with repo._connection() as conn:
-            if isinstance(model, ProjectDocument):
-                repo._upsert_project(conn, model)
-            elif isinstance(model, TagDocument):
-                repo._upsert_tag(conn, model)
-            elif isinstance(model, TaskDocument):
-                repo._upsert_task(conn, model)
-            elif isinstance(model, BrainDumpOperationDocument):
-                repo._upsert_brain_dump_operation(conn, model)
-            elif isinstance(model, TaskSubtaskDocument):
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO subtasks (owner_id, task_id, id, payload)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (model.owner_id, model.task_id, model.id, repo._payload(model)),
-                )
-            elif isinstance(model, TaskCommentDocument):
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO comments (owner_id, task_id, id, payload)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (model.owner_id, model.task_id, model.id, repo._payload(model)),
-                )
-            elif isinstance(model, IdempotencyRecord):
-                repo.save_idempotency(owner_id=path.parent.name, record=model)
-
     def _exists(
         self, conn: sqlite3.Connection, table: str, owner_id: str, record_id: str
     ) -> bool:
@@ -690,7 +701,7 @@ class TaskRepository(BaseRepository):
         *,
         owner_id: str,
     ) -> ModelT:
-        with self._connection() as conn:
+        with self._connection() as conn, _sqlite_guard(resource, record_id):
             row = conn.execute(
                 f"SELECT payload FROM {table} WHERE owner_id = ? AND id = ?",
                 (owner_id, record_id),
@@ -705,7 +716,7 @@ class TaskRepository(BaseRepository):
     def _list(
         self, table: str, model_cls: type[ModelT], *, owner_id: str
     ) -> list[ModelT]:
-        with self._connection() as conn:
+        with self._connection() as conn, _sqlite_guard(table, owner_id):
             rows = conn.execute(
                 f"SELECT payload FROM {table} WHERE owner_id = ?", (owner_id,)
             ).fetchall()

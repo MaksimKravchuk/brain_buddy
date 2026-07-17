@@ -34,6 +34,10 @@ class RepositoryError(BrainBuddyError):
     """Wrap lower-level IO or serialization failures."""
 
 
+class StorageUnavailableError(RepositoryError):
+    """Raised when the storage backend is temporarily unable to serve requests."""
+
+
 class ValidationFailure(BrainBuddyError):
     """Raised when requested operation fails domain validation checks."""
 
@@ -47,5 +51,6 @@ __all__ = [
     "ConflictError",
     "NotFoundError",
     "RepositoryError",
+    "StorageUnavailableError",
     "ValidationFailure",
 ]

@@ -69,6 +69,10 @@ interface OptimisticChange {
   snapshot: GraphSnapshot;
 }
 
+type SetTreeOptions = {
+  restoreSafe?: boolean;
+};
+
 type SelectionState =
   | { type: "node"; id: string }
   | { type: "relation"; id: string }
@@ -91,7 +95,7 @@ interface TreeStoreState {
   lastLocalSaveAt: string | null;
   lastCloudSyncAt: string | null;
   lastSyncError: string | null;
-  setTree(tree: TreeDetailResponse): void;
+  setTree(tree: TreeDetailResponse, options?: SetTreeOptions): void;
   reset(): void;
   select(selection: SelectionState): void;
   pushSnapshot(): void;
@@ -330,10 +334,12 @@ async function persistTree(get: () => TreeStoreState, set: TreeStoreSet) {
   let lastSyncError: string | null = savedLocally ? null : "Local draft save failed";
   let lastCloudSyncAt: string | null = null;
   let serverUpdatedAt: string | null = null;
+  let serverVersion: number | null = null;
 
   try {
     const syncedTree = await apiClient.updateTree(detail.id, buildTreeUpdateRequest(detail));
     serverUpdatedAt = syncedTree.metadata.updated_at;
+    serverVersion = syncedTree.metadata.version;
     lastCloudSyncAt = serverUpdatedAt;
     pendingSync = false;
     lastSyncError = null;
@@ -364,7 +370,11 @@ async function persistTree(get: () => TreeStoreState, set: TreeStoreSet) {
     lastSyncError,
     metadata:
       state.metadata && serverUpdatedAt
-        ? { ...state.metadata, updatedAt: serverUpdatedAt }
+        ? {
+            ...state.metadata,
+            version: serverVersion ?? state.metadata.version,
+            updatedAt: serverUpdatedAt
+          }
         : state.metadata
   }));
 }
@@ -386,6 +396,30 @@ function withPendingSync(): Partial<TreeStoreState> {
     lastChangeAt: Date.now(),
     lastSyncError: null
   };
+}
+
+function hasUnsavedLocalChanges(state: TreeStoreState) {
+  return state.pendingSync || state.optimisticQueue.length > 0;
+}
+
+function isRestoreSafeTreeRefresh(
+  state: TreeStoreState,
+  tree: TreeDetailResponse,
+  options?: SetTreeOptions
+) {
+  if (options?.restoreSafe) {
+    return true;
+  }
+
+  if (state.activeTreeId !== tree.id) {
+    return true;
+  }
+
+  if (hasUnsavedLocalChanges(state)) {
+    return false;
+  }
+
+  return true;
 }
 
 function calculateRelationCounts(nodes: GraphNode[], relations: GraphRelation[]) {
@@ -494,12 +528,16 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
   lastCloudSyncAt: null,
   lastSyncError: null,
 
-  setTree(tree) {
+  setTree(tree, options) {
     const mappedRelations = tree.relations.map(mapRelationResponse);
     const mappedNodes = applyDerivedNodeState(tree.nodes.map(mapNodeResponse), mappedRelations);
     const ownerId = tree.owner_id ?? tree.metadata.owner_id ?? null;
 
     set((state) => {
+      if (!isRestoreSafeTreeRefresh(state, tree, options)) {
+        return {};
+      }
+
       let nextSelection = state.activeTreeId === tree.id ? state.selection : initialSelection;
 
       if (nextSelection.type === "node") {
@@ -523,7 +561,7 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
         },
         nodes: mappedNodes,
         relations: mappedRelations,
-        versions: [],
+        versions: state.activeTreeId === tree.id ? state.versions : [],
         selection: nextSelection,
         undoStack: [],
         redoStack: [],

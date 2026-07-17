@@ -356,6 +356,65 @@ describe("treeStore", () => {
     expect(useTreeStore.getState().selection).toEqual({ type: null, id: null });
   });
 
+  it("does not let a same-tree refresh clobber dirty local edits or history", () => {
+    useTreeStore.getState().setTree(sampleTree);
+    let store = useTreeStore.getState();
+    store.pushSnapshot();
+    store.upsertNode({ ...store.nodes[0], label: "Unsaved local edit" });
+
+    expect(useTreeStore.getState().pendingSync).toBe(true);
+    expect(useTreeStore.getState().undoStack).toHaveLength(1);
+
+    store = useTreeStore.getState();
+    store.setTree({
+      ...sampleTree,
+      metadata: { ...sampleTree.metadata, version: 1, updated_at: "2024-04-01T10:01:00Z" },
+      nodes: [
+        {
+          ...sampleTree.nodes[0],
+          label: "Stale server label"
+        }
+      ]
+    });
+
+    const state = useTreeStore.getState();
+    expect(state.nodes[0].label).toBe("Unsaved local edit");
+    expect(state.pendingSync).toBe(true);
+    expect(state.undoStack).toHaveLength(1);
+    expect(state.redoStack).toHaveLength(0);
+  });
+
+  it("allows explicit restore-safe mutation results to replace dirty same-tree state", () => {
+    useTreeStore.getState().setTree(sampleTree);
+    let store = useTreeStore.getState();
+    store.pushSnapshot();
+    store.upsertNode({ ...store.nodes[0], label: "Dirty optimistic label" });
+
+    expect(useTreeStore.getState().pendingSync).toBe(true);
+
+    store = useTreeStore.getState();
+    store.setTree(
+      {
+        ...sampleTree,
+        name: "Server acknowledged tree",
+        metadata: { ...sampleTree.metadata, version: 2, updated_at: "2024-04-01T10:02:00Z" },
+        nodes: [
+          {
+            ...sampleTree.nodes[0],
+            label: "Server acknowledged label"
+          }
+        ]
+      },
+      { restoreSafe: true }
+    );
+
+    const state = useTreeStore.getState();
+    expect(state.metadata?.name).toBe("Server acknowledged tree");
+    expect(state.nodes[0].label).toBe("Server acknowledged label");
+    expect(state.pendingSync).toBe(false);
+    expect(state.undoStack).toHaveLength(0);
+  });
+
   it("recomputes highlighting state via upsert based on derived rules", () => {
     useTreeStore.getState().setTree(sampleTree);
 
@@ -517,6 +576,21 @@ describe("treeStore", () => {
       { id: "v1", label: "V1", createdAt: "2024-04-01", conflictCount: 0, diffSummary: null }
     ];
     useTreeStore.getState().setVersions(versions);
+    expect(useTreeStore.getState().versions).toEqual(versions);
+  });
+
+  it("preserves versions when refreshing the active tree detail", () => {
+    useTreeStore.getState().setTree(sampleTree);
+    const versions = [
+      { id: "v1", label: "V1", createdAt: "2024-04-01", conflictCount: 0, diffSummary: null }
+    ];
+    useTreeStore.getState().setVersions(versions);
+
+    useTreeStore.getState().setTree({
+      ...sampleTree,
+      metadata: { ...sampleTree.metadata, updated_at: "2024-04-01T12:00:00Z" }
+    });
+
     expect(useTreeStore.getState().versions).toEqual(versions);
   });
 

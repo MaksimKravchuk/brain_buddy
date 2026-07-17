@@ -146,6 +146,9 @@ export function BrainNode({ data, selected }: NodeProps<BrainNodeData>): JSX.Ele
   return (
     <div
       data-testid="brain-node"
+      data-node-id={node.id}
+      data-node-label={node.label}
+      aria-label={`Brain node ${node.label}`}
       className={twMerge(
         "group relative h-[132px] w-[240px] overflow-hidden rounded-l-2xl rounded-r-xl border border-slate-200 text-left shadow-soft transition-[transform,box-shadow,filter] duration-200 ease-smooth",
         selected

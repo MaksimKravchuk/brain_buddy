@@ -12,6 +12,7 @@ from app.exceptions import (
     ConflictError,
     NotFoundError,
     RepositoryError,
+    StorageUnavailableError,
     ValidationFailure,
 )
 from app.schemas import ErrorResponse
@@ -112,6 +113,22 @@ def register_exception_handlers(app: FastAPI) -> None:
         # entity to align with contract.
         response = JSONResponse(
             status_code=400, content=payload.model_dump(by_alias=True)
+        )
+        if correlation_id:
+            response.headers[CORRELATION_HEADER] = correlation_id
+        return response
+
+    @app.exception_handler(StorageUnavailableError)
+    async def handle_storage_unavailable(
+        request: Request, exc: StorageUnavailableError
+    ) -> JSONResponse:
+        correlation_id = getattr(request.state, "correlation_id", None)
+        payload = ErrorResponse(
+            message="Storage is temporarily unavailable; please retry.",
+            reference_id=correlation_id,
+        )
+        response = JSONResponse(
+            status_code=503, content=payload.model_dump(by_alias=True)
         )
         if correlation_id:
             response.headers[CORRELATION_HEADER] = correlation_id

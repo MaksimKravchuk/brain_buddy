@@ -28,8 +28,9 @@ test-frontend:
 	python3 scripts/validate_allure_taxonomy.py --path frontend/allure-results/vitest --label frontend-vitest
 
 test-e2e:
-	cd frontend && npm run test:e2e
-	python3 scripts/validate_allure_taxonomy.py --path frontend/allure-results/playwright --label frontend-playwright
+	./scripts/run_playwright_e2e.sh
+	python3 scripts/validate_ci_artifacts.py results --path frontend/allure-results/playwright --label playwright-e2e --since-file frontend/allure-results/playwright/.run-started-at
+	python3 scripts/validate_allure_taxonomy.py --path frontend/allure-results/playwright --label playwright-e2e
 
 lint-frontend:
 	cd frontend && npm run lint
@@ -46,4 +47,5 @@ validate-ci:
 	python3 scripts/validate_ci_artifacts.py mutation-workflow --workflow .github/workflows/mutation-quality.yml
 
 check-specs:
+	python3 -m unittest scripts/test_check_spec_kit_specs.py -v
 	python3 scripts/check_spec_kit_specs.py

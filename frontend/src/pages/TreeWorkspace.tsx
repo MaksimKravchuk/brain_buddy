@@ -26,6 +26,10 @@ import { TreeMenu } from "../components/layout/TreeMenu";
 import { CreateTreeModal } from "../components/modals/CreateTreeModal";
 import { DeleteTreeModal } from "../components/modals/DeleteTreeModal";
 import { RenameTreeModal } from "../components/modals/RenameTreeModal";
+import { InspectorTabs } from "../components/panels/InspectorTabs";
+import { NodeInspector } from "../components/panels/NodeInspector";
+import { RelationInspector } from "../components/panels/RelationInspector";
+import { VersionPanel } from "../components/panels/VersionPanel";
 import { ToastStack } from "../components/ui/ToastStack";
 import { useAuthStore } from "../stores/authStore";
 import { useTreeStore } from "../stores/treeStore";
@@ -44,6 +48,7 @@ export default function TreeWorkspace(): JSX.Element {
   const activeTreeId = useTreeStore((state) => state.activeTreeId);
   const openModal = useUiStore((state) => state.openModal);
   const pushToast = useUiStore((state) => state.pushToast);
+  const inspectorTab = useUiStore((state) => state.inspectorTab);
 
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
@@ -66,11 +71,8 @@ export default function TreeWorkspace(): JSX.Element {
     if (!treeQuery.data) {
       return;
     }
-    if (treeQuery.data.id === activeTreeId) {
-      return;
-    }
     setTree(treeQuery.data);
-  }, [treeQuery.data, activeTreeId, setTree]);
+  }, [treeQuery.data, setTree]);
 
   useEffect(() => {
     if (!selectedTreeId) {
@@ -173,7 +175,7 @@ export default function TreeWorkspace(): JSX.Element {
             />
             <div className="ml-auto flex items-center gap-2">
               {user ? (
-                <span className="truncate text-xs text-slate-500" title={user.email}>
+                <span className="hidden truncate text-xs text-slate-500 sm:inline" title={user.email}>
                   {user.email}
                 </span>
               ) : null}
@@ -224,6 +226,17 @@ export default function TreeWorkspace(): JSX.Element {
               onCenter={handleCenter}
             />
           </div>
+          <aside
+            aria-label="Tree inspector"
+            className="hidden w-96 shrink-0 overflow-y-auto border-l border-slate-200 bg-surface-sunken/80 px-4 py-5 shadow-soft xl:block"
+          >
+            <div className="space-y-5">
+              <InspectorTabs />
+              {inspectorTab === "node" ? <NodeInspector /> : null}
+              {inspectorTab === "relation" ? <RelationInspector /> : null}
+              {inspectorTab === "versions" ? <VersionPanel /> : null}
+            </div>
+          </aside>
         </main>
       </div>
 
