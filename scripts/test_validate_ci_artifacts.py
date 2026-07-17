@@ -31,7 +31,9 @@ class ValidateCiArtifactsTests(unittest.TestCase):
         include_evidence: bool = True,
     ) -> None:
         payload: dict[str, object] = {
+            "uuid": f"case-{index}",
             "name": story,
+            "fullName": f"native product {story}",
             "status": status,
             "labels": [
                 {"name": "epic", "value": "BrainBuddy MVP loop"},
@@ -71,7 +73,10 @@ class ValidateCiArtifactsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             results_dir = Path(tmp) / "allure-results"
             results_dir.mkdir()
-            (results_dir / "case-result.json").write_text("{}", encoding="utf-8")
+            (results_dir / "case-result.json").write_text(
+                '{"uuid":"case-1","name":"runs a journey","fullName":"spec runs a journey","status":"passed","start":100,"stop":125}',
+                encoding="utf-8",
+            )
 
             completed = self.run_validator(
                 "results", "--path", str(results_dir), "--label", "frontend-vitest"
@@ -80,12 +85,98 @@ class ValidateCiArtifactsTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("frontend-vitest", completed.stdout)
 
+    def test_results_rejects_skipped_only_allure_result_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results_dir = Path(tmp) / "allure-results"
+            results_dir.mkdir()
+            (results_dir / "case-result.json").write_text(
+                '{"uuid":"case-1","name":"skipped journey","fullName":"spec skipped journey","status":"skipped","start":100,"stop":125}',
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator(
+                "results", "--path", str(results_dir), "--label", "playwright-e2e"
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("playwright-e2e", completed.stderr)
+        self.assertIn("executed", completed.stderr)
+
+    def test_results_rejects_zero_executed_scenario_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results_dir = Path(tmp) / "allure-results"
+            results_dir.mkdir()
+            (results_dir / "case-result.json").write_text(
+                '{"uuid":"case-1","name":"zero duration journey","fullName":"spec zero duration journey","status":"passed","start":100,"stop":100}',
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator(
+                "results", "--path", str(results_dir), "--label", "playwright-e2e"
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("zero executed", completed.stderr)
+
+    def test_results_rejects_list_only_json_without_case_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results_dir = Path(tmp) / "allure-results"
+            results_dir.mkdir()
+            (results_dir / "list-result.json").write_text(
+                '{"uuid":"list-1","name":"tests/example.spec.ts","status":"passed","start":100,"stop":125}',
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator(
+                "results", "--path", str(results_dir), "--label", "playwright-e2e"
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("list-only", completed.stderr)
+
+    def test_results_rejects_files_older_than_run_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results_dir = Path(tmp) / "allure-results"
+            results_dir.mkdir()
+            result = results_dir / "case-result.json"
+            result.write_text(
+                '{"uuid":"case-1","name":"stale journey","fullName":"spec stale journey","status":"passed","start":100,"stop":125}',
+                encoding="utf-8",
+            )
+            marker = results_dir / ".run-started-at"
+            marker.write_text("started", encoding="utf-8")
+            result.touch()
+            marker.touch()
+
+            completed = self.run_validator(
+                "results",
+                "--path",
+                str(results_dir),
+                "--label",
+                "playwright-e2e",
+                "--since-file",
+                str(marker),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("stale", completed.stderr)
+
     def test_product_e2e_results_require_active_native_story_labels(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             results_dir = Path(tmp) / "allure-results"
             results_dir.mkdir()
             (results_dir / "legacy-result.json").write_text(
-                json.dumps({"name": "legacy /crt smoke", "status": "passed", "labels": []}),
+                json.dumps(
+                    {
+                        "name": "legacy /crt smoke",
+                        "fullName": "legacy /crt smoke",
+                        "status": "passed",
+                        "start": 100,
+                        "stop": 125,
+                        "steps": [{"name": "execute", "status": "passed", "start": 1, "stop": 2}],
+                        "labels": [],
+                    }
+                ),
                 encoding="utf-8",
             )
 
@@ -257,7 +348,6 @@ export default defineConfig({
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("frontend lint", completed.stderr)
         self.assertIn("frontend coverage threshold statements", completed.stderr)
-        self.assertIn("native product Compose E2E", completed.stderr)
 
     def test_mutation_workflow_rejects_a_non_nightly_workflow_without_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

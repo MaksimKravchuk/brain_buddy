@@ -1,31 +1,46 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const composeE2E = process.env.PLAYWRIGHT_COMPOSE === "1";
-const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? (composeE2E ? "http://127.0.0.1:8080" : "http://127.0.0.1:5173");
+const isCI = Boolean(process.env.CI);
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:5173";
+const usesExternalComposeStack = Boolean(process.env.BRAIN_BUDDY_E2E_COMPOSE_PROJECT);
 
 export default defineConfig({
   testDir: "./tests",
-  fullyParallel: true,
-  forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
-  reporter: composeE2E
-    ? [["list"], ["allure-playwright", { resultsDir: "allure-results/playwright", detail: true }]]
-    : process.env.CI
-      ? "github"
-      : "list",
+  fullyParallel: false,
+  forbidOnly: isCI,
+  retries: isCI ? 1 : 0,
+  workers: 1,
+  reporter: [
+    [isCI ? "github" : "list"],
+    ["html", { outputFolder: "playwright-report", open: "never" }],
+    ["allure-playwright", { resultsDir: "allure-results/playwright" }]
+  ],
+  outputDir: "test-results/playwright",
   use: {
     ...devices["Desktop Chrome"],
     baseURL,
-    trace: "on-first-retry"
+    trace: isCI ? "retain-on-failure" : "on-first-retry",
+    screenshot: "only-on-failure",
+    video: "retain-on-failure"
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: composeE2E
+  projects: [
+    {
+      name: "chromium",
+      testMatch: /(?:e2e\/(?!mobile).*|native-tasks-voice-brain-dump\.compose)\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] }
+    },
+    {
+      name: "mobile-chromium",
+      testMatch: /e2e\/mobile\.spec\.ts/,
+      use: { ...devices["Pixel 5"] }
+    }
+  ],
+  webServer: usesExternalComposeStack
     ? undefined
     : {
         command: "npm run dev -- --host 127.0.0.1",
-        url: "http://127.0.0.1:5173/login",
-        reuseExistingServer: !process.env.CI,
+        url: `${baseURL}/login`,
+        reuseExistingServer: !isCI,
         timeout: 120_000
       }
 });

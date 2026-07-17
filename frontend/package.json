@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:e2e:compose": "rm -rf allure-results/playwright playwright-report test-results && PLAYWRIGHT_COMPOSE=1 playwright test tests/native-tasks-voice-brain-dump.compose.spec.ts --project=chromium",
+    "test:e2e": "playwright test --config playwright.config.ts",
     "test:watch": "vitest"
   },
   "dependencies": {

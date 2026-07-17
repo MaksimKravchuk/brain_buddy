@@ -81,7 +81,10 @@ describe("SignupPage", () => {
   });
 
   it("explains conflicting and unexpected signup failures", async () => {
-    vi.spyOn(authApi, "signup").mockRejectedValueOnce(new ApiError("Conflict", 409, null)).mockRejectedValueOnce(new Error("offline"));
+    vi.spyOn(authApi, "signup")
+      .mockRejectedValueOnce(new ApiError("Conflict", 409, null))
+      .mockRejectedValueOnce(new ApiError("Server", 500, null))
+      .mockRejectedValueOnce(new Error("offline"));
     renderSignup();
     const user = userEvent.setup();
 
@@ -92,6 +95,11 @@ describe("SignupPage", () => {
       await user.click(screen.getByRole("button", { name: /create account/i }));
     });
     await waitFor(() => expect(screen.getByText(/account with that email already exists/i)).toBeInTheDocument());
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: /create account/i }));
+    });
+    await waitFor(() => expect(screen.getByText(/signup failed. please try again/i)).toBeInTheDocument());
 
     await act(async () => {
       await user.click(screen.getByRole("button", { name: /create account/i }));

@@ -33,8 +33,14 @@ async function productLabels(story: string): Promise<void> {
 }
 
 function createInvite(): string {
+  const composeProject = process.env.BRAIN_BUDDY_E2E_COMPOSE_PROJECT ?? process.env.COMPOSE_PROJECT_NAME;
+  const env = { ...process.env };
+  if (composeProject) {
+    env.COMPOSE_PROJECT_NAME = composeProject;
+  }
   return execFileSync("docker", ["compose", "exec", "-T", "backend", "python", "-m", "app.cli", "create-invite"], {
     cwd: "..",
+    env,
     encoding: "utf8"
   }).trim();
 }
