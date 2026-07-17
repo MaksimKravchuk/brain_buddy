@@ -172,6 +172,77 @@ class ValidateAllureTaxonomyTests(unittest.TestCase):
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("meaningful step", completed.stderr.lower())
 
+    def test_ignores_raw_json_reporter_steps_when_real_evidence_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results = Path(tmp)
+            payload = _valid_result()
+            payload["steps"] = [
+                {
+                    "name": '{"id":"user_123","email":"person@example.com"}',
+                    "status": "passed",
+                    "start": 100,
+                    "stop": 100,
+                    "steps": [],
+                    "attachments": [],
+                    "parameters": [],
+                },
+                {
+                    "name": "Expect tree menu to be visible",
+                    "status": "passed",
+                    "start": 101,
+                    "stop": 120,
+                    "steps": [],
+                    "attachments": [],
+                    "parameters": [],
+                },
+            ]
+            self._write(results, "a-result.json", payload)
+
+            completed = self.run_validator(
+                "--path", str(results), "--label", "frontend-playwright"
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_rejects_raw_json_reporter_steps_as_only_step_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results = Path(tmp)
+            payload = _valid_result()
+            payload["steps"] = [
+                {
+                    "name": '{"id":"user_123","email":"person@example.com"}',
+                    "status": "passed",
+                    "start": 100,
+                    "stop": 100,
+                    "steps": [],
+                    "attachments": [],
+                    "parameters": [],
+                }
+            ]
+            self._write(results, "a-result.json", payload)
+
+            completed = self.run_validator(
+                "--path", str(results), "--label", "frontend-playwright"
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("meaningful step", completed.stderr.lower())
+
+    def test_ignores_non_executed_results(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results = Path(tmp)
+            skipped = _valid_result()
+            skipped["status"] = "skipped"
+            skipped.pop("steps")
+            self._write(results, "skipped-result.json", skipped)
+            self._write(results, "passed-result.json", _valid_result())
+
+            completed = self.run_validator(
+                "--path", str(results), "--label", "frontend-playwright"
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
     def test_rejects_nested_childless_no_op_verify_placeholder(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             results = Path(tmp)

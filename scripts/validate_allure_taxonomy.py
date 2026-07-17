@@ -26,6 +26,7 @@ import sys
 from pathlib import Path
 
 REQUIRED_LABELS = ("epic", "feature", "story")
+EXECUTED_STATUSES = {"passed", "failed", "broken"}
 
 # A "human-readable" title must not be a raw framework identifier. pytest emits
 # the bare ``test_snake_case`` function name unless a title is supplied, and the
@@ -89,7 +90,7 @@ def _step_errors(result: dict) -> list[str]:
         if not isinstance(name, str) or not name.strip():
             errors.append(f"step {path} has an empty name")
             continue
-        if _is_fixture_or_hook_scaffolding_step(step):
+        if _is_reporter_scaffolding_step(step):
             continue
         if _is_zero_duration_childless_step_without_evidence(step):
             if _is_placeholder_step_name(name):
@@ -138,24 +139,37 @@ def _is_zero_duration_childless_step_without_evidence(step: dict) -> bool:
     return True
 
 
-def _is_fixture_or_hook_scaffolding_step(step: dict) -> bool:
-    """Return True for Playwright fixture/hook wrapper steps.
+def _is_reporter_scaffolding_step(step: dict) -> bool:
+    """Return True for generated reporter wrapper/evidence-dump steps.
 
     Playwright's Allure reporter emits scaffolding containers such as
     ``Before Hooks`` and ``Fixture "allureTaxonomy"`` around test execution.
     Those wrappers are useful chronology, but they are not product actions,
     assertions, or evidence by themselves. Child steps are walked separately, so
     a real action/assertion nested under a hook still satisfies the taxonomy.
+
+    The reporter can also emit raw JSON request/response body dumps as step
+    names for API setup calls. Treat those as generated scaffolding too: they do
+    not count as meaningful product steps, but they also should not fail an
+    otherwise meaningful browser journey.
     """
 
     name = step.get("name")
     if not isinstance(name, str):
         return False
     stripped = name.strip()
-    return bool(
+    if (
         _PLAYWRIGHT_HOOK_STEP_NAME.match(stripped)
         or _PLAYWRIGHT_FIXTURE_STEP_NAME.match(stripped)
-    )
+    ):
+        return True
+    if stripped.startswith(("{", "[")):
+        try:
+            json.loads(stripped)
+        except json.JSONDecodeError:
+            return False
+        return True
+    return False
 
 
 def _result_errors(result: dict) -> list[str]:
@@ -208,6 +222,9 @@ def validate(paths: list[Path], label: str) -> int:
                 f"error: {label}: {result_file.name}: result is not a JSON object",
                 file=sys.stderr,
             )
+            continue
+
+        if result.get("status") not in EXECUTED_STATUSES:
             continue
 
         errors = _result_errors(result)
