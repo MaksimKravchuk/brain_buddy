@@ -32,6 +32,8 @@ REQUIRED_LABELS = ("epic", "feature", "story")
 # Allure ``fullName`` (``module#test_case``) is a technical id, never a title.
 _RAW_PYTEST_NAME = re.compile(r"^test[_A-Z0-9]")
 _PLACEHOLDER_STEP_NAME = re.compile(r"^(Verify|Scenario|Action):\s+", re.IGNORECASE)
+_PLAYWRIGHT_HOOK_STEP_NAME = re.compile(r"^(Before Hooks|After Hooks)$")
+_PLAYWRIGHT_FIXTURE_STEP_NAME = re.compile(r'^Fixture ".+"$')
 
 
 def _iter_result_files(path: Path) -> list[Path]:
@@ -90,6 +92,8 @@ def _step_errors(result: dict) -> list[str]:
         if _is_no_op_placeholder_step(step):
             errors.append(f"step {path} is an empty placeholder: {name!r}")
             continue
+        if _is_fixture_or_hook_scaffolding_step(step):
+            continue
         meaningful_steps += 1
     if meaningful_steps == 0:
         errors.append("missing at least one meaningful step")
@@ -126,6 +130,26 @@ def _is_no_op_placeholder_step(step: dict) -> bool:
         if isinstance(evidence, list) and evidence:
             return False
     return True
+
+
+def _is_fixture_or_hook_scaffolding_step(step: dict) -> bool:
+    """Return True for Playwright fixture/hook wrapper steps.
+
+    Playwright's Allure reporter emits scaffolding containers such as
+    ``Before Hooks`` and ``Fixture "allureTaxonomy"`` around test execution.
+    Those wrappers are useful chronology, but they are not product actions,
+    assertions, or evidence by themselves. Child steps are walked separately, so
+    a real action/assertion nested under a hook still satisfies the taxonomy.
+    """
+
+    name = step.get("name")
+    if not isinstance(name, str):
+        return False
+    stripped = name.strip()
+    return bool(
+        _PLAYWRIGHT_HOOK_STEP_NAME.match(stripped)
+        or _PLAYWRIGHT_FIXTURE_STEP_NAME.match(stripped)
+    )
 
 
 def _result_errors(result: dict) -> list[str]:
