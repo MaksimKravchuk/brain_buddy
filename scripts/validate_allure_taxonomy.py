@@ -31,6 +31,7 @@ REQUIRED_LABELS = ("epic", "feature", "story")
 # the bare ``test_snake_case`` function name unless a title is supplied, and the
 # Allure ``fullName`` (``module#test_case``) is a technical id, never a title.
 _RAW_PYTEST_NAME = re.compile(r"^test[_A-Z0-9]")
+_PLACEHOLDER_STEP_NAME = re.compile(r"^(Verify|Scenario|Action):\s+", re.IGNORECASE)
 
 
 def _iter_result_files(path: Path) -> list[Path]:
@@ -79,11 +80,52 @@ def _step_errors(result: dict) -> list[str]:
     steps = result.get("steps")
     if not isinstance(steps, list) or not steps:
         return ["missing at least one step"]
-    for index, step in enumerate(steps):
+    errors: list[str] = []
+    meaningful_steps = 0
+    for path, step in _walk_steps(steps):
         name = step.get("name") if isinstance(step, dict) else None
         if not isinstance(name, str) or not name.strip():
-            return [f"step #{index} has an empty name"]
+            errors.append(f"step {path} has an empty name")
+            continue
+        if _is_no_op_placeholder_step(step):
+            errors.append(f"step {path} is an empty placeholder: {name!r}")
+            continue
+        meaningful_steps += 1
+    if meaningful_steps == 0:
+        errors.append("missing at least one meaningful step")
+    if errors:
+        return errors
     return []
+
+
+def _walk_steps(steps: list, prefix: str = "") -> list[tuple[str, dict]]:
+    found: list[tuple[str, dict]] = []
+    for index, step in enumerate(steps):
+        path = f"{prefix}.{index}" if prefix else f"#{index}"
+        if not isinstance(step, dict):
+            found.append((path, {}))
+            continue
+        found.append((path, step))
+        child_steps = step.get("steps")
+        if isinstance(child_steps, list) and child_steps:
+            found.extend(_walk_steps(child_steps, path))
+    return found
+
+
+def _is_no_op_placeholder_step(step: dict) -> bool:
+    name = step.get("name")
+    if not isinstance(name, str) or not _PLACEHOLDER_STEP_NAME.match(name.strip()):
+        return False
+    start = step.get("start")
+    stop = step.get("stop")
+    has_zero_duration = isinstance(start, int) and isinstance(stop, int) and start == stop
+    if not has_zero_duration:
+        return False
+    for evidence_key in ("steps", "attachments", "parameters"):
+        evidence = step.get(evidence_key)
+        if isinstance(evidence, list) and evidence:
+            return False
+    return True
 
 
 def _result_errors(result: dict) -> list[str]:
