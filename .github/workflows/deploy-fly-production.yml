@@ -55,3 +55,8 @@ jobs:
             --retry 20 --retry-all-errors --retry-delay 3 \
             "https://${frontend_app}.fly.dev/api/trees")
           test "$status" = "401"
+
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --retry 20 --retry-all-errors --retry-delay 3 \
+            "https://${frontend_app}.fly.dev/api/tasks")
+          test "$status" = "401"
