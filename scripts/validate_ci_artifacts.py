@@ -55,6 +55,15 @@ E2E_CI_REQUIREMENTS = (
         "Playwright Allure validation",
         "--path frontend/allure-results/playwright --label playwright-e2e",
     ),
+    ("native product E2E Allure validator", "product-e2e-results"),
+)
+NATIVE_PRODUCT_E2E_STORIES = (
+    "Native task shell navigation",
+    "Minimal native task management",
+    "Voice Brain Dump happy path",
+    "Voice Brain Dump idempotency and recovery",
+    "Voice Brain Dump failure recovery",
+    "Owner isolation",
 )
 
 
@@ -135,6 +144,141 @@ def validate_results(path: Path, label: str, since_file: Path | None = None) -> 
         )
 
     print(f"{label}: found {len(executed_files)} executed Allure result file(s) in {path}")
+    return 0
+
+
+def _allure_result_payloads(path: Path) -> list[dict[str, object]]:
+    payloads: list[dict[str, object]] = []
+    for file in sorted(path.glob("*-result.json")):
+        if not file.is_file() or file.stat().st_size == 0:
+            continue
+        try:
+            payload = json.loads(file.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid Allure result JSON in {file}: {exc}") from exc
+        if isinstance(payload, dict):
+            payloads.append(payload)
+    return payloads
+
+
+def _allure_label_values(payload: dict[str, object], name: str) -> set[str]:
+    labels = payload.get("labels")
+    if not isinstance(labels, list):
+        return set()
+    values: set[str] = set()
+    for label in labels:
+        if not isinstance(label, dict):
+            continue
+        if label.get("name") == name and isinstance(label.get("value"), str):
+            values.add(str(label["value"]))
+    return values
+
+
+def _has_meaningful_allure_step(steps: object) -> bool:
+    if not isinstance(steps, list):
+        return False
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        name = step.get("name")
+        status = step.get("status")
+        start = step.get("start")
+        stop = step.get("stop")
+        has_timing = isinstance(start, (int, float)) and isinstance(
+            stop, (int, float)
+        ) and stop >= start
+        if isinstance(name, str) and name.strip() and status == "passed" and has_timing:
+            return True
+        if _has_meaningful_allure_step(step.get("steps")):
+            return True
+    return False
+
+
+def _has_meaningful_playwright_evidence(payload: dict[str, object]) -> bool:
+    start = payload.get("start")
+    stop = payload.get("stop")
+    has_timing = isinstance(start, (int, float)) and isinstance(
+        stop, (int, float)
+    ) and stop > start
+    return has_timing and _has_meaningful_allure_step(payload.get("steps"))
+
+
+def validate_native_product_e2e_results(path: Path) -> int:
+    """Require passing Playwright evidence for the native tasks/voice product suite."""
+
+    if not path.is_dir():
+        return _fail(f"native-product-e2e: Allure results directory does not exist: {path}")
+
+    try:
+        payloads = _allure_result_payloads(path)
+    except ValueError as exc:
+        return _fail(f"native-product-e2e: {exc}")
+    if not payloads:
+        return _fail(f"native-product-e2e: expected non-empty Allure result JSON in {path}")
+
+    active = [payload for payload in payloads if payload.get("status") != "skipped"]
+    if len(active) < len(NATIVE_PRODUCT_E2E_STORIES):
+        return _fail(
+            "native-product-e2e: expected active native product scenarios, "
+            f"found {len(active)} active result(s)"
+        )
+
+    required_story_payloads: dict[str, list[dict[str, object]]] = {
+        story: [] for story in NATIVE_PRODUCT_E2E_STORIES
+    }
+    for payload in active:
+        for story in _allure_label_values(payload, "story"):
+            if story in required_story_payloads:
+                required_story_payloads[story].append(payload)
+
+    failed_stories = [
+        story
+        for story, story_payloads in required_story_payloads.items()
+        if any(payload.get("status") != "passed" for payload in story_payloads)
+    ]
+    if failed_stories:
+        return _fail(
+            "native-product-e2e: required story result(s) must pass: "
+            + ", ".join(failed_stories)
+        )
+
+    missing_meaningful_evidence = [
+        story
+        for story, story_payloads in required_story_payloads.items()
+        if story_payloads
+        and not any(_has_meaningful_playwright_evidence(payload) for payload in story_payloads)
+    ]
+    if missing_meaningful_evidence:
+        return _fail(
+            "native-product-e2e: required story result(s) need meaningful Playwright evidence: "
+            + ", ".join(missing_meaningful_evidence)
+        )
+
+    meaningful = [payload for payload in active if _has_meaningful_playwright_evidence(payload)]
+    stories = set().union(*(_allure_label_values(payload, "story") for payload in meaningful))
+    missing_stories = [story for story in NATIVE_PRODUCT_E2E_STORIES if story not in stories]
+    if missing_stories:
+        return _fail(
+            "native-product-e2e: missing required passing Allure story label(s): "
+            + ", ".join(missing_stories)
+        )
+
+    epics = set().union(*(_allure_label_values(payload, "epic") for payload in meaningful))
+    features = set().union(*(_allure_label_values(payload, "feature") for payload in meaningful))
+    if "BrainBuddy MVP loop" not in epics:
+        return _fail("native-product-e2e: missing BrainBuddy MVP loop epic label")
+    if "Native tasks and Voice Brain Dump" not in features:
+        return _fail("native-product-e2e: missing Native tasks and Voice Brain Dump feature label")
+
+    names = "\n".join(str(payload.get("name", "")) for payload in active).lower()
+    if "/crt" in names or "crt" in names:
+        return _fail("native-product-e2e: legacy CRT evidence cannot satisfy this suite")
+
+    print(
+        "native-product-e2e: found "
+        f"{len(meaningful)} meaningful passing result(s) covering "
+        f"{len(NATIVE_PRODUCT_E2E_STORIES)} required stories"
+    )
     return 0
 
 
@@ -290,6 +434,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     mutation_workflow.add_argument("--workflow", type=Path, required=True)
 
+    product_e2e_results = subparsers.add_parser(
+        "product-e2e-results",
+        help="validate native tasks and Voice Brain Dump Playwright evidence",
+    )
+    product_e2e_results.add_argument("--path", type=Path, required=True)
+
     return parser
 
 
@@ -301,6 +451,8 @@ def main(argv: list[str] | None = None) -> int:
         return validate_workflow(args.ci, args.disallow_workflow, args.frontend_vite_config)
     if args.command == "mutation-workflow":
         return validate_mutation_workflow(args.workflow)
+    if args.command == "product-e2e-results":
+        return validate_native_product_e2e_results(args.path)
     raise AssertionError(f"unknown command: {args.command}")
 
 

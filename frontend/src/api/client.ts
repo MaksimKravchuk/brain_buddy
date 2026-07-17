@@ -25,8 +25,12 @@ import type {
   BrainDumpTranscriptAppendRequest,
   ProjectResponse,
   TagResponse,
+  TaskCreateRequest,
   TaskListFilters,
-  TaskListResponse
+  TaskListResponse,
+  TaskResponse,
+  TaskTransitionRequest,
+  TaskUpdateRequest
 } from "./taskTypes";
 import { nowMs, recordTelemetry } from "../utils/telemetry";
 
@@ -181,8 +185,35 @@ export const apiClient = {
     if (filters.tagId) {
       params.set("tag_id", filters.tagId);
     }
+    if (filters.includeCompleted) {
+      params.set("include_completed", "true");
+    }
     const query = params.toString();
     return request<TaskListResponse>(`/tasks${query ? `?${query}` : ""}`, { signal });
+  },
+
+  createTask(payload: TaskCreateRequest, idempotencyKey: string) {
+    return request<TaskResponse>("/tasks", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  updateTask(taskId: string, payload: TaskUpdateRequest, idempotencyKey: string) {
+    return request<TaskResponse>(`/tasks/${taskId}`, {
+      method: "PATCH",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  transitionTask(taskId: string, payload: TaskTransitionRequest, idempotencyKey: string) {
+    return request<TaskResponse>(`/tasks/${taskId}/transitions`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
   },
 
   listProjects(signal?: AbortSignal) {

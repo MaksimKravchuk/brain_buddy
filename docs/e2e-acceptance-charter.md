@@ -1,6 +1,6 @@
 # E2E acceptance charter
 
-Status: executable QA design; implementation pending.
+Status: executable QA design; native tasks and Voice Brain Dump product matrix accepted for CI.
 Owner: AI-QA.
 Scope: browser E2E acceptance for the current authenticated tree/version product plus vNext contracts that are already normative in ADR-0001 and ADR-0002.
 
@@ -63,6 +63,33 @@ Fixture creation rules:
 - Prefer explicit waits on URL, role/name, and network responses over sleeps.
 
 ## Browser E2E acceptance scenarios
+
+### Native tasks and Voice Brain Dump product matrix
+
+The native task shell plus Voice Brain Dump suite is now a required product E2E
+gate. It must run through the committed Compose stack (`frontend nginx ->
+FastAPI -> file-backed persistence`) with only browser SpeechRecognition and
+microphone boundaries deterministically faked. Fetch, task APIs, operation APIs,
+auth, persistence, and owner scoping are not mocked. Legacy `/crt` smoke tests,
+API-only dogfood scripts, screenshots, or skipped/fixme scenarios cannot satisfy
+this matrix.
+
+| Requirement | Executable scenario | Evidence gate |
+|---|---|---|
+| Native task shell opens `/tasks/next`, renders real Inbox/Next counts and rows, navigates by state/project/tag, and survives reload/relogin. | `frontend/tests/native-tasks-voice-brain-dump.compose.spec.ts` story `Native task shell navigation` | Active Playwright Allure result with epic `BrainBuddy MVP loop` and feature `Native tasks and Voice Brain Dump` |
+| MVP task CRUD creates an Inbox task, edits its title, moves Inbox -> Next, completes, reopens, and proves persistence after reload/relogin. | Story `Minimal native task management` | Same active Allure product labels |
+| Voice Brain Dump happy path captures two deterministic utterances on mobile, shows stable numbered provisional cards and wording-changing metadata, pauses/resumes, reviews, edits/deletes, and saves exactly one edited Inbox task only after confirmation. | Story `Voice Brain Dump happy path` | Same active Allure product labels |
+| Brain Dump recovery/idempotency reloads/resumes an active or paused operation, retries commit without duplicates, and proves the same single committed Inbox task after relogin. | Story `Voice Brain Dump idempotency and recovery` | Same active Allure product labels |
+| Brain Dump failure handling shows recoverable errors for unavailable speech, denied mic, transcript conflicts, and failed pause/cancel/finish/commit while preserving live drafts and creating no unintended backend operation. | Story `Voice Brain Dump failure recovery` | Same active Allure product labels |
+| Owner isolation prevents a second user from seeing another user's tasks, operations, drafts, or committed task linkage. | Story `Owner isolation` | Same active Allure product labels |
+| Mobile-first usability at representative 390x844 keeps capture/review/save primary controls visible with no horizontal overflow, while desktop task navigation remains covered by the native shell scenario. | Covered inside the Voice Brain Dump happy-path and native shell scenarios | Same active Allure product labels plus Playwright viewport assertions |
+
+CI enforces the durable evidence contract in `.github/workflows/ci.yml` via the
+`Native Product Compose E2E` job. The job must run `npm run test:e2e:compose`,
+publish `native-product-e2e-allure-results`, and validate the active story-label
+matrix with `scripts/validate_ci_artifacts.py product-e2e-results`. The validator
+fails if no native product scenarios execute, if only skipped/stale results exist,
+or if CRT-labeled evidence is presented as this product suite.
 
 ### E2E-AUTH-01: invite signup creates a session and reaches the workspace
 
