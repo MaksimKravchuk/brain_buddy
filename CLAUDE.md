@@ -101,10 +101,11 @@ HTTP request
 - `NodeService` / `RelationService` — mutations that update the parent tree document
 - `ValidationService` — dispatches to an AI provider and records history
 - `VersionService` — creates/restores JSON snapshots of a tree
+- `app/modules/tasks/` — self-contained GTD task module (`TaskService`, `TaskRepository`, domain models): tasks/projects/tags plus voice brain-dump operations, stored in SQLite (`tasks.sqlite3`) with idempotent, owner-serialized commands
 
 **Dependency injection** lives in `app/container.py`, which wires repositories → services → API routers. All routes use FastAPI `Depends()` to receive services; never instantiate services directly in route handlers.
 
-**Data model:** each tree is a single JSON file (`backend/data/<tree_id>.json`) containing the full tree document with embedded `nodes` and `relations` arrays. An index file tracks all tree IDs. Pydantic domain models are in `app/schemas/domain.py`; API contracts are in `app/schemas/api.py`.
+**Data model:** storage is dual. Each tree is a single JSON file (`backend/data/<tree_id>.json`) containing the full tree document with embedded `nodes` and `relations` arrays; an index file tracks all tree IDs. Task-tracker records (tasks, projects, tags, brain-dump operations) live in one SQLite database (`tasks.sqlite3`) under the same data dir. Pydantic domain models are in `app/schemas/domain.py` and `app/modules/tasks/domain.py`; API contracts are in `app/schemas/api.py` and `app/schemas/tasks.py`.
 
 **AI provider abstraction** (`app/ai/providers/`): `base.py` defines the interface; `mock.py` returns canned responses; `openai.py` calls the real API. The active provider is selected at startup via config.
 
@@ -120,7 +121,7 @@ HTTP request
 
 ### Cross-cutting behavior
 
-- **Session auth** — users sign in with email + password; the backend sets an opaque session token in an `HttpOnly`, `SameSite=Lax`, `Secure`-in-prod cookie. Every `/api/trees/*` route requires the cookie and filters by the owning user. Signup is gated by an invite code minted via `python -m app.cli create-invite`. See `docs/auth.md`.
+- **Session auth** — users sign in with email + password; the backend sets an opaque session token in an `HttpOnly`, `SameSite=Lax`, `Secure`-in-prod cookie. Every `/api/trees/*`, `/api/tasks`, `/api/projects`, `/api/tags`, and `/api/brain-dump-operations` route requires the cookie and enforces per-owner filtering. Signup is gated by an invite code minted via `python -m app.cli create-invite`. See `docs/auth.md`.
 - **Same-origin fetch** — the frontend hits the backend via `/api` on the same origin. In production the Fly frontend app proxies. In dev, Vite proxies `/api` and `/health` to `http://localhost:8000`. This keeps cookies usable and eliminates CORS.
 - **AI consent gating** — AI validation requires an explicit consent toggle in the inspector. Declining consent short-circuits with a validation error rather than calling the provider.
 - **Correlation IDs** — every response carries `X-Correlation-ID`. Error toasts surface it for retry/report flows, and backend logs key off the same ID.
