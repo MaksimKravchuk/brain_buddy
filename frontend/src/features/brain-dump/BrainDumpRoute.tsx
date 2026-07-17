@@ -1,8 +1,10 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, Inbox, Mic, Pause, Play, Square, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { apiClient } from "../../api/client";
+import { taskKeys } from "../../api/taskHooks";
 import type { BrainDumpOperationResponse, BrainDumpProposal, BrainDumpProposalStatus } from "../../api/taskTypes";
 
 type SpeechRecognitionResultEventLike = {
@@ -43,6 +45,7 @@ export function BrainDumpRoute(): JSX.Element {
   const location = useLocation();
   const params = useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [operation, setOperation] = useState<BrainDumpOperationResponse | null>(null);
   const [isStarting, setIsStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,8 +53,15 @@ export function BrainDumpRoute(): JSX.Element {
   const [savedCount, setSavedCount] = useState<number | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const sequenceRef = useRef(0);
+  const operationRef = useRef<BrainDumpOperationResponse | null>(null);
+  const proposalMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const isReviewPath = location.pathname.endsWith("/review");
   const activeProposals = useMemo(() => (operation?.proposals ?? []).filter((proposal) => !proposal.deleted), [operation]);
+
+  const applyOperation = useCallback((next: BrainDumpOperationResponse | null) => {
+    operationRef.current = next;
+    setOperation(next);
+  }, []);
 
   useEffect(() => {
     if (!operation) {
@@ -73,13 +83,13 @@ export function BrainDumpRoute(): JSX.Element {
       return;
     }
     const controller = new AbortController();
-    apiClient.getBrainDump(operationId, controller.signal).then(setOperation).catch((caught: unknown) => {
+    apiClient.getBrainDump(operationId, controller.signal).then(applyOperation).catch((caught: unknown) => {
       if (!controller.signal.aborted) {
         setError(caught instanceof Error ? caught.message : "Could not resume brain dump.");
       }
     });
     return () => controller.abort();
-  }, [operation?.id, params.operationId]);
+  }, [applyOperation, operation?.id, params.operationId]);
 
   function speechRecognitionConstructor() {
     const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
@@ -120,7 +130,7 @@ export function BrainDumpRoute(): JSX.Element {
           { segments: [{ sequence: sequenceRef.current, text: transcript, stability: latest.isFinal === false ? "interim" : "stable" }] },
           idempotencyKey(`segment-${sequenceRef.current}`)
         )
-        .then(setOperation)
+        .then(applyOperation)
         .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "Transcript upload failed."));
     };
     recognition.onerror = (event) => setError(event.error === "not-allowed" ? "Microphone permission was denied." : `Microphone error: ${event.error}`);
@@ -137,8 +147,8 @@ export function BrainDumpRoute(): JSX.Element {
     setIsStarting(true);
     try {
       await probeMicrophone();
-      const started = operation ?? (await apiClient.startBrainDump({ consent: { microphone: true, external_processing_allowed: false } }, idempotencyKey("start")));
-      setOperation(started);
+      const started = operationRef.current ?? (await apiClient.startBrainDump({ consent: { microphone: true, external_processing_allowed: false } }, idempotencyKey("start")));
+      applyOperation(started);
       startRecognitionFor(started, Recognition);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Microphone permission was denied.");
@@ -148,7 +158,7 @@ export function BrainDumpRoute(): JSX.Element {
   }
 
   async function command(action: "pause" | "resume" | "finish" | "cancel" | "commit") {
-    if (!operation) {
+    if (!operationRef.current) {
       return;
     }
     setError(null);
@@ -165,8 +175,14 @@ export function BrainDumpRoute(): JSX.Element {
       }
     }
     try {
-      const updated = await apiClient.commandBrainDump(operation.id, action, operation.revision, idempotencyKey(action));
-      setOperation(updated);
+      // Let in-flight proposal edits settle so the command carries the freshest revision.
+      await proposalMutationQueueRef.current;
+      const current = operationRef.current;
+      if (!current) {
+        return;
+      }
+      const updated = await apiClient.commandBrainDump(current.id, action, current.revision, idempotencyKey(action));
+      applyOperation(updated);
       if (action === "pause" || action === "finish" || action === "cancel") {
         stopRecognition();
       }
@@ -174,45 +190,58 @@ export function BrainDumpRoute(): JSX.Element {
         startRecognitionFor(updated, Recognition);
       }
       if (action === "finish") {
-        navigate(`/brain-dump/${operation.id}/review`, { replace: true });
+        navigate(`/brain-dump/${current.id}/review`, { replace: true });
       }
       if (action === "cancel") {
-        setOperation(null);
+        applyOperation(null);
         setLastTranscript("");
         navigate("/brain-dump/new", { replace: true });
       }
       if (action === "commit") {
         setSavedCount(updated.committed_task_ids.length);
+        void queryClient.invalidateQueries({ queryKey: taskKeys.all });
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Brain dump command failed.");
     }
   }
 
-  async function updateProposal(proposal: BrainDumpProposal, title: string) {
-    if (!operation || !title.trim() || title === proposal.title) {
+  async function patchProposal(proposal: BrainDumpProposal, payload: { title?: string; deleted?: boolean }, kind: "edit" | "delete") {
+    const current = operationRef.current;
+    if (!current) {
       return;
     }
-    const updated = await apiClient.updateBrainDumpProposal(
-      operation.id,
-      proposal.id,
-      { title: title.trim(), expected_revision: operation.revision },
-      idempotencyKey(`edit-${proposal.id}`)
-    );
-    setOperation(updated);
+    setError(null);
+    try {
+      const updated = await apiClient.updateBrainDumpProposal(
+        current.id,
+        proposal.id,
+        { ...payload, expected_revision: current.revision },
+        idempotencyKey(`${kind}-${proposal.id}`)
+      );
+      applyOperation(updated);
+    } catch (caught) {
+      const fallback = kind === "edit" ? "Could not update the task title." : "Could not delete the task.";
+      setError(caught instanceof Error ? caught.message : fallback);
+    }
   }
 
-  async function deleteProposal(proposal: BrainDumpProposal) {
-    if (!operation) {
+  function queueProposalMutation(mutate: () => Promise<void>) {
+    // Serialize proposal edits so each PATCH reads the revision produced by the previous one.
+    const chained = proposalMutationQueueRef.current.then(mutate);
+    proposalMutationQueueRef.current = chained;
+    return chained;
+  }
+
+  function updateProposal(proposal: BrainDumpProposal, title: string) {
+    if (!title.trim() || title === proposal.title) {
       return;
     }
-    const updated = await apiClient.updateBrainDumpProposal(
-      operation.id,
-      proposal.id,
-      { deleted: true, expected_revision: operation.revision },
-      idempotencyKey(`delete-${proposal.id}`)
-    );
-    setOperation(updated);
+    void queueProposalMutation(() => patchProposal(proposal, { title: title.trim() }, "edit"));
+  }
+
+  function deleteProposal(proposal: BrainDumpProposal) {
+    void queueProposalMutation(() => patchProposal(proposal, { deleted: true }, "delete"));
   }
 
   if (savedCount !== null) {
@@ -222,6 +251,14 @@ export function BrainDumpRoute(): JSX.Element {
           <Inbox className="mx-auto h-8 w-8 text-brand-primary" aria-hidden />
           <h1 className="mt-3 text-xl font-semibold">Saved {savedCount} {savedCount === 1 ? "task" : "tasks"} to Inbox</h1>
           <p className="mt-2 text-sm text-slate-500">No duplicate tasks are created if this save is retried.</p>
+          <button
+            type="button"
+            className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-brand-primary px-5 text-[15px] font-semibold text-white shadow-glow hover:bg-brand-primary-hover"
+            onClick={() => navigate("/tasks/inbox", { replace: true })}
+          >
+            <Inbox className="h-4 w-4" aria-hidden />
+            View inbox
+          </button>
         </section>
       </div>
     );
@@ -230,6 +267,7 @@ export function BrainDumpRoute(): JSX.Element {
   if (isReviewPath || operation?.status === "awaiting_confirmation") {
     return (
       <ReviewSurface
+        error={error}
         proposals={activeProposals}
         onBack={() => navigate(`/brain-dump/${operation?.id ?? "new"}`, { replace: true })}
         onDelete={deleteProposal}
@@ -358,6 +396,7 @@ function ProposalCard({ proposal }: { proposal: BrainDumpProposal }): JSX.Elemen
 }
 
 function ReviewSurface({
+  error,
   proposals,
   onBack,
   onDelete,
@@ -365,6 +404,7 @@ function ReviewSurface({
   onSave,
   onUpdateTitle
 }: {
+  error: string | null;
   proposals: BrainDumpProposal[];
   onBack: () => void;
   onDelete: (proposal: BrainDumpProposal) => void;
@@ -385,6 +425,7 @@ function ReviewSurface({
       </header>
 
       <main aria-label="Review brain dump proposals" className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        {error ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
         <div className="flex flex-col gap-2.5">
           {proposals.map((proposal) => (
             <article key={proposal.id} className="rounded-[14px] border border-slate-200 bg-white px-3.5 py-3 shadow-soft">
