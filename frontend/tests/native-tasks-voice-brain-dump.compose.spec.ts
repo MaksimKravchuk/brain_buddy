@@ -328,7 +328,7 @@ test("Voice Brain Dump resume and commit idempotency do not create duplicate Inb
     operationId = (await page.locator("[data-operation-id]").getAttribute("data-operation-id")) ?? "";
     assertCondition(/^brain_dump_/.test(operationId), `expected persisted brain dump operation id, received ${operationId}`);
     await page.getByRole("button", { name: "Pause" }).click();
-    await expect(page.getByText("Paused")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Resume" })).toBeVisible();
     await page.reload();
     await expect(page.getByText("Paused")).toBeVisible();
     await expect(page.getByRole("article", { name: "Draft task 1: Write weekly update" })).toBeVisible();
