@@ -627,7 +627,7 @@ def test_schema_v2_accurate_reconciliation_preserves_opaque_ids_when_order_chang
     # Accurate audio reports the same two intents in the opposite order; a
     # positional reconciler would silently swap which proposal gets which
     # title. The production path must resolve by content, not position.
-    audio = "Call the dentist. Buy oat milk.".encode()
+    audio = b"Call the dentist. Buy oat milk."
     uploaded = api_client.put(
         f"/api/brain-dump-operations/{operation['id']}/audio/0",
         content=audio,
