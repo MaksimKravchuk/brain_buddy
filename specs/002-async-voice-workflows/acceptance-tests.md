@@ -11,18 +11,23 @@ event stream and fake timers. Provider tests use deterministic fakes, never live
 ## Fixtures
 
 - owner A and owner B;
-- a voice brain-dump operation with three numbered audio chunks;
+- a schema-v2 voice brain-dump operation with three numbered, time-aligned audio chunks and
+  an opaque sealed `media_ref`;
 - an open Weekly Review snapshot containing capture `c1@revision=4` and `c2@revision=2`;
-- fast and reconciler fakes able to emit controlled segments/patches/errors;
+- browser-preview, fast-STT, accurate-STT, and text-reconciler fakes able to emit controlled
+  segment versions, patches, delays, timeout-after-accept, and errors;
 - a task-tracker fake that records idempotency keys and can time out after accepting;
-- a clock and event stream whose delivery can duplicate, delay, or omit events.
+- a native Task port fake that records complete Inbox task payloads and child idempotency
+  keys;
+- a clock, process lease owner, and event stream whose delivery can duplicate, delay, or
+  omit events.
 
 ## State-machine tests
 
 | ID | Scenario | Required assertion |
 |---|---|---|
 | OP-01 | create brain dump | operation starts in `recording`; no canonical capture exists |
-| OP-02 | normal stop | seal drains fast stage, reconciles, freezes only on request, confirms, then completes |
+| OP-02 | normal stop | state advances through `sealing`, `fast_processing`, `accurate_transcribing`, `reconciling`, and `awaiting_confirmation`; freeze occurs only on request, then confirm completes |
 | OP-03 | stop vs cancel | stop seals input; cancel reaches `cancelled` and commits nothing |
 | OP-04 | close/reopen UI | server operation continues; refetched projection restores current phase and proposals |
 | OP-05 | illegal transition | command returns domain error and leaves revision/state unchanged |
@@ -45,6 +50,32 @@ event stream and fake timers. Provider tests use deterministic fakes, never live
 | UP-07 | local storage limit | warning/stop affordance appears before data loss; no fake server progress is shown |
 | UP-08 | no external consent | external provider fake has zero calls; local fallback or explicit disabled state is used |
 
+## Provider-role and transcript-version tests
+
+| ID | Scenario | Required assertion |
+|---|---|---|
+| PV-01 | replace provider adapter | swapping the configured fast, accurate, or text fake changes no domain/API schema and vendor names do not drive workflow branches |
+| PV-02 | accurate input contract | accurate fake receives sealed original `media_ref`, audio metadata, RU/EN hints, and vocabulary; it is never invoked with fast text as its audio input |
+| PV-03 | segment correction | accepted accurate versions carry audio spans and explicitly supersede overlapping fast IDs; old versions remain queryable in owner-scoped audit history |
+| PV-04 | many-to-many supersession | one-to-many and many-to-one transcript corrections project in `(start_ms, end_ms, sequence)` order without mutating old text |
+| PV-05 | invalid provider output | missing/negative spans, unknown segment/proposal IDs, oversized text, or unsupported schema is rejected before revision changes |
+| PV-06 | duplicate provider result | the same role/method/input hash returns the stored run, segment IDs, patch IDs, and proposal-ID mapping exactly once |
+| PV-07 | browser preview | fixed-locale browser text is labelled `browser_preview`, has a coarse capture-clock span, and never becomes authoritative when accurate output exists |
+
+## Multilingual semantic acceptance
+
+Provider fakes use versioned labelled audio/text fixtures; ordinary CI never calls a live or
+paid model. The required founder examples are release-blocking, not illustrative only.
+
+| ID | Scenario | Required assertion |
+|---|---|---|
+| ML-01 | `Надо починить BrainBuddy, потом сделать production smoke и написать Наташе` | accurate transcript preserves `BrainBuddy` and `production smoke`; active Review projection contains exactly three tasks for fixing BrainBuddy, doing production smoke, and writing Natasha |
+| ML-02 | fast says `brain body`, audio says `BrainBuddy` | fast version remains in history; accurate version from original audio supersedes it; reconciled active title contains `BrainBuddy` and not `brain body` |
+| ML-03 | long run-on without punctuation | semantic reconciliation emits the labelled number of distinct task intents with split lineage even though punctuation provides no boundaries |
+| ML-04 | `купить хлеб и молоко` | active Review projection contains exactly one task; no patch splits solely on `и` or another conjunction |
+| ML-05 | in-sentence RU→EN→RU code switch | code-switched-term accuracy and exact task count meet the versioned fixture expectations; per-segment language labels may contain both `ru` and `en` |
+| ML-06 | edit then accurate correction | an edited title remains locked; a differing accurate suggestion becomes an open visible conflict and cannot be frozen until the user resolves it |
+
 ## Event stream and projection tests
 
 | ID | Scenario | Required assertion |
@@ -66,7 +97,7 @@ event stream and fake timers. Provider tests use deterministic fakes, never live
 | PA-03 | user edits while speaking | later fast/reconciler patches do not overwrite edited fields; new speech still adds candidates |
 | PA-04 | disjoint stale patch | patch rebases and both changes survive |
 | PA-05 | conflicting stale patch | patch is rejected/rerun; no last-write-wins mutation occurs |
-| PA-06 | merge | result sits at earliest predecessor position and tombstones predecessors with lineage |
+| PA-06 | merge | result sits at earliest predecessor position and marks predecessors superseded with lineage |
 | PA-07 | split | children occupy predecessor position in source-span order |
 | PA-08 | user reorder then reconcile | pinned relative order remains unchanged |
 | PA-09 | interim churn | candidate repaint is coalesced to at most once per 500 ms |
@@ -74,6 +105,9 @@ event stream and fake timers. Provider tests use deterministic fakes, never live
 | PA-11 | low confidence | proposal is marked/requires clarification and cannot infer route/delete/promotion |
 | PA-12 | reconciler failure | stable fast candidates and user edits remain manually reviewable and marked unreconciled |
 | PA-13 | fast failure | sealed audio uses batch transcription/reconciliation fallback |
+| PA-14 | reconciler touches locked title | suggested change is stored as an open conflict; title is unchanged and freeze fails until explicit resolution |
+| PA-15 | remove/supersede audit | tombstoned and structurally superseded proposals are hidden from active list but remain in owner-scoped history with predecessor/successor links |
+| PA-16 | wording correction, same intent | `update` preserves proposal ID and revises wording/source spans; array position is not used to match the proposal |
 
 ## Target-resolution tests
 
@@ -103,6 +137,17 @@ event stream and fake timers. Provider tests use deterministic fakes, never live
 | CO-08 | route or promotion | local operation can complete while destination record remains visibly asynchronous |
 | CO-09 | destructive action | always appears individually in confirmation regardless of confidence |
 | CO-10 | event replay | state-transition metrics count once per event/command identity |
+| CO-11 | native Brain Dump save | each selected active proposal creates exactly one task with only title plus defaults `state=inbox`, null details/project/due date, empty tags, and `priority=none`; no write exists before confirm |
+
+## Brain Dump UI transition tests
+
+| ID | Scenario | Required assertion |
+|---|---|---|
+| UI-01 | stop and process | Stop leaves recording and visibly renders `Finishing upload`, `Improving transcript`, then `Reconciling tasks`; editable Review appears only at `awaiting_confirmation` |
+| UI-02 | progressive list | stable proposal IDs are React keys; numbered active proposals grow without repainting user-edited titles; hidden tombstones do not renumber identity |
+| UI-03 | conflict review | Review shows mine/suggestion values and blocks Save until every open conflict is explicitly kept or accepted |
+| UI-04 | leave/resume without events | polling restores exact stage, authoritative transcript quality, active proposals, locks, conflicts, and last sequence |
+| UI-05 | provisional-only fallback | after bounded accurate/reconciler failure, manual Review is opt-in and visibly labelled unreconciled; it never looks like the successful accurate path |
 
 ## Undo tests
 
@@ -142,6 +187,18 @@ event stream and fake timers. Provider tests use deterministic fakes, never live
 | PR-05 | provenance inspection | committed action traces to segments/source, model/template, user patches, and confirmer |
 | PR-06 | analytics export | only pseudonymous IDs, timings, bands, counts, and error codes leave app logs |
 
+## Runner recovery and migration tests
+
+| ID | Scenario | Required assertion |
+|---|---|---|
+| RC-01 | process dies with leased accurate run | after lease expiry, a new runner resumes from persisted sealed audio/input hash; one accurate generation is accepted and recovery count is bounded |
+| RC-02 | retries exhausted | stage reaches `retryable_error`, then terminal state at operation recovery budget; no hot loop, duplicate patch, or canonical task is produced |
+| RC-03 | provider timeout after durable accept | lookup by role/method/input hash returns prior output IDs and does not append another generation or proposal patch |
+| RC-04 | two runner instances | compare-and-set lease permits one invocation per due run; loser observes persisted state and does no provider call |
+| MG-01 | load completed/cancelled schema-v1 operation | operation remains readable and immutable; migration performs no provider call, replay, or native task write |
+| MG-02 | load active schema-v1 operation | existing proposal IDs/user edits/deletions import once into patches/locks/tombstones, quality is `provisional_only`, and UI cannot claim accurate reconciliation |
+| MG-03 | compatibility aliases | v1 `/transcript`, `/finish`, `/commit`, and proposal PATCH map to preview/seal/confirm/user-patch semantics with additive responses and preserve idempotency |
+
 ## Latency and evaluation gates
 
 Automated performance tests use deterministic delayed fakes and verify telemetry/budget
@@ -156,8 +213,12 @@ p50/p95 by audio duration, language, device/network class, and model version.
 - reconciled batch `<8 s` for two minutes and `<20 s` at configured maximum;
 - local commit acknowledgement `<1 s`.
 
-Confidence thresholds cannot ship from intuition alone. An offline labelled corpus must
-measure target-resolution precision, candidate split/merge quality, destructive-intent
-false positives, and calibration by language/model. Required safety invariants are zero
-automatic canonical writes and zero destructive/routing actions without confirmation;
-latency degradation may trigger fallback but never relax those invariants.
+Confidence thresholds cannot ship from intuition alone. A versioned offline labelled
+text/audio corpus must cover Russian, English, useful Dutch fixtures, in-sentence code
+switching, missing/wrong punctuation, product names, low-confidence audio, retries, and
+edit-then-reconcile. Report task-boundary precision/recall, exact task-count accuracy,
+title cleanliness, code-switched-term accuracy, conjunction false-split rate, proposal
+split/merge quality, and calibration by language/model. Required safety invariants are zero
+silent user-edit loss, zero automatic canonical writes, zero destructive/routing actions
+without confirmation, and zero duplicate tasks after retries. Latency degradation may
+trigger a labelled fallback but never relax those invariants.
