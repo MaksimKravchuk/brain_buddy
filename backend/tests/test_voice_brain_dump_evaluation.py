@@ -4,9 +4,11 @@ import hashlib
 import json
 import wave
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from app.workflows.voice_brain_dump import evaluation
 from app.workflows.voice_brain_dump.evaluation import (
     _case_languages,
     _EvaluationCase,
@@ -125,3 +127,21 @@ def test_audio_validation_rejects_hash_format_and_duration_mismatches(
     payload = write_audio(rate=8_000, frames=4_000)
     with pytest.raises(ValueError, match="500 ms"):
         _validated_audio(case(payload))
+
+
+def test_evaluation_reports_provider_text_audio_and_title_mismatches(monkeypatch) -> None:
+    class MismatchingProvider:
+        def __init__(self, _transcripts) -> None:
+            pass
+
+        def transcribe_sealed_audio(self, _request):
+            return SimpleNamespace(
+                segments=[SimpleNamespace(text="Completely different task")]
+            )
+
+    monkeypatch.setattr(evaluation, "DeterministicAccurateStt", MismatchingProvider)
+    report = evaluate_release_dataset()
+
+    assert any("audio transcript mismatch" in failure for failure in report.failures)
+    assert any("text/audio intent mismatch" in failure for failure in report.failures)
+    assert any("titles" in failure for failure in report.failures)

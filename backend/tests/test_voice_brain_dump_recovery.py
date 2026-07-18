@@ -53,6 +53,11 @@ def test_structural_lineage_requires_meaningful_textual_evidence() -> None:
     )
     assert not TaskService._titles_form_merge(["and the"], "Call dentist")
     assert TaskService._title_content_words("The call to Anna") == {"call", "anna"}
+    assert TaskService._extract_task_titles("купить хлеб и молоко") == [
+        "Купить хлеб и молоко"
+    ]
+    assert TaskService._titles_refer_to_same_item("Call", "Call")
+    assert not TaskService._titles_refer_to_same_item("Call", "Email")
 
 
 def _manifest_hash(audio: bytes) -> str:
