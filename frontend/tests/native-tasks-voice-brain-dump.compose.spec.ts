@@ -128,14 +128,23 @@ async function listInboxTasks(page: Page): Promise<Task[]> {
 
 async function installSpeechBoundary(page: Page, media: "granted" | "denied" | "unavailable" = "granted"): Promise<void> {
   await page.addInitScript((mode) => {
-    const fakeTrack = { stop() {} };
+    // `new MediaRecorder(stream)` requires a genuine MediaStream instance; a plain object
+    // with a getTracks() shim fails Chromium's constructor type check. A canvas capture
+    // stream gives real MediaStream/MediaStreamTrack objects without needing microphone
+    // hardware or audio-context autoplay permissions.
+    function fakeMediaStream(): MediaStream {
+      const canvas = document.createElement("canvas");
+      canvas.width = 2;
+      canvas.height = 2;
+      return canvas.captureStream();
+    }
     Object.defineProperty(navigator, "mediaDevices", {
       configurable: true,
       value: {
         getUserMedia: () =>
           mode === "denied"
             ? Promise.reject(new DOMException("Microphone blocked by test", "NotAllowedError"))
-            : Promise.resolve({ getTracks: () => [fakeTrack] })
+            : Promise.resolve(fakeMediaStream())
       }
     });
 
@@ -291,15 +300,20 @@ test("Voice Brain Dump records provisional cards, reviews edits/deletes and save
     await page.getByRole("button", { name: "Resume" }).click();
     await expect(page.getByText("Recording")).toBeVisible();
     await page.getByRole("button", { name: "Stop & review" }).click();
-    await expect(page.getByRole("heading", { name: "Review 2 tasks" })).toBeVisible();
+    // Accurate STT reconciles the sealed original audio independently of the browser
+    // preview text; since the E2E capture stream carries no recognizable speech, it
+    // surfaces one additional placeholder draft alongside the two speech-derived drafts.
+    await expect(page.getByRole("heading", { name: "Review 3 tasks" })).toBeVisible();
   });
 
-  await test.step("edit one draft, delete one draft and prove nothing canonical exists before Save", async () => {
+  await test.step("edit one draft, delete two drafts and prove nothing canonical exists before Save", async () => {
     await page.getByLabel("Task title #1").fill("Buy oat milk for breakfast");
     await page.keyboard.press("Tab");
     await expect(page.getByText("Edited")).toBeVisible();
     await page.getByRole("button", { name: "Delete Call dentist" }).click();
     await expect(page.getByText("Call dentist")).toHaveCount(0);
+    await page.getByRole("button", { name: "Delete Untranscribed sealed audio" }).click();
+    await expect(page.getByText("Untranscribed sealed audio")).toHaveCount(0);
     const beforeSave = await listInboxTasks(page);
     assertArrayLength(beforeSave, 0, "Inbox should remain empty before saving reviewed drafts");
   });
@@ -339,6 +353,11 @@ test("Voice Brain Dump resume and commit idempotency do not create duplicate Inb
 
   await test.step("confirm once, retry commit against completed operation, then verify one committed task after relogin", async () => {
     await page.getByRole("button", { name: "Stop & review" }).click();
+    // Accurate STT reconciles the sealed original audio in addition to the browser
+    // preview-derived draft; delete the placeholder before saving so committed state
+    // still reflects exactly one recovered task.
+    await expect(page.getByRole("heading", { name: "Review 2 tasks" })).toBeVisible();
+    await page.getByRole("button", { name: "Delete Untranscribed sealed audio" }).click();
     await expect(page.getByRole("heading", { name: "Review 1 task" })).toBeVisible();
     await page.getByRole("button", { name: "Save 1 to inbox" }).click();
     await expect(page.getByRole("heading", { name: "Saved 1 task to Inbox" })).toBeVisible();
@@ -362,7 +381,7 @@ test("Voice Brain Dump resume and commit idempotency do not create duplicate Inb
 test("Voice Brain Dump failures are visible and preserve recoverable live sessions", async ({ page }) => {
   await productLabels("Voice Brain Dump failure recovery");
 
-  await test.step("unavailable speech recognition creates no backend operation", async () => {
+  await test.step("unavailable speech recognition still records original audio and starts a backend operation", async () => {
     await signup(page, unique("voice-unavailable"));
     await installSpeechBoundary(page, "unavailable");
     const startRequests: string[] = [];
@@ -373,8 +392,8 @@ test("Voice Brain Dump failures are visible and preserve recoverable live sessio
     });
     await page.goto("/brain-dump/new");
     await page.getByRole("button", { name: "Record" }).click();
-    await expect(page.getByRole("alert")).toContainText("speech recognition is unavailable");
-    assertArrayLength(startRequests, 0, "Unavailable speech recognition should not start backend operations");
+    await waitForStartedOperation(page);
+    assertArrayLength(startRequests, 1, "Unavailable speech recognition should still start one backend operation for original-audio capture");
   });
 
   await test.step("denied microphone creates no backend operation", async () => {
