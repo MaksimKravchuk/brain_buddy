@@ -1,5 +1,7 @@
 export type TaskState = "inbox" | "next" | "waiting" | "someday" | "completed" | "cancelled";
 export type OpenTaskState = "inbox" | "next" | "waiting" | "someday";
+export type TaskPriority = "none" | "low" | "medium" | "high";
+export type TaskSort = "manual" | "due" | "priority" | "title";
 
 export interface TaskCounts {
   inbox: number;
@@ -16,6 +18,7 @@ export interface TaskResponse {
   project_id: string | null;
   tag_ids: string[];
   due_date: string | null;
+  priority: TaskPriority;
   waiting_for: string | null;
   waiting_since: string | null;
   order_key: number;
@@ -23,9 +26,27 @@ export interface TaskResponse {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  cancelled_at: string | null;
   revision: number;
-  subtasks?: Array<{ id: string; title: string; state: string; order_key: number; revision: number }>;
-  comments?: Array<{ id: string; body: string; actor_id: string; created_at: string; revision: number }>;
+  subtasks?: TaskSubtaskResponse[];
+  comments?: TaskCommentResponse[];
+}
+
+export interface TaskSubtaskResponse {
+  id: string;
+  title: string;
+  state: "open" | "completed" | "cancelled";
+  order_key: number;
+  revision: number;
+}
+
+export interface TaskCommentResponse {
+  id: string;
+  body: string;
+  actor_id: string;
+  created_at: string;
+  edited_at: string | null;
+  revision: number;
 }
 
 export interface TaskListResponse {
@@ -57,6 +78,13 @@ export interface TaskListFilters {
   projectId?: string;
   tagId?: string;
   includeCompleted?: boolean;
+  includeCancelled?: boolean;
+  q?: string;
+  priority?: TaskPriority[];
+  dueBefore?: string;
+  dueOn?: string;
+  dueAfter?: string;
+  sort?: TaskSort;
 }
 
 export interface TaskCreateRequest {
@@ -65,6 +93,9 @@ export interface TaskCreateRequest {
   state?: OpenTaskState;
   project_id?: string | null;
   tag_ids?: string[];
+  due_date?: string | null;
+  priority?: TaskPriority;
+  waiting_for?: string | null;
 }
 
 export interface TaskUpdateRequest {
@@ -72,12 +103,39 @@ export interface TaskUpdateRequest {
   details?: string | null;
   project_id?: string | null;
   tag_ids?: string[];
+  due_date?: string | null;
+  priority?: TaskPriority;
+  waiting_for?: string | null;
   expected_revision: number;
 }
 
 export interface TaskTransitionRequest {
   action: "move" | "complete" | "reopen" | "cancel";
   to_state?: OpenTaskState;
+  waiting_for?: string | null;
+  expected_revision: number;
+}
+
+export interface TaskSubtaskCreateRequest {
+  title: string;
+}
+
+export interface TaskSubtaskUpdateRequest {
+  title?: string;
+  expected_revision: number;
+}
+
+export interface TaskSubtaskTransitionRequest {
+  action: "complete" | "reopen" | "cancel";
+  expected_revision: number;
+}
+
+export interface TaskCommentCreateRequest {
+  body: string;
+}
+
+export interface TaskCommentUpdateRequest {
+  body: string;
   expected_revision: number;
 }
 

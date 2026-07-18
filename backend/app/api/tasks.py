@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import date
 
 from fastapi import APIRouter, Depends, Header, Query, status
 
@@ -38,13 +39,18 @@ from app.schemas.tasks import (
     TagUpdateRequest,
     TaskCommentCreateRequest,
     TaskCommentResponse,
+    TaskCommentUpdateRequest,
     TaskCounts,
     TaskCreateRequest,
     TaskListResponse,
+    TaskPriority,
     TaskResponse,
+    TaskSort,
     TaskState,
     TaskSubtaskCreateRequest,
     TaskSubtaskResponse,
+    TaskSubtaskTransitionRequest,
+    TaskSubtaskUpdateRequest,
     TaskTransitionRequest,
     TaskUpdateRequest,
 )
@@ -391,6 +397,54 @@ def create_subtask(
     return _to_subtask_response(subtask)
 
 
+@router.patch(
+    "/tasks/{task_id}/subtasks/{subtask_id}",
+    response_model=TaskSubtaskResponse,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
+def update_subtask(
+    task_id: str,
+    subtask_id: str,
+    payload: TaskSubtaskUpdateRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    task_service: TaskService = Depends(get_task_service),
+) -> TaskSubtaskResponse:
+    return _to_subtask_response(
+        task_service.update_subtask(
+            task_id,
+            subtask_id,
+            payload,
+            owner_id=current_user.id,
+            idempotency_key=_require_idempotency_key(idempotency_key),
+        )
+    )
+
+
+@router.post(
+    "/tasks/{task_id}/subtasks/{subtask_id}/transitions",
+    response_model=TaskSubtaskResponse,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
+def transition_subtask(
+    task_id: str,
+    subtask_id: str,
+    payload: TaskSubtaskTransitionRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    task_service: TaskService = Depends(get_task_service),
+) -> TaskSubtaskResponse:
+    return _to_subtask_response(
+        task_service.transition_subtask(
+            task_id,
+            subtask_id,
+            payload,
+            owner_id=current_user.id,
+            idempotency_key=_require_idempotency_key(idempotency_key),
+        )
+    )
+
+
 @router.post(
     "/tasks/{task_id}/comments",
     response_model=TaskCommentResponse,
@@ -412,6 +466,30 @@ def create_comment(
         idempotency_key=_require_idempotency_key(idempotency_key),
     )
     return _to_comment_response(comment)
+
+
+@router.patch(
+    "/tasks/{task_id}/comments/{comment_id}",
+    response_model=TaskCommentResponse,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
+def update_comment(
+    task_id: str,
+    comment_id: str,
+    payload: TaskCommentUpdateRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    task_service: TaskService = Depends(get_task_service),
+) -> TaskCommentResponse:
+    return _to_comment_response(
+        task_service.update_comment(
+            task_id,
+            comment_id,
+            payload,
+            owner_id=current_user.id,
+            idempotency_key=_require_idempotency_key(idempotency_key),
+        )
+    )
 
 
 @router.patch(
@@ -490,6 +568,13 @@ def list_tasks(
     tag_id: str | None = None,
     unassigned_project: bool = False,
     include_completed: bool = False,
+    include_cancelled: bool = False,
+    q: str | None = None,
+    priority: list[TaskPriority] | None = Query(default=None),
+    due_before: date | None = None,
+    due_on: date | None = None,
+    due_after: date | None = None,
+    sort: TaskSort = "manual",
     cursor: str | None = None,
     limit: int = Query(default=50, ge=1, le=200),
     current_user: User = Depends(get_current_user),
@@ -502,6 +587,13 @@ def list_tasks(
         tag_id=tag_id,
         unassigned_project=unassigned_project,
         include_completed=include_completed,
+        include_cancelled=include_cancelled,
+        q=q,
+        priority=priority or [],
+        due_before=due_before,
+        due_on=due_on,
+        due_after=due_after,
+        sort=sort,
         cursor=cursor,
         limit=limit,
     )
@@ -577,6 +669,7 @@ def _to_response(
         project_id=task.project_id,
         tag_ids=task.tag_ids,
         due_date=task.due_date,
+        priority=task.priority,
         waiting_for=task.waiting_for,
         waiting_since=task.waiting_since,
         order_key=task.order_key,
@@ -584,6 +677,7 @@ def _to_response(
         created_at=task.created_at,
         updated_at=task.updated_at,
         completed_at=task.completed_at,
+        cancelled_at=task.cancelled_at,
         revision=task.revision,
         subtasks=[_to_subtask_response(item) for item in subtasks],
         comments=[_to_comment_response(item) for item in comments],
@@ -635,5 +729,6 @@ def _to_comment_response(comment: TaskCommentDocument) -> TaskCommentResponse:
         body=comment.body,
         actor_id=comment.actor_id,
         created_at=comment.created_at,
+        edited_at=comment.edited_at,
         revision=comment.revision,
     )

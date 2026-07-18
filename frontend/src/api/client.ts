@@ -25,10 +25,17 @@ import type {
   BrainDumpTranscriptAppendRequest,
   ProjectResponse,
   TagResponse,
+  TaskCommentCreateRequest,
+  TaskCommentResponse,
+  TaskCommentUpdateRequest,
   TaskCreateRequest,
   TaskListFilters,
   TaskListResponse,
   TaskResponse,
+  TaskSubtaskCreateRequest,
+  TaskSubtaskResponse,
+  TaskSubtaskTransitionRequest,
+  TaskSubtaskUpdateRequest,
   TaskTransitionRequest,
   TaskUpdateRequest
 } from "./taskTypes";
@@ -188,6 +195,27 @@ export const apiClient = {
     if (filters.includeCompleted) {
       params.set("include_completed", "true");
     }
+    if (filters.includeCancelled) {
+      params.set("include_cancelled", "true");
+    }
+    if (filters.q?.trim()) {
+      params.set("q", filters.q.trim());
+    }
+    for (const priority of filters.priority ?? []) {
+      params.append("priority", priority);
+    }
+    if (filters.dueBefore) {
+      params.set("due_before", filters.dueBefore);
+    }
+    if (filters.dueOn) {
+      params.set("due_on", filters.dueOn);
+    }
+    if (filters.dueAfter) {
+      params.set("due_after", filters.dueAfter);
+    }
+    if (filters.sort && filters.sort !== "manual") {
+      params.set("sort", filters.sort);
+    }
     const query = params.toString();
     return request<TaskListResponse>(`/tasks${query ? `?${query}` : ""}`, { signal });
   },
@@ -198,6 +226,10 @@ export const apiClient = {
       headers: { "Idempotency-Key": idempotencyKey },
       body: payload
     });
+  },
+
+  getTask(taskId: string, signal?: AbortSignal) {
+    return request<TaskResponse>(`/tasks/${taskId}`, { signal });
   },
 
   updateTask(taskId: string, payload: TaskUpdateRequest, idempotencyKey: string) {
@@ -216,12 +248,99 @@ export const apiClient = {
     });
   },
 
+  createSubtask(taskId: string, payload: TaskSubtaskCreateRequest, idempotencyKey: string) {
+    return request<TaskSubtaskResponse>(`/tasks/${taskId}/subtasks`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  updateSubtask(taskId: string, subtaskId: string, payload: TaskSubtaskUpdateRequest, idempotencyKey: string) {
+    return request<TaskSubtaskResponse>(`/tasks/${taskId}/subtasks/${subtaskId}`, {
+      method: "PATCH",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  transitionSubtask(taskId: string, subtaskId: string, payload: TaskSubtaskTransitionRequest, idempotencyKey: string) {
+    return request<TaskSubtaskResponse>(`/tasks/${taskId}/subtasks/${subtaskId}/transitions`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  createComment(taskId: string, payload: TaskCommentCreateRequest, idempotencyKey: string) {
+    return request<TaskCommentResponse>(`/tasks/${taskId}/comments`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  updateComment(taskId: string, commentId: string, payload: TaskCommentUpdateRequest, idempotencyKey: string) {
+    return request<TaskCommentResponse>(`/tasks/${taskId}/comments/${commentId}`, {
+      method: "PATCH",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
   listProjects(signal?: AbortSignal) {
     return request<ProjectResponse[]>("/projects", { signal });
   },
 
+  createProject(payload: { name: string; color?: string | null }, idempotencyKey: string) {
+    return request<ProjectResponse>("/projects", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  updateProject(projectId: string, payload: { name?: string; color?: string | null; expected_revision: number }, idempotencyKey: string) {
+    return request<ProjectResponse>(`/projects/${projectId}`, {
+      method: "PATCH",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  archiveProject(projectId: string, expectedRevision: number, idempotencyKey: string) {
+    return request<ProjectResponse>(`/projects/${projectId}/archive`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: { expected_revision: expectedRevision }
+    });
+  },
+
   listTags(signal?: AbortSignal) {
     return request<TagResponse[]>("/tags", { signal });
+  },
+
+  createTag(payload: { name: string }, idempotencyKey: string) {
+    return request<TagResponse>("/tags", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  updateTag(tagId: string, payload: { name?: string; expected_revision: number }, idempotencyKey: string) {
+    return request<TagResponse>(`/tags/${tagId}`, {
+      method: "PATCH",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  deleteTag(tagId: string, expectedRevision: number, idempotencyKey: string) {
+    return request<TagResponse>(`/tags/${tagId}?expected_revision=${expectedRevision}`, {
+      method: "DELETE",
+      headers: { "Idempotency-Key": idempotencyKey }
+    });
   },
 
   startBrainDump(payload: BrainDumpStartRequest, idempotencyKey: string) {
