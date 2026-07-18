@@ -38,6 +38,65 @@ describe("TaskWorkspace", () => {
     );
   });
 
+  it("keeps the two represented rows for each source project fixture", async () => {
+    const user = userEvent.setup();
+    render(<TaskWorkspace />);
+
+    await user.click(screen.getByRole("button", { name: /Pricing 4/ }));
+    expect(screen.getAllByRole("article")).toHaveLength(2);
+
+    await user.click(screen.getByRole("button", { name: /Team offsite 3/ }));
+    expect(screen.getAllByRole("article")).toHaveLength(2);
+  });
+
+  it("represents the Think control, AI squircle, and compact edit state", async () => {
+    const user = userEvent.setup();
+    render(<TaskWorkspace />);
+
+    expect(screen.getByRole("button", { name: "Think" })).toBeInTheDocument();
+    expect(screen.getByLabelText("AI working on Draft the launch announcement")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Edit tasks" }));
+    expect(screen.getByRole("button", { name: "Edit tasks" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+  });
+
+  it("projects completion through list and project counts with metadata", async () => {
+    const user = userEvent.setup();
+    render(<TaskWorkspace />);
+
+    await user.click(screen.getByRole("checkbox", { name: "Complete Draft the launch announcement" }));
+    expect(screen.getByRole("button", { name: /Next actions 5/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Onboarding revamp 5/ })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Onboarding revamp 5/ }));
+    expect(screen.getByText("5 tasks · 0 running on AI")).toBeInTheDocument();
+  });
+
+  it("opens Brain Dump in its represented recording state before capture", async () => {
+    const user = userEvent.setup();
+    render(<TaskWorkspace />);
+
+    await user.click(screen.getByRole("button", { name: /brain dump/i }));
+    expect(screen.getByText("No tasks captured yet")).toBeInTheDocument();
+    expect(screen.getByText("Keep talking — Brain Buddy will collect useful next actions here.")).toBeInTheDocument();
+  });
+
+  it("closes Brain Dump with Escape and restores focus to its trigger", async () => {
+    const user = userEvent.setup();
+    render(<TaskWorkspace />);
+    const trigger = screen.getByRole("button", { name: /brain dump/i });
+
+    await user.click(trigger);
+    expect(screen.getByRole("button", { name: "Close brain dump" })).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Brain dump" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
   it("sends a brain dump to Inbox and shows the source toast", async () => {
     const user = userEvent.setup();
     render(<TaskWorkspace />);
@@ -49,6 +108,7 @@ describe("TaskWorkspace", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Inbox" })).toBeInTheDocument();
       expect(screen.getByText("1 task sent to inbox")).toBeInTheDocument();
+      expect(screen.getAllByRole("article")).toHaveLength(5);
     });
   });
 });

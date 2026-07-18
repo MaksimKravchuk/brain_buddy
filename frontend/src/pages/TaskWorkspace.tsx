@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BellRing,
+  BrainCircuit,
   ChevronDown,
   CircleHelp,
   Clock3,
@@ -16,6 +17,7 @@ import {
   RotateCcw,
   Search,
   Send,
+  Sparkles,
   Sprout,
   UserRound,
   UsersRound,
@@ -39,7 +41,13 @@ type ViewId =
   | "deep-work"
   | "laptop";
 
-type TaskState = "default" | "working" | "review" | "offer" | "needs-you";
+type TaskState =
+  | "default"
+  | "thinking"
+  | "working"
+  | "review"
+  | "offer"
+  | "needs-you";
 
 type Task = {
   id: string;
@@ -82,7 +90,7 @@ const contexts: Array<{ id: ViewId; label: string }> = [
 const sourceTasks: Record<ViewId, Task[]> = {
   next: [
     { id: "n1", title: "Draft the launch announcement", project: "Onboarding revamp", context: "@deep-work", state: "working" },
-    { id: "n2", title: "Call the dentist to reschedule", project: "No project", context: "@calls", due: "before Fri" },
+    { id: "n2", title: "Call the dentist to reschedule", project: "No project", context: "@calls", due: "before Fri", state: "thinking" },
     { id: "n3", title: "Choose a venue for the offsite", project: "Team offsite", state: "needs-you" },
     { id: "n4", title: "Review Q3 pricing assumptions", project: "Pricing", context: "@deep-work", state: "review" },
     { id: "n5", title: "Write the onboarding email sequence", project: "Onboarding revamp", context: "@laptop", state: "offer" },
@@ -95,8 +103,8 @@ const sourceTasks: Record<ViewId, Task[]> = {
     { id: "i4", title: "Renew passport?", project: "Inbox" },
   ],
   waiting: [
-    { id: "w1", title: "Contract redlines from the venue", project: "Team offsite", note: "sent Tue" },
-    { id: "w2", title: "Compare-plans research", project: "Pricing", state: "review" },
+    { id: "t2", title: "Contract redlines from the venue", project: "Team offsite", note: "sent Tue" },
+    { id: "p2", title: "Compare-plans research", project: "Pricing", state: "review" },
   ],
   someday: [
     { id: "s1", title: "Learn enough SQL to stop asking Priya", project: "No project" },
@@ -105,23 +113,25 @@ const sourceTasks: Record<ViewId, Task[]> = {
   ],
   review: [],
   onboarding: [
-    { id: "o1", title: "Draft the launch announcement", project: "Onboarding revamp", context: "@deep-work", state: "working" },
-    { id: "o2", title: "Write the onboarding email sequence", project: "Onboarding revamp", context: "@laptop", state: "offer" },
+    { id: "n1", title: "Draft the launch announcement", project: "Onboarding revamp", context: "@deep-work", state: "working" },
+    { id: "n5", title: "Write the onboarding email sequence", project: "Onboarding revamp", context: "@laptop", state: "offer" },
   ],
   pricing: [
-    { id: "p1", title: "Review Q3 pricing assumptions", project: "Pricing", context: "@deep-work", state: "review" },
+    { id: "n4", title: "Review Q3 pricing assumptions", project: "Pricing", context: "@deep-work", state: "review" },
+    { id: "p2", title: "Compare-plans research", project: "Pricing", state: "review" },
   ],
   offsite: [
-    { id: "t1", title: "Choose a venue for the offsite", project: "Team offsite", state: "needs-you" },
+    { id: "n3", title: "Choose a venue for the offsite", project: "Team offsite", state: "needs-you" },
+    { id: "t2", title: "Contract redlines from the venue", project: "Team offsite", note: "sent Tue" },
   ],
   billing: [],
-  calls: [{ id: "c1", title: "Call the dentist to reschedule", project: "No project", context: "@calls", due: "before Fri" }],
+  calls: [{ id: "n2", title: "Call the dentist to reschedule", project: "No project", context: "@calls", due: "before Fri", state: "thinking" }],
   errands: [{ id: "e1", title: "Buy stamps", project: "No project", context: "@errands" }],
   "deep-work": [
-    { id: "d1", title: "Draft the launch announcement", project: "Onboarding revamp", context: "@deep-work", state: "working" },
-    { id: "d2", title: "Review Q3 pricing assumptions", project: "Pricing", context: "@deep-work", state: "review" },
+    { id: "n1", title: "Draft the launch announcement", project: "Onboarding revamp", context: "@deep-work", state: "working" },
+    { id: "n4", title: "Review Q3 pricing assumptions", project: "Pricing", context: "@deep-work", state: "review" },
   ],
-  laptop: [{ id: "l1", title: "Write the onboarding email sequence", project: "Onboarding revamp", context: "@laptop", state: "offer" }],
+  laptop: [{ id: "n5", title: "Write the onboarding email sequence", project: "Onboarding revamp", context: "@laptop", state: "offer" }],
 };
 
 const paneMeta: Partial<Record<ViewId, string>> = {
@@ -138,6 +148,21 @@ const paneMeta: Partial<Record<ViewId, string>> = {
   laptop: "1 task across your lists",
 };
 
+const sourceCountBaselines: Partial<Record<ViewId, number>> = {
+  inbox: 4,
+  next: 6,
+  waiting: 2,
+  someday: 3,
+  onboarding: 6,
+  pricing: 4,
+  offsite: 3,
+  billing: 2,
+  calls: 1,
+  errands: 1,
+  "deep-work": 2,
+  laptop: 1,
+};
+
 function titleFor(view: ViewId): string {
   if (view === "next") return "Next actions";
   if (view === "review") return "Weekly review";
@@ -146,7 +171,15 @@ function titleFor(view: ViewId): string {
 
 function stateLabel(state?: TaskState): string | null {
   if (!state || state === "default") return null;
-  return state === "needs-you" ? "Needs you" : state === "working" ? "Working" : state === "review" ? "Ready for review" : "Offer ready";
+  return state === "needs-you"
+    ? "Needs you"
+    : state === "thinking"
+      ? "Thinking"
+      : state === "working"
+        ? "Working"
+        : state === "review"
+          ? "Ready for review"
+          : "Offer ready";
 }
 
 function TaskCard({
@@ -154,6 +187,7 @@ function TaskCard({
   completed,
   onToggle,
   showProject,
+  compact,
   expanded,
   onExpand,
 }: {
@@ -161,12 +195,14 @@ function TaskCard({
   completed: boolean;
   onToggle: () => void;
   showProject: boolean;
+  compact: boolean;
   expanded: boolean;
   onExpand: () => void;
 }): JSX.Element {
   const state = task.state ?? "default";
+  const isAgentTask = state === "working" || state === "review" || state === "offer";
   return (
-    <article className={`task-card task-card--${state} ${completed ? "is-completed" : ""} ${expanded ? "is-expanded" : ""}`}>
+    <article className={`task-card task-card--${state} ${compact ? "is-compact" : ""} ${completed ? "is-completed" : ""} ${expanded ? "is-expanded" : ""}`}>
       <div className="task-card__row">
         <input aria-label={`Complete ${task.title}`} checked={completed} className="task-check" onChange={onToggle} type="checkbox" />
         <button aria-expanded={expanded} className="task-card__title" onClick={onExpand} type="button">
@@ -175,6 +211,7 @@ function TaskCard({
         <div className="task-card__chips">
           {task.context && <span className="task-chip">{task.context}</span>}
           {task.due && <span className="task-chip task-chip--due">{task.due}</span>}
+          {isAgentTask && <span aria-label={`AI working on ${task.title}`} className="task-agent"><Sparkles size={14} /></span>}
           {stateLabel(state) && <span className={`task-chip task-chip--${state}`}><span className={state !== "needs-you" ? "task-chip__dot" : ""} />{stateLabel(state)}</span>}
         </div>
         {showProject && <span className="task-card__project">{task.project}</span>}
@@ -189,10 +226,10 @@ function TaskCard({
 function TaskDetail({ state }: { state: TaskState }): JSX.Element {
   return (
     <section className="task-detail" aria-label="Task details">
-      <div className="task-detail__section"><strong>Subtasks</strong><label><input type="checkbox" /> Read the supporting notes</label><label><input type="checkbox" /> Share a concise update</label><input aria-label="Add a subtask" className="task-detail__input" placeholder="+ Add a subtask" /></div>
-      <div className="task-detail__section"><strong>Run log</strong><div className="run-log"><span className="run-log__done" /> Brief created <time>10:24</time></div><div className="run-log"><span className="run-log__current" /> Agent is checking context <time>Now</time></div></div>
-      {state === "needs-you" && <div className="needs-you"><CircleHelp size={16} /><span>Which venue should be prioritized for the team?</span><button type="button">Choose</button></div>}
-      {(state === "working" || state === "offer") && <div className="agent-offer"><LoaderCircle size={16} /><span>Brain Buddy has a proposed handoff ready for you.</span><button type="button">Review</button></div>}
+      <div className="task-detail__section"><strong>Subtasks</strong><label><input checked readOnly type="checkbox" /> Read the supporting notes</label><label><input type="checkbox" /> Share a concise update</label><input aria-label="Add a subtask" className="task-detail__input" placeholder="+ Add a subtask" /></div>
+      <div className="task-detail__section"><strong>Run log</strong><div className="run-log"><span className="run-log__done" /> Brief created <time>10:24</time></div><div className="run-log"><span className="run-log__current" /> Agent is checking context <time>Now</time></div><div className="run-log"><span className="run-log__upcoming" /> Handoff scheduled <time>Upcoming</time></div></div>
+      <div className="needs-you"><CircleHelp size={16} /><span>Which venue should be prioritized for the team?</span><button type="button">Choose</button></div>
+      <div className="agent-offer"><LoaderCircle size={16} /><span>Brain Buddy has a proposed handoff ready for you.</span><button type="button">Review</button></div>
       <a className="artifact-link" href="#task-artifact"><FileText size={14} /> Open task artifact</a>
       <div className="comment"><span className="comment__avatar">TS</span><div><strong>Tom</strong><p>I added the key context here for review.</p></div></div>
       <button className="add-comment" type="button">+ Add a comment</button>
@@ -202,17 +239,49 @@ function TaskDetail({ state }: { state: TaskState }): JSX.Element {
 
 function BrainDumpOverlay({ onClose, onSend }: { onClose: () => void; onSend: () => void }): JSX.Element {
   const [reviewing, setReviewing] = useState(false);
+  const [captured, setCaptured] = useState(false);
   const [items, setItems] = useState(["Follow up on the new pricing notes"]);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(document.activeElement as HTMLElement | null);
   const remove = (index: number) => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index));
+
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(panelRef.current?.querySelectorAll<HTMLElement>("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])") ?? []).filter((element) => !element.hasAttribute("disabled"));
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      returnFocusRef.current?.focus();
+    };
+  }, [onClose]);
 
   return (
     <div aria-modal="true" className="brain-dump-scrim" role="dialog" aria-label="Brain dump">
-      <div className="brain-dump-panel">
-        <header className="brain-dump-header"><span className="brain-dump-mic"><Mic size={20} /></span><div><h2>Brain dump</h2><p>{reviewing ? "Review the tasks we found" : "Talk it out — we will turn it into clear next actions"}</p></div><button aria-label="Close brain dump" className="icon-button" onClick={onClose} type="button"><X size={18} /></button></header>
+      <div className="brain-dump-panel" ref={panelRef}>
+        <header className="brain-dump-header"><span className="brain-dump-mic"><Mic size={20} /></span><div><h2>Brain dump</h2><p>{reviewing ? "Review the tasks we found" : "Talk it out — we will turn it into clear next actions"}</p></div><button aria-label="Close brain dump" className="icon-button" onClick={onClose} ref={closeButtonRef} type="button"><X size={18} /></button></header>
         {reviewing ? (
           <div className="brain-dump-review"><div className="brain-dump-review__head"><h3>Ready to send</h3><span>{items.length} task{items.length === 1 ? "" : "s"}</span></div><div className="brain-dump-review__grid">{items.map((item, index) => <div className="review-card" key={item}><input aria-label={`Task ${index + 1}`} defaultValue={item} /><button type="button">Add date</button><button aria-label={`Remove ${item}`} onClick={() => remove(index)} type="button"><X size={16} /></button></div>)}</div><footer><button className="text-button" onClick={onClose} type="button">Discard all</button><button className="primary-button" onClick={onSend} type="button"><Send size={15} /> Send to inbox</button></footer></div>
         ) : (
-          <div className="brain-dump-recording"><aside><span className="recording-mic"><Mic size={26} /></span><div className="recording-status"><span /> Recording <time>0:14</time></div><p>Say what is on your mind. We will keep the useful parts.</p><div className="waveform" aria-label="Recording waveform">▁▃▅▂▆▄▇▃▅▂</div><div className="recording-spacer" /><button className="secondary-button" onClick={() => setReviewing(true)} type="button">Stop</button><button className="primary-button" onClick={() => setReviewing(true)} type="button"><Send size={15} /> Stop &amp; send</button></aside><section className="captured-tasks"><p className="transcript"><span>“</span> I should follow up on the new pricing notes and check in with Maya.</p><div className="captured-card"><span className="captured-card__label">Captured task</span><strong>Follow up on the new pricing notes</strong></div><div className="forming-card"><span className="task-chip__dot" /> Forming another task…</div></section></div>
+          <div className="brain-dump-recording"><aside><span className="recording-mic"><Mic size={26} /></span><div className="recording-status"><span /> Recording <time>0:14</time></div><p>Say what is on your mind. We will keep the useful parts.</p><div className="waveform" aria-label="Recording waveform">▁▃▅▂▆▄▇▃▅▂</div><div className="recording-spacer" /><button className="secondary-button" onClick={() => setCaptured(true)} type="button">Stop</button><button className="primary-button" onClick={() => { setCaptured(true); setReviewing(true); }} type="button"><Send size={15} /> Stop &amp; send</button></aside><section className="captured-tasks">{captured ? <><p className="transcript"><span>“</span> I should follow up on the new pricing notes and check in with Maya.</p><div className="captured-card"><span className="captured-card__label">Captured task</span><strong>Follow up on the new pricing notes</strong></div><div className="forming-card"><span className="task-chip__dot" /> Forming another task…</div></> : <div className="no-captured-tasks"><strong>No tasks captured yet</strong><p>Keep talking — Brain Buddy will collect useful next actions here.</p></div>}</section></div>
         )}
       </div>
     </div>
@@ -222,17 +291,36 @@ function BrainDumpOverlay({ onClose, onSend }: { onClose: () => void; onSend: ()
 export default function TaskWorkspace(): JSX.Element {
   const [view, setView] = useState<ViewId>("next");
   const [grouped, setGrouped] = useState(false);
+  const [compact, setCompact] = useState(false);
   const [completed, setCompleted] = useState<Record<string, boolean>>({});
   const [expanded, setExpanded] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [brainDumpOpen, setBrainDumpOpen] = useState(false);
-  const [sentInboxTask, setSentInboxTask] = useState(false);
-  const tasks = useMemo(() => sourceTasks[view], [view]);
-  const visibleInboxCount = sourceTasks.inbox.length - Object.entries(completed).filter(([id, value]) => value && id.startsWith("i")).length + (sentInboxTask ? 1 : 0);
+  const [sentInboxTasks, setSentInboxTasks] = useState<Task[]>([]);
+  const tasks = useMemo(
+    () => (view === "inbox" ? [...sourceTasks.inbox, ...sentInboxTasks] : sourceTasks[view]),
+    [sentInboxTasks, view]
+  );
+  const countFor = (target: ViewId): number => {
+    const targetTasks = target === "inbox" ? [...sourceTasks.inbox, ...sentInboxTasks] : sourceTasks[target];
+    const completedInTarget = targetTasks.filter((task) => completed[task.id]).length;
+    return (sourceCountBaselines[target] ?? targetTasks.length) + (target === "inbox" ? sentInboxTasks.length : 0) - completedInTarget;
+  };
+  const metadataFor = (target: ViewId): string | undefined => {
+    const count = countFor(target);
+    if (target === "next") return `${count} tasks across your active projects`;
+    if (target === "inbox") return `${count} unprocessed tasks`;
+    if (target === "onboarding") return `${count} tasks · ${sourceTasks.onboarding.filter((task) => !completed[task.id] && task.state === "working").length} running on AI`;
+    if (target === "offsite") return `${count} tasks · ${sourceTasks.offsite.filter((task) => !completed[task.id] && task.state === "needs-you").length} needs you`;
+    if (target === "pricing" || target === "billing") return `${count} tasks`;
+    if (target === "waiting") return `${count} tasks waiting on someone else`;
+    if (target === "someday") return `${count} tasks you may want to revisit`;
+    return paneMeta[target];
+  };
   const isProject = projects.some((project) => project.id === view);
   const isContext = contexts.some((context) => context.id === view);
   const showProject = view === "next" || isContext || view === "waiting";
-  const selectView = (nextView: ViewId) => { setView(nextView); setExpanded(null); setGrouped(false); };
+  const selectView = (nextView: ViewId) => { setView(nextView); setExpanded(null); setGrouped(false); setCompact(false); };
   const showToast = (message: string) => { setToast(message); window.setTimeout(() => setToast(null), 2500); };
   const showPlaceholder = (what: string) => showToast(`${what} isn't built yet — placeholder`);
   const groupedTasks = Object.entries(tasks.reduce<Record<string, Task[]>>((result, task) => { (result[task.project] ??= []).push(task); return result; }, {}));
@@ -242,8 +330,8 @@ export default function TaskWorkspace(): JSX.Element {
       <header className="task-topbar"><div className="brand"><Sprout size={22} /><span>Brain Buddy</span></div><label className="task-search"><Search size={15} /><input onKeyDown={(event) => event.key === "Enter" && showPlaceholder("Search")} placeholder="Search tasks and trees" /><kbd>⌘ K</kbd></label><div className="task-topbar__right"><button className="brain-dump-button" onClick={() => setBrainDumpOpen(true)} type="button"><Mic size={15} /> Brain dump</button><button aria-label="Account" className="avatar-button" onClick={() => showPlaceholder("Account menu")}>TS</button></div></header>
       <div className="task-workspace__body">
         <aside className="task-sidebar" aria-label="Task navigation">
-          <nav>{navItems.map(({ id, label, count, icon: Icon }) => <button aria-current={view === id ? "page" : undefined} className={`sidebar-item ${view === id ? "is-selected" : ""}`} key={id} onClick={() => selectView(id)} type="button"><Icon size={16} /><span>{label}</span>{id === "inbox" ? <b className="inbox-count">{visibleInboxCount}</b> : id === "review" ? <b className="review-due">Due Sunday</b> : count ? <em>{count}</em> : null}</button>)}</nav>
-          <section className="sidebar-section"><div className="sidebar-section__title"><span>Projects</span><button aria-label="New project" className="icon-button" onClick={() => showPlaceholder("New project")} type="button"><Plus size={15} /></button></div>{projects.map((project) => <button aria-current={view === project.id ? "page" : undefined} className={`sidebar-item sidebar-project ${view === project.id ? "is-selected" : ""}`} key={project.id} onClick={() => selectView(project.id)} type="button"><i style={{ background: project.color }} /><span>{project.label}</span><em>{project.count}</em></button>)}</section>
+          <nav>{navItems.map(({ id, label, icon: Icon }) => <button aria-current={view === id ? "page" : undefined} className={`sidebar-item ${view === id ? "is-selected" : ""}`} key={id} onClick={() => selectView(id)} type="button"><Icon size={16} /><span>{label}</span>{id === "inbox" ? <b className="inbox-count">{countFor(id)}</b> : id === "review" ? <b className="review-due">Due Sunday</b> : <em>{countFor(id)}</em>}</button>)}</nav>
+          <section className="sidebar-section"><div className="sidebar-section__title"><span>Projects</span><button aria-label="New project" className="icon-button" onClick={() => showPlaceholder("New project")} type="button"><Plus size={15} /></button></div>{projects.map((project) => <button aria-current={view === project.id ? "page" : undefined} className={`sidebar-item sidebar-project ${view === project.id ? "is-selected" : ""}`} key={project.id} onClick={() => selectView(project.id)} type="button"><i style={{ background: project.color }} /><span>{project.label}</span><em>{countFor(project.id)}</em></button>)}</section>
           <section className="sidebar-section"><div className="sidebar-section__title"><span>Contexts</span></div><div className="context-pills">{contexts.map((context) => <button aria-current={view === context.id ? "page" : undefined} className={view === context.id ? "is-selected" : ""} key={context.id} onClick={() => selectView(context.id)} type="button">{context.label}</button>)}</div></section>
         </aside>
         <section className="task-content">
@@ -252,17 +340,19 @@ export default function TaskWorkspace(): JSX.Element {
           ) : (
             <>
               <header className="pane-header">
-                <div><h1>{titleFor(view)}</h1><p>{view === "next" ? "6 tasks across your active projects" : paneMeta[view]}</p></div>
+                <div><h1>{titleFor(view)}</h1><p>{metadataFor(view)}</p></div>
                 <div className="pane-actions">
                   {view === "next" && <button aria-pressed={grouped} className="secondary-button" onClick={() => setGrouped((current) => !current)} type="button"><Menu size={15} /> Group by project</button>}
+                  {view === "next" && <button className="secondary-button" onClick={() => showPlaceholder("Think")} type="button"><BrainCircuit size={15} /> Think</button>}
+                  {view === "next" && <button aria-pressed={compact} className="secondary-button" onClick={() => setCompact((current) => !current)} type="button">Edit tasks</button>}
                   <button aria-label="Sort tasks" className="secondary-button" onClick={() => showPlaceholder("Sorting")} type="button">Sort <ChevronDown size={15} /></button>
                 </div>
               </header>
               {view === "inbox" && <div className="inbox-hint"><Inbox size={16} /> These are unprocessed thoughts. Decide what each one means before it gets lost.</div>}
               {grouped ? (
-                <div className="grouped-list">{groupedTasks.map(([project, group]) => <section className="task-group" key={project}><h2><i />{project}<span>{group.length}</span></h2>{group.map((task) => <TaskCard completed={Boolean(completed[task.id])} expanded={expanded === task.id} key={task.id} onExpand={() => setExpanded(expanded === task.id ? null : task.id)} onToggle={() => setCompleted((items) => ({ ...items, [task.id]: !items[task.id] }))} showProject={false} task={task} />)}</section>)}</div>
+                <div className="grouped-list">{groupedTasks.map(([project, group]) => <section className="task-group" key={project}><h2><i />{project}<span>{group.length}</span></h2>{group.map((task) => <TaskCard compact={compact} completed={Boolean(completed[task.id])} expanded={expanded === task.id} key={task.id} onExpand={() => setExpanded(expanded === task.id ? null : task.id)} onToggle={() => setCompleted((items) => ({ ...items, [task.id]: !items[task.id] }))} showProject={false} task={task} />)}</section>)}</div>
               ) : (
-                <div className="task-list">{tasks.map((task) => <TaskCard completed={Boolean(completed[task.id])} expanded={expanded === task.id} key={task.id} onExpand={() => setExpanded(expanded === task.id ? null : task.id)} onToggle={() => setCompleted((items) => ({ ...items, [task.id]: !items[task.id] }))} showProject={showProject} task={task} />)}</div>
+                <div className="task-list">{tasks.map((task) => <TaskCard compact={compact} completed={Boolean(completed[task.id])} expanded={expanded === task.id} key={task.id} onExpand={() => setExpanded(expanded === task.id ? null : task.id)} onToggle={() => setCompleted((items) => ({ ...items, [task.id]: !items[task.id] }))} showProject={showProject} task={task} />)}</div>
               )}
               {view !== "billing" && <button className="add-task" type="button"><Plus size={16} /> {view === "next" ? "Add a next action — or dump everything on your mind with the mic above" : "Add a task"}</button>}
             </>
@@ -270,7 +360,7 @@ export default function TaskWorkspace(): JSX.Element {
         </section>
       </div>
       {toast && <div className="workspace-toast" role="status">{toast}</div>}
-      {brainDumpOpen && <BrainDumpOverlay onClose={() => setBrainDumpOpen(false)} onSend={() => { setBrainDumpOpen(false); setSentInboxTask(true); selectView("inbox"); showToast("1 task sent to inbox"); }} />}
+      {brainDumpOpen && <BrainDumpOverlay onClose={() => setBrainDumpOpen(false)} onSend={() => { setBrainDumpOpen(false); setSentInboxTasks((current) => [...current, { id: `inbox-sent-${current.length + 1}`, title: "Follow up on the new pricing notes", project: "Inbox" }]); selectView("inbox"); showToast("1 task sent to inbox"); }} />}
     </main>
   );
 }
