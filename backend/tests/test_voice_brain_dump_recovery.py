@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -182,6 +183,67 @@ def test_retry_requires_retryable_state(data_dir: Path) -> None:
             ExpectedRevisionRequest(expected_revision=operation.revision),
             owner_id=OWNER,
             idempotency_key="retry-not-eligible",
+        )
+
+
+def test_retry_replays_cached_idempotent_response(data_dir: Path) -> None:
+    """A repeated retry with the same idempotency key returns the stored result
+    without invoking the provider again (no duplicate accurate-STT call)."""
+
+    service = _service(data_dir, fail_plan={"media_recovery": ["retryable"]})
+    operation, _ = _seal(service)
+    operation = service.task_repo.get_brain_dump_operation_for_owner(operation.id, owner_id=OWNER)
+    operation = operation.model_copy(update={"media_ref": "media_recovery"})
+    service.task_repo.save_brain_dump_operation(operation)
+
+    sealed = service.seal_brain_dump_operation(
+        operation.id,
+        BrainDumpSealRequest(expected_revision=operation.revision, expected_chunks=1),
+        owner_id=OWNER,
+        idempotency_key="recovery-seal-replay",
+    )
+    assert sealed.status == "retryable_error"
+
+    first = service.retry_brain_dump_operation(
+        operation.id,
+        ExpectedRevisionRequest(expected_revision=sealed.revision),
+        owner_id=OWNER,
+        idempotency_key="recovery-retry-replay",
+    )
+    assert first.status == "awaiting_confirmation"
+    accurate_stt = cast(DeterministicAccurateStt, service.accurate_stt)
+    call_count_after_first = len(accurate_stt.calls)
+
+    replayed = service.retry_brain_dump_operation(
+        operation.id,
+        ExpectedRevisionRequest(expected_revision=sealed.revision),
+        owner_id=OWNER,
+        idempotency_key="recovery-retry-replay",
+    )
+
+    assert replayed == first
+    assert len(accurate_stt.calls) == call_count_after_first
+
+
+def test_retry_without_sealed_checkpoint_is_rejected(data_dir: Path) -> None:
+    """A retryable-flagged operation with no provider-run checkpoint (should
+    never happen through normal flow) fails closed rather than resuming
+    from missing state."""
+
+    service = _service(data_dir)
+    operation, _ = _seal(service)
+    operation = service.task_repo.get_brain_dump_operation_for_owner(operation.id, owner_id=OWNER)
+    broken = operation.model_copy(
+        update={"status": "retryable_error", "sealed_manifest_hash": None}
+    )
+    service.task_repo.save_brain_dump_operation(broken)
+
+    with pytest.raises(ValidationFailure, match="no sealed checkpoint"):
+        service.retry_brain_dump_operation(
+            broken.id,
+            ExpectedRevisionRequest(expected_revision=broken.revision),
+            owner_id=OWNER,
+            idempotency_key="retry-no-checkpoint",
         )
 
 
