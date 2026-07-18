@@ -1,11 +1,8 @@
 import { useEffect } from "react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter } from "react-router-dom";
 
 import { setUnauthorizedHandler } from "./api/client";
-import { ProtectedRoute } from "./components/auth/ProtectedRoute";
-import LoginPage from "./pages/LoginPage";
-import SignupPage from "./pages/SignupPage";
-import TaskWorkspace from "./pages/TaskWorkspace";
+import { AppRoutes } from "./app/AppRoutes";
 import { useAuthStore } from "./stores/authStore";
 
 export default function App(): JSX.Element {
@@ -25,19 +22,7 @@ export default function App(): JSX.Element {
 
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/signup" element={<SignupPage />} />
-        <Route
-          path="/"
-          element={
-            <ProtectedRoute>
-              <TaskWorkspace />
-            </ProtectedRoute>
-          }
-        />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <AppRoutes />
     </BrowserRouter>
   );
 }
