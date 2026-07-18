@@ -17,7 +17,12 @@ from app.exceptions import NotFoundError, ValidationFailure
 from app.repositories import ProviderRepository, TreeRepository, ValidationRepository
 from app.schemas import ValidationRequest, ValidationResponse
 from app.schemas.common import ValidationState
-from app.schemas.domain import TreeDocument, ValidationEntry
+from app.schemas.domain import (
+    NodeDocument,
+    ProviderConfig,
+    TreeDocument,
+    ValidationEntry,
+)
 from app.services.tree_service import TreeService
 from app.utils.time import utcnow
 
@@ -48,7 +53,7 @@ class ValidationService:
         self, tree_id: str, node_id: str, payload: ValidationRequest
     ) -> ValidationResponse:
         tree = self.tree_repo.load(tree_id)
-        node, index = self._resolve_node(tree, node_id)
+        self._resolve_node(tree, node_id)
 
         prompt = self._build_prompt(tree, node_id)
         provider_id, provider_config = self._determine_provider(payload.provider)
@@ -80,10 +85,14 @@ class ValidationService:
         )
 
         self.validation_repo.append_entry(tree_id, node_id, entry)
-        updated_tree = self._update_node_validation(
-            tree, index, validation_state, checked_at
-        )
-        self.tree_service.touch_tree(updated_tree, timestamp=checked_at)
+
+        def apply_validation(current: TreeDocument) -> TreeDocument:
+            _, index = self._resolve_node(current, node_id)
+            return self._update_node_validation(
+                current, index, validation_state, checked_at
+            )
+
+        self.tree_service.mutate_tree(tree_id, apply_validation, timestamp=checked_at)
 
         return ValidationResponse(
             node_id=node_id,
@@ -96,13 +105,17 @@ class ValidationService:
     def get_history(self, tree_id: str, node_id: str) -> list[ValidationEntry]:
         return self.validation_repo.load_history(tree_id, node_id)
 
-    def _resolve_node(self, tree: TreeDocument, node_id: str):
+    def _resolve_node(
+        self, tree: TreeDocument, node_id: str
+    ) -> tuple[NodeDocument, int]:
         for index, candidate in enumerate(tree.nodes):
             if candidate.id == node_id:
                 return candidate, index
         raise NotFoundError("Node", node_id)
 
-    def _determine_provider(self, requested_id: str | None):
+    def _determine_provider(
+        self, requested_id: str | None
+    ) -> tuple[str, ProviderConfig | None]:
         registry = self.provider_repo.load()
         provider_id = (
             requested_id or registry.default_provider or self.default_provider_id

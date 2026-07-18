@@ -1,0 +1,144 @@
+name: Mutation quality (report-only)
+
+# Scope is intentionally limited to the deterministic core configured in
+# backend/pyproject.toml: app/services/tree_service.py,
+# app/services/version_service.py, app/services/relation_service.py,
+# app/repositories/tree.py, app/repositories/version.py, and
+# app/repositories/index.py.
+# LLM/provider, async, and other I/O boundaries are not part of this campaign.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-core-mutation:
+    name: Deterministic core mutation evidence
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install deterministic test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Run deterministic-core mutation campaign
+        id: mutation
+        continue-on-error: true
+        run: |
+          rm -rf mutants mutation-artifacts mutation-allure-results
+          mkdir -p mutation-artifacts
+          set +e
+          mutmut run
+          mutation_exit=$?
+          set -e
+          mutmut export-cicd-stats > mutation-artifacts/mutation-stats.json || true
+          mutmut results > mutation-artifacts/mutation-summary.txt || true
+          mutmut results --all true > mutation-artifacts/mutation-survivors.txt || true
+          {
+            echo "Mutation campaign is report-only; it is not a product-test gate."
+            echo "mutmut exit status: ${mutation_exit}"
+            cat mutation-artifacts/mutation-summary.txt
+          } > mutation-artifacts/mutation-summary.with-status.txt
+          mv mutation-artifacts/mutation-summary.with-status.txt mutation-artifacts/mutation-summary.txt
+          exit "${mutation_exit}"
+
+      - name: Create report-only Allure evidence
+        if: always()
+        run: |
+          mkdir -p mutation-allure-results
+          cp mutation-artifacts/mutation-summary.txt mutation-allure-results/
+          cp mutation-artifacts/mutation-survivors.txt mutation-allure-results/
+          python ../scripts/create_mutation_allure_evidence.py \
+            --summary mutation-allure-results/mutation-summary.txt \
+            --survivors mutation-allure-results/mutation-survivors.txt \
+            --output mutation-allure-results/mutation-evidence-result.json
+
+      - name: Upload raw mutmut state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-raw-results
+          path: backend/mutants
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload mutation summary and survivors
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-summary-and-survivors
+          path: backend/mutation-artifacts
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload report-only Allure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-evidence-allure-results
+          path: backend/mutation-allure-results
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Fail on mutation runner infrastructure errors
+        if: steps.mutation.outcome == 'failure'
+        run: |
+          echo "mutmut could not finish; raw evidence was uploaded for diagnosis." >&2
+          exit 1
+
+  mutation-allure-report:
+    name: Mutation Allure evidence report
+    runs-on: ubuntu-latest
+    needs: deterministic-core-mutation
+    if: always()
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download report-only Allure evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: mutation-evidence-allure-results
+          path: mutation-allure-results
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Allure Report 3 CLI
+        working-directory: frontend
+        run: npm ci
+
+      - name: Generate report-only Allure HTML
+        run: |
+          cd frontend
+          npx allure generate ../mutation-allure-results -o ../mutation-allure-report
+
+      - name: Upload Allure evidence report
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-allure-report-html
+          path: mutation-allure-report
+          if-no-files-found: error
+          retention-days: 30

@@ -83,7 +83,7 @@ describe("TreeCanvas sibling creation", () => {
     act(() => {
       useTreeStore.getState().reset();
       useUiStore.getState().clearToasts();
-      useTreeStore.getState().setTree(sampleTree as any);
+      useTreeStore.getState().setTree(sampleTree);
       useTreeStore.getState().select({ type: "node", id: "child-1" });
     });
 

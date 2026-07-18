@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from fastapi import Depends, HTTPException, Request, status
 
 from app.container import Container
 from app.core.config import AppConfig
+from app.modules.tasks import TaskService
 from app.schemas.auth import User
 from app.services import (
     AuthService,
@@ -21,14 +24,14 @@ def get_container(request: Request) -> Container:
     container = getattr(request.app.state, "container", None)
     if container is None:  # pragma: no cover - application misconfiguration
         raise RuntimeError("Application container has not been configured.")
-    return container
+    return cast(Container, container)
 
 
 def get_config_dep(request: Request) -> AppConfig:
     config = getattr(request.app.state, "config", None)
     if config is None:  # pragma: no cover - application misconfiguration
         raise RuntimeError("Application config has not been configured.")
-    return config
+    return cast(AppConfig, config)
 
 
 def get_tree_service(container: Container = Depends(get_container)) -> TreeService:
@@ -59,6 +62,10 @@ def get_validation_service(
 
 def get_auth_service(container: Container = Depends(get_container)) -> AuthService:
     return container.auth_service
+
+
+def get_task_service(container: Container = Depends(get_container)) -> TaskService:
+    return container.task_service
 
 
 def get_current_user(

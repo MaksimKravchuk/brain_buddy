@@ -1,9 +1,11 @@
 # Implementation Plan: [FEATURE]
 
 **Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
+
 **Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
 
-**Note**: This template is filled in by the `/speckit.plan` command. See `.specify/templates/commands/plan.md` for the execution workflow.
+**Note**: This template is filled in by the `/speckit-plan` command; its definition describes the execution workflow.
+Amend the spec first when implementation intent changes.
 
 ## Summary
 
@@ -17,25 +19,46 @@
   the iteration process.
 -->
 
-**Language/Version**: [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]  
-**Primary Dependencies**: [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]  
-**Storage**: [if applicable, e.g., PostgreSQL, CoreData, files or N/A]  
-**Testing**: [e.g., pytest, XCTest, cargo test or NEEDS CLARIFICATION]  
+**Language/Version**: [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]
+
+**Primary Dependencies**: [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]
+
+**Storage**: [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
+
+**Testing**: [e.g., pytest, XCTest, cargo test or NEEDS CLARIFICATION]
+
 **Target Platform**: [e.g., Linux server, iOS 15+, WASM or NEEDS CLARIFICATION]
-**Project Type**: [single/web/mobile - determines source structure]  
-**Performance Goals**: [domain-specific, e.g., 1000 req/s, 10k lines/sec, 60 fps or NEEDS CLARIFICATION]  
-**Constraints**: [domain-specific, e.g., <200ms p95, <100MB memory, offline-capable or NEEDS CLARIFICATION]  
+
+**Project Type**: [e.g., library/cli/web-service/mobile-app/compiler/desktop-app or NEEDS CLARIFICATION]
+
+**Performance Goals**: [domain-specific, e.g., 1000 req/s, 10k lines/sec, 60 fps or NEEDS CLARIFICATION]
+
+**Constraints**: [domain-specific, e.g., <200ms p95, <100MB memory, offline-capable or NEEDS CLARIFICATION]
+
 **Scale/Scope**: [domain-specific, e.g., 10k users, 1M LOC, 50 screens or NEEDS CLARIFICATION]
 
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-- Consent & Safety: How will data stay local-first, with per-request consent and API key enforcement (`BRAIN_BUDDY_API_KEY` + `VITE_API_KEY`) where needed? No real data committed.
-- Tests: What backend (pytest/FastAPI TestClient) and frontend (Vitest + Testing Library) failing-first tests will cover new behaviors? Include edge cases for AI/persistence flows.
-- Contracts: Which schemas/endpoints change, and how will compatibility be preserved across backend and frontend?
-- Observability: How will correlation IDs, structured logs, and actionable errors/retries surface for this work?
-- Performance/Resilience: How will responsiveness targets (~200-node canvas) and data-loss protections (autosave, warnings) be maintained?
+- Spec workflow: Is the relevant `specs/[###-feature]/spec.md` current, and are
+  clarification/checklist outcomes reflected before planning implementation?
+- Consent & Safety: How will data stay local-first, with explicit consent and
+  provider/API-key enforcement where needed? Confirm no real data, secrets, raw
+  audio/transcripts, paths, or content fingerprints are committed/logged.
+- Tests: What backend (pytest/FastAPI TestClient), frontend (Vitest + Testing
+  Library), operation, or documentation checks will fail first and then pass?
+  Include edge cases for AI/persistence/voice/routing flows.
+- Contracts: Which schemas/endpoints/events/state machines change, and how will
+  compatibility be preserved across backend, frontend, and generated specs?
+- Observability: How will correlation IDs, structured redacted logs, progress,
+  retry, cancellation, and actionable errors surface for this work?
+- Mobile/resilience/performance: How will mobile capture/review interruptions,
+  offline windows, data-loss protections, and ~200-node canvas responsiveness be
+  maintained?
+- Delivery boundary: Confirm Spec Kit tasks are planning input only; Hermes
+  Kanban, isolated worktrees, TDD, review, CI, PR, and Fly release gates remain
+  authoritative.
 
 ## Project Structure
 
@@ -43,12 +66,12 @@
 
 ```text
 specs/[###-feature]/
-├── plan.md              # This file (/speckit.plan command output)
-├── research.md          # Phase 0 output (/speckit.plan command)
-├── data-model.md        # Phase 1 output (/speckit.plan command)
-├── quickstart.md        # Phase 1 output (/speckit.plan command)
-├── contracts/           # Phase 1 output (/speckit.plan command)
-└── tasks.md             # Phase 2 output (/speckit.tasks command - NOT created by /speckit.plan)
+├── plan.md              # This file (/speckit-plan command output)
+├── research.md          # Phase 0 output (/speckit-plan command)
+├── data-model.md        # Phase 1 output (/speckit-plan command)
+├── quickstart.md        # Phase 1 output (/speckit-plan command)
+├── contracts/           # Phase 1 output (/speckit-plan command)
+└── tasks.md             # Phase 2 output (/speckit-tasks command - NOT created by /speckit-plan)
 ```
 
 ### Source Code (repository root)
