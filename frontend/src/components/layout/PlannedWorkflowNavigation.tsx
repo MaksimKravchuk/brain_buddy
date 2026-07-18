@@ -7,7 +7,7 @@ export function PlannedWorkflowNavigation(): JSX.Element {
   return (
     <nav
       aria-label="Planned workflows"
-      className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto px-1 py-0.5"
+      className="order-last flex min-w-0 basis-full flex-wrap items-center gap-2 overflow-visible px-1 py-0.5 sm:order-none sm:flex-1 sm:basis-auto sm:flex-nowrap sm:overflow-x-auto"
     >
       {plannedWorkflowItems.map((item) => (
         <button
