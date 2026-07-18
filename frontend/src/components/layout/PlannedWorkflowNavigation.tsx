@@ -14,7 +14,7 @@ export function PlannedWorkflowNavigation(): JSX.Element {
           key={item.id}
           type="button"
           disabled
-          className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-500 shadow-soft transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-smooth disabled:pointer-events-none disabled:opacity-100"
+          className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-500 shadow-soft transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-smooth disabled:opacity-100"
           aria-label={`${item.label} — Coming Later`}
         >
           <span className="text-slate-700">{item.label}</span>
