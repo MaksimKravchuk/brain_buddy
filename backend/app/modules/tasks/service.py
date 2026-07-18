@@ -11,6 +11,8 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime
 from typing import Concatenate, ParamSpec, TypeVar, cast
 
+from pydantic import BaseModel
+
 from app.exceptions import ConflictError, NotFoundError, ValidationFailure
 from app.schemas.tasks import (
     BrainDumpOperationStartRequest,
@@ -19,6 +21,8 @@ from app.schemas.tasks import (
     ExpectedRevisionRequest,
     ProjectCreateRequest,
     ProjectUpdateRequest,
+    SmartAddClassificationRef,
+    SmartAddTaskCreateRequest,
     TagCreateRequest,
     TagUpdateRequest,
     TaskCommentCreateRequest,
@@ -41,6 +45,8 @@ from .domain import (
     BrainDumpTranscriptSegmentDocument,
     IdempotencyRecord,
     ProjectDocument,
+    SmartAddCreatedDocument,
+    SmartAddTaskResultDocument,
     TagDocument,
     TaskCommentDocument,
     TaskDocument,
@@ -226,6 +232,79 @@ class TaskService:
         )
         self.task_repo.create(task)
         return task
+
+    @_serialized_write
+    def smart_add_task(
+        self,
+        payload: SmartAddTaskCreateRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> SmartAddTaskResultDocument:
+        command = "smart_add_task"
+        request_hash = self._request_hash(command, payload)
+        record = self._idempotency_record(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+        )
+        if record is not None:
+            return self._smart_add_result(record, owner_id=owner_id)
+
+        waiting_for = (
+            self._waiting_for(payload.waiting_for)
+            if payload.state == "waiting"
+            else None
+        )
+        project, created_project_id = self._resolve_smart_add_project(
+            payload.project, owner_id=owner_id
+        )
+        tags, created_tag_ids = self._resolve_smart_add_tags(
+            payload.tags, owner_id=owner_id
+        )
+        now = utcnow()
+        task = TaskDocument(
+            id=generate_id("task"),
+            owner_id=owner_id,
+            title=payload.title,
+            details=payload.details,
+            state=payload.state,
+            project_id=project.id if project else None,
+            tag_ids=[tag.id for tag in tags],
+            due_date=payload.due_date,
+            priority=payload.priority,
+            waiting_for=waiting_for,
+            waiting_since=now if waiting_for else None,
+            order_key=self.task_repo.next_order_key(owner_id=owner_id, state=payload.state),
+            source_capture_ids=[],
+            created_at=now,
+            updated_at=now,
+        )
+        result = SmartAddTaskResultDocument(
+            task=task,
+            project=project,
+            tags=tags,
+            created=SmartAddCreatedDocument(
+                project_id=created_project_id,
+                tag_ids=created_tag_ids,
+            ),
+        )
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=task.id,
+            response=result,
+        )
+        if project is not None and created_project_id == project.id:
+            self.task_repo.create_project(project)
+        for tag in tags:
+            if tag.id in created_tag_ids:
+                self.task_repo.create_tag(tag)
+        self.task_repo.create(task)
+        return result
 
     @_serialized_write
     def start_brain_dump_operation(
@@ -1280,6 +1359,8 @@ class TaskService:
             "create_tag",
         } or record.command.startswith(("update_tag:", "delete_tag:")):
             self._tag_result(record, owner_id=owner_id)
+        elif record.command == "smart_add_task":
+            self._smart_add_result(record, owner_id=owner_id)
         elif record.command.startswith(("create_subtask:", "update_subtask:", "transition_subtask:")):
             subtask = TaskSubtaskDocument.model_validate(record.response_body)
             self._subtask_result(record, owner_id=owner_id, task_id=subtask.task_id)
@@ -1297,14 +1378,7 @@ class TaskService:
         command: str,
         request_hash: str,
         resource_id: str,
-        response: (
-            BrainDumpOperationDocument
-            | ProjectDocument
-            | TagDocument
-            | TaskDocument
-            | TaskSubtaskDocument
-            | TaskCommentDocument
-        ),
+        response: BaseModel,
     ) -> None:
         self.task_repo.save_idempotency(
             owner_id=owner_id,
@@ -1357,6 +1431,37 @@ class TaskService:
         if current.revision < tag.revision:
             self.task_repo.save_tag(tag)
         return tag
+
+    def _smart_add_result(
+        self, record: IdempotencyRecord, *, owner_id: str
+    ) -> SmartAddTaskResultDocument:
+        result = SmartAddTaskResultDocument.model_validate(record.response_body)
+        if result.project is not None:
+            try:
+                current_project = self.task_repo.get_project_for_owner(
+                    result.project.id, owner_id=owner_id
+                )
+            except NotFoundError:
+                self.task_repo.create_project(result.project)
+            else:
+                if current_project.revision < result.project.revision:
+                    self.task_repo.save_project(result.project)
+        for tag in result.tags:
+            try:
+                current_tag = self.task_repo.get_tag_for_owner(tag.id, owner_id=owner_id)
+            except NotFoundError:
+                self.task_repo.create_tag(tag)
+            else:
+                if current_tag.revision < tag.revision:
+                    self.task_repo.save_tag(tag)
+        try:
+            current_task = self.task_repo.get_for_owner(result.task.id, owner_id=owner_id)
+        except NotFoundError:
+            self.task_repo.create(result.task)
+        else:
+            if current_task.revision < result.task.revision:
+                self.task_repo.save(result.task)
+        return result
 
     def _task_result(self, record: IdempotencyRecord, *, owner_id: str) -> TaskDocument:
         task = TaskDocument.model_validate(record.response_body)
@@ -1413,6 +1518,7 @@ class TaskService:
             | ProjectUpdateRequest
             | TagCreateRequest
             | TagUpdateRequest
+            | SmartAddTaskCreateRequest
             | TaskCreateRequest
             | TaskSubtaskCreateRequest
             | TaskSubtaskUpdateRequest
@@ -1599,6 +1705,81 @@ class TaskService:
             tag = self.task_repo.get_tag_for_owner(tag_id, owner_id=owner_id)
             if tag.state != "active":
                 raise ValidationFailure("Task contexts must be active; task tags must be active.")
+
+    def _resolve_smart_add_project(
+        self, ref: SmartAddClassificationRef | None, *, owner_id: str
+    ) -> tuple[ProjectDocument | None, str | None]:
+        if ref is None:
+            return None, None
+        if ref.id is not None:
+            project = self.task_repo.get_project_for_owner(ref.id, owner_id=owner_id)
+            if project.state != "active":
+                raise ValidationFailure("Task project must be active.")
+            return project, None
+        name = display_project_name(ref.name or "")
+        normalized = normalize_task_name(name)
+        for existing in self.task_repo.list_projects_for_owner(owner_id=owner_id):
+            if existing.normalized_name != normalized:
+                continue
+            if existing.state != "active":
+                raise ValidationFailure("Task project must be active.")
+            return existing, None
+        now = utcnow()
+        project = ProjectDocument(
+            id=generate_id("project"),
+            owner_id=owner_id,
+            name=name,
+            normalized_name=normalized,
+            color=None,
+            created_at=now,
+            updated_at=now,
+        )
+        self._assert_unique_project_name(owner_id=owner_id, project=project)
+        return project, project.id
+
+    def _resolve_smart_add_tags(
+        self, refs: list[SmartAddClassificationRef], *, owner_id: str
+    ) -> tuple[list[TagDocument], list[str]]:
+        tags: list[TagDocument] = []
+        created_ids: list[str] = []
+        seen: set[str] = set()
+        for ref in refs:
+            tag, created_id = self._resolve_smart_add_tag(ref, owner_id=owner_id)
+            if tag.id in seen:
+                continue
+            seen.add(tag.id)
+            tags.append(tag)
+            if created_id is not None:
+                created_ids.append(created_id)
+        return tags, created_ids
+
+    def _resolve_smart_add_tag(
+        self, ref: SmartAddClassificationRef, *, owner_id: str
+    ) -> tuple[TagDocument, str | None]:
+        if ref.id is not None:
+            tag = self.task_repo.get_tag_for_owner(ref.id, owner_id=owner_id)
+            if tag.state != "active":
+                raise ValidationFailure("Task contexts must be active; task tags must be active.")
+            return tag, None
+        name = display_tag_name(ref.name or "")
+        normalized = normalize_task_name(name, strip_tag_prefix=True)
+        for existing in self.task_repo.list_tags_for_owner(owner_id=owner_id):
+            if existing.normalized_name != normalized:
+                continue
+            if existing.state != "active":
+                raise ValidationFailure("Task contexts must be active; task tags must be active.")
+            return existing, None
+        now = utcnow()
+        tag = TagDocument(
+            id=generate_id("tag"),
+            owner_id=owner_id,
+            name=name,
+            normalized_name=normalized,
+            created_at=now,
+            updated_at=now,
+        )
+        self._assert_unique_tag_name(owner_id=owner_id, tag=tag)
+        return tag, tag.id
 
     def _filter_tasks(
         self,
