@@ -34,8 +34,18 @@ const statusLabels: Record<BrainDumpProposalStatus, string> = {
   provisional: "Provisional",
   wording_changing: "Wording still changing",
   ready_to_review: "Ready to review",
-  user_edited: "Edited"
+  user_edited: "Edited",
+  reconciled: "Reconciled",
+  conflicted: "Needs review"
 };
+
+const processingStatusLabels = new Map<string, string>([
+  ["sealing", "Sealing audio"],
+  ["fast_processing", "Building provisional tasks"],
+  ["accurate_transcribing", "Improving transcript"],
+  ["reconciling", "Reconciling tasks"],
+  ["committing", "Saving tasks"]
+]);
 
 function idempotencyKey(suffix: string) {
   return `brain-dump-${suffix}-${Date.now()}`;
@@ -58,6 +68,7 @@ export function BrainDumpRoute(): JSX.Element {
   const proposalMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const isReviewPath = location.pathname.endsWith("/review");
   const activeProposals = useMemo(() => (operation?.proposals ?? []).filter((proposal) => !proposal.deleted), [operation]);
+  const hasUnresolvedConflicts = activeProposals.some((proposal) => (proposal.conflicts ?? []).length > 0);
 
   const applyOperation = useCallback((next: BrainDumpOperationResponse | null) => {
     const current = operationRef.current;
@@ -279,10 +290,15 @@ export function BrainDumpRoute(): JSX.Element {
     );
   }
 
+  if (operation && processingStatusLabels.has(operation.status) && operation.status !== "committing") {
+    return <ProcessingSurface error={error} operation={operation} proposals={activeProposals} />;
+  }
+
   if (isReviewPath || operation?.status === "awaiting_confirmation") {
     return (
       <ReviewSurface
         error={error}
+        hasUnresolvedConflicts={hasUnresolvedConflicts}
         proposals={activeProposals}
         onBack={() => navigate(`/brain-dump/${operation?.id ?? "new"}`, { replace: true })}
         onDelete={deleteProposal}
@@ -410,8 +426,37 @@ function ProposalCard({ proposal }: { proposal: BrainDumpProposal }): JSX.Elemen
   );
 }
 
+function ProcessingSurface({
+  error,
+  operation,
+  proposals
+}: {
+  error: string | null;
+  operation: BrainDumpOperationResponse;
+  proposals: BrainDumpProposal[];
+}): JSX.Element {
+  const label = processingStatusLabels.get(operation.status) ?? "Processing";
+  return (
+    <div className="min-h-screen bg-surface-base text-slate-900" data-operation-id={operation.id}>
+      <div className="fixed inset-0 flex items-center justify-center bg-slate-50/80 p-4 backdrop-blur-sm">
+        <section role="status" aria-live="polite" className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-floating">
+          {error ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
+          <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-600">Voice brain dump</p>
+          <h1 className="mt-2 text-xl font-semibold text-slate-900">{label}</h1>
+          <p className="mt-1 text-sm text-slate-500">{operation.status}</p>
+          <div className="mt-4 flex flex-col gap-2">
+            {proposals.map((proposal) => <ProposalCard key={proposal.id} proposal={proposal} />)}
+            {proposals.length === 0 ? <p className="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">We are keeping the task list first while the accurate transcript catches up.</p> : null}
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
 function ReviewSurface({
   error,
+  hasUnresolvedConflicts,
   proposals,
   onBack,
   onDelete,
@@ -420,6 +465,7 @@ function ReviewSurface({
   onUpdateTitle
 }: {
   error: string | null;
+  hasUnresolvedConflicts: boolean;
   proposals: BrainDumpProposal[];
   onBack: () => void;
   onDelete: (proposal: BrainDumpProposal) => void;
@@ -452,7 +498,17 @@ function ReviewSurface({
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700">Inbox</span>
                     <span className="rounded-full bg-sky-50 px-2.5 py-1 text-xs text-sky-700">{statusLabels[proposal.status]}</span>
+                    {(proposal.locked_fields ?? []).map((field) => (
+                      <span key={field} className="rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-700">Locked: {field}</span>
+                    ))}
                   </div>
+                  {(proposal.conflicts ?? []).map((conflict) => (
+                    <div key={`${conflict.field}-${conflict.suggested_value ?? ""}`} className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+                      <div className="font-semibold">Conflict: {conflict.field}</div>
+                      <div>Mine: {conflict.current_value ?? "—"}</div>
+                      <div>Suggestion: {conflict.suggested_value ?? "—"}</div>
+                    </div>
+                  ))}
                 </div>
                 <button type="button" className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-500" aria-label={`Delete ${proposal.title}`} onClick={() => onDelete(proposal)}>
                   <Trash2 className="h-4 w-4" aria-hidden />
@@ -467,7 +523,7 @@ function ReviewSurface({
         <button type="button" className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600" onClick={onDiscard}>
           Discard
         </button>
-        <button type="button" className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-brand-primary text-[15px] font-semibold text-white shadow-glow" onClick={onSave}>
+        <button type="button" className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-brand-primary text-[15px] font-semibold text-white shadow-glow disabled:cursor-not-allowed disabled:opacity-50" disabled={hasUnresolvedConflicts} onClick={onSave}>
           <Inbox className="h-4 w-4" aria-hidden />
           Save {proposals.length} to inbox
         </button>

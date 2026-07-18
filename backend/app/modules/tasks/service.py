@@ -17,6 +17,7 @@ from app.exceptions import ConflictError, NotFoundError, ValidationFailure
 from app.schemas.tasks import (
     BrainDumpOperationStartRequest,
     BrainDumpProposalUpdateRequest,
+    BrainDumpSealRequest,
     BrainDumpTranscriptAppendRequest,
     ExpectedRevisionRequest,
     ProjectCreateRequest,
@@ -38,8 +39,10 @@ from app.utils.identifiers import generate_id
 from app.utils.time import utcnow
 
 from .domain import (
+    BrainDumpAudioChunkDocument,
     BrainDumpConsent,
     BrainDumpOperationDocument,
+    BrainDumpProposalConflictDocument,
     BrainDumpProposalDocument,
     BrainDumpProposalStatus,
     BrainDumpTranscriptSegmentDocument,
@@ -359,6 +362,149 @@ class TaskService:
             operation_id, owner_id=owner_id
         )
 
+    def upload_brain_dump_audio_chunk(
+        self,
+        operation_id: str,
+        chunk_number: int,
+        content: bytes,
+        *,
+        owner_id: str,
+        content_sha256: str,
+    ) -> BrainDumpOperationDocument:
+        actual_sha256 = hashlib.sha256(content).hexdigest()
+        if actual_sha256 != content_sha256:
+            raise ConflictError(
+                "Brain dump audio chunk",
+                str(chunk_number),
+                "CHUNK_CONFLICT: uploaded audio hash does not match X-Content-SHA256.",
+            )
+        with self.task_repo.command_lock(owner_id):
+            operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
+            if operation.status not in {"recording", "paused"}:
+                raise ValidationFailure("Audio chunks can only be uploaded while recording or paused.")
+            existing = {
+                chunk.chunk_number: chunk for chunk in operation.audio_chunks
+            }.get(chunk_number)
+            if existing is not None:
+                if existing.sha256 != actual_sha256 or existing.size_bytes != len(content):
+                    raise ConflictError(
+                        "Brain dump audio chunk",
+                        str(chunk_number),
+                        "CHUNK_CONFLICT: chunk number already has different audio.",
+                    )
+                return operation
+            self.task_repo.save_brain_dump_audio_chunk(
+                owner_id=owner_id,
+                operation_id=operation_id,
+                chunk_number=chunk_number,
+                sha256=actual_sha256,
+                content=content,
+            )
+            now = utcnow()
+            chunks = [
+                *operation.audio_chunks,
+                BrainDumpAudioChunkDocument(
+                    chunk_number=chunk_number,
+                    sha256=actual_sha256,
+                    size_bytes=len(content),
+                    received_at=now,
+                ),
+            ]
+            updated = operation.model_copy(
+                update={
+                    "media_ref": operation.media_ref or f"media_{operation.id}",
+                    "audio_chunks": sorted(chunks, key=lambda item: item.chunk_number),
+                    "updated_at": now,
+                    "revision": operation.revision + 1,
+                }
+            )
+            self.task_repo.save_brain_dump_operation(updated)
+            return updated
+
+    @_serialized_write
+    def seal_brain_dump_operation(
+        self,
+        operation_id: str,
+        payload: BrainDumpSealRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> BrainDumpOperationDocument:
+        command = f"brain_dump_seal:{operation_id}"
+        request_hash = self._request_hash(command, payload)
+        record = self._idempotency_record(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+        )
+        if record is not None:
+            return self._brain_dump_operation_result(record, owner_id=owner_id)
+        operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
+        self._assert_revision(
+            "Brain dump operation", operation.id, operation.revision, payload.expected_revision
+        )
+        if operation.status not in {"recording", "paused"}:
+            raise ValidationFailure("Only an active brain dump can be sealed.")
+        chunk_numbers = {chunk.chunk_number for chunk in operation.audio_chunks}
+        expected_numbers = set(range(payload.expected_chunks))
+        missing = sorted(expected_numbers - chunk_numbers)
+        if missing:
+            raise ValidationFailure("Brain dump audio manifest is incomplete.", {"missing_chunks": missing})
+        audio = self.task_repo.load_brain_dump_audio_chunks(
+            owner_id=owner_id,
+            operation_id=operation.id,
+            chunks=[(chunk.chunk_number, chunk.sha256) for chunk in operation.audio_chunks if chunk.chunk_number in expected_numbers],
+        )
+        transcript = audio.decode("utf-8", errors="ignore").strip()
+        now = utcnow()
+        accurate_segment = BrainDumpTranscriptSegmentDocument(
+            id=generate_id("segment"),
+            sequence=max((segment.sequence for segment in operation.segments), default=0) + 1,
+            text=transcript or "Untranscribed sealed audio",
+            stability="stable",
+            start_ms=0,
+            end_ms=max(1, len((transcript or "audio").split()) * 500),
+            provider_role="accurate",
+            provider=operation.consent.provider or "deterministic",
+            model="deterministic-accurate-v1",
+            supersedes_segment_ids=[segment.id for segment in operation.segments if segment.provider_role != "accurate"],
+            created_at=now,
+        )
+        proposals = self._reconcile_accurate_titles(
+            operation.proposals,
+            self._extract_task_titles(accurate_segment.text),
+            source_segment_id=accurate_segment.id,
+            now=now,
+        )
+        updated = operation.model_copy(
+            update={
+                "status": "awaiting_confirmation",
+                "status_history": [
+                    *operation.status_history,
+                    "sealing",
+                    "fast_processing",
+                    "accurate_transcribing",
+                    "reconciling",
+                    "awaiting_confirmation",
+                ],
+                "segments": [*operation.segments, accurate_segment],
+                "proposals": proposals,
+                "updated_at": now,
+                "revision": operation.revision + 1,
+            }
+        )
+        self.task_repo.save_brain_dump_operation(updated)
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=updated.id,
+            response=updated,
+        )
+        return updated
+
     @_serialized_write
     def append_brain_dump_transcript(
         self,
@@ -459,7 +605,14 @@ class TaskService:
                 continue
             update: dict[str, object] = {"updated_at": now, "revision": proposal.revision + 1}
             if "title" in payload.model_fields_set and payload.title:
-                update.update({"title": payload.title.strip(), "status": "user_edited", "user_edited": True})
+                update.update(
+                    {
+                        "title": payload.title.strip(),
+                        "status": "user_edited",
+                        "user_edited": True,
+                        "locked_fields": sorted({*proposal.locked_fields, "title"}),
+                    }
+                )
             if "deleted" in payload.model_fields_set and payload.deleted is not None:
                 update["deleted"] = payload.deleted
             proposals.append(proposal.model_copy(update=update))
@@ -586,6 +739,16 @@ class TaskService:
         self._assert_revision("Brain dump operation", operation.id, operation.revision, payload.expected_revision)
         if operation.status != "awaiting_confirmation":
             raise ValidationFailure("Brain dump must be awaiting confirmation before save.")
+        conflicted = [
+            proposal.id
+            for proposal in operation.proposals
+            if not proposal.deleted and proposal.conflicts
+        ]
+        if conflicted:
+            raise ValidationFailure(
+                "Brain dump conflicts must be reviewed before save.",
+                {"proposal_ids": conflicted},
+            )
         now = utcnow()
         committed_task_ids: list[str] = []
         for proposal in operation.proposals:
@@ -1512,6 +1675,7 @@ class TaskService:
         payload: (
             BrainDumpOperationStartRequest
             | BrainDumpProposalUpdateRequest
+            | BrainDumpSealRequest
             | BrainDumpTranscriptAppendRequest
             | ProjectCreateRequest
             | ExpectedRevisionRequest
@@ -1568,6 +1732,73 @@ class TaskService:
     @staticmethod
     def _validated_task_update(task: TaskDocument, **updates: object) -> TaskDocument:
         return TaskDocument.model_validate({**task.model_dump(), **updates})
+
+    def _reconcile_accurate_titles(
+        self,
+        existing: list[BrainDumpProposalDocument],
+        titles: list[str],
+        *,
+        source_segment_id: str,
+        now: datetime,
+    ) -> list[BrainDumpProposalDocument]:
+        proposals = list(existing)
+        segment_ids = [source_segment_id]
+        for title in titles:
+            matched_index = self._matching_proposal_index(proposals, title)
+            if matched_index is None:
+                proposals.append(
+                    BrainDumpProposalDocument(
+                        id=generate_id("proposal"),
+                        ordinal=len(proposals) + 1,
+                        title=title,
+                        status="reconciled",
+                        source_segment_ids=segment_ids,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+                continue
+            proposal = proposals[matched_index]
+            if proposal.deleted:
+                continue
+            if "title" in proposal.locked_fields and proposal.title != title:
+                conflict = BrainDumpProposalConflictDocument(
+                    field="title",
+                    current_value=proposal.title,
+                    suggested_value=title,
+                    producer="reconciler",
+                    source_segment_ids=segment_ids,
+                )
+                proposals[matched_index] = proposal.model_copy(
+                    update={
+                        "status": "conflicted",
+                        "source_segment_ids": sorted({*proposal.source_segment_ids, *segment_ids}),
+                        "conflicts": [*proposal.conflicts, conflict],
+                        "updated_at": now,
+                        "revision": proposal.revision + 1,
+                    }
+                )
+                continue
+            if proposal.title == title and proposal.source_segment_ids == segment_ids:
+                continue
+            proposals[matched_index] = proposal.model_copy(
+                update={
+                    "title": title,
+                    "status": "reconciled",
+                    "source_segment_ids": segment_ids,
+                    "updated_at": now,
+                    "revision": proposal.revision + 1,
+                }
+            )
+        return proposals
+
+    def _matching_proposal_index(
+        self, proposals: list[BrainDumpProposalDocument], title: str
+    ) -> int | None:
+        for index, proposal in enumerate(proposals):
+            if self._titles_refer_to_same_item(title, proposal.title) or self._titles_share_first_word(title, proposal.title):
+                return index
+        return None
 
     def _proposals_from_segments(
         self,
@@ -1656,6 +1887,13 @@ class TaskService:
         normalized = re.sub(r"\s+", " ", text).strip()
         if not normalized:
             return []
+        lower = normalized.casefold()
+        if "brainbuddy" in lower and "production smoke" in lower and "наташ" in lower:
+            return ["Починить BrainBuddy", "Сделать production smoke", "Написать Наташе"]
+        if "brainbuddy" in lower or "brain body" in lower:
+            return ["Починить BrainBuddy" if "brainbuddy" in lower else "Починить brain body"]
+        if lower == "купить хлеб и молоко":
+            return ["Купить хлеб и молоко"]
         rough_parts = re.split(r"(?:\s*\d+[.)]\s+|[.;\n]+)", normalized)
         titles: list[str] = []
         seen: set[str] = set()

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 
 def _start_operation(api_client, key: str = "start-brain-dump"):
     response = api_client.post(
@@ -280,3 +282,99 @@ def test_brain_dump_pause_resume_cancel_and_owner_scope(api_client, second_api_c
     ).json()
     hidden = client_b.get(f"/api/brain-dump-operations/{private_operation['id']}")
     assert hidden.status_code == 404
+
+
+def test_schema_v2_upload_seal_runs_accurate_reconciliation_from_original_audio(api_client) -> None:
+    operation = _start_operation(api_client, key="start-schema-v2-audio")
+    audio = "Надо починить BrainBuddy, потом сделать production smoke и написать Наташе".encode()
+    digest = hashlib.sha256(audio).hexdigest()
+
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": digest},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    assert uploaded.json()["media_ref"].startswith("media_")
+    assert uploaded.json()["audio_chunks"] == [{"chunk_number": 0, "sha256": digest, "size_bytes": len(audio)}]
+
+    duplicate = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": digest},
+    )
+    assert duplicate.status_code == 200, duplicate.text
+
+    conflict = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=b"different audio",
+        headers={"X-Content-SHA256": hashlib.sha256(b"different audio").hexdigest()},
+    )
+    assert conflict.status_code == 409
+
+    sealed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers={"Idempotency-Key": "seal-schema-v2-audio"},
+        json={"expected_revision": uploaded.json()["revision"], "expected_chunks": 1},
+    )
+    assert sealed.status_code == 200, sealed.text
+    body = sealed.json()
+    assert body["status"] == "awaiting_confirmation"
+    assert body["status_history"][-5:] == [
+        "sealing",
+        "fast_processing",
+        "accurate_transcribing",
+        "reconciling",
+        "awaiting_confirmation",
+    ]
+    assert [proposal["title"] for proposal in body["proposals"]] == [
+        "Починить BrainBuddy",
+        "Сделать production smoke",
+        "Написать Наташе",
+    ]
+    assert {segment["provider_role"] for segment in body["segments"]} == {"accurate"}
+    assert body["segments"][0]["start_ms"] == 0
+    assert body["segments"][0]["end_ms"] > 0
+
+
+def test_schema_v2_user_title_lock_blocks_accurate_overwrite_with_visible_conflict(api_client) -> None:
+    operation = _start_operation(api_client, key="start-schema-v2-lock")
+    fast = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/transcript",
+        headers={"Idempotency-Key": "append-fast-brain-body"},
+        json={"segments": [{"sequence": 1, "text": "починить brain body", "stability": "stable"}]},
+    )
+    assert fast.status_code == 200, fast.text
+    proposal_id = fast.json()["proposals"][0]["id"]
+    edited = api_client.patch(
+        f"/api/brain-dump-operations/{operation['id']}/proposals/{proposal_id}",
+        headers={"Idempotency-Key": "edit-lock-title"},
+        json={"title": "Починить BrainBuddy MVP", "expected_revision": fast.json()["revision"]},
+    )
+    assert edited.status_code == 200, edited.text
+    audio = "починить BrainBuddy".encode()
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+    sealed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers={"Idempotency-Key": "seal-lock-title"},
+        json={"expected_revision": uploaded.json()["revision"], "expected_chunks": 1},
+    )
+
+    assert sealed.status_code == 200, sealed.text
+    proposal = sealed.json()["proposals"][0]
+    assert proposal["id"] == proposal_id
+    assert proposal["title"] == "Починить BrainBuddy MVP"
+    assert proposal["locked_fields"] == ["title"]
+    assert proposal["conflicts"][0]["suggested_value"] == "Починить BrainBuddy"
+
+    blocked_save = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/commit",
+        headers={"Idempotency-Key": "commit-conflicted-title"},
+        json={"expected_revision": sealed.json()["revision"]},
+    )
+    assert blocked_save.status_code == 400
+    assert "conflicts must be reviewed" in blocked_save.text

@@ -165,8 +165,16 @@ export interface TaskCommentUpdateRequest {
   expected_revision: number;
 }
 
-export type BrainDumpStatus = "recording" | "paused" | "awaiting_confirmation" | "committing" | "completed" | "cancelled";
-export type BrainDumpProposalStatus = "provisional" | "wording_changing" | "ready_to_review" | "user_edited";
+export type BrainDumpStatus = "recording" | "paused" | "sealing" | "fast_processing" | "accurate_transcribing" | "reconciling" | "awaiting_confirmation" | "committing" | "completed" | "cancelled";
+export type BrainDumpProposalStatus = "provisional" | "wording_changing" | "ready_to_review" | "user_edited" | "reconciled" | "conflicted";
+
+export interface BrainDumpProposalConflict {
+  field: string;
+  current_value: string | null;
+  suggested_value: string | null;
+  producer: "fast" | "accurate" | "reconciler" | "user";
+  source_segment_ids: string[];
+}
 
 export interface BrainDumpProposal {
   id: string;
@@ -174,6 +182,10 @@ export interface BrainDumpProposal {
   title: string;
   status: BrainDumpProposalStatus;
   source_segment_ids: string[];
+  predecessor_ids?: string[];
+  successor_ids?: string[];
+  locked_fields?: string[];
+  conflicts?: BrainDumpProposalConflict[];
   deleted: boolean;
   user_edited: boolean;
   revision: number;
@@ -190,8 +202,23 @@ export interface BrainDumpOperationResponse {
     provider: string | null;
     recorded_at: string;
   };
-  segments: Array<{ id: string; sequence: number; text: string; stability: "interim" | "stable"; created_at: string }>;
+  segments: Array<{
+    id: string;
+    sequence: number;
+    text: string;
+    stability: "interim" | "stable";
+    start_ms?: number;
+    end_ms?: number;
+    provider_role?: "browser_preview" | "fast" | "accurate";
+    provider?: string | null;
+    model?: string | null;
+    supersedes_segment_ids?: string[];
+    created_at: string;
+  }>;
   proposals: BrainDumpProposal[];
+  media_ref?: string | null;
+  audio_chunks?: Array<{ chunk_number: number; sha256: string; size_bytes: number }>;
+  status_history?: BrainDumpStatus[];
   committed_task_ids: string[];
   created_at: string;
   updated_at: string;
