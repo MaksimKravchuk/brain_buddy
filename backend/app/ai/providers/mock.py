@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 
+from app.schemas.domain import ProviderConfig
+
 from .base import ProviderContext, ProviderResult, ValidationProvider
 
 
@@ -19,7 +21,7 @@ class MockValidationProvider(ValidationProvider):
         prompt: str,
         context: ProviderContext,
         *,
-        config=None,
+        config: ProviderConfig | None = None,
     ) -> ProviderResult:
         digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
         seed = int(digest[:8], 16)
