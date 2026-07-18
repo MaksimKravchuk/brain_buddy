@@ -382,6 +382,31 @@ export const apiClient = {
     });
   },
 
+  uploadBrainDumpAudio(
+    operationId: string,
+    chunkNumber: number,
+    content: ArrayBuffer,
+    sha256: string
+  ) {
+    return request<BrainDumpOperationResponse>(`/brain-dump-operations/${operationId}/audio/${chunkNumber}`, {
+      method: "PUT",
+      headers: { "X-Content-SHA256": sha256 },
+      body: content
+    });
+  },
+
+  sealBrainDump(
+    operationId: string,
+    payload: { expected_revision: number; expected_chunks: number; manifest_hash: string },
+    idempotencyKey: string
+  ) {
+    return request<BrainDumpOperationResponse>(`/brain-dump-operations/${operationId}/seal`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
   updateBrainDumpProposal(
     operationId: string,
     proposalId: string,

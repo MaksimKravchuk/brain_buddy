@@ -234,6 +234,8 @@ BrainDumpStatus = Literal[
     "fast_processing",
     "accurate_transcribing",
     "reconciling",
+    "retryable_error",
+    "terminal_error",
     "awaiting_confirmation",
     "committing",
     "completed",
@@ -325,6 +327,16 @@ class BrainDumpAudioChunkResponse(StrictBaseModel):
     size_bytes: int
 
 
+class BrainDumpProviderRunResponse(StrictBaseModel):
+    id: str
+    role: Literal["accurate_stt", "reconciler"]
+    status: Literal["pending", "running", "succeeded", "retryable_error", "terminal_error"]
+    checkpoint: Literal["sealed", "accurate_transcribed", "reconciled"]
+    attempt: int
+    recovery_count: int
+    error: str | None = None
+
+
 class BrainDumpOperationResponse(StrictBaseModel):
     id: str
     owner_id: str
@@ -335,6 +347,8 @@ class BrainDumpOperationResponse(StrictBaseModel):
     proposals: list[BrainDumpProposalResponse] = Field(default_factory=list)
     media_ref: str | None = None
     audio_chunks: list[BrainDumpAudioChunkResponse] = Field(default_factory=list)
+    sealed_manifest_hash: str | None = None
+    provider_runs: list[BrainDumpProviderRunResponse] = Field(default_factory=list)
     status_history: list[BrainDumpStatus] = Field(default_factory=list)
     committed_task_ids: list[str] = Field(default_factory=list)
     created_at: datetime

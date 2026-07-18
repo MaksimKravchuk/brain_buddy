@@ -28,6 +28,7 @@ class AccurateSttRequest:
     supersedes_segment_ids: list[str] = field(default_factory=list)
     # Contract guard: this must remain None; accurate STT consumes sealed audio.
     fast_text: str | None = None
+    sealed_audio: bytes = b""
 
 
 @dataclass(frozen=True)
@@ -98,7 +99,12 @@ class DeterministicAccurateStt:
 
     def transcribe_sealed_audio(self, request: AccurateSttRequest) -> SttResult:
         self.calls.append(request)
-        text = self.transcripts.get(request.media_ref, "".join(request.vocabulary) or "")
+        text = self.transcripts.get(
+            request.media_ref,
+            request.sealed_audio.decode("utf-8", errors="ignore")
+            or "".join(request.vocabulary)
+            or "",
+        )
         segment = TranscriptHypothesis(
             id=_stable_id("accurate", request.operation_id, request.media_ref, text),
             sequence=1,

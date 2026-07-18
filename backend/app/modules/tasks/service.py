@@ -37,6 +37,11 @@ from app.schemas.tasks import (
 )
 from app.utils.identifiers import generate_id
 from app.utils.time import utcnow
+from app.workflows.voice_brain_dump.providers import (
+    AccurateSttPort,
+    AccurateSttRequest,
+    DeterministicAccurateStt,
+)
 
 from .domain import (
     BrainDumpAudioChunkDocument,
@@ -45,6 +50,7 @@ from .domain import (
     BrainDumpProposalConflictDocument,
     BrainDumpProposalDocument,
     BrainDumpProposalStatus,
+    BrainDumpProviderRunDocument,
     BrainDumpTranscriptSegmentDocument,
     IdempotencyRecord,
     ProjectDocument,
@@ -90,8 +96,11 @@ def _serialized_write(
 class TaskService:
     """Owns canonical GTD records and their owner-scoped projections."""
 
-    def __init__(self, task_repo: TaskRepository) -> None:
+    def __init__(
+        self, task_repo: TaskRepository, *, accurate_stt: AccurateSttPort | None = None
+    ) -> None:
         self.task_repo = task_repo
+        self.accurate_stt = accurate_stt or DeterministicAccurateStt()
 
     @_serialized_write
     def create_project(
@@ -451,24 +460,49 @@ class TaskService:
         missing = sorted(expected_numbers - chunk_numbers)
         if missing:
             raise ValidationFailure("Brain dump audio manifest is incomplete.", {"missing_chunks": missing})
+        manifest_hash = self._brain_dump_manifest_hash(
+            [
+                chunk
+                for chunk in operation.audio_chunks
+                if chunk.chunk_number in expected_numbers
+            ]
+        )
+        if payload.manifest_hash is not None and payload.manifest_hash != manifest_hash:
+            raise ConflictError(
+                "Brain dump audio manifest",
+                operation.id,
+                "MANIFEST_CONFLICT: sealed manifest does not match uploaded audio chunks.",
+            )
         audio = self.task_repo.load_brain_dump_audio_chunks(
             owner_id=owner_id,
             operation_id=operation.id,
             chunks=[(chunk.chunk_number, chunk.sha256) for chunk in operation.audio_chunks if chunk.chunk_number in expected_numbers],
         )
-        transcript = audio.decode("utf-8", errors="ignore").strip()
         now = utcnow()
+        accurate_result = self.accurate_stt.transcribe_sealed_audio(
+            AccurateSttRequest(
+                operation_id=operation.id,
+                media_ref=operation.media_ref or f"media_{operation.id}",
+                supersedes_segment_ids=[
+                    segment.id
+                    for segment in operation.segments
+                    if segment.provider_role != "accurate"
+                ],
+                sealed_audio=audio,
+            )
+        )
+        accurate_hypothesis = accurate_result.segments[0]
         accurate_segment = BrainDumpTranscriptSegmentDocument(
-            id=generate_id("segment"),
+            id=accurate_hypothesis.id,
             sequence=max((segment.sequence for segment in operation.segments), default=0) + 1,
-            text=transcript or "Untranscribed sealed audio",
-            stability="stable",
-            start_ms=0,
-            end_ms=max(1, len((transcript or "audio").split()) * 500),
-            provider_role="accurate",
+            text=accurate_hypothesis.text,
+            stability=accurate_hypothesis.stability,
+            start_ms=accurate_hypothesis.start_ms,
+            end_ms=accurate_hypothesis.end_ms,
+            provider_role=accurate_hypothesis.provider_role,
             provider=operation.consent.provider or "deterministic",
-            model="deterministic-accurate-v1",
-            supersedes_segment_ids=[segment.id for segment in operation.segments if segment.provider_role != "accurate"],
+            model=accurate_hypothesis.model,
+            supersedes_segment_ids=accurate_hypothesis.supersedes_segment_ids,
             created_at=now,
         )
         proposals = self._reconcile_accurate_titles(
@@ -490,6 +524,21 @@ class TaskService:
                 ],
                 "segments": [*operation.segments, accurate_segment],
                 "proposals": proposals,
+                "sealed_manifest_hash": manifest_hash,
+                "provider_runs": [
+                    *operation.provider_runs,
+                    BrainDumpProviderRunDocument(
+                        id=generate_id("provider_run"),
+                        role="accurate_stt",
+                        status="succeeded",
+                        input_hash=hashlib.sha256(audio).hexdigest(),
+                        checkpoint="accurate_transcribed",
+                        attempt=1,
+                        output_segment_ids=[accurate_segment.id],
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                ],
                 "updated_at": now,
                 "revision": operation.revision + 1,
             }
@@ -1706,6 +1755,24 @@ class TaskService:
         return hashlib.sha256(encoded).hexdigest()
 
     @staticmethod
+    def _brain_dump_manifest_hash(chunks: list[BrainDumpAudioChunkDocument]) -> str:
+        """Hash the exact ordered chunk metadata that a seal consumes."""
+
+        encoded = json.dumps(
+            [
+                {
+                    "chunk_number": chunk.chunk_number,
+                    "sha256": chunk.sha256,
+                    "size_bytes": chunk.size_bytes,
+                }
+                for chunk in sorted(chunks, key=lambda item: item.chunk_number)
+            ],
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    @staticmethod
     def _assert_current(task: TaskDocument, expected_revision: int) -> None:
         if task.revision != expected_revision:
             raise ConflictError(
@@ -1821,14 +1888,20 @@ class TaskService:
             "wording_changing" if latest_is_interim else "provisional"
         )
         proposals = list(existing)
-        for index, title in enumerate(candidates):
-            if index < len(proposals):
-                proposal = proposals[index]
+        proposal_index_by_title = {
+            self._proposal_identity_key(proposal.title): index
+            for index, proposal in enumerate(proposals)
+            if not proposal.deleted
+        }
+        for title in candidates:
+            existing_index = proposal_index_by_title.get(self._proposal_identity_key(title))
+            if existing_index is not None:
+                proposal = proposals[existing_index]
                 if proposal.user_edited or proposal.deleted:
                     continue
                 if proposal.title == title and proposal.source_segment_ids == segment_ids:
                     continue
-                proposals[index] = proposal.model_copy(
+                proposals[existing_index] = proposal.model_copy(
                     update={
                         "title": title,
                         "status": status,
@@ -1838,11 +1911,42 @@ class TaskService:
                     }
                 )
                 continue
-            if any(
-                self._titles_refer_to_same_item(title, proposal.title)
-                or ((proposal.user_edited or proposal.deleted) and self._titles_share_first_word(title, proposal.title))
+            semantic_matches = [
+                (index, proposal)
+                for index, proposal in enumerate(proposals)
+                if self._proposal_semantic_key(proposal.title)
+                == self._proposal_semantic_key(title)
+            ]
+            protected_matches = [
+                proposal
+                for _index, proposal in semantic_matches
+                if proposal.user_edited or proposal.deleted
+            ]
+            if protected_matches or any(
+                (proposal.user_edited or proposal.deleted)
+                and self._titles_share_first_word(title, proposal.title)
                 for proposal in proposals
             ):
+                # A conservative lock/deletion guard is allowed to omit an
+                # ambiguous preview candidate; it must never overwrite it.
+                continue
+            mutable_matches = [
+                (index, proposal)
+                for index, proposal in semantic_matches
+                if not proposal.deleted and not proposal.user_edited
+            ]
+            if len(mutable_matches) == 1:
+                matched_index, proposal = mutable_matches[0]
+                proposals[matched_index] = proposal.model_copy(
+                    update={
+                        "title": title,
+                        "status": status,
+                        "source_segment_ids": segment_ids,
+                        "updated_at": now,
+                        "revision": proposal.revision + 1,
+                    }
+                )
+                proposal_index_by_title[self._proposal_identity_key(title)] = matched_index
                 continue
             proposals.append(
                 BrainDumpProposalDocument(
@@ -1855,6 +1959,7 @@ class TaskService:
                     updated_at=now,
                 )
             )
+            proposal_index_by_title[self._proposal_identity_key(title)] = len(proposals) - 1
         return proposals
 
     @classmethod
@@ -1881,6 +1986,18 @@ class TaskService:
     @staticmethod
     def _normalized_transcript_for_replacement(text: str) -> str:
         return re.sub(r"\s+", " ", text).strip().casefold()
+
+    @classmethod
+    def _proposal_identity_key(cls, title: str) -> str:
+        """Identity is content-derived, never inferred from a candidate position."""
+
+        return cls._normalized_transcript_for_replacement(title)
+
+    @classmethod
+    def _proposal_semantic_key(cls, title: str) -> str:
+        """Use a unique two-token key only to preserve an existing opaque ID."""
+
+        return " ".join(cls._proposal_identity_key(title).split()[:2])
 
     @staticmethod
     def _extract_task_titles(text: str) -> list[str]:

@@ -131,6 +131,44 @@ def test_brain_dump_same_sequence_interim_can_be_replaced_by_final(api_client) -
     ]
 
 
+def test_preview_reconciliation_keeps_opaque_proposal_ids_when_candidate_order_changes(
+    api_client,
+) -> None:
+    operation = _start_operation(api_client, key="start-stable-proposal-identity")
+    interim = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/transcript",
+        headers={"Idempotency-Key": "append-preview-order-interim"},
+        json={
+            "segments": [
+                {
+                    "sequence": 1,
+                    "text": "Email landlord. Email lawyer.",
+                    "stability": "interim",
+                }
+            ]
+        },
+    )
+    assert interim.status_code == 200, interim.text
+    ids_by_title = {proposal["title"]: proposal["id"] for proposal in interim.json()["proposals"]}
+
+    reordered = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/transcript",
+        headers={"Idempotency-Key": "replace-preview-order-final"},
+        json={
+            "segments": [
+                {
+                    "sequence": 1,
+                    "text": "Email lawyer. Email landlord.",
+                    "stability": "stable",
+                }
+            ]
+        },
+    )
+    assert reordered.status_code == 200, reordered.text
+
+    assert {proposal["title"]: proposal["id"] for proposal in reordered.json()["proposals"]} == ids_by_title
+
+
 def test_user_edits_survive_later_transcript_reconciliation_and_delete_before_save(api_client) -> None:
     operation = _start_operation(api_client, key="start-edit-operation")
     append = api_client.post(
@@ -335,6 +373,18 @@ def test_schema_v2_upload_seal_runs_accurate_reconciliation_from_original_audio(
     assert {segment["provider_role"] for segment in body["segments"]} == {"accurate"}
     assert body["segments"][0]["start_ms"] == 0
     assert body["segments"][0]["end_ms"] > 0
+    assert body["sealed_manifest_hash"]
+    assert body["provider_runs"] == [
+        {
+            "id": body["provider_runs"][0]["id"],
+            "role": "accurate_stt",
+            "status": "succeeded",
+            "checkpoint": "accurate_transcribed",
+            "attempt": 1,
+            "recovery_count": 0,
+            "error": None,
+        }
+    ]
 
 
 def test_schema_v2_audio_upload_rejects_missing_bad_hash_and_inactive_state(
@@ -417,6 +467,32 @@ def test_schema_v2_seal_rejects_missing_chunks_and_replays_success(api_client) -
     )
     assert reseal_inactive.status_code == 400
     assert "Only an active brain dump can be sealed" in reseal_inactive.text
+
+
+def test_schema_v2_seal_rejects_a_manifest_hash_that_is_not_bound_to_uploaded_chunks(
+    api_client,
+) -> None:
+    operation = _start_operation(api_client, key="start-schema-v2-manifest-integrity")
+    audio = b"buy oat milk"
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+
+    rejected = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers={"Idempotency-Key": "seal-invalid-manifest"},
+        json={
+            "expected_revision": uploaded.json()["revision"],
+            "expected_chunks": 1,
+            "manifest_hash": "0" * 64,
+        },
+    )
+
+    assert rejected.status_code == 409
+    assert "manifest" in rejected.text.casefold()
 
 
 def test_schema_v2_unsupported_operation_command_is_rejected(api_client) -> None:
