@@ -31,7 +31,9 @@ const treeResponse = {
 };
 
 test.describe("mobile acceptance", () => {
-  test("E2E-MOBILE-02 planned workflow placeholders are visible at 390px", async ({ page }) => {
+  test("E2E-MOBILE-02 planned workflow placeholders are visible and inert at 390px", async ({ page }) => {
+    let nodeCreationRequests = 0;
+
     await page.route("**/*", async (route) => {
       const url = new URL(route.request().url());
       if (!url.pathname.startsWith("/api/")) {
@@ -50,6 +52,25 @@ test.describe("mobile acceptance", () => {
         await route.fulfill({ json: treeResponse });
         return;
       }
+      if (url.pathname === "/api/trees/tree-1/nodes" && route.request().method() === "POST") {
+        nodeCreationRequests += 1;
+        const payload = route.request().postDataJSON() as {
+          label: string;
+          position: { x: number; y: number };
+          type: "parent" | "child";
+        };
+        await route.fulfill({
+          json: {
+            id: `node-${nodeCreationRequests}`,
+            label: payload.label,
+            position: payload.position,
+            type: payload.type,
+            highlight_state: "none",
+            relation_counts: { up_count: 0, down_count: 0 }
+          }
+        });
+        return;
+      }
       await route.fulfill({ status: 404, json: { detail: "Not found" } });
     });
 
@@ -65,6 +86,8 @@ test.describe("mobile acceptance", () => {
     await expect(weeklyReview).toBeVisible();
     await expect(crt).toBeDisabled();
     await expect(weeklyReview).toBeDisabled();
+    await expect(crt).toHaveCSS("pointer-events", "auto");
+    await expect(weeklyReview).toHaveCSS("pointer-events", "auto");
     await expect(plannedWorkflows.getByRole("link")).toHaveCount(0);
 
     await test.step("Verify both planned placeholders are not clipped in the 390px viewport", async () => {
@@ -75,6 +98,40 @@ test.describe("mobile acceptance", () => {
           throw new Error(`Expected visible placeholder inside 390px viewport, received ${JSON.stringify(box)}`);
         }
       }
+    });
+
+    await expect.poll(() => nodeCreationRequests).toBe(1);
+    const nodeCreationRequestsBeforePlaceholderClicks = nodeCreationRequests;
+
+    await test.step("Click each placeholder at its rendered coordinates without activating the CRT canvas", async () => {
+      for (const item of [crt, weeklyReview]) {
+        const box = await item.boundingBox();
+        if (!box) {
+          throw new Error("Expected planned workflow placeholder to have a rendered bounding box");
+        }
+
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        await page.waitForTimeout(125);
+        await attachment(
+          "Node creation request count after placeholder click",
+          JSON.stringify(
+            {
+              expected: nodeCreationRequestsBeforePlaceholderClicks,
+              actual: nodeCreationRequests
+            },
+            null,
+            2
+          ),
+          ContentType.JSON
+        );
+        if (nodeCreationRequests !== nodeCreationRequestsBeforePlaceholderClicks) {
+          throw new Error(
+            "A planned workflow placeholder activated the CRT canvas instead of remaining inert"
+          );
+        }
+      }
+
+      await expect(page.getByText("Failed to create node")).toHaveCount(0);
     });
   });
 
