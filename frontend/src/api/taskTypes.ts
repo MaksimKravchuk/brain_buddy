@@ -77,6 +77,7 @@ export interface TaskListFilters {
   state?: OpenTaskState;
   projectId?: string;
   tagId?: string;
+  unassignedProject?: boolean;
   cursor?: string;
   limit?: number;
   includeCompleted?: boolean;
