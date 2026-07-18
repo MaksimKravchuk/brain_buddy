@@ -39,6 +39,7 @@
 - Before changing module boundaries, persistence ownership, workflow state machines, authentication assumptions, or deployment boundaries, inspect accepted/proposed records under `docs/decisions/`.
 - BrainBuddy vNext's modular-monolith boundaries and capture-to-result contracts are defined in `docs/decisions/0001-vnext-modular-monolith-and-workflow-contracts.md`; preserve them unless a new ADR explicitly supersedes the decision.
 - Async voice brain dumps and voice-led Weekly Review share the operation, patch, confirmation, privacy, and idempotency contract in `docs/decisions/0002-async-voice-operation-substrate.md`.
+- Native GTD capability status, Task lifecycle transitions, Waiting/recovery behavior, date and Priority semantics, and implementation-ready UI/API gaps are fixed in `docs/decisions/0006-native-gtd-lifecycle-and-capability-baseline.md`.
 - Autonomous delivery, visual preview eligibility, and production release/rollback authority are governed by `docs/decisions/0003-autonomous-delivery-guardrails.md` and `docs/autonomous-delivery-runbook.md`.
 
 ## Mandatory Spec Kit Workflow

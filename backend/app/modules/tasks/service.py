@@ -6,8 +6,9 @@ import base64
 import hashlib
 import json
 import re
-from collections.abc import Callable, Mapping
-from datetime import datetime
+import unicodedata
+from collections.abc import Callable, Mapping, Sequence
+from datetime import date, datetime
 from typing import Concatenate, ParamSpec, TypeVar, cast
 
 from app.exceptions import ConflictError, NotFoundError, ValidationFailure
@@ -21,8 +22,11 @@ from app.schemas.tasks import (
     TagCreateRequest,
     TagUpdateRequest,
     TaskCommentCreateRequest,
+    TaskCommentUpdateRequest,
     TaskCreateRequest,
     TaskSubtaskCreateRequest,
+    TaskSubtaskTransitionRequest,
+    TaskSubtaskUpdateRequest,
     TaskTransitionRequest,
     TaskUpdateRequest,
 )
@@ -50,6 +54,7 @@ from .repository import (
 )
 
 _OPEN_STATES = ("inbox", "next", "waiting", "someday")
+_PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2, "none": 3}
 
 _P = ParamSpec("_P")
 _Result = TypeVar("_Result")
@@ -201,6 +206,7 @@ class TaskService:
             project_id=payload.project_id,
             tag_ids=payload.tag_ids,
             due_date=payload.due_date,
+            priority=payload.priority,
             waiting_for=waiting_for,
             waiting_since=now if waiting_for else None,
             order_key=self.task_repo.next_order_key(
@@ -625,6 +631,151 @@ class TaskService:
         self.task_repo.create_comment(comment)
         return comment
 
+    @_serialized_write
+    def update_subtask(
+        self,
+        task_id: str,
+        subtask_id: str,
+        payload: TaskSubtaskUpdateRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> TaskSubtaskDocument:
+        command = f"update_subtask:{task_id}:{subtask_id}"
+        request_hash = self._request_hash(command, payload)
+        record = self._idempotency_record(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+        )
+        if record is not None:
+            return self._subtask_result(record, owner_id=owner_id, task_id=task_id)
+
+        self.get_task(task_id, owner_id=owner_id)
+        subtask = self.task_repo.get_subtask_for_owner(
+            subtask_id, owner_id=owner_id, task_id=task_id
+        )
+        self._assert_revision(
+            "Subtask", subtask.id, subtask.revision, payload.expected_revision
+        )
+        fields = payload.model_fields_set
+        now = utcnow()
+        updated = subtask.model_copy(
+            update={
+                "title": payload.title if "title" in fields else subtask.title,
+                "updated_at": now,
+                "revision": subtask.revision + 1,
+            }
+        )
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=updated.id,
+            response=updated,
+        )
+        self.task_repo.save_subtask(updated)
+        return updated
+
+    @_serialized_write
+    def transition_subtask(
+        self,
+        task_id: str,
+        subtask_id: str,
+        payload: TaskSubtaskTransitionRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> TaskSubtaskDocument:
+        command = f"transition_subtask:{task_id}:{subtask_id}"
+        request_hash = self._request_hash(command, payload)
+        record = self._idempotency_record(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+        )
+        if record is not None:
+            return self._subtask_result(record, owner_id=owner_id, task_id=task_id)
+
+        self.get_task(task_id, owner_id=owner_id)
+        subtask = self.task_repo.get_subtask_for_owner(
+            subtask_id, owner_id=owner_id, task_id=task_id
+        )
+        self._assert_revision(
+            "Subtask", subtask.id, subtask.revision, payload.expected_revision
+        )
+        next_state = {
+            "complete": "completed",
+            "cancel": "cancelled",
+            "reopen": "open",
+        }[payload.action]
+        if subtask.state == next_state:
+            raise ValidationFailure("Subtask transition requires a different state.")
+        now = utcnow()
+        updated = subtask.model_copy(
+            update={"state": next_state, "updated_at": now, "revision": subtask.revision + 1}
+        )
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=updated.id,
+            response=updated,
+        )
+        self.task_repo.save_subtask(updated)
+        return updated
+
+    @_serialized_write
+    def update_comment(
+        self,
+        task_id: str,
+        comment_id: str,
+        payload: TaskCommentUpdateRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> TaskCommentDocument:
+        command = f"update_comment:{task_id}:{comment_id}"
+        request_hash = self._request_hash(command, payload)
+        record = self._idempotency_record(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+        )
+        if record is not None:
+            return self._comment_result(record, owner_id=owner_id, task_id=task_id)
+
+        self.get_task(task_id, owner_id=owner_id)
+        comment = self.task_repo.get_comment_for_owner(
+            comment_id, owner_id=owner_id, task_id=task_id
+        )
+        self._assert_revision(
+            "Comment", comment.id, comment.revision, payload.expected_revision
+        )
+        now = utcnow()
+        updated = comment.model_copy(
+            update={
+                "body": payload.body,
+                "edited_at": now,
+                "revision": comment.revision + 1,
+            }
+        )
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=updated.id,
+            response=updated,
+        )
+        self.task_repo.save_comment(updated)
+        return updated
+
     def get_task_detail(
         self, task_id: str, *, owner_id: str
     ) -> tuple[TaskDocument, list[TaskSubtaskDocument], list[TaskCommentDocument]]:
@@ -666,6 +817,14 @@ class TaskService:
         fields = payload.model_fields_set
         if "title" in fields and payload.title is None:
             raise ValidationFailure("Task title cannot be null.")
+        if "priority" in fields and payload.priority is None:
+            raise ValidationFailure("Task priority cannot be null.")
+        if "waiting_for" in fields:
+            if task.state != "waiting":
+                raise ValidationFailure("waiting_for can only be edited on Waiting tasks.")
+            waiting_for: str | None = self._waiting_for(payload.waiting_for)
+        else:
+            waiting_for = task.waiting_for
         project_id = payload.project_id if "project_id" in fields else task.project_id
         tag_ids = payload.tag_ids if "tag_ids" in fields else task.tag_ids
         self._assert_active_references(
@@ -680,6 +839,8 @@ class TaskService:
             project_id=project_id,
             tag_ids=tag_ids or [],
             due_date=payload.due_date if "due_date" in fields else task.due_date,
+            priority=payload.priority if "priority" in fields else task.priority,
+            waiting_for=waiting_for,
             updated_at=utcnow(),
             revision=task.revision + 1,
         )
@@ -757,6 +918,8 @@ class TaskService:
         else:
             if task.state not in _OPEN_STATES or payload.to_state is None:
                 raise ValidationFailure("Move requires an open task and destination.")
+            if task.state == payload.to_state:
+                raise ValidationFailure("Move requires a different open destination.")
             waiting_for = (
                 self._waiting_for(payload.waiting_for)
                 if payload.to_state == "waiting"
@@ -796,8 +959,15 @@ class TaskService:
         tag_id: str | None,
         unassigned_project: bool,
         include_completed: bool,
-        cursor: str | None,
-        limit: int,
+        include_cancelled: bool = False,
+        q: str | None = None,
+        priority: Sequence[str] = (),
+        due_before: date | None = None,
+        due_on: date | None = None,
+        due_after: date | None = None,
+        sort: str = "manual",
+        cursor: str | None = None,
+        limit: int = 50,
     ) -> tuple[list[TaskDocument], str | None, bool, dict[str, int]]:
         if project_id is not None and unassigned_project:
             raise ValidationFailure(
@@ -807,6 +977,11 @@ class TaskService:
             self.task_repo.get_project_for_owner(project_id, owner_id=owner_id)
         if tag_id is not None:
             self.task_repo.get_tag_for_owner(tag_id, owner_id=owner_id)
+        if sum(value is not None for value in (due_before, due_on, due_after)) > 1:
+            raise ValidationFailure("Use only one due date filter at a time.")
+        if len(set(priority)) != len(priority):
+            raise ValidationFailure("Priority filters cannot contain duplicates.")
+        normalized_query = self._normalize_search_query(q)
 
         filters = {
             "state": state,
@@ -814,6 +989,13 @@ class TaskService:
             "tag_id": tag_id,
             "unassigned_project": unassigned_project,
             "include_completed": include_completed,
+            "include_cancelled": include_cancelled,
+            "q": normalized_query,
+            "priority": sorted(priority),
+            "due_before": due_before.isoformat() if due_before else None,
+            "due_on": due_on.isoformat() if due_on else None,
+            "due_after": due_after.isoformat() if due_after else None,
+            "sort": sort,
         }
         last_sort_key = self._decode_cursor(cursor, filters) if cursor else None
         all_filtered = self._filter_tasks(
@@ -823,21 +1005,33 @@ class TaskService:
             tag_id=tag_id,
             unassigned_project=unassigned_project,
             include_completed=include_completed,
+            include_cancelled=include_cancelled,
+            q=normalized_query,
+            priority=set(priority),
+            due_before=due_before,
+            due_on=due_on,
+            due_after=due_after,
+            sort=sort,
         )
         if last_sort_key is not None:
             all_filtered = [
-                task for task in all_filtered if self._sort_key(task) > last_sort_key
+                task for task in all_filtered if self._sort_key(task, sort=sort) > last_sort_key
             ]
         page = all_filtered[:limit]
         has_more = len(all_filtered) > limit
         next_cursor = (
-            self._encode_cursor(filters, self._sort_key(page[-1])) if has_more else None
+            self._encode_cursor(filters, self._sort_key(page[-1], sort=sort)) if has_more else None
         )
         counts = self._open_counts(
             owner_id=owner_id,
             project_id=project_id,
             tag_id=tag_id,
             unassigned_project=unassigned_project,
+            q=normalized_query,
+            priority=set(priority),
+            due_before=due_before,
+            due_on=due_on,
+            due_after=due_after,
         )
         return page, next_cursor, has_more, counts
 
@@ -943,8 +1137,9 @@ class TaskService:
             update={"state": "archived", "updated_at": now, "revision": project.revision + 1}
         )
         affected = [
-            task for task in self.task_repo.list_for_owner(owner_id=owner_id)
-            if task.project_id == project_id and task.state != "cancelled"
+            task
+            for task in self.task_repo.list_for_owner(owner_id=owner_id)
+            if task.project_id == project_id
         ]
         self._store_idempotency(
             owner_id=owner_id,
@@ -1085,10 +1280,10 @@ class TaskService:
             "create_tag",
         } or record.command.startswith(("update_tag:", "delete_tag:")):
             self._tag_result(record, owner_id=owner_id)
-        elif record.command.startswith("create_subtask:"):
+        elif record.command.startswith(("create_subtask:", "update_subtask:", "transition_subtask:")):
             subtask = TaskSubtaskDocument.model_validate(record.response_body)
             self._subtask_result(record, owner_id=owner_id, task_id=subtask.task_id)
-        elif record.command.startswith("create_comment:"):
+        elif record.command.startswith(("create_comment:", "update_comment:")):
             comment = TaskCommentDocument.model_validate(record.response_body)
             self._comment_result(record, owner_id=owner_id, task_id=comment.task_id)
         else:
@@ -1179,24 +1374,32 @@ class TaskService:
     ) -> TaskSubtaskDocument:
         subtask = TaskSubtaskDocument.model_validate(record.response_body)
         try:
-            return self.task_repo.get_subtask_for_owner(
+            current = self.task_repo.get_subtask_for_owner(
                 subtask.id, owner_id=owner_id, task_id=task_id
             )
         except NotFoundError:
             self.task_repo.create_subtask(subtask)
             return subtask
+        if current.revision < subtask.revision:
+            self.task_repo.save_subtask(subtask)
+            return subtask
+        return current
 
     def _comment_result(
         self, record: IdempotencyRecord, *, owner_id: str, task_id: str
     ) -> TaskCommentDocument:
         comment = TaskCommentDocument.model_validate(record.response_body)
         try:
-            return self.task_repo.get_comment_for_owner(
+            current = self.task_repo.get_comment_for_owner(
                 comment.id, owner_id=owner_id, task_id=task_id
             )
         except NotFoundError:
             self.task_repo.create_comment(comment)
             return comment
+        if current.revision < comment.revision:
+            self.task_repo.save_comment(comment)
+            return comment
+        return current
 
     @staticmethod
     def _request_hash(
@@ -1212,7 +1415,10 @@ class TaskService:
             | TagUpdateRequest
             | TaskCreateRequest
             | TaskSubtaskCreateRequest
+            | TaskSubtaskUpdateRequest
+            | TaskSubtaskTransitionRequest
             | TaskCommentCreateRequest
+            | TaskCommentUpdateRequest
             | TaskTransitionRequest
             | TaskUpdateRequest
         ),
@@ -1403,16 +1609,27 @@ class TaskService:
         tag_id: str | None,
         unassigned_project: bool,
         include_completed: bool,
+        include_cancelled: bool,
+        q: str,
+        priority: set[str],
+        due_before: date | None,
+        due_on: date | None,
+        due_after: date | None,
+        sort: str,
     ) -> list[TaskDocument]:
         allowed_states: set[str]
         if state is not None:
             allowed_states = {state}
             if include_completed:
                 allowed_states.add("completed")
+            if include_cancelled:
+                allowed_states.add("cancelled")
         else:
             allowed_states = set(_OPEN_STATES)
             if include_completed:
                 allowed_states.add("completed")
+            if include_cancelled:
+                allowed_states.add("cancelled")
         return sorted(
             (
                 task
@@ -1421,8 +1638,13 @@ class TaskService:
                 and (project_id is None or task.project_id == project_id)
                 and (tag_id is None or tag_id in task.tag_ids)
                 and (not unassigned_project or task.project_id is None)
+                and (not q or self._task_matches_query(task, q))
+                and (not priority or task.priority in priority)
+                and self._task_matches_due_filter(
+                    task, due_before=due_before, due_on=due_on, due_after=due_after
+                )
             ),
-            key=self._sort_key,
+            key=lambda task: self._sort_key(task, sort=sort),
         )
 
     def _open_counts(
@@ -1432,6 +1654,11 @@ class TaskService:
         project_id: str | None,
         tag_id: str | None,
         unassigned_project: bool,
+        q: str,
+        priority: set[str],
+        due_before: date | None,
+        due_on: date | None,
+        due_after: date | None,
     ) -> dict[str, int]:
         tasks = self.task_repo.list_for_owner(owner_id=owner_id)
         filtered = [
@@ -1440,6 +1667,11 @@ class TaskService:
             if (project_id is None or task.project_id == project_id)
             and (tag_id is None or tag_id in task.tag_ids)
             and (not unassigned_project or task.project_id is None)
+            and (not q or self._task_matches_query(task, q))
+            and (not priority or task.priority in priority)
+            and self._task_matches_due_filter(
+                task, due_before=due_before, due_on=due_on, due_after=due_after
+            )
         ]
         return {
             state: sum(task.state == state for task in filtered)
@@ -1481,17 +1713,57 @@ class TaskService:
                 f"{resource} '{resource_id}' has newer changes; reload before saving.",
             )
 
+    @classmethod
+    def _normalize_for_search(cls, value: str) -> str:
+        return unicodedata.normalize("NFKC", value).casefold()
+
+    @classmethod
+    def _normalize_search_query(cls, value: str | None) -> str:
+        return cls._normalize_for_search(" ".join((value or "").strip().split()))
+
+    @classmethod
+    def _task_matches_query(cls, task: TaskDocument, query: str) -> bool:
+        haystack = cls._normalize_for_search("\n".join([task.title, task.details or ""]))
+        return query in haystack
+
     @staticmethod
-    def _sort_key(task: TaskDocument) -> tuple[int, datetime, str]:
-        return task.order_key, task.created_at, task.id
+    def _task_matches_due_filter(
+        task: TaskDocument,
+        *,
+        due_before: date | None,
+        due_on: date | None,
+        due_after: date | None,
+    ) -> bool:
+        if due_before is not None:
+            return task.due_date is not None and task.due_date < due_before
+        if due_on is not None:
+            return task.due_date == due_on
+        if due_after is not None:
+            return task.due_date is not None and task.due_date > due_after
+        return True
+
+    @classmethod
+    def _sort_key(cls, task: TaskDocument, *, sort: str) -> tuple[int | str, ...]:
+        manual = (task.order_key, task.created_at.isoformat(), task.id)
+        if sort == "due":
+            return (
+                0 if task.due_date is not None else 1,
+                task.due_date.isoformat() if task.due_date is not None else "",
+                *manual,
+            )
+        if sort == "priority":
+            return (_PRIORITY_RANK[task.priority], *manual)
+        if sort == "title":
+            return (cls._normalize_for_search(task.title), task.id)
+        return manual
 
     @staticmethod
     def _encode_cursor(
-        filters: Mapping[str, object], last_sort_key: tuple[int, datetime, str]
+        filters: Mapping[str, object], last_sort_key: tuple[int | str, ...]
     ) -> str:
         payload = {
             "filters": filters,
-            "last": [last_sort_key[0], last_sort_key[1].isoformat(), last_sort_key[2]],
+            "last": list(last_sort_key),
         }
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(
             "utf-8"
@@ -1501,18 +1773,18 @@ class TaskService:
     @staticmethod
     def _decode_cursor(
         cursor: str, filters: Mapping[str, object]
-    ) -> tuple[int, datetime, str]:
+    ) -> tuple[int | str, ...]:
         try:
             padded = cursor + "=" * (-len(cursor) % 4)
             payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
             if payload["filters"] != filters:
                 raise ValueError("cursor filters do not match")
-            order_key, created_at, task_id = payload["last"]
-            if not isinstance(order_key, int) or not isinstance(created_at, str):
+            last = payload["last"]
+            if not isinstance(last, list) or not last:
                 raise ValueError("invalid cursor tuple")
-            if not isinstance(task_id, str) or not task_id:
+            if any(not isinstance(value, int | str) for value in last):
                 raise ValueError("invalid cursor task id")
-            return order_key, datetime.fromisoformat(created_at), task_id
+            return tuple(last)
         except (
             KeyError,
             TypeError,

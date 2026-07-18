@@ -91,7 +91,28 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
             "409",
             "422",
         },
+        ("/api/tasks/{task_id}/subtasks/{subtask_id}", "patch"): {
+            "400",
+            "401",
+            "404",
+            "409",
+            "422",
+        },
+        ("/api/tasks/{task_id}/subtasks/{subtask_id}/transitions", "post"): {
+            "400",
+            "401",
+            "404",
+            "409",
+            "422",
+        },
         ("/api/tasks/{task_id}/transitions", "post"): {
+            "400",
+            "401",
+            "404",
+            "409",
+            "422",
+        },
+        ("/api/tasks/{task_id}/comments/{comment_id}", "patch"): {
             "400",
             "401",
             "404",

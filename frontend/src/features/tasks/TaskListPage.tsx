@@ -1,12 +1,12 @@
 /* istanbul ignore file -- task shell rendering is covered by route tests and Playwright snapshots. */
-import { AlertTriangle, Check, Edit3, Plus, RotateCcw, SlidersHorizontal } from "lucide-react";
+import { AlertTriangle, Check, Edit3, Plus, RotateCcw, X } from "lucide-react";
 import { useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { apiClient } from "../../api/client";
-import { parseOpenTaskState, useProjects, useTags, useTaskList } from "../../api/taskHooks";
-import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts, TaskResponse } from "../../api/taskTypes";
+import { parseOpenTaskState, parseTaskDateView, useProjects, useTags, useTaskDetail, useTaskList } from "../../api/taskHooks";
+import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts, TaskPriority, TaskResponse, TaskSort, TaskSubtaskResponse, TaskUpdateRequest } from "../../api/taskTypes";
 import { AppShell } from "../../components/shell/AppShell";
 import { getErrorMessage } from "../../utils/error";
 
@@ -17,9 +17,16 @@ const stateLabels: Record<OpenTaskState, string> = {
   someday: "Someday / maybe"
 };
 
+const dateViewLabels = {
+  overdue: "Overdue",
+  today: "Today",
+  upcoming: "Upcoming"
+} as const;
+
 const emptyCounts: TaskCounts = { inbox: 0, next: 0, waiting: 0, someday: 0 };
 const emptyProjects: ProjectResponse[] = [];
 const emptyTags: TagResponse[] = [];
+const openStateOptions: OpenTaskState[] = ["inbox", "next", "waiting", "someday"];
 
 function idempotencyKey(action: string): string {
   return `task-shell-${action}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -27,26 +34,62 @@ function idempotencyKey(action: string): string {
 
 export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): JSX.Element {
   const params = useParams();
-  const state = mode === "state" || !mode ? parseOpenTaskState(params.state) : undefined;
+  const [searchParams, setSearchParams] = useSearchParams();
+  const dateView = mode === "state" || !mode ? parseTaskDateView(params.state) : undefined;
+  const state = (mode === "state" || !mode) && !dateView ? parseOpenTaskState(params.state) : undefined;
   const projectId = mode === "project" ? params.projectId : undefined;
   const tagId = mode === "tag" ? params.tagId : undefined;
+  const taskId = params.taskId;
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [newTitle, setNewTitle] = useState("");
+  const [newWaitingFor, setNewWaitingFor] = useState("");
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [showCompleted, setShowCompleted] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
 
-  const taskQuery = useTaskList({ state, projectId, tagId, includeCompleted: showCompleted });
+  const sort = parseTaskSort(searchParams.get("sort"));
+  const searchQuery = searchParams.get("q") ?? "";
+  const today = localDateIso();
+  const taskQuery = useTaskList({
+    state,
+    projectId,
+    tagId,
+    includeCompleted: showCompleted,
+    includeCancelled: showCompleted,
+    q: searchQuery,
+    sort,
+    dueBefore: dateView === "overdue" ? today : undefined,
+    dueOn: dateView === "today" ? today : undefined,
+    dueAfter: dateView === "upcoming" ? today : undefined
+  });
+  const detailQuery = useTaskDetail(taskId);
   const projectsQuery = useProjects();
   const tagsQuery = useTags();
 
   const invalidateTasks = () => queryClient.invalidateQueries({ queryKey: ["tasks"] });
+  const listPath = projectId
+    ? `/projects/${projectId}`
+    : tagId
+      ? `/tags/${tagId}`
+      : `/tasks/${params.state ?? "next"}`;
 
   const createMutation = useMutation({
-    mutationFn: (title: string) => apiClient.createTask({ title, state: state ?? "inbox" }, idempotencyKey("create")),
+    mutationFn: (title: string) =>
+      apiClient.createTask(
+        {
+          title,
+          state: state ?? "inbox",
+          ...(state === "waiting" ? { waiting_for: newWaitingFor.trim() } : {}),
+          ...(projectId ? { project_id: projectId } : {}),
+          ...(tagId ? { tag_ids: [tagId] } : {})
+        },
+        idempotencyKey("create")
+      ),
     onSuccess: () => {
       setNewTitle("");
+      setNewWaitingFor("");
       setMutationError(null);
       void invalidateTasks();
     },
@@ -54,8 +97,8 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ task, title }: { task: TaskResponse; title: string }) =>
-      apiClient.updateTask(task.id, { title, expected_revision: task.revision }, idempotencyKey("edit")),
+    mutationFn: ({ task, payload }: { task: TaskResponse; payload: Omit<TaskUpdateRequest, "expected_revision"> }) =>
+      apiClient.updateTask(task.id, { ...payload, expected_revision: task.revision }, idempotencyKey("edit")),
     onSuccess: () => {
       setEditingTaskId(null);
       setEditingTitle("");
@@ -75,6 +118,108 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     onError: (caught: unknown) => setMutationError(getErrorMessage(caught))
   });
 
+  const detailUpdateMutation = useMutation({
+    mutationFn: ({ task, payload }: { task: TaskResponse; payload: Parameters<typeof apiClient.updateTask>[1] }) =>
+      apiClient.updateTask(task.id, payload, idempotencyKey("detail-edit")),
+    onSuccess: () => {
+      setMutationError(null);
+      void invalidateTasks();
+    },
+    onError: (caught: unknown) => setMutationError(getErrorMessage(caught))
+  });
+
+  const detailTransitionMutation = useMutation({
+    mutationFn: ({ task, action, toState, waitingFor }: { task: TaskResponse; action: "move" | "complete" | "reopen" | "cancel"; toState?: OpenTaskState; waitingFor?: string }) =>
+      apiClient.transitionTask(
+        task.id,
+        { action, to_state: toState, waiting_for: waitingFor || undefined, expected_revision: task.revision },
+        idempotencyKey(`detail-${action}`)
+      ),
+    onSuccess: () => {
+      setMutationError(null);
+      void invalidateTasks();
+    },
+    onError: (caught: unknown) => setMutationError(getErrorMessage(caught))
+  });
+
+  const subtaskCreateMutation = useMutation({
+    mutationFn: ({ task, title }: { task: TaskResponse; title: string }) =>
+      apiClient.createSubtask(task.id, { title }, idempotencyKey("subtask-create")),
+    onSuccess: () => {
+      setMutationError(null);
+      void invalidateTasks();
+    },
+    onError: (caught: unknown) => setMutationError(getErrorMessage(caught))
+  });
+
+  const subtaskTransitionMutation = useMutation({
+    mutationFn: ({ task, subtask, action }: { task: TaskResponse; subtask: TaskSubtaskResponse; action: "complete" | "reopen" | "cancel" }) =>
+      apiClient.transitionSubtask(task.id, subtask.id, { action, expected_revision: subtask.revision }, idempotencyKey(`subtask-${action}`)),
+    onSuccess: () => {
+      setMutationError(null);
+      void invalidateTasks();
+    },
+    onError: (caught: unknown) => setMutationError(getErrorMessage(caught))
+  });
+
+  const commentCreateMutation = useMutation({
+    mutationFn: ({ task, body }: { task: TaskResponse; body: string }) =>
+      apiClient.createComment(task.id, { body }, idempotencyKey("comment-create")),
+    onSuccess: () => {
+      setMutationError(null);
+      void invalidateTasks();
+    },
+    onError: (caught: unknown) => setMutationError(getErrorMessage(caught))
+  });
+
+  const projectMutation = useMutation({
+    mutationFn: ({ action, project, name }: { action: "create" | "rename" | "archive"; project?: ProjectResponse; name?: string }) => {
+      if (action === "create") {
+        return apiClient.createProject({ name: name ?? "" }, idempotencyKey("create-project"));
+      }
+      if (!project) {
+        throw new Error("Project is required.");
+      }
+      if (action === "archive") {
+        return apiClient.archiveProject(project.id, project.revision, idempotencyKey("archive-project"));
+      }
+      return apiClient.updateProject(project.id, { name, expected_revision: project.revision }, idempotencyKey("rename-project"));
+    },
+    onSuccess: (_project, variables) => {
+      setMutationError(null);
+      void invalidateTasks();
+      void queryClient.invalidateQueries({ queryKey: ["tasks", "projects"] });
+      if (variables.action === "archive" && variables.project?.id === projectId) {
+        navigate("/tasks/next");
+      }
+    },
+    onError: (caught: unknown) => setMutationError(getErrorMessage(caught))
+  });
+
+  const tagMutation = useMutation({
+    mutationFn: ({ action, tag, name }: { action: "create" | "rename" | "delete"; tag?: TagResponse; name?: string }) => {
+      if (action === "create") {
+        return apiClient.createTag({ name: name ?? "" }, idempotencyKey("create-tag"));
+      }
+      if (!tag) {
+        throw new Error("Tag is required.");
+      }
+      if (action === "delete") {
+        return apiClient.deleteTag(tag.id, tag.revision, idempotencyKey("delete-tag"));
+      }
+      return apiClient.updateTag(tag.id, { name, expected_revision: tag.revision }, idempotencyKey("rename-tag"));
+    },
+    onSuccess: (_tag, variables) => {
+      setMutationError(null);
+      void invalidateTasks();
+      void queryClient.invalidateQueries({ queryKey: ["tasks", "tags"] });
+      if (variables.action === "delete" && variables.tag?.id === tagId) {
+        navigate("/tasks/next");
+      }
+    },
+    onError: (caught: unknown) => setMutationError(getErrorMessage(caught))
+  });
+
   const projects = projectsQuery.data ?? emptyProjects;
   const tags = tagsQuery.data ?? emptyTags;
   const tasks = taskQuery.data?.items ?? [];
@@ -88,8 +233,11 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       const tag = tags.find((item) => item.id === tagId)?.name ?? "tag";
       return `@${tag.replace(/^@/, "")}`;
     }
+    if (dateView) {
+      return dateViewLabels[dateView];
+    }
     return stateLabels[state ?? "next"];
-  }, [projectId, projects, state, tagId, tags]);
+  }, [dateView, projectId, projects, state, tagId, tags]);
 
   const taskNoun = counts[state ?? "next"] === 1 ? "task" : "tasks";
   const subtitle = state ? `${counts[state]} ${taskNoun}` : `${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`;
@@ -104,6 +252,12 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       activeState={state}
       activeProjectId={projectId}
       activeTagId={tagId}
+      onCreateProject={(name) => projectMutation.mutate({ action: "create", name })}
+      onRenameProject={(project, name) => projectMutation.mutate({ action: "rename", project, name })}
+      onArchiveProject={(project) => projectMutation.mutate({ action: "archive", project })}
+      onCreateTag={(name) => tagMutation.mutate({ action: "create", name })}
+      onRenameTag={(tag, name) => tagMutation.mutate({ action: "rename", tag, name })}
+      onDeleteTag={(tag) => tagMutation.mutate({ action: "delete", tag })}
     >
       <section aria-labelledby="task-list-title" className="mx-auto max-w-5xl">
         <div className="mb-4 flex flex-wrap items-baseline gap-3">
@@ -111,14 +265,29 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             {title}
           </h1>
           <span className="text-xs text-slate-600">{subtitle}</span>
-          <button
-            type="button"
-            className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs text-slate-600 hover:bg-slate-100"
-            disabled
-          >
-            <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden />
-            Sort by tag
-          </button>
+          <label className="ml-auto inline-flex items-center gap-2 text-xs text-slate-600">
+            Sort
+            <select
+              aria-label="Sort tasks"
+              className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-700"
+              value={sort}
+              onChange={(event) => {
+                const next = new URLSearchParams(searchParams);
+                const value = parseTaskSort(event.currentTarget.value);
+                if (value === "manual") {
+                  next.delete("sort");
+                } else {
+                  next.set("sort", value);
+                }
+                setSearchParams(next, { replace: true });
+              }}
+            >
+              <option value="manual">Manual</option>
+              <option value="due">Due date</option>
+              <option value="priority">Priority</option>
+              <option value="title">Title</option>
+            </select>
+          </label>
         </div>
 
         {mutationError ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{mutationError}</div> : null}
@@ -139,7 +308,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             tasks={tasks}
             projects={projects}
             tags={tags}
-            activeState={state}
+            taskPathBase={listPath}
             editingTaskId={editingTaskId}
             editingTitle={editingTitle}
             onBeginEdit={(task) => {
@@ -153,21 +322,69 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             onComplete={(task) => transitionMutation.mutate({ task, action: "complete" })}
             onEditTitle={(title) => setEditingTitle(title)}
             onMoveToNext={(task) => transitionMutation.mutate({ task, action: "move", toState: "next" })}
-            onReopen={(task) => transitionMutation.mutate({ task, action: "reopen", toState: state ?? "next" })}
-            onSaveEdit={(task) => updateMutation.mutate({ task, title: editingTitle.trim() })}
+            onProjectChange={(task, nextProjectId) =>
+              updateMutation.mutate({ task, payload: { project_id: nextProjectId || null } })
+            }
+            onAddTag={(task, tagIdToAdd) =>
+              updateMutation.mutate({ task, payload: { tag_ids: Array.from(new Set([...task.tag_ids, tagIdToAdd])) } })
+            }
+            onRemoveTag={(task, tagIdToRemove) =>
+              updateMutation.mutate({ task, payload: { tag_ids: task.tag_ids.filter((id) => id !== tagIdToRemove) } })
+            }
+            onSaveEdit={(task) => updateMutation.mutate({ task, payload: { title: editingTitle.trim() } })}
           />
         ) : (
           <EmptyState state={state} />
         )}
 
-        <TaskCreator
-          newTitle={newTitle}
-          showCompleted={showCompleted}
-          isCreating={createMutation.isPending}
-          onCreate={(title) => createMutation.mutate(title)}
-          onTitleChange={setNewTitle}
-          onToggleCompleted={setShowCompleted}
-        />
+        {taskQuery.hasNextPage ? (
+          <div className="mt-3 flex justify-center">
+            <button
+              type="button"
+              className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 shadow-soft transition hover:border-sky-200 hover:text-brand-primary disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() => void taskQuery.fetchNextPage()}
+              disabled={taskQuery.isFetchingNextPage}
+            >
+              {taskQuery.isFetchingNextPage ? "Loading more tasks…" : "Load more tasks"}
+            </button>
+          </div>
+        ) : null}
+
+        {dateView ? (
+          <DateViewCaptureHint />
+        ) : (
+          <TaskCreator
+            newTitle={newTitle}
+            newWaitingFor={newWaitingFor}
+            state={state}
+            showCompleted={showCompleted}
+            isCreating={createMutation.isPending}
+            onCreate={(title) => createMutation.mutate(title)}
+            onTitleChange={setNewTitle}
+            onWaitingForChange={setNewWaitingFor}
+            onToggleCompleted={setShowCompleted}
+          />
+        )}
+
+        {taskId ? (
+          <TaskDetailPanel
+            task={detailQuery.data}
+            projects={projects}
+            tags={tags}
+            isLoading={detailQuery.isLoading}
+            error={detailQuery.error}
+            onClose={() => navigate(listPath)}
+            onSave={(task, payload) => detailUpdateMutation.mutate({ task, payload })}
+            onTransition={(task, action, toState, waitingFor) =>
+              detailTransitionMutation.mutate({ task, action, toState, waitingFor })
+            }
+            onCreateSubtask={(task, title) => subtaskCreateMutation.mutate({ task, title })}
+            onTransitionSubtask={(task, subtask, action) =>
+              subtaskTransitionMutation.mutate({ task, subtask, action })
+            }
+            onCreateComment={(task, body) => commentCreateMutation.mutate({ task, body })}
+          />
+        ) : null}
       </section>
     </AppShell>
   );
@@ -177,7 +394,7 @@ function TaskList({
   tasks,
   projects,
   tags,
-  activeState,
+  taskPathBase,
   editingTaskId,
   editingTitle,
   onBeginEdit,
@@ -185,13 +402,15 @@ function TaskList({
   onComplete,
   onEditTitle,
   onMoveToNext,
-  onReopen,
+  onProjectChange,
+  onAddTag,
+  onRemoveTag,
   onSaveEdit
 }: {
   tasks: TaskResponse[];
   projects: ProjectResponse[];
   tags: TagResponse[];
-  activeState?: OpenTaskState;
+  taskPathBase: string;
   editingTaskId: string | null;
   editingTitle: string;
   onBeginEdit: (task: TaskResponse) => void;
@@ -199,7 +418,9 @@ function TaskList({
   onComplete: (task: TaskResponse) => void;
   onEditTitle: (title: string) => void;
   onMoveToNext: (task: TaskResponse) => void;
-  onReopen: (task: TaskResponse) => void;
+  onProjectChange: (task: TaskResponse, projectId: string) => void;
+  onAddTag: (task: TaskResponse, tagId: string) => void;
+  onRemoveTag: (task: TaskResponse, tagId: string) => void;
   onSaveEdit: (task: TaskResponse) => void;
 }): JSX.Element {
   const projectById = new Map(projects.map((project) => [project.id, project]));
@@ -216,7 +437,7 @@ function TaskList({
             task={task}
             project={project}
             tags={taskTags}
-            activeState={activeState}
+            detailPath={`${taskPathBase}/${task.id}`}
             isEditing={editingTaskId === task.id}
             editingTitle={editingTitle}
             onBeginEdit={onBeginEdit}
@@ -224,7 +445,11 @@ function TaskList({
             onComplete={onComplete}
             onEditTitle={onEditTitle}
             onMoveToNext={onMoveToNext}
-            onReopen={onReopen}
+            projects={projects}
+            allTags={tags}
+            onProjectChange={onProjectChange}
+            onAddTag={onAddTag}
+            onRemoveTag={onRemoveTag}
             onSaveEdit={onSaveEdit}
           />
         );
@@ -237,7 +462,7 @@ function TaskRow({
   task,
   project,
   tags,
-  activeState,
+  detailPath,
   isEditing,
   editingTitle,
   onBeginEdit,
@@ -245,40 +470,43 @@ function TaskRow({
   onComplete,
   onEditTitle,
   onMoveToNext,
-  onReopen,
+  projects,
+  allTags,
+  onProjectChange,
+  onAddTag,
+  onRemoveTag,
   onSaveEdit
 }: {
   task: TaskResponse;
   project?: ProjectResponse;
   tags: TagResponse[];
-  activeState?: OpenTaskState;
+  detailPath: string;
   isEditing: boolean;
   editingTitle: string;
+  projects: ProjectResponse[];
+  allTags: TagResponse[];
   onBeginEdit: (task: TaskResponse) => void;
   onCancelEdit: () => void;
   onComplete: (task: TaskResponse) => void;
   onEditTitle: (title: string) => void;
   onMoveToNext: (task: TaskResponse) => void;
-  onReopen: (task: TaskResponse) => void;
+  onProjectChange: (task: TaskResponse, projectId: string) => void;
+  onAddTag: (task: TaskResponse, tagId: string) => void;
+  onRemoveTag: (task: TaskResponse, tagId: string) => void;
   onSaveEdit: (task: TaskResponse) => void;
 }): JSX.Element {
-  const isCompleted = task.state === "completed";
-  const reopenState = activeState ?? "next";
+  const isTerminal = task.state === "completed" || task.state === "cancelled";
+  const availableTags = allTags.filter((tag) => !task.tag_ids.includes(tag.id));
 
   return (
     <article
-      className={`flex min-h-[48px] flex-col gap-2 rounded-xl border px-4 py-3 shadow-soft transition hover:shadow-raised sm:flex-row sm:items-center sm:gap-3 ${isCompleted ? "border-emerald-100 bg-emerald-50/50" : "border-slate-200 bg-white"}`}
+      className={`flex min-h-[48px] flex-col gap-2 rounded-xl border px-4 py-3 shadow-soft transition hover:shadow-raised sm:flex-row sm:items-center sm:gap-3 ${isTerminal ? "border-emerald-100 bg-emerald-50/50" : "border-slate-200 bg-white"}`}
       role="listitem"
     >
-      {isCompleted ? (
-        <button
-          type="button"
-          className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-white px-2 text-xs font-medium text-emerald-700"
-          aria-label={`Reopen ${task.title} to ${stateLabels[reopenState].replace(" actions", "")}`}
-          onClick={() => onReopen(task)}
-        >
-          Reopen
-        </button>
+      {isTerminal ? (
+        <span className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-white px-2 text-xs font-medium text-emerald-700">
+          {task.state === "completed" ? "Completed" : "Cancelled"}
+        </span>
       ) : (
         <button
           type="button"
@@ -311,7 +539,7 @@ function TaskRow({
           <button type="button" className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-600" onClick={onCancelEdit}>Cancel</button>
         </form>
       ) : (
-        <div className={`min-w-0 flex-1 text-sm font-medium text-slate-900 ${isCompleted ? "line-through decoration-emerald-500/70" : ""}`}>{task.title}</div>
+        <Link to={detailPath} className={`min-w-0 flex-1 text-sm font-medium text-slate-900 hover:text-brand-primary ${isTerminal ? "line-through decoration-emerald-500/70" : ""}`}>{task.title}</Link>
       )}
       {task.due_date ? (
         <span className="w-fit rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] text-rose-700">
@@ -320,18 +548,56 @@ function TaskRow({
       ) : null}
       <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
         {tags.map((tag) => (
-          <span key={tag.id} className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-slate-600">
-            @{tag.name.replace(/^@/, "")}
-          </span>
+          <button
+            key={tag.id}
+            type="button"
+            className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-slate-600 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label={`Remove ${tag.name} from ${task.title}`}
+            onClick={() => onRemoveTag(task, tag.id)}
+            disabled={isTerminal}
+          >
+            @{tag.name.replace(/^@/, "")} ×
+          </button>
         ))}
-        {project ? <span className="text-[11px] text-slate-500 sm:w-[120px] sm:text-right">{project.name}</span> : null}
-        {!isEditing && !isCompleted ? (
+        <label className="sr-only" htmlFor={`task-project-${task.id}`}>Project</label>
+        <select
+          id={`task-project-${task.id}`}
+          aria-label={`Project for ${task.title}`}
+          className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-600"
+          value={project?.id ?? ""}
+          onChange={(event) => onProjectChange(task, event.currentTarget.value)}
+          disabled={isTerminal}
+        >
+          <option value="">No project</option>
+          {projects.map((option) => (
+            <option key={option.id} value={option.id}>{option.name}</option>
+          ))}
+        </select>
+        <label className="sr-only" htmlFor={`task-tag-${task.id}`}>Add tag</label>
+        <select
+          id={`task-tag-${task.id}`}
+          aria-label={`Add tag to ${task.title}`}
+          className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-600"
+          value=""
+          onChange={(event) => {
+            if (event.currentTarget.value) {
+              onAddTag(task, event.currentTarget.value);
+            }
+          }}
+          disabled={isTerminal || availableTags.length === 0}
+        >
+          <option value="">Add tag</option>
+          {availableTags.map((option) => (
+            <option key={option.id} value={option.id}>@{option.name.replace(/^@/, "")}</option>
+          ))}
+        </select>
+        {!isEditing && !isTerminal ? (
           <button type="button" className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-600" aria-label={`Edit ${task.title}`} onClick={() => onBeginEdit(task)}>
             <Edit3 className="h-3.5 w-3.5" aria-hidden />
             Edit
           </button>
         ) : null}
-        {!isEditing && !isCompleted && task.state !== "next" ? (
+        {!isEditing && !isTerminal && task.state !== "next" ? (
           <button type="button" className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-600" aria-label={`Move ${task.title} to Next`} onClick={() => onMoveToNext(task)}>
             Move to Next
           </button>
@@ -341,21 +607,253 @@ function TaskRow({
   );
 }
 
+function TaskDetailPanel({
+  task,
+  projects,
+  tags,
+  isLoading,
+  error,
+  onClose,
+  onSave,
+  onTransition,
+  onCreateSubtask,
+  onTransitionSubtask,
+  onCreateComment
+}: {
+  task?: TaskResponse;
+  projects: ProjectResponse[];
+  tags: TagResponse[];
+  isLoading: boolean;
+  error: unknown;
+  onClose: () => void;
+  onSave: (task: TaskResponse, payload: Parameters<typeof apiClient.updateTask>[1]) => void;
+  onTransition: (task: TaskResponse, action: "move" | "complete" | "reopen" | "cancel", toState?: OpenTaskState, waitingFor?: string) => void;
+  onCreateSubtask: (task: TaskResponse, title: string) => void;
+  onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") => void;
+  onCreateComment: (task: TaskResponse, body: string) => void;
+}): JSX.Element {
+  return (
+    <aside className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-raised" aria-labelledby="task-detail-title">
+      <div className="mb-3 flex items-center gap-3">
+        <h2 id="task-detail-title" className="m-0 flex-1 text-lg font-semibold text-slate-900">
+          Task detail
+        </h2>
+        <button type="button" className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 px-2 text-xs text-slate-600" onClick={onClose}>
+          <X className="h-3.5 w-3.5" aria-hidden />
+          Close
+        </button>
+      </div>
+
+      {isLoading ? <p className="text-sm text-slate-600">Loading task detail…</p> : null}
+      {error ? <p role="alert" className="text-sm text-rose-700">{getErrorMessage(error)}</p> : null}
+      {task ? (
+        <div className="space-y-5">
+          <form
+            className="grid gap-3 md:grid-cols-2"
+            key={`${task.id}-${task.revision}`}
+            onSubmit={(event) => {
+              event.preventDefault();
+              const form = new FormData(event.currentTarget);
+              const tagIds = form.getAll("tag_ids").map(String);
+              const details = String(form.get("details") ?? "").trim();
+              const projectId = String(form.get("project_id") ?? "");
+              const dueDate = String(form.get("due_date") ?? "");
+              const waitingFor = String(form.get("waiting_for") ?? "").trim();
+              onSave(task, {
+                title: String(form.get("title") ?? "").trim(),
+                details: details || null,
+                project_id: projectId || null,
+                tag_ids: tagIds,
+                due_date: dueDate || null,
+                priority: String(form.get("priority") ?? "none") as TaskPriority,
+                ...(task.state === "waiting" ? { waiting_for: waitingFor } : {}),
+                expected_revision: task.revision
+              });
+            }}
+          >
+            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+              Title
+              <input name="title" aria-label="Title" defaultValue={task.title} className="min-h-10 rounded-lg border border-slate-200 px-3 text-sm text-slate-900" />
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+              Project
+              <select name="project_id" aria-label="Project" defaultValue={task.project_id ?? ""} className="min-h-10 rounded-lg border border-slate-200 px-3 text-sm text-slate-900">
+                <option value="">No project</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>{project.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600 md:col-span-2">
+              Details
+              <textarea name="details" aria-label="Details" defaultValue={task.details ?? ""} rows={3} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900" />
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+              Due date
+              <input name="due_date" aria-label="Due date" type="date" defaultValue={task.due_date ?? ""} className="min-h-10 rounded-lg border border-slate-200 px-3 text-sm text-slate-900" />
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+              Priority
+              <select name="priority" aria-label="Priority" defaultValue={task.priority} className="min-h-10 rounded-lg border border-slate-200 px-3 text-sm text-slate-900">
+                <option value="none">None</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+              Waiting for
+              <input name="waiting_for" aria-label="Waiting for" defaultValue={task.waiting_for ?? ""} className="min-h-10 rounded-lg border border-slate-200 px-3 text-sm text-slate-900" />
+              <span className="text-[11px] font-normal text-slate-500">Required when moving or reopening to Waiting.</span>
+            </label>
+            <fieldset className="flex flex-wrap gap-2 text-xs font-medium text-slate-600">
+              <legend className="mb-1 w-full">Tags</legend>
+              {tags.map((tag) => (
+                <label key={tag.id} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1">
+                  <input name="tag_ids" type="checkbox" value={tag.id} defaultChecked={task.tag_ids.includes(tag.id)} />
+                  @{tag.name.replace(/^@/, "")}
+                </label>
+              ))}
+            </fieldset>
+            <div className="flex flex-wrap items-end gap-2 md:col-span-2">
+              <button type="submit" className="h-10 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white">Save task detail</button>
+              {task.state !== "completed" && task.state !== "cancelled" ? (
+                <>
+                  <button type="button" className="h-10 rounded-lg border border-emerald-200 px-3 text-sm text-emerald-700" onClick={() => onTransition(task, "complete")}>Complete</button>
+                  <button type="button" className="h-10 rounded-lg border border-rose-200 px-3 text-sm text-rose-700" onClick={() => onTransition(task, "cancel")}>Cancel</button>
+                  {openStateOptions.filter((option) => option !== task.state).map((option) => (
+                    <TaskTransitionButton
+                      key={option}
+                      label={`Move to ${stateLabels[option].replace(" actions", "")}`}
+                      targetState={option}
+                      action="move"
+                      task={task}
+                      onTransition={onTransition}
+                    />
+                  ))}
+                </>
+              ) : (
+                openStateOptions.map((option) => (
+                  <TaskTransitionButton
+                    key={option}
+                    label={`Reopen to ${stateLabels[option].replace(" actions", "")}`}
+                    targetState={option}
+                    action="reopen"
+                    task={task}
+                    onTransition={onTransition}
+                  />
+                ))
+              )}
+            </div>
+          </form>
+
+          <form
+            className="flex gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const form = new FormData(event.currentTarget);
+              const title = String(form.get("subtask_title") ?? "").trim();
+              if (title) {
+                onCreateSubtask(task, title);
+                event.currentTarget.reset();
+              }
+            }}
+          >
+            <input name="subtask_title" aria-label="New subtask title" className="min-h-10 flex-1 rounded-lg border border-slate-200 px-3 text-sm" placeholder="Add a subtask" />
+            <button type="submit" className="h-10 rounded-lg border border-slate-200 px-3 text-sm">Add subtask</button>
+          </form>
+          <div className="space-y-2" aria-label="Subtasks">
+            {(task.subtasks ?? []).map((subtask) => (
+              <div key={subtask.id} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
+                <span className="flex-1">{subtask.title}</span>
+                <span className="text-xs text-slate-500">{subtask.state}</span>
+                {subtask.state === "open" ? (
+                  <button type="button" className="text-xs text-emerald-700" onClick={() => onTransitionSubtask(task, subtask, "complete")}>Complete</button>
+                ) : (
+                  <button type="button" className="text-xs text-slate-700" onClick={() => onTransitionSubtask(task, subtask, "reopen")}>Reopen</button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <form
+            className="flex gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const form = new FormData(event.currentTarget);
+              const body = String(form.get("comment_body") ?? "").trim();
+              if (body) {
+                onCreateComment(task, body);
+                event.currentTarget.reset();
+              }
+            }}
+          >
+            <input name="comment_body" aria-label="New comment" className="min-h-10 flex-1 rounded-lg border border-slate-200 px-3 text-sm" placeholder="Add a comment" />
+            <button type="submit" className="h-10 rounded-lg border border-slate-200 px-3 text-sm">Add comment</button>
+          </form>
+          <div className="space-y-2" aria-label="Comments">
+            {(task.comments ?? []).map((comment) => (
+              <p key={comment.id} className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">{comment.body}</p>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </aside>
+  );
+}
+
+function TaskTransitionButton({
+  task,
+  action,
+  targetState,
+  label,
+  onTransition
+}: {
+  task: TaskResponse;
+  action: "move" | "reopen";
+  targetState: OpenTaskState;
+  label: string;
+  onTransition: (task: TaskResponse, action: "move" | "complete" | "reopen" | "cancel", toState?: OpenTaskState, waitingFor?: string) => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      className="h-10 rounded-lg border border-slate-200 px-3 text-sm text-slate-700"
+      onClick={(event) => {
+        const detailForm = event.currentTarget.form;
+        const waitingFor = detailForm
+          ? String(new FormData(detailForm).get("waiting_for") ?? "")
+          : undefined;
+        onTransition(task, action, targetState, targetState === "waiting" ? waitingFor : undefined);
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
 function TaskCreator({
   newTitle,
+  newWaitingFor,
+  state,
   showCompleted,
   isCreating,
   onCreate,
   onTitleChange,
+  onWaitingForChange,
   onToggleCompleted
 }: {
   newTitle: string;
+  newWaitingFor: string;
+  state?: OpenTaskState;
   showCompleted: boolean;
   isCreating: boolean;
   onCreate: (title: string) => void;
   onTitleChange: (title: string) => void;
+  onWaitingForChange: (value: string) => void;
   onToggleCompleted: (show: boolean) => void;
 }): JSX.Element {
+  const waitingForRequired = state === "waiting";
   return (
     <div className="mt-3 space-y-3">
       <form
@@ -377,14 +875,35 @@ function TaskCreator({
           value={newTitle}
           onChange={(event) => onTitleChange(event.currentTarget.value)}
         />
-        <button type="submit" disabled={isCreating || !newTitle.trim()} className="h-10 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
+        {waitingForRequired ? (
+          <>
+            <label className="sr-only" htmlFor="new-task-waiting-for">Waiting for</label>
+            <input
+              id="new-task-waiting-for"
+              aria-label="Waiting for"
+              className="min-h-10 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-300"
+              placeholder="Waiting for who or what?"
+              value={newWaitingFor}
+              onChange={(event) => onWaitingForChange(event.currentTarget.value)}
+            />
+          </>
+        ) : null}
+        <button type="submit" disabled={isCreating || !newTitle.trim() || (waitingForRequired && !newWaitingFor.trim())} className="h-10 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
           Add task
         </button>
       </form>
       <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-600">
         <input type="checkbox" checked={showCompleted} onChange={(event) => onToggleCompleted(event.currentTarget.checked)} />
-        Show completed tasks
+        Show terminal tasks
       </label>
+    </div>
+  );
+}
+
+function DateViewCaptureHint(): JSX.Element {
+  return (
+    <div className="mt-3 rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+      Date views are filters over existing tasks. Add a task from Inbox, Next, Waiting, Someday, a Project, or a Tag, then set its due date in task detail.
     </div>
   );
 }
@@ -436,4 +955,19 @@ function formatDueDate(value: string): string {
     return value;
   }
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+function parseTaskSort(value: string | null): TaskSort {
+  if (value === "due" || value === "priority" || value === "title") {
+    return value;
+  }
+  return "manual";
+}
+
+function localDateIso(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
