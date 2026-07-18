@@ -13,14 +13,29 @@
         "Написать Наташе"
       ],
       "spans_ms": [[0, 1800], [1800, 3600], [3600, 5200]],
-      "notes": "Code-switched product and deployment terms must be preserved."
+      "notes": "Code-switched product and deployment terms must be preserved.",
+      "code_switch_terms": ["BrainBuddy", "production smoke"]
     },
     {
       "id": "ML-02",
       "fast_text": "починить brain body",
       "accurate_text": "починить BrainBuddy",
       "expected_titles": ["Починить BrainBuddy"],
-      "spans_ms": [[0, 1400]]
+      "spans_ms": [[0, 1400]],
+      "notes": "Accurate sealed-audio STT corrects a low-confidence fast-STT hypothesis."
+    },
+    {
+      "id": "ML-03",
+      "language": ["ru"],
+      "text": "надо позвонить в банк потом оплатить интернет потом забрать посылку",
+      "expected_titles": [
+        "Позвонить в банк",
+        "Оплатить интернет",
+        "Забрать посылку"
+      ],
+      "spans_ms": [[0, 1200], [1200, 2600], [2600, 4000]],
+      "notes": "Run-on utterance with no punctuation; only the 'потом' conjunction marks task boundaries.",
+      "run_on": true
     },
     {
       "id": "ML-04",
@@ -30,11 +45,54 @@
       "notes": "Conjunction alone is not a split oracle."
     },
     {
+      "id": "ML-05",
+      "language": ["en", "ru"],
+      "text": "please deploy the BrainBuddy release; потом протестировать production smoke на staging",
+      "expected_titles": [
+        "Deploy the BrainBuddy release",
+        "Протестировать production smoke на staging"
+      ],
+      "spans_ms": [[0, 2000], [2000, 4200]],
+      "notes": "In-sentence code switching within a single clause; product and deployment terms must survive untranslated.",
+      "code_switch_terms": ["BrainBuddy", "production smoke", "staging"]
+    },
+    {
       "id": "ML-06",
       "fast_text": "починить brain body",
       "user_title": "Починить BrainBuddy MVP",
       "accurate_text": "починить BrainBuddy",
-      "expected_conflict_field": "title"
+      "expected_conflict_field": "title",
+      "notes": "User-locked title must surface a visible conflict instead of a silent accurate-STT overwrite."
+    },
+    {
+      "id": "ML-07",
+      "language": ["nl"],
+      "text": "ik moet de huur betalen. dan moet ik de dokter bellen",
+      "expected_titles": [
+        "De huur betalen",
+        "De dokter bellen"
+      ],
+      "spans_ms": [[0, 1500], [1500, 3000]],
+      "notes": "Dutch fixture; 'moet ik/moet de' filler is stripped like the RU/EN modal-verb prefixes."
+    },
+    {
+      "id": "ML-08",
+      "language": ["ru"],
+      "text": "эм ну надо наверное починить BrainBuddy",
+      "expected_titles": ["Наверное починить BrainBuddy"],
+      "spans_ms": [[0, 1900]],
+      "notes": "Low-confidence hesitant phrasing ('эм ну'); a retry of the same segment must be idempotent and not duplicate the proposal.",
+      "low_confidence": true,
+      "retry_of": "ML-08"
+    },
+    {
+      "id": "ML-09",
+      "language": ["ru", "en"],
+      "fast_text": "написать Наташе про MVP",
+      "user_title": "Написать Наташе про custom MVP scope",
+      "accurate_text": "написать Наташе про MVP",
+      "expected_conflict_field": null,
+      "notes": "Edit-then-reconcile: once the user has edited and locked the title, a matching accurate segment must not raise a conflict when it agrees with the user's wording family; only a genuinely different accurate suggestion raises ML-06-style conflict."
     }
   ]
 }

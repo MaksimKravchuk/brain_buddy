@@ -61,6 +61,8 @@ class ReconciledProposal:
     tombstoned: bool = False
     ordinal: int = 1
     revision: int = 1
+    title_revision: int = 1
+    """Revision at which ``title`` was last changed; drives stale-base checks."""
 
 
 @dataclass(frozen=True)
@@ -75,6 +77,14 @@ class ProposalPatch:
     predecessor_ids: list[str] = dataclass_field(default_factory=list)
     successor_ids: list[str] = dataclass_field(default_factory=list)
     locked_fields: list[str] = dataclass_field(default_factory=list)
+    base_revision: int | None = None
+    """Revision this patch was computed against; drives stale-base handling.
+
+    When set and older than the target's ``title_revision``, a title change
+    is treated as a *conflicting stale patch* (PA-05: rejected into an open
+    conflict, never a silent overwrite). A patch that leaves ``title`` unset
+    only ever touches disjoint fields and always rebases cleanly (PA-04).
+    """
 
     @classmethod
     def add(
@@ -84,6 +94,7 @@ class ProposalPatch:
         title: str,
         source_segment_ids: list[str],
         producer: PatchProducer,
+        base_revision: int | None = None,
     ) -> ProposalPatch:
         return cls(
             operation="add",
@@ -91,6 +102,7 @@ class ProposalPatch:
             title=title,
             source_segment_ids=source_segment_ids,
             producer=producer,
+            base_revision=base_revision,
         )
 
     @classmethod
@@ -102,6 +114,7 @@ class ProposalPatch:
         title: str | None = None,
         source_segment_ids: list[str] | None = None,
         locked_fields: list[str] | None = None,
+        base_revision: int | None = None,
     ) -> ProposalPatch:
         return cls(
             operation="update",
@@ -110,6 +123,7 @@ class ProposalPatch:
             source_segment_ids=source_segment_ids or [],
             locked_fields=locked_fields or [],
             producer=producer,
+            base_revision=base_revision,
         )
 
     @classmethod
@@ -237,11 +251,19 @@ def apply_proposal_patches(
         status = current.status
         conflicts = list(current.conflicts)
         title = current.title
+        title_revision = current.title_revision
         source_segment_ids = current.source_segment_ids
+        wants_title_change = patch.title is not None and patch.title != current.title
+        is_stale_base = (
+            wants_title_change
+            and patch.base_revision is not None
+            and patch.base_revision < current.title_revision
+        )
         if patch.producer == "user":
             status = "user_edited"
             if patch.title is not None:
                 title = patch.title
+                title_revision = current.title_revision + 1
             if patch.source_segment_ids:
                 source_segment_ids = patch.source_segment_ids
         elif "title" in current.locked_fields and patch.title and patch.title != current.title:
@@ -255,15 +277,34 @@ def apply_proposal_patches(
                     source_segment_ids=patch.source_segment_ids,
                 )
             )
+        elif is_stale_base:
+            # PA-05: a title change computed against a stale base conflicts
+            # instead of silently overwriting a newer concurrent change.
+            status = "conflicted"
+            conflicts.append(
+                ProposalConflict(
+                    field="title",
+                    current_value=current.title,
+                    suggested_value=patch.title,
+                    producer=patch.producer,
+                    source_segment_ids=patch.source_segment_ids,
+                )
+            )
+            if patch.source_segment_ids:
+                # PA-04: disjoint (non-title) changes in the same patch still
+                # rebase and apply even when the title itself conflicts.
+                source_segment_ids = patch.source_segment_ids
         else:
             if patch.title is not None:
                 title = patch.title
+                title_revision = current.title_revision + 1
             if patch.source_segment_ids:
                 source_segment_ids = patch.source_segment_ids
             status = "reconciled" if patch.producer == "reconciler" else status
         updated = _replace(
             current,
             title=title,
+            title_revision=title_revision,
             source_segment_ids=source_segment_ids,
             status=status,
             locked_fields=locked_fields,
