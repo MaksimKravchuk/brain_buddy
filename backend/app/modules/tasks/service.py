@@ -9,11 +9,17 @@ import re
 import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime
-from typing import Concatenate, ParamSpec, TypeVar, cast
+from typing import Concatenate, Literal, ParamSpec, TypeVar, cast
 
 from pydantic import BaseModel
 
-from app.exceptions import ConflictError, NotFoundError, ValidationFailure
+from app.exceptions import (
+    ConflictError,
+    NotFoundError,
+    ProviderRetryableError,
+    ProviderTerminalError,
+    ValidationFailure,
+)
 from app.schemas.tasks import (
     BrainDumpOperationStartRequest,
     BrainDumpProposalUpdateRequest,
@@ -37,6 +43,12 @@ from app.schemas.tasks import (
 )
 from app.utils.identifiers import generate_id
 from app.utils.time import utcnow
+from app.workflows.voice_brain_dump.domain import (
+    ProposalConflict,
+    ProposalPatch,
+    ReconciledProposal,
+    apply_proposal_patches,
+)
 from app.workflows.voice_brain_dump.providers import (
     AccurateSttPort,
     AccurateSttRequest,
@@ -479,18 +491,96 @@ class TaskService:
             chunks=[(chunk.chunk_number, chunk.sha256) for chunk in operation.audio_chunks if chunk.chunk_number in expected_numbers],
         )
         now = utcnow()
-        accurate_result = self.accurate_stt.transcribe_sealed_audio(
-            AccurateSttRequest(
-                operation_id=operation.id,
-                media_ref=operation.media_ref or f"media_{operation.id}",
-                supersedes_segment_ids=[
-                    segment.id
-                    for segment in operation.segments
-                    if segment.provider_role != "accurate"
-                ],
-                sealed_audio=audio,
-            )
+        sealed = operation.model_copy(
+            update={"sealed_manifest_hash": manifest_hash, "updated_at": now}
         )
+        updated = self._run_accurate_stt_and_reconcile(
+            sealed, audio=audio, attempt=1, recovery_count=0, now=now
+        )
+        self.task_repo.save_brain_dump_operation(updated)
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=updated.id,
+            response=updated,
+        )
+        return updated
+
+    _MAX_ACCURATE_STT_ATTEMPTS = 3
+    """Bounded recovery budget for the accurate-STT stage; no hot retry loop."""
+
+    def _run_accurate_stt_and_reconcile(
+        self,
+        operation: BrainDumpOperationDocument,
+        *,
+        audio: bytes,
+        attempt: int,
+        recovery_count: int,
+        now: datetime,
+    ) -> BrainDumpOperationDocument:
+        """Call the accurate-STT port from a persisted sealed checkpoint.
+
+        On success the transcript is reconciled and the operation advances to
+        ``awaiting_confirmation``. On a retryable provider failure the
+        operation persists a ``retryable_error`` checkpoint that a later
+        ``retry_brain_dump_operation`` call resumes without re-uploading or
+        re-sealing audio. On a terminal failure, or once the bounded
+        recovery budget is exhausted, the operation becomes ``terminal_error``.
+        """
+
+        input_hash = hashlib.sha256(audio).hexdigest()
+        try:
+            accurate_result = self.accurate_stt.transcribe_sealed_audio(
+                AccurateSttRequest(
+                    operation_id=operation.id,
+                    media_ref=operation.media_ref or f"media_{operation.id}",
+                    supersedes_segment_ids=[
+                        segment.id
+                        for segment in operation.segments
+                        if segment.provider_role != "accurate"
+                    ],
+                    sealed_audio=audio,
+                )
+            )
+        except (ProviderRetryableError, ProviderTerminalError) as exc:
+            is_retryable = isinstance(exc, ProviderRetryableError)
+            budget_exhausted = attempt >= self._MAX_ACCURATE_STT_ATTEMPTS
+            next_status: Literal["retryable_error", "terminal_error"] = (
+                "retryable_error" if is_retryable and not budget_exhausted else "terminal_error"
+            )
+            return operation.model_copy(
+                update={
+                    "status": next_status,
+                    "status_history": [
+                        *operation.status_history,
+                        "sealing",
+                        "fast_processing",
+                        "accurate_transcribing",
+                        next_status,
+                    ],
+                    "sealed_manifest_hash": operation.sealed_manifest_hash,
+                    "provider_runs": [
+                        *operation.provider_runs,
+                        BrainDumpProviderRunDocument(
+                            id=generate_id("provider_run"),
+                            role="accurate_stt",
+                            status=next_status,
+                            input_hash=input_hash,
+                            checkpoint="sealed",
+                            attempt=attempt,
+                            recovery_count=recovery_count,
+                            error=str(exc)[:1000],
+                            created_at=now,
+                            updated_at=now,
+                        ),
+                    ],
+                    "updated_at": now,
+                    "revision": operation.revision + 1,
+                }
+            )
+
         accurate_hypothesis = accurate_result.segments[0]
         accurate_segment = BrainDumpTranscriptSegmentDocument(
             id=accurate_hypothesis.id,
@@ -511,7 +601,7 @@ class TaskService:
             source_segment_id=accurate_segment.id,
             now=now,
         )
-        updated = operation.model_copy(
+        return operation.model_copy(
             update={
                 "status": "awaiting_confirmation",
                 "status_history": [
@@ -524,16 +614,16 @@ class TaskService:
                 ],
                 "segments": [*operation.segments, accurate_segment],
                 "proposals": proposals,
-                "sealed_manifest_hash": manifest_hash,
                 "provider_runs": [
                     *operation.provider_runs,
                     BrainDumpProviderRunDocument(
                         id=generate_id("provider_run"),
                         role="accurate_stt",
                         status="succeeded",
-                        input_hash=hashlib.sha256(audio).hexdigest(),
+                        input_hash=input_hash,
                         checkpoint="accurate_transcribed",
-                        attempt=1,
+                        attempt=attempt,
+                        recovery_count=recovery_count,
                         output_segment_ids=[accurate_segment.id],
                         created_at=now,
                         updated_at=now,
@@ -542,6 +632,58 @@ class TaskService:
                 "updated_at": now,
                 "revision": operation.revision + 1,
             }
+        )
+
+    @_serialized_write
+    def retry_brain_dump_operation(
+        self,
+        operation_id: str,
+        payload: ExpectedRevisionRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> BrainDumpOperationDocument:
+        """Resume the accurate-STT stage from its persisted sealed checkpoint."""
+
+        command = f"brain_dump_retry:{operation_id}"
+        request_hash = self._request_hash(command, payload)
+        record = self._idempotency_record(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+        )
+        if record is not None:
+            return self._brain_dump_operation_result(record, owner_id=owner_id)
+        operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
+        self._assert_revision(
+            "Brain dump operation", operation.id, operation.revision, payload.expected_revision
+        )
+        if operation.status != "retryable_error":
+            raise ValidationFailure("Only a retryable brain dump can be retried.")
+        last_run = next(
+            (
+                run
+                for run in reversed(operation.provider_runs)
+                if run.role == "accurate_stt"
+            ),
+            None,
+        )
+        if last_run is None or operation.sealed_manifest_hash is None:
+            raise ValidationFailure("Brain dump has no sealed checkpoint to resume from.")
+        expected_numbers = {chunk.chunk_number for chunk in operation.audio_chunks}
+        audio = self.task_repo.load_brain_dump_audio_chunks(
+            owner_id=owner_id,
+            operation_id=operation.id,
+            chunks=[(chunk.chunk_number, chunk.sha256) for chunk in operation.audio_chunks if chunk.chunk_number in expected_numbers],
+        )
+        now = utcnow()
+        updated = self._run_accurate_stt_and_reconcile(
+            operation,
+            audio=audio,
+            attempt=last_run.attempt + 1,
+            recovery_count=last_run.recovery_count + 1,
+            now=now,
         )
         self.task_repo.save_brain_dump_operation(updated)
         self._store_idempotency(
@@ -659,6 +801,7 @@ class TaskService:
                         "title": payload.title.strip(),
                         "status": "user_edited",
                         "user_edited": True,
+                        "title_revision": proposal.title_revision + 1,
                         "locked_fields": sorted({*proposal.locked_fields, "title"}),
                     }
                 )
@@ -1800,6 +1943,64 @@ class TaskService:
     def _validated_task_update(task: TaskDocument, **updates: object) -> TaskDocument:
         return TaskDocument.model_validate({**task.model_dump(), **updates})
 
+    _DOMAIN_STATUS_TO_DOC_STATUS: dict[str, BrainDumpProposalStatus] = {
+        "provisional": "provisional",
+        "reconciled": "reconciled",
+        "user_edited": "user_edited",
+        "conflicted": "conflicted",
+    }
+
+    @classmethod
+    def _domain_status_to_doc_status(cls, status: str) -> BrainDumpProposalStatus:
+        return cls._DOMAIN_STATUS_TO_DOC_STATUS.get(status, "reconciled")
+
+    @staticmethod
+    def _domain_conflict_to_doc(
+        conflict: ProposalConflict,
+    ) -> BrainDumpProposalConflictDocument:
+        return BrainDumpProposalConflictDocument(
+            field=conflict.field,
+            current_value=conflict.current_value,
+            suggested_value=conflict.suggested_value,
+            producer=conflict.producer,
+            source_segment_ids=conflict.source_segment_ids,
+        )
+
+    @staticmethod
+    def _proposal_document_to_reconciled(
+        proposal: BrainDumpProposalDocument,
+    ) -> ReconciledProposal:
+        status_map: dict[str, Literal["provisional", "reconciled", "user_edited", "conflicted"]] = {
+            "provisional": "provisional",
+            "wording_changing": "provisional",
+            "ready_to_review": "reconciled",
+            "user_edited": "user_edited",
+            "reconciled": "reconciled",
+            "conflicted": "conflicted",
+        }
+        return ReconciledProposal(
+            id=proposal.id,
+            title=proposal.title,
+            source_segment_ids=proposal.source_segment_ids,
+            status=status_map.get(proposal.status, "provisional"),
+            predecessor_ids=proposal.predecessor_ids,
+            successor_ids=proposal.successor_ids,
+            locked_fields=proposal.locked_fields,
+            conflicts=[
+                ProposalConflict(
+                    field=conflict.field,
+                    current_value=conflict.current_value,
+                    suggested_value=conflict.suggested_value,
+                    producer=conflict.producer,
+                    source_segment_ids=conflict.source_segment_ids,
+                )
+                for conflict in proposal.conflicts
+            ],
+            ordinal=proposal.ordinal,
+            revision=proposal.revision,
+            title_revision=proposal.title_revision,
+        )
+
     def _reconcile_accurate_titles(
         self,
         existing: list[BrainDumpProposalDocument],
@@ -1808,56 +2009,97 @@ class TaskService:
         source_segment_id: str,
         now: datetime,
     ) -> list[BrainDumpProposalDocument]:
-        proposals = list(existing)
+        """Reconcile accurate-STT titles through opaque-ID, lineage-aware patches.
+
+        Identity/lineage/lock/stale-base decisions are delegated to
+        ``apply_proposal_patches`` so the append-only patch contract (PA-04,
+        PA-05) is real production behavior on the accurate-STT reconciliation
+        path, not only a unit-tested pure module.
+        """
+
         segment_ids = [source_segment_id]
+        mutable = [proposal for proposal in existing if not proposal.deleted]
+        base = [self._proposal_document_to_reconciled(proposal) for proposal in mutable]
+
+        patches: list[ProposalPatch] = []
         for title in titles:
-            matched_index = self._matching_proposal_index(proposals, title)
+            matched_index = self._matching_proposal_index(mutable, title)
             if matched_index is None:
-                proposals.append(
-                    BrainDumpProposalDocument(
-                        id=generate_id("proposal"),
-                        ordinal=len(proposals) + 1,
+                patches.append(
+                    ProposalPatch.add(
+                        proposal_id=generate_id("proposal"),
                         title=title,
-                        status="reconciled",
                         source_segment_ids=segment_ids,
-                        created_at=now,
-                        updated_at=now,
+                        producer="reconciler",
                     )
                 )
                 continue
-            proposal = proposals[matched_index]
-            if proposal.deleted:
-                continue
-            if "title" in proposal.locked_fields and proposal.title != title:
-                conflict = BrainDumpProposalConflictDocument(
-                    field="title",
-                    current_value=proposal.title,
-                    suggested_value=title,
-                    producer="reconciler",
+            target = mutable[matched_index]
+            patches.append(
+                ProposalPatch.update(
+                    proposal_id=target.id,
+                    title=title,
                     source_segment_ids=segment_ids,
+                    producer="reconciler",
+                    base_revision=target.title_revision,
                 )
-                proposals[matched_index] = proposal.model_copy(
-                    update={
-                        "status": "conflicted",
-                        "source_segment_ids": sorted({*proposal.source_segment_ids, *segment_ids}),
-                        "conflicts": [*proposal.conflicts, conflict],
-                        "updated_at": now,
-                        "revision": proposal.revision + 1,
-                    }
+            )
+
+        projection = apply_proposal_patches(base, patches)
+        by_existing_id = {proposal.id: proposal for proposal in mutable}
+        reconciled_by_id: dict[str, BrainDumpProposalDocument] = {}
+        for reconciled in projection.active:
+            original = by_existing_id.get(reconciled.id)
+            new_status = self._domain_status_to_doc_status(reconciled.status)
+            new_conflicts = [self._domain_conflict_to_doc(conflict) for conflict in reconciled.conflicts]
+            if original is None:
+                reconciled_by_id[reconciled.id] = BrainDumpProposalDocument(
+                    id=reconciled.id,
+                    ordinal=reconciled.ordinal,
+                    title=reconciled.title,
+                    status=new_status,
+                    source_segment_ids=reconciled.source_segment_ids,
+                    predecessor_ids=reconciled.predecessor_ids,
+                    successor_ids=reconciled.successor_ids,
+                    locked_fields=reconciled.locked_fields,
+                    conflicts=new_conflicts,
+                    title_revision=reconciled.title_revision,
+                    created_at=now,
+                    updated_at=now,
                 )
                 continue
-            if proposal.title == title and proposal.source_segment_ids == segment_ids:
+            unchanged = (
+                original.title == reconciled.title
+                and original.source_segment_ids == reconciled.source_segment_ids
+                and original.status == new_status
+                and original.locked_fields == reconciled.locked_fields
+                and len(original.conflicts) == len(new_conflicts)
+            )
+            if unchanged:
                 continue
-            proposals[matched_index] = proposal.model_copy(
+            reconciled_by_id[reconciled.id] = original.model_copy(
                 update={
-                    "title": title,
-                    "status": "reconciled",
-                    "source_segment_ids": segment_ids,
+                    "title": reconciled.title,
+                    "status": new_status,
+                    "source_segment_ids": reconciled.source_segment_ids,
+                    "locked_fields": reconciled.locked_fields,
+                    "conflicts": new_conflicts,
+                    "title_revision": reconciled.title_revision,
                     "updated_at": now,
-                    "revision": proposal.revision + 1,
+                    "revision": original.revision + 1,
                 }
             )
-        return proposals
+
+        existing_ids = [proposal.id for proposal in existing]
+        ordered = [
+            reconciled_by_id.get(proposal_id, existing[index])
+            for index, proposal_id in enumerate(existing_ids)
+        ]
+        new_ids = [
+            proposal_id for proposal_id in reconciled_by_id if proposal_id not in existing_ids
+        ]
+        ordered.extend(reconciled_by_id[new_id] for new_id in new_ids)
+        return ordered
 
     def _matching_proposal_index(
         self, proposals: list[BrainDumpProposalDocument], title: str

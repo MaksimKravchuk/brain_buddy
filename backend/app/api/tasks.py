@@ -221,6 +221,10 @@ def command_brain_dump_operation(
         operation = task_service.commit_brain_dump_operation(
             operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
         )
+    elif action == "retry":
+        operation = task_service.retry_brain_dump_operation(
+            operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
+        )
     elif action in {"pause", "resume", "finish", "cancel"}:
         operation = task_service.transition_brain_dump_operation(
             operation_id,

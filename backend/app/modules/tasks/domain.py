@@ -195,6 +195,9 @@ class BrainDumpProposalDocument(StorageBaseModel):
     conflicts: list[BrainDumpProposalConflictDocument] = Field(default_factory=list)
     deleted: bool = False
     user_edited: bool = False
+    title_revision: int = Field(default=1, ge=1)
+    """Revision at which ``title`` was last changed; drives stale-base checks
+    for reconciler patches applied through ``apply_proposal_patches``."""
     created_at: datetime
     updated_at: datetime
     revision: int = Field(default=1, ge=1)

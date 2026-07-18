@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from app.exceptions import ProviderRetryableError, ProviderTerminalError
 from app.workflows.voice_brain_dump.domain import ProposalPatch, TranscriptHypothesis
 
 
@@ -93,12 +94,33 @@ class DeterministicFastStt:
 class DeterministicAccurateStt:
     """Fake accurate STT that enforces sealed-original-audio input."""
 
-    def __init__(self, transcripts: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        transcripts: dict[str, str] | None = None,
+        *,
+        fail_plan: dict[str, list[str]] | None = None,
+    ) -> None:
         self.transcripts = transcripts or {}
+        # Per-media_ref queue of forced outcomes ("retryable" | "terminal"),
+        # consumed one call at a time; deterministic CI-only failure injection.
+        self.fail_plan: dict[str, list[str]] = {
+            key: list(value) for key, value in (fail_plan or {}).items()
+        }
         self.calls: list[AccurateSttRequest] = []
 
     def transcribe_sealed_audio(self, request: AccurateSttRequest) -> SttResult:
         self.calls.append(request)
+        queue = self.fail_plan.get(request.media_ref)
+        if queue:
+            outcome = queue.pop(0)
+            if outcome == "retryable":
+                raise ProviderRetryableError(
+                    f"Deterministic accurate STT retryable failure for '{request.media_ref}'."
+                )
+            if outcome == "terminal":
+                raise ProviderTerminalError(
+                    f"Deterministic accurate STT terminal failure for '{request.media_ref}'."
+                )
         text = self.transcripts.get(
             request.media_ref,
             request.sealed_audio.decode("utf-8", errors="ignore")
