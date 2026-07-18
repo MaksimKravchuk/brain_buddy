@@ -134,7 +134,7 @@ def _measured_frequency_hz(audio_path: Path) -> float:
     """Measure the deterministic corpus tone without consulting case labels."""
 
     with wave.open(str(audio_path), "rb") as fixture:
-        rate = fixture.getframerate()
+        rate = int(fixture.getframerate())
         frames = fixture.readframes(fixture.getnframes())
     samples = [value[0] for value in struct.iter_unpack("<h", frames)]
     crossings = sum(
@@ -142,7 +142,7 @@ def _measured_frequency_hz(audio_path: Path) -> float:
         for left, right in zip(samples, samples[1:], strict=False)
     )
     duration_seconds = len(samples) / rate
-    return crossings / (2 * duration_seconds)
+    return float(crossings) / (2.0 * duration_seconds)
 
 
 def evaluate_release_dataset(
