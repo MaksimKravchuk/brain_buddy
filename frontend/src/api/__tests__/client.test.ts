@@ -141,6 +141,33 @@ describe("apiClient", () => {
     expect(inits[2].body).toBe(JSON.stringify({ action: "move", to_state: "next", expected_revision: 2 }));
   });
 
+  it("sends Smart Add task classification through the compound endpoint", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(response({ task: { id: "task-1", revision: 1 }, tags: [], created: { project_id: null, tag_ids: [] } })));
+
+    await apiClient.smartAddTask(
+      {
+        title: "Call supplier",
+        state: "next",
+        project: { name: "Vendor launch" },
+        tags: [{ id: "tag-calls" }, { name: "vendor" }]
+      },
+      "smart-add-key"
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/tasks/smart-add",
+      expect.objectContaining({ credentials: "include", method: "POST" })
+    );
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new Headers(init.headers).get("Idempotency-Key")).toBe("smart-add-key");
+    expect(init.body).toBe(JSON.stringify({
+      title: "Call supplier",
+      state: "next",
+      project: { name: "Vendor launch" },
+      tags: [{ id: "tag-calls" }, { name: "vendor" }]
+    }));
+  });
+
   it("omits task query parameters when filters are absent", async () => {
     fetchMock.mockResolvedValue(response({ items: [], counts_by_state: {} }));
 
