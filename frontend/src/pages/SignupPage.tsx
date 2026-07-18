@@ -63,7 +63,7 @@ export default function SignupPage(): JSX.Element {
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="rounded-md border border-slate-300 px-3 py-2 text-slate-900 focus:border-brand-primary focus:outline-none"
+            className="rounded-md border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-soft transition-colors duration-200 ease-smooth focus:border-brand-primary focus:outline-none"
             autoComplete="email"
           />
         </label>
@@ -75,7 +75,7 @@ export default function SignupPage(): JSX.Element {
             minLength={PASSWORD_MIN_LENGTH}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="rounded-md border border-slate-300 px-3 py-2 text-slate-900 focus:border-brand-primary focus:outline-none"
+            className="rounded-md border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-soft transition-colors duration-200 ease-smooth focus:border-brand-primary focus:outline-none"
             autoComplete="new-password"
           />
           <span className="text-xs text-slate-500">
@@ -89,7 +89,7 @@ export default function SignupPage(): JSX.Element {
             required
             value={inviteCode}
             onChange={(e) => setInviteCode(e.target.value)}
-            className="rounded-md border border-slate-300 px-3 py-2 font-mono text-slate-900 focus:border-brand-primary focus:outline-none"
+            className="rounded-md border border-slate-200 bg-white px-3 py-2 font-mono text-slate-900 shadow-soft transition-colors duration-200 ease-smooth focus:border-brand-primary focus:outline-none"
             autoComplete="off"
           />
         </label>

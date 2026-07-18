@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import { apiClient } from "../api/client";
+import { nowMs, recordTelemetry } from "../utils/telemetry";
 
 import type {
   NodeResponse,
@@ -68,6 +69,10 @@ interface OptimisticChange {
   snapshot: GraphSnapshot;
 }
 
+type SetTreeOptions = {
+  restoreSafe?: boolean;
+};
+
 type SelectionState =
   | { type: "node"; id: string }
   | { type: "relation"; id: string }
@@ -90,7 +95,7 @@ interface TreeStoreState {
   lastLocalSaveAt: string | null;
   lastCloudSyncAt: string | null;
   lastSyncError: string | null;
-  setTree(tree: TreeDetailResponse): void;
+  setTree(tree: TreeDetailResponse, options?: SetTreeOptions): void;
   reset(): void;
   select(selection: SelectionState): void;
   pushSnapshot(): void;
@@ -262,7 +267,6 @@ function mapTreeDetail(state: TreeStoreState): TreeDetailResponse | null {
     return null;
   }
 
-  const updatedAt = new Date().toISOString();
   const ownerId = state.metadata.ownerId ?? null;
 
   return {
@@ -271,7 +275,7 @@ function mapTreeDetail(state: TreeStoreState): TreeDetailResponse | null {
     metadata: {
       version: state.metadata.version,
       created_at: state.metadata.createdAt,
-      updated_at: updatedAt,
+      updated_at: state.metadata.updatedAt,
       layout: state.metadata.layout ?? null,
       owner_id: ownerId
     },
@@ -305,6 +309,7 @@ function persistDraft(detail: TreeDetailResponse) {
 }
 
 async function persistTree(get: () => TreeStoreState, set: TreeStoreSet) {
+  const startMs = nowMs();
   const detail = mapTreeDetail(get());
   if (!detail) {
     return;
@@ -312,16 +317,30 @@ async function persistTree(get: () => TreeStoreState, set: TreeStoreSet) {
 
   clearAutosaveTimer();
 
+  const localStartMs = nowMs();
   const savedLocally = persistDraft(detail);
+  recordTelemetry(
+    {
+      name: "tree.local_draft_save",
+      durationMs: nowMs() - localStartMs,
+      ok: savedLocally,
+      details: { treeId: detail.id, nodes: detail.nodes.length, relations: detail.relations.length }
+    },
+    savedLocally ? "info" : "warn"
+  );
 
-  const timestamp = detail.metadata.updated_at;
+  const localSaveAt = new Date().toISOString();
   let pendingSync = !savedLocally;
   let lastSyncError: string | null = savedLocally ? null : "Local draft save failed";
   let lastCloudSyncAt: string | null = null;
+  let serverUpdatedAt: string | null = null;
+  let serverVersion: number | null = null;
 
   try {
-    await apiClient.updateTree(detail.id, buildTreeUpdateRequest(detail));
-    lastCloudSyncAt = timestamp;
+    const syncedTree = await apiClient.updateTree(detail.id, buildTreeUpdateRequest(detail));
+    serverUpdatedAt = syncedTree.metadata.updated_at;
+    serverVersion = syncedTree.metadata.version;
+    lastCloudSyncAt = serverUpdatedAt;
     pendingSync = false;
     lastSyncError = null;
   } catch (error) {
@@ -329,12 +348,34 @@ async function persistTree(get: () => TreeStoreState, set: TreeStoreSet) {
     lastSyncError = error instanceof Error ? error.message : "Cloud sync failed";
   }
 
+  recordTelemetry(
+    {
+      name: "tree.cloud_sync",
+      durationMs: nowMs() - startMs,
+      ok: !pendingSync,
+      details: {
+        treeId: detail.id,
+        nodes: detail.nodes.length,
+        relations: detail.relations.length,
+        error: lastSyncError
+      }
+    },
+    pendingSync ? "warn" : "info"
+  );
+
   set((state) => ({
     pendingSync,
-    lastLocalSaveAt: savedLocally ? timestamp : null,
+    lastLocalSaveAt: savedLocally ? localSaveAt : null,
     lastCloudSyncAt,
     lastSyncError,
-    metadata: state.metadata ? { ...state.metadata, updatedAt: timestamp } : state.metadata
+    metadata:
+      state.metadata && serverUpdatedAt
+        ? {
+            ...state.metadata,
+            version: serverVersion ?? state.metadata.version,
+            updatedAt: serverUpdatedAt
+          }
+        : state.metadata
   }));
 }
 
@@ -355,6 +396,30 @@ function withPendingSync(): Partial<TreeStoreState> {
     lastChangeAt: Date.now(),
     lastSyncError: null
   };
+}
+
+function hasUnsavedLocalChanges(state: TreeStoreState) {
+  return state.pendingSync || state.optimisticQueue.length > 0;
+}
+
+function isRestoreSafeTreeRefresh(
+  state: TreeStoreState,
+  tree: TreeDetailResponse,
+  options?: SetTreeOptions
+) {
+  if (options?.restoreSafe) {
+    return true;
+  }
+
+  if (state.activeTreeId !== tree.id) {
+    return true;
+  }
+
+  if (hasUnsavedLocalChanges(state)) {
+    return false;
+  }
+
+  return true;
 }
 
 function calculateRelationCounts(nodes: GraphNode[], relations: GraphRelation[]) {
@@ -387,7 +452,10 @@ function reachesAllChildren(
   const queue: string[] = [nodeId];
 
   while (queue.length > 0) {
-    const current = queue.shift()!;
+    const current = queue.shift();
+    if (current === undefined) {
+      break;
+    }
     if (visited.has(current)) {
       continue;
     }
@@ -460,12 +528,16 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
   lastCloudSyncAt: null,
   lastSyncError: null,
 
-  setTree(tree) {
+  setTree(tree, options) {
     const mappedRelations = tree.relations.map(mapRelationResponse);
     const mappedNodes = applyDerivedNodeState(tree.nodes.map(mapNodeResponse), mappedRelations);
     const ownerId = tree.owner_id ?? tree.metadata.owner_id ?? null;
 
     set((state) => {
+      if (!isRestoreSafeTreeRefresh(state, tree, options)) {
+        return {};
+      }
+
       let nextSelection = state.activeTreeId === tree.id ? state.selection : initialSelection;
 
       if (nextSelection.type === "node") {
@@ -489,7 +561,7 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
         },
         nodes: mappedNodes,
         relations: mappedRelations,
-        versions: [],
+        versions: state.activeTreeId === tree.id ? state.versions : [],
         selection: nextSelection,
         undoStack: [],
         redoStack: [],

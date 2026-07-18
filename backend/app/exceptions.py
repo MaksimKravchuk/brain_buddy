@@ -20,17 +20,22 @@ class NotFoundError(BrainBuddyError):
 
 
 class ConflictError(BrainBuddyError):
-    """Raised when a write operation would violate uniqueness constraints."""
+    """Raised when a write operation conflicts with current resource state."""
 
-    def __init__(self, resource: str, identifier: str) -> None:
-        message = f"{resource} '{identifier}' already exists."
-        super().__init__(message)
+    def __init__(
+        self, resource: str, identifier: str, message: str | None = None
+    ) -> None:
+        super().__init__(message or f"{resource} '{identifier}' already exists.")
         self.resource = resource
         self.identifier = identifier
 
 
 class RepositoryError(BrainBuddyError):
     """Wrap lower-level IO or serialization failures."""
+
+
+class StorageUnavailableError(RepositoryError):
+    """Raised when the storage backend is temporarily unable to serve requests."""
 
 
 class ValidationFailure(BrainBuddyError):
@@ -46,5 +51,6 @@ __all__ = [
     "ConflictError",
     "NotFoundError",
     "RepositoryError",
+    "StorageUnavailableError",
     "ValidationFailure",
 ]
