@@ -114,6 +114,22 @@ class TaskDocument(StorageBaseModel):
         return data
 
 
+class SmartAddCreatedDocument(StorageBaseModel):
+    """Classification records created by one Smart Add command."""
+
+    project_id: str | None = None
+    tag_ids: list[str] = Field(default_factory=list)
+
+
+class SmartAddTaskResultDocument(StorageBaseModel):
+    """Composite idempotency payload for a Smart Add task command."""
+
+    task: TaskDocument
+    project: ProjectDocument | None = None
+    tags: list[TagDocument] = Field(default_factory=list)
+    created: SmartAddCreatedDocument = Field(default_factory=SmartAddCreatedDocument)
+
+
 BrainDumpStatus = Literal[
     "recording",
     "paused",
