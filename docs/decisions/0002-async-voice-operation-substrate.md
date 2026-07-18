@@ -3,7 +3,8 @@
 Date: 2026-07-11
 Status: Proposed
 Decision owner: BrainBuddy
-Related: ADR-0001, Kanban task `t_8a1164be`
+Related: ADR-0001, Kanban tasks `t_8a1164be` and `t_58293688`
+Last amended: 2026-07-18 (multilingual reconciliation contract)
 
 ## Context
 
@@ -31,18 +32,29 @@ Both `voice_brain_dump` and `weekly_review_voice` use it. The operation owns orc
 progress, ordered model patches, confirmation batches, retry checkpoints, and operation
 audit metadata. Domain modules continue to own canonical records and transitions.
 
-Use two model stages:
+Use three replaceable logical provider roles, with task extraction and reconciliation as
+two methods of the same text role:
 
-1. A **fast streaming stage** transcribes stable speech segments and emits conservative,
-   provisional candidates. It optimizes for responsiveness and may only touch the
-   operation workspace.
-2. A **smart reconciliation stage** runs after stop, pause-settle, or an explicit review
-   checkpoint. It resolves targets and proposes merge/split/edit/route/review actions.
-   It still cannot write canonical domain records.
+1. **Fast STT** consumes bounded windows of the original recording and emits low-latency,
+   time-aligned transcript hypotheses. Browser speech recognition may supply a labelled
+   preview fallback, but is never the authoritative mixed-language transcript.
+2. **Accurate STT** runs after stop or an explicit reconciliation checkpoint and processes
+   the sealed original audio. It does not transcribe the fast text. It emits a new,
+   time-aligned transcript generation that explicitly supersedes the hypotheses it
+   corrects.
+3. **Text task reconciler** extracts conservative provisional tasks from stable fast
+   windows while recording, then reconciles the accurate transcript against current
+   proposal lineage, user edits, and field locks. Both methods emit append-only proposal
+   patches; neither mutates canonical tasks.
+
+The roles may be separate providers or two modes of one provider. Role selection is
+configuration and dependency-injection wiring, not a stored vendor enum or a branch in
+domain logic. A provider change must not change operation, transcript, proposal, or
+confirmation contracts.
 
 Only an explicit user confirmation command applies a frozen proposal batch through
-Capture, Organize, Review, Thinking, or Execution ports. Neither model stage may approve,
-delete, route, promote, or mutate an external task.
+Capture, Organize, Review, Thinking, or Execution ports. No provider role may approve,
+delete, route, promote, create a native task, or mutate an external task.
 
 ## Ownership and records
 
@@ -51,31 +63,65 @@ delete, route, promote, or mutate an external task.
 ```text
 AsyncOperation:
   id, owner_id, kind: voice_brain_dump | weekly_review_voice
-  status: recording | uploading | fast_processing | reconciling |
+  status: recording | paused | sealing | fast_processing |
+          accurate_transcribing | reconciling |
           awaiting_confirmation | committing | completed |
           retryable_error | terminal_error | cancelling | cancelled
   phase_revision, proposal_revision, last_sequence
   target_snapshot?: {kind, ids[], revisions_by_id}
-  upload?: {session_id, received_chunks[], expected_chunks?, sealed_at?}
+  audio: {session_id, media_ref, received_chunks[], expected_chunks?,
+          manifest_hash?, duration_ms?, sealed_at?, retention_until?}
   progress: {phase, completed_units?, total_units?, message_code, updated_at}
-  consent: {microphone, external_processing_allowed, recorded_at, provider?}
-  checkpoint: {last_stable_segment, fast_stage_complete, reconciler_input_hash?}
+  consent: {microphone, external_processing_allowed, recorded_at,
+            allowed_provider_categories[]}
+  checkpoint: {last_audio_chunk, last_fast_window_end_ms?,
+               accurate_generation_id?, reconciler_input_hash?,
+               resume_status?, recovery_count}
+  reconciliation_quality: none | provisional_only | accurate | conflicted
   active_proposal_batch_id?, committed_batch_id?
   last_error?: {code, stage, retryable, retry_after_ms?}
   created_at, updated_at, expires_at?, schema_version, revision
 
-TranscriptSegment (operation-private):
-  id, operation_id, sequence, start_ms, end_ms
-  text, stability: interim | stable, confidence?, provider, model?
-  supersedes_segment_id?, created_at
+ProviderRun (append-only attempt/result envelope):
+  id, operation_id, role: fast_stt | accurate_stt | text_reconciler
+  method: transcribe_window | transcribe_audio |
+          extract_provisional | reconcile
+  input_hash, provider, model?, template_version?
+  status: queued | leased | succeeded | retry_wait | failed | cancelled
+  attempt, max_attempts, deadline_at?, next_attempt_at?
+  lease_owner?, lease_expires_at?, output_ref?, error_code?
+  created_at, updated_at
+
+TranscriptSegmentVersion (operation-private, append-only):
+  id, operation_id, sequence, generation_id
+  lane: browser_preview | fast | accurate
+  start_ms, end_ms, text
+  stability: interim | stable | final
+  language_codes[], confidence?, provider_run_id
+  supersedes_segment_ids[], created_at
+
+Proposal (projection rebuilt from patches):
+  id, operation_id, ordinal
+  state: active | tombstoned | superseded
+  title, source_segment_ids[], source_audio_spans[]
+  predecessor_ids[], successor_ids[]
+  locked_fields[], open_conflict_ids[]
+  created_at, revision
 
 ProposalPatch (append-only):
   id, operation_id, sequence, base_proposal_revision
-  producer: fast | reconciler | user
-  operation: add | replace | remove | merge | split | reorder
-  target: {kind: provisional | capture_item | review_item, id}
-  payload, source_segment_ids[], confidence, reasons[]
-  created_at
+  producer: fast_extractor | reconciler | user
+  provider_run_id?, input_hash?, idempotency_key
+  operation: add | update | split | merge | remove | supersede | reorder
+  target_ids[], creates[], field_changes?
+  source_segment_ids[], source_audio_spans[]
+  confidence?, reasons[], created_at
+
+ProposalConflict (append-only resolution history):
+  id, operation_id, proposal_id, field
+  locked_value, suggested_value, source_patch_id
+  status: open | accepted | dismissed
+  resolved_by?, resolved_at?, created_at
 
 ProposalBatch:
   id, operation_id, based_on_proposal_revision
@@ -90,6 +136,21 @@ OperationCommand:
   request_hash, result_ref?, created_at
 ```
 
+`sequence` is append order, not transcript display order. The transcript projection sorts
+active segment versions by `(start_ms, end_ms, sequence)`. A segment version is active when
+no later accepted version names it in `supersedes_segment_ids`. Many-to-many correction is
+therefore representable: one accurate segment may supersede several fast hypotheses, or
+several accurate segments may supersede one run-on hypothesis. The old versions remain
+auditable. Every provider-produced segment has a non-negative audio span with
+`end_ms > start_ms`; browser preview adapters must provide at least the corresponding
+client capture-clock span and label its precision as preview-only.
+
+The authoritative reconciliation transcript is the active `accurate` generation from the
+latest successful accurate-STT run. Fast and browser-preview segments remain available as
+provenance and fallback material but cannot silently outrank it. The accurate provider is
+passed the sealed `media_ref`, audio metadata, language hints (for example `ru` and `en`),
+and optional product vocabulary. It is never passed fast text as the audio input.
+
 Raw audio remains Capture-private. Operation records contain an opaque upload/session
 reference, not bytes or filesystem paths. Transcript segments and proposals are working
 artifacts with a configurable short retention period; immutable source provenance and
@@ -100,6 +161,54 @@ revisions when it starts. It does not copy item text into its canonical record. 
 proposals may address only that snapshot unless the user explicitly adds an item to the
 review.
 
+## Provider ports and persisted runner
+
+The application workflow depends on narrow ports. Drafts returned by an adapter contain
+no domain objects and cannot be persisted directly:
+
+```text
+FastSttPort.transcribe_window(
+  AudioWindowRef, SttContext
+) -> TranscriptSegmentDraft[]
+
+AccurateSttPort.transcribe_audio(
+  SealedAudioRef, SttContext
+) -> TranscriptSegmentDraft[]
+
+TextReconcilerPort.extract_provisional(
+  StableTranscriptWindow, ProposalProjection
+) -> ProposalPatchDraft[]
+
+TextReconcilerPort.reconcile(
+  AccurateTranscriptProjection, ProposalProjection,
+  UserLocks, OpenConflicts
+) -> ProposalPatchDraft[]
+```
+
+`SttContext` carries permitted language hints, product vocabulary, audio format/duration,
+and a correlation ID. It never contains credentials. The workflow validates spans,
+references, patch preconditions, output size, and schema version before materializing
+provider drafts. The server allocates segment, proposal, patch, and conflict IDs; provider
+text cannot choose owner IDs or canonical task IDs.
+
+`ProviderRun` is the persisted work queue for the MVP. An in-process background runner
+scans due runs, claims one with a compare-and-set lease, invokes the configured port under
+a deadline, and atomically appends accepted output plus the next checkpoint. Correctness
+must not depend on an in-memory queue or an untracked `asyncio` task. On process start and
+periodically thereafter, expired leases are returned to `queued` or `retry_wait` and the
+operation projection is reconciled from persisted state.
+
+Each stage has configuration-backed timeout, maximum attempts (default three), exponential
+retry delay with a cap, and an operation-level recovery budget. A timeout or process death
+never increments a transcript/proposal revision unless output was durably accepted. The
+same `(operation_id, role, method, input_hash)` reuses the successful run and output;
+provider timeout-after-accept therefore cannot append duplicate segments or patches.
+Exhausting a retryable stage moves the operation to `retryable_error` with its prior
+checkpoint and a manual retry action. Exceeding the operation recovery budget moves it to
+`terminal_error` without canonical task creation. Adding a broker, Celery, a worker
+service, or distributed leases requires measured evidence under ADR-0001's extraction
+criteria.
+
 ## Interaction and state machine
 
 `idle` is a client state before an operation exists. The complete user-visible flow is:
@@ -107,8 +216,10 @@ review.
 ```text
 idle
   -> recording
-  -> uploading
+  <-> paused
+  -> sealing
   -> fast_processing
+  -> accurate_transcribing
   -> reconciling
   -> awaiting_confirmation
   -> committing
@@ -117,28 +228,40 @@ idle
 
 Recording and upload overlap in normal operation. `recording` remains the principal state
 while chunks upload and stable segments/candidates arrive; progress exposes concurrent
-subphases. After stop, the server seals the upload, drains fast processing, then starts
-reconciliation. The serial diagram above describes completion gates, not a prohibition on
-overlap.
+subphases. `paused` stops microphone capture but does not discard acknowledged chunks or
+proposals. After Stop, the server enters `sealing`, validates the complete audio manifest,
+drains fast processing, calls accurate STT on the sealed original audio, and reconciles its
+final transcript. The serial diagram describes completion gates, not a prohibition on
+recording, upload, fast STT, and provisional extraction overlapping.
 
 Allowed exceptional transitions:
 
 ```text
-recording|uploading|fast_processing|reconciling|awaiting_confirmation
+recording|paused|sealing|fast_processing|accurate_transcribing|
+reconciling|awaiting_confirmation
   -> cancelling -> cancelled
-recording|uploading|fast_processing|reconciling|committing
+recording|sealing|fast_processing|accurate_transcribing|reconciling|committing
   -> retryable_error
-recording|uploading|fast_processing|reconciling|committing
+recording|sealing|fast_processing|accurate_transcribing|reconciling|committing
   -> terminal_error
 retryable_error -> last durable checkpoint state
-awaiting_confirmation -> reconciling       (user requests rerun after edits)
+retryable_error -> awaiting_confirmation    (explicit provisional-only review)
+awaiting_confirmation -> accurate_transcribing (retry from original audio)
+awaiting_confirmation -> reconciling        (rerun after edits)
 awaiting_confirmation -> committing         (confirm frozen batch)
-committing -> awaiting_confirmation          (stale target or resolvable action failure)
+committing -> awaiting_confirmation         (stale target or resolvable action failure)
 ```
 
 Rules:
 
-- Stop recording seals audio; it is not cancellation.
+- Stop recording requests a seal; it is not cancellation and does not jump directly to
+  Review. The UI shows `Finishing upload`, `Improving transcript`, and `Reconciling tasks`
+  for `sealing`, `accurate_transcribing`, and `reconciling` respectively. Only
+  `awaiting_confirmation` renders the explicit Review state.
+- `awaiting_confirmation` exposes `reconciliation_quality`. A provisional-only fallback
+  is visibly labelled, requires the user to choose it after accurate-STT/reconciler
+  exhaustion, and still uses explicit confirmation. It is never called accurate or
+  silently selected.
 - Cancel is idempotent. Before commit it discards unconfirmed proposals and schedules raw
   media deletion. During commit it prevents not-yet-started actions but does not compensate
   already committed domain writes. The UI reports the partial result and offers undo where
@@ -167,8 +290,12 @@ terminal capture error with an explicit salvage option for already-uploaded audi
 Retries resume from the last durable checkpoint:
 
 - upload: request missing chunk numbers; never resend acknowledged chunks unnecessarily;
-- fast stage: resume after the last stable transcript segment;
-- reconciler: rerun from a sealed immutable input and current user patches;
+- fast STT/extraction: resume at the first uncovered audio window and reuse a successful
+  `(role, method, input_hash)` run;
+- accurate STT: rerun against the same sealed original-audio manifest and append a new
+  generation only after full output validation;
+- reconciler: rerun from the immutable accurate generation plus the current proposal
+  projection, locks, and conflicts;
 - commit: query each action's idempotency key and continue unresolved actions.
 
 The server publishes progress through an ordered event stream; polling the operation
@@ -189,17 +316,29 @@ Model output never replaces the proposal document wholesale. It emits `ProposalP
 records against `base_proposal_revision`:
 
 1. User patches have highest authority and are never silently overwritten.
-2. Reconciler patches supersede fast patches only when all referenced source segments are
-   represented and no user-edited field is changed.
-3. Fast patches may replace only their own provisional targets.
+2. Reconciler `update` keeps a proposal ID only when the same user intent remains. It may
+   correct wording and source spans but must not change a locked field.
+3. Fast-extractor patches may update only active provisional proposals created by the same
+   source window. They cannot revive tombstoned/superseded proposals.
 4. A stale-base patch is rebased if it touches disjoint targets; otherwise it is rejected
    and the producer reruns against the current projection.
 5. Display order defaults to earliest source-segment time, then patch sequence. A user
    reorder pins relative order. Merges occupy the earliest merged position; splits occupy
    the original position in source-span order.
-6. Merge creates a new provisional ID, records all predecessor IDs and source segment IDs,
-   and tombstones predecessors. Split does the analogous one-to-many mapping. UI selection
-   and edits follow this lineage where unambiguous; otherwise confirmation is required.
+6. `split` atomically creates two or more server-assigned IDs, links each child to the one
+   predecessor, and marks that predecessor `superseded`. `merge` atomically creates one
+   server-assigned ID linked to all predecessors and marks each predecessor `superseded`.
+   Structural successors inherit source spans and unlocked fields, not user locks by
+   guesswork. If a locked predecessor cannot map unambiguously, the patch creates a visible
+   conflict and leaves the active projection unchanged.
+7. `remove` marks a proposal `tombstoned`; `supersede` performs a one-to-one replacement
+   when semantic identity changed. Neither operation erases a proposal or patch. Active
+   API lists hide tombstoned/superseded proposals by default, while an audit/debug
+   projection can include them.
+8. New IDs are allocated while atomically materializing a successful provider run. A
+   repeated run with the same input hash returns the prior patch IDs and proposal-ID
+   mapping. A later run receives current opaque IDs and must express lineage explicitly;
+   array position is never identity.
 
 Patch payloads distinguish transcript wording from inferred fields. The UI visually marks
 provisional, reconciled, user-edited, low-confidence, conflicted, and removed proposals.
@@ -212,7 +351,15 @@ The user may edit provisional candidates while still speaking. Every edit is a `
 patch with the candidate revision and locks only fields actually changed. New speech can
 continue to add candidates. Reconciliation receives transcript segments, candidate
 lineage, and user patches; it may suggest a conflicting alternative but cannot overwrite
-a locked field.
+a locked field. Editing `title` locks only `title`; deleting locks lifecycle state; a user
+reorder locks relative order. Unedited source spans and confidence may still improve.
+
+When a reconciler draft touches a lock, the workflow appends `ProposalConflict` containing
+the current user value and suggested value but does not apply the field change. Review
+shows both values with `Keep mine` and `Use suggestion`. Resolving either choice is a user
+patch and closes the conflict without deleting it. Freeze/confirm is rejected while an
+active proposal has an open conflict. A user-deleted proposal never reappears because of a
+provider rerun; any suggested restoration is a conflict requiring an explicit user action.
 
 The operation may also propose edits to existing BrainBuddy `CaptureItem`s or current
 Weekly Review items. Such targets are resolved by opaque ID from the owner-scoped target
@@ -246,23 +393,27 @@ Confidence bands use calibrated scores, not provider labels copied without valid
 Thresholds are configuration-backed and changed only with evaluation evidence. Language,
 microphone, and model/version are dimensions in calibration metrics.
 
-## Two-stage responsibilities and latency budgets
+## Provider-role responsibilities and latency budgets
 
-The fast stage may:
+Fast STT may emit interim/stable, time-aligned transcript versions and language/confidence
+metadata. It does not create proposals. Accurate STT may emit only final, time-aligned
+transcript versions from sealed original audio. It does not consume proposal text or make
+task decisions.
 
-- emit interim/stable transcript segments;
-- detect clause boundaries;
-- create, append to, or conservatively split provisional captures;
-- classify broad `task | note | question | problem_candidate` intent;
-- mark ambiguity and collect source spans.
+The text role's provisional method may detect semantic task boundaries, create/update
+provisional proposals, mark ambiguity, and collect source spans. It must not resolve
+existing targets semantically, merge independent existing items, infer metadata or a
+destination, modify domain records, or emit confirmation-ready destructive actions. For
+`voice_brain_dump`, its proposal payload is deliberately limited to `title`, source spans,
+confidence, and reasons.
 
-It must not resolve existing targets semantically, merge independent captures, infer a
-destination, modify domain records, or emit confirmation-ready destructive actions.
-
-The reconciler may propose normalized wording, deduplication, merge/split, destination,
-clarification questions, existing-item edits, Weekly Review outcomes, and CRT candidates.
-It must preserve source lineage and user field locks, explain nontrivial changes, and emit
-patches rather than mutate canonical state.
+The text role's reconciliation method may propose normalized wording, deduplication,
+add/update/split/merge/remove/supersede operations, clarification, and—when invoked by the
+Weekly Review specialization—review outcomes and target actions. It must preserve source
+lineage and field locks, explain nontrivial changes, and emit patches rather than mutate
+canonical state. Semantic boundaries come from the utterance and context, not punctuation
+or conjunction tokens alone: `купить хлеб и молоко` is one task, while an unpunctuated
+run-on containing distinct intents can be several.
 
 Service-level objectives measured at p95 on supported conditions:
 
@@ -275,11 +426,13 @@ Service-level objectives measured at p95 on supported conditions:
 - commit acknowledgement: `<1 s` for local writes, while external route completion remains
   an independently visible asynchronous state.
 
-Budgets are product targets, not correctness timeouts. On fast-stage failure, continue
-recording/upload and run batch transcription after stop. On reconciler failure, retain
-user-edited and stable fast candidates, mark them unreconciled, and allow manual review or
-retry. If both fail but audio is intact, offer transcript-only retry. No fallback bypasses
-confirmation.
+Budgets are product targets, not correctness timeouts. On fast-STT failure, continue
+recording/upload and run accurate STT after stop. On accurate-STT failure, preserve the
+original audio and provisional tasks for bounded retry or explicitly chosen
+provisional-only review. On reconciler failure, retain the accurate transcript, user edits,
+and stable provisional candidates, mark them unreconciled, and allow retry or explicit
+manual review. If audio is intact, offer an accurate-transcript retry from that audio—not a
+retry over fast text. No fallback bypasses confirmation.
 
 ## Confirmation, commit, idempotency, and partial failure
 
@@ -292,13 +445,24 @@ Confirmation uses one command idempotency key and one deterministic child key pe
 `H(operation_id, batch_id, action_id)`. Repeating the same key and request hash returns the
 original result; reusing a key with another hash returns `409 IDEMPOTENCY_CONFLICT`.
 
-Commit order is:
+For the native `voice_brain_dump` vertical slice, every selected action is exactly
+`create_native_inbox_task {proposal_id, title}`. The Task application port sets
+`state=inbox`, `details=null`, `project_id=null`, `tag_ids=[]`, `due_date=null`, and
+`priority=none`; the operation never infers those fields from speech. Tombstoned or
+superseded proposals are excluded, and an open conflict prevents freeze/confirm. One
+action key can produce at most one task ID even after timeout, process restart, or a retry
+with a new outer HTTP request. No task row, Capture/Organize record, route, or external
+side effect exists before this confirmation command.
 
-1. persist new immutable Capture sources and mutable Organize items;
+Commit order is specialization-aware:
+
+1. for native Brain Dump additions, persist each Inbox task plus an immutable operation
+   action receipt/source link under the child key; for ADR-0001 capture flows, persist new
+   immutable Capture sources before mutable Organize items;
 2. apply confirmed edits/decisions to existing items using expected revisions;
 3. record Weekly Review outcomes referencing successful decisions;
 4. request routes or CRT promotions, which remain separately asynchronous;
-5. mark the batch and operation completed when all local actions are recorded.
+5. mark the batch and operation completed when all applicable local actions are recorded.
 
 Actions form a dependency DAG. Independent actions may commit concurrently, but audit and
 result presentation use batch order. A dependency failure skips dependants and does not
@@ -324,11 +488,12 @@ The UI displays the actual undo scope and expiry rather than promising atomic ro
 
 ## Provenance, consent, and privacy
 
-Every proposal and committed action links to source transcript segment IDs and, after
-commit, to ADR-0001 `AtomicCaptureSource` IDs. Model/provider/version, prompt/template
-version, confidence, operation ID, proposal lineage, user edits, confirmation actor/time,
-and idempotency keys are audit metadata. Raw text/audio never enters logs, metrics, or
-operation events.
+Every proposal and committed action links to source transcript segment IDs. ADR-0001
+capture flows additionally link `AtomicCaptureSource` IDs; native Inbox tasks link the
+operation action receipt and proposal ID through their source reference. Model/provider/
+version, prompt/template version, confidence, operation ID, proposal lineage, user edits,
+confirmation actor/time, and idempotency keys are audit metadata. Raw text/audio never
+enters logs, metrics, or operation events.
 
 Microphone permission and external-processing consent are separate. Recording may begin
 only after microphone permission; audio may leave the device only after current external
@@ -345,27 +510,110 @@ only IDs, stage timings, coarse confidence bands, counts, and error codes.
 
 ## API and transport contract
 
-Minimum endpoints (all owner-scoped, authenticated, correlation-ID-bearing):
+The first vertical slice keeps the current owner-scoped route family rather than adding a
+second generic controller. All endpoints are authenticated and correlation-ID-bearing:
 
 ```text
-POST /operations                         -> create kind/consent/target snapshot
-GET  /operations/{id}                    -> current projection
-GET  /operations/{id}/events?after=N     -> SSE or long-poll ordered events
-PUT   /operations/{id}/audio/{chunk_no}  -> idempotent chunk upload
-POST  /operations/{id}/seal              -> seal manifest / stop
-POST  /operations/{id}/commands          -> edit, reorder, resolve, cancel, retry
-POST  /operations/{id}/proposal-batches  -> freeze current revision
-POST  /operations/{id}/confirm           -> idempotent batch commit
-POST  /operations/{id}/undo              -> explicit inverse command
+POST /api/brain-dump-operations
+  -> create operation with consent and language hints
+GET  /api/brain-dump-operations/{id}
+  -> current owner-scoped projection
+GET  /api/brain-dump-operations/{id}/events?after=N
+  -> SSE or long-poll ordered events
+PUT  /api/brain-dump-operations/{id}/audio/{chunk_no}
+  -> idempotent chunk upload with hash/start_ms/end_ms
+POST /api/brain-dump-operations/{id}/seal
+  -> stop and seal expected chunk count/manifest hash
+POST /api/brain-dump-operations/{id}/commands/{pause|resume|cancel|retry|review-provisional}
+  -> persisted state command
+POST /api/brain-dump-operations/{id}/preview-segments
+  -> optional browser-preview hypotheses; never authoritative
+POST /api/brain-dump-operations/{id}/proposals/{proposal_id}/patches
+  -> user edit/remove/reorder with field locks
+POST /api/brain-dump-operations/{id}/conflicts/{conflict_id}/resolve
+  -> keep user value or accept suggestion
+POST /api/brain-dump-operations/{id}/proposal-batches
+  -> freeze active, conflict-free proposal revision
+POST /api/brain-dump-operations/{id}/confirm
+  -> idempotent native Inbox task creation
+POST /api/brain-dump-operations/{id}/undo
+  -> explicit inverse command
 ```
 
 WebSocket is optional; correctness must not depend on it. SSE plus REST upload/commands and
 polling fallback is sufficient. Commands require `Idempotency-Key` and
 `expected_operation_revision`. Chunk upload uses its manifest identity instead.
 
+The GET projection is a cacheable representation, not the append log. In addition to the
+operation fields above it returns:
+
+```text
+transcript: {
+  authoritative_generation_id?, quality,
+  active_segments[]: {id, lane, start_ms, end_ms, text,
+                      language_codes[], confidence?, supersedes_segment_ids[]}
+}
+proposals[]: {
+  id, ordinal, state=active, title, source_audio_spans[],
+  predecessor_ids[], locked_fields[], open_conflicts[], revision
+}
+history: {last_sequence, hidden_proposal_count, projection_revision}
+```
+
+The default projection omits provider payloads and hidden proposal bodies but includes the
+IDs needed to request an owner-scoped audit view. Every referenced segment, proposal,
+conflict, provider run, batch, and resulting task is checked against the operation owner;
+a wrong-owner operation or nested ID returns `404` without revealing existence. Event
+payloads carry IDs, enum states, counts, coarse confidence bands, and progress only—never
+audio, transcript/task text, language vocabulary, provider responses, local paths, emails,
+or credentials.
+
 ADR-0001 capture/review endpoints remain domain-level contracts. The operation workflow
 invokes those ports; clients should not orchestrate a voice flow by calling domain
 endpoints directly.
+
+## Current implementation migration and smallest vertical slice
+
+At this amendment, the shipped v1 Brain Dump stores one JSON/SQLite payload per operation,
+accepts browser Web Speech text through `/transcript`, mutates an interim segment in place,
+rebuilds proposals positionally from punctuation/number-list splitting, and moves `finish`
+directly to `awaiting_confirmation`. The browser fixes one locale from
+`navigator.language`. These are compatibility facts, not behavior to preserve for new
+operations.
+
+Use `schema_version=2` for newly recorded operations and migrate without a flag day:
+
+1. Completed/cancelled v1 operations remain readable and immutable. Never replay them or
+   create tasks during migration.
+2. An active v1 operation is imported once as `legacy_preview_only`: each old segment
+   becomes a `browser_preview` segment version with an unknown/coarse capture span; each
+   proposal keeps its existing ID through a synthetic `add` patch; `user_edited=true`
+   becomes a `title` lock; `deleted=true` becomes a user `remove` tombstone.
+3. Because v1 has no durable original audio, imported operations cannot claim accurate
+   reconciliation. They may be cancelled or explicitly reviewed/confirmed with a visible
+   `provisional_only` warning. Retry never fabricates an accurate transcript.
+4. During one frontend/backend compatibility window, `/transcript`, `/finish`, `/commit`,
+   and direct proposal PATCH remain aliases for preview-segment, seal, confirm, and user
+   patch commands only for v1-aware clients. Responses include new fields additively. Remove
+   aliases only after deployed clients and stored active operations no longer need them.
+5. The existing owner-partitioned SQLite payload can store v2 append arrays and projections
+   for the thin slice. Add normalized tables or another store only after measured payload,
+   contention, or recovery evidence; do not introduce a broker or microservice as a schema
+   migration.
+
+Implementation order is one thin end-to-end slice, not a provider platform program:
+
+1. Record/upload original audio with v2 operation, segment-version, patch, lease, polling,
+   retention, and v1 migration contracts.
+2. Wire one fast-STT adapter/fake plus provisional extraction so numbered proposals grow
+   while speaking; retain browser Web Speech only as labelled preview/fallback.
+3. On seal, run accurate STT from `media_ref`, then reconcile into stable lineage and
+   conflicts; expose processing and Review states.
+4. Freeze and explicitly confirm title-only native Inbox actions with deterministic child
+   keys; add the deterministic multilingual/e2e gates before enabling a paid provider.
+
+Weekly Review reuses these substrate types and ports later, but this slice adds no Weekly
+Review UX, CRT, routing, external tracker, inferred metadata, or autonomous execution.
 
 ## Weekly Review specialization
 
@@ -384,10 +632,11 @@ machine.
 
 ## Rationale
 
-The two-stage design separates responsiveness from authority. Fast output reassures the
-user that speech is being captured and makes correction possible while context is fresh;
-the reconciler gets a sealed, provenance-rich input suitable for global merge, split, and
-target proposals. Keeping both stages proposal-only means a latency optimization cannot
+The role-separated design separates responsiveness, transcription authority, and task
+interpretation. Fast output reassures the user that speech is being captured; accurate STT
+can correct mixed-language names from original audio; the reconciler gets a sealed,
+provenance-rich transcript suitable for global merge, split, and target proposals. Keeping
+every provider role operation-private means a latency or quality optimization cannot
 silently become a data-integrity or external-side-effect policy.
 
 A shared operation substrate is justified by lifecycle, not by the word “voice.” Brain
@@ -414,17 +663,24 @@ Positive:
 Costs and risks:
 
 - operation projections, patch lineage, and idempotent batch commits add complexity;
-- file-backed persistence must serialize per-operation append/write and may reach ADR-0001's
-  SQLite migration trigger sooner;
+- append-heavy operation payloads and leases add SQLite contention/payload-growth risk and
+  may eventually justify normalized operation tables;
 - confidence thresholds require an evaluation corpus and ongoing calibration;
 - partial commit and bounded undo must be communicated honestly in the UI.
 
 Future agents must preserve:
 
 - one operation substrate and state machine for brain dump and voice-led Weekly Review;
-- model output as proposals only, with explicit confirmation before canonical writes;
+- replaceable fast-STT, accurate-STT, and text-reconciler roles, with accurate STT reading
+  sealed original audio rather than fast text;
+- append-only, time-aligned transcript versions with explicit supersession, and stable
+  proposal identity with split/merge/tombstone lineage rather than positional arrays;
+- model output as proposals only, with explicit confirmation before canonical writes; native
+  Brain Dump confirmation creates title-only Inbox tasks and infers no metadata;
 - user-edit field locks, immutable source lineage, owner-scoped snapshot target resolution,
-  expected revisions, and deterministic action idempotency keys;
+  visible conflicts, expected revisions, and deterministic action idempotency keys;
+- persisted work leases, bounded retry/recovery, and restart reconciliation rather than
+  correctness depending on process memory;
 - ordered replayable events with a projection/polling fallback rather than transport-bound
   correctness;
 - separate microphone permission and external-processing consent, redacted telemetry, and
@@ -446,7 +702,20 @@ would make corrections, deduplication, privacy, and idempotency unsafe.
 ### One large smart-model call
 
 Rejected. It misses responsiveness targets and creates a single failure/retry boundary.
-The reconciler remains a bounded second stage over an immutable sealed input.
+Accurate STT and text reconciliation remain bounded roles over immutable sealed input.
+
+### Browser Web Speech as the transcript source
+
+Rejected as authoritative. A single browser locale is not reliable for RU/EN code-switching,
+browser hypotheses do not constitute durable original audio, and later text processing
+cannot recover words the browser never captured. It may remain a clearly labelled preview
+fallback while MediaRecorder audio is uploaded independently.
+
+### Encode one concrete AI vendor in operation records
+
+Rejected. Fast and accurate modes may initially share a vendor, but persisted contracts are
+role- and schema-based. Vendor enums in domain state would make replacement and deterministic
+fakes a migration rather than adapter wiring.
 
 ### Separate Weekly Review voice workflow
 
@@ -462,6 +731,21 @@ Extract transcription only when ADR-0001's measured scaling/failure criteria are
 
 The [acceptance scenarios](../../specs/002-async-voice-workflows/acceptance-tests.md) are
 normative for implementation.
+
+Outcome-to-contract mapping:
+
+| Required outcome | Architecture mechanism | Normative scenarios |
+|---|---|---|
+| Mixed RU/EN speech preserves `BrainBuddy` and `production smoke` and yields three tasks | multilingual hints, accurate original-audio generation, semantic text reconciliation | ML-01, ML-05 |
+| Fast `brain body` is corrected from original audio | accurate port receives sealed `media_ref`; cross-lane segment supersession | ML-02, PV-02 |
+| Unpunctuated run-on becomes several tasks | semantic boundary patches and stable split lineage, not regex position | ML-03, PA-07 |
+| `купить хлеб и молоко` remains one task | conjunction is evidence inside semantic context, never a split rule | ML-04 |
+| User edits/deletes survive accurate reconciliation | field locks, tombstones, visible conflicts, conflict-gated freeze | PA-03, PA-14, ML-06 |
+| Stop visibly reconciles before Review | `sealing -> accurate_transcribing -> reconciling -> awaiting_confirmation` | OP-02, UI-01 |
+| Save creates native Inbox tasks once and no metadata | frozen title-only actions plus deterministic child idempotency keys | CO-03, CO-11 |
+| Restart/failure is bounded and resumable | persisted provider runs, leases, checkpoints, retry budget, polling projection | OP-09, RC-01, RC-02 |
+| Existing data remains safe | schema-v2 import rules; terminal v1 is read-only; active v1 is visibly provisional-only | MG-01, MG-02 |
+
 No product code is introduced by this ADR.
 
 ## Related files

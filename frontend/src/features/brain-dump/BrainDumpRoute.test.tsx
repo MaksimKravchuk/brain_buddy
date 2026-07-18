@@ -66,6 +66,16 @@ function proposal(id: string, ordinal: number, title: string, extras: Record<str
   };
 }
 
+function conflict(field: string, currentValue: string, suggestedValue: string) {
+  return {
+    field,
+    current_value: currentValue,
+    suggested_value: suggestedValue,
+    producer: "reconciler",
+    source_segment_ids: ["segment_accurate"]
+  };
+}
+
 function TaskListProbe(): JSX.Element {
   const routeParams = useParams();
   return <div>{`Task list route: ${routeParams.state ?? "unknown"}`}</div>;
@@ -119,6 +129,27 @@ describe("BrainDumpRoute", () => {
       return recognition;
     }
     vi.stubGlobal("SpeechRecognition", FakeRecognition);
+    function FakeMediaRecorder() {
+      return {
+        state: "inactive",
+        ondataavailable: null,
+        onstop: null,
+        start(this: { state: string }) {
+          this.state = "recording";
+        },
+        pause(this: { state: string }) {
+          this.state = "paused";
+        },
+        resume(this: { state: string }) {
+          this.state = "recording";
+        },
+        stop(this: { state: string; onstop: ((event: Event) => void) | null }) {
+          this.state = "inactive";
+          this.onstop?.(new Event("stop"));
+        }
+      };
+    }
+    vi.stubGlobal("MediaRecorder", FakeMediaRecorder);
     micTrackStop = vi.fn();
     Object.defineProperty(window.navigator, "mediaDevices", {
       configurable: true,
@@ -155,7 +186,7 @@ describe("BrainDumpRoute", () => {
     renderBrainDump();
     await userEvent.click(screen.getByRole("button", { name: "Record" }));
     expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({ audio: true });
-    expect(micTrackStop).toHaveBeenCalledTimes(1);
+    expect(micTrackStop).not.toHaveBeenCalled();
     expect(recognition?.start).toHaveBeenCalledTimes(1);
 
     act(() => emitSpeech("Renew car insurance. Reply to Anna about the offsite."));
@@ -271,7 +302,7 @@ describe("BrainDumpRoute", () => {
     await waitFor(() => expect(screen.getByLabelText("current route")).toHaveTextContent("/brain-dump/brain_dump_1"));
   });
 
-  it("does not create a backend operation when browser speech recognition is unavailable", async () => {
+  it("records original audio when browser speech recognition is unavailable", async () => {
     vi.stubGlobal("SpeechRecognition", undefined);
     vi.stubGlobal("webkitSpeechRecognition", undefined);
     fetchMock.mockImplementation(() => jsonResponse(operation(), 201));
@@ -279,9 +310,78 @@ describe("BrainDumpRoute", () => {
     renderBrainDump();
     await userEvent.click(screen.getByRole("button", { name: "Record" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Browser speech recognition is unavailable");
+    await waitFor(() => expect(screen.getByLabelText("current route")).toHaveTextContent("/brain-dump/brain_dump_1"));
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({ audio: true });
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/brain-dump-operations"), expect.anything());
+  });
+
+  it("does not start an operation when original audio recording is unavailable", async () => {
+    vi.stubGlobal("MediaRecorder", undefined);
+    fetchMock.mockImplementation(() => jsonResponse(operation(), 201));
+
+    renderBrainDump();
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Original audio recording is unavailable");
     expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("uploads MediaRecorder chunks and seals their manifest before opening review", async () => {
+    let uploadedHash = "";
+    let sealPayload: { expected_chunks: number; manifest_hash: string } | null = null;
+    function ChunkingMediaRecorder() {
+      return {
+        state: "inactive",
+        ondataavailable: null as ((event: { data: Blob }) => void) | null,
+        onstop: null as ((event: Event) => void) | null,
+        start(this: { state: string }) {
+          this.state = "recording";
+        },
+        pause(this: { state: string }) {
+          this.state = "paused";
+        },
+        resume(this: { state: string }) {
+          this.state = "recording";
+        },
+        stop(this: { state: string; ondataavailable: ((event: { data: Blob }) => void) | null; onstop: ((event: Event) => void) | null }) {
+          this.state = "inactive";
+          this.ondataavailable?.({ data: { size: 0 } as Blob });
+          this.ondataavailable?.({
+            data: {
+              size: 14,
+              arrayBuffer: async () => new TextEncoder().encode("original audio").buffer
+            } as Blob
+          });
+          this.onstop?.(new Event("stop"));
+        }
+      };
+    }
+    vi.stubGlobal("MediaRecorder", ChunkingMediaRecorder);
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
+        return jsonResponse(operation(), 201);
+      }
+      if (url.endsWith("/brain_dump_1/audio/0")) {
+        uploadedHash = new Headers(init?.headers).get("X-Content-SHA256") ?? "";
+        return jsonResponse(operation({ revision: 2, audio_chunks: [{ chunk_number: 0, sha256: uploadedHash, size_bytes: 14 }] }));
+      }
+      if (url.endsWith("/brain_dump_1/seal")) {
+        sealPayload = JSON.parse(String(init?.body));
+        return jsonResponse(operation({ status: "awaiting_confirmation", revision: 3 }));
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump();
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+    await userEvent.click(screen.getByRole("button", { name: "Stop & review" }));
+
+    await waitFor(() => expect(uploadedHash).toMatch(/^[a-f0-9]{64}$/));
+    await waitFor(() => expect(sealPayload).not.toBeNull());
+    expect(sealPayload).toMatchObject({ expected_chunks: 1, manifest_hash: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    expect(await screen.findByRole("main", { name: "Review brain dump proposals" })).toBeInTheDocument();
   });
 
   it("does not create a backend operation when microphone permission fails", async () => {
@@ -582,13 +682,13 @@ describe("BrainDumpRoute", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Brain dump command failed.");
   });
 
-  it("keeps recognition alive when finishing fails", async () => {
+  it("surfaces a seal failure after stopping preview recognition", async () => {
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
         return jsonResponse(operation(), 201);
       }
-      if (url.endsWith("/brain_dump_1/finish")) {
+      if (url.endsWith("/brain_dump_1/seal")) {
         return Promise.reject(new Error("finish failed"));
       }
       if (url.endsWith("/brain_dump_1/transcript")) {
@@ -606,9 +706,7 @@ describe("BrainDumpRoute", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("finish failed");
     expect(screen.getByText("Recording")).toBeInTheDocument();
-    expect(activeRecognition?.stop).not.toHaveBeenCalled();
-    act(() => emitSpeech("Still recording after failed finish"));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/brain_dump_1/transcript"), expect.anything()));
+    expect(activeRecognition?.stop).toHaveBeenCalledTimes(1);
   });
 
   it("keeps unchanged and blank review edits local", async () => {
@@ -677,7 +775,7 @@ describe("BrainDumpRoute", () => {
       if (url.endsWith("/brain_dump_1/transcript")) {
         return jsonResponse(captured);
       }
-      if (url.endsWith("/brain_dump_1/finish")) {
+      if (url.endsWith("/brain_dump_1/seal")) {
         return jsonResponse(operation({ ...captured, status: "awaiting_confirmation", revision: 3 }));
       }
       if (url.endsWith("/brain_dump_1/commit")) {
@@ -708,7 +806,7 @@ describe("BrainDumpRoute", () => {
       if (url.endsWith("/brain_dump_1/transcript")) {
         return jsonResponse(captured);
       }
-      if (url.endsWith("/brain_dump_1/finish")) {
+      if (url.endsWith("/brain_dump_1/seal")) {
         return jsonResponse(operation({ ...captured, status: "awaiting_confirmation", revision: 3 }));
       }
       if (url.includes("/proposals/proposal_1")) {
@@ -940,5 +1038,303 @@ describe("BrainDumpRoute", () => {
     await userEvent.click(await screen.findByRole("button", { name: "View inbox" }));
 
     expect(await screen.findByText("Task list route: inbox")).toBeInTheDocument();
+  });
+
+  it("shows schema-v2 processing stages before editable review", async () => {
+    const improving = operation({
+      id: "brain_dump_processing",
+      status: "accurate_transcribing",
+      revision: 5,
+      status_history: ["sealing", "fast_processing", "accurate_transcribing"]
+    });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_processing") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(improving);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_processing");
+
+    expect(await screen.findByText("Improving transcript")).toBeInTheDocument();
+    expect(screen.getByText("accurate_transcribing")).toBeInTheDocument();
+    expect(screen.queryByRole("main", { name: "Review brain dump proposals" })).not.toBeInTheDocument();
+  });
+
+  it("shows title conflicts and blocks Save until the user resolves them", async () => {
+    const conflicted = operation({
+      id: "brain_dump_conflict",
+      status: "awaiting_confirmation",
+      revision: 6,
+      proposals: [
+        proposal("proposal_locked", 1, "Починить BrainBuddy MVP", {
+          status: "conflicted",
+          user_edited: true,
+          locked_fields: ["title"],
+          conflicts: [conflict("title", "Починить BrainBuddy MVP", "Починить BrainBuddy")]
+        })
+      ]
+    });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_conflict") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(conflicted);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_conflict/review");
+
+    expect(await screen.findByText("Conflict: title")).toBeInTheDocument();
+    expect(screen.getByText("Mine: Починить BrainBuddy MVP")).toBeInTheDocument();
+    expect(screen.getByText("Suggestion: Починить BrainBuddy")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save 1 to inbox" })).toBeDisabled();
+  });
+
+  it("does not replace a named recording route when starting after load fails", async () => {
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_ad_hoc") && (!init?.method || init.method === "GET")) {
+        return Promise.reject(new Error("load failed"));
+      }
+      if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
+        return jsonResponse(operation({ id: "brain_dump_ad_hoc" }), 201);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_ad_hoc");
+    expect(await screen.findByRole("alert")).toHaveTextContent("load failed");
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+
+    await waitFor(() => expect(screen.getByLabelText("current route")).toHaveTextContent("/brain-dump/brain_dump_ad_hoc"));
+  });
+
+  it("does not surface load errors after the route aborts an in-flight resume", async () => {
+    let rejectLoad: ((reason: unknown) => void) | undefined;
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_abort") && (!init?.method || init.method === "GET")) {
+        return new Promise<Response>((_resolve, reject) => {
+          rejectLoad = reject;
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    const view = renderBrainDump("/brain-dump/brain_dump_abort");
+    await waitFor(() => expect(rejectLoad).toBeDefined());
+    view.unmount();
+
+    await act(async () => {
+      rejectLoad?.(new Error("aborted load failed"));
+    });
+  });
+
+  it("uses a generic transcript upload message for non-error rejections", async () => {
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
+        return jsonResponse(operation(), 201);
+      }
+      if (url.endsWith("/brain_dump_1/transcript")) {
+        return Promise.reject("upload rejected");
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump();
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+    act(() => emitSpeech("Needs follow-up"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Transcript upload failed.");
+  });
+
+  it("shows the generic microphone denial when resume permission rejects with a non-error", async () => {
+    const paused = operation({ id: "brain_dump_existing", status: "paused", revision: 3 });
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValueOnce("denied");
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_existing") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(paused);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_existing");
+    await userEvent.click(await screen.findByRole("button", { name: "Resume" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Microphone permission was denied.");
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/resume"), expect.anything());
+  });
+
+  it("keeps provisional proposals visible while schema-v2 processing continues", async () => {
+    const improving = operation({
+      id: "brain_dump_processing",
+      status: "reconciling",
+      revision: 5,
+      proposals: [proposal("proposal_1", 1, "Renew car insurance")]
+    });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_processing") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(improving);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_processing");
+
+    expect(await screen.findByText("Reconciling tasks")).toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Draft task 1: Renew car insurance" })).toBeInTheDocument();
+    expect(screen.queryByText("We are keeping the task list first while the accurate transcript catches up.")).not.toBeInTheDocument();
+  });
+
+  it("renders conflict value fallbacks when the reconciler omits current or suggested text", async () => {
+    const conflicted = operation({
+      id: "brain_dump_conflict_fallbacks",
+      status: "awaiting_confirmation",
+      revision: 6,
+      proposals: [
+        proposal("proposal_locked", 1, "Resolve missing context", {
+          status: "conflicted",
+          conflicts: [
+            {
+              field: "title",
+              current_value: null,
+              suggested_value: null,
+              producer: "reconciler",
+              source_segment_ids: []
+            }
+          ]
+        })
+      ]
+    });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_conflict_fallbacks") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(conflicted);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_conflict_fallbacks/review");
+
+    expect(await screen.findByText("Mine: —")).toBeInTheDocument();
+    expect(screen.getByText("Suggestion: —")).toBeInTheDocument();
+  });
+
+  it("offers a retry action for a persisted retryable provider checkpoint", async () => {
+    const retryable = operation({
+      id: "brain_dump_retryable",
+      status: "retryable_error",
+      revision: 7,
+      proposals: [proposal("proposal_1", 1, "Renew car insurance")],
+      provider_runs: [
+        {
+          id: "provider_run_1",
+          role: "accurate_stt",
+          status: "retryable_error",
+          checkpoint: "sealed",
+          attempt: 1,
+          recovery_count: 0,
+          error: "provider temporarily unavailable"
+        }
+      ]
+    });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_retryable") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(retryable);
+      }
+      if (url.endsWith("/brain_dump_retryable/retry") && init?.method === "POST") {
+        return jsonResponse(operation({ ...retryable, status: "awaiting_confirmation", revision: 8 }));
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_retryable/review");
+    expect(await screen.findByText("Accurate transcription paused")).toBeInTheDocument();
+    expect(screen.getByText("provider temporarily unavailable")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Retry accurate transcription" }));
+
+    expect(await screen.findByText("Review 1 task")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/brain_dump_retryable/retry"),
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("shows terminal recovery choices instead of a recording surface", async () => {
+    const terminal = operation({
+      id: "brain_dump_terminal",
+      status: "terminal_error",
+      revision: 4,
+      proposals: [
+        proposal("proposal_child", 1, "Call the dentist", {
+          predecessor_ids: ["proposal_old_1", "proposal_old_2"],
+          successor_ids: ["proposal_next"]
+        }),
+        proposal("proposal_split", 2, "Buy oat milk", {
+          predecessor_ids: ["proposal_old_3"]
+        })
+      ],
+      provider_runs: [
+        {
+          id: "provider_run_terminal",
+          role: "accurate_stt",
+          status: "terminal_error",
+          checkpoint: "sealed",
+          attempt: 3,
+          recovery_count: 2,
+          error: "audio could not be transcribed"
+        }
+      ]
+    });
+    fetchMock.mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_terminal")) {
+        return jsonResponse(terminal);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_terminal/review");
+
+    expect(await screen.findByText("Accurate transcription failed")).toBeInTheDocument();
+    expect(screen.getByText("audio could not be transcribed")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete recording" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Review provisional tasks" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "Review provisional tasks" }));
+    expect(screen.getByText("Merged from 2 tasks")).toBeInTheDocument();
+    expect(screen.getByText("Split from an earlier task")).toBeInTheDocument();
+  });
+
+  it("shows fallback terminal copy and preserves the recovery surface when deletion fails", async () => {
+    const terminal = operation({
+      id: "brain_dump_terminal_fallback",
+      status: "terminal_error",
+      revision: 5,
+      proposals: [],
+      provider_runs: undefined
+    });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_terminal_fallback") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(terminal);
+      }
+      if (url.endsWith("/brain_dump_terminal_fallback/cancel") && init?.method === "POST") {
+        return Promise.reject(new Error("delete failed"));
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_terminal_fallback/review");
+
+    expect(await screen.findByText("The recording could not be processed accurately.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Review provisional tasks" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Delete recording" }));
+    expect(await screen.findByText("delete failed")).toBeInTheDocument();
   });
 });

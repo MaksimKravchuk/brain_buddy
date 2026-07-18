@@ -31,6 +31,11 @@ class ExpectedRevisionRequest(StrictBaseModel):
     expected_revision: int = Field(ge=1)
 
 
+class BrainDumpSealRequest(ExpectedRevisionRequest):
+    expected_chunks: int = Field(ge=0)
+    manifest_hash: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+
+
 class TagCreateRequest(StrictBaseModel):
     name: str = Field(min_length=1, max_length=500)
 
@@ -225,6 +230,12 @@ class TaskListResponse(StrictBaseModel):
 BrainDumpStatus = Literal[
     "recording",
     "paused",
+    "sealing",
+    "fast_processing",
+    "accurate_transcribing",
+    "reconciling",
+    "retryable_error",
+    "terminal_error",
     "awaiting_confirmation",
     "committing",
     "completed",
@@ -235,6 +246,8 @@ BrainDumpProposalStatus = Literal[
     "wording_changing",
     "ready_to_review",
     "user_edited",
+    "reconciled",
+    "conflicted",
 ]
 
 
@@ -255,7 +268,9 @@ class BrainDumpTranscriptSegmentRequest(StrictBaseModel):
 
 
 class BrainDumpTranscriptAppendRequest(StrictBaseModel):
-    segments: list[BrainDumpTranscriptSegmentRequest] = Field(min_length=1, max_length=50)
+    segments: list[BrainDumpTranscriptSegmentRequest] = Field(
+        min_length=1, max_length=50
+    )
 
 
 class BrainDumpProposalUpdateRequest(StrictBaseModel):
@@ -276,7 +291,21 @@ class BrainDumpTranscriptSegmentResponse(StrictBaseModel):
     sequence: int
     text: str
     stability: Literal["interim", "stable"]
+    start_ms: int = 0
+    end_ms: int = 1
+    provider_role: Literal["browser_preview", "fast", "accurate"] = "browser_preview"
+    provider: str | None = None
+    model: str | None = None
+    supersedes_segment_ids: list[str] = Field(default_factory=list)
     created_at: datetime
+
+
+class BrainDumpProposalConflictResponse(StrictBaseModel):
+    field: str
+    current_value: str | None = None
+    suggested_value: str | None = None
+    producer: Literal["fast", "accurate", "reconciler", "user"]
+    source_segment_ids: list[str] = Field(default_factory=list)
 
 
 class BrainDumpProposalResponse(StrictBaseModel):
@@ -285,9 +314,45 @@ class BrainDumpProposalResponse(StrictBaseModel):
     title: str
     status: BrainDumpProposalStatus
     source_segment_ids: list[str] = Field(default_factory=list)
+    predecessor_ids: list[str] = Field(default_factory=list)
+    successor_ids: list[str] = Field(default_factory=list)
+    locked_fields: list[str] = Field(default_factory=list)
+    conflicts: list[BrainDumpProposalConflictResponse] = Field(default_factory=list)
     deleted: bool
     user_edited: bool
     revision: int
+
+
+class BrainDumpAudioChunkResponse(StrictBaseModel):
+    chunk_number: int
+    sha256: str
+    size_bytes: int
+
+
+class BrainDumpProviderRunResponse(StrictBaseModel):
+    id: str
+    role: Literal["accurate_stt", "reconciler"]
+    status: Literal[
+        "pending", "running", "succeeded", "retryable_error", "terminal_error"
+    ]
+    checkpoint: Literal["sealed", "accurate_transcribed", "reconciled"]
+    attempt: int
+    recovery_count: int
+    error: str | None = None
+
+
+class BrainDumpProposalPatchResponse(StrictBaseModel):
+    id: str
+    sequence: int
+    operation: Literal["add", "update", "split", "merge", "remove", "supersede"]
+    proposal_id: str
+    producer: Literal["fast", "accurate", "reconciler", "user"]
+    title: str | None = None
+    source_segment_ids: list[str] = Field(default_factory=list)
+    predecessor_ids: list[str] = Field(default_factory=list)
+    successor_ids: list[str] = Field(default_factory=list)
+    locked_fields: list[str] = Field(default_factory=list)
+    base_revision: int | None = None
 
 
 class BrainDumpOperationResponse(StrictBaseModel):
@@ -298,6 +363,12 @@ class BrainDumpOperationResponse(StrictBaseModel):
     consent: BrainDumpConsentResponse
     segments: list[BrainDumpTranscriptSegmentResponse] = Field(default_factory=list)
     proposals: list[BrainDumpProposalResponse] = Field(default_factory=list)
+    media_ref: str | None = None
+    audio_chunks: list[BrainDumpAudioChunkResponse] = Field(default_factory=list)
+    sealed_manifest_hash: str | None = None
+    provider_runs: list[BrainDumpProviderRunResponse] = Field(default_factory=list)
+    proposal_patches: list[BrainDumpProposalPatchResponse] = Field(default_factory=list)
+    status_history: list[BrainDumpStatus] = Field(default_factory=list)
     committed_task_ids: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime

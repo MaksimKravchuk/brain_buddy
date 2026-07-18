@@ -69,6 +69,11 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
         "Brain dump API",
         "Voice brain dump operation lifecycle",
     ),
+    "voice_brain_dump_reconciliation": (
+        EPIC_TASKS,
+        "Voice brain dump reconciliation",
+        "Schema v2 dual-STT contracts",
+    ),
     # Authentication & access
     "auth_service": (EPIC_AUTH, "Auth service", "Credential and session logic"),
     "auth_routes": (EPIC_AUTH, "Auth API", "Auth HTTP endpoints"),
