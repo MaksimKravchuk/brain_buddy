@@ -25,9 +25,9 @@ class ProviderResult:
 
     confidence: int
     verdict: str
-    observations: list[dict]
+    observations: list[dict[str, object]]
     suggested_questions: list[str]
-    raw: dict
+    raw: dict[str, object]
 
 
 class ValidationProvider(Protocol):

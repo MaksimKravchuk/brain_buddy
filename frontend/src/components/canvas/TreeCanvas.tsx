@@ -328,7 +328,8 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       resolveOptimisticChange,
       rollbackOptimisticChange,
       updateNodeMutation,
-      upsertNode
+      upsertNode,
+      nodes
     ]
   );
 
@@ -696,9 +697,9 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   }, [handleCreateNode, isLoading, nodes.length, reactFlowInstance]);
 
   const buildCombo = useCallback((event: KeyboardEvent) => {
-    const target = event.target as HTMLElement | null;
-    if (target) {
-      const tag = target.tagName?.toLowerCase();
+    const target = event.target;
+    if (target instanceof HTMLElement) {
+      const tag = target.tagName.toLowerCase();
       if (
         tag === "input" ||
         tag === "textarea" ||
@@ -791,7 +792,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   const hasContent = nodes.length > 0 || relations.length > 0;
 
   return (
-    <div ref={canvasRef} className="relative h-full w-full">
+    <div ref={canvasRef} className="relative h-full w-full" data-testid="tree-canvas">
       <div aria-live="assertive" className="sr-only" data-testid="relation-error-live">
         {linkError?.message ?? ""}
       </div>

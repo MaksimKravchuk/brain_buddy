@@ -42,6 +42,10 @@ export function VersionPanel(): JSX.Element {
     () => [...versions].sort((a, b) => (a.createdAt > b.createdAt ? -1 : 1)),
     [versions]
   );
+  const { shouldRender: shouldRenderConfirm, isAnimatingOut: isConfirmAnimatingOut } = useDelayedUnmount(
+    confirmState !== null,
+    200
+  );
 
   if (!isReady || !metadata) {
     return (
@@ -141,7 +145,7 @@ export function VersionPanel(): JSX.Element {
 
     restoreVersionMutation.mutate(version.id, {
       onSuccess: (tree) => {
-        setTree(tree);
+        setTree(tree, { restoreSafe: true });
         pushToast({
           id: toastId,
           title: "Version restored",
@@ -206,11 +210,6 @@ export function VersionPanel(): JSX.Element {
 
   const isDeleting = deleteVersionMutation.isPending && confirmState?.action === "delete";
   const isRestoring = restoreVersionMutation.isPending && confirmState?.action === "restore";
-  const { shouldRender: shouldRenderConfirm, isAnimatingOut: isConfirmAnimatingOut } = useDelayedUnmount(
-    confirmState !== null,
-    200
-  );
-
   return (
     <>
       <div className="space-y-4 animate-fade-in">

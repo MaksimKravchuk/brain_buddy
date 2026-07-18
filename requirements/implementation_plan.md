@@ -115,6 +115,7 @@
   - Introduce lightweight auth middleware placeholder (API key header) to ease future access control.
   - Expand documentation: README v1.0, API usage guide, troubleshooting tips, contribution guide, architecture diagrams.
   - Conduct exploratory testing session; capture bug backlog and address high-severity issues.
+  - Use `docs/e2e-acceptance-charter.md` as the executable browser E2E acceptance design for auth, tree, versioning, ownership, mobile, accessibility, fixtures, artifacts, and anti-flake rules.
 - **Deliverables**: performance report with tuning notes, updated docs, polished UI/UX per design review.
 - **Acceptance Criteria**: interaction latency targets met, no P0/P1 bugs open, docs reviewed by designer/PM.
 - **Dependencies**: all prior phases feature-complete.

@@ -25,6 +25,12 @@ venv/
 *.log
 *.log.*
 coverage/
+allure-results/
+playwright-report/
+test-results/
+frontend/allure-results/
+frontend/playwright-report/
+frontend/test-results/
 
 # Editors and misc
 .idea/

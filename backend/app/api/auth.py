@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
+from app.api.contracts import error_responses
 from app.api.dependencies import get_auth_service, get_config_dep, get_current_user
 from app.core.config import AppConfig
 from app.core.rate_limit import login_rate_limiter
@@ -46,7 +47,12 @@ def _clear_session_cookie(response: Response, config: AppConfig) -> None:
     )
 
 
-@router.post("/signup", response_model=MeResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/signup",
+    response_model=MeResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses=error_responses(400, 409, 422),
+)
 def signup(
     payload: SignupRequest,
     response: Response,
@@ -73,7 +79,9 @@ def signup(
     return MeResponse(id=user.id, email=user.email)
 
 
-@router.post("/login", response_model=MeResponse)
+@router.post(
+    "/login", response_model=MeResponse, responses=error_responses(401, 422, 429)
+)
 def login(
     payload: LoginRequest,
     request: Request,
@@ -112,6 +120,6 @@ def logout(
     return response
 
 
-@router.get("/me", response_model=MeResponse)
+@router.get("/me", response_model=MeResponse, responses=error_responses(401))
 def me(current_user: User = Depends(get_current_user)) -> MeResponse:
     return MeResponse(id=current_user.id, email=current_user.email)
