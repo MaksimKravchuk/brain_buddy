@@ -337,6 +337,101 @@ def test_schema_v2_upload_seal_runs_accurate_reconciliation_from_original_audio(
     assert body["segments"][0]["end_ms"] > 0
 
 
+def test_schema_v2_audio_upload_rejects_missing_bad_hash_and_inactive_state(
+    api_client,
+) -> None:
+    operation = _start_operation(api_client, key="start-schema-v2-upload-guards")
+    audio = b"buy milk"
+
+    missing_header = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+    )
+    assert missing_header.status_code == 400
+    assert "X-Content-SHA256" in missing_header.text
+
+    bad_hash = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(b"other").hexdigest()},
+    )
+    assert bad_hash.status_code == 409
+    assert "uploaded audio hash" in bad_hash.text
+
+    cancelled = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/cancel",
+        headers={"Idempotency-Key": "cancel-before-upload-retry"},
+        json={"expected_revision": operation["revision"]},
+    )
+    assert cancelled.status_code == 200, cancelled.text
+
+    inactive = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+    assert inactive.status_code == 400
+    assert "recording or paused" in inactive.text
+
+
+def test_schema_v2_seal_rejects_missing_chunks_and_replays_success(api_client) -> None:
+    operation = _start_operation(api_client, key="start-schema-v2-seal-guards")
+    audio = b"buy milk"
+    upload = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+    assert upload.status_code == 200, upload.text
+
+    incomplete = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers={"Idempotency-Key": "seal-with-missing-chunk"},
+        json={"expected_revision": upload.json()["revision"], "expected_chunks": 2},
+    )
+    assert incomplete.status_code == 400
+    assert "missing_chunks" in incomplete.text
+
+    headers = {"Idempotency-Key": "seal-complete-once"}
+    payload = {"expected_revision": upload.json()["revision"], "expected_chunks": 1}
+    sealed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers=headers,
+        json=payload,
+    )
+    replay = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers=headers,
+        json=payload,
+    )
+
+    assert sealed.status_code == replay.status_code == 200
+    assert replay.json()["id"] == sealed.json()["id"]
+    assert replay.json()["revision"] == sealed.json()["revision"]
+    assert replay.json()["status"] == "awaiting_confirmation"
+
+    reseal_inactive = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers={"Idempotency-Key": "seal-after-confirmation-started"},
+        json={"expected_revision": sealed.json()["revision"], "expected_chunks": 1},
+    )
+    assert reseal_inactive.status_code == 400
+    assert "Only an active brain dump can be sealed" in reseal_inactive.text
+
+
+def test_schema_v2_unsupported_operation_command_is_rejected(api_client) -> None:
+    operation = _start_operation(api_client, key="start-schema-v2-command-guard")
+
+    unsupported = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/archive",
+        headers={"Idempotency-Key": "archive-is-not-a-brain-dump-command"},
+        json={"expected_revision": operation["revision"]},
+    )
+
+    assert unsupported.status_code == 400
+    assert "Unsupported brain dump operation command" in unsupported.text
+
+
 def test_schema_v2_user_title_lock_blocks_accurate_overwrite_with_visible_conflict(api_client) -> None:
     operation = _start_operation(api_client, key="start-schema-v2-lock")
     fast = api_client.post(
