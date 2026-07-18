@@ -467,6 +467,105 @@ def test_task_list_filters_counts_and_stable_cursor(api_client) -> None:
     }
 
 
+def test_projectless_inbox_projection_paginates_searches_and_tracks_assignment(
+    api_client,
+) -> None:
+    project = api_client.post(
+        "/api/projects",
+        headers={"Idempotency-Key": "projectless-inbox-project"},
+        json={"name": "Launch Inbox"},
+    ).json()
+    first = _create_task(
+        api_client,
+        "Shared alpha projectless",
+        key="projectless-inbox-first",
+        state="inbox",
+    )
+    _create_task(
+        api_client,
+        "Shared assigned alpha",
+        key="projectless-inbox-assigned",
+        state="inbox",
+        project_id=project["id"],
+    )
+    second = _create_task(
+        api_client,
+        "Shared beta projectless",
+        key="projectless-inbox-second",
+        state="inbox",
+    )
+
+    first_page = api_client.get(
+        "/api/tasks",
+        params={
+            "state": "inbox",
+            "unassigned_project": True,
+            "q": " shared ",
+            "limit": 1,
+        },
+    )
+    assert first_page.status_code == 200, first_page.text
+    first_body = first_page.json()
+    assert first_body["counts_by_state"]["inbox"] == 2
+    assert [item["project_id"] for item in first_body["items"]] == [None]
+    assert first_body["has_more"] is True
+
+    second_page = api_client.get(
+        "/api/tasks",
+        params={
+            "state": "inbox",
+            "unassigned_project": True,
+            "q": " shared ",
+            "limit": 1,
+            "cursor": first_body["next_cursor"],
+        },
+    )
+    assert second_page.status_code == 200, second_page.text
+    projected_ids = {first_body["items"][0]["id"], second_page.json()["items"][0]["id"]}
+    assert projected_ids == {first["id"], second["id"]}
+    assert second_page.json()["has_more"] is False
+    assert (
+        api_client.get(
+            "/api/tasks",
+            params={"state": "inbox", "cursor": first_body["next_cursor"]},
+        ).status_code
+        == 400
+    )
+
+    assigned = api_client.patch(
+        f"/api/tasks/{first['id']}",
+        headers={"Idempotency-Key": "projectless-inbox-assign"},
+        json={"project_id": project["id"], "expected_revision": first["revision"]},
+    )
+    assert assigned.status_code == 200, assigned.text
+    assert assigned.json()["state"] == "inbox"
+    assert assigned.json()["project_id"] == project["id"]
+    assert assigned.json()["waiting_for"] is None
+    assert assigned.json()["completed_at"] is None
+
+    after_assignment = api_client.get(
+        "/api/tasks", params={"state": "inbox", "unassigned_project": True}
+    )
+    assert after_assignment.status_code == 200, after_assignment.text
+    assert [item["id"] for item in after_assignment.json()["items"]] == [second["id"]]
+    assert after_assignment.json()["counts_by_state"]["inbox"] == 1
+    project_view = api_client.get("/api/tasks", params={"project_id": project["id"]})
+    assert project_view.status_code == 200, project_view.text
+    assert first["id"] in {item["id"] for item in project_view.json()["items"]}
+
+    archived = api_client.post(
+        f"/api/projects/{project['id']}/archive",
+        headers={"Idempotency-Key": "projectless-inbox-archive"},
+        json={"expected_revision": project["revision"]},
+    )
+    assert archived.status_code == 200, archived.text
+    after_archive = api_client.get(
+        "/api/tasks", params={"state": "inbox", "unassigned_project": True}
+    )
+    assert after_archive.status_code == 200, after_archive.text
+    assert first["id"] in {item["id"] for item in after_archive.json()["items"]}
+
+
 def test_task_endpoints_require_authentication(anonymous_api_client) -> None:
     for path in ("/api/tasks", "/api/projects", "/api/tags"):
         response = anonymous_api_client.get(path)
