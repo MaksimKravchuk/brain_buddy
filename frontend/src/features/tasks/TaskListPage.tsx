@@ -55,10 +55,12 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const sort = parseTaskSort(searchParams.get("sort"));
   const searchQuery = searchParams.get("q") ?? "";
   const today = localDateIso();
+  const isInboxProductView = state === "inbox" && !projectId && !tagId && !dateView;
   const taskQuery = useTaskList({
     state,
     projectId,
     tagId,
+    unassignedProject: isInboxProductView,
     includeCompleted: showCompleted,
     includeCancelled: showCompleted,
     q: searchQuery,
@@ -67,6 +69,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     dueOn: dateView === "today" ? today : undefined,
     dueAfter: dateView === "upcoming" ? today : undefined
   });
+  const inboxBadgeQuery = useTaskList({ state: "inbox", unassignedProject: true, limit: 1 });
   const detailQuery = useTaskDetail(taskId);
   const projectsQuery = useProjects();
   const tagsQuery = useTags();
@@ -244,6 +247,12 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     onError: (caught: unknown) => setMutationError(getErrorMessage(caught))
   });
 
+  const canonicalInboxCount = inboxBadgeQuery.data?.counts_by_state.inbox ?? (isInboxProductView ? counts.inbox : 0);
+  const shellCounts = useMemo(
+    () => ({ ...counts, inbox: canonicalInboxCount }),
+    [canonicalInboxCount, counts]
+  );
+
   const title = useMemo(() => {
     if (projectId) {
       return projects.find((project) => project.id === projectId)?.name ?? "Project";
@@ -265,7 +274,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
 
   return (
     <AppShell
-      counts={counts}
+      counts={shellCounts}
       projects={projects}
       tags={tags}
       activeState={state}
