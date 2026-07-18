@@ -88,7 +88,7 @@
   display: flex; flex-direction: column; gap: 20px;
 }
 .task-content { flex: 1; overflow-y: auto; }
-.task-content-inner { max-width: 696px; margin: 0 auto; padding: 32px 32px 64px; }
+.task-content-inner { max-width: 760px; margin: 0 auto; padding: 32px 32px 64px; }
 
 /* --- Sidebar --- */
 .sidebar-nav { display: flex; flex-direction: column; gap: 2px; }
@@ -140,7 +140,7 @@
 /* --- Main pane header --- */
 .pane-header { display: flex; align-items: flex-end; gap: 12px; margin-bottom: 20px; }
 .pane-header h1 { font-size: 20px; line-height: 1.3; letter-spacing: -0.015em; font-weight: 600; color: var(--bb-fg-1); margin: 0; }
-.pane-header p { font-size: 12px; color: var(--bb-fg-5); margin: 4px 0 0; }
+.pane-header p { font-size: 12px; line-height: normal; color: var(--bb-fg-5); margin: 4px 0 0; }
 .pane-actions { margin-left: auto; display: flex; gap: 8px; }
 
 /* --- Task list --- */
