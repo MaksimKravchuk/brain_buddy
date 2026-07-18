@@ -30,6 +30,14 @@ export function AppRoutes(): JSX.Element {
         }
       />
       <Route
+        path="/tasks/:state/:taskId"
+        element={
+          <ProtectedRoute>
+            <TaskListPage mode="state" />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/projects/:projectId"
         element={
           <ProtectedRoute>
@@ -38,7 +46,23 @@ export function AppRoutes(): JSX.Element {
         }
       />
       <Route
+        path="/projects/:projectId/:taskId"
+        element={
+          <ProtectedRoute>
+            <TaskListPage mode="project" />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/tags/:tagId"
+        element={
+          <ProtectedRoute>
+            <TaskListPage mode="tag" />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/tags/:tagId/:taskId"
         element={
           <ProtectedRoute>
             <TaskListPage mode="tag" />

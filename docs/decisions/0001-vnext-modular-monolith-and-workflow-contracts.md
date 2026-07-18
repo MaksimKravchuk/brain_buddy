@@ -1,10 +1,12 @@
 # ADR-0001: Build BrainBuddy vNext as a workflow-oriented modular monolith
 
 Date: 2026-07-11
-Status: Proposed
+Amended: 2026-07-13
+Status: Accepted
 Decision owner: BrainBuddy
 Related: `backend/app/container.py`, `backend/app/schemas/domain.py`, `docs/auth.md`,
-ADR-0002, Kanban task `t_be41d6d7`
+ADR-0002, `docs/vnext-cloud-design-build-contract.md`, Kanban tasks `t_be41d6d7`
+and `t_d9b91644`
 
 ## Context
 
@@ -12,32 +14,37 @@ BrainBuddy already has a deployed FastAPI/React application, invite-gated accoun
 owner-scoped file persistence, a CRT canvas, AI-provider adapters, and automated tests.
 The vNext MVP changes the primary product loop to:
 
-> voice brain dump -> transcription -> atomic captures -> clarify/approve -> route
-> to one task tracker or a BrainBuddy problem candidate -> smart Weekly Review ->
-> optionally promote complex/repeating problems into CRT -> return evidence/results.
+> voice brain dump -> transcription -> atomic captures -> clarify/approve -> create
+> canonical BrainBuddy tasks or problem candidates -> organize with native GTD views ->
+> smart Weekly Review -> optionally Think in CRT -> return evidence/results.
 
 The product is being dogfooded by one primary user. The important unknown is whether the
 capture/review loop creates value, not whether each noun can be deployed independently.
 We therefore need boundaries that make the workflow safe to change without paying the
 operational and consistency cost of microservices.
 
-MVP non-goals are a proprietary task manager, calendar/reminder/recurrence engine,
-plugin marketplace, general autonomous browser/email agent, multiple task-manager
-connectors, and premature microservices. Bounded autonomous execution is explicitly
-deferred until capture and review are trusted.
+The first tranche includes a deliberately small, BrainBuddy-owned GTD core: Tasks,
+Projects, and Contexts. It does not include reminders, recurrence, calendar sync,
+priorities, arbitrary sorting, collaboration, sharing, delegated ownership, federated
+search, a plugin marketplace, or bidirectional external-task synchronization. Subtasks,
+comments, full Weekly Review, autonomous execution, and external task adapters are later
+tranches. Premature microservices remain a non-goal.
 
 ## Decision
 
-Continue in this repository as one deployable modular monolith. Add six bounded modules
-behind application-level ports: Capture, Organize, Review, Thinking/CRT, Execution, and
-Identity. Each module owns its domain records and transitions. HTTP handlers and a thin
+Continue in this repository as one deployable modular monolith. Add seven bounded modules
+behind application-level ports: Capture, Organize, Tasks, Review, Thinking/CRT, Execution,
+and Identity. Each module owns its domain records and transitions. HTTP handlers and a thin
 application workflow layer may coordinate modules; modules must not reach into another
 module's repository or mutate another module's records.
 
 Use the existing FastAPI process, Pydantic contracts, dependency container, React client,
-session authentication, and filesystem repositories for the MVP. Keep external provider
-and task-tracker details behind adapters. Domain events are versioned in-process
-contracts and audit facts, not a reason to add a broker.
+session authentication, and filesystem repositories for the MVP. BrainBuddy Tasks are the
+canonical GTD source of truth. Keep external provider, execution-runner, and optional
+task-tracker details behind Execution adapters; no adapter may become a second canonical
+task store or introduce dual writes without a later decision defining conflict ownership.
+Domain events are versioned in-process contracts and audit facts, not a reason to add a
+broker.
 
 This record is the vNext contract. Existing `requirements/` documents remain historical;
 where they conflict with live authentication or this workflow, `docs/auth.md`, live
@@ -49,30 +56,40 @@ schemas, and this ADR take precedence.
 |---|---|---|---|
 | **Identity** | `User`, `Session`, invite and owner resolution | authenticate; resolve current actor; assert owner | capture content, connector behavior, review policy |
 | **Capture** | raw-input metadata, media reference, transcription attempts/results, immutable atomic-capture source and provenance | submit input; transcribe/retry; split; get session/source captures | approval, mutable user text, destination choice, task creation, CRT mutation |
-| **Organize** | mutable capture item, clarification/approval decisions, text revisions, destination intent, route record | edit; clarify; approve; defer; delete; request route | source transcript/provenance, connector credentials/API calls, review sessions, CRT graph |
-| **Review** | weekly review session, immutable per-item outcomes, completion summary | start/resume review; decide item; complete review | canonical capture text, task-tracker state, CRT graph |
+| **Organize** | mutable capture item, clarification/approval decisions, text revisions, destination intent, route/link record | edit; clarify; approve; defer; delete; request destination | source transcript/provenance, canonical task state, execution runs/results, review sessions, CRT graph |
+| **Tasks** | native `Task`, `Project`, and `Context` records and their transitions | create/query/edit/move/complete/reopen tasks; create/query projects and contexts | capture source content, operation proposals, execution runs/results, review sessions, CRT graph |
+| **Review** | weekly review session, immutable per-item outcomes, completion summary | start/resume review; decide item; complete review | canonical capture or task state, execution state, CRT graph |
 | **Thinking/CRT** | problem candidates, promotion records, existing trees/nodes/relations, source links | assess candidate; promote/dismiss; query source/results | transcription, external dispatch, general task management |
-| **Execution** | one configured task-tracker adapter, dispatch attempts, evidence/results returned by manual or adapter input | dispatch/retry; record result; query result links | deciding what to execute, arbitrary tools, autonomous agents |
+| **Execution** | deferred execution runs, adapter attempts, and evidence/results linked to tasks or thinking contexts | request/track/cancel a run when enabled; record/query results | canonical Task/Project/Context fields or completion, capture decisions, CRT graph |
 
 Cross-module dependency rules:
 
 1. Identity is a shared policy dependency and imports no feature module.
 2. Capture publishes immutable source facts. Organize creates one mutable `CaptureItem`
    for each `AtomicCaptureSource` ID but never edits the source artifact.
-3. Review reads projections and submits Organize or Thinking commands. It records the
-   resulting IDs in its outcome; it does not duplicate their state machines.
-4. Organize requests dispatch through the `TaskTrackerPort` or candidate creation through
-   the `ThinkingPort`; it never imports concrete repositories/adapters.
-5. Thinking may attach `EvidenceResult` IDs but Execution owns their content and status.
-6. All cross-module writes run through an application service. A repository is private to
+3. After explicit confirmation, the application workflow asks Organize to approve the
+   capture and asks Tasks through `TaskPort` to create the canonical task. Organize stores
+   the returned task ID in its route/link record; it never writes the Tasks repository.
+4. Review reads projections and submits Organize, Tasks, or Thinking commands. It records
+   the resulting IDs in its outcome; it does not duplicate their state machines.
+5. Tasks may retain immutable `source_capture_ids` but may not read or copy Capture source
+   text. Task completion is a Tasks transition; capture completion remains Organize-owned.
+6. Execution may reference a `task_id` and return `EvidenceResult` IDs, but execution status
+   is a composed projection and never a Task enum. A successful run does not silently
+   complete its Task; completion requires an explicit Tasks command.
+7. Thinking may attach `EvidenceResult` IDs but Execution owns their content and status.
+   A Project may link existing CRT tree IDs for the `Think` affordance, but a Project is not
+   a tree and no task package may duplicate the CRT graph model.
+8. All cross-module writes run through an application service. A repository is private to
    its owning module.
-7. The first implementation may keep ports as Python protocols and invoke them
+9. The first implementation may keep ports as Python protocols and invoke them
    synchronously. Network clients are only concrete adapters in Execution or Capture.
 
-Migration is incremental. Implement Capture and Organize first under
-`backend/app/modules/`, because they establish immutable provenance and the item lifecycle
-used by every later workflow. Add Execution and Review next, then move Thinking/CRT only
-when its existing services can be wrapped without duplicating the graph model. During the
+Migration is incremental. Implement Tasks for the manual Inbox-to-completion slice, then
+Capture and Organize under `backend/app/modules/` for immutable provenance and the
+confirmation-to-task lifecycle. Add Review next and Execution only when a truthful run or
+result slice is authorized; move Thinking/CRT only when its existing services can be
+wrapped without duplicating the graph model. During the
 migration, `container.py` may wire new module ports to adapters around the current flat
 services/repositories. New modules may call those adapters; flat code must not import new
 module repositories, and each migrated record gains exactly one canonical owner. Identity
@@ -85,6 +102,7 @@ backend/app/modules/
   identity/{domain,service,repository}.py
   capture/{domain,service,repository,transcription.py}
   organize/{domain,service,repository}.py
+  tasks/{domain,service,repository}.py
   review/{domain,service,repository}.py
   thinking/{domain,service,repository,crt_adapter.py}
   execution/{domain,service,repository,task_tracker.py}
@@ -129,6 +147,7 @@ Low confidence is not a technical failure: continue to `ready`, mark generated c
 ```text
 AtomicCaptureSource (Capture-owned, immutable after creation):
   id, owner_id, capture_session_id, ordinal
+  source_operation_id?, source_segment_ids[]
   kind: task | note | question | problem_candidate
   source_span?: {start_char, end_char}
   source_text
@@ -140,8 +159,9 @@ CaptureItem (Organize-owned, one-to-one with source):
   current_text
   review_state: proposed | needs_clarification | approved | deferred | completed | deleted
   clarification?: {question, answer?, resolved_at?}
-  destination_intent: none | external_task_tracker | brainbuddy_problem
+  destination_intent: none | native_task | external_task_tracker | brainbuddy_problem
   route_id?: RouteRecord.id
+  task_id?: Task.id
   crt_candidate_id?: ProblemCandidate.id
   created_at, updated_at, schema_version, revision
 ```
@@ -160,6 +180,60 @@ work and provenance while removing it from the open review set; `deleted` lets W
 Review count avoided/deleted low-value work. Content in either state may be hard-deleted
 later by a separate privacy operation.
 
+For a voice Brain Dump, `source_operation_id` and `source_segment_ids` preserve the
+ADR-0002 proposal-to-transcript lineage without copying operation working text. A
+confirmed addition has the inspectable chain `TranscriptSegment -> AtomicCaptureSource ->
+CaptureItem -> Task`. The Task has its own ID and stores the source ID in
+`source_capture_ids`; neither the Task nor the capture item embeds the other's mutable
+record. This permits later many-captures-to-one-task or one-capture-to-many-tasks changes
+without redefining either aggregate.
+
+### Task, Project, and Context
+
+```text
+Task (Tasks-owned):
+  id, owner_id
+  title, details?
+  state: inbox | next | waiting | someday | completed | cancelled
+  project_id?, context_ids[]
+  due_date?
+  waiting_for?, waiting_since?
+  order_key
+  source_capture_ids[]
+  created_at, updated_at, completed_at?, cancelled_at?
+  schema_version, revision
+
+Project (Tasks-owned):
+  id, owner_id
+  name, color?
+  state: active | completed | archived
+  linked_tree_ids[]
+  created_at, updated_at, schema_version, revision
+
+Context (Tasks-owned):
+  id, owner_id
+  name
+  state: active | archived
+  created_at, updated_at, schema_version, revision
+```
+
+First-tranche invariants:
+
+- `completed` and `cancelled` reopen only through an explicit command naming the new open
+  state; the service never guesses it.
+- `waiting` requires `waiting_for` or `waiting_since`. Leaving `waiting` clears those fields
+  from the active projection while the audit decision retains history.
+- Every project, context, source capture, and linked tree must be same-owner. New task
+  assignments accept only active projects and contexts.
+- Project completion/archive never completes, cancels, or deletes member tasks.
+- `due_date` is an ISO local calendar date with no time, timezone, or reminder promise.
+- `order_key` defines manual order within a state; ties resolve by `created_at`, then `id`.
+- Subtasks, comments, reminders, recurrence, priorities, collaboration, and hard deletion
+  are not first-tranche Task fields. They require later contracts rather than nullable
+  placeholders in the initial schema.
+- Execution and thinking badges are composed from Task plus owner-scoped Execution and CRT
+  summaries. They are not persisted Task states.
+
 ### OrganizeDecision and RouteRecord
 
 ```text
@@ -171,17 +245,23 @@ OrganizeDecision:
 
 RouteRecord:
   id, owner_id, atomic_capture_id
-  destination: external_task_tracker | brainbuddy_problem
+  destination: native_task | external_task_tracker | brainbuddy_problem
   status: pending | dispatching | succeeded | failed | cancelled
   external_ref?: opaque adapter ID
+  task_id?: Task.id
   candidate_id?: ProblemCandidate.id
   attempt_count, last_error?: {code, retryable}
   requested_at, completed_at?, revision
 ```
 
-Only one successful route is allowed per capture in the MVP. A repeated request with the
-same idempotency key returns the original record. Changing destination after success is a
-future explicit “reroute” operation, not an update.
+Only one successful destination link is allowed per capture in the MVP. A repeated request
+with the same idempotency key returns the original record. Changing destination after
+success is a future explicit “reroute” operation, not an update.
+
+`native_task` is fulfilled by the application workflow through `TaskPort`, not by
+Execution. `external_task_tracker` remains a reserved, deferred destination for a later
+one-way adapter decision; it is not implemented, synchronized, or shown as canonical in
+the first tranche.
 
 ### WeeklyReview and WeeklyReviewOutcome
 
@@ -245,9 +325,15 @@ examples that describe the opposite direction must not be copied. Source provena
 stored in the promotion record and in the node's existing `extra` metadata as IDs, not as
 invented graph relations.
 
-### DispatchAttempt and EvidenceResult
+### ExecutionRun, DispatchAttempt, and EvidenceResult
 
 ```text
+ExecutionRun (Execution-owned, deferred beyond the first tranche):
+  id, owner_id, task_id?
+  status: queued | running | blocked | succeeded | failed | cancelled
+  requested_action?, result_ids[]
+  created_at, updated_at, completed_at?, revision
+
 DispatchAttempt:
   id, owner_id, route_id, adapter: configured_task_tracker
   status: started | succeeded | failed
@@ -259,14 +345,15 @@ EvidenceResult:
   kind: evidence | result
   status: recorded | superseded
   title, summary?, uri?
-  atomic_capture_ids[]
+  atomic_capture_ids[], task_ids[]
   route_id?, weekly_review_id?, tree_id?, node_ids[]
   observed_at, recorded_at, actor_id
 ```
 
-Evidence/result return means a result is visible from both its originating capture and
-its review/CRT context through IDs. The MVP accepts manual recording and data returned by
-the single task-tracker adapter. It does not poll arbitrary systems or run agents.
+Evidence/result return means a result is visible from its originating capture, canonical
+Task when linked, and review/CRT context through IDs. The first tranche accepts manual
+recording only. External adapters and autonomous runs are deferred; when enabled, their
+run state and result content remain Execution-owned.
 
 ## State transitions and invariants
 
@@ -306,7 +393,21 @@ approved -> completed (successful route or recorded result)
 - Automatic classification may set `needs_clarification`; it may not approve, delete,
   route, or promote.
 
-### Routing
+### Tasks
+
+```text
+inbox|next|waiting|someday -> inbox|next|waiting|someday
+inbox|next|waiting|someday -> completed | cancelled
+completed|cancelled --explicit reopen destination--> inbox|next|waiting|someday
+```
+
+Task create, edit, move, complete, cancel, and reopen commands check `owner_id`, expected
+revision where applicable, and idempotency key. A Task write produced by Brain Dump is
+successful only after its source references pass owner checks and the Task is durable.
+Reconciliation then marks the Organize route/link and capture completed; a retry uses the
+same deterministic child key and cannot create a second Task.
+
+### Destination linking and external routing
 
 ```text
 pending -> dispatching -> succeeded
@@ -315,9 +416,10 @@ failed --retry if retryable--> dispatching
 pending|failed -> cancelled
 ```
 
-The application persists `pending` before calling an adapter. A crash may leave a stale
-`dispatching` record; retry/reconciliation must first query by idempotency key where the
-adapter supports it. External IDs are opaque strings.
+For `native_task`, the application persists `pending`, invokes `TaskPort`, and stores the
+returned Task ID before marking the link `succeeded`. For a future external adapter, a
+crash may leave a stale `dispatching` record; retry/reconciliation must first query by
+idempotency key where the adapter supports it. External IDs are opaque strings.
 
 ### CRT promotion
 
@@ -336,10 +438,10 @@ source links are persisted. Failed promotion leaves the candidate
 ### Evidence/result return
 
 `EvidenceResult` is append-only except `recorded -> superseded`. At least one originating
-`atomic_capture_id` is required. Every linked route, review, tree, and node must have the
-same owner. The application service performs those cross-module checks through each
-module's owner-scoped query port; it must not access another module's repository directly.
-Removing a destination record must not erase returned evidence.
+`atomic_capture_id` or `task_id` is required. Every linked task, route, review, tree, and
+node must have the same owner. The application service performs those cross-module checks
+through each module's owner-scoped query port; it must not access another module's
+repository directly. Removing a destination record must not erase returned evidence.
 
 ## Minimal HTTP API
 
@@ -356,6 +458,13 @@ on stale state.
 | `POST /captures/{id}/decisions` | edit/clarify/approve/defer/delete | `200 CaptureItemDetail` + decision ID |
 | `POST /captures/{id}/routes` | request one destination | `202 RouteRecord` |
 | `GET /captures/{id}/results` | linked evidence/results | `200 EvidenceResult[]` |
+| `GET /tasks` | list/filter canonical tasks and open counts | `200 TaskPage` |
+| `POST /tasks` | idempotently create a manual or source-linked task | `201 Task` |
+| `GET /tasks/{id}` | task detail | `200 Task` |
+| `PATCH /tasks/{id}` | edit title/details/metadata/order | `200 Task` |
+| `POST /tasks/{id}/transitions` | move/complete/cancel/reopen | `200 Task` |
+| `GET /projects` / `POST /projects` | list or create projects | `200 Project[]` / `201 Project` |
+| `GET /contexts` / `POST /contexts` | list or create contexts | `200 Context[]` / `201 Context` |
 | `POST /weekly-reviews` | start or resume review for period | `200 WeeklyReviewDetail` |
 | `POST /weekly-reviews/{id}/items/{capture_id}/outcomes` | record item outcome and invoke relevant command | `200 WeeklyReviewOutcome` |
 | `POST /weekly-reviews/{id}/complete` | validate coverage and complete | `200 WeeklyReviewSummary` |
@@ -363,8 +472,31 @@ on stale state.
 | `POST /results` | manually record linked evidence/result | `201 EvidenceResult` |
 
 Do not add generic CRUD endpoints for every record. State-changing commands preserve
-invariants and audit intent. `GET` list endpoints may be added for the capture inbox,
-review history, and candidates when their UI needs them.
+invariants and audit intent. Project/context edit and archive commands, task subtasks and
+comments, capture inbox, review history, and candidate lists are added only with their
+later UI slices.
+
+The first frontend integration uses these normative list semantics:
+
+- `GET /tasks` accepts optional `state`, `project_id`, `context_id`,
+  `unassigned_project`, `include_completed` (default `false`), `cursor`, and `limit`
+  (default `50`, maximum `200`). `project_id` and `unassigned_project=true` are mutually
+  exclusive. A wrong-owner filter ID returns `404`; invalid combinations return `400`.
+- Without `state`, the query returns all four open states. Completed tasks appear only with
+  `state=completed` or `include_completed=true`; cancelled tasks require
+  `state=cancelled`. `context_id` means membership in that context.
+- `TaskPage` contains `items`, `next_cursor`, `has_more`, and `counts_by_state`. Counts apply
+  the same project/context filters but ignore the `state` filter, so unfiltered navigation
+  gets global open counts and project/context views get internally consistent counts.
+  Counts exclude completed/cancelled tasks.
+- The only first-tranche sort is `order_key ASC, created_at ASC, id ASC`. The opaque cursor
+  binds the last tuple and normalized filters; reuse with different filters is `400`.
+- Desktop group-by-project must fetch all pages for its selected state and show aggregate
+  loading/error before rendering groups. It must never present a partial group as complete.
+  If full retrieval becomes unacceptable, a server grouped projection with per-group
+  counts/cursors is required before release.
+- `GET /projects` and `GET /contexts` return active same-owner records ordered by normalized
+  name then ID. Archived records are excluded unless explicitly requested in a later API.
 
 Voice upload limits (MIME allowlist, byte size, and duration) are configuration-backed
 and rejected before provider invocation. ADR-0002 supersedes the synchronous interaction
@@ -411,10 +543,12 @@ Initial events:
 - `capture.atomic_captures_created` `{capture_session_id, atomic_capture_ids}`
 - `organize.capture_decided` `{atomic_capture_id, action, from_state, to_state}`
 - `organize.route_requested` `{route_id, atomic_capture_id, destination}`
+- `tasks.task_created` `{task_id, state, source_capture_ids}`
+- `tasks.task_transitioned` `{task_id, action, from_state, to_state}`
 - `execution.route_succeeded|failed` `{route_id, external_ref?, error_code?}`
 - `review.completed` `{weekly_review_id, counts}`
 - `thinking.crt_promoted|promotion_failed` `{promotion_id, candidate_id, tree_id?}`
-- `execution.result_recorded` `{result_id, atomic_capture_ids, source, kind}`
+- `execution.result_recorded` `{result_id, atomic_capture_ids, task_ids, source, kind}`
 
 For MVP these are typed Python/Pydantic values dispatched in-process and appended to a
 redacted audit stream. Handlers must be idempotent by event ID. A failed handler records
@@ -437,9 +571,9 @@ separate event store.
   completion/cancellation. A retry-safe cleanup job enforces both configuration-backed
   periods, and users may request immediate audio deletion after processing. Transcript and
   atomic-source provenance remain after audio deletion.
-- Task-tracker credentials are server-side references owned by the adapter and are never
-  returned through APIs or events. The adapter uses one allowlisted integration, not an
-  arbitrary URL/tool mechanism.
+- Future task-tracker/runner credentials are server-side references owned by Execution and
+  are never returned through APIs or events. A later adapter uses an allowlisted
+  integration, not an arbitrary URL/tool mechanism, and cannot replace canonical Tasks.
 - Logs and analytics contain IDs, enums, sizes, confidence bands, durations, and error
   codes—not transcript/capture/evidence text, audio, emails, cookies, or credentials.
 
@@ -461,9 +595,10 @@ be pseudonymized before export to third-party analytics. Required product counte
 - capture sessions started/ready/failed and stage latency;
 - atomic captures proposed, approved, deferred, deleted, and clarification rate;
 - atomic captures completed, including completion source (`route` or `result`);
+- tasks created/moved/completed/reopened by state, plus list-query latency/page size;
 - Weekly Reviews started/completed and completion duration;
 - `avoidance_reason` counts for deleted low-value items;
-- routes requested/succeeded/failed by the single destination;
+- destination links requested/succeeded/failed by destination;
 - candidates proposed and CRT promotions succeeded/failed;
 - evidence/results returned and linked to an originating capture.
 
@@ -478,6 +613,9 @@ write helpers. A practical MVP layout is:
 ```text
 captures/{owner_id}/{capture_session_id}.json
 organize/{owner_id}/{atomic_capture_id}.json
+tasks/{owner_id}/{task_id}.json
+projects/{owner_id}/{project_id}.json
+contexts/{owner_id}/{context_id}.json
 reviews/{owner_id}/{weekly_review_id}.json
 candidates/{owner_id}/{candidate_id}.json
 promotions/{owner_id}/{promotion_id}.json
@@ -529,8 +667,10 @@ pressure—not speculative reuse—demands otherwise.
   path without network calls, duplicated authorization, or distributed transactions now.
 - The existing auth, CRT, provider, deployment, and test infrastructure are valuable and
   should be extended rather than rewritten.
-- Separate review, route, and promotion records preserve product decision history while
-  avoiding a proprietary task model.
+- A minimal native GTD model makes CloudDesign's lists and completion semantics truthful
+  without turning BrainBuddy into a calendar, collaboration suite, or connector platform.
+- Separate capture, task, review, execution, and promotion records preserve provenance and
+  product decision history without conflating canonical work with run/result projections.
 - State machines, idempotency, and evidence links address reliability at the domain
   boundary; microservices would not remove those requirements.
 
@@ -554,11 +694,19 @@ Rejected. Current lag/data-loss issues must be reproduced and stabilized separat
 they do not justify discarding working auth, canvas, deployment, and tests. vNext should
 add a new product flow around reusable infrastructure.
 
-### Adopt a full task-management domain
+### Keep an external tracker canonical
 
-Rejected for MVP. BrainBuddy records capture decisions, review outcomes, route attempts,
-and evidence links. Scheduling, recurrence, priorities, reminders, and task completion
-semantics remain in the single external tracker.
+Rejected for the vNext product shell. CloudDesign requires native list membership,
+completion, project/context assignment, and detail semantics. Treating those views as a
+cache of an external tracker would either make the UI non-authoritative or require
+bidirectional synchronization before the core product loop is validated.
+
+### Adopt a broad task-management suite
+
+Rejected for the first tranche. Native Tasks include only the fields and transitions
+needed for Inbox, Next, Waiting, Someday, Projects, Contexts, completion, and truthful
+Brain Dump creation. Reminders, recurrence, calendar sync, collaboration, priorities,
+subtasks, and comments stay out until a later slice defines their value and invariants.
 
 ### Broker-backed event-driven architecture now
 
@@ -572,8 +720,7 @@ Positive consequences:
 
 - The MVP can ship incrementally in the current repository and deployment.
 - Source-to-result provenance and user decisions are explicit and testable.
-- Provider and tracker choices remain adapters rather than domain enums spread across the
-  codebase.
+- Native task state has one owner; provider, runner, and tracker choices remain adapters.
 - Likely future extraction points are visible without pre-building distributed systems.
 
 Tradeoffs and risks:
@@ -583,27 +730,35 @@ Tradeoffs and risks:
 - In-process transcription can still tie up web capacity; instrumentation must show when
   to add a worker.
 - Soft-deleted content needs a later privacy-retention policy and hard-delete operation.
+- File-backed list scans/grouping have a practical scale limit and may trigger the existing
+  SQLite migration criterion earlier.
 
 Future agents must preserve:
 
 - One deployable modular monolith until explicit extraction criteria are evidenced.
 - Repository ownership and port-only cross-module writes.
 - Immutable source provenance, owner checks, expected revisions, and idempotent commands.
-- Human approval before routing, deletion by automation, or CRT promotion.
+- BrainBuddy Tasks as the sole canonical GTD store; external adapters and Execution may
+  link records but may not own task fields or completion.
+- Explicit confirmation before Brain Dump additions, deletion by automation, external
+  dispatch, or CRT promotion.
 - Terminal `completed` history and the exclusion of completed/successfully routed items
   from later Weekly Reviews.
-- One configured task-tracker adapter and no autonomous Execution in the MVP.
-- Evidence/result linkage back to at least one originating atomic capture.
+- No autonomous Execution or external task synchronization in the first tranche.
+- Evidence/result linkage back to at least one originating atomic capture or canonical Task.
+- Projects/Contexts are GTD records, not CRT graphs; `Think` links existing Thinking-owned
+  tree IDs and never duplicates tree/node/relation state.
 
 ## Verification and tests
 
 Implementation is conformant when automated tests demonstrate:
 
-1. every allowed and forbidden CaptureSession, CaptureItem, Route, Review, and Promotion state
-   transition, including stale revisions and idempotent retries;
+1. every allowed and forbidden CaptureSession, CaptureItem, Task, Route, Review, and
+   Promotion transition, including stale revisions and idempotent retries;
 2. empty transcripts fail, low-confidence transcripts require clarification, and retries
    preserve prior attempts;
-3. cross-owner IDs return `404` for reads and commands, including result links;
+3. cross-owner IDs return `404` for reads, filters, assignments, and commands, including
+   task source/result/tree links;
 4. a capture cannot route before approval or route successfully twice;
 5. successful routes and recorded results advance approved captures to `completed`;
    completed captures and approved captures with an already-succeeded route are excluded
@@ -612,15 +767,21 @@ Implementation is conformant when automated tests demonstrate:
    completion and delete/avoidance counts;
 7. CRT promotion preserves source IDs, uses live relation semantics, and remains retryable
    after partial failure;
-8. evidence/results are visible from originating capture and linked CRT/review context;
+8. evidence/results are visible from originating capture or Task and linked CRT/review
+   context without storing run/result status as Task state;
 9. emitted events contain IDs/enums but no transcript, capture, evidence, or credential
    content;
 10. correlation and causation IDs follow the command/event derivation rules, unsupported
     event versions fail explicitly, and product metrics do not double count retries;
 11. transcription timeout reaches the retryable `failed` state and raw-audio cleanup
     honors the configured retention period;
-12. no module imports another module's repository (enforce with an architecture/import
-    test once module packages exist).
+12. task list filters, stable ordering, counts, cursor boundaries/filter binding, and
+    complete-before-grouping behavior match the HTTP contract;
+13. duplicate or timeout-after-accept Brain Dump confirmation produces exactly one
+    `AtomicCaptureSource`, `CaptureItem`, Task, and successful source-to-task link;
+14. no module imports another module's repository (enforce with an architecture/import
+    test once module packages exist), and Tasks imports neither Execution nor tree
+    repositories.
 
 ## Related files
 
@@ -629,5 +790,6 @@ Implementation is conformant when automated tests demonstrate:
 - `backend/app/api/dependencies.py`
 - `backend/app/api/routes.py`
 - `docs/auth.md`
+- `docs/vnext-cloud-design-build-contract.md`
 - `requirements/backend_architecture.md` (historical)
 - `requirements/api_contracts.md` (historical)

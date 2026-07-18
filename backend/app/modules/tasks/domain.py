@@ -10,6 +10,7 @@ from pydantic import Field, model_validator
 from app.schemas.common import StorageBaseModel
 
 TaskState = Literal["inbox", "next", "waiting", "someday", "completed", "cancelled"]
+TaskPriority = Literal["none", "low", "medium", "high"]
 # "archived" is a legacy-only stored value; the SQLite migration rewrites it to
 # "deleted" on load and no code path writes it. Kept for deserialization only.
 TagState = Literal["active", "archived", "deleted"]
@@ -93,6 +94,7 @@ class TaskDocument(StorageBaseModel):
     project_id: str | None = None
     tag_ids: list[str] = Field(default_factory=list)
     due_date: date | None = None
+    priority: TaskPriority = "none"
     waiting_for: str | None = Field(default=None, max_length=500)
     waiting_since: datetime | None = None
     order_key: int = Field(ge=0)

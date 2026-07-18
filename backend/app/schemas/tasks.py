@@ -11,6 +11,8 @@ from .common import StrictBaseModel
 
 TaskState = Literal["inbox", "next", "waiting", "someday", "completed", "cancelled"]
 OpenTaskState = Literal["inbox", "next", "waiting", "someday"]
+TaskPriority = Literal["none", "low", "medium", "high"]
+TaskSort = Literal["manual", "due", "priority", "title"]
 
 
 class ProjectCreateRequest(StrictBaseModel):
@@ -63,6 +65,7 @@ class TaskCreateRequest(StrictBaseModel):
     project_id: str | None = None
     tag_ids: list[str] = Field(default_factory=list)
     due_date: date | None = None
+    priority: TaskPriority = "none"
     waiting_for: str | None = Field(default=None, max_length=500)
     source_capture_ids: list[str] = Field(default_factory=list)
 
@@ -81,6 +84,8 @@ class TaskUpdateRequest(StrictBaseModel):
     project_id: str | None = None
     tag_ids: list[str] | None = None
     due_date: date | None = None
+    priority: TaskPriority | None = None
+    waiting_for: str | None = Field(default=None, max_length=500)
     expected_revision: int = Field(ge=1)
 
     @model_validator(mode="before")
@@ -103,8 +108,23 @@ class TaskSubtaskCreateRequest(StrictBaseModel):
     title: str = Field(min_length=1, max_length=500)
 
 
+class TaskSubtaskUpdateRequest(StrictBaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=500)
+    expected_revision: int = Field(ge=1)
+
+
+class TaskSubtaskTransitionRequest(StrictBaseModel):
+    action: Literal["complete", "reopen", "cancel"]
+    expected_revision: int = Field(ge=1)
+
+
 class TaskCommentCreateRequest(StrictBaseModel):
     body: str = Field(min_length=1, max_length=20_000)
+
+
+class TaskCommentUpdateRequest(StrictBaseModel):
+    body: str = Field(min_length=1, max_length=20_000)
+    expected_revision: int = Field(ge=1)
 
 
 class TaskSubtaskResponse(StrictBaseModel):
@@ -120,6 +140,7 @@ class TaskCommentResponse(StrictBaseModel):
     body: str
     actor_id: str
     created_at: datetime
+    edited_at: datetime | None = None
     revision: int
 
 
@@ -133,6 +154,7 @@ class TaskResponse(StrictBaseModel):
     project_id: str | None = None
     tag_ids: list[str] = Field(default_factory=list)
     due_date: date | None = None
+    priority: TaskPriority = "none"
     waiting_for: str | None = None
     waiting_since: datetime | None = None
     order_key: int
@@ -140,6 +162,7 @@ class TaskResponse(StrictBaseModel):
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None = None
+    cancelled_at: datetime | None = None
     revision: int
     subtasks: list[TaskSubtaskResponse] = Field(default_factory=list)
     comments: list[TaskCommentResponse] = Field(default_factory=list)

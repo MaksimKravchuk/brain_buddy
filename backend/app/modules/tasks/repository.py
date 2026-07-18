@@ -526,6 +526,19 @@ class TaskRepository(BaseRepository):
             self.subtask_path(subtask.owner_id, subtask.task_id, subtask.id), subtask
         )
 
+    def save_subtask(self, subtask: TaskSubtaskDocument) -> None:
+        with self._connection() as conn, _sqlite_guard("Task subtask", subtask.id):
+            conn.execute(
+                """
+                UPDATE subtasks SET payload = ?
+                WHERE owner_id = ? AND task_id = ? AND id = ?
+                """,
+                (self._payload(subtask), subtask.owner_id, subtask.task_id, subtask.id),
+            )
+        BaseRepository.dump_model(
+            self.subtask_path(subtask.owner_id, subtask.task_id, subtask.id), subtask
+        )
+
     def list_subtasks(
         self, *, owner_id: str, task_id: str
     ) -> list[TaskSubtaskDocument]:
@@ -556,6 +569,19 @@ class TaskRepository(BaseRepository):
             conn.execute(
                 "INSERT INTO comments (owner_id, task_id, id, payload) VALUES (?, ?, ?, ?)",
                 (comment.owner_id, comment.task_id, comment.id, self._payload(comment)),
+            )
+        BaseRepository.dump_model(
+            self.comment_path(comment.owner_id, comment.task_id, comment.id), comment
+        )
+
+    def save_comment(self, comment: TaskCommentDocument) -> None:
+        with self._connection() as conn, _sqlite_guard("Task comment", comment.id):
+            conn.execute(
+                """
+                UPDATE comments SET payload = ?
+                WHERE owner_id = ? AND task_id = ? AND id = ?
+                """,
+                (self._payload(comment), comment.owner_id, comment.task_id, comment.id),
             )
         BaseRepository.dump_model(
             self.comment_path(comment.owner_id, comment.task_id, comment.id), comment
