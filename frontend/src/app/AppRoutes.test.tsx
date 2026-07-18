@@ -57,6 +57,18 @@ const tagsResponse = [
   { id: "tag-deep-work", name: "deep-work", state: "active", revision: 1, open_task_count: 1 }
 ];
 
+function taskFixture(id: string, title: string, state = "next") {
+  return {
+    ...taskResponse.items[0],
+    id,
+    title,
+    state,
+    project_id: null,
+    tag_ids: [],
+    order_key: Number(id.replace(/\D/g, "")) || 1
+  };
+}
+
 function renderRoutes(initialEntry: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
@@ -172,6 +184,57 @@ describe("AppRoutes", () => {
       expect(fetch).toHaveBeenCalledWith(expect.stringContaining("sort=due"), expect.anything());
     });
     expect(screen.queryByRole("button", { name: /Sort by tag/i })).not.toBeInTheDocument();
+  });
+
+  it("offers cursor continuation so large state projections remain reachable", async () => {
+    const user = userEvent.setup();
+    const firstPageTasks = Array.from({ length: 50 }, (_, index) =>
+      taskFixture(`someday-${index}`, `Overflow task ${String(index).padStart(2, "0")}`, "someday")
+    );
+    const secondPageTasks = Array.from({ length: 5 }, (_, index) =>
+      taskFixture(`someday-${index + 50}`, `Overflow task ${String(index + 50).padStart(2, "0")}`, "someday")
+    );
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/tasks?") && url.includes("cursor=next-page")) {
+        return Promise.resolve(jsonResponse({
+          items: secondPageTasks,
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 0, next: 0, waiting: 0, someday: 55 }
+        }));
+      }
+      if (url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse({
+          items: firstPageTasks,
+          next_cursor: "next-page",
+          has_more: true,
+          counts_by_state: { inbox: 0, next: 0, waiting: 0, someday: 55 }
+        }));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/someday");
+
+    expect(await screen.findByRole("heading", { name: "Someday / maybe" })).toBeInTheDocument();
+    expect(await screen.findByText("55 tasks")).toBeInTheDocument();
+    expect(screen.getByText("Overflow task 00")).toBeInTheDocument();
+    expect(screen.queryByText("Overflow task 54")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Load more tasks" }));
+
+    expect(await screen.findByText("Overflow task 54")).toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: "Tasks" })).getAllByRole("listitem")).toHaveLength(55);
+    expect(screen.queryByRole("button", { name: "Load more tasks" })).not.toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining("cursor=next-page"), expect.anything());
   });
 
   it("creates contextual Waiting, Project and Tag tasks with required organization fields", async () => {

@@ -337,6 +337,19 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
           <EmptyState state={state} />
         )}
 
+        {taskQuery.hasNextPage ? (
+          <div className="mt-3 flex justify-center">
+            <button
+              type="button"
+              className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 shadow-soft transition hover:border-sky-200 hover:text-brand-primary disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() => void taskQuery.fetchNextPage()}
+              disabled={taskQuery.isFetchingNextPage}
+            >
+              {taskQuery.isFetchingNextPage ? "Loading more tasks…" : "Load more tasks"}
+            </button>
+          </div>
+        ) : null}
+
         {dateView ? (
           <DateViewCaptureHint />
         ) : (
@@ -546,7 +559,7 @@ function TaskRow({
             @{tag.name.replace(/^@/, "")} ×
           </button>
         ))}
-        <label className="sr-only" htmlFor={`task-project-${task.id}`}>Project for {task.title}</label>
+        <label className="sr-only" htmlFor={`task-project-${task.id}`}>Project</label>
         <select
           id={`task-project-${task.id}`}
           aria-label={`Project for ${task.title}`}
@@ -560,7 +573,7 @@ function TaskRow({
             <option key={option.id} value={option.id}>{option.name}</option>
           ))}
         </select>
-        <label className="sr-only" htmlFor={`task-tag-${task.id}`}>Add tag to {task.title}</label>
+        <label className="sr-only" htmlFor={`task-tag-${task.id}`}>Add tag</label>
         <select
           id={`task-tag-${task.id}`}
           aria-label={`Add tag to ${task.title}`}

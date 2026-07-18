@@ -192,6 +192,12 @@ export const apiClient = {
     if (filters.tagId) {
       params.set("tag_id", filters.tagId);
     }
+    if (filters.cursor) {
+      params.set("cursor", filters.cursor);
+    }
+    if (filters.limit) {
+      params.set("limit", String(filters.limit));
+    }
     if (filters.includeCompleted) {
       params.set("include_completed", "true");
     }
