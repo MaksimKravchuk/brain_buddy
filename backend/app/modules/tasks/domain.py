@@ -133,6 +133,10 @@ class SmartAddTaskResultDocument(StorageBaseModel):
 BrainDumpStatus = Literal[
     "recording",
     "paused",
+    "sealing",
+    "fast_processing",
+    "accurate_transcribing",
+    "reconciling",
     "awaiting_confirmation",
     "committing",
     "completed",
@@ -143,6 +147,8 @@ BrainDumpProposalStatus = Literal[
     "wording_changing",
     "ready_to_review",
     "user_edited",
+    "reconciled",
+    "conflicted",
 ]
 
 
@@ -158,7 +164,21 @@ class BrainDumpTranscriptSegmentDocument(StorageBaseModel):
     sequence: int = Field(ge=1)
     text: str = Field(min_length=1, max_length=20_000)
     stability: Literal["interim", "stable"]
+    start_ms: int = Field(default=0, ge=0)
+    end_ms: int = Field(default=1, gt=0)
+    provider_role: Literal["browser_preview", "fast", "accurate"] = "browser_preview"
+    provider: str | None = None
+    model: str | None = None
+    supersedes_segment_ids: list[str] = Field(default_factory=list)
     created_at: datetime
+
+
+class BrainDumpProposalConflictDocument(StorageBaseModel):
+    field: str = Field(min_length=1, max_length=100)
+    current_value: str | None = Field(default=None, max_length=500)
+    suggested_value: str | None = Field(default=None, max_length=500)
+    producer: Literal["fast", "accurate", "reconciler", "user"] = "reconciler"
+    source_segment_ids: list[str] = Field(default_factory=list)
 
 
 class BrainDumpProposalDocument(StorageBaseModel):
@@ -167,11 +187,22 @@ class BrainDumpProposalDocument(StorageBaseModel):
     title: str = Field(min_length=1, max_length=500)
     status: BrainDumpProposalStatus = "provisional"
     source_segment_ids: list[str] = Field(default_factory=list)
+    predecessor_ids: list[str] = Field(default_factory=list)
+    successor_ids: list[str] = Field(default_factory=list)
+    locked_fields: list[str] = Field(default_factory=list)
+    conflicts: list[BrainDumpProposalConflictDocument] = Field(default_factory=list)
     deleted: bool = False
     user_edited: bool = False
     created_at: datetime
     updated_at: datetime
     revision: int = Field(default=1, ge=1)
+
+
+class BrainDumpAudioChunkDocument(StorageBaseModel):
+    chunk_number: int = Field(ge=0)
+    sha256: str = Field(min_length=64, max_length=64)
+    size_bytes: int = Field(ge=0)
+    received_at: datetime
 
 
 class BrainDumpOperationDocument(StorageBaseModel):
@@ -184,8 +215,11 @@ class BrainDumpOperationDocument(StorageBaseModel):
     consent: BrainDumpConsent
     segments: list[BrainDumpTranscriptSegmentDocument] = Field(default_factory=list)
     proposals: list[BrainDumpProposalDocument] = Field(default_factory=list)
+    media_ref: str | None = None
+    audio_chunks: list[BrainDumpAudioChunkDocument] = Field(default_factory=list)
+    status_history: list[BrainDumpStatus] = Field(default_factory=list)
     committed_task_ids: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
-    schema_version: int = Field(default=1, ge=1)
+    schema_version: int = Field(default=2, ge=1)
     revision: int = Field(default=1, ge=1)

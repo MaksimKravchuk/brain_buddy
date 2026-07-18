@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "license": "synthetic-test-fixture",
+  "source": "Created for BrainBuddy deterministic CI; no real user media.",
+  "fixtures": [
+    {
+      "id": "ML-01",
+      "language": ["ru", "en"],
+      "text": "Надо починить BrainBuddy, потом сделать production smoke и написать Наташе",
+      "expected_titles": [
+        "Починить BrainBuddy",
+        "Сделать production smoke",
+        "Написать Наташе"
+      ],
+      "spans_ms": [[0, 1800], [1800, 3600], [3600, 5200]],
+      "notes": "Code-switched product and deployment terms must be preserved."
+    },
+    {
+      "id": "ML-02",
+      "fast_text": "починить brain body",
+      "accurate_text": "починить BrainBuddy",
+      "expected_titles": ["Починить BrainBuddy"],
+      "spans_ms": [[0, 1400]]
+    },
+    {
+      "id": "ML-04",
+      "text": "купить хлеб и молоко",
+      "expected_titles": ["Купить хлеб и молоко"],
+      "spans_ms": [[0, 1300]],
+      "notes": "Conjunction alone is not a split oracle."
+    },
+    {
+      "id": "ML-06",
+      "fast_text": "починить brain body",
+      "user_title": "Починить BrainBuddy MVP",
+      "accurate_text": "починить BrainBuddy",
+      "expected_conflict_field": "title"
+    }
+  ]
+}

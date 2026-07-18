@@ -66,6 +66,16 @@ function proposal(id: string, ordinal: number, title: string, extras: Record<str
   };
 }
 
+function conflict(field: string, currentValue: string, suggestedValue: string) {
+  return {
+    field,
+    current_value: currentValue,
+    suggested_value: suggestedValue,
+    producer: "reconciler",
+    source_segment_ids: ["segment_accurate"]
+  };
+}
+
 function TaskListProbe(): JSX.Element {
   const routeParams = useParams();
   return <div>{`Task list route: ${routeParams.state ?? "unknown"}`}</div>;
@@ -940,5 +950,57 @@ describe("BrainDumpRoute", () => {
     await userEvent.click(await screen.findByRole("button", { name: "View inbox" }));
 
     expect(await screen.findByText("Task list route: inbox")).toBeInTheDocument();
+  });
+
+  it("shows schema-v2 processing stages before editable review", async () => {
+    const improving = operation({
+      id: "brain_dump_processing",
+      status: "accurate_transcribing",
+      revision: 5,
+      status_history: ["sealing", "fast_processing", "accurate_transcribing"]
+    });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_processing") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(improving);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_processing");
+
+    expect(await screen.findByText("Improving transcript")).toBeInTheDocument();
+    expect(screen.getByText("accurate_transcribing")).toBeInTheDocument();
+    expect(screen.queryByRole("main", { name: "Review brain dump proposals" })).not.toBeInTheDocument();
+  });
+
+  it("shows title conflicts and blocks Save until the user resolves them", async () => {
+    const conflicted = operation({
+      id: "brain_dump_conflict",
+      status: "awaiting_confirmation",
+      revision: 6,
+      proposals: [
+        proposal("proposal_locked", 1, "Починить BrainBuddy MVP", {
+          status: "conflicted",
+          user_edited: true,
+          locked_fields: ["title"],
+          conflicts: [conflict("title", "Починить BrainBuddy MVP", "Починить BrainBuddy")]
+        })
+      ]
+    });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_conflict") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(conflicted);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_conflict/review");
+
+    expect(await screen.findByText("Conflict: title")).toBeInTheDocument();
+    expect(screen.getByText("Mine: Починить BrainBuddy MVP")).toBeInTheDocument();
+    expect(screen.getByText("Suggestion: Починить BrainBuddy")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save 1 to inbox" })).toBeDisabled();
   });
 });
