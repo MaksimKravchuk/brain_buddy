@@ -1,6 +1,6 @@
 /* istanbul ignore file -- task shell rendering is covered by route tests and Playwright snapshots. */
 import { AlertTriangle, Check, Edit3, Plus, RotateCcw, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
@@ -9,6 +9,9 @@ import { parseOpenTaskState, parseTaskDateView, useProjects, useTags, useTaskDet
 import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts, TaskPriority, TaskResponse, TaskSort, TaskSubtaskResponse, TaskUpdateRequest } from "../../api/taskTypes";
 import { AppShell } from "../../components/shell/AppShell";
 import { getErrorMessage } from "../../utils/error";
+import { applySmartAddSuggestion, parseSmartAdd, smartAddChips, smartAddSuggestions } from "./smartAdd";
+import type { SmartAddDraft, SmartAddSuggestion } from "./smartAdd";
+import { SmartAddSuggestions } from "./SmartAddSuggestions";
 
 const stateLabels: Record<OpenTaskState, string> = {
   inbox: "Inbox",
@@ -68,6 +71,11 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const projectsQuery = useProjects();
   const tagsQuery = useTags();
 
+  const projects = projectsQuery.data ?? emptyProjects;
+  const tags = tagsQuery.data ?? emptyTags;
+  const tasks = taskQuery.data?.items ?? [];
+  const counts = taskQuery.data?.counts_by_state ?? emptyCounts;
+
   const invalidateTasks = () => queryClient.invalidateQueries({ queryKey: ["tasks"] });
   const listPath = projectId
     ? `/projects/${projectId}`
@@ -76,22 +84,38 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       : `/tasks/${params.state ?? "next"}`;
 
   const createMutation = useMutation({
-    mutationFn: (title: string) =>
-      apiClient.createTask(
+    mutationFn: (draft: SmartAddDraft) => {
+      const payload = {
+        title: draft.cleanTitle,
+        state: state ?? "inbox",
+        ...(state === "waiting" ? { waiting_for: newWaitingFor.trim() } : {})
+      };
+      if (draft.hasCompletedTokens) {
+        return apiClient.smartAddTask(
+          {
+            ...payload,
+            project: draft.project,
+            tags: draft.tags
+          },
+          idempotencyKey("smart-add")
+        ).then((response) => response.task);
+      }
+      return apiClient.createTask(
         {
-          title,
-          state: state ?? "inbox",
-          ...(state === "waiting" ? { waiting_for: newWaitingFor.trim() } : {}),
+          ...payload,
           ...(projectId ? { project_id: projectId } : {}),
           ...(tagId ? { tag_ids: [tagId] } : {})
         },
         idempotencyKey("create")
-      ),
+      );
+    },
     onSuccess: () => {
       setNewTitle("");
       setNewWaitingFor("");
       setMutationError(null);
       void invalidateTasks();
+      void queryClient.invalidateQueries({ queryKey: ["tasks", "projects"] });
+      void queryClient.invalidateQueries({ queryKey: ["tasks", "tags"] });
     },
     onError: (caught: unknown) => setMutationError(getErrorMessage(caught))
   });
@@ -220,18 +244,13 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     onError: (caught: unknown) => setMutationError(getErrorMessage(caught))
   });
 
-  const projects = projectsQuery.data ?? emptyProjects;
-  const tags = tagsQuery.data ?? emptyTags;
-  const tasks = taskQuery.data?.items ?? [];
-  const counts = taskQuery.data?.counts_by_state ?? emptyCounts;
-
   const title = useMemo(() => {
     if (projectId) {
       return projects.find((project) => project.id === projectId)?.name ?? "Project";
     }
     if (tagId) {
       const tag = tags.find((item) => item.id === tagId)?.name ?? "tag";
-      return `@${tag.replace(/^@/, "")}`;
+      return `#${tag.replace(/^[#@]/, "")}`;
     }
     if (dateView) {
       return dateViewLabels[dateView];
@@ -356,10 +375,14 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
           <TaskCreator
             newTitle={newTitle}
             newWaitingFor={newWaitingFor}
+            projects={projects}
+            tags={tags}
+            contextProjectId={projectId}
+            contextTagId={tagId}
             state={state}
             showCompleted={showCompleted}
             isCreating={createMutation.isPending}
-            onCreate={(title) => createMutation.mutate(title)}
+            onCreate={(draft) => createMutation.mutate(draft)}
             onTitleChange={setNewTitle}
             onWaitingForChange={setNewWaitingFor}
             onToggleCompleted={setShowCompleted}
@@ -547,6 +570,11 @@ function TaskRow({
         </span>
       ) : null}
       <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+        {project ? (
+          <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-slate-600">
+            @{project.name.replace(/^@/, "")}
+          </span>
+        ) : null}
         {tags.map((tag) => (
           <button
             key={tag.id}
@@ -556,7 +584,7 @@ function TaskRow({
             onClick={() => onRemoveTag(task, tag.id)}
             disabled={isTerminal}
           >
-            @{tag.name.replace(/^@/, "")} ×
+            #{tag.name.replace(/^[#@]/, "")} ×
           </button>
         ))}
         <label className="sr-only" htmlFor={`task-project-${task.id}`}>Project</label>
@@ -588,7 +616,7 @@ function TaskRow({
         >
           <option value="">Add tag</option>
           {availableTags.map((option) => (
-            <option key={option.id} value={option.id}>@{option.name.replace(/^@/, "")}</option>
+            <option key={option.id} value={option.id}>#{option.name.replace(/^[#@]/, "")}</option>
           ))}
         </select>
         {!isEditing && !isTerminal ? (
@@ -711,7 +739,7 @@ function TaskDetailPanel({
               {tags.map((tag) => (
                 <label key={tag.id} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1">
                   <input name="tag_ids" type="checkbox" value={tag.id} defaultChecked={task.tag_ids.includes(tag.id)} />
-                  @{tag.name.replace(/^@/, "")}
+                  #{tag.name.replace(/^[#@]/, "")}
                 </label>
               ))}
             </fieldset>
@@ -835,6 +863,10 @@ function TaskTransitionButton({
 function TaskCreator({
   newTitle,
   newWaitingFor,
+  projects,
+  tags,
+  contextProjectId,
+  contextTagId,
   state,
   showCompleted,
   isCreating,
@@ -845,35 +877,118 @@ function TaskCreator({
 }: {
   newTitle: string;
   newWaitingFor: string;
+  projects: ProjectResponse[];
+  tags: TagResponse[];
+  contextProjectId?: string;
+  contextTagId?: string;
   state?: OpenTaskState;
   showCompleted: boolean;
   isCreating: boolean;
-  onCreate: (title: string) => void;
+  onCreate: (draft: SmartAddDraft) => void;
   onTitleChange: (title: string) => void;
   onWaitingForChange: (value: string) => void;
   onToggleCompleted: (show: boolean) => void;
 }): JSX.Element {
   const waitingForRequired = state === "waiting";
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [caret, setCaret] = useState(0);
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(true);
+  const smartAddSuggestionsId = "smart-add-suggestions";
+  const smartAddOptions = useMemo(
+    () => ({ projects, tags, contextProjectId, contextTagId }),
+    [projects, tags, contextProjectId, contextTagId]
+  );
+  const draft = useMemo(() => parseSmartAdd(newTitle, smartAddOptions), [newTitle, smartAddOptions]);
+  const chips = draft.hasCompletedTokens ? smartAddChips(draft, smartAddOptions) : [];
+  const suggestions = smartAddSuggestions(newTitle, caret, smartAddOptions);
+  const popupOpen = suggestionsOpen && suggestions.length > 0;
+  const selectedSuggestionIndex = Math.min(activeSuggestionIndex, Math.max(suggestions.length - 1, 0));
+
+  const submitDraft = () => {
+    if (draft.isValid && (!waitingForRequired || newWaitingFor.trim())) {
+      setSuggestionsOpen(false);
+      onCreate(draft);
+    }
+  };
+
+  const updateCaretFromInput = () => {
+    setCaret(inputRef.current?.selectionStart ?? newTitle.length);
+  };
+
+  const applySuggestion = (suggestion: SmartAddSuggestion) => {
+    const applied = applySmartAddSuggestion(newTitle, caret, suggestion);
+    if (!applied) {
+      return;
+    }
+    onTitleChange(applied.text);
+    setCaret(applied.caret);
+    setSuggestionsOpen(false);
+    window.setTimeout(() => {
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(applied.caret, applied.caret);
+    }, 0);
+  };
+
   return (
     <div className="mt-3 space-y-3">
       <form
         className="flex flex-col gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/70 p-3 sm:flex-row sm:items-center"
         onSubmit={(event) => {
           event.preventDefault();
-          if (newTitle.trim()) {
-            onCreate(newTitle.trim());
-          }
+          submitDraft();
         }}
       >
         <Plus className="hidden h-3.5 w-3.5 text-slate-500 sm:block" aria-hidden />
         <label className="sr-only" htmlFor="new-task-title">New task title</label>
         <input
+          ref={inputRef}
           id="new-task-title"
           aria-label="New task title"
+          aria-expanded={popupOpen}
+          aria-controls={popupOpen ? smartAddSuggestionsId : undefined}
+          aria-activedescendant={popupOpen ? `${smartAddSuggestionsId}-option-${selectedSuggestionIndex}` : undefined}
           className="min-h-10 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-300"
-          placeholder="Add a task — or dump everything on your mind with the mic above"
+          placeholder="Add a task with #tag and @project — or dump with the mic above"
           value={newTitle}
-          onChange={(event) => onTitleChange(event.currentTarget.value)}
+          onChange={(event) => {
+            onTitleChange(event.currentTarget.value);
+            setCaret(event.currentTarget.selectionStart ?? event.currentTarget.value.length);
+            setActiveSuggestionIndex(0);
+            setSuggestionsOpen(true);
+          }}
+          onClick={updateCaretFromInput}
+          onKeyUp={updateCaretFromInput}
+          onKeyDown={(event) => {
+            if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+              event.preventDefault();
+              submitDraft();
+              return;
+            }
+            if (!popupOpen) {
+              return;
+            }
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault();
+              const direction = event.key === "ArrowDown" ? 1 : -1;
+              setActiveSuggestionIndex((current) =>
+                (current + direction + suggestions.length) % suggestions.length
+              );
+              return;
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setSuggestionsOpen(false);
+              return;
+            }
+            if (event.key === "Enter" || event.key === "Tab") {
+              event.preventDefault();
+              const suggestion = suggestions[selectedSuggestionIndex];
+              if (suggestion) {
+                applySuggestion(suggestion);
+              }
+            }
+          }}
         />
         {waitingForRequired ? (
           <>
@@ -888,10 +1003,29 @@ function TaskCreator({
             />
           </>
         ) : null}
-        <button type="submit" disabled={isCreating || !newTitle.trim() || (waitingForRequired && !newWaitingFor.trim())} className="h-10 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
+        <button type="submit" disabled={isCreating || !draft.isValid || (waitingForRequired && !newWaitingFor.trim())} className="h-10 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
           Add task
         </button>
       </form>
+      {popupOpen ? (
+        <SmartAddSuggestions
+          suggestions={suggestions}
+          activeIndex={selectedSuggestionIndex}
+          listboxId={smartAddSuggestionsId}
+          onSelect={applySuggestion}
+        />
+      ) : null}
+      {chips.length ? (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600" aria-label="Smart Add classification chips">
+          <span>Will add:</span>
+          {chips.map((chip) => (
+            <span key={`${chip.kind}-${chip.label}`} className="rounded-full bg-slate-100 px-2.5 py-0.5 text-slate-700">
+              {chip.kind === "tag" ? "#" : "@"}{chip.label.replace(/^[#@]/, "")}
+            </span>
+          ))}
+          <span className="text-slate-500">Title: “{draft.cleanTitle}”</span>
+        </div>
+      ) : null}
       <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-600">
         <input type="checkbox" checked={showCompleted} onChange={(event) => onToggleCompleted(event.currentTarget.checked)} />
         Show terminal tasks

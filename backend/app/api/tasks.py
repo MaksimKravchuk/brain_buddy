@@ -16,6 +16,7 @@ from app.modules.tasks.domain import (
     BrainDumpProposalDocument,
     BrainDumpTranscriptSegmentDocument,
     ProjectDocument,
+    SmartAddTaskResultDocument,
     TagDocument,
     TaskCommentDocument,
     TaskDocument,
@@ -34,6 +35,9 @@ from app.schemas.tasks import (
     ProjectCreateRequest,
     ProjectResponse,
     ProjectUpdateRequest,
+    SmartAddCreatedResponse,
+    SmartAddTaskCreateRequest,
+    SmartAddTaskResponse,
     TagCreateRequest,
     TagResponse,
     TagUpdateRequest,
@@ -354,6 +358,30 @@ def get_tag(
 ) -> TagResponse:
     return _to_tag_response(
         task_service.get_tag(tag_id, owner_id=current_user.id),
+        task_service=task_service,
+        owner_id=current_user.id,
+    )
+
+
+@router.post(
+    "/tasks/smart-add",
+    response_model=SmartAddTaskResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
+def smart_add_task(
+    payload: SmartAddTaskCreateRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    task_service: TaskService = Depends(get_task_service),
+) -> SmartAddTaskResponse:
+    result = task_service.smart_add_task(
+        payload,
+        owner_id=current_user.id,
+        idempotency_key=_require_idempotency_key(idempotency_key),
+    )
+    return _to_smart_add_response(
+        result,
         task_service=task_service,
         owner_id=current_user.id,
     )
@@ -681,6 +709,28 @@ def _to_response(
         revision=task.revision,
         subtasks=[_to_subtask_response(item) for item in subtasks],
         comments=[_to_comment_response(item) for item in comments],
+    )
+
+
+def _to_smart_add_response(
+    result: SmartAddTaskResultDocument,
+    *,
+    task_service: TaskService,
+    owner_id: str,
+) -> SmartAddTaskResponse:
+    return SmartAddTaskResponse(
+        task=_to_response(result.task),
+        project=_to_project_response(result.project, task_service=task_service, owner_id=owner_id)
+        if result.project
+        else None,
+        tags=[
+            _to_tag_response(tag, task_service=task_service, owner_id=owner_id)
+            for tag in result.tags
+        ],
+        created=SmartAddCreatedResponse(
+            project_id=result.created.project_id,
+            tag_ids=result.created.tag_ids,
+        ),
     )
 
 
