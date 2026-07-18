@@ -127,6 +127,16 @@ describe("apiClient", () => {
     ]);
   });
 
+  it("serializes the projectless Inbox projection filter with the rest of the task query", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(response({ items: [], counts_by_state: {} })));
+
+    await apiClient.listTasks({ state: "inbox", unassignedProject: true, q: " shared ", cursor: "page-2", limit: 25 });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/tasks?state=inbox&cursor=page-2&limit=25&q=shared&unassigned_project=true"
+    );
+  });
+
   it("sends native task create, update, and transition idempotency contracts", async () => {
     fetchMock.mockImplementation(() => Promise.resolve(response({ id: "task-1", revision: 2 })));
 

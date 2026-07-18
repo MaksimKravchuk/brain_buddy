@@ -209,6 +209,9 @@ export const apiClient = {
     if (filters.q?.trim()) {
       params.set("q", filters.q.trim());
     }
+    if (filters.unassignedProject) {
+      params.set("unassigned_project", "true");
+    }
     for (const priority of filters.priority ?? []) {
       params.append("priority", priority);
     }

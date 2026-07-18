@@ -287,6 +287,109 @@ describe("AppRoutes", () => {
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining("cursor=next-page"), expect.anything());
   });
 
+  it("routes Inbox rows, search, and pagination through the canonical projectless projection", async () => {
+    const user = userEvent.setup();
+    const inboxPage = {
+      items: [taskFixture("inbox-1", "Projectless captured task", "inbox")],
+      next_cursor: "inbox-next-page",
+      has_more: true,
+      counts_by_state: { inbox: 2, next: 0, waiting: 0, someday: 0 }
+    };
+    const inboxSecondPage = {
+      items: [taskFixture("inbox-2", "Second projectless task", "inbox")],
+      next_cursor: null,
+      has_more: false,
+      counts_by_state: { inbox: 2, next: 0, waiting: 0, someday: 0 }
+    };
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/tasks?") && url.includes("cursor=inbox-next-page")) {
+        return Promise.resolve(jsonResponse(inboxSecondPage));
+      }
+      if (url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse(inboxPage));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/inbox?q=shared");
+
+    expect(await screen.findByRole("heading", { name: "Inbox" })).toBeInTheDocument();
+    expect(await screen.findByText("2 tasks")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining("/tasks?state=inbox"),
+        expect.anything()
+      );
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining("unassigned_project=true"),
+        expect.anything()
+      );
+      expect(fetch).toHaveBeenCalledWith(expect.stringContaining("q=shared"), expect.anything());
+    });
+
+    await user.click(screen.getByRole("button", { name: "Load more tasks" }));
+
+    expect(await screen.findByText("Second projectless task")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(expect.stringContaining("cursor=inbox-next-page"), expect.anything());
+      expect(fetch).toHaveBeenCalledWith(expect.stringContaining("unassigned_project=true"), expect.anything());
+    });
+  });
+
+  it("keeps the Inbox navigation badge projectless while a Project view is active", async () => {
+    const assignedInboxTask = {
+      ...taskFixture("assigned-inbox-1", "Assigned inbox task stays in project", "inbox"),
+      project_id: "project-onboarding"
+    };
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/tasks?") && url.includes("project_id=project-onboarding")) {
+        return Promise.resolve(jsonResponse({
+          items: [assignedInboxTask],
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 9, next: 0, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/tasks?") && url.includes("state=inbox") && url.includes("unassigned_project=true")) {
+        return Promise.resolve(jsonResponse({
+          items: [taskFixture("projectless-inbox-1", "Projectless badge sample", "inbox")],
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 4, next: 0, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/projects/project-onboarding");
+
+    expect(await screen.findByRole("heading", { name: "Onboarding drop-off" })).toBeInTheDocument();
+    expect(await screen.findByText("Assigned inbox task stays in project")).toBeInTheDocument();
+    const sidebar = screen.getByRole("navigation", { name: "Task navigation" });
+    expect(await within(sidebar).findByText("4")).toBeInTheDocument();
+    expect(within(sidebar).queryByText("9")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(expect.stringContaining("project_id=project-onboarding"), expect.anything());
+      expect(fetch).toHaveBeenCalledWith(expect.stringContaining("unassigned_project=true"), expect.anything());
+    });
+  });
+
   it("creates contextual Waiting, Project and Tag tasks with required organization fields", async () => {
     const user = userEvent.setup();
     const firstView = renderRoutes("/projects/project-onboarding");
