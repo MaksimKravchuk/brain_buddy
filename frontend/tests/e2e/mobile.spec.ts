@@ -123,8 +123,16 @@ test.describe("mobile acceptance", () => {
         ),
         ContentType.JSON
       );
-      expect(response.status()).toBe(200);
-      expect(nodeCreationRequestsBeforePlaceholderClicks).toBe(1);
+      if (response.status() !== 200) {
+        throw new Error(
+          `Expected bootstrap node creation to succeed with status 200, received ${response.status()}`
+        );
+      }
+      if (nodeCreationRequestsBeforePlaceholderClicks !== 1) {
+        throw new Error(
+          `Expected exactly one node-creation call before placeholder interaction, observed ${nodeCreationRequestsBeforePlaceholderClicks}`
+        );
+      }
     });
 
     await test.step("Click each placeholder at its rendered coordinates without activating the CRT canvas", async () => {
