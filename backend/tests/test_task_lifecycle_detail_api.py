@@ -182,6 +182,147 @@ def test_subtask_and_comment_detail_commands_persist(api_client) -> None:
     assert detail["comments"][0]["edited_at"]
 
 
+def test_subtask_comment_idempotency_and_transition_edges(api_client) -> None:
+    task = _create_task(api_client, "Nested edge detail", key="nested-edge-create")
+
+    subtask = api_client.post(
+        f"/api/tasks/{task['id']}/subtasks",
+        headers={"Idempotency-Key": "nested-edge-subtask"},
+        json={"title": "Collect examples"},
+    ).json()
+    edit_payload = {"title": "Collect final examples", "expected_revision": subtask["revision"]}
+    edited = api_client.patch(
+        f"/api/tasks/{task['id']}/subtasks/{subtask['id']}",
+        headers={"Idempotency-Key": "nested-edge-subtask-edit"},
+        json=edit_payload,
+    )
+    assert edited.status_code == 200, edited.text
+    replayed_edit = api_client.patch(
+        f"/api/tasks/{task['id']}/subtasks/{subtask['id']}",
+        headers={"Idempotency-Key": "nested-edge-subtask-edit"},
+        json=edit_payload,
+    )
+    assert replayed_edit.status_code == 200, replayed_edit.text
+    assert replayed_edit.json()["revision"] == edited.json()["revision"]
+
+    untouched_title = api_client.patch(
+        f"/api/tasks/{task['id']}/subtasks/{subtask['id']}",
+        headers={"Idempotency-Key": "nested-edge-subtask-noop"},
+        json={"expected_revision": edited.json()["revision"]},
+    )
+    assert untouched_title.status_code == 200, untouched_title.text
+    assert untouched_title.json()["title"] == "Collect final examples"
+
+    transition_payload = {
+        "action": "complete",
+        "expected_revision": untouched_title.json()["revision"],
+    }
+    completed = api_client.post(
+        f"/api/tasks/{task['id']}/subtasks/{subtask['id']}/transitions",
+        headers={"Idempotency-Key": "nested-edge-subtask-complete"},
+        json=transition_payload,
+    )
+    assert completed.status_code == 200, completed.text
+    replayed_transition = api_client.post(
+        f"/api/tasks/{task['id']}/subtasks/{subtask['id']}/transitions",
+        headers={"Idempotency-Key": "nested-edge-subtask-complete"},
+        json=transition_payload,
+    )
+    assert replayed_transition.status_code == 200, replayed_transition.text
+    assert replayed_transition.json()["revision"] == completed.json()["revision"]
+    same_state = api_client.post(
+        f"/api/tasks/{task['id']}/subtasks/{subtask['id']}/transitions",
+        headers={"Idempotency-Key": "nested-edge-subtask-same-state"},
+        json={"action": "complete", "expected_revision": completed.json()["revision"]},
+    )
+    assert same_state.status_code == 400
+
+    cancelled_subtask = api_client.post(
+        f"/api/tasks/{task['id']}/subtasks",
+        headers={"Idempotency-Key": "nested-edge-cancel-subtask"},
+        json={"title": "Discarded branch"},
+    ).json()
+    cancelled = api_client.post(
+        f"/api/tasks/{task['id']}/subtasks/{cancelled_subtask['id']}/transitions",
+        headers={"Idempotency-Key": "nested-edge-subtask-cancel"},
+        json={"action": "cancel", "expected_revision": cancelled_subtask["revision"]},
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    reopened = api_client.post(
+        f"/api/tasks/{task['id']}/subtasks/{cancelled_subtask['id']}/transitions",
+        headers={"Idempotency-Key": "nested-edge-subtask-reopen"},
+        json={"action": "reopen", "expected_revision": cancelled.json()["revision"]},
+    )
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.json()["state"] == "open"
+
+    comment = api_client.post(
+        f"/api/tasks/{task['id']}/comments",
+        headers={"Idempotency-Key": "nested-edge-comment"},
+        json={"body": "Initial edge note"},
+    ).json()
+    comment_payload = {"body": "Edited edge note", "expected_revision": comment["revision"]}
+    edited_comment = api_client.patch(
+        f"/api/tasks/{task['id']}/comments/{comment['id']}",
+        headers={"Idempotency-Key": "nested-edge-comment-edit"},
+        json=comment_payload,
+    )
+    assert edited_comment.status_code == 200, edited_comment.text
+    replayed_comment = api_client.patch(
+        f"/api/tasks/{task['id']}/comments/{comment['id']}",
+        headers={"Idempotency-Key": "nested-edge-comment-edit"},
+        json=comment_payload,
+    )
+    assert replayed_comment.status_code == 200, replayed_comment.text
+    assert replayed_comment.json()["revision"] == edited_comment.json()["revision"]
+
+
+def test_task_query_and_update_validation_edges(api_client) -> None:
+    _create_task(
+        api_client,
+        "Alpha due edge",
+        key="edge-alpha-due",
+        state="next",
+        due_date="2026-09-02",
+        priority="low",
+    )
+    undated = _create_task(
+        api_client,
+        "Beta undated edge",
+        key="edge-beta-undated",
+        state="next",
+        priority="high",
+    )
+
+    conflicting_dates = api_client.get(
+        "/api/tasks",
+        params={"due_before": "2026-09-03", "due_after": "2026-09-01"},
+    )
+    assert conflicting_dates.status_code == 400
+    duplicate_priority = api_client.get(
+        "/api/tasks",
+        params=[("priority", "low"), ("priority", "low")],
+    )
+    assert duplicate_priority.status_code == 400
+
+    due_before = api_client.get("/api/tasks", params={"due_before": "2026-09-03"})
+    assert due_before.status_code == 200, due_before.text
+    assert [item["title"] for item in due_before.json()["items"]] == ["Alpha due edge"]
+    title_sorted = api_client.get("/api/tasks", params={"sort": "title"})
+    assert title_sorted.status_code == 200, title_sorted.text
+    assert [item["title"] for item in title_sorted.json()["items"]] == [
+        "Alpha due edge",
+        "Beta undated edge",
+    ]
+
+    rejected_null_priority = api_client.patch(
+        f"/api/tasks/{undated['id']}",
+        headers={"Idempotency-Key": "edge-null-priority"},
+        json={"priority": None, "expected_revision": undated["revision"]},
+    )
+    assert rejected_null_priority.status_code == 400
+
+
 def test_project_archive_clears_assignments_from_all_lifecycle_states(api_client) -> None:
     project = api_client.post(
         "/api/projects",
