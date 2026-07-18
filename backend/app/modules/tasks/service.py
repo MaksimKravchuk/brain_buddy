@@ -672,41 +672,12 @@ class TaskService:
             source_segment_id=accurate_segment.id,
             now=now,
         )
-        proposal_patches = list(operation.proposal_patches)
-        for draft in patch_drafts:
-            sequence = len(proposal_patches) + 1
-            identity = json.dumps(
-                {
-                    "operation_id": operation.id,
-                    "sequence": sequence,
-                    "operation": draft.operation,
-                    "proposal_id": draft.proposal_id,
-                    "producer": draft.producer,
-                    "title": draft.title,
-                    "source_segment_ids": draft.source_segment_ids,
-                    "predecessor_ids": draft.predecessor_ids,
-                    "successor_ids": draft.successor_ids,
-                    "base_revision": draft.base_revision,
-                },
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            proposal_patches.append(
-                BrainDumpProposalPatchDocument(
-                    id="proposal_patch_"
-                    + hashlib.sha256(identity.encode()).hexdigest()[:12],
-                    sequence=sequence,
-                    operation=draft.operation,
-                    proposal_id=draft.proposal_id,
-                    producer=draft.producer,
-                    title=draft.title,
-                    source_segment_ids=draft.source_segment_ids,
-                    predecessor_ids=draft.predecessor_ids,
-                    successor_ids=draft.successor_ids,
-                    base_revision=draft.base_revision,
-                    created_at=now,
-                )
-            )
+        proposal_patches = self._append_proposal_patch_documents(
+            operation_id=operation.id,
+            existing=operation.proposal_patches,
+            drafts=patch_drafts,
+            now=now,
+        )
         return operation.model_copy(
             update={
                 "status": "awaiting_confirmation",
@@ -912,10 +883,47 @@ class TaskService:
         proposals = self._proposals_from_segments(
             operation.proposals, segments, now=now
         )
+        existing_by_id = {proposal.id: proposal for proposal in operation.proposals}
+        patch_drafts: list[ProposalPatch] = []
+        for proposal in proposals:
+            previous = existing_by_id.get(proposal.id)
+            if previous is None:
+                patch_drafts.append(
+                    ProposalPatch.add(
+                        proposal_id=proposal.id,
+                        title=proposal.title,
+                        source_segment_ids=proposal.source_segment_ids,
+                        producer="fast",
+                    )
+                )
+                continue
+            title = proposal.title if proposal.title != previous.title else None
+            source_segment_ids = (
+                proposal.source_segment_ids
+                if proposal.source_segment_ids != previous.source_segment_ids
+                else None
+            )
+            if title is not None or source_segment_ids is not None:
+                patch_drafts.append(
+                    ProposalPatch.update(
+                        proposal_id=proposal.id,
+                        title=title,
+                        source_segment_ids=source_segment_ids,
+                        producer="fast",
+                        base_revision=previous.title_revision,
+                    )
+                )
+        proposal_patches = self._append_proposal_patch_documents(
+            operation_id=operation.id,
+            existing=operation.proposal_patches,
+            drafts=patch_drafts,
+            now=now,
+        )
         updated = operation.model_copy(
             update={
                 "segments": segments,
                 "proposals": proposals,
+                "proposal_patches": proposal_patches,
                 "updated_at": now,
                 "revision": operation.revision + 1,
             }
@@ -964,6 +972,7 @@ class TaskService:
             )
         now = utcnow()
         changed = False
+        patch_drafts: list[ProposalPatch] = []
         proposals: list[BrainDumpProposalDocument] = []
         for proposal in operation.proposals:
             if proposal.id != proposal_id:
@@ -974,17 +983,34 @@ class TaskService:
                 "revision": proposal.revision + 1,
             }
             if "title" in payload.model_fields_set and payload.title:
+                title = payload.title.strip()
                 update.update(
                     {
-                        "title": payload.title.strip(),
+                        "title": title,
                         "status": "user_edited",
                         "user_edited": True,
                         "title_revision": proposal.title_revision + 1,
                         "locked_fields": sorted({*proposal.locked_fields, "title"}),
                     }
                 )
+                patch_drafts.append(
+                    ProposalPatch.update(
+                        proposal_id=proposal.id,
+                        title=title,
+                        producer="user",
+                        locked_fields=["title"],
+                        base_revision=proposal.title_revision,
+                    )
+                )
             if "deleted" in payload.model_fields_set and payload.deleted is not None:
                 update["deleted"] = payload.deleted
+                if payload.deleted and not proposal.deleted:
+                    patch_drafts.append(
+                        ProposalPatch.remove(
+                            proposal_id=proposal.id,
+                            producer="user",
+                        )
+                    )
             proposals.append(proposal.model_copy(update=update))
             changed = True
         if not changed:
@@ -992,6 +1018,12 @@ class TaskService:
         updated = operation.model_copy(
             update={
                 "proposals": proposals,
+                "proposal_patches": self._append_proposal_patch_documents(
+                    operation_id=operation.id,
+                    existing=operation.proposal_patches,
+                    drafts=patch_drafts,
+                    now=now,
+                ),
                 "updated_at": now,
                 "revision": operation.revision + 1,
             }
@@ -2221,6 +2253,53 @@ class TaskService:
         )
 
     @staticmethod
+    def _append_proposal_patch_documents(
+        *,
+        operation_id: str,
+        existing: list[BrainDumpProposalPatchDocument],
+        drafts: list[ProposalPatch],
+        now: datetime,
+    ) -> list[BrainDumpProposalPatchDocument]:
+        proposal_patches = list(existing)
+        for draft in drafts:
+            sequence = len(proposal_patches) + 1
+            identity = json.dumps(
+                {
+                    "operation_id": operation_id,
+                    "sequence": sequence,
+                    "operation": draft.operation,
+                    "proposal_id": draft.proposal_id,
+                    "producer": draft.producer,
+                    "title": draft.title,
+                    "source_segment_ids": draft.source_segment_ids,
+                    "predecessor_ids": draft.predecessor_ids,
+                    "successor_ids": draft.successor_ids,
+                    "locked_fields": draft.locked_fields,
+                    "base_revision": draft.base_revision,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            proposal_patches.append(
+                BrainDumpProposalPatchDocument(
+                    id="proposal_patch_"
+                    + hashlib.sha256(identity.encode()).hexdigest()[:12],
+                    sequence=sequence,
+                    operation=draft.operation,
+                    proposal_id=draft.proposal_id,
+                    producer=draft.producer,
+                    title=draft.title,
+                    source_segment_ids=draft.source_segment_ids,
+                    predecessor_ids=draft.predecessor_ids,
+                    successor_ids=draft.successor_ids,
+                    locked_fields=draft.locked_fields,
+                    base_revision=draft.base_revision,
+                    created_at=now,
+                )
+            )
+        return proposal_patches
+
+    @staticmethod
     def _proposal_document_to_reconciled(
         proposal: BrainDumpProposalDocument,
     ) -> ReconciledProposal:
@@ -2317,6 +2396,33 @@ class TaskService:
                     source_segment_ids=segment_ids,
                 )
             )
+        elif (
+            len(mutable) == 1
+            and len(titles) == 1
+            and not self._titles_refer_to_same_item(titles[0], mutable[0].title)
+            and self._proposal_identity_key(titles[0])
+            != self._proposal_identity_key(mutable[0].title)
+        ):
+            predecessor = mutable[0]
+            if predecessor.user_edited or predecessor.locked_fields:
+                patches.append(
+                    ProposalPatch.update(
+                        proposal_id=predecessor.id,
+                        title=titles[0],
+                        source_segment_ids=segment_ids,
+                        producer="reconciler",
+                        base_revision=predecessor.title_revision,
+                    )
+                )
+            else:
+                patches.append(
+                    ProposalPatch.supersede(
+                        proposal_id=stable_id(titles[0], predecessor.id),
+                        title=titles[0],
+                        predecessor_ids=[predecessor.id],
+                        source_segment_ids=segment_ids,
+                    )
+                )
         else:
             matched_ids: set[str] = set()
             for title in titles:

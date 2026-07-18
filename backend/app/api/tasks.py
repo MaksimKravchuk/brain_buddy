@@ -752,6 +752,7 @@ def _to_brain_dump_response(
                 source_segment_ids=patch.source_segment_ids,
                 predecessor_ids=patch.predecessor_ids,
                 successor_ids=patch.successor_ids,
+                locked_fields=patch.locked_fields,
                 base_revision=patch.base_revision,
             )
             for patch in operation.proposal_patches

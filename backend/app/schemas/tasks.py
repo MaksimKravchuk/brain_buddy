@@ -351,6 +351,7 @@ class BrainDumpProposalPatchResponse(StrictBaseModel):
     source_segment_ids: list[str] = Field(default_factory=list)
     predecessor_ids: list[str] = Field(default_factory=list)
     successor_ids: list[str] = Field(default_factory=list)
+    locked_fields: list[str] = Field(default_factory=list)
     base_revision: int | None = None
 
 

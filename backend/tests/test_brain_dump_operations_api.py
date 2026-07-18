@@ -227,6 +227,16 @@ def test_user_edits_survive_later_transcript_reconciliation_and_delete_before_sa
         json={"deleted": True, "expected_revision": edited.json()["revision"]},
     )
     assert deleted.status_code == 200, deleted.text
+    assert [
+        (patch["operation"], patch["producer"], patch["proposal_id"])
+        for patch in deleted.json()["proposal_patches"]
+    ] == [
+        ("add", "fast", first_id),
+        ("add", "fast", second_id),
+        ("update", "user", first_id),
+        ("remove", "user", second_id),
+    ]
+    assert deleted.json()["proposal_patches"][2]["locked_fields"] == ["title"]
 
     later = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/transcript",
@@ -433,6 +443,62 @@ def test_schema_v2_upload_seal_runs_accurate_reconciliation_from_original_audio(
             "error": None,
         }
     ]
+
+
+def test_schema_v2_accurate_correction_supersedes_fast_preview_without_canonical_write(
+    api_client,
+) -> None:
+    operation = _start_operation(api_client, key="start-schema-v2-supersede")
+    preview = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/transcript",
+        headers={"Idempotency-Key": "append-superseded-preview"},
+        json={
+            "segments": [
+                {
+                    "sequence": 1,
+                    "text": "починить brain body",
+                    "stability": "stable",
+                }
+            ]
+        },
+    )
+    assert preview.status_code == 200, preview.text
+    stale = preview.json()["proposals"][0]
+    assert preview.json()["proposal_patches"][-1]["operation"] == "add"
+    assert preview.json()["proposal_patches"][-1]["producer"] == "fast"
+    assert api_client.get("/api/tasks", params={"state": "inbox"}).json()[
+        "counts_by_state"
+    ]["inbox"] == 0
+
+    audio = "починить BrainBuddy".encode()
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    sealed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers={"Idempotency-Key": "seal-superseded-preview"},
+        json={
+            "expected_revision": uploaded.json()["revision"],
+            "expected_chunks": 1,
+            "manifest_hash": _manifest_hash(audio),
+        },
+    )
+    assert sealed.status_code == 200, sealed.text
+
+    proposals = sealed.json()["proposals"]
+    active = [proposal for proposal in proposals if not proposal["deleted"]]
+    old = next(proposal for proposal in proposals if proposal["id"] == stale["id"])
+    assert [proposal["title"] for proposal in active] == ["Починить BrainBuddy"]
+    assert old["successor_ids"] == [active[0]["id"]]
+    assert active[0]["predecessor_ids"] == [old["id"]]
+    assert sealed.json()["proposal_patches"][-1]["operation"] == "supersede"
+    assert sealed.json()["proposal_patches"][-1]["proposal_id"] == active[0]["id"]
+    assert api_client.get("/api/tasks", params={"state": "inbox"}).json()[
+        "counts_by_state"
+    ]["inbox"] == 0
 
 
 def test_schema_v2_audio_upload_rejects_missing_bad_hash_and_inactive_state(
