@@ -4,7 +4,9 @@ Date: 2026-07-13
 
 Status: Accepted implementation contract; unresolved gates defer only their named slices
 
-Scope: CloudDesign v2, current `main` implementation, ADR-0001, and ADR-0002
+Scope: CloudDesign v2, the implementation baseline at this record's date, ADR-0001, and
+ADR-0002. ADR-0006 contains the later current-state audit and narrower native-GTD
+lifecycle/query decisions.
 
 ## 1. Purpose and authority
 
@@ -33,6 +35,12 @@ port, but no task API, repository, or UI may duplicate `TreeDocument`, `NodeDocu
 `RelationDocument`, or the live cause-to-effect relation semantics.
 
 ## 2. Evidence baseline
+
+The repository inventory and gap classifications in this section are a historical
+2026-07-13 baseline. Use
+`docs/decisions/0006-native-gtd-lifecycle-and-capability-baseline.md` for the current
+implementation matrix and for accepted Tag terminology, lifecycle recovery, Waiting,
+date, Priority, search, sort, and pagination semantics.
 
 ### 2.1 Design archive
 

@@ -39,6 +39,7 @@
 - Before changing module boundaries, persistence ownership, workflow state machines, authentication assumptions, or deployment boundaries, inspect accepted/proposed records under `docs/decisions/`.
 - BrainBuddy vNext's modular-monolith boundaries and capture-to-result contracts are defined in `docs/decisions/0001-vnext-modular-monolith-and-workflow-contracts.md`; preserve them unless a new ADR explicitly supersedes the decision.
 - Async voice brain dumps and voice-led Weekly Review share the operation, patch, confirmation, privacy, and idempotency contract in `docs/decisions/0002-async-voice-operation-substrate.md`.
+- Native GTD capability status, Task lifecycle transitions, Waiting/recovery behavior, date and Priority semantics, and implementation-ready UI/API gaps are fixed in `docs/decisions/0006-native-gtd-lifecycle-and-capability-baseline.md`.
 - Autonomous delivery, visual preview eligibility, and production release/rollback authority are governed by `docs/decisions/0003-autonomous-delivery-guardrails.md` and `docs/autonomous-delivery-runbook.md`.
 
 ## Mandatory Spec Kit Workflow
@@ -47,12 +48,6 @@
 - Spec Kit owns versioned planning artifacts under `specs/` plus `.specify/`; Hermes Kanban remains the execution/orchestration and PR-review system. Generated `tasks.md` is planning input, not permission to bypass isolated worktrees, TDD, review, CI, merge, or release gates. `/speckit-implement` is disabled for BrainBuddy.
 - Architect-profile agents own Spec Kit technical planning, module boundaries, ADR alignment, and architecture handoff for new/materially changed architecture or feature specs. Implementation agents consume those artifacts from their Kanban cards rather than inventing architecture.
 - Before adding or changing a feature spec, run `python3 scripts/check_spec_kit_specs.py` (or `make check-specs`) and preserve documented grandfathering for historical specs.
-
-## Agent Delivery Workflow
-- Work in an isolated git worktree and feature branch. Never leave product changes uncommitted in the primary worktree.
-- Every useful product change must be committed, pushed, and opened as a PR against `main`. Review and green CI are the merge gate.
-- A successful push to `main` deploys to Fly automatically and runs production smoke checks. Do not perform an ad-hoc production deploy instead of this release path.
-- There are currently no customer or valuable production data: prioritize MVP velocity, but preserve the PR → CI → deploy traceability.
 
 ## Agent Delivery Workflow
 - Work in an isolated git worktree and feature branch. Never leave product changes uncommitted in the primary worktree.
