@@ -703,7 +703,7 @@ def test_schema_v2_user_title_lock_blocks_accurate_overwrite_with_visible_confli
         f"/api/brain-dump-operations/{operation['id']}/proposals/{proposal_id}",
         headers={"Idempotency-Key": "edit-lock-title"},
         json={
-            "title": "Починить BrainBuddy MVP",
+            "title": "Моя формулировка ремонта",
             "expected_revision": fast.json()["revision"],
         },
     )
@@ -727,7 +727,7 @@ def test_schema_v2_user_title_lock_blocks_accurate_overwrite_with_visible_confli
     assert sealed.status_code == 200, sealed.text
     proposal = sealed.json()["proposals"][0]
     assert proposal["id"] == proposal_id
-    assert proposal["title"] == "Починить BrainBuddy MVP"
+    assert proposal["title"] == "Моя формулировка ремонта"
     assert proposal["locked_fields"] == ["title"]
     assert proposal["conflicts"][0]["suggested_value"] == "Починить BrainBuddy"
 
