@@ -29,6 +29,7 @@ from app.schemas.tasks import (
     BrainDumpOperationResponse,
     BrainDumpOperationStartRequest,
     BrainDumpProposalConflictResponse,
+    BrainDumpProposalPatchResponse,
     BrainDumpProposalResponse,
     BrainDumpProposalUpdateRequest,
     BrainDumpProviderRunResponse,
@@ -255,7 +256,9 @@ def create_project(
         owner_id=current_user.id,
         idempotency_key=_require_idempotency_key(idempotency_key),
     )
-    return _to_project_response(project, task_service=task_service, owner_id=current_user.id)
+    return _to_project_response(
+        project, task_service=task_service, owner_id=current_user.id
+    )
 
 
 @router.get(
@@ -266,7 +269,9 @@ def list_projects(
     task_service: TaskService = Depends(get_task_service),
 ) -> list[ProjectResponse]:
     return [
-        _to_project_response(project, task_service=task_service, owner_id=current_user.id)
+        _to_project_response(
+            project, task_service=task_service, owner_id=current_user.id
+        )
         for project in task_service.list_projects(owner_id=current_user.id)
     ]
 
@@ -289,7 +294,9 @@ def update_project(
         owner_id=current_user.id,
         idempotency_key=_require_idempotency_key(idempotency_key),
     )
-    return _to_project_response(project, task_service=task_service, owner_id=current_user.id)
+    return _to_project_response(
+        project, task_service=task_service, owner_id=current_user.id
+    )
 
 
 @router.post(
@@ -310,7 +317,9 @@ def archive_project(
         owner_id=current_user.id,
         idempotency_key=_require_idempotency_key(idempotency_key),
     )
-    return _to_project_response(project, task_service=task_service, owner_id=current_user.id)
+    return _to_project_response(
+        project, task_service=task_service, owner_id=current_user.id
+    )
 
 
 @router.get(
@@ -704,8 +713,12 @@ def _to_brain_dump_response(
             provider=operation.consent.provider,
             recorded_at=operation.consent.recorded_at,
         ),
-        segments=[_to_brain_dump_segment_response(segment) for segment in operation.segments],
-        proposals=[_to_brain_dump_proposal_response(item) for item in operation.proposals],
+        segments=[
+            _to_brain_dump_segment_response(segment) for segment in operation.segments
+        ],
+        proposals=[
+            _to_brain_dump_proposal_response(item) for item in operation.proposals
+        ],
         media_ref=operation.media_ref,
         audio_chunks=[
             BrainDumpAudioChunkResponse(
@@ -727,6 +740,21 @@ def _to_brain_dump_response(
                 error=run.error,
             )
             for run in operation.provider_runs
+        ],
+        proposal_patches=[
+            BrainDumpProposalPatchResponse(
+                id=patch.id,
+                sequence=patch.sequence,
+                operation=patch.operation,
+                proposal_id=patch.proposal_id,
+                producer=patch.producer,
+                title=patch.title,
+                source_segment_ids=patch.source_segment_ids,
+                predecessor_ids=patch.predecessor_ids,
+                successor_ids=patch.successor_ids,
+                base_revision=patch.base_revision,
+            )
+            for patch in operation.proposal_patches
         ],
         status_history=operation.status_history,
         committed_task_ids=operation.committed_task_ids,
@@ -819,9 +847,13 @@ def _to_smart_add_response(
 ) -> SmartAddTaskResponse:
     return SmartAddTaskResponse(
         task=_to_response(result.task),
-        project=_to_project_response(result.project, task_service=task_service, owner_id=owner_id)
+        project=(
+            _to_project_response(
+                result.project, task_service=task_service, owner_id=owner_id
+            )
         if result.project
-        else None,
+            else None
+        ),
         tags=[
             _to_tag_response(tag, task_service=task_service, owner_id=owner_id)
             for tag in result.tags
