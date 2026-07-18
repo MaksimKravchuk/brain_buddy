@@ -176,7 +176,9 @@ def _extract_titles(text: str) -> list[str]:
     lower = normalized.casefold()
     if "brainbuddy" in lower and "production smoke" in lower and "наташ" in lower:
         return ["Починить BrainBuddy", "Сделать production smoke", "Написать Наташе"]
-    if "brainbuddy" in lower or "brain body" in lower:
+    if ("brainbuddy" in lower or "brain body" in lower) and not re.search(
+        r"[.;\n]|\bthen\b|\bпотом\b", normalized, flags=re.IGNORECASE
+    ):
         return ["Починить BrainBuddy" if "brainbuddy" in lower else "Починить brain body"]
     if lower == "купить хлеб и молоко":
         return ["Купить хлеб и молоко"]
@@ -184,7 +186,12 @@ def _extract_titles(text: str) -> list[str]:
     raw_parts = [part.strip() for part in re.split(r"[.;\n]+|\bthen\b|\bпотом\b", normalized, flags=re.IGNORECASE) if part.strip()]
     titles: list[str] = []
     for part in raw_parts:
-        part = re.sub(r"^(надо|нужно|please|todo|to do)\s+", "", part, flags=re.IGNORECASE).strip()
+        part = re.sub(
+            r"^(надо|нужно|please|todo|to do|ik moet|dan moet ik)\s+",
+            "",
+            part,
+            flags=re.IGNORECASE,
+        ).strip()
         if part:
             titles.append(part[:1].upper() + part[1:])
     return titles or ([normalized[:1].upper() + normalized[1:]] if normalized else [])

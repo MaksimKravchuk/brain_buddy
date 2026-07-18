@@ -575,6 +575,36 @@ def test_schema_v2_seal_requires_the_exact_client_manifest_hash(api_client) -> N
     assert "manifest_hash" in response.text
 
 
+def test_schema_v2_seal_rejects_uploaded_chunks_outside_the_exact_manifest(
+    api_client,
+) -> None:
+    operation = _start_operation(api_client, key="start-manifest-extra-chunk")
+    first = b"manifest chunk zero"
+    second = b"unexpected chunk one"
+    revision = operation["revision"]
+    for chunk_number, audio in enumerate((first, second)):
+        uploaded = api_client.put(
+            f"/api/brain-dump-operations/{operation['id']}/audio/{chunk_number}",
+            content=audio,
+            headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        revision = uploaded.json()["revision"]
+
+    response = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers={"Idempotency-Key": "seal-manifest-extra-chunk"},
+        json={
+            "expected_revision": revision,
+            "expected_chunks": 1,
+            "manifest_hash": _manifest_hash(first),
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["unexpected_chunks"] == [1]
+
+
 def test_schema_v2_unsupported_operation_command_is_rejected(api_client) -> None:
     operation = _start_operation(api_client, key="start-schema-v2-command-guard")
 

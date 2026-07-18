@@ -482,14 +482,18 @@ class TaskService:
             if operation.status not in {"recording", "paused"}:
                 raise ValidationFailure("Only an active brain dump can be sealed.")
             expected_numbers = set(range(payload.expected_chunks))
-            missing = sorted(
-                expected_numbers
-                - {chunk.chunk_number for chunk in operation.audio_chunks}
-            )
-            if missing:
+            uploaded_numbers = {
+                chunk.chunk_number for chunk in operation.audio_chunks
+            }
+            missing = sorted(expected_numbers - uploaded_numbers)
+            unexpected = sorted(uploaded_numbers - expected_numbers)
+            if missing or unexpected:
                 raise ValidationFailure(
-                    "Brain dump audio manifest is incomplete.",
-                    {"missing_chunks": missing},
+                    "Brain dump audio manifest is not the exact uploaded chunk set.",
+                    {
+                        "missing_chunks": missing,
+                        "unexpected_chunks": unexpected,
+                    },
                 )
             consumed_chunks = [
                 chunk
@@ -738,7 +742,6 @@ class TaskService:
             }
         )
 
-    @_serialized_write
     def retry_brain_dump_operation(
         self,
         operation_id: str,
@@ -751,69 +754,105 @@ class TaskService:
 
         command = f"brain_dump_retry:{operation_id}"
         request_hash = self._request_hash(command, payload)
-        record = self._idempotency_record(
-            owner_id=owner_id,
-            key=idempotency_key,
-            command=command,
-            request_hash=request_hash,
-        )
-        if record is not None:
-            return self._brain_dump_operation_result(record, owner_id=owner_id)
-        operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
-        self._assert_revision(
-            "Brain dump operation",
-            operation.id,
-            operation.revision,
-            payload.expected_revision,
-        )
-        recoverable_claim = (
-            operation.status == "accurate_transcribing"
-            and bool(operation.provider_runs)
-            and operation.provider_runs[-1].status == "running"
-            and operation.provider_runs[-1].lease_expires_at is not None
-            and operation.provider_runs[-1].lease_expires_at <= utcnow()
-        )
-        if operation.status != "retryable_error" and not recoverable_claim:
-            raise ValidationFailure("Only a retryable brain dump can be retried.")
-        last_run = next(
-            (
-                run
-                for run in reversed(operation.provider_runs)
-                if run.role == "accurate_stt"
-            ),
-            None,
-        )
-        if last_run is None or operation.sealed_manifest_hash is None:
-            raise ValidationFailure(
-                "Brain dump has no sealed checkpoint to resume from."
+        with self.task_repo.command_lock(owner_id):
+            self.task_repo.purge_expired_idempotency(owner_id=owner_id, now=utcnow())
+            self._reconcile_idempotent_result(owner_id=owner_id, key=idempotency_key)
+            record = self._idempotency_record(
+                owner_id=owner_id,
+                key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
             )
-        expected_numbers = {chunk.chunk_number for chunk in operation.audio_chunks}
-        audio = self.task_repo.load_brain_dump_audio_chunks(
-            owner_id=owner_id,
-            operation_id=operation.id,
-            chunks=[
-                (chunk.chunk_number, chunk.sha256)
-                for chunk in operation.audio_chunks
-                if chunk.chunk_number in expected_numbers
-            ],
-        )
-        now = utcnow()
+            if record is not None:
+                return self._brain_dump_operation_result(record, owner_id=owner_id)
+            operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
+            self._assert_revision(
+                "Brain dump operation",
+                operation.id,
+                operation.revision,
+                payload.expected_revision,
+            )
+            recoverable_claim = (
+                operation.status == "accurate_transcribing"
+                and bool(operation.provider_runs)
+                and operation.provider_runs[-1].status == "running"
+                and operation.provider_runs[-1].lease_expires_at is not None
+                and operation.provider_runs[-1].lease_expires_at <= utcnow()
+            )
+            if operation.status != "retryable_error" and not recoverable_claim:
+                raise ValidationFailure("Only a retryable brain dump can be retried.")
+            last_run = next(
+                (
+                    run
+                    for run in reversed(operation.provider_runs)
+                    if run.role == "accurate_stt"
+                ),
+                None,
+            )
+            if last_run is None or operation.sealed_manifest_hash is None:
+                raise ValidationFailure(
+                    "Brain dump has no sealed checkpoint to resume from."
+                )
+            audio = self.task_repo.load_brain_dump_audio_chunks(
+                owner_id=owner_id,
+                operation_id=operation.id,
+                chunks=[
+                    (chunk.chunk_number, chunk.sha256)
+                    for chunk in operation.audio_chunks
+                ],
+            )
+            now = utcnow()
+            attempt = last_run.attempt + 1
+            recovery_count = last_run.recovery_count + 1
+            claimed = operation.model_copy(
+                update={
+                    "status": "accurate_transcribing",
+                    "status_history": [
+                        *operation.status_history,
+                        "accurate_transcribing",
+                    ],
+                    "provider_runs": [
+                        *operation.provider_runs,
+                        BrainDumpProviderRunDocument(
+                            id=generate_id("provider_run"),
+                            role="accurate_stt",
+                            status="running",
+                            input_hash=hashlib.sha256(audio).hexdigest(),
+                            checkpoint="sealed",
+                            attempt=attempt,
+                            recovery_count=recovery_count,
+                            lease_owner=generate_id("runner"),
+                            lease_expires_at=now + timedelta(seconds=30),
+                            created_at=now,
+                            updated_at=now,
+                        ),
+                    ],
+                    "updated_at": now,
+                    "revision": operation.revision + 1,
+                }
+            )
+            self.task_repo.save_brain_dump_operation(claimed)
+
         updated = self._run_accurate_stt_and_reconcile(
-            operation,
+            claimed,
             audio=audio,
-            attempt=last_run.attempt + 1,
-            recovery_count=last_run.recovery_count + 1,
-            now=now,
+            attempt=attempt,
+            recovery_count=recovery_count,
+            now=utcnow(),
         )
-        self.task_repo.save_brain_dump_operation(updated)
-        self._store_idempotency(
-            owner_id=owner_id,
-            key=idempotency_key,
-            command=command,
-            request_hash=request_hash,
-            resource_id=updated.id,
-            response=updated,
-        )
+        with self.task_repo.command_lock(owner_id):
+            current = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
+            if current.revision != claimed.revision:
+                raise ConflictError("Brain dump operation", operation_id)
+            self.task_repo.save_brain_dump_operation(updated)
+            self._store_idempotency(
+                owner_id=owner_id,
+                key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+                resource_id=updated.id,
+                response=updated,
+            )
         return updated
 
     @_serialized_write
@@ -2247,7 +2286,11 @@ class TaskService:
             )
             return "proposal_" + hashlib.sha256(identity.encode()).hexdigest()[:12]
 
-        if len(mutable) == 1 and len(titles) > 1:
+        if (
+            len(mutable) == 1
+            and len(titles) > 1
+            and self._titles_form_split(mutable[0].title, titles)
+        ):
             predecessor = mutable[0]
             patches.extend(
                 ProposalPatch.split(
@@ -2258,7 +2301,13 @@ class TaskService:
                 )
                 for title in titles
             )
-        elif len(mutable) > 1 and len(titles) == 1:
+        elif (
+            len(mutable) > 1
+            and len(titles) == 1
+            and self._titles_form_merge(
+                [proposal.title for proposal in mutable], titles[0]
+            )
+        ):
             predecessor_ids = [proposal.id for proposal in mutable]
             patches.append(
                 ProposalPatch.merge(
@@ -2309,7 +2358,8 @@ class TaskService:
             patches.extend(
                 ProposalPatch.remove(proposal_id=proposal.id, producer="reconciler")
                 for proposal in mutable
-                if proposal.id not in matched_ids
+                if matched_ids
+                and proposal.id not in matched_ids
                 and not any(
                     patch.predecessor_ids and proposal.id in patch.predecessor_ids
                     for patch in patches
@@ -2600,6 +2650,38 @@ class TaskService:
             candidate_words
             and existing_words
             and candidate_words[0] == existing_words[0]
+        )
+
+    @staticmethod
+    def _title_content_words(title: str) -> set[str]:
+        return {
+            word
+            for word in re.findall(r"[\w']+", title.casefold())
+            if word not in {"a", "an", "and", "the", "to"}
+        }
+
+    @classmethod
+    def _titles_form_split(cls, predecessor: str, successors: list[str]) -> bool:
+        """Require textual evidence before emitting structural split lineage."""
+
+        predecessor_words = cls._title_content_words(predecessor)
+        successor_words = set().union(
+            *(cls._title_content_words(title) for title in successors)
+        )
+        return bool(predecessor_words and successor_words) and successor_words <= (
+            predecessor_words
+        )
+
+    @classmethod
+    def _titles_form_merge(cls, predecessors: list[str], successor: str) -> bool:
+        """Require textual evidence before emitting structural merge lineage."""
+
+        predecessor_words = set().union(
+            *(cls._title_content_words(title) for title in predecessors)
+        )
+        successor_words = cls._title_content_words(successor)
+        return bool(predecessor_words and successor_words) and predecessor_words <= (
+            successor_words
         )
 
     def _assert_active_references(

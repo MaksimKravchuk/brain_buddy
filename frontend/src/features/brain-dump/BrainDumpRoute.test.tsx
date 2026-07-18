@@ -1271,7 +1271,15 @@ describe("BrainDumpRoute", () => {
       id: "brain_dump_terminal",
       status: "terminal_error",
       revision: 4,
-      proposals: [proposal("proposal_child", 1, "Call the dentist")],
+      proposals: [
+        proposal("proposal_child", 1, "Call the dentist", {
+          predecessor_ids: ["proposal_old_1", "proposal_old_2"],
+          successor_ids: ["proposal_next"]
+        }),
+        proposal("proposal_split", 2, "Buy oat milk", {
+          predecessor_ids: ["proposal_old_3"]
+        })
+      ],
       provider_runs: [
         {
           id: "provider_run_terminal",
@@ -1298,5 +1306,35 @@ describe("BrainDumpRoute", () => {
     expect(screen.getByText("audio could not be transcribed")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delete recording" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Review provisional tasks" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "Review provisional tasks" }));
+    expect(screen.getByText("Merged from 2 tasks")).toBeInTheDocument();
+    expect(screen.getByText("Split from an earlier task")).toBeInTheDocument();
+  });
+
+  it("shows fallback terminal copy and preserves the recovery surface when deletion fails", async () => {
+    const terminal = operation({
+      id: "brain_dump_terminal_fallback",
+      status: "terminal_error",
+      revision: 5,
+      proposals: [],
+      provider_runs: undefined
+    });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_terminal_fallback") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(terminal);
+      }
+      if (url.endsWith("/brain_dump_terminal_fallback/cancel") && init?.method === "POST") {
+        return Promise.reject(new Error("delete failed"));
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_terminal_fallback/review");
+
+    expect(await screen.findByText("The recording could not be processed accurately.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Review provisional tasks" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Delete recording" }));
+    expect(await screen.findByText("delete failed")).toBeInTheDocument();
   });
 });

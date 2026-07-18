@@ -14,15 +14,25 @@
       ],
       "spans_ms": [[0, 1800], [1800, 3600], [3600, 5200]],
       "notes": "Code-switched product and deployment terms must be preserved.",
-      "code_switch_terms": ["BrainBuddy", "production smoke"]
+      "code_switch_terms": ["BrainBuddy", "production smoke"],
+      "audio_file": "ml-01-synthetic.wav",
+      "audio_sha256": "37e68e0c1a48cdc7ccbdc2c57698cca139b17b08a83f201a5e78160f9a7e3cd1",
+      "structural_change": "split",
+      "expected_confidence": 1.0
     },
     {
       "id": "ML-02",
+      "language": ["ru", "en"],
       "fast_text": "починить brain body",
       "accurate_text": "починить BrainBuddy",
       "expected_titles": ["Починить BrainBuddy"],
       "spans_ms": [[0, 1400]],
-      "notes": "Accurate sealed-audio STT corrects a low-confidence fast-STT hypothesis."
+      "notes": "Accurate sealed-audio STT corrects a low-confidence fast-STT hypothesis.",
+      "code_switch_terms": ["BrainBuddy"],
+      "audio_file": "ml-02-synthetic.wav",
+      "audio_sha256": "46c4018d65493d2a0cbce8f2160481cad4bd4869bd772321627105be91d8cab4",
+      "structural_change": "supersede",
+      "expected_confidence": 1.0
     },
     {
       "id": "ML-03",
@@ -35,14 +45,22 @@
       ],
       "spans_ms": [[0, 1200], [1200, 2600], [2600, 4000]],
       "notes": "Run-on utterance with no punctuation; only the 'потом' conjunction marks task boundaries.",
-      "run_on": true
+      "run_on": true,
+      "audio_file": "ml-03-synthetic.wav",
+      "audio_sha256": "6d05927a8de45d1ba08797df56617a01d7812ad0fba5c250ceedadfe26fcf283",
+      "structural_change": "split",
+      "expected_confidence": 1.0
     },
     {
       "id": "ML-04",
+      "language": ["ru"],
       "text": "купить хлеб и молоко",
       "expected_titles": ["Купить хлеб и молоко"],
       "spans_ms": [[0, 1300]],
-      "notes": "Conjunction alone is not a split oracle."
+      "notes": "Conjunction alone is not a split oracle.",
+      "audio_file": "ml-04-synthetic.wav",
+      "audio_sha256": "9816b238fc1a516ebb7cb77c4fa96615032e7ff640c87d5f3b259793c904319c",
+      "expected_confidence": 1.0
     },
     {
       "id": "ML-05",
@@ -54,15 +72,26 @@
       ],
       "spans_ms": [[0, 2000], [2000, 4200]],
       "notes": "In-sentence code switching within a single clause; product and deployment terms must survive untranslated.",
-      "code_switch_terms": ["BrainBuddy", "production smoke", "staging"]
+      "code_switch_terms": ["BrainBuddy", "production smoke", "staging"],
+      "audio_file": "ml-05-synthetic.wav",
+      "audio_sha256": "dba568aa21100be07ebc7e2828ab97c1a201a60cd67e0278e87a34ec4a47ac69",
+      "structural_change": "split",
+      "expected_confidence": 1.0
     },
     {
       "id": "ML-06",
+      "language": ["ru", "en"],
       "fast_text": "починить brain body",
       "user_title": "Починить BrainBuddy MVP",
       "accurate_text": "починить BrainBuddy",
+      "expected_titles": ["Починить BrainBuddy"],
       "expected_conflict_field": "title",
-      "notes": "User-locked title must surface a visible conflict instead of a silent accurate-STT overwrite."
+      "notes": "User-locked title must surface a visible conflict instead of a silent accurate-STT overwrite.",
+      "code_switch_terms": ["BrainBuddy"],
+      "audio_file": "ml-06-synthetic.wav",
+      "audio_sha256": "1fb9e21494f7656bb80159cf49da208de0c57a72e9a0f832f1c12f741c24dfc4",
+      "structural_change": "conflict",
+      "expected_confidence": 1.0
     },
     {
       "id": "ML-07",
@@ -73,7 +102,11 @@
         "De dokter bellen"
       ],
       "spans_ms": [[0, 1500], [1500, 3000]],
-      "notes": "Dutch fixture; 'moet ik/moet de' filler is stripped like the RU/EN modal-verb prefixes."
+      "notes": "Dutch fixture; 'moet ik/moet de' filler is stripped like the RU/EN modal-verb prefixes.",
+      "audio_file": "ml-07-synthetic.wav",
+      "audio_sha256": "dbbc9cf411f7bcde3ff9c824d1d4bd0eac200fe25488c885f56fc68bb9c0fedc",
+      "structural_change": "split",
+      "expected_confidence": 1.0
     },
     {
       "id": "ML-08",
