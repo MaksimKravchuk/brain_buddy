@@ -237,6 +237,15 @@ def test_user_edits_survive_later_transcript_reconciliation_and_delete_before_sa
         ("remove", "user", second_id),
     ]
     assert deleted.json()["proposal_patches"][2]["locked_fields"] == ["title"]
+    repeated_delete = api_client.patch(
+        f"/api/brain-dump-operations/{operation['id']}/proposals/{second_id}",
+        headers={"Idempotency-Key": "delete-second-proposal-again"},
+        json={"deleted": True, "expected_revision": deleted.json()["revision"]},
+    )
+    assert repeated_delete.status_code == 200, repeated_delete.text
+    assert repeated_delete.json()["proposal_patches"] == deleted.json()[
+        "proposal_patches"
+    ]
 
     later = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/transcript",
@@ -703,7 +712,7 @@ def test_schema_v2_user_title_lock_blocks_accurate_overwrite_with_visible_confli
         f"/api/brain-dump-operations/{operation['id']}/proposals/{proposal_id}",
         headers={"Idempotency-Key": "edit-lock-title"},
         json={
-            "title": "Моя формулировка ремонта",
+            "title": "Починить BrainBuddy MVP",
             "expected_revision": fast.json()["revision"],
         },
     )
@@ -727,7 +736,7 @@ def test_schema_v2_user_title_lock_blocks_accurate_overwrite_with_visible_confli
     assert sealed.status_code == 200, sealed.text
     proposal = sealed.json()["proposals"][0]
     assert proposal["id"] == proposal_id
-    assert proposal["title"] == "Моя формулировка ремонта"
+    assert proposal["title"] == "Починить BrainBuddy MVP"
     assert proposal["locked_fields"] == ["title"]
     assert proposal["conflicts"][0]["suggested_value"] == "Починить BrainBuddy"
 
