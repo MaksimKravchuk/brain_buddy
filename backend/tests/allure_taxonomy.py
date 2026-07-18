@@ -57,6 +57,7 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
     "tree_import_export": (EPIC_REALITY_TREE, "Tree API", "Import and export"),
     # Task management
     "task_api": (EPIC_TASKS, "Task API", "Task HTTP endpoints"),
+    "task_smart_add_api": (EPIC_TASKS, "Task API", "Smart Add classification"),
     "task_branch_coverage": (EPIC_TASKS, "Task API", "Task API branch coverage"),
     "task_tag_project_mvp_api": (
         EPIC_TASKS,
