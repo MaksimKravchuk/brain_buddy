@@ -32,6 +32,29 @@ from app.workflows.voice_brain_dump.providers import DeterministicAccurateStt
 OWNER = "user_recovery_owner"
 
 
+def test_structural_lineage_requires_meaningful_textual_evidence() -> None:
+    assert TaskService._titles_form_split(
+        "Buy oat milk and call the dentist",
+        ["Buy oat milk", "Call the dentist"],
+    )
+    assert not TaskService._titles_form_split(
+        "Buy oat milk",
+        ["Untranscribed sealed audio", "Call the dentist"],
+    )
+    assert not TaskService._titles_form_split("and the", ["Call dentist"])
+
+    assert TaskService._titles_form_merge(
+        ["Buy oat milk", "Call the dentist"],
+        "Buy oat milk and call the dentist",
+    )
+    assert not TaskService._titles_form_merge(
+        ["Buy oat milk", "Call the dentist"],
+        "Untranscribed sealed audio",
+    )
+    assert not TaskService._titles_form_merge(["and the"], "Call dentist")
+    assert TaskService._title_content_words("The call to Anna") == {"call", "anna"}
+
+
 def _manifest_hash(audio: bytes) -> str:
     digest = hashlib.sha256(audio).hexdigest()
     payload = [{"chunk_number": 0, "sha256": digest, "size_bytes": len(audio)}]
