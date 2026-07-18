@@ -17,6 +17,21 @@ node_modules/
 dist/
 build/
 coverage/
+/.coverage
+/coverage.xml
+/allure-results/
+/backend/.coverage
+/backend/coverage.xml
+/backend/allure-results/
+/backend/mutants/
+/backend/mutants.previous.*/
+/backend/mutants.failed-bootstrap/
+/backend/mutation-artifacts/
+/backend/mutation-artifacts.previous.*/
+/backend/mutation-allure-results/
+/backend/mutation-allure-results.previous.*/
+/frontend/allure-results/
+/allure-report/
 *.log
 
 # Editors
@@ -34,3 +49,9 @@ data/
 .codex/
 # CodeSpeak
 .codespeak/ignored/
+
+# Claude Code project-private state (track .claude/skills for Spec Kit)
+.claude/settings.local.json
+.claude/CLAUDE.local.md
+.claude/**/*.local.*
+.claude/**/.credentials*

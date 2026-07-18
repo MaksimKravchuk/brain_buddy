@@ -22,6 +22,7 @@
 ## Testing Guidelines
 - Backend uses pytest with FastAPI TestClient; mirror test names after module under test (`test_tree_service.py`).
 - Frontend leverages Vitest + Testing Library; place component specs beside feature folders.
+- Every pytest, Vitest, and Playwright product test must emit Allure Report 3 taxonomy: non-empty `epic`, `feature`, `story`, a human-readable title, and at least one named step. Use the central helpers in `backend/tests/allure_taxonomy.py`, `frontend/src/test/allureTaxonomy.ts`, and `frontend/tests/allure.fixtures.ts`; override explicitly only when a test needs narrower labels. See `docs/test-allure-taxonomy.md`.
 - Ensure new features include targeted tests; run both test suites before pushing.
 
 ## Commit & Pull Request Guidelines
@@ -38,6 +39,15 @@
 - Before changing module boundaries, persistence ownership, workflow state machines, authentication assumptions, or deployment boundaries, inspect accepted/proposed records under `docs/decisions/`.
 - BrainBuddy vNext's modular-monolith boundaries and capture-to-result contracts are defined in `docs/decisions/0001-vnext-modular-monolith-and-workflow-contracts.md`; preserve them unless a new ADR explicitly supersedes the decision.
 - Async voice brain dumps and voice-led Weekly Review share the operation, patch, confirmation, privacy, and idempotency contract in `docs/decisions/0002-async-voice-operation-substrate.md`.
+- Native GTD capability status, Task lifecycle transitions, Waiting/recovery behavior, date and Priority semantics, and implementation-ready UI/API gaps are fixed in `docs/decisions/0006-native-gtd-lifecycle-and-capability-baseline.md`.
+- Autonomous delivery, visual preview eligibility, and production release/rollback authority are governed by `docs/decisions/0003-autonomous-delivery-guardrails.md` and `docs/autonomous-delivery-runbook.md`.
+
+## Mandatory Spec Kit Workflow
+- GitHub Spec Kit is the canonical authoring workflow for every new or materially changed BrainBuddy feature spec; use the repo-pinned official CLI version documented in `docs/spec-kit-workflow.md`.
+- The required sequence is constitution → `/speckit-specify` (what/why) → `/speckit-clarify` → `/speckit-plan` (how/architecture) → `/speckit-checklist` → `/speckit-tasks` → Hermes Kanban handoff. Upstream v0.12.17 checklist setup requires `plan.md`, so run checklist after planning. Amend the spec first whenever implementation intent changes.
+- Spec Kit owns versioned planning artifacts under `specs/` plus `.specify/`; Hermes Kanban remains the execution/orchestration and PR-review system. Generated `tasks.md` is planning input, not permission to bypass isolated worktrees, TDD, review, CI, merge, or release gates. `/speckit-implement` is disabled for BrainBuddy.
+- Architect-profile agents own Spec Kit technical planning, module boundaries, ADR alignment, and architecture handoff for new/materially changed architecture or feature specs. Implementation agents consume those artifacts from their Kanban cards rather than inventing architecture.
+- Before adding or changing a feature spec, run `python3 scripts/check_spec_kit_specs.py` (or `make check-specs`) and preserve documented grandfathering for historical specs.
 
 ## Agent Delivery Workflow
 - Work in an isolated git worktree and feature branch. Never leave product changes uncommitted in the primary worktree.

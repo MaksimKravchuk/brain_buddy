@@ -7,6 +7,7 @@ replayed back as a valid cookie.
 
 from __future__ import annotations
 
+from contextlib import suppress
 from pathlib import Path
 
 from app.schemas.auth import Session
@@ -40,16 +41,12 @@ class SessionRepository(BaseRepository):
         session = self.load_model(path, Session)
         if session.expires_at <= utcnow():
             # Expired — clean up and behave as if missing.
-            try:
+            with suppress(FileNotFoundError):  # pragma: no cover - race
                 path.unlink()
-            except FileNotFoundError:  # pragma: no cover - race
-                pass
             return None
         return session
 
     def delete(self, token_hash: str) -> None:
         path = self._session_path(token_hash)
-        try:
+        with suppress(FileNotFoundError):
             path.unlink()
-        except FileNotFoundError:
-            pass

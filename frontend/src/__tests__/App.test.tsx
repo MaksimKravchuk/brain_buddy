@@ -1,0 +1,64 @@
+import { render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import App from "../App";
+
+const state = vi.hoisted(() => ({
+  hydrate: vi.fn(),
+  clearSession: vi.fn(),
+  unauthorizedHandler: undefined as (() => void) | null | undefined
+}));
+
+vi.mock("../stores/authStore", () => ({
+  useAuthStore: (selector: (store: typeof state) => unknown) => selector(state)
+}));
+vi.mock("../api/client", () => ({
+  setUnauthorizedHandler: (handler: (() => void) | null) => {
+    state.unauthorizedHandler = handler;
+  }
+}));
+vi.mock("../components/auth/ProtectedRoute", () => ({
+  ProtectedRoute: ({ children }: { children: React.ReactNode }) => <>{children}</>
+}));
+vi.mock("../pages/LoginPage", () => ({ default: () => <div>Login route</div> }));
+vi.mock("../pages/SignupPage", () => ({ default: () => <div>Signup route</div> }));
+vi.mock("../pages/TreeWorkspace", () => ({ default: () => <div>Workspace route</div> }));
+vi.mock("../features/tasks/TaskListPage", () => ({
+  TaskListPage: () => <div>Task shell route</div>
+}));
+vi.mock("../features/brain-dump/BrainDumpRoute", () => ({
+  BrainDumpRoute: () => <div>Brain dump route</div>
+}));
+
+describe("App", () => {
+  beforeEach(() => {
+    state.hydrate.mockReset();
+    state.clearSession.mockReset();
+    state.unauthorizedHandler = undefined;
+    window.history.pushState({}, "", "/login");
+  });
+
+  afterEach(() => vi.clearAllMocks());
+
+  it("hydrates auth state and installs an unauthorized session handler", () => {
+    const { unmount } = render(<App />);
+
+    expect(screen.getByText("Login route")).toBeInTheDocument();
+    expect(state.hydrate).toHaveBeenCalledOnce();
+    expect(state.unauthorizedHandler).toBeTypeOf("function");
+
+    state.unauthorizedHandler?.();
+    expect(state.clearSession).toHaveBeenCalledOnce();
+
+    unmount();
+    expect(state.unauthorizedHandler).toBeNull();
+  });
+
+  it("redirects unknown routes to the protected task shell", () => {
+    window.history.pushState({}, "", "/unknown");
+
+    render(<App />);
+
+    expect(screen.getByText("Task shell route")).toBeInTheDocument();
+  });
+});

@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.exceptions import (
     BrainBuddyError,
     ConflictError,
     NotFoundError,
     RepositoryError,
+    StorageUnavailableError,
     ValidationFailure,
 )
 from app.schemas import ErrorResponse
@@ -19,6 +22,52 @@ from .middleware import CORRELATION_HEADER
 
 def register_exception_handlers(app: FastAPI) -> None:
     """Attach exception handlers for known error types."""
+
+    @app.exception_handler(RequestValidationError)
+    async def handle_request_validation(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        correlation_id = getattr(request.state, "correlation_id", None)
+        payload = ErrorResponse(
+            message="Request validation failed.",
+            detail=exc.errors(),
+            reference_id=correlation_id,
+        )
+        response = JSONResponse(
+            status_code=422, content=payload.model_dump(by_alias=True)
+        )
+        if correlation_id:
+            response.headers[CORRELATION_HEADER] = correlation_id
+        return response
+
+    async def build_http_error_response(
+        request: Request, exc: StarletteHTTPException
+    ) -> JSONResponse:
+        correlation_id = getattr(request.state, "correlation_id", None)
+        detail = exc.detail if not isinstance(exc.detail, str) else None
+        payload = ErrorResponse(
+            message=str(exc.detail), detail=detail, reference_id=correlation_id
+        )
+        response = JSONResponse(
+            status_code=exc.status_code,
+            content=payload.model_dump(by_alias=True),
+            headers=exc.headers,
+        )
+        if correlation_id:
+            response.headers[CORRELATION_HEADER] = correlation_id
+        return response
+
+    @app.exception_handler(HTTPException)
+    async def handle_http_exception(
+        request: Request, exc: HTTPException
+    ) -> JSONResponse:
+        return await build_http_error_response(request, exc)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def handle_starlette_http_exception(
+        request: Request, exc: StarletteHTTPException
+    ) -> JSONResponse:
+        return await build_http_error_response(request, exc)
 
     @app.exception_handler(NotFoundError)
     async def handle_not_found(request: Request, exc: NotFoundError) -> JSONResponse:
@@ -64,6 +113,22 @@ def register_exception_handlers(app: FastAPI) -> None:
         # entity to align with contract.
         response = JSONResponse(
             status_code=400, content=payload.model_dump(by_alias=True)
+        )
+        if correlation_id:
+            response.headers[CORRELATION_HEADER] = correlation_id
+        return response
+
+    @app.exception_handler(StorageUnavailableError)
+    async def handle_storage_unavailable(
+        request: Request, exc: StorageUnavailableError
+    ) -> JSONResponse:
+        correlation_id = getattr(request.state, "correlation_id", None)
+        payload = ErrorResponse(
+            message="Storage is temporarily unavailable; please retry.",
+            reference_id=correlation_id,
+        )
+        response = JSONResponse(
+            status_code=503, content=payload.model_dump(by_alias=True)
         )
         if correlation_id:
             response.headers[CORRELATION_HEADER] = correlation_id

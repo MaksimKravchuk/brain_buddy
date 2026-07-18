@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { Sprout } from "lucide-react";
 
 import { ApiError } from "../api/client";
 import { Button } from "../components/ui/Button";
@@ -51,7 +52,7 @@ export default function LoginPage(): JSX.Element {
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="rounded-md border border-slate-300 px-3 py-2 text-slate-900 focus:border-brand-primary focus:outline-none"
+            className="rounded-md border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-soft transition-colors duration-200 ease-smooth focus:border-brand-primary focus:outline-none"
             autoComplete="email"
           />
         </label>
@@ -62,7 +63,7 @@ export default function LoginPage(): JSX.Element {
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="rounded-md border border-slate-300 px-3 py-2 text-slate-900 focus:border-brand-primary focus:outline-none"
+            className="rounded-md border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-soft transition-colors duration-200 ease-smooth focus:border-brand-primary focus:outline-none"
             autoComplete="current-password"
           />
         </label>
@@ -90,8 +91,14 @@ export function AuthLayout({
 }): JSX.Element {
   return (
     <div className="flex min-h-screen items-center justify-center bg-surface-base px-4">
-      <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-surface-raised p-6 shadow-raised">
-        <h1 className="mb-4 text-center text-title font-semibold text-slate-900">{title}</h1>
+      <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-surface-raised p-7 shadow-raised">
+        <div className="mb-3 flex items-center justify-center gap-2 text-subtitle font-semibold text-slate-900">
+          <Sprout className="h-5 w-5 text-brand-primary" aria-hidden="true" />
+          <span>Brain Buddy</span>
+        </div>
+        <h1 className="mb-5 text-center text-title font-semibold text-slate-900">
+          {title}
+        </h1>
         {children}
       </div>
     </div>
