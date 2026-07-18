@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.workflows.voice_brain_dump import evaluation
+from app.workflows.voice_brain_dump import evaluation, providers
 from app.workflows.voice_brain_dump.evaluation import (
     _case_languages,
     _EvaluationCase,
@@ -145,3 +145,22 @@ def test_evaluation_reports_provider_text_audio_and_title_mismatches(monkeypatch
     assert any("audio transcript mismatch" in failure for failure in report.failures)
     assert any("text/audio intent mismatch" in failure for failure in report.failures)
     assert any("titles" in failure for failure in report.failures)
+
+
+def test_deterministic_provider_tolerates_unknown_failure_plans_and_empty_cleanups(
+    monkeypatch,
+) -> None:
+    provider = providers.DeterministicAccurateStt(
+        fail_plan={"media": ["unknown-outcome"]}
+    )
+    result = provider.transcribe_sealed_audio(
+        providers.AccurateSttRequest(
+            operation_id="operation",
+            media_ref="media",
+            sealed_audio=b"Call dentist",
+        )
+    )
+    assert result.segments[0].text == "Call dentist"
+
+    monkeypatch.setattr(providers.re, "sub", lambda *_args, **_kwargs: "")
+    assert providers._extract_titles("content") == ["Content"]
