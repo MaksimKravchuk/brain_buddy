@@ -208,8 +208,8 @@ test("native task shell uses real backend counts, filters, reload and relogin pe
     await expect(page.getByRole("heading", { name: "Launch Plan" })).toBeVisible();
     await expect(page.getByText("Draft launch note")).toBeVisible();
 
-    await page.getByRole("link", { name: "@deep-work" }).click();
-    await expect(page.getByRole("heading", { name: "@deep-work" })).toBeVisible();
+    await page.getByRole("link", { name: "#deep-work" }).click();
+    await expect(page.getByRole("heading", { name: "#deep-work" })).toBeVisible();
     await expect(page.getByText("Draft launch note")).toBeVisible();
     await page.reload();
     await expect(page.getByText("Draft launch note")).toBeVisible();
@@ -218,7 +218,7 @@ test("native task shell uses real backend counts, filters, reload and relogin pe
   await test.step("relogin and prove the same filtered backend row is still present", async () => {
     await relogin(page, account.email);
     await page.goto(`/tags/${account.tag.id}`);
-    await expect(page.getByRole("heading", { name: "@deep-work" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "#deep-work" })).toBeVisible();
     await expect(page.getByText("Draft launch note")).toBeVisible();
   });
 });
