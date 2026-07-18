@@ -31,6 +31,8 @@ import type {
   TaskCreateRequest,
   TaskListFilters,
   TaskListResponse,
+  SmartAddTaskCreateRequest,
+  SmartAddTaskResponse,
   TaskResponse,
   TaskSubtaskCreateRequest,
   TaskSubtaskResponse,
@@ -231,6 +233,14 @@ export const apiClient = {
 
   createTask(payload: TaskCreateRequest, idempotencyKey: string) {
     return request<TaskResponse>("/tasks", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  smartAddTask(payload: SmartAddTaskCreateRequest, idempotencyKey: string) {
+    return request<SmartAddTaskResponse>("/tasks/smart-add", {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },
       body: payload

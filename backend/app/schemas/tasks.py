@@ -6,6 +6,7 @@ from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import Field, model_validator
+from pydantic_core import PydanticCustomError
 
 from .common import StrictBaseModel
 
@@ -76,6 +77,38 @@ class TaskCreateRequest(StrictBaseModel):
             data = {**data}
             data["tag_ids"] = data.pop("context_ids") or []
         return data
+
+
+class SmartAddClassificationRef(StrictBaseModel):
+    id: str | None = Field(default=None, min_length=1, max_length=500)
+    name: str | None = Field(default=None, min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def require_strict_xor(self) -> SmartAddClassificationRef:
+        if (self.id is None) == (self.name is None):
+            raise PydanticCustomError(
+                "smart_add_ref_xor",
+                "Smart Add classification ref requires exactly one of id or name.",
+            )
+        return self
+
+
+class SmartAddTaskCreateRequest(StrictBaseModel):
+    """Create a task and classify inline Smart Add refs atomically."""
+
+    title: str = Field(min_length=1, max_length=500)
+    details: str | None = Field(default=None, max_length=20_000)
+    state: OpenTaskState = "inbox"
+    waiting_for: str | None = Field(default=None, max_length=500)
+    due_date: date | None = None
+    priority: TaskPriority = "none"
+    project: SmartAddClassificationRef | None = None
+    tags: list[SmartAddClassificationRef] = Field(default_factory=list)
+
+
+class SmartAddCreatedResponse(StrictBaseModel):
+    project_id: str | None = None
+    tag_ids: list[str] = Field(default_factory=list)
 
 
 class TaskUpdateRequest(StrictBaseModel):
@@ -166,6 +199,13 @@ class TaskResponse(StrictBaseModel):
     revision: int
     subtasks: list[TaskSubtaskResponse] = Field(default_factory=list)
     comments: list[TaskCommentResponse] = Field(default_factory=list)
+
+
+class SmartAddTaskResponse(StrictBaseModel):
+    task: TaskResponse
+    project: ProjectResponse | None = None
+    tags: list[TagResponse] = Field(default_factory=list)
+    created: SmartAddCreatedResponse
 
 
 class TaskCounts(StrictBaseModel):

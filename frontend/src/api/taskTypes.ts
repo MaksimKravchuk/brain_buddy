@@ -101,6 +101,29 @@ export interface TaskCreateRequest {
   waiting_for?: string | null;
 }
 
+export type SmartAddClassificationRef = { id: string; name?: never } | { id?: never; name: string };
+
+export interface SmartAddTaskCreateRequest {
+  title: string;
+  details?: string | null;
+  state?: OpenTaskState;
+  waiting_for?: string | null;
+  due_date?: string | null;
+  priority?: TaskPriority;
+  project?: SmartAddClassificationRef | null;
+  tags?: SmartAddClassificationRef[];
+}
+
+export interface SmartAddTaskResponse {
+  task: TaskResponse;
+  project: ProjectResponse | null;
+  tags: TagResponse[];
+  created: {
+    project_id: string | null;
+    tag_ids: string[];
+  };
+}
+
 export interface TaskUpdateRequest {
   title?: string;
   details?: string | null;
