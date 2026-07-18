@@ -165,7 +165,7 @@ export interface TaskCommentUpdateRequest {
   expected_revision: number;
 }
 
-export type BrainDumpStatus = "recording" | "paused" | "sealing" | "fast_processing" | "accurate_transcribing" | "reconciling" | "awaiting_confirmation" | "committing" | "completed" | "cancelled";
+export type BrainDumpStatus = "recording" | "paused" | "sealing" | "fast_processing" | "accurate_transcribing" | "reconciling" | "retryable_error" | "terminal_error" | "awaiting_confirmation" | "committing" | "completed" | "cancelled";
 export type BrainDumpProposalStatus = "provisional" | "wording_changing" | "ready_to_review" | "user_edited" | "reconciled" | "conflicted";
 
 export interface BrainDumpProposalConflict {
@@ -218,6 +218,16 @@ export interface BrainDumpOperationResponse {
   proposals: BrainDumpProposal[];
   media_ref?: string | null;
   audio_chunks?: Array<{ chunk_number: number; sha256: string; size_bytes: number }>;
+  sealed_manifest_hash?: string | null;
+  provider_runs?: Array<{
+    id: string;
+    role: "accurate_stt" | "reconciler";
+    status: "pending" | "running" | "succeeded" | "retryable_error" | "terminal_error";
+    checkpoint: "sealed" | "accurate_transcribed" | "reconciled";
+    attempt: number;
+    recovery_count: number;
+    error: string | null;
+  }>;
   status_history?: BrainDumpStatus[];
   committed_task_ids: string[];
   created_at: string;

@@ -31,6 +31,7 @@ from app.schemas.tasks import (
     BrainDumpProposalConflictResponse,
     BrainDumpProposalResponse,
     BrainDumpProposalUpdateRequest,
+    BrainDumpProviderRunResponse,
     BrainDumpSealRequest,
     BrainDumpTranscriptAppendRequest,
     BrainDumpTranscriptSegmentResponse,
@@ -709,6 +710,19 @@ def _to_brain_dump_response(
                 size_bytes=chunk.size_bytes,
             )
             for chunk in operation.audio_chunks
+        ],
+        sealed_manifest_hash=operation.sealed_manifest_hash,
+        provider_runs=[
+            BrainDumpProviderRunResponse(
+                id=run.id,
+                role=run.role,
+                status=run.status,
+                checkpoint=run.checkpoint,
+                attempt=run.attempt,
+                recovery_count=run.recovery_count,
+                error=run.error,
+            )
+            for run in operation.provider_runs
         ],
         status_history=operation.status_history,
         committed_task_ids=operation.committed_task_ids,

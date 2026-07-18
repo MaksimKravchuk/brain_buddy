@@ -62,6 +62,10 @@ export function BrainDumpRoute(): JSX.Element {
   const [lastTranscript, setLastTranscript] = useState("");
   const [savedCount, setSavedCount] = useState<number | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioChunkNumberRef = useRef(0);
+  const audioUploadQueueRef = useRef<Promise<void>>(Promise.resolve());
   const sequenceRef = useRef(0);
   const pendingInterimSequenceRef = useRef<number | null>(null);
   const operationRef = useRef<BrainDumpOperationResponse | null>(null);
@@ -90,6 +94,10 @@ export function BrainDumpRoute(): JSX.Element {
     return () => {
       recognitionRef.current?.stop();
       recognitionRef.current = null;
+      mediaRecorderRef.current?.stop();
+      mediaRecorderRef.current = null;
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
     };
   }, []);
 
@@ -109,11 +117,7 @@ export function BrainDumpRoute(): JSX.Element {
 
   function speechRecognitionConstructor() {
     const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
-    if (!Recognition) {
-      setError("Browser speech recognition is unavailable; try Chrome or Edge.");
-      return null;
-    }
-    return Recognition;
+    return Recognition ?? null;
   }
 
   function stopRecognition() {
@@ -123,8 +127,7 @@ export function BrainDumpRoute(): JSX.Element {
   }
 
   async function probeMicrophone() {
-    const permissionProbe = await navigator.mediaDevices.getUserMedia({ audio: true });
-    permissionProbe.getTracks().forEach((track) => track.stop());
+    return navigator.mediaDevices.getUserMedia({ audio: true });
   }
 
   function startRecognitionFor(started: BrainDumpOperationResponse, Recognition: SpeechRecognitionConstructor) {
@@ -161,21 +164,84 @@ export function BrainDumpRoute(): JSX.Element {
     recognitionRef.current = recognition;
   }
 
+  async function sha256(bytes: ArrayBuffer) {
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+
+  async function manifestHash(operation: BrainDumpOperationResponse, expectedChunks: number) {
+    const chunks = (operation.audio_chunks ?? [])
+      .filter((chunk) => chunk.chunk_number < expectedChunks)
+      .sort((left, right) => left.chunk_number - right.chunk_number)
+      .map(({ chunk_number, sha256: digest, size_bytes }) => ({ chunk_number, sha256: digest, size_bytes }));
+    return sha256(new TextEncoder().encode(JSON.stringify(chunks)).buffer);
+  }
+
+  function startMediaRecorderFor(started: BrainDumpOperationResponse, stream: MediaStream) {
+    const recorder = new MediaRecorder(stream);
+    audioChunkNumberRef.current = 0;
+    audioUploadQueueRef.current = Promise.resolve();
+    recorder.ondataavailable = (event) => {
+      if (event.data.size === 0) {
+        return;
+      }
+      const chunkNumber = audioChunkNumberRef.current++;
+      audioUploadQueueRef.current = audioUploadQueueRef.current.then(async () => {
+        const bytes = await event.data.arrayBuffer();
+        const updated = await apiClient.uploadBrainDumpAudio(
+          started.id,
+          chunkNumber,
+          bytes,
+          await sha256(bytes)
+        );
+        applyOperation(updated);
+      });
+      void audioUploadQueueRef.current.catch((caught: unknown) => {
+        setError(caught instanceof Error ? caught.message : "Original audio upload failed.");
+      });
+    };
+    recorder.start(1000);
+    mediaRecorderRef.current = recorder;
+    mediaStreamRef.current = stream;
+  }
+
+  async function stopMediaRecorder() {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state === "inactive") {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      const previousStop = recorder.onstop;
+      recorder.onstop = (event) => {
+        previousStop?.call(recorder, event);
+        resolve();
+      };
+      recorder.stop();
+    });
+    mediaRecorderRef.current = null;
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    mediaStreamRef.current = null;
+  }
+
   async function startRecording() {
     setError(null);
     const Recognition = speechRecognitionConstructor();
-    if (!Recognition) {
+    if (typeof MediaRecorder === "undefined") {
+      setError("Original audio recording is unavailable in this browser.");
       return;
     }
     setIsStarting(true);
     try {
-      await probeMicrophone();
+      const stream = await probeMicrophone();
       const started = operationRef.current ?? (await apiClient.startBrainDump({ consent: { microphone: true, external_processing_allowed: false } }, idempotencyKey("start")));
       applyOperation(started);
       if (params.operationId === "new") {
         navigate(`/brain-dump/${started.id}`, { replace: true });
       }
-      startRecognitionFor(started, Recognition);
+      startMediaRecorderFor(started, stream);
+      if (Recognition) {
+        startRecognitionFor(started, Recognition);
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Microphone permission was denied.");
     } finally {
@@ -191,10 +257,14 @@ export function BrainDumpRoute(): JSX.Element {
     const Recognition = action === "resume" ? speechRecognitionConstructor() : null;
     if (action === "resume") {
       if (!Recognition) {
+        setError("Browser speech recognition is unavailable; try Chrome or Edge.");
         return;
       }
       try {
-        await probeMicrophone();
+        const permissionProbe = await probeMicrophone();
+        if (!mediaRecorderRef.current) {
+          permissionProbe.getTracks().forEach((track) => track.stop());
+        }
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Microphone permission was denied.");
         return;
@@ -207,16 +277,41 @@ export function BrainDumpRoute(): JSX.Element {
       if (!current) {
         return;
       }
+      if (action === "finish") {
+        stopRecognition();
+        await stopMediaRecorder();
+        await audioUploadQueueRef.current;
+        const sealedInput = operationRef.current;
+        if (!sealedInput) {
+          return;
+        }
+        const expectedChunks = audioChunkNumberRef.current;
+        const sealed = await apiClient.sealBrainDump(
+          sealedInput.id,
+          {
+            expected_revision: sealedInput.revision,
+            expected_chunks: expectedChunks,
+            manifest_hash: await manifestHash(sealedInput, expectedChunks)
+          },
+          idempotencyKey("seal")
+        );
+        applyOperation(sealed);
+        navigate(`/brain-dump/${sealed.id}/review`, { replace: true });
+        return;
+      }
       const updated = await apiClient.commandBrainDump(current.id, action, current.revision, idempotencyKey(action));
       applyOperation(updated);
-      if (action === "pause" || action === "finish" || action === "cancel") {
+      if (action === "pause" || action === "cancel") {
         stopRecognition();
+      }
+      if (action === "pause" && mediaRecorderRef.current?.state === "recording") {
+        mediaRecorderRef.current.pause();
       }
       if (action === "resume" && Recognition) {
         startRecognitionFor(updated, Recognition);
       }
-      if (action === "finish") {
-        navigate(`/brain-dump/${current.id}/review`, { replace: true });
+      if (action === "resume" && mediaRecorderRef.current?.state === "paused") {
+        mediaRecorderRef.current.resume();
       }
       if (action === "cancel") {
         applyOperation(null);
