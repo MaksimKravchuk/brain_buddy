@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import date
 
-from fastapi import APIRouter, Depends, Header, Query, status
+from fastapi import APIRouter, Depends, Header, Query, Request, status
 
 from app.api.contracts import error_responses
 from app.api.dependencies import get_current_user, get_task_service
@@ -24,11 +24,16 @@ from app.modules.tasks.domain import (
 )
 from app.schemas.auth import User
 from app.schemas.tasks import (
+    BrainDumpAudioChunkResponse,
     BrainDumpConsentResponse,
     BrainDumpOperationResponse,
     BrainDumpOperationStartRequest,
+    BrainDumpProposalConflictResponse,
+    BrainDumpProposalPatchResponse,
     BrainDumpProposalResponse,
     BrainDumpProposalUpdateRequest,
+    BrainDumpProviderRunResponse,
+    BrainDumpSealRequest,
     BrainDumpTranscriptAppendRequest,
     BrainDumpTranscriptSegmentResponse,
     ExpectedRevisionRequest,
@@ -126,6 +131,55 @@ def append_brain_dump_transcript(
     )
 
 
+@router.put(
+    "/brain-dump-operations/{operation_id}/audio/{chunk_number}",
+    response_model=BrainDumpOperationResponse,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
+async def upload_brain_dump_audio_chunk(
+    operation_id: str,
+    chunk_number: int,
+    request: Request,
+    x_content_sha256: str | None = Header(default=None, alias="X-Content-SHA256"),
+    current_user: User = Depends(get_current_user),
+    task_service: TaskService = Depends(get_task_service),
+) -> BrainDumpOperationResponse:
+    if not x_content_sha256:
+        raise ValidationFailure("X-Content-SHA256 header is required.")
+    content = await request.body()
+    return _to_brain_dump_response(
+        task_service.upload_brain_dump_audio_chunk(
+            operation_id,
+            chunk_number,
+            content,
+            owner_id=current_user.id,
+            content_sha256=x_content_sha256,
+        )
+    )
+
+
+@router.post(
+    "/brain-dump-operations/{operation_id}/seal",
+    response_model=BrainDumpOperationResponse,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
+def seal_brain_dump_operation(
+    operation_id: str,
+    payload: BrainDumpSealRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    task_service: TaskService = Depends(get_task_service),
+) -> BrainDumpOperationResponse:
+    return _to_brain_dump_response(
+        task_service.seal_brain_dump_operation(
+            operation_id,
+            payload,
+            owner_id=current_user.id,
+            idempotency_key=_require_idempotency_key(idempotency_key),
+        )
+    )
+
+
 @router.patch(
     "/brain-dump-operations/{operation_id}/proposals/{proposal_id}",
     response_model=BrainDumpOperationResponse,
@@ -168,6 +222,10 @@ def command_brain_dump_operation(
         operation = task_service.commit_brain_dump_operation(
             operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
         )
+    elif action == "retry":
+        operation = task_service.retry_brain_dump_operation(
+            operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
+        )
     elif action in {"pause", "resume", "finish", "cancel"}:
         operation = task_service.transition_brain_dump_operation(
             operation_id,
@@ -198,7 +256,9 @@ def create_project(
         owner_id=current_user.id,
         idempotency_key=_require_idempotency_key(idempotency_key),
     )
-    return _to_project_response(project, task_service=task_service, owner_id=current_user.id)
+    return _to_project_response(
+        project, task_service=task_service, owner_id=current_user.id
+    )
 
 
 @router.get(
@@ -209,7 +269,9 @@ def list_projects(
     task_service: TaskService = Depends(get_task_service),
 ) -> list[ProjectResponse]:
     return [
-        _to_project_response(project, task_service=task_service, owner_id=current_user.id)
+        _to_project_response(
+            project, task_service=task_service, owner_id=current_user.id
+        )
         for project in task_service.list_projects(owner_id=current_user.id)
     ]
 
@@ -232,7 +294,9 @@ def update_project(
         owner_id=current_user.id,
         idempotency_key=_require_idempotency_key(idempotency_key),
     )
-    return _to_project_response(project, task_service=task_service, owner_id=current_user.id)
+    return _to_project_response(
+        project, task_service=task_service, owner_id=current_user.id
+    )
 
 
 @router.post(
@@ -253,7 +317,9 @@ def archive_project(
         owner_id=current_user.id,
         idempotency_key=_require_idempotency_key(idempotency_key),
     )
-    return _to_project_response(project, task_service=task_service, owner_id=current_user.id)
+    return _to_project_response(
+        project, task_service=task_service, owner_id=current_user.id
+    )
 
 
 @router.get(
@@ -647,8 +713,51 @@ def _to_brain_dump_response(
             provider=operation.consent.provider,
             recorded_at=operation.consent.recorded_at,
         ),
-        segments=[_to_brain_dump_segment_response(segment) for segment in operation.segments],
-        proposals=[_to_brain_dump_proposal_response(item) for item in operation.proposals],
+        segments=[
+            _to_brain_dump_segment_response(segment) for segment in operation.segments
+        ],
+        proposals=[
+            _to_brain_dump_proposal_response(item) for item in operation.proposals
+        ],
+        media_ref=operation.media_ref,
+        audio_chunks=[
+            BrainDumpAudioChunkResponse(
+                chunk_number=chunk.chunk_number,
+                sha256=chunk.sha256,
+                size_bytes=chunk.size_bytes,
+            )
+            for chunk in operation.audio_chunks
+        ],
+        sealed_manifest_hash=operation.sealed_manifest_hash,
+        provider_runs=[
+            BrainDumpProviderRunResponse(
+                id=run.id,
+                role=run.role,
+                status=run.status,
+                checkpoint=run.checkpoint,
+                attempt=run.attempt,
+                recovery_count=run.recovery_count,
+                error=run.error,
+            )
+            for run in operation.provider_runs
+        ],
+        proposal_patches=[
+            BrainDumpProposalPatchResponse(
+                id=patch.id,
+                sequence=patch.sequence,
+                operation=patch.operation,
+                proposal_id=patch.proposal_id,
+                producer=patch.producer,
+                title=patch.title,
+                source_segment_ids=patch.source_segment_ids,
+                predecessor_ids=patch.predecessor_ids,
+                successor_ids=patch.successor_ids,
+                locked_fields=patch.locked_fields,
+                base_revision=patch.base_revision,
+            )
+            for patch in operation.proposal_patches
+        ],
+        status_history=operation.status_history,
         committed_task_ids=operation.committed_task_ids,
         created_at=operation.created_at,
         updated_at=operation.updated_at,
@@ -664,6 +773,12 @@ def _to_brain_dump_segment_response(
         sequence=segment.sequence,
         text=segment.text,
         stability=segment.stability,
+        start_ms=segment.start_ms,
+        end_ms=segment.end_ms,
+        provider_role=segment.provider_role,
+        provider=segment.provider,
+        model=segment.model,
+        supersedes_segment_ids=segment.supersedes_segment_ids,
         created_at=segment.created_at,
     )
 
@@ -677,6 +792,19 @@ def _to_brain_dump_proposal_response(
         title=proposal.title,
         status=proposal.status,
         source_segment_ids=proposal.source_segment_ids,
+        predecessor_ids=proposal.predecessor_ids,
+        successor_ids=proposal.successor_ids,
+        locked_fields=proposal.locked_fields,
+        conflicts=[
+            BrainDumpProposalConflictResponse(
+                field=conflict.field,
+                current_value=conflict.current_value,
+                suggested_value=conflict.suggested_value,
+                producer=conflict.producer,
+                source_segment_ids=conflict.source_segment_ids,
+            )
+            for conflict in proposal.conflicts
+        ],
         deleted=proposal.deleted,
         user_edited=proposal.user_edited,
         revision=proposal.revision,
@@ -720,9 +848,13 @@ def _to_smart_add_response(
 ) -> SmartAddTaskResponse:
     return SmartAddTaskResponse(
         task=_to_response(result.task),
-        project=_to_project_response(result.project, task_service=task_service, owner_id=owner_id)
+        project=(
+            _to_project_response(
+                result.project, task_service=task_service, owner_id=owner_id
+            )
         if result.project
-        else None,
+            else None
+        ),
         tags=[
             _to_tag_response(tag, task_service=task_service, owner_id=owner_id)
             for tag in result.tags

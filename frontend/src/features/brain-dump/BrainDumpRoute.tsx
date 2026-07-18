@@ -34,8 +34,18 @@ const statusLabels: Record<BrainDumpProposalStatus, string> = {
   provisional: "Provisional",
   wording_changing: "Wording still changing",
   ready_to_review: "Ready to review",
-  user_edited: "Edited"
+  user_edited: "Edited",
+  reconciled: "Reconciled",
+  conflicted: "Needs review"
 };
+
+const processingStatusLabels = new Map<string, string>([
+  ["sealing", "Sealing audio"],
+  ["fast_processing", "Building provisional tasks"],
+  ["accurate_transcribing", "Improving transcript"],
+  ["reconciling", "Reconciling tasks"],
+  ["committing", "Saving tasks"]
+]);
 
 function idempotencyKey(suffix: string) {
   return `brain-dump-${suffix}-${Date.now()}`;
@@ -51,13 +61,19 @@ export function BrainDumpRoute(): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [lastTranscript, setLastTranscript] = useState("");
   const [savedCount, setSavedCount] = useState<number | null>(null);
+  const [showProvisionalReview, setShowProvisionalReview] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioChunkNumberRef = useRef(0);
+  const audioUploadQueueRef = useRef<Promise<void>>(Promise.resolve());
   const sequenceRef = useRef(0);
   const pendingInterimSequenceRef = useRef<number | null>(null);
   const operationRef = useRef<BrainDumpOperationResponse | null>(null);
   const proposalMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const isReviewPath = location.pathname.endsWith("/review");
   const activeProposals = useMemo(() => (operation?.proposals ?? []).filter((proposal) => !proposal.deleted), [operation]);
+  const hasUnresolvedConflicts = activeProposals.some((proposal) => (proposal.conflicts ?? []).length > 0);
 
   const applyOperation = useCallback((next: BrainDumpOperationResponse | null) => {
     const current = operationRef.current;
@@ -79,6 +95,10 @@ export function BrainDumpRoute(): JSX.Element {
     return () => {
       recognitionRef.current?.stop();
       recognitionRef.current = null;
+      mediaRecorderRef.current?.stop();
+      mediaRecorderRef.current = null;
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
     };
   }, []);
 
@@ -98,11 +118,7 @@ export function BrainDumpRoute(): JSX.Element {
 
   function speechRecognitionConstructor() {
     const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
-    if (!Recognition) {
-      setError("Browser speech recognition is unavailable; try Chrome or Edge.");
-      return null;
-    }
-    return Recognition;
+    return Recognition ?? null;
   }
 
   function stopRecognition() {
@@ -112,8 +128,7 @@ export function BrainDumpRoute(): JSX.Element {
   }
 
   async function probeMicrophone() {
-    const permissionProbe = await navigator.mediaDevices.getUserMedia({ audio: true });
-    permissionProbe.getTracks().forEach((track) => track.stop());
+    return navigator.mediaDevices.getUserMedia({ audio: true });
   }
 
   function startRecognitionFor(started: BrainDumpOperationResponse, Recognition: SpeechRecognitionConstructor) {
@@ -150,21 +165,84 @@ export function BrainDumpRoute(): JSX.Element {
     recognitionRef.current = recognition;
   }
 
+  async function sha256(bytes: ArrayBuffer) {
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+
+  async function manifestHash(operation: BrainDumpOperationResponse, expectedChunks: number) {
+    const chunks = (operation.audio_chunks ?? [])
+      .filter((chunk) => chunk.chunk_number < expectedChunks)
+      .sort((left, right) => left.chunk_number - right.chunk_number)
+      .map(({ chunk_number, sha256: digest, size_bytes }) => ({ chunk_number, sha256: digest, size_bytes }));
+    return sha256(new TextEncoder().encode(JSON.stringify(chunks)).buffer);
+  }
+
+  function startMediaRecorderFor(started: BrainDumpOperationResponse, stream: MediaStream) {
+    const recorder = new MediaRecorder(stream);
+    audioChunkNumberRef.current = 0;
+    audioUploadQueueRef.current = Promise.resolve();
+    recorder.ondataavailable = (event) => {
+      if (event.data.size === 0) {
+        return;
+      }
+      const chunkNumber = audioChunkNumberRef.current++;
+      audioUploadQueueRef.current = audioUploadQueueRef.current.then(async () => {
+        const bytes = await event.data.arrayBuffer();
+        const updated = await apiClient.uploadBrainDumpAudio(
+          started.id,
+          chunkNumber,
+          bytes,
+          await sha256(bytes)
+        );
+        applyOperation(updated);
+      });
+      void audioUploadQueueRef.current.catch((caught: unknown) => {
+        setError(caught instanceof Error ? caught.message : "Original audio upload failed.");
+      });
+    };
+    recorder.start(1000);
+    mediaRecorderRef.current = recorder;
+    mediaStreamRef.current = stream;
+  }
+
+  async function stopMediaRecorder() {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state === "inactive") {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      const previousStop = recorder.onstop;
+      recorder.onstop = (event) => {
+        previousStop?.call(recorder, event);
+        resolve();
+      };
+      recorder.stop();
+    });
+    mediaRecorderRef.current = null;
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    mediaStreamRef.current = null;
+  }
+
   async function startRecording() {
     setError(null);
     const Recognition = speechRecognitionConstructor();
-    if (!Recognition) {
+    if (typeof MediaRecorder === "undefined") {
+      setError("Original audio recording is unavailable in this browser.");
       return;
     }
     setIsStarting(true);
     try {
-      await probeMicrophone();
+      const stream = await probeMicrophone();
       const started = operationRef.current ?? (await apiClient.startBrainDump({ consent: { microphone: true, external_processing_allowed: false } }, idempotencyKey("start")));
       applyOperation(started);
       if (params.operationId === "new") {
         navigate(`/brain-dump/${started.id}`, { replace: true });
       }
-      startRecognitionFor(started, Recognition);
+      startMediaRecorderFor(started, stream);
+      if (Recognition) {
+        startRecognitionFor(started, Recognition);
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Microphone permission was denied.");
     } finally {
@@ -172,7 +250,7 @@ export function BrainDumpRoute(): JSX.Element {
     }
   }
 
-  async function command(action: "pause" | "resume" | "finish" | "cancel" | "commit") {
+  async function command(action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry") {
     if (!operationRef.current) {
       return;
     }
@@ -180,10 +258,14 @@ export function BrainDumpRoute(): JSX.Element {
     const Recognition = action === "resume" ? speechRecognitionConstructor() : null;
     if (action === "resume") {
       if (!Recognition) {
+        setError("Browser speech recognition is unavailable; try Chrome or Edge.");
         return;
       }
       try {
-        await probeMicrophone();
+        const permissionProbe = await probeMicrophone();
+        if (!mediaRecorderRef.current) {
+          permissionProbe.getTracks().forEach((track) => track.stop());
+        }
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Microphone permission was denied.");
         return;
@@ -196,16 +278,41 @@ export function BrainDumpRoute(): JSX.Element {
       if (!current) {
         return;
       }
+      if (action === "finish") {
+        stopRecognition();
+        await stopMediaRecorder();
+        await audioUploadQueueRef.current;
+        const sealedInput = operationRef.current;
+        if (!sealedInput) {
+          return;
+        }
+        const expectedChunks = audioChunkNumberRef.current;
+        const sealed = await apiClient.sealBrainDump(
+          sealedInput.id,
+          {
+            expected_revision: sealedInput.revision,
+            expected_chunks: expectedChunks,
+            manifest_hash: await manifestHash(sealedInput, expectedChunks)
+          },
+          idempotencyKey("seal")
+        );
+        applyOperation(sealed);
+        navigate(`/brain-dump/${sealed.id}/review`, { replace: true });
+        return;
+      }
       const updated = await apiClient.commandBrainDump(current.id, action, current.revision, idempotencyKey(action));
       applyOperation(updated);
-      if (action === "pause" || action === "finish" || action === "cancel") {
+      if (action === "pause" || action === "cancel") {
         stopRecognition();
+      }
+      if (action === "pause" && mediaRecorderRef.current?.state === "recording") {
+        mediaRecorderRef.current.pause();
       }
       if (action === "resume" && Recognition) {
         startRecognitionFor(updated, Recognition);
       }
-      if (action === "finish") {
-        navigate(`/brain-dump/${current.id}/review`, { replace: true });
+      if (action === "resume" && mediaRecorderRef.current?.state === "paused") {
+        mediaRecorderRef.current.resume();
       }
       if (action === "cancel") {
         applyOperation(null);
@@ -279,10 +386,30 @@ export function BrainDumpRoute(): JSX.Element {
     );
   }
 
+  if (operation && processingStatusLabels.has(operation.status) && operation.status !== "committing") {
+    return <ProcessingSurface error={error} operation={operation} proposals={activeProposals} />;
+  }
+
+  if (operation && (operation.status === "retryable_error" || operation.status === "terminal_error") && !showProvisionalReview) {
+    const providerRuns = operation.provider_runs ?? [];
+    const providerError = providerRuns[providerRuns.length - 1]?.error ?? null;
+    return (
+      <RecoverySurface
+        error={error}
+        operation={operation}
+        providerError={providerError}
+        onDelete={() => void command("cancel")}
+        onReview={() => setShowProvisionalReview(true)}
+        onRetry={() => void command("retry")}
+      />
+    );
+  }
+
   if (isReviewPath || operation?.status === "awaiting_confirmation") {
     return (
       <ReviewSurface
         error={error}
+        hasUnresolvedConflicts={hasUnresolvedConflicts}
         proposals={activeProposals}
         onBack={() => navigate(`/brain-dump/${operation?.id ?? "new"}`, { replace: true })}
         onDelete={deleteProposal}
@@ -306,6 +433,41 @@ export function BrainDumpRoute(): JSX.Element {
       onResume={() => void command("resume")}
       onStart={() => void startRecording()}
     />
+  );
+}
+
+function RecoverySurface({
+  error,
+  operation,
+  providerError,
+  onDelete,
+  onReview,
+  onRetry
+}: {
+  error: string | null;
+  operation: BrainDumpOperationResponse;
+  providerError: string | null;
+  onDelete: () => void;
+  onReview: () => void;
+  onRetry: () => void;
+}): JSX.Element {
+  const retryable = operation.status === "retryable_error";
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-surface-base px-4 text-slate-900">
+      <section role="alert" className="w-full max-w-md rounded-2xl border border-amber-200 bg-white p-6 shadow-floating">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-amber-700">Voice brain dump</p>
+        <h1 className="mt-2 text-xl font-semibold">{retryable ? "Accurate transcription paused" : "Accurate transcription failed"}</h1>
+        <p className="mt-2 text-sm text-slate-600">
+          {providerError ?? (retryable ? "The provider can be retried from the sealed recording." : "The recording could not be processed accurately.")}
+        </p>
+        {error ? <p className="mt-3 text-sm text-rose-700">{error}</p> : null}
+        <div className="mt-5 flex flex-col gap-2">
+          {retryable ? <button type="button" className="h-11 rounded-xl bg-brand-primary px-4 text-sm font-semibold text-white" onClick={onRetry}>Retry accurate transcription</button> : null}
+          {operation.proposals.some((proposal) => !proposal.deleted) ? <button type="button" className="h-11 rounded-xl border border-slate-200 px-4 text-sm font-medium text-slate-700" onClick={onReview}>Review provisional tasks</button> : null}
+          <button type="button" className="h-11 rounded-xl border border-rose-200 px-4 text-sm font-medium text-rose-700" onClick={onDelete}>Delete recording</button>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -410,8 +572,37 @@ function ProposalCard({ proposal }: { proposal: BrainDumpProposal }): JSX.Elemen
   );
 }
 
+function ProcessingSurface({
+  error,
+  operation,
+  proposals
+}: {
+  error: string | null;
+  operation: BrainDumpOperationResponse;
+  proposals: BrainDumpProposal[];
+}): JSX.Element {
+  const label = processingStatusLabels.get(operation.status) ?? "Processing";
+  return (
+    <div className="min-h-screen bg-surface-base text-slate-900" data-operation-id={operation.id}>
+      <div className="fixed inset-0 flex items-center justify-center bg-slate-50/80 p-4 backdrop-blur-sm">
+        <section role="status" aria-live="polite" className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-floating">
+          {error ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
+          <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-600">Voice brain dump</p>
+          <h1 className="mt-2 text-xl font-semibold text-slate-900">{label}</h1>
+          <p className="mt-1 text-sm text-slate-500">{operation.status}</p>
+          <div className="mt-4 flex flex-col gap-2">
+            {proposals.map((proposal) => <ProposalCard key={proposal.id} proposal={proposal} />)}
+            {proposals.length === 0 ? <p className="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">We are keeping the task list first while the accurate transcript catches up.</p> : null}
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
 function ReviewSurface({
   error,
+  hasUnresolvedConflicts,
   proposals,
   onBack,
   onDelete,
@@ -420,6 +611,7 @@ function ReviewSurface({
   onUpdateTitle
 }: {
   error: string | null;
+  hasUnresolvedConflicts: boolean;
   proposals: BrainDumpProposal[];
   onBack: () => void;
   onDelete: (proposal: BrainDumpProposal) => void;
@@ -452,7 +644,24 @@ function ReviewSurface({
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700">Inbox</span>
                     <span className="rounded-full bg-sky-50 px-2.5 py-1 text-xs text-sky-700">{statusLabels[proposal.status]}</span>
+                    {(proposal.locked_fields ?? []).map((field) => (
+                      <span key={field} className="rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-700">Locked: {field}</span>
+                    ))}
+                    {(proposal.predecessor_ids ?? []).length > 0 ? (
+                      <span className="rounded-full bg-violet-50 px-2.5 py-1 text-xs text-violet-700">
+                        {(proposal.predecessor_ids ?? []).length > 1
+                          ? `Merged from ${(proposal.predecessor_ids ?? []).length} tasks`
+                          : "Split from an earlier task"}
+                      </span>
+                    ) : null}
                   </div>
+                  {(proposal.conflicts ?? []).map((conflict) => (
+                    <div key={`${conflict.field}-${conflict.suggested_value ?? ""}`} className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+                      <div className="font-semibold">Conflict: {conflict.field}</div>
+                      <div>Mine: {conflict.current_value ?? "—"}</div>
+                      <div>Suggestion: {conflict.suggested_value ?? "—"}</div>
+                    </div>
+                  ))}
                 </div>
                 <button type="button" className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-500" aria-label={`Delete ${proposal.title}`} onClick={() => onDelete(proposal)}>
                   <Trash2 className="h-4 w-4" aria-hidden />
@@ -467,7 +676,7 @@ function ReviewSurface({
         <button type="button" className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600" onClick={onDiscard}>
           Discard
         </button>
-        <button type="button" className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-brand-primary text-[15px] font-semibold text-white shadow-glow" onClick={onSave}>
+        <button type="button" className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-brand-primary text-[15px] font-semibold text-white shadow-glow disabled:cursor-not-allowed disabled:opacity-50" disabled={hasUnresolvedConflicts} onClick={onSave}>
           <Inbox className="h-4 w-4" aria-hidden />
           Save {proposals.length} to inbox
         </button>
