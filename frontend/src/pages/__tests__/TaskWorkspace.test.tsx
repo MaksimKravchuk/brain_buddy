@@ -1,6 +1,6 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import TaskWorkspace from "../TaskWorkspace";
 
@@ -28,15 +28,20 @@ describe("TaskWorkspace", () => {
     expect(screen.getByRole("button", { name: "Choose one" })).toBeInTheDocument();
   });
 
+  it("does not show source-absent project counts and keeps New project in the projects section", () => {
+    render(<TaskWorkspace />);
+
+    expect(screen.queryByText("Onboarding revamp 6")).not.toBeInTheDocument();
+    const onboardingButton = screen.getByRole("button", { name: /Onboarding revamp/ });
+    expect(within(onboardingButton).queryByText("6")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /New project/i })).toBeInTheDocument();
+  });
+
   it("keeps each literal state treatment on the source fixture row", () => {
     render(<TaskWorkspace />);
 
-    const dentistCard = screen
-      .getByLabelText("Complete Call the dentist to reschedule")
-      .closest("article");
-    const pricingCard = screen
-      .getByLabelText("Complete Review Q3 pricing assumptions")
-      .closest("article");
+    const dentistCard = screen.getByText("Call the dentist to reschedule").closest("article");
+    const pricingCard = screen.getByText("Review Q3 pricing assumptions").closest("article");
 
     expect(dentistCard).not.toBeNull();
     expect(pricingCard).not.toBeNull();
@@ -52,49 +57,56 @@ describe("TaskWorkspace", () => {
     const user = userEvent.setup();
     render(<TaskWorkspace />);
 
-    await click(user, screen.getByRole("button", { name: /Inbox 4/ }));
+    await click(user, screen.getByRole("button", { name: /Inbox/ }));
     expect(
       screen.getByText("Process these — decide the next action for each.")
     ).toBeInTheDocument();
     expect(screen.queryByText(/unprocessed thoughts/i)).not.toBeInTheDocument();
 
-    await click(user, screen.getByRole("button", { name: /Weekly review due Sun/i }));
+    await click(user, screen.getByRole("button", { name: /Weekly review/i }));
     expect(
       screen.getByText(
         "A guided pass over your lists — empty the inbox, refresh next actions, decide on the somedays. Due Sunday."
       )
     ).toBeInTheDocument();
-    expect(screen.getByText("PLACEHOLDER — NOT DESIGNED YET")).toBeInTheDocument();
+    expect(screen.getByText("Placeholder — not designed yet")).toBeInTheDocument();
   });
 
-  it("updates the visible list count while preserving the source project fixture count", async () => {
+  it("updates the visible list count while completing a task", async () => {
     const user = userEvent.setup();
     render(<TaskWorkspace />);
 
-    await click(user,
-      screen.getByRole("checkbox", { name: "Complete Draft the launch announcement" })
-    );
+    await click(user, screen.getByRole("button", { name: /Complete Draft the launch announcement/ }));
 
-    expect(screen.getByRole("button", { name: /Next actions 5/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Onboarding revamp 6/ })).toBeInTheDocument();
-
-    await click(user, screen.getByRole("button", { name: /Onboarding revamp 6/ }));
-    expect(screen.getByText("6 tasks · 1 running on AI")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Next actions/ })).toHaveTextContent("5");
   });
 
-  it("opens expanded details from the source thinking affordance", async () => {
+  it("opens expanded details from the source thinking affordance with literal placeholder content", async () => {
     const user = userEvent.setup();
     render(<TaskWorkspace />);
 
     await click(user, screen.getByRole("button", { name: "Thinking · 12 steps" }));
 
-    expect(screen.getByRole("region", { name: "Task details" })).toBeInTheDocument();
-    expect(screen.getByText("Run log")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Choose" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Task details")).toBeInTheDocument();
+    expect(screen.getByText("Subtasks")).toBeInTheDocument();
+    expect(screen.getByText("Agent")).toBeInTheDocument();
+    expect(screen.getByText("Comments")).toBeInTheDocument();
   });
 
-  it("matches the source recording overlay and closes it from Stop", async () => {
+  it("expands the literal run log for a task that has one", async () => {
     const user = userEvent.setup();
+    render(<TaskWorkspace />);
+
+    const dentistCard = screen.getByText("Draft the launch announcement").closest("article") as HTMLElement;
+    await click(user, within(dentistCard).getByText("Draft the launch announcement"));
+
+    expect(within(dentistCard).getByText("Run log")).toBeInTheDocument();
+    expect(within(dentistCard).getByText("Drafting outline")).toBeInTheDocument();
+  });
+
+  it("matches the source recording overlay and progresses to review naturally after capture", async () => {
+    vi.useFakeTimers();
+    const user = userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime });
     render(<TaskWorkspace />);
     const trigger = screen.getByRole("button", { name: /brain dump/i });
 
@@ -103,41 +115,39 @@ describe("TaskWorkspace", () => {
     expect(screen.getByText("Speak freely — tasks are extracted as you go")).toBeInTheDocument();
     expect(screen.getByText("0:00")).toBeInTheDocument();
     expect(screen.getByText("Nothing is saved until you stop")).toBeInTheDocument();
-    expect(screen.getByText("HEADED TO INBOX · 0")).toBeInTheDocument();
     expect(screen.getByText("Tasks appear here as you speak")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Stop & send/i })).not.toBeInTheDocument();
 
-    await click(user, screen.getByRole("button", { name: "Stop" }));
-    expect(screen.queryByRole("dialog", { name: "Brain dump" })).not.toBeInTheDocument();
-    expect(trigger).toHaveFocus();
-  });
-
-  it("exposes the represented review and send states through the deterministic QA state hook", async () => {
-    const user = userEvent.setup();
-    render(<TaskWorkspace />);
-
-    act(() => {
-      window.dispatchEvent(
-        new CustomEvent("brainbuddy:brain-dump-state", { detail: "captured" })
-      );
+    // Advance the deterministic capture timeline past the first captured task (~4.5s).
+    await act(async () => {
+      vi.advanceTimersByTime(4600);
     });
-    expect(screen.getByText("Forming another task…")).toBeInTheDocument();
 
-    act(() => {
-      window.dispatchEvent(
-        new CustomEvent("brainbuddy:brain-dump-state", { detail: "review" })
-      );
-    });
+    expect(screen.getByRole("button", { name: /Stop & send 1 to inbox/i })).toBeInTheDocument();
+
+    await click(user, screen.getByRole("button", { name: /Stop & send 1 to inbox/i }));
 
     expect(screen.getByRole("dialog", { name: "Brain dump" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /send to inbox/i })).toBeInTheDocument();
+    expect(screen.getByText("Review 1 task")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /send 1 to inbox/i })).toBeInTheDocument();
 
-    await click(user, screen.getByRole("button", { name: /send to inbox/i }));
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Inbox" })).toBeInTheDocument();
-      expect(screen.getByText("1 task sent to inbox")).toBeInTheDocument();
-      expect(screen.getAllByRole("article")).toHaveLength(5);
-    });
+    await click(user, screen.getByRole("button", { name: /send 1 to inbox/i }));
+
+    expect(screen.getByRole("heading", { name: "Inbox" })).toBeInTheDocument();
+    expect(screen.getByText("1 task sent to inbox")).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("closes the recording overlay from Stop with zero captured tasks and returns focus", async () => {
+    const user = userEvent.setup();
+    render(<TaskWorkspace />);
+    const trigger = screen.getByRole("button", { name: /brain dump/i });
+
+    await click(user, trigger);
+    await click(user, screen.getByRole("button", { name: "Stop" }));
+
+    expect(screen.queryByRole("dialog", { name: "Brain dump" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
   });
 });

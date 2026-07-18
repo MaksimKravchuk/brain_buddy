@@ -22,13 +22,7 @@ vi.mock("../components/auth/ProtectedRoute", () => ({
 }));
 vi.mock("../pages/LoginPage", () => ({ default: () => <div>Login route</div> }));
 vi.mock("../pages/SignupPage", () => ({ default: () => <div>Signup route</div> }));
-vi.mock("../pages/TreeWorkspace", () => ({ default: () => <div>Workspace route</div> }));
-vi.mock("../features/tasks/TaskListPage", () => ({
-  TaskListPage: () => <div>Task shell route</div>
-}));
-vi.mock("../features/brain-dump/BrainDumpRoute", () => ({
-  BrainDumpRoute: () => <div>Brain dump route</div>
-}));
+vi.mock("../pages/TaskWorkspace", () => ({ default: () => <div>Task workspace route</div> }));
 
 describe("App", () => {
   beforeEach(() => {
@@ -54,11 +48,11 @@ describe("App", () => {
     expect(state.unauthorizedHandler).toBeNull();
   });
 
-  it("redirects unknown routes to the protected task shell", () => {
+  it("redirects unknown routes to the protected task workspace", () => {
     window.history.pushState({}, "", "/unknown");
 
     render(<App />);
 
-    expect(screen.getByText("Task shell route")).toBeInTheDocument();
+    expect(screen.getByText("Task workspace route")).toBeInTheDocument();
   });
 });
