@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 
 from app.exceptions import ProviderRetryableError
 
@@ -17,7 +18,20 @@ def _start_operation(api_client, key: str = "start-brain-dump"):
     return response.json()
 
 
-def test_brain_dump_operation_collects_provisional_tasks_without_inbox_writes(api_client) -> None:
+def _manifest_hash(audio: bytes) -> str:
+    digest = hashlib.sha256(audio).hexdigest()
+    return hashlib.sha256(
+        json.dumps(
+            [{"chunk_number": 0, "sha256": digest, "size_bytes": len(audio)}],
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+
+
+def test_brain_dump_operation_collects_provisional_tasks_without_inbox_writes(
+    api_client,
+) -> None:
     operation = _start_operation(api_client)
     assert operation["status"] == "recording"
     assert operation["kind"] == "voice_brain_dump"
@@ -124,9 +138,10 @@ def test_brain_dump_same_sequence_interim_can_be_replaced_by_final(api_client) -
     )
     assert final.status_code == 200, final.text
     body = final.json()
-    assert [(segment["sequence"], segment["text"], segment["stability"]) for segment in body["segments"]] == [
-        (1, "buy oat milk. call dentist", "stable")
-    ]
+    assert [
+        (segment["sequence"], segment["text"], segment["stability"])
+        for segment in body["segments"]
+    ] == [(1, "buy oat milk. call dentist", "stable")]
     assert [proposal["title"] for proposal in body["proposals"]] == [
         "Buy oat milk",
         "Call dentist",
@@ -151,7 +166,9 @@ def test_preview_reconciliation_keeps_opaque_proposal_ids_when_candidate_order_c
         },
     )
     assert interim.status_code == 200, interim.text
-    ids_by_title = {proposal["title"]: proposal["id"] for proposal in interim.json()["proposals"]}
+    ids_by_title = {
+        proposal["title"]: proposal["id"] for proposal in interim.json()["proposals"]
+    }
 
     reordered = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/transcript",
@@ -168,17 +185,25 @@ def test_preview_reconciliation_keeps_opaque_proposal_ids_when_candidate_order_c
     )
     assert reordered.status_code == 200, reordered.text
 
-    assert {proposal["title"]: proposal["id"] for proposal in reordered.json()["proposals"]} == ids_by_title
+    assert {
+        proposal["title"]: proposal["id"] for proposal in reordered.json()["proposals"]
+    } == ids_by_title
 
 
-def test_user_edits_survive_later_transcript_reconciliation_and_delete_before_save(api_client) -> None:
+def test_user_edits_survive_later_transcript_reconciliation_and_delete_before_save(
+    api_client,
+) -> None:
     operation = _start_operation(api_client, key="start-edit-operation")
     append = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/transcript",
         headers={"Idempotency-Key": "append-edit-segment"},
         json={
             "segments": [
-                {"sequence": 1, "text": "Book flights. Call dentist.", "stability": "stable"}
+                {
+                    "sequence": 1,
+                    "text": "Book flights. Call dentist.",
+                    "stability": "stable",
+                }
             ]
         },
     ).json()
@@ -188,7 +213,10 @@ def test_user_edits_survive_later_transcript_reconciliation_and_delete_before_sa
     edited = api_client.patch(
         f"/api/brain-dump-operations/{operation['id']}/proposals/{first_id}",
         headers={"Idempotency-Key": "edit-first-proposal"},
-        json={"title": "Book refundable Lisbon flights", "expected_revision": append["revision"]},
+        json={
+            "title": "Book refundable Lisbon flights",
+            "expected_revision": append["revision"],
+        },
     )
     assert edited.status_code == 200, edited.text
     assert edited.json()["proposals"][0]["status"] == "user_edited"
@@ -214,10 +242,15 @@ def test_user_edits_survive_later_transcript_reconciliation_and_delete_before_sa
         },
     )
     assert later.status_code == 200, later.text
-    titles_by_id = {proposal["id"]: proposal["title"] for proposal in later.json()["proposals"]}
+    titles_by_id = {
+        proposal["id"]: proposal["title"] for proposal in later.json()["proposals"]
+    }
     assert titles_by_id[first_id] == "Book refundable Lisbon flights"
     assert titles_by_id[second_id] == "Call dentist"
-    assert any(proposal["title"] == "Draft launch post" for proposal in later.json()["proposals"])
+    assert any(
+        proposal["title"] == "Draft launch post"
+        for proposal in later.json()["proposals"]
+    )
 
     finish = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/finish",
@@ -281,14 +314,19 @@ def test_brain_dump_commit_is_atomic_and_idempotent_on_retry(api_client) -> None
         json={"expected_revision": first.json()["revision"]},
     )
     assert retry_with_new_key.status_code == 200
-    assert retry_with_new_key.json()["committed_task_ids"] == first.json()["committed_task_ids"]
+    assert (
+        retry_with_new_key.json()["committed_task_ids"]
+        == first.json()["committed_task_ids"]
+    )
 
     inbox = api_client.get("/api/tasks", params={"state": "inbox"}).json()
     assert inbox["counts_by_state"]["inbox"] == 2
     assert [item["title"] for item in inbox["items"]] == ["Pay VAT", "Send invoice"]
 
 
-def test_brain_dump_pause_resume_cancel_and_owner_scope(api_client, second_api_client) -> None:
+def test_brain_dump_pause_resume_cancel_and_owner_scope(
+    api_client, second_api_client
+) -> None:
     operation = _start_operation(api_client, key="start-resume-operation")
     paused = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/pause",
@@ -324,7 +362,9 @@ def test_brain_dump_pause_resume_cancel_and_owner_scope(api_client, second_api_c
     assert hidden.status_code == 404
 
 
-def test_schema_v2_upload_seal_runs_accurate_reconciliation_from_original_audio(api_client) -> None:
+def test_schema_v2_upload_seal_runs_accurate_reconciliation_from_original_audio(
+    api_client,
+) -> None:
     operation = _start_operation(api_client, key="start-schema-v2-audio")
     audio = "Надо починить BrainBuddy, потом сделать production smoke и написать Наташе".encode()
     digest = hashlib.sha256(audio).hexdigest()
@@ -336,7 +376,9 @@ def test_schema_v2_upload_seal_runs_accurate_reconciliation_from_original_audio(
     )
     assert uploaded.status_code == 200, uploaded.text
     assert uploaded.json()["media_ref"].startswith("media_")
-    assert uploaded.json()["audio_chunks"] == [{"chunk_number": 0, "sha256": digest, "size_bytes": len(audio)}]
+    assert uploaded.json()["audio_chunks"] == [
+        {"chunk_number": 0, "sha256": digest, "size_bytes": len(audio)}
+    ]
 
     duplicate = api_client.put(
         f"/api/brain-dump-operations/{operation['id']}/audio/0",
@@ -355,7 +397,11 @@ def test_schema_v2_upload_seal_runs_accurate_reconciliation_from_original_audio(
     sealed = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/seal",
         headers={"Idempotency-Key": "seal-schema-v2-audio"},
-        json={"expected_revision": uploaded.json()["revision"], "expected_chunks": 1},
+        json={
+            "expected_revision": uploaded.json()["revision"],
+            "expected_chunks": 1,
+            "manifest_hash": _manifest_hash(audio),
+        },
     )
     assert sealed.status_code == 200, sealed.text
     body = sealed.json()
@@ -439,13 +485,21 @@ def test_schema_v2_seal_rejects_missing_chunks_and_replays_success(api_client) -
     incomplete = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/seal",
         headers={"Idempotency-Key": "seal-with-missing-chunk"},
-        json={"expected_revision": upload.json()["revision"], "expected_chunks": 2},
+        json={
+            "expected_revision": upload.json()["revision"],
+            "expected_chunks": 2,
+            "manifest_hash": _manifest_hash(audio),
+        },
     )
     assert incomplete.status_code == 400
     assert "missing_chunks" in incomplete.text
 
     headers = {"Idempotency-Key": "seal-complete-once"}
-    payload = {"expected_revision": upload.json()["revision"], "expected_chunks": 1}
+    payload = {
+        "expected_revision": upload.json()["revision"],
+        "expected_chunks": 1,
+        "manifest_hash": _manifest_hash(audio),
+    }
     sealed = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/seal",
         headers=headers,
@@ -465,7 +519,11 @@ def test_schema_v2_seal_rejects_missing_chunks_and_replays_success(api_client) -
     reseal_inactive = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/seal",
         headers={"Idempotency-Key": "seal-after-confirmation-started"},
-        json={"expected_revision": sealed.json()["revision"], "expected_chunks": 1},
+        json={
+            "expected_revision": sealed.json()["revision"],
+            "expected_chunks": 1,
+            "manifest_hash": _manifest_hash(audio),
+        },
     )
     assert reseal_inactive.status_code == 400
     assert "Only an active brain dump can be sealed" in reseal_inactive.text
@@ -497,6 +555,26 @@ def test_schema_v2_seal_rejects_a_manifest_hash_that_is_not_bound_to_uploaded_ch
     assert "manifest" in rejected.text.casefold()
 
 
+def test_schema_v2_seal_requires_the_exact_client_manifest_hash(api_client) -> None:
+    operation = _start_operation(api_client, key="start-manifest-required")
+    audio = b"manifest-bound audio"
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+
+    response = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers={"Idempotency-Key": "seal-manifest-required"},
+        json={"expected_revision": uploaded.json()["revision"], "expected_chunks": 1},
+    )
+
+    assert response.status_code == 422
+    assert "manifest_hash" in response.text
+
+
 def test_schema_v2_unsupported_operation_command_is_rejected(api_client) -> None:
     operation = _start_operation(api_client, key="start-schema-v2-command-guard")
 
@@ -510,19 +588,28 @@ def test_schema_v2_unsupported_operation_command_is_rejected(api_client) -> None
     assert "Unsupported brain dump operation command" in unsupported.text
 
 
-def test_schema_v2_user_title_lock_blocks_accurate_overwrite_with_visible_conflict(api_client) -> None:
+def test_schema_v2_user_title_lock_blocks_accurate_overwrite_with_visible_conflict(
+    api_client,
+) -> None:
     operation = _start_operation(api_client, key="start-schema-v2-lock")
     fast = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/transcript",
         headers={"Idempotency-Key": "append-fast-brain-body"},
-        json={"segments": [{"sequence": 1, "text": "починить brain body", "stability": "stable"}]},
+        json={
+            "segments": [
+                {"sequence": 1, "text": "починить brain body", "stability": "stable"}
+            ]
+        },
     )
     assert fast.status_code == 200, fast.text
     proposal_id = fast.json()["proposals"][0]["id"]
     edited = api_client.patch(
         f"/api/brain-dump-operations/{operation['id']}/proposals/{proposal_id}",
         headers={"Idempotency-Key": "edit-lock-title"},
-        json={"title": "Починить BrainBuddy MVP", "expected_revision": fast.json()["revision"]},
+        json={
+            "title": "Починить BrainBuddy MVP",
+            "expected_revision": fast.json()["revision"],
+        },
     )
     assert edited.status_code == 200, edited.text
     audio = "починить BrainBuddy".encode()
@@ -534,7 +621,11 @@ def test_schema_v2_user_title_lock_blocks_accurate_overwrite_with_visible_confli
     sealed = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/seal",
         headers={"Idempotency-Key": "seal-lock-title"},
-        json={"expected_revision": uploaded.json()["revision"], "expected_chunks": 1},
+        json={
+            "expected_revision": uploaded.json()["revision"],
+            "expected_chunks": 1,
+            "manifest_hash": _manifest_hash(audio),
+        },
     )
 
     assert sealed.status_code == 200, sealed.text
@@ -553,7 +644,9 @@ def test_schema_v2_user_title_lock_blocks_accurate_overwrite_with_visible_confli
     assert "conflicts must be reviewed" in blocked_save.text
 
 
-def test_schema_v2_retryable_provider_failure_recovers_via_retry_command(api_client) -> None:
+def test_schema_v2_retryable_provider_failure_recovers_via_retry_command(
+    api_client,
+) -> None:
     """MUST-2: a retryable accurate-STT failure persists a resumable checkpoint."""
 
     operation = _start_operation(api_client, key="start-schema-v2-retry")
@@ -580,7 +673,11 @@ def test_schema_v2_retryable_provider_failure_recovers_via_retry_command(api_cli
     sealed = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/seal",
         headers={"Idempotency-Key": "seal-retry-flaky"},
-        json={"expected_revision": uploaded.json()["revision"], "expected_chunks": 1},
+        json={
+            "expected_revision": uploaded.json()["revision"],
+            "expected_chunks": 1,
+            "manifest_hash": _manifest_hash(audio),
+        },
     )
     assert sealed.status_code == 200, sealed.text
     body = sealed.json()
@@ -616,12 +713,18 @@ def test_schema_v2_accurate_reconciliation_preserves_opaque_ids_when_order_chang
         headers={"Idempotency-Key": "append-lineage-preview"},
         json={
             "segments": [
-                {"sequence": 1, "text": "Buy oat milk. Call the dentist.", "stability": "stable"}
+                {
+                    "sequence": 1,
+                    "text": "Buy oat milk. Call the dentist.",
+                    "stability": "stable",
+                }
             ]
         },
     )
     assert preview.status_code == 200, preview.text
-    ids_by_title = {proposal["title"]: proposal["id"] for proposal in preview.json()["proposals"]}
+    ids_by_title = {
+        proposal["title"]: proposal["id"] for proposal in preview.json()["proposals"]
+    }
     assert set(ids_by_title) == {"Buy oat milk", "Call the dentist"}
 
     # Accurate audio reports the same two intents in the opposite order; a
@@ -638,7 +741,11 @@ def test_schema_v2_accurate_reconciliation_preserves_opaque_ids_when_order_chang
     sealed = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/seal",
         headers={"Idempotency-Key": "seal-lineage-reordered"},
-        json={"expected_revision": uploaded.json()["revision"], "expected_chunks": 1},
+        json={
+            "expected_revision": uploaded.json()["revision"],
+            "expected_chunks": 1,
+            "manifest_hash": _manifest_hash(audio),
+        },
     )
     assert sealed.status_code == 200, sealed.text
     reconciled_ids_by_title = {
@@ -648,3 +755,61 @@ def test_schema_v2_accurate_reconciliation_preserves_opaque_ids_when_order_chang
     assert all(
         proposal["status"] == "reconciled" for proposal in sealed.json()["proposals"]
     )
+
+
+def test_schema_v2_accurate_reconciliation_persists_split_lineage(api_client) -> None:
+    operation = _start_operation(api_client, key="start-schema-v2-split")
+    preview = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/transcript",
+        headers={"Idempotency-Key": "append-split-preview"},
+        json={
+            "segments": [
+                {
+                    "sequence": 1,
+                    "text": "Buy oat milk and call the dentist",
+                    "stability": "stable",
+                }
+            ]
+        },
+    )
+    assert preview.status_code == 200, preview.text
+    predecessor = preview.json()["proposals"][0]
+    audio = b"Buy oat milk. Call the dentist."
+    digest = hashlib.sha256(audio).hexdigest()
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": digest},
+    )
+    manifest = hashlib.sha256(
+        json.dumps(
+            [{"chunk_number": 0, "sha256": digest, "size_bytes": len(audio)}],
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+    sealed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers={"Idempotency-Key": "seal-split-lineage"},
+        json={
+            "expected_revision": uploaded.json()["revision"],
+            "expected_chunks": 1,
+            "manifest_hash": manifest,
+        },
+    )
+
+    assert sealed.status_code == 200, sealed.text
+    proposals = sealed.json()["proposals"]
+    old = next(item for item in proposals if item["id"] == predecessor["id"])
+    children = [item for item in proposals if not item["deleted"]]
+    assert old["deleted"] is True
+    assert len(children) == 2
+    assert old["successor_ids"] == sorted(item["id"] for item in children)
+    assert all(item["predecessor_ids"] == [old["id"]] for item in children)
+    patch_log = sealed.json()["proposal_patches"]
+    assert [patch["sequence"] for patch in patch_log] == list(
+        range(1, len(patch_log) + 1)
+    )
+    assert [patch["operation"] for patch in patch_log[-2:]] == ["split", "split"]
+    assert len({patch["id"] for patch in patch_log}) == len(patch_log)

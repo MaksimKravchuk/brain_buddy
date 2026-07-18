@@ -61,6 +61,7 @@ export function BrainDumpRoute(): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [lastTranscript, setLastTranscript] = useState("");
   const [savedCount, setSavedCount] = useState<number | null>(null);
+  const [showProvisionalReview, setShowProvisionalReview] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -249,7 +250,7 @@ export function BrainDumpRoute(): JSX.Element {
     }
   }
 
-  async function command(action: "pause" | "resume" | "finish" | "cancel" | "commit") {
+  async function command(action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry") {
     if (!operationRef.current) {
       return;
     }
@@ -389,6 +390,21 @@ export function BrainDumpRoute(): JSX.Element {
     return <ProcessingSurface error={error} operation={operation} proposals={activeProposals} />;
   }
 
+  if (operation && (operation.status === "retryable_error" || operation.status === "terminal_error") && !showProvisionalReview) {
+    const providerRuns = operation.provider_runs ?? [];
+    const providerError = providerRuns[providerRuns.length - 1]?.error ?? null;
+    return (
+      <RecoverySurface
+        error={error}
+        operation={operation}
+        providerError={providerError}
+        onDelete={() => void command("cancel")}
+        onReview={() => setShowProvisionalReview(true)}
+        onRetry={() => void command("retry")}
+      />
+    );
+  }
+
   if (isReviewPath || operation?.status === "awaiting_confirmation") {
     return (
       <ReviewSurface
@@ -417,6 +433,41 @@ export function BrainDumpRoute(): JSX.Element {
       onResume={() => void command("resume")}
       onStart={() => void startRecording()}
     />
+  );
+}
+
+function RecoverySurface({
+  error,
+  operation,
+  providerError,
+  onDelete,
+  onReview,
+  onRetry
+}: {
+  error: string | null;
+  operation: BrainDumpOperationResponse;
+  providerError: string | null;
+  onDelete: () => void;
+  onReview: () => void;
+  onRetry: () => void;
+}): JSX.Element {
+  const retryable = operation.status === "retryable_error";
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-surface-base px-4 text-slate-900">
+      <section role="alert" className="w-full max-w-md rounded-2xl border border-amber-200 bg-white p-6 shadow-floating">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-amber-700">Voice brain dump</p>
+        <h1 className="mt-2 text-xl font-semibold">{retryable ? "Accurate transcription paused" : "Accurate transcription failed"}</h1>
+        <p className="mt-2 text-sm text-slate-600">
+          {providerError ?? (retryable ? "The provider can be retried from the sealed recording." : "The recording could not be processed accurately.")}
+        </p>
+        {error ? <p className="mt-3 text-sm text-rose-700">{error}</p> : null}
+        <div className="mt-5 flex flex-col gap-2">
+          {retryable ? <button type="button" className="h-11 rounded-xl bg-brand-primary px-4 text-sm font-semibold text-white" onClick={onRetry}>Retry accurate transcription</button> : null}
+          {operation.proposals.some((proposal) => !proposal.deleted) ? <button type="button" className="h-11 rounded-xl border border-slate-200 px-4 text-sm font-medium text-slate-700" onClick={onReview}>Review provisional tasks</button> : null}
+          <button type="button" className="h-11 rounded-xl border border-rose-200 px-4 text-sm font-medium text-rose-700" onClick={onDelete}>Delete recording</button>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -596,6 +647,13 @@ function ReviewSurface({
                     {(proposal.locked_fields ?? []).map((field) => (
                       <span key={field} className="rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-700">Locked: {field}</span>
                     ))}
+                    {(proposal.predecessor_ids ?? []).length > 0 ? (
+                      <span className="rounded-full bg-violet-50 px-2.5 py-1 text-xs text-violet-700">
+                        {(proposal.predecessor_ids ?? []).length > 1
+                          ? `Merged from ${(proposal.predecessor_ids ?? []).length} tasks`
+                          : "Split from an earlier task"}
+                      </span>
+                    ) : null}
                   </div>
                   {(proposal.conflicts ?? []).map((conflict) => (
                     <div key={`${conflict.field}-${conflict.suggested_value ?? ""}`} className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">

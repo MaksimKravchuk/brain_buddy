@@ -8,6 +8,7 @@ checkpoint/recovery) and the PA-04/PA-05 stale-patch rebase/rejection rules from
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from typing import cast
 
@@ -31,7 +32,17 @@ from app.workflows.voice_brain_dump.providers import DeterministicAccurateStt
 OWNER = "user_recovery_owner"
 
 
-def _service(data_dir: Path, *, fail_plan: dict[str, list[str]] | None = None) -> TaskService:
+def _manifest_hash(audio: bytes) -> str:
+    digest = hashlib.sha256(audio).hexdigest()
+    payload = [{"chunk_number": 0, "sha256": digest, "size_bytes": len(audio)}]
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _service(
+    data_dir: Path, *, fail_plan: dict[str, list[str]] | None = None
+) -> TaskService:
     repository = TaskRepository(data_dir)
     accurate_stt = DeterministicAccurateStt(
         {"media_recovery": "почини BrainBuddy"}, fail_plan=fail_plan
@@ -66,13 +77,19 @@ def test_retryable_provider_failure_persists_checkpoint_and_retry_resumes_it(
     service = _service(data_dir, fail_plan={"media_recovery": ["retryable"]})
     operation, _ = _seal(service)
     # Force a deterministic media_ref so the fake fail plan keys match.
-    operation = service.task_repo.get_brain_dump_operation_for_owner(operation.id, owner_id=OWNER)
+    operation = service.task_repo.get_brain_dump_operation_for_owner(
+        operation.id, owner_id=OWNER
+    )
     operation = operation.model_copy(update={"media_ref": "media_recovery"})
     service.task_repo.save_brain_dump_operation(operation)
 
     sealed = service.seal_brain_dump_operation(
         operation.id,
-        BrainDumpSealRequest(expected_revision=operation.revision, expected_chunks=1),
+        BrainDumpSealRequest(
+            expected_revision=operation.revision,
+            expected_chunks=1,
+            manifest_hash=_manifest_hash(b"audio bytes"),
+        ),
         owner_id=OWNER,
         idempotency_key="recovery-seal-1",
     )
@@ -105,6 +122,60 @@ def test_retryable_provider_failure_persists_checkpoint_and_retry_resumes_it(
     assert any(proposal.title for proposal in retried.proposals)
 
 
+def test_process_death_during_provider_call_leaves_a_durable_claimed_checkpoint(
+    data_dir: Path,
+) -> None:
+    audio = b"crash-safe audio"
+    service = _service(data_dir)
+    operation, _ = _seal(service, audio=audio)
+
+    def crash_after_claim(_request: object) -> object:
+        raise SystemExit("simulated process death")
+
+    service.accurate_stt.transcribe_sealed_audio = crash_after_claim  # type: ignore[method-assign]
+
+    with pytest.raises(SystemExit, match="simulated process death"):
+        service.seal_brain_dump_operation(
+            operation.id,
+            BrainDumpSealRequest(
+                expected_revision=operation.revision,
+                expected_chunks=1,
+                manifest_hash=_manifest_hash(audio),
+            ),
+            owner_id=OWNER,
+            idempotency_key="crash-safe-seal",
+        )
+
+    persisted = TaskRepository(data_dir).get_brain_dump_operation_for_owner(
+        operation.id, owner_id=OWNER
+    )
+    assert persisted.status == "accurate_transcribing"
+    assert persisted.sealed_manifest_hash == _manifest_hash(audio)
+    assert persisted.provider_runs[-1].status == "running"
+    assert persisted.provider_runs[-1].checkpoint == "sealed"
+    assert persisted.provider_runs[-1].lease_owner
+    assert persisted.provider_runs[-1].lease_expires_at
+
+    expired_run = persisted.provider_runs[-1].model_copy(
+        update={"lease_expires_at": persisted.provider_runs[-1].created_at}
+    )
+    persisted = persisted.model_copy(
+        update={"provider_runs": [*persisted.provider_runs[:-1], expired_run]}
+    )
+    service.task_repo.save_brain_dump_operation(persisted)
+
+    recovered_service = _service(data_dir)
+    recovered = recovered_service.retry_brain_dump_operation(
+        operation.id,
+        ExpectedRevisionRequest(expected_revision=persisted.revision),
+        owner_id=OWNER,
+        idempotency_key="recover-expired-provider-claim",
+    )
+    assert recovered.status == "awaiting_confirmation"
+    assert recovered.provider_runs[-1].attempt == 2
+    assert recovered.provider_runs[-1].recovery_count == 1
+
+
 def test_recovery_budget_exhausts_into_terminal_error_without_hot_loop(
     data_dir: Path,
 ) -> None:
@@ -112,13 +183,19 @@ def test_recovery_budget_exhausts_into_terminal_error_without_hot_loop(
         data_dir, fail_plan={"media_recovery": ["retryable", "retryable", "retryable"]}
     )
     operation, _ = _seal(service)
-    operation = service.task_repo.get_brain_dump_operation_for_owner(operation.id, owner_id=OWNER)
+    operation = service.task_repo.get_brain_dump_operation_for_owner(
+        operation.id, owner_id=OWNER
+    )
     operation = operation.model_copy(update={"media_ref": "media_recovery"})
     service.task_repo.save_brain_dump_operation(operation)
 
     sealed = service.seal_brain_dump_operation(
         operation.id,
-        BrainDumpSealRequest(expected_revision=operation.revision, expected_chunks=1),
+        BrainDumpSealRequest(
+            expected_revision=operation.revision,
+            expected_chunks=1,
+            manifest_hash=_manifest_hash(b"audio bytes"),
+        ),
         owner_id=OWNER,
         idempotency_key="recovery-seal-budget",
     )
@@ -156,13 +233,19 @@ def test_recovery_budget_exhausts_into_terminal_error_without_hot_loop(
 def test_terminal_provider_failure_skips_retryable_state(data_dir: Path) -> None:
     service = _service(data_dir, fail_plan={"media_recovery": ["terminal"]})
     operation, _ = _seal(service)
-    operation = service.task_repo.get_brain_dump_operation_for_owner(operation.id, owner_id=OWNER)
+    operation = service.task_repo.get_brain_dump_operation_for_owner(
+        operation.id, owner_id=OWNER
+    )
     operation = operation.model_copy(update={"media_ref": "media_recovery"})
     service.task_repo.save_brain_dump_operation(operation)
 
     sealed = service.seal_brain_dump_operation(
         operation.id,
-        BrainDumpSealRequest(expected_revision=operation.revision, expected_chunks=1),
+        BrainDumpSealRequest(
+            expected_revision=operation.revision,
+            expected_chunks=1,
+            manifest_hash=_manifest_hash(b"audio bytes"),
+        ),
         owner_id=OWNER,
         idempotency_key="recovery-seal-terminal",
     )
@@ -175,7 +258,9 @@ def test_terminal_provider_failure_skips_retryable_state(data_dir: Path) -> None
 def test_retry_requires_retryable_state(data_dir: Path) -> None:
     service = _service(data_dir)
     operation, _ = _seal(service)
-    operation = service.task_repo.get_brain_dump_operation_for_owner(operation.id, owner_id=OWNER)
+    operation = service.task_repo.get_brain_dump_operation_for_owner(
+        operation.id, owner_id=OWNER
+    )
 
     with pytest.raises(ValidationFailure, match="Only a retryable"):
         service.retry_brain_dump_operation(
@@ -192,13 +277,19 @@ def test_retry_replays_cached_idempotent_response(data_dir: Path) -> None:
 
     service = _service(data_dir, fail_plan={"media_recovery": ["retryable"]})
     operation, _ = _seal(service)
-    operation = service.task_repo.get_brain_dump_operation_for_owner(operation.id, owner_id=OWNER)
+    operation = service.task_repo.get_brain_dump_operation_for_owner(
+        operation.id, owner_id=OWNER
+    )
     operation = operation.model_copy(update={"media_ref": "media_recovery"})
     service.task_repo.save_brain_dump_operation(operation)
 
     sealed = service.seal_brain_dump_operation(
         operation.id,
-        BrainDumpSealRequest(expected_revision=operation.revision, expected_chunks=1),
+        BrainDumpSealRequest(
+            expected_revision=operation.revision,
+            expected_chunks=1,
+            manifest_hash=_manifest_hash(b"audio bytes"),
+        ),
         owner_id=OWNER,
         idempotency_key="recovery-seal-replay",
     )
@@ -232,7 +323,9 @@ def test_retry_without_sealed_checkpoint_is_rejected(data_dir: Path) -> None:
 
     service = _service(data_dir)
     operation, _ = _seal(service)
-    operation = service.task_repo.get_brain_dump_operation_for_owner(operation.id, owner_id=OWNER)
+    operation = service.task_repo.get_brain_dump_operation_for_owner(
+        operation.id, owner_id=OWNER
+    )
     broken = operation.model_copy(
         update={"status": "retryable_error", "sealed_manifest_hash": None}
     )

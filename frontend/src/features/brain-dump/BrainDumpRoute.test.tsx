@@ -378,7 +378,7 @@ describe("BrainDumpRoute", () => {
     await userEvent.click(screen.getByRole("button", { name: "Record" }));
     await userEvent.click(screen.getByRole("button", { name: "Stop & review" }));
 
-    expect(uploadedHash).toMatch(/^[a-f0-9]{64}$/);
+    await waitFor(() => expect(uploadedHash).toMatch(/^[a-f0-9]{64}$/));
     await waitFor(() => expect(sealPayload).not.toBeNull());
     expect(sealPayload).toMatchObject({ expected_chunks: 1, manifest_hash: expect.stringMatching(/^[a-f0-9]{64}$/) });
     expect(await screen.findByRole("main", { name: "Review brain dump proposals" })).toBeInTheDocument();
@@ -1223,5 +1223,80 @@ describe("BrainDumpRoute", () => {
 
     expect(await screen.findByText("Mine: —")).toBeInTheDocument();
     expect(screen.getByText("Suggestion: —")).toBeInTheDocument();
+  });
+
+  it("offers a retry action for a persisted retryable provider checkpoint", async () => {
+    const retryable = operation({
+      id: "brain_dump_retryable",
+      status: "retryable_error",
+      revision: 7,
+      proposals: [proposal("proposal_1", 1, "Renew car insurance")],
+      provider_runs: [
+        {
+          id: "provider_run_1",
+          role: "accurate_stt",
+          status: "retryable_error",
+          checkpoint: "sealed",
+          attempt: 1,
+          recovery_count: 0,
+          error: "provider temporarily unavailable"
+        }
+      ]
+    });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_retryable") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(retryable);
+      }
+      if (url.endsWith("/brain_dump_retryable/retry") && init?.method === "POST") {
+        return jsonResponse(operation({ ...retryable, status: "awaiting_confirmation", revision: 8 }));
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_retryable/review");
+    expect(await screen.findByText("Accurate transcription paused")).toBeInTheDocument();
+    expect(screen.getByText("provider temporarily unavailable")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Retry accurate transcription" }));
+
+    expect(await screen.findByText("Review 1 task")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/brain_dump_retryable/retry"),
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("shows terminal recovery choices instead of a recording surface", async () => {
+    const terminal = operation({
+      id: "brain_dump_terminal",
+      status: "terminal_error",
+      revision: 4,
+      proposals: [proposal("proposal_child", 1, "Call the dentist")],
+      provider_runs: [
+        {
+          id: "provider_run_terminal",
+          role: "accurate_stt",
+          status: "terminal_error",
+          checkpoint: "sealed",
+          attempt: 3,
+          recovery_count: 2,
+          error: "audio could not be transcribed"
+        }
+      ]
+    });
+    fetchMock.mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_terminal")) {
+        return jsonResponse(terminal);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_terminal/review");
+
+    expect(await screen.findByText("Accurate transcription failed")).toBeInTheDocument();
+    expect(screen.getByText("audio could not be transcribed")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete recording" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Review provisional tasks" })).toBeEnabled();
   });
 });

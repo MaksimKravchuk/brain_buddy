@@ -215,15 +215,35 @@ class BrainDumpProviderRunDocument(StorageBaseModel):
 
     id: str
     role: Literal["accurate_stt", "reconciler"]
-    status: Literal["pending", "running", "succeeded", "retryable_error", "terminal_error"]
+    status: Literal[
+        "pending", "running", "succeeded", "retryable_error", "terminal_error"
+    ]
     input_hash: str = Field(min_length=64, max_length=64)
     checkpoint: Literal["sealed", "accurate_transcribed", "reconciled"]
     attempt: int = Field(default=0, ge=0)
     recovery_count: int = Field(default=0, ge=0)
     error: str | None = Field(default=None, max_length=1000)
     output_segment_ids: list[str] = Field(default_factory=list)
+    lease_owner: str | None = None
+    lease_expires_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class BrainDumpProposalPatchDocument(StorageBaseModel):
+    """Immutable audit record for one applied proposal projection change."""
+
+    id: str
+    sequence: int = Field(ge=1)
+    operation: Literal["add", "update", "split", "merge", "remove", "supersede"]
+    proposal_id: str
+    producer: Literal["fast", "accurate", "reconciler", "user"]
+    title: str | None = None
+    source_segment_ids: list[str] = Field(default_factory=list)
+    predecessor_ids: list[str] = Field(default_factory=list)
+    successor_ids: list[str] = Field(default_factory=list)
+    base_revision: int | None = None
+    created_at: datetime
 
 
 class BrainDumpOperationDocument(StorageBaseModel):
@@ -240,6 +260,7 @@ class BrainDumpOperationDocument(StorageBaseModel):
     audio_chunks: list[BrainDumpAudioChunkDocument] = Field(default_factory=list)
     sealed_manifest_hash: str | None = Field(default=None, min_length=64, max_length=64)
     provider_runs: list[BrainDumpProviderRunDocument] = Field(default_factory=list)
+    proposal_patches: list[BrainDumpProposalPatchDocument] = Field(default_factory=list)
     status_history: list[BrainDumpStatus] = Field(default_factory=list)
     committed_task_ids: list[str] = Field(default_factory=list)
     created_at: datetime
