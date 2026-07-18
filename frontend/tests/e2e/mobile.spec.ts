@@ -1,4 +1,5 @@
 import { expect, test } from "../allure.fixtures";
+import { ContentType, attachment } from "allure-js-commons";
 
 import {
   createTreeViaUi,
@@ -30,7 +31,7 @@ const treeResponse = {
 };
 
 test.describe("mobile acceptance", () => {
-  test("E2E-MOBILE-02 CRT header shows planned workflow placeholders at 390px", async ({ page }) => {
+  test("E2E-MOBILE-02 planned workflow placeholders are visible at 390px", async ({ page }) => {
     await page.route("**/*", async (route) => {
       const url = new URL(route.request().url());
       if (!url.pathname.startsWith("/api/")) {
@@ -69,9 +70,10 @@ test.describe("mobile acceptance", () => {
     await test.step("Verify both planned placeholders are not clipped in the 390px viewport", async () => {
       for (const item of [crt, weeklyReview]) {
         const box = await item.boundingBox();
-        expect(box?.width ?? 0).toBeGreaterThan(40);
-        expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
-        expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(390);
+        await attachment("Placeholder bounding box", JSON.stringify(box, null, 2), ContentType.JSON);
+        if (!box || box.width <= 40 || box.x < 0 || box.x + box.width > 390) {
+          throw new Error(`Expected visible placeholder inside 390px viewport, received ${JSON.stringify(box)}`);
+        }
       }
     });
   });
