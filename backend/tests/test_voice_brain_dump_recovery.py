@@ -176,6 +176,50 @@ def test_process_death_during_provider_call_leaves_a_durable_claimed_checkpoint(
     assert recovered.provider_runs[-1].recovery_count == 1
 
 
+def test_process_death_during_retry_persists_the_new_attempt_claim(
+    data_dir: Path,
+) -> None:
+    audio = b"retry crash-safe audio"
+    service = _service(data_dir, fail_plan={"media_recovery": ["retryable"]})
+    operation, _ = _seal(service, audio=audio)
+    operation = operation.model_copy(update={"media_ref": "media_recovery"})
+    service.task_repo.save_brain_dump_operation(operation)
+    retryable = service.seal_brain_dump_operation(
+        operation.id,
+        BrainDumpSealRequest(
+            expected_revision=operation.revision,
+            expected_chunks=1,
+            manifest_hash=_manifest_hash(audio),
+        ),
+        owner_id=OWNER,
+        idempotency_key="retry-crash-safe-seal",
+    )
+    assert retryable.status == "retryable_error"
+
+    def crash_after_retry_claim(_request: object) -> object:
+        raise SystemExit("simulated retry process death")
+
+    service.accurate_stt.transcribe_sealed_audio = crash_after_retry_claim  # type: ignore[method-assign]
+    with pytest.raises(SystemExit, match="simulated retry process death"):
+        service.retry_brain_dump_operation(
+            operation.id,
+            ExpectedRevisionRequest(expected_revision=retryable.revision),
+            owner_id=OWNER,
+            idempotency_key="retry-crash-safe-attempt",
+        )
+
+    persisted = TaskRepository(data_dir).get_brain_dump_operation_for_owner(
+        operation.id, owner_id=OWNER
+    )
+    claimed_run = persisted.provider_runs[-1]
+    assert persisted.status == "accurate_transcribing"
+    assert claimed_run.status == "running"
+    assert claimed_run.attempt == 2
+    assert claimed_run.recovery_count == 1
+    assert claimed_run.lease_owner
+    assert claimed_run.lease_expires_at
+
+
 def test_recovery_budget_exhausts_into_terminal_error_without_hot_loop(
     data_dir: Path,
 ) -> None:
