@@ -74,6 +74,12 @@ test.describe("mobile acceptance", () => {
       await route.fulfill({ status: 404, json: { detail: "Not found" } });
     });
 
+    const defaultNodeCreationResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/trees/tree-1/nodes" &&
+        response.request().method() === "POST"
+    );
+
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/crt");
 
@@ -100,8 +106,26 @@ test.describe("mobile acceptance", () => {
       }
     });
 
-    await expect.poll(() => nodeCreationRequests).toBe(1);
-    const nodeCreationRequestsBeforePlaceholderClicks = nodeCreationRequests;
+    let nodeCreationRequestsBeforePlaceholderClicks = 0;
+    await test.step("Confirm the tree bootstrap issued exactly one node-creation call before any placeholder interaction", async () => {
+      const response = await defaultNodeCreationResponse;
+      nodeCreationRequestsBeforePlaceholderClicks = nodeCreationRequests;
+      await attachment(
+        "Node creation response observed before placeholder clicks",
+        JSON.stringify(
+          {
+            url: response.url(),
+            status: response.status(),
+            requestsSoFar: nodeCreationRequestsBeforePlaceholderClicks
+          },
+          null,
+          2
+        ),
+        ContentType.JSON
+      );
+      expect(response.status()).toBe(200);
+      expect(nodeCreationRequestsBeforePlaceholderClicks).toBe(1);
+    });
 
     await test.step("Click each placeholder at its rendered coordinates without activating the CRT canvas", async () => {
       for (const item of [crt, weeklyReview]) {
