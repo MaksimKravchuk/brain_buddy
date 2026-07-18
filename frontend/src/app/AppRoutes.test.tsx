@@ -129,15 +129,15 @@ afterEach(() => {
 });
 
 describe("AppRoutes", () => {
-  it("redirects the authenticated root route into the source-faithful next actions shell", async () => {
+  it("renders the literal source workspace at the authenticated root route", async () => {
     renderRoutes("/");
 
     expect(await screen.findByRole("heading", { name: "Next actions" })).toBeInTheDocument();
-    expect(screen.getByRole("banner")).toHaveStyle({ height: "52px" });
+    expect(screen.getByRole("banner")).toHaveStyle({ height: "56px" });
     expect(screen.getByText("Brain Buddy")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Search tasks")).toBeEnabled();
+    expect(screen.getByPlaceholderText("Search tasks and trees")).toBeEnabled();
     expect(screen.getByRole("button", { name: "Brain dump" })).toBeEnabled();
-    expect(await screen.findByText("6 tasks")).toBeInTheDocument();
+    expect(screen.getByText("6 tasks · 1 running on AI")).toBeInTheDocument();
   });
 
   it("renders projects, tags and task rows from server projections without Context copy", async () => {

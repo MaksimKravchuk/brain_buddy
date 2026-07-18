@@ -82,7 +82,7 @@ async function loginViaUi(page: Page, email: string): Promise<void> {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(/\/tasks\/next$/);
+  await expect(page).toHaveURL(/\/$/);
 }
 
 async function relogin(page: Page, email: string): Promise<void> {

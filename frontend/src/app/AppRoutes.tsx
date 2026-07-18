@@ -6,6 +6,7 @@ import { BrainDumpRoute } from "../features/brain-dump/BrainDumpRoute";
 import { TaskListPage } from "../features/tasks/TaskListPage";
 import LoginPage from "../pages/LoginPage";
 import SignupPage from "../pages/SignupPage";
+import TaskWorkspace from "../pages/TaskWorkspace";
 import TreeWorkspace from "../pages/TreeWorkspace";
 
 export function AppRoutes(): JSX.Element {
@@ -17,7 +18,7 @@ export function AppRoutes(): JSX.Element {
         path="/"
         element={
           <ProtectedRoute>
-            <Navigate to="/tasks/next" replace />
+            <TaskWorkspace />
           </ProtectedRoute>
         }
       />
@@ -97,7 +98,7 @@ export function AppRoutes(): JSX.Element {
         path="*"
         element={
           <ProtectedRoute>
-            <Navigate to="/tasks/next" replace />
+            <Navigate to="/" replace />
           </ProtectedRoute>
         }
       />
