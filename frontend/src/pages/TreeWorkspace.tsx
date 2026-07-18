@@ -22,6 +22,7 @@ import {
 } from "../api/hooks";
 import { Button } from "../components/ui/Button";
 import { TreeCanvas, type TreeCanvasHandle } from "../components/canvas/TreeCanvas";
+import { PlannedWorkflowNavigation } from "../components/layout/PlannedWorkflowNavigation";
 import { TreeMenu } from "../components/layout/TreeMenu";
 import { CreateTreeModal } from "../components/modals/CreateTreeModal";
 import { DeleteTreeModal } from "../components/modals/DeleteTreeModal";
@@ -157,6 +158,7 @@ export default function TreeWorkspace(): JSX.Element {
               onDeleteTree={() => openModal("deleteTree")}
               onSwitchTree={(treeId) => setSelectedTreeId(treeId)}
             />
+            <PlannedWorkflowNavigation />
             <input
               ref={importInputRef}
               type="file"
