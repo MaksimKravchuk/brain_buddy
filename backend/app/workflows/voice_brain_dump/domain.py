@@ -168,6 +168,25 @@ class ProposalPatch:
             producer=producer,
         )
 
+    @classmethod
+    def supersede(
+        cls,
+        *,
+        proposal_id: str,
+        title: str,
+        predecessor_ids: list[str],
+        source_segment_ids: list[str],
+        producer: PatchProducer = "reconciler",
+    ) -> ProposalPatch:
+        return cls(
+            operation="supersede",
+            proposal_id=proposal_id,
+            title=title,
+            predecessor_ids=predecessor_ids,
+            source_segment_ids=source_segment_ids,
+            producer=producer,
+        )
+
 
 @dataclass(frozen=True)
 class ProposalProjection:
@@ -202,9 +221,11 @@ def apply_proposal_patches(
     history: dict[str, ReconciledProposal] = dict(by_id)
 
     for patch in patches:
-        if patch.operation in {"add", "merge", "split"}:
+        if patch.operation in {"add", "merge", "split", "supersede"}:
             if patch.title is None:
-                raise ValidationFailure("Proposal add/split/merge requires a title.")
+                raise ValidationFailure(
+                    "Proposal add/split/merge/supersede requires a title."
+                )
             for predecessor_id in patch.predecessor_ids:
                 predecessor = by_id.get(predecessor_id)
                 if predecessor is not None:
@@ -236,7 +257,7 @@ def apply_proposal_patches(
         if current is None:
             raise ValidationFailure(f"Unknown proposal ID '{patch.proposal_id}'.")
 
-        if patch.operation in {"remove", "supersede"}:
+        if patch.operation == "remove":
             updated = _replace(
                 current, tombstoned=True, revision=current.revision + 1
             )

@@ -17,6 +17,7 @@
       "code_switch_terms": ["BrainBuddy", "production smoke"],
       "audio_file": "ml-01-synthetic.wav",
       "audio_sha256": "37e68e0c1a48cdc7ccbdc2c57698cca139b17b08a83f201a5e78160f9a7e3cd1",
+      "expected_frequency_hz": 257,
       "structural_change": "split",
       "expected_confidence": 1.0
     },
@@ -31,6 +32,7 @@
       "code_switch_terms": ["BrainBuddy"],
       "audio_file": "ml-02-synthetic.wav",
       "audio_sha256": "46c4018d65493d2a0cbce8f2160481cad4bd4869bd772321627105be91d8cab4",
+      "expected_frequency_hz": 294,
       "structural_change": "supersede",
       "expected_confidence": 1.0
     },
@@ -48,6 +50,7 @@
       "run_on": true,
       "audio_file": "ml-03-synthetic.wav",
       "audio_sha256": "6d05927a8de45d1ba08797df56617a01d7812ad0fba5c250ceedadfe26fcf283",
+      "expected_frequency_hz": 331,
       "structural_change": "split",
       "expected_confidence": 1.0
     },
@@ -60,6 +63,7 @@
       "notes": "Conjunction alone is not a split oracle.",
       "audio_file": "ml-04-synthetic.wav",
       "audio_sha256": "9816b238fc1a516ebb7cb77c4fa96615032e7ff640c87d5f3b259793c904319c",
+      "expected_frequency_hz": 368,
       "expected_confidence": 1.0
     },
     {
@@ -75,6 +79,7 @@
       "code_switch_terms": ["BrainBuddy", "production smoke", "staging"],
       "audio_file": "ml-05-synthetic.wav",
       "audio_sha256": "dba568aa21100be07ebc7e2828ab97c1a201a60cd67e0278e87a34ec4a47ac69",
+      "expected_frequency_hz": 405,
       "structural_change": "split",
       "expected_confidence": 1.0
     },
@@ -90,6 +95,7 @@
       "code_switch_terms": ["BrainBuddy"],
       "audio_file": "ml-06-synthetic.wav",
       "audio_sha256": "1fb9e21494f7656bb80159cf49da208de0c57a72e9a0f832f1c12f741c24dfc4",
+      "expected_frequency_hz": 442,
       "structural_change": "conflict",
       "expected_confidence": 1.0
     },
@@ -105,6 +111,7 @@
       "notes": "Dutch fixture; 'moet ik/moet de' filler is stripped like the RU/EN modal-verb prefixes.",
       "audio_file": "ml-07-synthetic.wav",
       "audio_sha256": "dbbc9cf411f7bcde3ff9c824d1d4bd0eac200fe25488c885f56fc68bb9c0fedc",
+      "expected_frequency_hz": 479,
       "structural_change": "split",
       "expected_confidence": 1.0
     },

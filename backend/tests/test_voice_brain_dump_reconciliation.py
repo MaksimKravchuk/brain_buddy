@@ -228,6 +228,33 @@ def test_projection_preserves_lineage_for_merge_split_remove_and_unlocked_update
     ]
 
 
+def test_supersede_patch_replaces_one_proposal_with_explicit_lineage() -> None:
+    base = ReconciledProposal(
+        id="proposal_fast",
+        title="Починить brain body",
+        source_segment_ids=["fast_1"],
+        status="provisional",
+    )
+
+    projection = apply_proposal_patches(
+        [base],
+        [
+            ProposalPatch.supersede(
+                proposal_id="proposal_accurate",
+                title="Починить BrainBuddy",
+                predecessor_ids=["proposal_fast"],
+                source_segment_ids=["accurate_1"],
+            )
+        ],
+    )
+
+    history_by_id = {proposal.id: proposal for proposal in projection.history}
+    assert [proposal.id for proposal in projection.active] == ["proposal_accurate"]
+    assert history_by_id["proposal_fast"].tombstoned is True
+    assert history_by_id["proposal_fast"].successor_ids == ["proposal_accurate"]
+    assert history_by_id["proposal_accurate"].predecessor_ids == ["proposal_fast"]
+
+
 def test_projection_rejects_malformed_unknown_and_unsupported_patches() -> None:
     base = ReconciledProposal(
         id="proposal_existing",

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import struct
 import wave
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,7 @@ class EvaluationReport:
     languages: set[str]
     modalities: set[str]
     provider_model_version: str
+    audio_signal_accuracy: float
     task_boundary_precision: float
     task_boundary_recall: float
     exact_count_accuracy: float
@@ -48,6 +50,7 @@ class _EvaluationCase:
     code_switch_terms: tuple[str, ...]
     structural_change: str | None
     expected_confidence: float
+    expected_frequency_hz: float | None
 
 
 _FIXTURE_ROOT = (
@@ -101,6 +104,11 @@ def _load_cases(fixture_root: Path) -> list[_EvaluationCase]:
                     else None
                 ),
                 expected_confidence=float(fixture.get("expected_confidence", 1.0)),
+                expected_frequency_hz=(
+                    float(fixture["expected_frequency_hz"])
+                    if fixture.get("expected_frequency_hz") is not None
+                    else None
+                ),
             )
         )
     return cases
@@ -122,6 +130,21 @@ def _case_languages(case: _EvaluationCase) -> tuple[str, ...]:
     return case.languages or ("unknown",)
 
 
+def _measured_frequency_hz(audio_path: Path) -> float:
+    """Measure the deterministic corpus tone without consulting case labels."""
+
+    with wave.open(str(audio_path), "rb") as fixture:
+        rate = fixture.getframerate()
+        frames = fixture.readframes(fixture.getnframes())
+    samples = [value[0] for value in struct.iter_unpack("<h", frames)]
+    crossings = sum(
+        (left < 0) != (right < 0)
+        for left, right in zip(samples, samples[1:], strict=False)
+    )
+    duration_seconds = len(samples) / rate
+    return crossings / (2 * duration_seconds)
+
+
 def evaluate_release_dataset(
     fixture_root: Path = _FIXTURE_ROOT,
 ) -> EvaluationReport:
@@ -137,10 +160,17 @@ def evaluate_release_dataset(
     conjunction_cases = conjunction_false_splits = 0
     structural_cases = structural_hits = 0
     confidence_error = 0.0
+    audio_signal_hits = 0
     language_counts: dict[str, dict[str, float]] = {}
 
     for case in cases:
         audio = _validated_audio(case)
+        signal_matches = case.expected_frequency_hz is None or abs(
+            _measured_frequency_hz(case.audio_path) - case.expected_frequency_hz
+        ) <= 2.0
+        audio_signal_hits += int(signal_matches)
+        if not signal_matches:
+            failures.append(f"{case.id}: audio signal mismatch")
         result = provider.transcribe_sealed_audio(
             AccurateSttRequest(
                 operation_id=case.id,
@@ -220,6 +250,9 @@ def evaluate_release_dataset(
         languages={language for case in cases for language in case.languages},
         modalities={"audio", "text"},
         provider_model_version=_PROVIDER_MODEL_VERSION,
+        audio_signal_accuracy=(
+            audio_signal_hits / case_count if case_count else 0.0
+        ),
         task_boundary_precision=(
             matched_boundaries / predicted_total if predicted_total else 0.0
         ),
