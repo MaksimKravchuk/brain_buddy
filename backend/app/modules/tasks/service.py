@@ -2400,6 +2400,7 @@ class TaskService:
             len(mutable) == 1
             and len(titles) == 1
             and not self._titles_refer_to_same_item(titles[0], mutable[0].title)
+            and self._titles_share_first_word(titles[0], mutable[0].title)
             and self._proposal_identity_key(titles[0])
             != self._proposal_identity_key(mutable[0].title)
         ):
