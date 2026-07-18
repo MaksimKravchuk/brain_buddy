@@ -146,7 +146,7 @@ export default function TreeWorkspace(): JSX.Element {
     <ReactFlowProvider>
       <div className="flex min-h-screen flex-col bg-surface-base text-slate-900">
         <header className="relative z-30 border-b border-slate-200 bg-surface-raised/90 px-6 py-3 shadow-floating backdrop-blur">
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:flex-nowrap">
             <TreeMenu
               treeName={treeName}
               activeTreeId={activeTreeId}
