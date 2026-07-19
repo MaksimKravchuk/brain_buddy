@@ -31,6 +31,8 @@ import type {
   TaskCreateRequest,
   TaskListFilters,
   TaskListResponse,
+  SmartAddTaskCreateRequest,
+  SmartAddTaskResponse,
   TaskResponse,
   TaskSubtaskCreateRequest,
   TaskSubtaskResponse,
@@ -237,6 +239,14 @@ export const apiClient = {
     });
   },
 
+  smartAddTask(payload: SmartAddTaskCreateRequest, idempotencyKey: string) {
+    return request<SmartAddTaskResponse>("/tasks/smart-add", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
   getTask(taskId: string, signal?: AbortSignal) {
     return request<TaskResponse>(`/tasks/${taskId}`, { signal });
   },
@@ -372,6 +382,31 @@ export const apiClient = {
     });
   },
 
+  uploadBrainDumpAudio(
+    operationId: string,
+    chunkNumber: number,
+    content: ArrayBuffer,
+    sha256: string
+  ) {
+    return request<BrainDumpOperationResponse>(`/brain-dump-operations/${operationId}/audio/${chunkNumber}`, {
+      method: "PUT",
+      headers: { "X-Content-SHA256": sha256 },
+      body: content
+    });
+  },
+
+  sealBrainDump(
+    operationId: string,
+    payload: { expected_revision: number; expected_chunks: number; manifest_hash: string },
+    idempotencyKey: string
+  ) {
+    return request<BrainDumpOperationResponse>(`/brain-dump-operations/${operationId}/seal`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
   updateBrainDumpProposal(
     operationId: string,
     proposalId: string,
@@ -385,7 +420,7 @@ export const apiClient = {
     });
   },
 
-  commandBrainDump(operationId: string, action: "pause" | "resume" | "finish" | "cancel" | "commit", expectedRevision: number, idempotencyKey: string) {
+  commandBrainDump(operationId: string, action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry", expectedRevision: number, idempotencyKey: string) {
     return request<BrainDumpOperationResponse>(`/brain-dump-operations/${operationId}/${action}`, {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },

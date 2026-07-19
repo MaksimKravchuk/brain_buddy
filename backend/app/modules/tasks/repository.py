@@ -307,6 +307,13 @@ class TaskRepository(BaseRepository):
     def brain_dump_operation_path(self, owner_id: str, operation_id: str) -> Path:
         return self.resolve("brain-dump-operations", owner_id, f"{operation_id}.json")
 
+    def brain_dump_audio_chunk_path(
+        self, owner_id: str, operation_id: str, chunk_number: int, sha256: str
+    ) -> Path:
+        return self.resolve(
+            "brain-dump-media", owner_id, operation_id, f"{chunk_number:06d}-{sha256}.bin"
+        )
+
     def project_path(self, owner_id: str, project_id: str) -> Path:
         return self.resolve("projects", owner_id, f"{project_id}.json")
 
@@ -476,6 +483,24 @@ class TaskRepository(BaseRepository):
             _sqlite_guard("Brain dump operation", operation.id),
         ):
             self._upsert_brain_dump_operation(conn, operation)
+
+    def save_brain_dump_audio_chunk(
+        self, *, owner_id: str, operation_id: str, chunk_number: int, sha256: str, content: bytes
+    ) -> None:
+        path = self.brain_dump_audio_chunk_path(owner_id, operation_id, chunk_number, sha256)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+
+    def load_brain_dump_audio_chunks(
+        self, *, owner_id: str, operation_id: str, chunks: list[tuple[int, str]]
+    ) -> bytes:
+        parts: list[bytes] = []
+        for chunk_number, sha256 in sorted(chunks):
+            path = self.brain_dump_audio_chunk_path(owner_id, operation_id, chunk_number, sha256)
+            if not path.exists():
+                raise NotFoundError("Brain dump audio chunk", f"{operation_id}:{chunk_number}")
+            parts.append(path.read_bytes())
+        return b"".join(parts)
 
     def get_brain_dump_operation_for_owner(
         self, operation_id: str, *, owner_id: str

@@ -129,15 +129,15 @@ afterEach(() => {
 });
 
 describe("AppRoutes", () => {
-  it("redirects the authenticated root route into the source-faithful next actions shell", async () => {
+  it("renders the literal source workspace at the authenticated root route", async () => {
     renderRoutes("/");
 
     expect(await screen.findByRole("heading", { name: "Next actions" })).toBeInTheDocument();
-    expect(screen.getByRole("banner")).toHaveStyle({ height: "52px" });
+    expect(screen.getByRole("banner")).toHaveStyle({ height: "56px" });
     expect(screen.getByText("Brain Buddy")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Search tasks")).toBeEnabled();
+    expect(screen.getByPlaceholderText("Search tasks and trees")).toBeEnabled();
     expect(screen.getByRole("button", { name: "Brain dump" })).toBeEnabled();
-    expect(await screen.findByText("6 tasks")).toBeInTheDocument();
+    expect(screen.getByText("6 tasks · 1 running on AI")).toBeInTheDocument();
   });
 
   it("renders projects, tags and task rows from server projections without Context copy", async () => {
@@ -151,11 +151,61 @@ describe("AppRoutes", () => {
     expect(within(sidebar).getByText("Launch v2")).toBeInTheDocument();
     expect(within(sidebar).getByText("Tags")).toBeInTheDocument();
     expect(within(sidebar).queryByText("Contexts")).not.toBeInTheDocument();
-    expect(within(sidebar).getByText("@deep-work")).toBeInTheDocument();
+    expect(within(sidebar).getByText("#deep-work")).toBeInTheDocument();
 
     expect(screen.getByText("Fix onboarding drop-off")).toBeInTheDocument();
     expect(screen.getAllByText("Onboarding drop-off").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getAllByText(/@deep-work/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("@Onboarding drop-off")).toBeInTheDocument();
+    expect(screen.getAllByText(/#deep-work/).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("accepts a Smart Add suggestion by keyboard before submitting the clean classified task", async () => {
+    const user = userEvent.setup();
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/tasks/smart-add")) {
+        return Promise.resolve(
+          jsonResponse({
+            task: taskFixture("task-smart-add", "Call supplier"),
+            project: null,
+            tags: [tagsResponse[0]],
+            created: { project_id: null, tag_ids: [] }
+          }, 201)
+        );
+      }
+      if (url.endsWith("/tasks") || url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse(taskResponse));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/next");
+    const title = await screen.findByLabelText("New task title");
+    await user.type(title, "Call supplier #ca");
+
+    expect(await screen.findByRole("listbox", { name: "Smart Add suggestions" })).toBeInTheDocument();
+    expect(title).toHaveAttribute("aria-expanded", "true");
+    await user.keyboard("{Enter}");
+    expect(title).toHaveValue("Call supplier #calls ");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining("/tasks/smart-add"),
+        expect.objectContaining({ method: "POST" })
+      );
+    });
+    const smartAddCall = vi.mocked(fetch).mock.calls.find(([input]) => String(input).includes("/tasks/smart-add"));
+    expect(JSON.parse(String(smartAddCall?.[1]?.body))).toMatchObject({
+      title: "Call supplier",
+      tags: [{ id: "tag-calls" }]
+    });
   });
 
   it("keeps the legacy CRT workspace isolated under /crt/*", async () => {
@@ -466,7 +516,7 @@ describe("AppRoutes", () => {
     projectView.unmount();
     renderRoutes("/tags/tag-deep-work");
 
-    expect(await screen.findByRole("heading", { name: "@deep-work" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "#deep-work" })).toBeInTheDocument();
     await user.click(screen.getAllByRole("button", { name: "Delete" })[1]);
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/tasks?state=next"), expect.anything());

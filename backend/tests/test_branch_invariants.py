@@ -276,6 +276,59 @@ def test_mock_provider_middle_confidence_and_correlation_error_header(
     assert response.headers[CORRELATION_HEADER] == "trace"
 
 
+def test_build_diff_skips_relation_diff_entry_when_fields_are_unchanged(
+    version_service,
+) -> None:
+    """An unchanged relation present on both sides of a snapshot diff must not
+    produce a conflict entry — only relations whose comparable fields actually
+    differ should count toward relations_modified."""
+
+    nodes = [_node("a"), _node("b")]
+    unchanged_relation = _relation("a", "b")
+    prev_tree = _tree(nodes, [unchanged_relation])
+    curr_tree = _tree(nodes, [unchanged_relation])
+
+    diff, conflicts = version_service._build_diff(prev_tree, curr_tree)
+
+    assert diff.relations_modified == 0
+    assert conflicts == []
+
+
+def test_restore_version_merges_missing_refs_then_skips_already_present_refs(
+    tree_service, version_service
+) -> None:
+    """Exercises both merge branches in restore_version: appending a ref that
+    is absent from the target tree (the version's own ref, and any ref
+    carried on the restored snapshot), and skipping a ref that is already
+    present on a subsequent restore of the same version."""
+
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Ref merge"), owner_id="owner"
+    )
+    v1 = version_service.create_version(tree.id, VersionCreateRequest(label="v1"))
+    v2 = version_service.create_version(tree.id, VersionCreateRequest(label="v2"))
+
+    # Simulate a tree whose version_refs were lost while the version
+    # documents themselves still exist, so both the restored-ref and the
+    # snapshot's-own-ref-list appends are exercised.
+    def strip_refs(current: TreeDocument) -> TreeDocument:
+        return current.model_copy(update={"version_refs": []})
+
+    tree_service.mutate_tree(tree.id, strip_refs)
+
+    restored = version_service.restore_version(tree.id, v2.id)
+    ref_ids = [ref.id for ref in restored.version_refs]
+    assert ref_ids.count(v2.id) == 1
+    assert ref_ids.count(v1.id) == 1
+
+    # Restoring the same version again: both refs are already present, so the
+    # merge loop's "skip" branch (ref already accounted for) is taken instead.
+    restored_again = version_service.restore_version(tree.id, v2.id)
+    ref_ids_again = [ref.id for ref in restored_again.version_refs]
+    assert ref_ids_again.count(v2.id) == 1
+    assert ref_ids_again.count(v1.id) == 1
+
+
 def test_index_missing_delete_and_configured_admin_seed(
     container, data_dir, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -15,7 +15,14 @@ type BrainDumpOperation = {
   id: string;
   status: string;
   revision: number;
-  proposals: Array<{ id: string; title: string; revision: number }>;
+  proposals: Array<{
+    id: string;
+    title: string;
+    revision: number;
+    deleted: boolean;
+    locked_fields: string[];
+    user_edited: boolean;
+  }>;
   committed_task_ids: string[];
 };
 
@@ -82,7 +89,7 @@ async function loginViaUi(page: Page, email: string): Promise<void> {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(/\/tasks\/next$/);
+  await expect(page).toHaveURL(/\/$/);
 }
 
 async function relogin(page: Page, email: string): Promise<void> {
@@ -128,14 +135,23 @@ async function listInboxTasks(page: Page): Promise<Task[]> {
 
 async function installSpeechBoundary(page: Page, media: "granted" | "denied" | "unavailable" = "granted"): Promise<void> {
   await page.addInitScript((mode) => {
-    const fakeTrack = { stop() {} };
+    // `new MediaRecorder(stream)` requires a genuine MediaStream instance; a plain object
+    // with a getTracks() shim fails Chromium's constructor type check. A canvas capture
+    // stream gives real MediaStream/MediaStreamTrack objects without needing microphone
+    // hardware or audio-context autoplay permissions.
+    function fakeMediaStream(): MediaStream {
+      const canvas = document.createElement("canvas");
+      canvas.width = 2;
+      canvas.height = 2;
+      return canvas.captureStream();
+    }
     Object.defineProperty(navigator, "mediaDevices", {
       configurable: true,
       value: {
         getUserMedia: () =>
           mode === "denied"
             ? Promise.reject(new DOMException("Microphone blocked by test", "NotAllowedError"))
-            : Promise.resolve({ getTracks: () => [fakeTrack] })
+            : Promise.resolve(fakeMediaStream())
       }
     });
 
@@ -164,6 +180,57 @@ async function installSpeechBoundary(page: Page, media: "granted" | "denied" | "
       recognition?.onresult?.({ results: [{ 0: { transcript: text }, isFinal }] });
     };
   }, media);
+}
+
+async function installDeterministicSealedAudioBoundary(page: Page, sealedText: string): Promise<void> {
+  await page.addInitScript((audioText) => {
+    const fakeStream = { getTracks: () => [{ stop() {} }] } as unknown as MediaStream;
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia: () => Promise.resolve(fakeStream) }
+    });
+
+    class FakeMediaRecorder {
+      state: RecordingState = "inactive";
+      ondataavailable: ((event: { data: Blob }) => void) | null = null;
+      onstop: ((event: Event) => void) | null = null;
+      constructor(public stream: MediaStream) {}
+      start(): void {
+        this.state = "recording";
+      }
+      pause(): void {
+        this.state = "paused";
+      }
+      resume(): void {
+        this.state = "recording";
+      }
+      stop(): void {
+        this.state = "inactive";
+        this.ondataavailable?.({ data: new Blob([audioText], { type: "audio/webm" }) });
+        this.onstop?.(new Event("stop"));
+      }
+    }
+
+    class FakeSpeechRecognition {
+      continuous = false;
+      interimResults = false;
+      lang = "en-US";
+      onresult: ((event: { results: Array<{ 0: { transcript: string }; isFinal: boolean }> }) => void) | null = null;
+      onerror: ((event: { error: string }) => void) | null = null;
+      start(): void {
+        (window as unknown as { __brainBuddyRecognition?: FakeSpeechRecognition }).__brainBuddyRecognition = this;
+      }
+      stop(): void {}
+    }
+
+    (window as unknown as { MediaRecorder: typeof FakeMediaRecorder }).MediaRecorder = FakeMediaRecorder;
+    (window as unknown as { SpeechRecognition: typeof FakeSpeechRecognition; webkitSpeechRecognition: typeof FakeSpeechRecognition }).SpeechRecognition = FakeSpeechRecognition;
+    (window as unknown as { SpeechRecognition: typeof FakeSpeechRecognition; webkitSpeechRecognition: typeof FakeSpeechRecognition }).webkitSpeechRecognition = FakeSpeechRecognition;
+    (window as unknown as { __emitSpeech: (text: string, isFinal?: boolean) => void }).__emitSpeech = (text: string, isFinal = true) => {
+      const recognition = (window as unknown as { __brainBuddyRecognition?: FakeSpeechRecognition }).__brainBuddyRecognition;
+      recognition?.onresult?.({ results: [{ 0: { transcript: text }, isFinal }] });
+    };
+  }, sealedText);
 }
 
 async function emitSpeech(page: Page, text: string, isFinal = true): Promise<void> {
@@ -208,8 +275,8 @@ test("native task shell uses real backend counts, filters, reload and relogin pe
     await expect(page.getByRole("heading", { name: "Launch Plan" })).toBeVisible();
     await expect(page.getByText("Draft launch note")).toBeVisible();
 
-    await page.getByRole("link", { name: "@deep-work" }).click();
-    await expect(page.getByRole("heading", { name: "@deep-work" })).toBeVisible();
+    await page.getByRole("link", { name: "#deep-work" }).click();
+    await expect(page.getByRole("heading", { name: "#deep-work" })).toBeVisible();
     await expect(page.getByText("Draft launch note")).toBeVisible();
     await page.reload();
     await expect(page.getByText("Draft launch note")).toBeVisible();
@@ -218,7 +285,7 @@ test("native task shell uses real backend counts, filters, reload and relogin pe
   await test.step("relogin and prove the same filtered backend row is still present", async () => {
     await relogin(page, account.email);
     await page.goto(`/tags/${account.tag.id}`);
-    await expect(page.getByRole("heading", { name: "@deep-work" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "#deep-work" })).toBeVisible();
     await expect(page.getByText("Draft launch note")).toBeVisible();
   });
 });
@@ -291,15 +358,20 @@ test("Voice Brain Dump records provisional cards, reviews edits/deletes and save
     await page.getByRole("button", { name: "Resume" }).click();
     await expect(page.getByText("Recording")).toBeVisible();
     await page.getByRole("button", { name: "Stop & review" }).click();
-    await expect(page.getByRole("heading", { name: "Review 2 tasks" })).toBeVisible();
+    // Accurate STT reconciles the sealed original audio independently of the browser
+    // preview text; since the E2E capture stream carries no recognizable speech, it
+    // surfaces one additional placeholder draft alongside the two speech-derived drafts.
+    await expect(page.getByRole("heading", { name: "Review 3 tasks" })).toBeVisible();
   });
 
-  await test.step("edit one draft, delete one draft and prove nothing canonical exists before Save", async () => {
+  await test.step("edit one draft, delete two drafts and prove nothing canonical exists before Save", async () => {
     await page.getByLabel("Task title #1").fill("Buy oat milk for breakfast");
     await page.keyboard.press("Tab");
     await expect(page.getByText("Edited")).toBeVisible();
     await page.getByRole("button", { name: "Delete Call dentist" }).click();
     await expect(page.getByText("Call dentist")).toHaveCount(0);
+    await page.getByRole("button", { name: "Delete Untranscribed sealed audio" }).click();
+    await expect(page.getByText("Untranscribed sealed audio")).toHaveCount(0);
     const beforeSave = await listInboxTasks(page);
     assertArrayLength(beforeSave, 0, "Inbox should remain empty before saving reviewed drafts");
   });
@@ -311,6 +383,80 @@ test("Voice Brain Dump records provisional cards, reviews edits/deletes and save
     await expect(page.getByText("Buy oat milk for breakfast")).toBeVisible();
     const inbox = await listInboxTasks(page);
     assertStringArrayEquals(inbox.map((task) => task.title), ["Buy oat milk for breakfast"], "Inbox titles after saving brain dump");
+  });
+});
+
+test("Voice Brain Dump grows a mixed-language preview and preserves user choices through accurate reconciliation", async ({ page }) => {
+  await productLabels("Voice Brain Dump reconciliation preserves user choices");
+  await signup(page, unique("voice-reconcile-locks"));
+  await installDeterministicSealedAudioBoundary(
+    page,
+    "Надо починить BrainBuddy, потом сделать production smoke и написать Наташе"
+  );
+  let operationId = "";
+  let breadId = "";
+  let deletedId = "";
+  const editedTitle = "SMOKE Купить хлеб и молоко";
+
+  await test.step("one stable mixed-language result splits потом and grows six provisional proposals", async () => {
+    await page.goto("/brain-dump/new");
+    await page.getByRole("button", { name: "Record" }).click();
+    await waitForStartedOperation(page);
+    operationId = (await page.locator("[data-operation-id]").getAttribute("data-operation-id")) ?? "";
+    await emitSpeech(
+      page,
+      "Сделать production smoke. написать Наташе. купить хлеб и молоко. удалить черновик. Починить brain body потом позвонить маме"
+    );
+    await expect(page.getByText("6 tasks captured")).toBeVisible();
+    await expect(page.getByText("Купить хлеб и молоко", { exact: true })).toBeVisible();
+    await expect(page.getByText("Починить brain body", { exact: true })).toBeVisible();
+    await expect(page.getByText("Позвонить маме", { exact: true })).toBeVisible();
+  });
+
+  await test.step("record a title lock and deletion without writing canonical tasks", async () => {
+    let operation = await apiGet<BrainDumpOperation>(page, `/api/brain-dump-operations/${operationId}`);
+    const bread = operation.proposals.find((proposal) => proposal.title.includes("хлеб"));
+    const disposable = operation.proposals.find((proposal) => proposal.title.includes("черновик"));
+    assertCondition(bread && disposable, "expected bread and disposable preview proposals");
+    breadId = bread.id;
+    deletedId = disposable.id;
+    operation = await apiPatch<BrainDumpOperation>(
+      page,
+      `/api/brain-dump-operations/${operationId}/proposals/${breadId}`,
+      { title: editedTitle, expected_revision: operation.revision },
+      unique("edit-locked-bread")
+    );
+    await apiPatch<BrainDumpOperation>(
+      page,
+      `/api/brain-dump-operations/${operationId}/proposals/${deletedId}`,
+      { deleted: true, expected_revision: operation.revision },
+      unique("delete-preview-draft")
+    );
+    assertArrayLength(await listInboxTasks(page), 0, "Inbox before reconciliation");
+  });
+
+  await test.step("accurate reconciliation keeps the locked proposal and deletion while correcting other tasks", async () => {
+    await page.getByRole("button", { name: "Stop & review" }).click();
+    await expect(page.getByRole("heading", { name: "Review 4 tasks" })).toBeVisible();
+    const reconciled = await apiGet<BrainDumpOperation>(page, `/api/brain-dump-operations/${operationId}`);
+    const activeTitles = reconciled.proposals
+      .filter((proposal) => !proposal.deleted)
+      .map((proposal) => proposal.title)
+      .sort();
+    assertStringArrayEquals(
+      activeTitles,
+      ["Починить BrainBuddy", "Сделать production smoke", "Написать Наташе", editedTitle].sort(),
+      "Reconciled active proposal titles"
+    );
+    const edited = reconciled.proposals.find((proposal) => proposal.id === breadId);
+    const deleted = reconciled.proposals.find((proposal) => proposal.id === deletedId);
+    assertCondition(
+      edited?.title === editedTitle && edited.locked_fields.includes("title") && edited.user_edited,
+      "user-edited bread proposal and title lock must survive reconciliation"
+    );
+    assertCondition(deleted?.deleted, "user-deleted proposal must remain deleted");
+    assertArrayLength(await listInboxTasks(page), 0, "Inbox before explicit Save");
+    await page.getByRole("button", { name: "Discard" }).click();
   });
 });
 
@@ -339,6 +485,11 @@ test("Voice Brain Dump resume and commit idempotency do not create duplicate Inb
 
   await test.step("confirm once, retry commit against completed operation, then verify one committed task after relogin", async () => {
     await page.getByRole("button", { name: "Stop & review" }).click();
+    // Accurate STT reconciles the sealed original audio in addition to the browser
+    // preview-derived draft; delete the placeholder before saving so committed state
+    // still reflects exactly one recovered task.
+    await expect(page.getByRole("heading", { name: "Review 2 tasks" })).toBeVisible();
+    await page.getByRole("button", { name: "Delete Untranscribed sealed audio" }).click();
     await expect(page.getByRole("heading", { name: "Review 1 task" })).toBeVisible();
     await page.getByRole("button", { name: "Save 1 to inbox" }).click();
     await expect(page.getByRole("heading", { name: "Saved 1 task to Inbox" })).toBeVisible();
@@ -362,7 +513,7 @@ test("Voice Brain Dump resume and commit idempotency do not create duplicate Inb
 test("Voice Brain Dump failures are visible and preserve recoverable live sessions", async ({ page }) => {
   await productLabels("Voice Brain Dump failure recovery");
 
-  await test.step("unavailable speech recognition creates no backend operation", async () => {
+  await test.step("unavailable speech recognition still records original audio and starts a backend operation", async () => {
     await signup(page, unique("voice-unavailable"));
     await installSpeechBoundary(page, "unavailable");
     const startRequests: string[] = [];
@@ -373,8 +524,8 @@ test("Voice Brain Dump failures are visible and preserve recoverable live sessio
     });
     await page.goto("/brain-dump/new");
     await page.getByRole("button", { name: "Record" }).click();
-    await expect(page.getByRole("alert")).toContainText("speech recognition is unavailable");
-    assertArrayLength(startRequests, 0, "Unavailable speech recognition should not start backend operations");
+    await waitForStartedOperation(page);
+    assertArrayLength(startRequests, 1, "Unavailable speech recognition should still start one backend operation for original-audio capture");
   });
 
   await test.step("denied microphone creates no backend operation", async () => {

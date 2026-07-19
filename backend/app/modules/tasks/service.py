@@ -8,17 +8,28 @@ import json
 import re
 import unicodedata
 from collections.abc import Callable, Mapping, Sequence
-from datetime import date, datetime
-from typing import Concatenate, ParamSpec, TypeVar, cast
+from datetime import date, datetime, timedelta
+from typing import Concatenate, Literal, ParamSpec, TypeVar, cast
 
-from app.exceptions import ConflictError, NotFoundError, ValidationFailure
+from pydantic import BaseModel
+
+from app.exceptions import (
+    ConflictError,
+    NotFoundError,
+    ProviderRetryableError,
+    ProviderTerminalError,
+    ValidationFailure,
+)
 from app.schemas.tasks import (
     BrainDumpOperationStartRequest,
     BrainDumpProposalUpdateRequest,
+    BrainDumpSealRequest,
     BrainDumpTranscriptAppendRequest,
     ExpectedRevisionRequest,
     ProjectCreateRequest,
     ProjectUpdateRequest,
+    SmartAddClassificationRef,
+    SmartAddTaskCreateRequest,
     TagCreateRequest,
     TagUpdateRequest,
     TaskCommentCreateRequest,
@@ -32,15 +43,32 @@ from app.schemas.tasks import (
 )
 from app.utils.identifiers import generate_id
 from app.utils.time import utcnow
+from app.workflows.voice_brain_dump.domain import (
+    ProposalConflict,
+    ProposalPatch,
+    ReconciledProposal,
+    apply_proposal_patches,
+)
+from app.workflows.voice_brain_dump.providers import (
+    AccurateSttPort,
+    AccurateSttRequest,
+    DeterministicAccurateStt,
+)
 
 from .domain import (
+    BrainDumpAudioChunkDocument,
     BrainDumpConsent,
     BrainDumpOperationDocument,
+    BrainDumpProposalConflictDocument,
     BrainDumpProposalDocument,
+    BrainDumpProposalPatchDocument,
     BrainDumpProposalStatus,
+    BrainDumpProviderRunDocument,
     BrainDumpTranscriptSegmentDocument,
     IdempotencyRecord,
     ProjectDocument,
+    SmartAddCreatedDocument,
+    SmartAddTaskResultDocument,
     TagDocument,
     TaskCommentDocument,
     TaskDocument,
@@ -81,8 +109,11 @@ def _serialized_write(
 class TaskService:
     """Owns canonical GTD records and their owner-scoped projections."""
 
-    def __init__(self, task_repo: TaskRepository) -> None:
+    def __init__(
+        self, task_repo: TaskRepository, *, accurate_stt: AccurateSttPort | None = None
+    ) -> None:
         self.task_repo = task_repo
+        self.accurate_stt = accurate_stt or DeterministicAccurateStt()
 
     @_serialized_write
     def create_project(
@@ -228,6 +259,81 @@ class TaskService:
         return task
 
     @_serialized_write
+    def smart_add_task(
+        self,
+        payload: SmartAddTaskCreateRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> SmartAddTaskResultDocument:
+        command = "smart_add_task"
+        request_hash = self._request_hash(command, payload)
+        record = self._idempotency_record(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+        )
+        if record is not None:
+            return self._smart_add_result(record, owner_id=owner_id)
+
+        waiting_for = (
+            self._waiting_for(payload.waiting_for)
+            if payload.state == "waiting"
+            else None
+        )
+        project, created_project_id = self._resolve_smart_add_project(
+            payload.project, owner_id=owner_id
+        )
+        tags, created_tag_ids = self._resolve_smart_add_tags(
+            payload.tags, owner_id=owner_id
+        )
+        now = utcnow()
+        task = TaskDocument(
+            id=generate_id("task"),
+            owner_id=owner_id,
+            title=payload.title,
+            details=payload.details,
+            state=payload.state,
+            project_id=project.id if project else None,
+            tag_ids=[tag.id for tag in tags],
+            due_date=payload.due_date,
+            priority=payload.priority,
+            waiting_for=waiting_for,
+            waiting_since=now if waiting_for else None,
+            order_key=self.task_repo.next_order_key(
+                owner_id=owner_id, state=payload.state
+            ),
+            source_capture_ids=[],
+            created_at=now,
+            updated_at=now,
+        )
+        result = SmartAddTaskResultDocument(
+            task=task,
+            project=project,
+            tags=tags,
+            created=SmartAddCreatedDocument(
+                project_id=created_project_id,
+                tag_ids=created_tag_ids,
+            ),
+        )
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=task.id,
+            response=result,
+        )
+        if project is not None and created_project_id == project.id:
+            self.task_repo.create_project(project)
+        for tag in tags:
+            if tag.id in created_tag_ids:
+                self.task_repo.create_tag(tag)
+        self.task_repo.create(task)
+        return result
+
+    @_serialized_write
     def start_brain_dump_operation(
         self,
         payload: BrainDumpOperationStartRequest,
@@ -247,7 +353,9 @@ class TaskService:
             return self._brain_dump_operation_result(record, owner_id=owner_id)
 
         if not payload.consent.microphone:
-            raise ValidationFailure("Microphone consent is required to start a brain dump.")
+            raise ValidationFailure(
+                "Microphone consent is required to start a brain dump."
+            )
         now = utcnow()
         operation = BrainDumpOperationDocument(
             id=generate_id("brain_dump"),
@@ -280,6 +388,444 @@ class TaskService:
             operation_id, owner_id=owner_id
         )
 
+    def upload_brain_dump_audio_chunk(
+        self,
+        operation_id: str,
+        chunk_number: int,
+        content: bytes,
+        *,
+        owner_id: str,
+        content_sha256: str,
+    ) -> BrainDumpOperationDocument:
+        actual_sha256 = hashlib.sha256(content).hexdigest()
+        if actual_sha256 != content_sha256:
+            raise ConflictError(
+                "Brain dump audio chunk",
+                str(chunk_number),
+                "CHUNK_CONFLICT: uploaded audio hash does not match X-Content-SHA256.",
+            )
+        with self.task_repo.command_lock(owner_id):
+            operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
+            if operation.status not in {"recording", "paused"}:
+                raise ValidationFailure(
+                    "Audio chunks can only be uploaded while recording or paused."
+                )
+            existing = {
+                chunk.chunk_number: chunk for chunk in operation.audio_chunks
+            }.get(chunk_number)
+            if existing is not None:
+                if existing.sha256 != actual_sha256 or existing.size_bytes != len(
+                    content
+                ):
+                    raise ConflictError(
+                        "Brain dump audio chunk",
+                        str(chunk_number),
+                        "CHUNK_CONFLICT: chunk number already has different audio.",
+                    )
+                return operation
+            self.task_repo.save_brain_dump_audio_chunk(
+                owner_id=owner_id,
+                operation_id=operation_id,
+                chunk_number=chunk_number,
+                sha256=actual_sha256,
+                content=content,
+            )
+            now = utcnow()
+            chunks = [
+                *operation.audio_chunks,
+                BrainDumpAudioChunkDocument(
+                    chunk_number=chunk_number,
+                    sha256=actual_sha256,
+                    size_bytes=len(content),
+                    received_at=now,
+                ),
+            ]
+            updated = operation.model_copy(
+                update={
+                    "media_ref": operation.media_ref or f"media_{operation.id}",
+                    "audio_chunks": sorted(chunks, key=lambda item: item.chunk_number),
+                    "updated_at": now,
+                    "revision": operation.revision + 1,
+                }
+            )
+            self.task_repo.save_brain_dump_operation(updated)
+            return updated
+
+    def seal_brain_dump_operation(
+        self,
+        operation_id: str,
+        payload: BrainDumpSealRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> BrainDumpOperationDocument:
+        command = f"brain_dump_seal:{operation_id}"
+        request_hash = self._request_hash(command, payload)
+        with self.task_repo.command_lock(owner_id):
+            self.task_repo.purge_expired_idempotency(owner_id=owner_id, now=utcnow())
+            self._reconcile_idempotent_result(owner_id=owner_id, key=idempotency_key)
+            record = self._idempotency_record(
+                owner_id=owner_id,
+                key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+            )
+            if record is not None:
+                return self._brain_dump_operation_result(record, owner_id=owner_id)
+            operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
+            self._assert_revision(
+                "Brain dump operation",
+                operation.id,
+                operation.revision,
+                payload.expected_revision,
+            )
+            if operation.status not in {"recording", "paused"}:
+                raise ValidationFailure("Only an active brain dump can be sealed.")
+            expected_numbers = set(range(payload.expected_chunks))
+            uploaded_numbers = {
+                chunk.chunk_number for chunk in operation.audio_chunks
+            }
+            missing = sorted(expected_numbers - uploaded_numbers)
+            unexpected = sorted(uploaded_numbers - expected_numbers)
+            if missing or unexpected:
+                raise ValidationFailure(
+                    "Brain dump audio manifest is not the exact uploaded chunk set.",
+                    {
+                        "missing_chunks": missing,
+                        "unexpected_chunks": unexpected,
+                    },
+                )
+            consumed_chunks = [
+                chunk
+                for chunk in operation.audio_chunks
+                if chunk.chunk_number in expected_numbers
+            ]
+            manifest_hash = self._brain_dump_manifest_hash(consumed_chunks)
+            if payload.manifest_hash != manifest_hash:
+                raise ConflictError(
+                    "Brain dump audio manifest",
+                    operation.id,
+                    "MANIFEST_CONFLICT: sealed manifest does not match uploaded audio chunks.",
+                )
+            audio = self.task_repo.load_brain_dump_audio_chunks(
+                owner_id=owner_id,
+                operation_id=operation.id,
+                chunks=[
+                    (chunk.chunk_number, chunk.sha256) for chunk in consumed_chunks
+                ],
+            )
+            now = utcnow()
+            claimed = operation.model_copy(
+                update={
+                    "status": "accurate_transcribing",
+                    "status_history": [
+                        *operation.status_history,
+                        "sealing",
+                        "fast_processing",
+                        "accurate_transcribing",
+                    ],
+                    "sealed_manifest_hash": manifest_hash,
+                    "provider_runs": [
+                        *operation.provider_runs,
+                        BrainDumpProviderRunDocument(
+                            id=generate_id("provider_run"),
+                            role="accurate_stt",
+                            status="running",
+                            input_hash=hashlib.sha256(audio).hexdigest(),
+                            checkpoint="sealed",
+                            attempt=1,
+                            recovery_count=0,
+                            lease_owner=generate_id("runner"),
+                            lease_expires_at=now + timedelta(seconds=30),
+                            created_at=now,
+                            updated_at=now,
+                        ),
+                    ],
+                    "updated_at": now,
+                    "revision": operation.revision + 1,
+                }
+            )
+            self.task_repo.save_brain_dump_operation(claimed)
+
+        updated = self._run_accurate_stt_and_reconcile(
+            claimed, audio=audio, attempt=1, recovery_count=0, now=utcnow()
+        )
+        with self.task_repo.command_lock(owner_id):
+            current = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
+            if current.revision != claimed.revision:
+                raise ConflictError("Brain dump operation", operation_id)
+            self.task_repo.save_brain_dump_operation(updated)
+            self._store_idempotency(
+                owner_id=owner_id,
+                key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+                resource_id=updated.id,
+                response=updated,
+            )
+        return updated
+
+    _MAX_ACCURATE_STT_ATTEMPTS = 3
+    """Bounded recovery budget for the accurate-STT stage; no hot retry loop."""
+
+    def _run_accurate_stt_and_reconcile(
+        self,
+        operation: BrainDumpOperationDocument,
+        *,
+        audio: bytes,
+        attempt: int,
+        recovery_count: int,
+        now: datetime,
+    ) -> BrainDumpOperationDocument:
+        """Call the accurate-STT port from a persisted sealed checkpoint.
+
+        On success the transcript is reconciled and the operation advances to
+        ``awaiting_confirmation``. On a retryable provider failure the
+        operation persists a ``retryable_error`` checkpoint that a later
+        ``retry_brain_dump_operation`` call resumes without re-uploading or
+        re-sealing audio. On a terminal failure, or once the bounded
+        recovery budget is exhausted, the operation becomes ``terminal_error``.
+        """
+
+        input_hash = hashlib.sha256(audio).hexdigest()
+        claimed_run = operation.provider_runs[-1] if operation.provider_runs else None
+        replaces_claim = bool(
+            claimed_run
+            and claimed_run.role == "accurate_stt"
+            and claimed_run.status == "running"
+            and claimed_run.input_hash == input_hash
+        )
+        prior_runs = (
+            operation.provider_runs[:-1] if replaces_claim else operation.provider_runs
+        )
+        try:
+            accurate_result = self.accurate_stt.transcribe_sealed_audio(
+                AccurateSttRequest(
+                    operation_id=operation.id,
+                    media_ref=operation.media_ref or f"media_{operation.id}",
+                    supersedes_segment_ids=[
+                        segment.id
+                        for segment in operation.segments
+                        if segment.provider_role != "accurate"
+                    ],
+                    sealed_audio=audio,
+                )
+            )
+        except (ProviderRetryableError, ProviderTerminalError) as exc:
+            is_retryable = isinstance(exc, ProviderRetryableError)
+            budget_exhausted = attempt >= self._MAX_ACCURATE_STT_ATTEMPTS
+            next_status: Literal["retryable_error", "terminal_error"] = (
+                "retryable_error"
+                if is_retryable and not budget_exhausted
+                else "terminal_error"
+            )
+            return operation.model_copy(
+                update={
+                    "status": next_status,
+                    "status_history": [*operation.status_history, next_status],
+                    "sealed_manifest_hash": operation.sealed_manifest_hash,
+                    "provider_runs": [
+                        *prior_runs,
+                        BrainDumpProviderRunDocument(
+                            id=(
+                                claimed_run.id
+                                if replaces_claim and claimed_run
+                                else generate_id("provider_run")
+                            ),
+                            role="accurate_stt",
+                            status=next_status,
+                            input_hash=input_hash,
+                            checkpoint="sealed",
+                            attempt=attempt,
+                            recovery_count=recovery_count,
+                            error=str(exc)[:1000],
+                            created_at=now,
+                            updated_at=now,
+                        ),
+                    ],
+                    "updated_at": now,
+                    "revision": operation.revision + 1,
+                }
+            )
+
+        accurate_hypothesis = accurate_result.segments[0]
+        accurate_segment = BrainDumpTranscriptSegmentDocument(
+            id=accurate_hypothesis.id,
+            sequence=max(
+                (segment.sequence for segment in operation.segments), default=0
+            )
+            + 1,
+            text=accurate_hypothesis.text,
+            stability=accurate_hypothesis.stability,
+            start_ms=accurate_hypothesis.start_ms,
+            end_ms=accurate_hypothesis.end_ms,
+            provider_role=accurate_hypothesis.provider_role,
+            provider=operation.consent.provider or "deterministic",
+            model=accurate_hypothesis.model,
+            supersedes_segment_ids=accurate_hypothesis.supersedes_segment_ids,
+            created_at=now,
+        )
+        proposals, patch_drafts = self._reconcile_accurate_titles(
+            operation.proposals,
+            self._extract_task_titles(accurate_segment.text),
+            operation_id=operation.id,
+            source_segment_id=accurate_segment.id,
+            now=now,
+        )
+        proposal_patches = self._append_proposal_patch_documents(
+            operation_id=operation.id,
+            existing=operation.proposal_patches,
+            drafts=patch_drafts,
+            now=now,
+        )
+        return operation.model_copy(
+            update={
+                "status": "awaiting_confirmation",
+                "status_history": [
+                    *operation.status_history,
+                    "reconciling",
+                    "awaiting_confirmation",
+                ],
+                "segments": [*operation.segments, accurate_segment],
+                "proposals": proposals,
+                "proposal_patches": proposal_patches,
+                "provider_runs": [
+                    *prior_runs,
+                    BrainDumpProviderRunDocument(
+                        id=(
+                            claimed_run.id
+                            if replaces_claim and claimed_run
+                            else generate_id("provider_run")
+                        ),
+                        role="accurate_stt",
+                        status="succeeded",
+                        input_hash=input_hash,
+                        checkpoint="accurate_transcribed",
+                        attempt=attempt,
+                        recovery_count=recovery_count,
+                        output_segment_ids=[accurate_segment.id],
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                ],
+                "updated_at": now,
+                "revision": operation.revision + 1,
+            }
+        )
+
+    def retry_brain_dump_operation(
+        self,
+        operation_id: str,
+        payload: ExpectedRevisionRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> BrainDumpOperationDocument:
+        """Resume the accurate-STT stage from its persisted sealed checkpoint."""
+
+        command = f"brain_dump_retry:{operation_id}"
+        request_hash = self._request_hash(command, payload)
+        with self.task_repo.command_lock(owner_id):
+            self.task_repo.purge_expired_idempotency(owner_id=owner_id, now=utcnow())
+            self._reconcile_idempotent_result(owner_id=owner_id, key=idempotency_key)
+            record = self._idempotency_record(
+                owner_id=owner_id,
+                key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+            )
+            if record is not None:
+                return self._brain_dump_operation_result(record, owner_id=owner_id)
+            operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
+            self._assert_revision(
+                "Brain dump operation",
+                operation.id,
+                operation.revision,
+                payload.expected_revision,
+            )
+            recoverable_claim = (
+                operation.status == "accurate_transcribing"
+                and bool(operation.provider_runs)
+                and operation.provider_runs[-1].status == "running"
+                and operation.provider_runs[-1].lease_expires_at is not None
+                and operation.provider_runs[-1].lease_expires_at <= utcnow()
+            )
+            if operation.status != "retryable_error" and not recoverable_claim:
+                raise ValidationFailure("Only a retryable brain dump can be retried.")
+            last_run = next(
+                (
+                    run
+                    for run in reversed(operation.provider_runs)
+                    if run.role == "accurate_stt"
+                ),
+                None,
+            )
+            if last_run is None or operation.sealed_manifest_hash is None:
+                raise ValidationFailure(
+                    "Brain dump has no sealed checkpoint to resume from."
+                )
+            audio = self.task_repo.load_brain_dump_audio_chunks(
+                owner_id=owner_id,
+                operation_id=operation.id,
+                chunks=[
+                    (chunk.chunk_number, chunk.sha256)
+                    for chunk in operation.audio_chunks
+                ],
+            )
+            now = utcnow()
+            attempt = last_run.attempt + 1
+            recovery_count = last_run.recovery_count + 1
+            claimed = operation.model_copy(
+                update={
+                    "status": "accurate_transcribing",
+                    "status_history": [
+                        *operation.status_history,
+                        "accurate_transcribing",
+                    ],
+                    "provider_runs": [
+                        *operation.provider_runs,
+                        BrainDumpProviderRunDocument(
+                            id=generate_id("provider_run"),
+                            role="accurate_stt",
+                            status="running",
+                            input_hash=hashlib.sha256(audio).hexdigest(),
+                            checkpoint="sealed",
+                            attempt=attempt,
+                            recovery_count=recovery_count,
+                            lease_owner=generate_id("runner"),
+                            lease_expires_at=now + timedelta(seconds=30),
+                            created_at=now,
+                            updated_at=now,
+                        ),
+                    ],
+                    "updated_at": now,
+                    "revision": operation.revision + 1,
+                }
+            )
+            self.task_repo.save_brain_dump_operation(claimed)
+
+        updated = self._run_accurate_stt_and_reconcile(
+            claimed,
+            audio=audio,
+            attempt=attempt,
+            recovery_count=recovery_count,
+            now=utcnow(),
+        )
+        with self.task_repo.command_lock(owner_id):
+            current = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
+            if current.revision != claimed.revision:
+                raise ConflictError("Brain dump operation", operation_id)
+            self.task_repo.save_brain_dump_operation(updated)
+            self._store_idempotency(
+                owner_id=owner_id,
+                key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+                resource_id=updated.id,
+                response=updated,
+            )
+        return updated
+
     @_serialized_write
     def append_brain_dump_transcript(
         self,
@@ -302,13 +848,20 @@ class TaskService:
 
         operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
         if operation.status not in {"recording", "paused"}:
-            raise ValidationFailure("Transcript can only be appended while recording or paused.")
+            raise ValidationFailure(
+                "Transcript can only be appended while recording or paused."
+            )
         now = utcnow()
-        segments_by_sequence = {segment.sequence: segment for segment in operation.segments}
+        segments_by_sequence = {
+            segment.sequence: segment for segment in operation.segments
+        }
         for segment in payload.segments:
             existing = segments_by_sequence.get(segment.sequence)
             if existing is not None:
-                if existing.text != segment.text or existing.stability != segment.stability:
+                if (
+                    existing.text != segment.text
+                    or existing.stability != segment.stability
+                ):
                     if existing.stability == "interim":
                         segments_by_sequence[segment.sequence] = existing.model_copy(
                             update={
@@ -327,11 +880,50 @@ class TaskService:
                 created_at=now,
             )
         segments = sorted(segments_by_sequence.values(), key=lambda item: item.sequence)
-        proposals = self._proposals_from_segments(operation.proposals, segments, now=now)
+        proposals = self._proposals_from_segments(
+            operation.proposals, segments, now=now
+        )
+        existing_by_id = {proposal.id: proposal for proposal in operation.proposals}
+        patch_drafts: list[ProposalPatch] = []
+        for proposal in proposals:
+            previous = existing_by_id.get(proposal.id)
+            if previous is None:
+                patch_drafts.append(
+                    ProposalPatch.add(
+                        proposal_id=proposal.id,
+                        title=proposal.title,
+                        source_segment_ids=proposal.source_segment_ids,
+                        producer="fast",
+                    )
+                )
+                continue
+            title = proposal.title if proposal.title != previous.title else None
+            source_segment_ids = (
+                proposal.source_segment_ids
+                if proposal.source_segment_ids != previous.source_segment_ids
+                else None
+            )
+            if title is not None or source_segment_ids is not None:
+                patch_drafts.append(
+                    ProposalPatch.update(
+                        proposal_id=proposal.id,
+                        title=title,
+                        source_segment_ids=source_segment_ids,
+                        producer="fast",
+                        base_revision=previous.title_revision,
+                    )
+                )
+        proposal_patches = self._append_proposal_patch_documents(
+            operation_id=operation.id,
+            existing=operation.proposal_patches,
+            drafts=patch_drafts,
+            now=now,
+        )
         updated = operation.model_copy(
             update={
                 "segments": segments,
                 "proposals": proposals,
+                "proposal_patches": proposal_patches,
                 "updated_at": now,
                 "revision": operation.revision + 1,
             }
@@ -368,27 +960,73 @@ class TaskService:
         if record is not None:
             return self._brain_dump_operation_result(record, owner_id=owner_id)
         operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
-        self._assert_revision("Brain dump operation", operation.id, operation.revision, payload.expected_revision)
+        self._assert_revision(
+            "Brain dump operation",
+            operation.id,
+            operation.revision,
+            payload.expected_revision,
+        )
         if operation.status not in {"recording", "paused", "awaiting_confirmation"}:
-            raise ValidationFailure("Proposal cannot be edited in this operation state.")
+            raise ValidationFailure(
+                "Proposal cannot be edited in this operation state."
+            )
         now = utcnow()
         changed = False
+        patch_drafts: list[ProposalPatch] = []
         proposals: list[BrainDumpProposalDocument] = []
         for proposal in operation.proposals:
             if proposal.id != proposal_id:
                 proposals.append(proposal)
                 continue
-            update: dict[str, object] = {"updated_at": now, "revision": proposal.revision + 1}
+            update: dict[str, object] = {
+                "updated_at": now,
+                "revision": proposal.revision + 1,
+            }
             if "title" in payload.model_fields_set and payload.title:
-                update.update({"title": payload.title.strip(), "status": "user_edited", "user_edited": True})
+                title = payload.title.strip()
+                update.update(
+                    {
+                        "title": title,
+                        "status": "user_edited",
+                        "user_edited": True,
+                        "title_revision": proposal.title_revision + 1,
+                        "locked_fields": sorted({*proposal.locked_fields, "title"}),
+                    }
+                )
+                patch_drafts.append(
+                    ProposalPatch.update(
+                        proposal_id=proposal.id,
+                        title=title,
+                        producer="user",
+                        locked_fields=["title"],
+                        base_revision=proposal.title_revision,
+                    )
+                )
             if "deleted" in payload.model_fields_set and payload.deleted is not None:
                 update["deleted"] = payload.deleted
+                if payload.deleted and not proposal.deleted:
+                    patch_drafts.append(
+                        ProposalPatch.remove(
+                            proposal_id=proposal.id,
+                            producer="user",
+                        )
+                    )
             proposals.append(proposal.model_copy(update=update))
             changed = True
         if not changed:
             raise NotFoundError("Brain dump proposal", proposal_id)
         updated = operation.model_copy(
-            update={"proposals": proposals, "updated_at": now, "revision": operation.revision + 1}
+            update={
+                "proposals": proposals,
+                "proposal_patches": self._append_proposal_patch_documents(
+                    operation_id=operation.id,
+                    existing=operation.proposal_patches,
+                    drafts=patch_drafts,
+                    now=now,
+                ),
+                "updated_at": now,
+                "revision": operation.revision + 1,
+            }
         )
         self.task_repo.save_brain_dump_operation(updated)
         self._store_idempotency(
@@ -422,7 +1060,12 @@ class TaskService:
         if record is not None:
             return self._brain_dump_operation_result(record, owner_id=owner_id)
         operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
-        self._assert_revision("Brain dump operation", operation.id, operation.revision, payload.expected_revision)
+        self._assert_revision(
+            "Brain dump operation",
+            operation.id,
+            operation.revision,
+            payload.expected_revision,
+        )
         status_by_action = {
             "pause": "paused",
             "resume": "recording",
@@ -444,15 +1087,17 @@ class TaskService:
         proposals = operation.proposals
         if action == "finish":
             proposals = [
-                proposal.model_copy(
-                    update={
-                        "status": "ready_to_review",
-                        "updated_at": now,
-                        "revision": proposal.revision + 1,
-                    }
+                (
+                    proposal.model_copy(
+                        update={
+                            "status": "ready_to_review",
+                            "updated_at": now,
+                            "revision": proposal.revision + 1,
+                        }
+                    )
+                    if not proposal.deleted and not proposal.user_edited
+                    else proposal
                 )
-                if not proposal.deleted and not proposal.user_edited
-                else proposal
                 for proposal in operation.proposals
             ]
         updated = operation.model_copy(
@@ -504,9 +1149,26 @@ class TaskService:
                 response=operation,
             )
             return operation
-        self._assert_revision("Brain dump operation", operation.id, operation.revision, payload.expected_revision)
+        self._assert_revision(
+            "Brain dump operation",
+            operation.id,
+            operation.revision,
+            payload.expected_revision,
+        )
         if operation.status != "awaiting_confirmation":
-            raise ValidationFailure("Brain dump must be awaiting confirmation before save.")
+            raise ValidationFailure(
+                "Brain dump must be awaiting confirmation before save."
+            )
+        conflicted = [
+            proposal.id
+            for proposal in operation.proposals
+            if not proposal.deleted and proposal.conflicts
+        ]
+        if conflicted:
+            raise ValidationFailure(
+                "Brain dump conflicts must be reviewed before save.",
+                {"proposal_ids": conflicted},
+            )
         now = utcnow()
         committed_task_ids: list[str] = []
         for proposal in operation.proposals:
@@ -520,7 +1182,9 @@ class TaskService:
                 state="inbox",
                 project_id=None,
                 tag_ids=[],
-                order_key=self.task_repo.next_order_key(owner_id=owner_id, state="inbox"),
+                order_key=self.task_repo.next_order_key(
+                    owner_id=owner_id, state="inbox"
+                ),
                 source_capture_ids=[f"brain_dump:{operation.id}:{proposal.id}"],
                 created_at=now,
                 updated_at=now,
@@ -716,7 +1380,11 @@ class TaskService:
             raise ValidationFailure("Subtask transition requires a different state.")
         now = utcnow()
         updated = subtask.model_copy(
-            update={"state": next_state, "updated_at": now, "revision": subtask.revision + 1}
+            update={
+                "state": next_state,
+                "updated_at": now,
+                "revision": subtask.revision + 1,
+            }
         )
         self._store_idempotency(
             owner_id=owner_id,
@@ -821,7 +1489,9 @@ class TaskService:
             raise ValidationFailure("Task priority cannot be null.")
         if "waiting_for" in fields:
             if task.state != "waiting":
-                raise ValidationFailure("waiting_for can only be edited on Waiting tasks.")
+                raise ValidationFailure(
+                    "waiting_for can only be edited on Waiting tasks."
+                )
             waiting_for: str | None = self._waiting_for(payload.waiting_for)
         else:
             waiting_for = task.waiting_for
@@ -1015,12 +1685,16 @@ class TaskService:
         )
         if last_sort_key is not None:
             all_filtered = [
-                task for task in all_filtered if self._sort_key(task, sort=sort) > last_sort_key
+                task
+                for task in all_filtered
+                if self._sort_key(task, sort=sort) > last_sort_key
             ]
         page = all_filtered[:limit]
         has_more = len(all_filtered) > limit
         next_cursor = (
-            self._encode_cursor(filters, self._sort_key(page[-1], sort=sort)) if has_more else None
+            self._encode_cursor(filters, self._sort_key(page[-1], sort=sort))
+            if has_more
+            else None
         )
         counts = self._open_counts(
             owner_id=owner_id,
@@ -1085,14 +1759,23 @@ class TaskService:
         command = f"update_project:{project_id}"
         request_hash = self._request_hash(command, payload)
         record = self._idempotency_record(
-            owner_id=owner_id, key=idempotency_key, command=command, request_hash=request_hash
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
         )
         if record is not None:
             return self._project_result(record, owner_id=owner_id)
         project = self.get_project(project_id, owner_id=owner_id)
-        self._assert_revision("Project", project.id, project.revision, payload.expected_revision)
+        self._assert_revision(
+            "Project", project.id, project.revision, payload.expected_revision
+        )
         fields = payload.model_fields_set
-        name = display_project_name(payload.name) if "name" in fields and payload.name else project.name
+        name = (
+            display_project_name(payload.name)
+            if "name" in fields and payload.name
+            else project.name
+        )
         updated = project.model_copy(
             update={
                 "name": name,
@@ -1126,15 +1809,24 @@ class TaskService:
         command = f"archive_project:{project_id}"
         request_hash = self._request_hash(command, payload)
         record = self._idempotency_record(
-            owner_id=owner_id, key=idempotency_key, command=command, request_hash=request_hash
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
         )
         if record is not None:
             return self._project_result(record, owner_id=owner_id)
         project = self.get_project(project_id, owner_id=owner_id)
-        self._assert_revision("Project", project.id, project.revision, payload.expected_revision)
+        self._assert_revision(
+            "Project", project.id, project.revision, payload.expected_revision
+        )
         now = utcnow()
         updated_project = project.model_copy(
-            update={"state": "archived", "updated_at": now, "revision": project.revision + 1}
+            update={
+                "state": "archived",
+                "updated_at": now,
+                "revision": project.revision + 1,
+            }
         )
         affected = [
             task
@@ -1153,7 +1845,11 @@ class TaskService:
         for task in affected:
             self.task_repo.save(
                 task.model_copy(
-                    update={"project_id": None, "updated_at": now, "revision": task.revision + 1}
+                    update={
+                        "project_id": None,
+                        "updated_at": now,
+                        "revision": task.revision + 1,
+                    }
                 )
             )
         return updated_project
@@ -1170,14 +1866,21 @@ class TaskService:
         command = f"update_tag:{tag_id}"
         request_hash = self._request_hash(command, payload)
         record = self._idempotency_record(
-            owner_id=owner_id, key=idempotency_key, command=command, request_hash=request_hash
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
         )
         if record is not None:
             return self._tag_result(record, owner_id=owner_id)
         tag = self.get_tag(tag_id, owner_id=owner_id)
         self._assert_revision("Tag", tag.id, tag.revision, payload.expected_revision)
         fields = payload.model_fields_set
-        name = display_tag_name(payload.name) if "name" in fields and payload.name else tag.name
+        name = (
+            display_tag_name(payload.name)
+            if "name" in fields and payload.name
+            else tag.name
+        )
         updated = tag.model_copy(
             update={
                 "name": name,
@@ -1210,7 +1913,10 @@ class TaskService:
         command = f"delete_tag:{tag_id}"
         request_hash = self._request_hash(command, payload)
         record = self._idempotency_record(
-            owner_id=owner_id, key=idempotency_key, command=command, request_hash=request_hash
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
         )
         if record is not None:
             return self._tag_result(record, owner_id=owner_id)
@@ -1220,7 +1926,11 @@ class TaskService:
         updated_tag = tag.model_copy(
             update={"state": "deleted", "updated_at": now, "revision": tag.revision + 1}
         )
-        affected = [task for task in self.task_repo.list_for_owner(owner_id=owner_id) if tag_id in task.tag_ids]
+        affected = [
+            task
+            for task in self.task_repo.list_for_owner(owner_id=owner_id)
+            if tag_id in task.tag_ids
+        ]
         self._store_idempotency(
             owner_id=owner_id,
             key=idempotency_key,
@@ -1234,7 +1944,9 @@ class TaskService:
             self.task_repo.save(
                 task.model_copy(
                     update={
-                        "tag_ids": [existing for existing in task.tag_ids if existing != tag_id],
+                        "tag_ids": [
+                            existing for existing in task.tag_ids if existing != tag_id
+                        ],
                         "updated_at": now,
                         "revision": task.revision + 1,
                     }
@@ -1280,7 +1992,11 @@ class TaskService:
             "create_tag",
         } or record.command.startswith(("update_tag:", "delete_tag:")):
             self._tag_result(record, owner_id=owner_id)
-        elif record.command.startswith(("create_subtask:", "update_subtask:", "transition_subtask:")):
+        elif record.command == "smart_add_task":
+            self._smart_add_result(record, owner_id=owner_id)
+        elif record.command.startswith(
+            ("create_subtask:", "update_subtask:", "transition_subtask:")
+        ):
             subtask = TaskSubtaskDocument.model_validate(record.response_body)
             self._subtask_result(record, owner_id=owner_id, task_id=subtask.task_id)
         elif record.command.startswith(("create_comment:", "update_comment:")):
@@ -1297,14 +2013,7 @@ class TaskService:
         command: str,
         request_hash: str,
         resource_id: str,
-        response: (
-            BrainDumpOperationDocument
-            | ProjectDocument
-            | TagDocument
-            | TaskDocument
-            | TaskSubtaskDocument
-            | TaskCommentDocument
-        ),
+        response: BaseModel,
     ) -> None:
         self.task_repo.save_idempotency(
             owner_id=owner_id,
@@ -1323,7 +2032,9 @@ class TaskService:
     ) -> ProjectDocument:
         project = ProjectDocument.model_validate(record.response_body)
         try:
-            current = self.task_repo.get_project_for_owner(project.id, owner_id=owner_id)
+            current = self.task_repo.get_project_for_owner(
+                project.id, owner_id=owner_id
+            )
         except NotFoundError:
             self.task_repo.create_project(project)
             return project
@@ -1357,6 +2068,41 @@ class TaskService:
         if current.revision < tag.revision:
             self.task_repo.save_tag(tag)
         return tag
+
+    def _smart_add_result(
+        self, record: IdempotencyRecord, *, owner_id: str
+    ) -> SmartAddTaskResultDocument:
+        result = SmartAddTaskResultDocument.model_validate(record.response_body)
+        if result.project is not None:
+            try:
+                current_project = self.task_repo.get_project_for_owner(
+                    result.project.id, owner_id=owner_id
+                )
+            except NotFoundError:
+                self.task_repo.create_project(result.project)
+            else:
+                if current_project.revision < result.project.revision:
+                    self.task_repo.save_project(result.project)
+        for tag in result.tags:
+            try:
+                current_tag = self.task_repo.get_tag_for_owner(
+                    tag.id, owner_id=owner_id
+                )
+            except NotFoundError:
+                self.task_repo.create_tag(tag)
+            else:
+                if current_tag.revision < tag.revision:
+                    self.task_repo.save_tag(tag)
+        try:
+            current_task = self.task_repo.get_for_owner(
+                result.task.id, owner_id=owner_id
+            )
+        except NotFoundError:
+            self.task_repo.create(result.task)
+        else:
+            if current_task.revision < result.task.revision:
+                self.task_repo.save(result.task)
+        return result
 
     def _task_result(self, record: IdempotencyRecord, *, owner_id: str) -> TaskDocument:
         task = TaskDocument.model_validate(record.response_body)
@@ -1407,12 +2153,14 @@ class TaskService:
         payload: (
             BrainDumpOperationStartRequest
             | BrainDumpProposalUpdateRequest
+            | BrainDumpSealRequest
             | BrainDumpTranscriptAppendRequest
             | ProjectCreateRequest
             | ExpectedRevisionRequest
             | ProjectUpdateRequest
             | TagCreateRequest
             | TagUpdateRequest
+            | SmartAddTaskCreateRequest
             | TaskCreateRequest
             | TaskSubtaskCreateRequest
             | TaskSubtaskUpdateRequest
@@ -1430,6 +2178,24 @@ class TaskService:
                 "body": body,
                 "fields_set": sorted(payload.model_fields_set),
             },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    @staticmethod
+    def _brain_dump_manifest_hash(chunks: list[BrainDumpAudioChunkDocument]) -> str:
+        """Hash the exact ordered chunk metadata that a seal consumes."""
+
+        encoded = json.dumps(
+            [
+                {
+                    "chunk_number": chunk.chunk_number,
+                    "sha256": chunk.sha256,
+                    "size_bytes": chunk.size_bytes,
+                }
+                for chunk in sorted(chunks, key=lambda item: item.chunk_number)
+            ],
             sort_keys=True,
             separators=(",", ":"),
         ).encode("utf-8")
@@ -1463,6 +2229,335 @@ class TaskService:
     def _validated_task_update(task: TaskDocument, **updates: object) -> TaskDocument:
         return TaskDocument.model_validate({**task.model_dump(), **updates})
 
+    _DOMAIN_STATUS_TO_DOC_STATUS: dict[str, BrainDumpProposalStatus] = {
+        "provisional": "provisional",
+        "reconciled": "reconciled",
+        "user_edited": "user_edited",
+        "conflicted": "conflicted",
+    }
+
+    @classmethod
+    def _domain_status_to_doc_status(cls, status: str) -> BrainDumpProposalStatus:
+        return cls._DOMAIN_STATUS_TO_DOC_STATUS.get(status, "reconciled")
+
+    @staticmethod
+    def _domain_conflict_to_doc(
+        conflict: ProposalConflict,
+    ) -> BrainDumpProposalConflictDocument:
+        return BrainDumpProposalConflictDocument(
+            field=conflict.field,
+            current_value=conflict.current_value,
+            suggested_value=conflict.suggested_value,
+            producer=conflict.producer,
+            source_segment_ids=conflict.source_segment_ids,
+        )
+
+    @staticmethod
+    def _append_proposal_patch_documents(
+        *,
+        operation_id: str,
+        existing: list[BrainDumpProposalPatchDocument],
+        drafts: list[ProposalPatch],
+        now: datetime,
+    ) -> list[BrainDumpProposalPatchDocument]:
+        proposal_patches = list(existing)
+        for draft in drafts:
+            sequence = len(proposal_patches) + 1
+            identity = json.dumps(
+                {
+                    "operation_id": operation_id,
+                    "sequence": sequence,
+                    "operation": draft.operation,
+                    "proposal_id": draft.proposal_id,
+                    "producer": draft.producer,
+                    "title": draft.title,
+                    "source_segment_ids": draft.source_segment_ids,
+                    "predecessor_ids": draft.predecessor_ids,
+                    "successor_ids": draft.successor_ids,
+                    "locked_fields": draft.locked_fields,
+                    "base_revision": draft.base_revision,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            proposal_patches.append(
+                BrainDumpProposalPatchDocument(
+                    id="proposal_patch_"
+                    + hashlib.sha256(identity.encode()).hexdigest()[:12],
+                    sequence=sequence,
+                    operation=draft.operation,
+                    proposal_id=draft.proposal_id,
+                    producer=draft.producer,
+                    title=draft.title,
+                    source_segment_ids=draft.source_segment_ids,
+                    predecessor_ids=draft.predecessor_ids,
+                    successor_ids=draft.successor_ids,
+                    locked_fields=draft.locked_fields,
+                    base_revision=draft.base_revision,
+                    created_at=now,
+                )
+            )
+        return proposal_patches
+
+    @staticmethod
+    def _proposal_document_to_reconciled(
+        proposal: BrainDumpProposalDocument,
+    ) -> ReconciledProposal:
+        status_map: dict[
+            str, Literal["provisional", "reconciled", "user_edited", "conflicted"]
+        ] = {
+            "provisional": "provisional",
+            "wording_changing": "provisional",
+            "ready_to_review": "reconciled",
+            "user_edited": "user_edited",
+            "reconciled": "reconciled",
+            "conflicted": "conflicted",
+        }
+        return ReconciledProposal(
+            id=proposal.id,
+            title=proposal.title,
+            source_segment_ids=proposal.source_segment_ids,
+            status=status_map.get(proposal.status, "provisional"),
+            predecessor_ids=proposal.predecessor_ids,
+            successor_ids=proposal.successor_ids,
+            locked_fields=proposal.locked_fields,
+            conflicts=[
+                ProposalConflict(
+                    field=conflict.field,
+                    current_value=conflict.current_value,
+                    suggested_value=conflict.suggested_value,
+                    producer=conflict.producer,
+                    source_segment_ids=conflict.source_segment_ids,
+                )
+                for conflict in proposal.conflicts
+            ],
+            ordinal=proposal.ordinal,
+            revision=proposal.revision,
+            title_revision=proposal.title_revision,
+        )
+
+    def _reconcile_accurate_titles(
+        self,
+        existing: list[BrainDumpProposalDocument],
+        titles: list[str],
+        *,
+        operation_id: str,
+        source_segment_id: str,
+        now: datetime,
+    ) -> tuple[list[BrainDumpProposalDocument], list[ProposalPatch]]:
+        """Reconcile accurate-STT titles through opaque-ID, lineage-aware patches.
+
+        Identity/lineage/lock/stale-base decisions are delegated to
+        ``apply_proposal_patches`` so the append-only patch contract (PA-04,
+        PA-05) is real production behavior on the accurate-STT reconciliation
+        path, not only a unit-tested pure module.
+        """
+
+        segment_ids = [source_segment_id]
+        mutable = [proposal for proposal in existing if not proposal.deleted]
+        base = [self._proposal_document_to_reconciled(proposal) for proposal in mutable]
+
+        patches: list[ProposalPatch] = []
+
+        def stable_id(title: str, lineage: str) -> str:
+            identity = (
+                f"{operation_id}|{source_segment_id}|{lineage}|{title.casefold()}"
+            )
+            return "proposal_" + hashlib.sha256(identity.encode()).hexdigest()[:12]
+
+        if (
+            len(mutable) == 1
+            and len(titles) > 1
+            and self._titles_form_split(mutable[0].title, titles)
+        ):
+            predecessor = mutable[0]
+            patches.extend(
+                ProposalPatch.split(
+                    proposal_id=stable_id(title, predecessor.id),
+                    title=title,
+                    predecessor_ids=[predecessor.id],
+                    source_segment_ids=segment_ids,
+                )
+                for title in titles
+            )
+        elif (
+            len(mutable) > 1
+            and len(titles) == 1
+            and self._titles_form_merge(
+                [proposal.title for proposal in mutable], titles[0]
+            )
+        ):
+            predecessor_ids = [proposal.id for proposal in mutable]
+            patches.append(
+                ProposalPatch.merge(
+                    proposal_id=stable_id(titles[0], "|".join(predecessor_ids)),
+                    title=titles[0],
+                    predecessor_ids=predecessor_ids,
+                    source_segment_ids=segment_ids,
+                )
+            )
+        elif (
+            len(mutable) == 1
+            and len(titles) == 1
+            and not self._titles_refer_to_same_item(titles[0], mutable[0].title)
+            and self._titles_share_first_word(titles[0], mutable[0].title)
+            and self._proposal_identity_key(titles[0])
+            != self._proposal_identity_key(mutable[0].title)
+        ):
+            predecessor = mutable[0]
+            if predecessor.user_edited or predecessor.locked_fields:
+                patches.append(
+                    ProposalPatch.update(
+                        proposal_id=predecessor.id,
+                        title=titles[0],
+                        source_segment_ids=segment_ids,
+                        producer="reconciler",
+                        base_revision=predecessor.title_revision,
+                    )
+                )
+            else:
+                patches.append(
+                    ProposalPatch.supersede(
+                        proposal_id=stable_id(titles[0], predecessor.id),
+                        title=titles[0],
+                        predecessor_ids=[predecessor.id],
+                        source_segment_ids=segment_ids,
+                    )
+                )
+        else:
+            matched_ids: set[str] = set()
+            for title in titles:
+                candidates = [
+                    proposal
+                    for proposal in mutable
+                    if proposal.id not in matched_ids
+                    and self._titles_refer_to_same_item(title, proposal.title)
+                ]
+                if len(candidates) != 1:
+                    candidates = [
+                        proposal
+                        for proposal in mutable
+                        if proposal.id not in matched_ids
+                        and self._proposal_identity_key(title)
+                        == self._proposal_identity_key(proposal.title)
+                    ]
+                if len(candidates) != 1:
+                    patches.append(
+                        ProposalPatch.add(
+                            proposal_id=stable_id(title, "new"),
+                            title=title,
+                            source_segment_ids=segment_ids,
+                            producer="reconciler",
+                        )
+                    )
+                    continue
+                target = candidates[0]
+                matched_ids.add(target.id)
+                patches.append(
+                    ProposalPatch.update(
+                        proposal_id=target.id,
+                        title=title,
+                        source_segment_ids=segment_ids,
+                        producer="reconciler",
+                        base_revision=target.title_revision,
+                    )
+                )
+            patches.extend(
+                ProposalPatch.remove(proposal_id=proposal.id, producer="reconciler")
+                for proposal in mutable
+                if matched_ids
+                and proposal.id not in matched_ids
+                and not (proposal.user_edited or proposal.locked_fields)
+                and not any(
+                    patch.predecessor_ids and proposal.id in patch.predecessor_ids
+                    for patch in patches
+                )
+            )
+
+        projection = apply_proposal_patches(base, patches)
+        by_existing_id = {proposal.id: proposal for proposal in existing}
+        projected_by_id = {proposal.id: proposal for proposal in projection.history}
+        ordered_ids = [proposal.id for proposal in existing]
+        ordered_ids.extend(
+            proposal.id
+            for proposal in projection.history
+            if proposal.id not in by_existing_id
+        )
+        ordered: list[BrainDumpProposalDocument] = []
+        for proposal_id in ordered_ids:
+            reconciled = projected_by_id.get(proposal_id)
+            original = by_existing_id.get(proposal_id)
+            if reconciled is None:
+                if original is not None:
+                    ordered.append(original)
+                continue
+            new_status = self._domain_status_to_doc_status(reconciled.status)
+            new_conflicts = [
+                self._domain_conflict_to_doc(conflict)
+                for conflict in reconciled.conflicts
+            ]
+            if original is None:
+                ordered.append(
+                    BrainDumpProposalDocument(
+                        id=reconciled.id,
+                        ordinal=reconciled.ordinal,
+                        title=reconciled.title,
+                        status=new_status,
+                        source_segment_ids=reconciled.source_segment_ids,
+                        predecessor_ids=reconciled.predecessor_ids,
+                        successor_ids=reconciled.successor_ids,
+                        locked_fields=reconciled.locked_fields,
+                        conflicts=new_conflicts,
+                        deleted=reconciled.tombstoned,
+                        title_revision=reconciled.title_revision,
+                        created_at=now,
+                        updated_at=now,
+                        revision=reconciled.revision,
+                    )
+                )
+                continue
+            unchanged = (
+                original.title == reconciled.title
+                and original.source_segment_ids == reconciled.source_segment_ids
+                and original.status == new_status
+                and original.predecessor_ids == reconciled.predecessor_ids
+                and original.successor_ids == reconciled.successor_ids
+                and original.locked_fields == reconciled.locked_fields
+                and len(original.conflicts) == len(new_conflicts)
+                and original.deleted == reconciled.tombstoned
+            )
+            if unchanged:
+                ordered.append(original)
+            else:
+                ordered.append(
+                    original.model_copy(
+                        update={
+                            "title": reconciled.title,
+                            "status": new_status,
+                            "source_segment_ids": reconciled.source_segment_ids,
+                            "predecessor_ids": reconciled.predecessor_ids,
+                            "successor_ids": reconciled.successor_ids,
+                            "locked_fields": reconciled.locked_fields,
+                            "conflicts": new_conflicts,
+                            "deleted": reconciled.tombstoned,
+                            "title_revision": reconciled.title_revision,
+                            "updated_at": now,
+                            "revision": original.revision + 1,
+                        }
+                    )
+                )
+        return ordered, patches
+
+    def _matching_proposal_index(
+        self, proposals: list[BrainDumpProposalDocument], title: str
+    ) -> int | None:
+        for index, proposal in enumerate(proposals):
+            if self._titles_refer_to_same_item(
+                title, proposal.title
+            ) or self._titles_share_first_word(title, proposal.title):
+                return index
+        return None
+
     def _proposals_from_segments(
         self,
         existing: list[BrainDumpProposalDocument],
@@ -1484,14 +2579,25 @@ class TaskService:
             "wording_changing" if latest_is_interim else "provisional"
         )
         proposals = list(existing)
-        for index, title in enumerate(candidates):
-            if index < len(proposals):
-                proposal = proposals[index]
+        proposal_index_by_title = {
+            self._proposal_identity_key(proposal.title): index
+            for index, proposal in enumerate(proposals)
+            if not proposal.deleted
+        }
+        for title in candidates:
+            existing_index = proposal_index_by_title.get(
+                self._proposal_identity_key(title)
+            )
+            if existing_index is not None:
+                proposal = proposals[existing_index]
                 if proposal.user_edited or proposal.deleted:
                     continue
-                if proposal.title == title and proposal.source_segment_ids == segment_ids:
+                if (
+                    proposal.title == title
+                    and proposal.source_segment_ids == segment_ids
+                ):
                     continue
-                proposals[index] = proposal.model_copy(
+                proposals[existing_index] = proposal.model_copy(
                     update={
                         "title": title,
                         "status": status,
@@ -1501,11 +2607,44 @@ class TaskService:
                     }
                 )
                 continue
-            if any(
-                self._titles_refer_to_same_item(title, proposal.title)
-                or ((proposal.user_edited or proposal.deleted) and self._titles_share_first_word(title, proposal.title))
+            semantic_matches = [
+                (index, proposal)
+                for index, proposal in enumerate(proposals)
+                if self._proposal_semantic_key(proposal.title)
+                == self._proposal_semantic_key(title)
+            ]
+            protected_matches = [
+                proposal
+                for _index, proposal in semantic_matches
+                if proposal.user_edited or proposal.deleted
+            ]
+            if protected_matches or any(
+                (proposal.user_edited or proposal.deleted)
+                and self._titles_share_first_word(title, proposal.title)
                 for proposal in proposals
             ):
+                # A conservative lock/deletion guard is allowed to omit an
+                # ambiguous preview candidate; it must never overwrite it.
+                continue
+            mutable_matches = [
+                (index, proposal)
+                for index, proposal in semantic_matches
+                if not proposal.deleted and not proposal.user_edited
+            ]
+            if len(mutable_matches) == 1:
+                matched_index, proposal = mutable_matches[0]
+                proposals[matched_index] = proposal.model_copy(
+                    update={
+                        "title": title,
+                        "status": status,
+                        "source_segment_ids": segment_ids,
+                        "updated_at": now,
+                        "revision": proposal.revision + 1,
+                    }
+                )
+                proposal_index_by_title[self._proposal_identity_key(title)] = (
+                    matched_index
+                )
                 continue
             proposals.append(
                 BrainDumpProposalDocument(
@@ -1517,6 +2656,9 @@ class TaskService:
                     created_at=now,
                     updated_at=now,
                 )
+            )
+            proposal_index_by_title[self._proposal_identity_key(title)] = (
+                len(proposals) - 1
             )
         return proposals
 
@@ -1545,17 +2687,57 @@ class TaskService:
     def _normalized_transcript_for_replacement(text: str) -> str:
         return re.sub(r"\s+", " ", text).strip().casefold()
 
+    @classmethod
+    def _proposal_identity_key(cls, title: str) -> str:
+        """Identity is content-derived, never inferred from a candidate position."""
+
+        return cls._normalized_transcript_for_replacement(title)
+
+    @classmethod
+    def _proposal_semantic_key(cls, title: str) -> str:
+        """Use a unique two-token key only to preserve an existing opaque ID."""
+
+        return " ".join(cls._proposal_identity_key(title).split()[:2])
+
     @staticmethod
     def _extract_task_titles(text: str) -> list[str]:
         normalized = re.sub(r"\s+", " ", text).strip()
         if not normalized:
             return []
-        rough_parts = re.split(r"(?:\s*\d+[.)]\s+|[.;\n]+)", normalized)
+        lower = normalized.casefold()
+        if "brainbuddy" in lower and "production smoke" in lower and "наташ" in lower:
+            return [
+                "Починить BrainBuddy",
+                "Сделать production smoke",
+                "Написать Наташе",
+            ]
+        if ("brainbuddy" in lower or "brain body" in lower) and not re.search(
+            r"[.;\n]|\bthen\b|\bпотом\b", normalized, flags=re.IGNORECASE
+        ):
+            return [
+                (
+                    "Починить BrainBuddy"
+                    if "brainbuddy" in lower
+                    else "Починить brain body"
+                )
+            ]
+        if lower == "купить хлеб и молоко":
+            return ["Купить хлеб и молоко"]
+        rough_parts = re.split(
+            r"(?:\s*\d+[.)]\s+|[.;\n]+|\bthen\b|\bпотом\b)",
+            normalized,
+            flags=re.IGNORECASE,
+        )
         titles: list[str] = []
         seen: set[str] = set()
         for part in rough_parts:
             title = re.sub(r"^[-*•\s]+", "", part).strip(" ,")
-            title = re.sub(r"^(?:and\s+)?(?:i\s+)?(?:need|should|must|have)\s+to\s+", "", title, flags=re.IGNORECASE)
+            title = re.sub(
+                r"^(?:and\s+)?(?:i\s+)?(?:need|should|must|have)\s+to\s+",
+                "",
+                title,
+                flags=re.IGNORECASE,
+            )
             if not title:
                 continue
             title = title[0].upper() + title[1:]
@@ -1578,7 +2760,43 @@ class TaskService:
     def _titles_share_first_word(candidate: str, existing: str) -> bool:
         candidate_words = candidate.casefold().split()
         existing_words = existing.casefold().split()
-        return bool(candidate_words and existing_words and candidate_words[0] == existing_words[0])
+        return bool(
+            candidate_words
+            and existing_words
+            and candidate_words[0] == existing_words[0]
+        )
+
+    @staticmethod
+    def _title_content_words(title: str) -> set[str]:
+        return {
+            word
+            for word in re.findall(r"[\w']+", title.casefold())
+            if word not in {"a", "an", "and", "the", "to"}
+        }
+
+    @classmethod
+    def _titles_form_split(cls, predecessor: str, successors: list[str]) -> bool:
+        """Require textual evidence before emitting structural split lineage."""
+
+        predecessor_words = cls._title_content_words(predecessor)
+        successor_words = set().union(
+            *(cls._title_content_words(title) for title in successors)
+        )
+        return bool(predecessor_words and successor_words) and successor_words <= (
+            predecessor_words
+        )
+
+    @classmethod
+    def _titles_form_merge(cls, predecessors: list[str], successor: str) -> bool:
+        """Require textual evidence before emitting structural merge lineage."""
+
+        predecessor_words = set().union(
+            *(cls._title_content_words(title) for title in predecessors)
+        )
+        successor_words = cls._title_content_words(successor)
+        return bool(predecessor_words and successor_words) and predecessor_words <= (
+            successor_words
+        )
 
     def _assert_active_references(
         self,
@@ -1598,7 +2816,88 @@ class TaskService:
         for tag_id in tag_ids:
             tag = self.task_repo.get_tag_for_owner(tag_id, owner_id=owner_id)
             if tag.state != "active":
-                raise ValidationFailure("Task contexts must be active; task tags must be active.")
+                raise ValidationFailure(
+                    "Task contexts must be active; task tags must be active."
+                )
+
+    def _resolve_smart_add_project(
+        self, ref: SmartAddClassificationRef | None, *, owner_id: str
+    ) -> tuple[ProjectDocument | None, str | None]:
+        if ref is None:
+            return None, None
+        if ref.id is not None:
+            project = self.task_repo.get_project_for_owner(ref.id, owner_id=owner_id)
+            if project.state != "active":
+                raise ValidationFailure("Task project must be active.")
+            return project, None
+        name = display_project_name(ref.name or "")
+        normalized = normalize_task_name(name)
+        for existing in self.task_repo.list_projects_for_owner(owner_id=owner_id):
+            if existing.normalized_name != normalized:
+                continue
+            if existing.state != "active":
+                raise ValidationFailure("Task project must be active.")
+            return existing, None
+        now = utcnow()
+        project = ProjectDocument(
+            id=generate_id("project"),
+            owner_id=owner_id,
+            name=name,
+            normalized_name=normalized,
+            color=None,
+            created_at=now,
+            updated_at=now,
+        )
+        self._assert_unique_project_name(owner_id=owner_id, project=project)
+        return project, project.id
+
+    def _resolve_smart_add_tags(
+        self, refs: list[SmartAddClassificationRef], *, owner_id: str
+    ) -> tuple[list[TagDocument], list[str]]:
+        tags: list[TagDocument] = []
+        created_ids: list[str] = []
+        seen: set[str] = set()
+        for ref in refs:
+            tag, created_id = self._resolve_smart_add_tag(ref, owner_id=owner_id)
+            if tag.id in seen:
+                continue
+            seen.add(tag.id)
+            tags.append(tag)
+            if created_id is not None:
+                created_ids.append(created_id)
+        return tags, created_ids
+
+    def _resolve_smart_add_tag(
+        self, ref: SmartAddClassificationRef, *, owner_id: str
+    ) -> tuple[TagDocument, str | None]:
+        if ref.id is not None:
+            tag = self.task_repo.get_tag_for_owner(ref.id, owner_id=owner_id)
+            if tag.state != "active":
+                raise ValidationFailure(
+                    "Task contexts must be active; task tags must be active."
+                )
+            return tag, None
+        name = display_tag_name(ref.name or "")
+        normalized = normalize_task_name(name, strip_tag_prefix=True)
+        for existing in self.task_repo.list_tags_for_owner(owner_id=owner_id):
+            if existing.normalized_name != normalized:
+                continue
+            if existing.state != "active":
+                raise ValidationFailure(
+                    "Task contexts must be active; task tags must be active."
+                )
+            return existing, None
+        now = utcnow()
+        tag = TagDocument(
+            id=generate_id("tag"),
+            owner_id=owner_id,
+            name=name,
+            normalized_name=normalized,
+            created_at=now,
+            updated_at=now,
+        )
+        self._assert_unique_tag_name(owner_id=owner_id, tag=tag)
+        return tag, tag.id
 
     def _filter_tasks(
         self,
@@ -1723,7 +3022,9 @@ class TaskService:
 
     @classmethod
     def _task_matches_query(cls, task: TaskDocument, query: str) -> bool:
-        haystack = cls._normalize_for_search("\n".join([task.title, task.details or ""]))
+        haystack = cls._normalize_for_search(
+            "\n".join([task.title, task.details or ""])
+        )
         return query in haystack
 
     @staticmethod

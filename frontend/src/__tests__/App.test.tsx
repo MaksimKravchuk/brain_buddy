@@ -17,18 +17,7 @@ vi.mock("../api/client", () => ({
     state.unauthorizedHandler = handler;
   }
 }));
-vi.mock("../components/auth/ProtectedRoute", () => ({
-  ProtectedRoute: ({ children }: { children: React.ReactNode }) => <>{children}</>
-}));
-vi.mock("../pages/LoginPage", () => ({ default: () => <div>Login route</div> }));
-vi.mock("../pages/SignupPage", () => ({ default: () => <div>Signup route</div> }));
-vi.mock("../pages/TreeWorkspace", () => ({ default: () => <div>Workspace route</div> }));
-vi.mock("../features/tasks/TaskListPage", () => ({
-  TaskListPage: () => <div>Task shell route</div>
-}));
-vi.mock("../features/brain-dump/BrainDumpRoute", () => ({
-  BrainDumpRoute: () => <div>Brain dump route</div>
-}));
+vi.mock("../app/AppRoutes", () => ({ AppRoutes: () => <div>App routes</div> }));
 
 describe("App", () => {
   beforeEach(() => {
@@ -43,7 +32,7 @@ describe("App", () => {
   it("hydrates auth state and installs an unauthorized session handler", () => {
     const { unmount } = render(<App />);
 
-    expect(screen.getByText("Login route")).toBeInTheDocument();
+    expect(screen.getByText("App routes")).toBeInTheDocument();
     expect(state.hydrate).toHaveBeenCalledOnce();
     expect(state.unauthorizedHandler).toBeTypeOf("function");
 
@@ -54,11 +43,11 @@ describe("App", () => {
     expect(state.unauthorizedHandler).toBeNull();
   });
 
-  it("redirects unknown routes to the protected task shell", () => {
+  it("delegates route selection to AppRoutes", () => {
     window.history.pushState({}, "", "/unknown");
 
     render(<App />);
 
-    expect(screen.getByText("Task shell route")).toBeInTheDocument();
+    expect(screen.getByText("App routes")).toBeInTheDocument();
   });
 });
