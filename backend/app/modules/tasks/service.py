@@ -119,10 +119,51 @@ class TaskService:
         *,
         accurate_stt: AccurateSttPort | None = None,
         text_reconciler: TextReconcilerPort | None = None,
+        raw_audio_retention: timedelta = timedelta(days=1),
     ) -> None:
         self.task_repo = task_repo
         self.accurate_stt = accurate_stt or DisabledAccurateStt()
         self.text_reconciler = text_reconciler or DeterministicTextReconciler()
+        self.raw_audio_retention = raw_audio_retention
+
+    def purge_expired_raw_audio(self, *, now: datetime | None = None) -> int:
+        """Purge raw audio from terminal operations past the configured retention."""
+
+        current_time = now or utcnow()
+        cutoff = current_time - self.raw_audio_retention
+        purged = 0
+        for candidate in self.task_repo.list_expired_raw_audio_operations(before=cutoff):
+            with self.task_repo.command_lock(candidate.owner_id):
+                operation = self.get_brain_dump_operation(
+                    candidate.id, owner_id=candidate.owner_id
+                )
+                if (
+                    operation.status not in {"cancelled", "completed", "terminal_error"}
+                    or operation.updated_at >= cutoff
+                    or not operation.audio_chunks
+                ):
+                    continue
+                self.task_repo.delete_brain_dump_audio_chunks(
+                    owner_id=operation.owner_id,
+                    operation_id=operation.id,
+                    chunks=[
+                        (chunk.chunk_number, chunk.sha256)
+                        for chunk in operation.audio_chunks
+                    ],
+                )
+                self.task_repo.save_brain_dump_operation(
+                    operation.model_copy(
+                        update={
+                            "audio_chunks": [],
+                            "media_ref": None,
+                            "sealed_manifest_hash": None,
+                            "updated_at": current_time,
+                            "revision": operation.revision + 1,
+                        }
+                    )
+                )
+                purged += 1
+        return purged
 
     @_serialized_write
     def create_project(
@@ -794,21 +835,7 @@ class TaskService:
         attempt: int,
         recovery_count: int,
     ) -> BrainDumpOperationDocument:
-        if not self.text_reconciler.requires_external_processing:
-            # Deterministic fixture extraction is restricted to ordinary CI and
-            # explicitly injected tests. Production adapters always take the
-            # structured semantic branch below.
-            proposals, patch_drafts = self._reconcile_accurate_titles(
-                operation.proposals,
-                self._extract_task_titles(accurate_segment.text),
-                operation_id=operation.id,
-                source_segment_id=accurate_segment.id,
-                now=now,
-            )
-            reconciler_input_hash = hashlib.sha256(
-                f"deterministic|{operation.id}|{accurate_segment.id}".encode()
-            ).hexdigest()
-        else:
+        if self.text_reconciler.requires_external_processing:
             if not operation.consent.external_processing_allowed:
                 return self._reconciler_failure(
                     operation,
@@ -831,45 +858,45 @@ class TaskService:
                     attempt=attempt,
                     recovery_count=recovery_count,
                 )
-            reconciler_request = ReconcileTextRequest(
-                operation_id=operation.id,
-                transcript_segments=[accurate_hypothesis],
-                active_proposals=[
-                    self._proposal_document_to_reconciled(proposal)
-                    for proposal in operation.proposals
-                ],
-                user_locks={
-                    proposal.id: proposal.locked_fields
-                    for proposal in operation.proposals
-                    if proposal.locked_fields
-                },
-                language_hints=operation.consent.language_hints,
-                vocabulary=operation.consent.vocabulary,
+        reconciler_request = ReconcileTextRequest(
+            operation_id=operation.id,
+            transcript_segments=[accurate_hypothesis],
+            active_proposals=[
+                self._proposal_document_to_reconciled(proposal)
+                for proposal in operation.proposals
+            ],
+            user_locks={
+                proposal.id: proposal.locked_fields
+                for proposal in operation.proposals
+                if proposal.locked_fields
+            },
+            language_hints=operation.consent.language_hints,
+            vocabulary=operation.consent.vocabulary,
+        )
+        try:
+            reconcile_result = self.text_reconciler.reconcile(reconciler_request)
+        except (
+            ProviderRetryableError,
+            ProviderTerminalError,
+            ValidationFailure,
+        ) as exc:
+            return self._reconciler_failure(
+                operation,
+                checkpoint_segments=checkpoint_segments,
+                checkpoint_runs=checkpoint_runs,
+                input_hash=input_hash,
+                error=str(exc)[:1000],
+                error_code=str(exc)[:100],
+                now=now,
+                retryable=isinstance(exc, ProviderRetryableError),
+                attempt=attempt,
+                recovery_count=recovery_count,
             )
-            try:
-                reconcile_result = self.text_reconciler.reconcile(reconciler_request)
-            except (
-                ProviderRetryableError,
-                ProviderTerminalError,
-                ValidationFailure,
-            ) as exc:
-                return self._reconciler_failure(
-                    operation,
-                    checkpoint_segments=checkpoint_segments,
-                    checkpoint_runs=checkpoint_runs,
-                    input_hash=input_hash,
-                    error=str(exc)[:1000],
-                    error_code=str(exc)[:100],
-                    now=now,
-                    retryable=isinstance(exc, ProviderRetryableError),
-                    attempt=attempt,
-                    recovery_count=recovery_count,
-                )
-            proposals = self._apply_reconciler_patches(
-                operation.proposals, reconcile_result.patches, now=now
-            )
-            patch_drafts = reconcile_result.patches
-            reconciler_input_hash = reconcile_result.input_hash
+        proposals = self._apply_reconciler_patches(
+            operation.proposals, reconcile_result.patches, now=now
+        )
+        patch_drafts = reconcile_result.patches
+        reconciler_input_hash = reconcile_result.input_hash
         proposal_patches = self._append_proposal_patch_documents(
             operation_id=operation.id,
             existing=operation.proposal_patches,
@@ -1065,6 +1092,8 @@ class TaskService:
             return self._brain_dump_operation_result(record, owner_id=owner_id)
 
         operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
+        if not operation.consent.external_processing_allowed:
+            raise ValidationFailure("TRANSCRIPT_CONSENT_REQUIRED")
         if operation.status not in {"recording", "paused"}:
             raise ValidationFailure(
                 "Transcript can only be appended while recording or paused."
@@ -1365,10 +1394,25 @@ class TaskService:
                 )
                 for proposal in operation.proposals
             ]
+        clear_raw_audio = action == "cancel"
+        if clear_raw_audio:
+            self.task_repo.delete_brain_dump_audio_chunks(
+                owner_id=owner_id,
+                operation_id=operation.id,
+                chunks=[
+                    (chunk.chunk_number, chunk.sha256)
+                    for chunk in operation.audio_chunks
+                ],
+            )
         updated = operation.model_copy(
             update={
                 "status": next_status,
                 "proposals": proposals,
+                "audio_chunks": [] if clear_raw_audio else operation.audio_chunks,
+                "media_ref": None if clear_raw_audio else operation.media_ref,
+                "sealed_manifest_hash": (
+                    None if clear_raw_audio else operation.sealed_manifest_hash
+                ),
                 "updated_at": now,
                 "revision": operation.revision + 1,
             }

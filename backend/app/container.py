@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import timedelta
 
 from app.ai.providers import MockValidationProvider, OpenAIValidationProvider
 from app.core.config import AppConfig, AppEnvironment
@@ -135,6 +136,7 @@ def build_container(config: AppConfig) -> Container:
         task_repo,
         accurate_stt=_build_accurate_stt(config),
         text_reconciler=_build_text_reconciler(config),
+        raw_audio_retention=timedelta(seconds=config.voice.retention.raw_audio_seconds),
     )
     auth_service = AuthService(
         user_repo=user_repo,

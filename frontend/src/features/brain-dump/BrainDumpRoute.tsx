@@ -242,6 +242,10 @@ export function BrainDumpRoute(): JSX.Element {
 
   async function startRecording() {
     setError(null);
+    if (!externalProcessingAllowed) {
+      setError("Secure cloud transcription consent is required before recording.");
+      return;
+    }
     const Recognition = speechRecognitionConstructor();
     if (typeof MediaRecorder === "undefined") {
       setError("Original audio recording is unavailable in this browser.");
@@ -264,13 +268,7 @@ export function BrainDumpRoute(): JSX.Element {
       if (params.operationId === "new") {
         navigate(`/brain-dump/${started.id}`, { replace: true });
       }
-      if (started.consent.external_processing_allowed) {
-        startMediaRecorderFor(started, stream);
-      } else {
-        // No external-processing consent: never open the original-audio
-        // upload pipeline. Browser preview (below) stays local-only.
-        stream.getTracks().forEach((track) => track.stop());
-      }
+      startMediaRecorderFor(started, stream);
       if (Recognition) {
         startRecognitionFor(started, Recognition);
       }

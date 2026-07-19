@@ -196,6 +196,7 @@ def test_build_container_forwards_bounded_reconciler_settings_to_the_adapter(
     monkeypatch.setenv(
         "BRAIN_BUDDY_VOICE_RECONCILER_ESTIMATED_COST_USD_PER_MB", "0.03"
     )
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RAW_AUDIO_RETENTION_SECONDS", "123")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     get_config.cache_clear()  # type: ignore[attr-defined]
 
@@ -206,6 +207,7 @@ def test_build_container_forwards_bounded_reconciler_settings_to_the_adapter(
     assert reconciler.retry_backoff_seconds == (0.5, 1.5)
     assert reconciler.max_cost_usd_per_operation == 0.05
     assert reconciler.estimated_cost_usd_per_megabyte == 0.03
+    assert container.task_service.raw_audio_retention.total_seconds() == 123
 
 
 def test_unsupported_reconciler_provider_fails_closed(
@@ -218,3 +220,17 @@ def test_unsupported_reconciler_provider_fails_closed(
     provider = _build_text_reconciler(get_config())
 
     assert isinstance(provider, DisabledTextReconciler)
+
+
+@pytest.mark.parametrize(
+    "backoff",
+    ["-1", "nan", "inf", "301", "1,2,3,4,5,6"],
+)
+def test_reconciler_retry_backoff_rejects_non_finite_negative_or_unbounded_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backoff: str
+) -> None:
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_RETRY_BACKOFF_SECONDS", backoff)
+
+    with pytest.raises(ValueError, match="retry backoff"):
+        get_config()

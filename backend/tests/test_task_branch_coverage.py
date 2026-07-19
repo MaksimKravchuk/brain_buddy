@@ -557,7 +557,7 @@ def test_brain_dump_append_retry_after_idempotency_crash_does_not_advance_revisi
 ) -> None:
     operation = service.start_brain_dump_operation(
         BrainDumpOperationStartRequest.model_validate(
-            {"consent": {"microphone": True, "external_processing_allowed": False}}
+            {"consent": {"microphone": True, "external_processing_allowed": True}}
         ),
         owner_id=OWNER,
         idempotency_key="crash-start-brain-dump",
@@ -628,7 +628,7 @@ def test_brain_dump_append_replay_state_and_duplicate_segment_branches(
     service: TaskService,
 ) -> None:
     start_payload = BrainDumpOperationStartRequest.model_validate(
-        {"consent": {"microphone": True, "external_processing_allowed": False}}
+        {"consent": {"microphone": True, "external_processing_allowed": True}}
     )
     append_payload = BrainDumpTranscriptAppendRequest.model_validate(
         {"segments": [{"sequence": 1, "text": "Pay VAT.", "stability": "stable"}]}
@@ -695,7 +695,7 @@ def test_brain_dump_proposal_update_replay_not_found_and_invalid_state(
 ) -> None:
     operation = service.start_brain_dump_operation(
         BrainDumpOperationStartRequest.model_validate(
-            {"consent": {"microphone": True, "external_processing_allowed": False}}
+            {"consent": {"microphone": True, "external_processing_allowed": True}}
         ),
         owner_id=OWNER,
         idempotency_key="brain-dump-proposal-start",
@@ -843,7 +843,7 @@ def test_brain_dump_commit_replay_invalid_state_and_deleted_proposals(
 ) -> None:
     operation = service.start_brain_dump_operation(
         BrainDumpOperationStartRequest.model_validate(
-            {"consent": {"microphone": True, "external_processing_allowed": False}}
+            {"consent": {"microphone": True, "external_processing_allowed": True}}
         ),
         owner_id=OWNER,
         idempotency_key="brain-dump-commit-start",

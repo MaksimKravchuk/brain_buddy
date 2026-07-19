@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 load_dotenv()
 
@@ -99,6 +100,17 @@ class VoiceProviderSettings(BaseModel):
     endpoint: str = ""
 
     model_config = ConfigDict(frozen=True)
+
+    @field_validator("retry_backoff_seconds")
+    @classmethod
+    def validate_retry_backoff_seconds(
+        cls, values: tuple[float, ...]
+    ) -> tuple[float, ...]:
+        if not values or len(values) > 5:
+            raise ValueError("retry backoff must contain between one and five delays")
+        if any(not math.isfinite(value) or value < 0 or value > 300 for value in values):
+            raise ValueError("retry backoff delays must be finite values from 0 to 300 seconds")
+        return values
 
 
 class VoiceRetentionSettings(BaseModel):

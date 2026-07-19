@@ -1051,3 +1051,69 @@ def test_deterministic_reconciler_extracts_known_split_and_fallback_titles(
     text: str, expected: list[str]
 ) -> None:
     assert _extract_titles(text) == expected
+
+
+def test_openai_reconciler_retries_remote_protocol_errors_with_bounded_backoff() -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    attempts = 0
+    delays: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        raise httpx.RemoteProtocolError("peer disconnected", request=request)
+
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        max_retries=2,
+        retry_backoff_seconds=(0.1, 0.2),
+        transport=httpx.MockTransport(handler),
+        sleep=delays.append,
+    )
+
+    with pytest.raises(ProviderRetryableError, match="RECONCILER_PROVIDER_RETRYABLE"):
+        reconciler.reconcile(_minimal_reconcile_request())
+
+    assert attempts == 3
+    assert delays == [0.1, 0.2]
+
+
+def test_openai_reconciler_rejects_a_provenance_bearing_invented_task_identity() -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text="Buy milk",
+        stability="stable",
+        provider_role="accurate",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": "add",
+                    "proposal_id": None,
+                    "title": "Buy yacht",
+                    "source_segment_ids": [segment.id],
+                    "predecessor_ids": [],
+                    "base_revision": None,
+                    "confidence": 0.99,
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(ValidationFailure, match="unsupported task identity"):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id="operation_identity",
+                transcript_segments=[segment],
+                active_proposals=[],
+                user_locks={},
+            )
+        )

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
@@ -253,7 +254,7 @@ class OpenAITextReconciler:
                         },
                         json=payload,
                     )
-            except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            except httpx.TransportError as exc:
                 if attempt >= self.max_retries:
                     raise ProviderRetryableError("RECONCILER_PROVIDER_RETRYABLE") from exc
                 self._backoff(attempt)
@@ -287,11 +288,14 @@ class OpenAITextReconciler:
             if isinstance(item, ReconciledProposal)
         }
         known_segments = {segment.id for segment in request.transcript_segments}
+        source_text_by_id = {
+            segment.id: segment.text for segment in request.transcript_segments
+        }
         patches: list[ProposalPatch] = []
         allocated_ids: set[str] = set(existing)
 
         for index, draft in enumerate(operations):
-            self._validate_draft(draft, existing, known_segments)
+            self._validate_draft(draft, existing, known_segments, source_text_by_id)
             proposal_id = draft.proposal_id
             if draft.operation in {"add", "split", "merge", "supersede"}:
                 collision_offset = 0
@@ -323,6 +327,7 @@ class OpenAITextReconciler:
         draft: _OperationDraft,
         existing: dict[str, ReconciledProposal],
         known_segments: set[str],
+        source_text_by_id: dict[str, str],
     ) -> None:
         structural = {"add", "split", "merge", "supersede"}
         if draft.operation in structural and draft.proposal_id is not None:
@@ -347,6 +352,14 @@ class OpenAITextReconciler:
             raise ValidationFailure(
                 "Reconciler cannot restore a user-deleted proposal."
             )
+        if draft.operation == "add":
+            source_text = " ".join(
+                source_text_by_id[source_id]
+                for source_id in draft.source_segment_ids
+            )
+            OpenAITextReconciler._assert_transcript_supported_identity(
+                draft.title, source_text
+            )
         if draft.operation == "split" and len(draft.predecessor_ids) != 1:
             raise ValidationFailure("Split requires exactly one predecessor.")
         if draft.operation == "merge" and len(draft.predecessor_ids) < 2:
@@ -355,6 +368,26 @@ class OpenAITextReconciler:
             raise ValidationFailure("Supersede requires exactly one predecessor.")
         if draft.predecessor_ids and not set(draft.predecessor_ids) <= set(existing):
             raise ValidationFailure("Reconciler used unknown predecessor IDs.")
+
+    @staticmethod
+    def _assert_transcript_supported_identity(title: str, source_text: str) -> None:
+        """Reject a newly introduced object when the action is otherwise copied.
+
+        This deliberately stays conservative: semantic paraphrases and translations
+        have no lexical overlap and are left to the structured-model contract, while
+        a shared action paired with a novel concrete object is an actionable sign of
+        hallucination that can be rejected deterministically at the trust boundary.
+        """
+
+        title_terms = set(re.findall(r"\w+", title.casefold()))
+        source_terms = set(re.findall(r"\w+", source_text.casefold()))
+        shared_terms = title_terms & source_terms
+        action_words = {"add", "buy", "call", "create", "fix", "make", "pay", "send", "write"}
+        novel_object_terms = title_terms - source_terms - action_words
+        if shared_terms and novel_object_terms:
+            raise ValidationFailure(
+                "unsupported task identity is not grounded in the cited transcript."
+            )
 
     @staticmethod
     def _server_id(operation_id: str, index: int, draft: _OperationDraft) -> str:
