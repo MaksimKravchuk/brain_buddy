@@ -147,6 +147,24 @@ describe("AppRoutes", () => {
   });
 
   it("renders projects, tags and task rows from server projections without Context copy", async () => {
+    const tagsWithAt = [...tagsResponse, { id: "tag-at-calls", name: "@calls", state: "active", revision: 1, open_task_count: 1 }];
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/tasks") || url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse(taskResponse));
+      }
+      if (url.includes("/tasks/")) {
+        return Promise.resolve(jsonResponse(taskResponse.items[0]));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsWithAt));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
     renderRoutes("/tasks/next");
 
     expect(await screen.findByRole("heading", { name: "Next actions" })).toBeInTheDocument();
@@ -158,6 +176,7 @@ describe("AppRoutes", () => {
     expect(within(sidebar).getByText("Tags")).toBeInTheDocument();
     expect(within(sidebar).queryByText("Contexts")).not.toBeInTheDocument();
     expect(within(sidebar).getByText("#deep-work")).toBeInTheDocument();
+    expect(await within(sidebar).findByRole("link", { name: "@calls" })).toBeInTheDocument();
 
     expect(screen.getByText("Fix onboarding drop-off")).toBeInTheDocument();
     expect(screen.getAllByText("Onboarding drop-off").length).toBeGreaterThanOrEqual(1);
@@ -568,6 +587,37 @@ describe("AppRoutes", () => {
         expect.objectContaining({ body: expect.stringContaining('"action":"complete"') })
       );
     });
+  });
+
+  it("keeps direct task detail visible when the task is absent from the active projection", async () => {
+    const directTask = taskFixture("task-direct", "Shared task outside Next", "waiting");
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/tasks/task-direct")) {
+        return Promise.resolve(jsonResponse(directTask));
+      }
+      if (url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse({
+          items: [],
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 0, next: 0, waiting: 1, someday: 0 }
+        }));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/next/task-direct");
+
+    expect(await screen.findByRole("heading", { name: "Task detail" })).toBeInTheDocument();
+    expect(await screen.findByDisplayValue("Shared task outside Next")).toBeInTheDocument();
+    expect(screen.getByText("Next actions is clear")).toBeInTheDocument();
   });
 
   it("keeps terminal recovery explicit in task detail", async () => {

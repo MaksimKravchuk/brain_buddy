@@ -26,7 +26,7 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testMatch: /(?:e2e\/(?!mobile).*|native-tasks-voice-brain-dump\.compose)\.spec\.ts/,
+      testMatch: /(?:e2e\/(?!mobile).*|native-tasks-voice-brain-dump\.compose|claude-design-shell)\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] }
     },
     {
