@@ -4,7 +4,57 @@ Date: 2026-07-11
 Status: Proposed
 Decision owner: BrainBuddy
 Related: ADR-0001, Kanban tasks `t_8a1164be` and `t_58293688`
-Last amended: 2026-07-18 (multilingual reconciliation contract)
+Last amended: 2026-07-19 (real-provider invariants and STT/extraction evaluation separation)
+
+## 2026-07-19 amendment: real-provider invariants
+
+The 2026-07-18 contract assumed deterministic fakes as the production default.
+The shipped v1 code confirmed five root causes against `origin/main` `c0c12b0`:
+browser locale from `navigator.language`, `DeterministicAccurateStt` decoding
+binary audio as UTF-8, regex/hardcoded fixture extraction in the production
+path, synthetic-tone evaluation with injected expected transcripts, and
+hardcoded `external_processing_allowed=False` with no language/vocabulary hint
+propagation.
+
+The real-provider amendment adds these invariants without altering the
+operation/patch/confirmation substrate:
+
+- Production MUST NOT instantiate `DeterministicAccurateStt` silently. An
+  explicit env escape hatch (`BRAINBUDDY_ALLOW_DETERMINISTIC_STT=1`) is
+  allowed for local dev and logged as a warning; production startup refuses
+  it otherwise.
+- The production accurate-STT adapter MUST consume sealed original audio bytes
+  as audio (e.g. multipart upload). Binary audio MUST NEVER be decoded as
+  UTF-8 text in the production decision path.
+- The production task reconciler MUST be a structured semantic text-model
+  process emitting only schema-valid `add/update/split/merge/remove/supersede`
+  operations. Regex/hardcoded fixture extraction is removed from the
+  production decision path; `DeterministicTextReconciler` remains CI-only.
+- `language_hints` (`ru`, `ru+en`) and `vocabulary` (recurring project, person,
+  and product names) MUST propagate from operation consent to every fast-STT,
+  accurate-STT, and reconciler invocation. Browser preview locale MUST follow
+  declared hints, not `navigator.language` alone.
+- Provider configuration is role- and schema-based (`provider`, `model`,
+  `api_key_env`, `timeout_seconds`, `max_retries`, `retry_backoff_seconds`,
+  `max_cost_usd_per_operation`); a provider change must not alter operation,
+  transcript, proposal, or confirmation contracts.
+- A real-audio evaluation harness MUST report STT quality (CER/WER,
+  critical-term recall, omission/hallucination counts, latency) separately
+  from task-extraction quality (task-count accuracy, boundary
+  precision/recall, title cleanliness, conjunction false-split rate, semantic
+  preservation, calibration) by language and provider/model version, without
+  injecting expected transcripts or tone fixtures into the production
+  decision path.
+- Release targets on the approved founder corpus: 100% critical-term
+  preservation, zero invented tasks, at least 95% exact task-count accuracy,
+  at least 95% task-boundary precision/recall, and all safety/idempotency
+  invariants passing. A measured CER/WER threshold is established from the
+  first baseline.
+
+These invariants are already implicit in the provider-port, consent, privacy,
+and observability sections above. The amendment makes them explicit for
+implementation agents. See `specs/002-async-voice-workflows/` for the amended
+spec, plan, tasks, checklist, and acceptance tests.
 
 ## Context
 
