@@ -152,6 +152,62 @@ def test_build_container_uses_openai_reconciler_outside_test(
     assert container.task_service.text_reconciler.model == "gpt-4o"
 
 
+def test_voice_reconciler_configuration_is_bounded_and_resolves_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "production")
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER", "openai")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_MODEL", "gpt-4o-mini")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_API_KEY_ENV", "RECONCILER_API_KEY")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_TIMEOUT_SECONDS", "12")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_MAX_RETRIES", "3")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_RETRY_BACKOFF_SECONDS", "1,4")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_MAX_COST_USD", "0.10")
+    monkeypatch.setenv(
+        "BRAIN_BUDDY_VOICE_RECONCILER_ESTIMATED_COST_USD_PER_MB", "0.02"
+    )
+    monkeypatch.setenv("RECONCILER_API_KEY", "not-returned-from-config")
+
+    config = get_config()
+
+    assert config.voice.reconciler.provider == "openai"
+    assert config.voice.reconciler.model == "gpt-4o-mini"
+    assert config.voice.reconciler.api_key_env == "RECONCILER_API_KEY"
+    assert config.voice.reconciler.timeout_seconds == 12
+    assert config.voice.reconciler.max_retries == 3
+    assert config.voice.reconciler.retry_backoff_seconds == (1.0, 4.0)
+    assert config.voice.reconciler.max_cost_usd_per_operation == 0.10
+    assert config.voice.reconciler.estimated_cost_usd_per_megabyte == 0.02
+    assert "not-returned-from-config" not in config.model_dump_json()
+
+
+def test_build_container_forwards_bounded_reconciler_settings_to_the_adapter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.container import build_container
+
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "development")
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER", "openai")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_MAX_RETRIES", "4")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_RETRY_BACKOFF_SECONDS", "0.5,1.5")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_MAX_COST_USD", "0.05")
+    monkeypatch.setenv(
+        "BRAIN_BUDDY_VOICE_RECONCILER_ESTIMATED_COST_USD_PER_MB", "0.03"
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    get_config.cache_clear()  # type: ignore[attr-defined]
+
+    container = build_container(get_config())
+
+    reconciler = container.task_service.text_reconciler
+    assert reconciler.max_retries == 4
+    assert reconciler.retry_backoff_seconds == (0.5, 1.5)
+    assert reconciler.max_cost_usd_per_operation == 0.05
+    assert reconciler.estimated_cost_usd_per_megabyte == 0.03
+
+
 def test_unsupported_reconciler_provider_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -85,7 +85,13 @@ def _seal(
 ) -> tuple[BrainDumpOperationDocument, TaskService]:
     operation = service.start_brain_dump_operation(
         BrainDumpOperationStartRequest.model_validate(
-            {"consent": {"microphone": True, "external_processing_allowed": False}}
+            {
+                "consent": {
+                    "microphone": True,
+                    "external_processing_allowed": True,
+                    "provider": "openai",
+                }
+            }
         ),
         owner_id=OWNER,
         idempotency_key="recovery-start",

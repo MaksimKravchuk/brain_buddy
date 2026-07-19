@@ -421,6 +421,11 @@ class TaskService:
                 raise ValidationFailure(
                     "Audio chunks can only be uploaded while recording or paused."
                 )
+            if not operation.consent.external_processing_allowed:
+                raise ValidationFailure(
+                    "AUDIO_UPLOAD_CONSENT_REQUIRED: external processing consent is "
+                    "required before audio may leave the device."
+                )
             existing = {
                 chunk.chunk_number: chunk for chunk in operation.audio_chunks
             }.get(chunk_number)
@@ -815,6 +820,17 @@ class TaskService:
                     attempt=attempt,
                     recovery_count=recovery_count,
                 )
+            if operation.consent.provider != self.text_reconciler.provider_id:
+                return self._reconciler_failure(
+                    operation,
+                    checkpoint_segments=checkpoint_segments,
+                    checkpoint_runs=checkpoint_runs,
+                    input_hash=input_hash,
+                    error="RECONCILER_CONSENT_PROVIDER_MISMATCH",
+                    now=now,
+                    attempt=attempt,
+                    recovery_count=recovery_count,
+                )
             reconciler_request = ReconcileTextRequest(
                 operation_id=operation.id,
                 transcript_segments=[accurate_hypothesis],
@@ -843,6 +859,7 @@ class TaskService:
                     checkpoint_runs=checkpoint_runs,
                     input_hash=input_hash,
                     error=str(exc)[:1000],
+                    error_code=str(exc)[:100],
                     now=now,
                     retryable=isinstance(exc, ProviderRetryableError),
                     attempt=attempt,
@@ -2894,6 +2911,7 @@ class TaskService:
         retryable: bool = False,
         attempt: int = 1,
         recovery_count: int = 0,
+        error_code: str | None = None,
     ) -> BrainDumpOperationDocument:
         status: Literal["retryable_error", "terminal_error"] = (
             "retryable_error" if retryable else "terminal_error"
@@ -2918,6 +2936,9 @@ class TaskService:
                         attempt=attempt,
                         recovery_count=recovery_count,
                         error=error,
+                        error_code=(error_code if error_code is not None else error)[
+                            :100
+                        ],
                         created_at=now,
                         updated_at=now,
                     ),

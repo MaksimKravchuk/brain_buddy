@@ -65,6 +65,29 @@ def _real_adapter(transport: httpx.BaseTransport) -> OpenAiAccurateStt:
     )
 
 
+def _withdraw_consent(api_client, operation_id: str) -> None:
+    """Simulate a consent withdrawal after audio was durably uploaded.
+
+    Exercises the seal-time defense-in-depth consent gates independently of
+    the upload-time gate, which now refuses to persist audio at all when
+    consent is absent from the start.
+    """
+
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    container = api_client.app.state.container
+    persisted = container.task_service.get_brain_dump_operation(
+        operation_id, owner_id=owner_id
+    )
+    withdrawn = persisted.model_copy(
+        update={
+            "consent": persisted.consent.model_copy(
+                update={"external_processing_allowed": False}
+            )
+        }
+    )
+    container.task_repo.save_brain_dump_operation(withdrawn)
+
+
 def _upload_and_seal(api_client, operation: dict[str, object], audio: bytes, key: str):
     digest = hashlib.sha256(audio).hexdigest()
     uploaded = api_client.put(
@@ -340,12 +363,42 @@ def test_seal_rejects_external_reconciliation_without_explicit_consent(
 ) -> None:
     from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
 
-    operation = _start_operation(api_client, key="start-reconciler-without-consent")
-    api_client.app.state.container.task_service.text_reconciler = OpenAITextReconciler(
-        api_key="test-key", complete=lambda _payload: {"operations": []}
+    calls = 0
+
+    def complete(_payload: dict[str, object]) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        return {"operations": []}
+
+    # Audio can only be uploaded with consent (see the upload-consent-gate
+    # tests below), so this exercises a consent withdrawal that happens after
+    # upload but before seal -- the reconciler's own defense-in-depth gate.
+    operation = _start_operation(
+        api_client,
+        key="start-reconciler-without-consent",
+        external_processing_allowed=True,
     )
-    sealed = _upload_and_seal(
-        api_client, operation, b"no external consent", "seal-without-consent"
+    api_client.app.state.container.task_service.text_reconciler = OpenAITextReconciler(
+        api_key="test-key", complete=complete
+    )
+    audio = b"no external consent"
+    digest = hashlib.sha256(audio).hexdigest()
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": digest},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    _withdraw_consent(api_client, operation["id"])
+
+    sealed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers={"Idempotency-Key": "seal-without-consent"},
+        json={
+            "expected_revision": uploaded.json()["revision"],
+            "expected_chunks": 1,
+            "manifest_hash": _manifest_hash(audio),
+        },
     )
 
     assert sealed.status_code == 200, sealed.text
@@ -353,6 +406,7 @@ def test_seal_rejects_external_reconciliation_without_explicit_consent(
     assert sealed.json()["provider_runs"][-1]["error"] == (
         "RECONCILER_CONSENT_REQUIRED"
     )
+    assert calls == 0
 
 
 @pytest.mark.parametrize(
@@ -513,10 +567,30 @@ def test_external_stt_is_not_called_without_operation_consent(api_client) -> Non
     api_client.app.state.container.task_service.accurate_stt = _real_adapter(
         httpx.MockTransport(handler)
     )
-    operation = _start_operation(api_client, key="start-no-external-consent")
+    # Audio can only be uploaded with consent (see the upload-consent-gate
+    # tests below), so this exercises a consent withdrawal that happens after
+    # upload but before seal -- the STT's own defense-in-depth gate.
+    operation = _start_operation(
+        api_client, key="start-no-external-consent", external_processing_allowed=True
+    )
+    audio = b"\x1aE\xdf\xa3private-webm"
+    digest = hashlib.sha256(audio).hexdigest()
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": digest},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    _withdraw_consent(api_client, operation["id"])
 
-    sealed = _upload_and_seal(
-        api_client, operation, b"\x1aE\xdf\xa3private-webm", "seal-no-consent"
+    sealed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers={"Idempotency-Key": "seal-no-consent"},
+        json={
+            "expected_revision": uploaded.json()["revision"],
+            "expected_chunks": 1,
+            "manifest_hash": _manifest_hash(audio),
+        },
     )
 
     assert sealed.status_code == 200, sealed.text
@@ -562,6 +636,91 @@ def test_external_stt_consent_is_bound_to_the_named_provider(api_client) -> None
     assert sealed.json()["provider_runs"][-1]["error_code"] == (
         "STT_CONSENT_PROVIDER_MISMATCH"
     )
+
+
+def test_reconciler_consent_is_bound_to_the_named_provider(api_client) -> None:
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    calls = 0
+
+    def complete(_payload: dict[str, object]) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        return {"operations": []}
+
+    api_client.app.state.container.task_service.text_reconciler = OpenAITextReconciler(
+        api_key="test-key", complete=complete
+    )
+    response = api_client.post(
+        "/api/brain-dump-operations",
+        headers={"Idempotency-Key": "start-reconciler-provider-mismatch"},
+        json={
+            "consent": {
+                "microphone": True,
+                "external_processing_allowed": True,
+                "provider": "another-provider",
+                "language_hints": ["ru"],
+                "vocabulary": [],
+            }
+        },
+    )
+    assert response.status_code == 201
+
+    sealed = _upload_and_seal(
+        api_client, response.json(), b"audio", "seal-reconciler-provider-mismatch"
+    )
+
+    assert calls == 0
+    assert sealed.json()["status"] == "terminal_error"
+    assert sealed.json()["provider_runs"][-1]["error_code"] == (
+        "RECONCILER_CONSENT_PROVIDER_MISMATCH"
+    )
+
+
+def test_audio_upload_fails_closed_and_persists_nothing_without_external_consent(
+    api_client,
+) -> None:
+    operation = _start_operation(api_client, key="start-upload-without-consent")
+
+    audio = b"\x1aE\xdf\xa3never-persisted"
+    digest = hashlib.sha256(audio).hexdigest()
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": digest},
+    )
+
+    assert uploaded.status_code == 400, uploaded.text
+    assert "AUDIO_UPLOAD_CONSENT_REQUIRED" in uploaded.text
+
+    fetched = api_client.get(f"/api/brain-dump-operations/{operation['id']}")
+    assert fetched.status_code == 200
+    assert fetched.json()["audio_chunks"] == []
+    assert fetched.json()["media_ref"] is None
+
+
+def test_audio_upload_succeeds_with_explicit_external_consent(api_client) -> None:
+    api_client.app.state.container.task_service.accurate_stt = _real_adapter(
+        httpx.MockTransport(lambda _request: httpx.Response(200, json={"text": "ok"}))
+    )
+    operation = _start_operation(
+        api_client, key="start-upload-with-consent", external_processing_allowed=True
+    )
+
+    audio = b"\x1aE\xdf\xa3persisted-with-consent"
+    digest = hashlib.sha256(audio).hexdigest()
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": digest},
+    )
+
+    assert uploaded.status_code == 200, uploaded.text
+    chunks = uploaded.json()["audio_chunks"]
+    assert len(chunks) == 1
+    assert chunks[0]["chunk_number"] == 0
+    assert chunks[0]["sha256"] == digest
+    assert chunks[0]["size_bytes"] == len(audio)
 
 
 def test_brain_dump_operation_collects_provisional_tasks_without_inbox_writes(
@@ -684,7 +843,11 @@ def test_final_segment_splits_preview_on_explicit_clause_boundaries(
 def test_accurate_reconciliation_preserves_unmatched_locked_and_deleted_proposals(
     api_client,
 ) -> None:
-    operation = _start_operation(api_client, key="start-preserve-preview-choices")
+    operation = _start_operation(
+        api_client,
+        key="start-preserve-preview-choices",
+        external_processing_allowed=True,
+    )
     preview = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/transcript",
         headers={"Idempotency-Key": "append-preserve-preview-choices"},
@@ -1087,7 +1250,9 @@ def test_brain_dump_pause_resume_cancel_and_owner_scope(
 def test_schema_v2_upload_seal_runs_accurate_reconciliation_from_original_audio(
     api_client,
 ) -> None:
-    operation = _start_operation(api_client, key="start-schema-v2-audio")
+    operation = _start_operation(
+        api_client, key="start-schema-v2-audio", external_processing_allowed=True
+    )
     audio = "Надо починить BrainBuddy, потом сделать production smoke и написать Наташе".encode()
     digest = hashlib.sha256(audio).hexdigest()
 
@@ -1159,7 +1324,9 @@ def test_schema_v2_upload_seal_runs_accurate_reconciliation_from_original_audio(
 def test_schema_v2_accurate_correction_supersedes_fast_preview_without_canonical_write(
     api_client,
 ) -> None:
-    operation = _start_operation(api_client, key="start-schema-v2-supersede")
+    operation = _start_operation(
+        api_client, key="start-schema-v2-supersede", external_processing_allowed=True
+    )
     preview = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/transcript",
         headers={"Idempotency-Key": "append-superseded-preview"},
@@ -1250,7 +1417,11 @@ def test_schema_v2_audio_upload_rejects_missing_bad_hash_and_inactive_state(
 
 
 def test_schema_v2_seal_rejects_missing_chunks_and_replays_success(api_client) -> None:
-    operation = _start_operation(api_client, key="start-schema-v2-seal-guards")
+    operation = _start_operation(
+        api_client,
+        key="start-schema-v2-seal-guards",
+        external_processing_allowed=True,
+    )
     audio = b"buy milk"
     upload = api_client.put(
         f"/api/brain-dump-operations/{operation['id']}/audio/0",
@@ -1309,7 +1480,11 @@ def test_schema_v2_seal_rejects_missing_chunks_and_replays_success(api_client) -
 def test_schema_v2_seal_rejects_a_manifest_hash_that_is_not_bound_to_uploaded_chunks(
     api_client,
 ) -> None:
-    operation = _start_operation(api_client, key="start-schema-v2-manifest-integrity")
+    operation = _start_operation(
+        api_client,
+        key="start-schema-v2-manifest-integrity",
+        external_processing_allowed=True,
+    )
     audio = b"buy oat milk"
     uploaded = api_client.put(
         f"/api/brain-dump-operations/{operation['id']}/audio/0",
@@ -1333,7 +1508,9 @@ def test_schema_v2_seal_rejects_a_manifest_hash_that_is_not_bound_to_uploaded_ch
 
 
 def test_schema_v2_seal_requires_the_exact_client_manifest_hash(api_client) -> None:
-    operation = _start_operation(api_client, key="start-manifest-required")
+    operation = _start_operation(
+        api_client, key="start-manifest-required", external_processing_allowed=True
+    )
     audio = b"manifest-bound audio"
     uploaded = api_client.put(
         f"/api/brain-dump-operations/{operation['id']}/audio/0",
@@ -1355,7 +1532,9 @@ def test_schema_v2_seal_requires_the_exact_client_manifest_hash(api_client) -> N
 def test_schema_v2_seal_rejects_uploaded_chunks_outside_the_exact_manifest(
     api_client,
 ) -> None:
-    operation = _start_operation(api_client, key="start-manifest-extra-chunk")
+    operation = _start_operation(
+        api_client, key="start-manifest-extra-chunk", external_processing_allowed=True
+    )
     first = b"manifest chunk zero"
     second = b"unexpected chunk one"
     revision = operation["revision"]
@@ -1398,7 +1577,9 @@ def test_schema_v2_unsupported_operation_command_is_rejected(api_client) -> None
 def test_schema_v2_user_title_lock_blocks_accurate_overwrite_with_visible_conflict(
     api_client,
 ) -> None:
-    operation = _start_operation(api_client, key="start-schema-v2-lock")
+    operation = _start_operation(
+        api_client, key="start-schema-v2-lock", external_processing_allowed=True
+    )
     fast = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/transcript",
         headers={"Idempotency-Key": "append-fast-brain-body"},
@@ -1456,7 +1637,9 @@ def test_schema_v2_retryable_provider_failure_recovers_via_retry_command(
 ) -> None:
     """MUST-2: a retryable accurate-STT failure persists a resumable checkpoint."""
 
-    operation = _start_operation(api_client, key="start-schema-v2-retry")
+    operation = _start_operation(
+        api_client, key="start-schema-v2-retry", external_processing_allowed=True
+    )
     audio = b"buy oat milk"
     uploaded = api_client.put(
         f"/api/brain-dump-operations/{operation['id']}/audio/0",
@@ -1519,7 +1702,9 @@ def test_schema_v2_accurate_reconciliation_preserves_opaque_ids_when_order_chang
     """MUST-3: production accurate-STT reconciliation targets proposals by opaque
     content-derived ID via ``apply_proposal_patches``, never by array position."""
 
-    operation = _start_operation(api_client, key="start-schema-v2-lineage")
+    operation = _start_operation(
+        api_client, key="start-schema-v2-lineage", external_processing_allowed=True
+    )
     preview = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/transcript",
         headers={"Idempotency-Key": "append-lineage-preview"},
@@ -1570,7 +1755,9 @@ def test_schema_v2_accurate_reconciliation_preserves_opaque_ids_when_order_chang
 
 
 def test_schema_v2_accurate_reconciliation_persists_split_lineage(api_client) -> None:
-    operation = _start_operation(api_client, key="start-schema-v2-split")
+    operation = _start_operation(
+        api_client, key="start-schema-v2-split", external_processing_allowed=True
+    )
     preview = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/transcript",
         headers={"Idempotency-Key": "append-split-preview"},

@@ -476,7 +476,7 @@ def test_openai_reconciler_maps_provider_http_failures(
     monkeypatch.setattr(httpx, "Client", Client)
 
     with pytest.raises(expected_error):
-        OpenAITextReconciler(api_key="test-key").reconcile(
+        OpenAITextReconciler(api_key="test-key", max_retries=0).reconcile(
             _minimal_reconcile_request()
         )
 
@@ -578,7 +578,7 @@ def test_openai_reconciler_maps_provider_timeout_to_retryable(
 
     monkeypatch.setattr(httpx, "Client", Client)
     with pytest.raises(ProviderRetryableError, match="RETRYABLE"):
-        OpenAITextReconciler(api_key="test-key").reconcile(
+        OpenAITextReconciler(api_key="test-key", max_retries=0).reconcile(
             _minimal_reconcile_request()
         )
 
@@ -592,6 +592,141 @@ def test_production_reconciler_module_has_no_regex_or_fixture_extractor() -> Non
     assert "_extract_titles" not in source
     assert "re.split" not in source
     assert "brainbuddy\" in lower" not in source.casefold()
+
+
+def test_openai_reconciler_prompt_prohibits_inventing_unsupported_tasks() -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    captured: dict[str, object] = {}
+
+    def complete(payload: dict[str, object]) -> dict[str, object]:
+        captured.update(payload)
+        return {"operations": []}
+
+    OpenAITextReconciler(api_key="test-key", complete=complete).reconcile(
+        _minimal_reconcile_request()
+    )
+
+    messages = captured["messages"]
+    assert isinstance(messages, list)
+    system_prompt = str(messages[0]["content"]).casefold()
+    assert "invent" in system_prompt or "fabricat" in system_prompt
+    assert "source_segment_ids" in system_prompt
+
+
+def test_openai_reconciler_retries_only_retryable_failures_with_a_bounded_budget() -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    attempts = 0
+    delays: list[float] = []
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            return httpx.Response(429, json={"error": {"message": "rate limited"}})
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": {"operations": []}}}]},
+        )
+
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        timeout_seconds=5,
+        max_retries=2,
+        retry_backoff_seconds=(0.1, 0.2),
+        transport=httpx.MockTransport(handler),
+        sleep=delays.append,
+    )
+
+    result = reconciler.reconcile(_minimal_reconcile_request())
+
+    assert result.patches == []
+    assert attempts == 3
+    assert delays == [0.1, 0.2]
+
+
+def test_openai_reconciler_exhausts_retryable_http_status_without_backoff() -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        max_retries=0,
+        retry_backoff_seconds=(),
+        transport=httpx.MockTransport(lambda _request: httpx.Response(429)),
+    )
+
+    with pytest.raises(ProviderRetryableError, match="RECONCILER_PROVIDER_RETRYABLE"):
+        reconciler.reconcile(_minimal_reconcile_request())
+
+
+def test_openai_reconciler_exhausts_transport_retries_as_retryable_error() -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        timeout_seconds=0.1,
+        max_retries=1,
+        retry_backoff_seconds=(0.0,),
+        transport=httpx.MockTransport(
+            lambda request: (_ for _ in ()).throw(
+                httpx.ReadTimeout("timeout", request=request)
+            )
+        ),
+        sleep=lambda _delay: None,
+    )
+
+    with pytest.raises(ProviderRetryableError, match="RECONCILER_PROVIDER_RETRYABLE"):
+        reconciler.reconcile(_minimal_reconcile_request())
+
+
+def test_openai_reconciler_rejects_requests_over_cost_budget_before_network() -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": {"operations": []}}}]}
+        )
+
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        max_cost_usd_per_operation=0.000001,
+        estimated_cost_usd_per_megabyte=1.0,
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(ProviderTerminalError, match="RECONCILER_COST_LIMIT_EXCEEDED"):
+        reconciler.reconcile(_minimal_reconcile_request())
+
+    assert calls == 0
+
+
+def test_openai_reconciler_reserves_budget_for_every_bounded_retry() -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"choices": [{"message": {"content": {"operations": []}}}]})
+
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        max_retries=2,
+        max_cost_usd_per_operation=0.000003,
+        estimated_cost_usd_per_megabyte=0.01,
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(ProviderTerminalError, match="RECONCILER_COST_LIMIT_EXCEEDED"):
+        reconciler.reconcile(_minimal_reconcile_request())
+
+    assert calls == 0
 
 
 def test_dual_stt_roles_keep_accurate_audio_input_separate_from_fast_text() -> None:
