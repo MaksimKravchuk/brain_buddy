@@ -15,7 +15,14 @@ type BrainDumpOperation = {
   id: string;
   status: string;
   revision: number;
-  proposals: Array<{ id: string; title: string; revision: number }>;
+  proposals: Array<{
+    id: string;
+    title: string;
+    revision: number;
+    deleted: boolean;
+    locked_fields: string[];
+    user_edited: boolean;
+  }>;
   committed_task_ids: string[];
 };
 
@@ -175,6 +182,57 @@ async function installSpeechBoundary(page: Page, media: "granted" | "denied" | "
   }, media);
 }
 
+async function installDeterministicSealedAudioBoundary(page: Page, sealedText: string): Promise<void> {
+  await page.addInitScript((audioText) => {
+    const fakeStream = { getTracks: () => [{ stop() {} }] } as unknown as MediaStream;
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia: () => Promise.resolve(fakeStream) }
+    });
+
+    class FakeMediaRecorder {
+      state: RecordingState = "inactive";
+      ondataavailable: ((event: { data: Blob }) => void) | null = null;
+      onstop: ((event: Event) => void) | null = null;
+      constructor(public stream: MediaStream) {}
+      start(): void {
+        this.state = "recording";
+      }
+      pause(): void {
+        this.state = "paused";
+      }
+      resume(): void {
+        this.state = "recording";
+      }
+      stop(): void {
+        this.state = "inactive";
+        this.ondataavailable?.({ data: new Blob([audioText], { type: "audio/webm" }) });
+        this.onstop?.(new Event("stop"));
+      }
+    }
+
+    class FakeSpeechRecognition {
+      continuous = false;
+      interimResults = false;
+      lang = "en-US";
+      onresult: ((event: { results: Array<{ 0: { transcript: string }; isFinal: boolean }> }) => void) | null = null;
+      onerror: ((event: { error: string }) => void) | null = null;
+      start(): void {
+        (window as unknown as { __brainBuddyRecognition?: FakeSpeechRecognition }).__brainBuddyRecognition = this;
+      }
+      stop(): void {}
+    }
+
+    (window as unknown as { MediaRecorder: typeof FakeMediaRecorder }).MediaRecorder = FakeMediaRecorder;
+    (window as unknown as { SpeechRecognition: typeof FakeSpeechRecognition; webkitSpeechRecognition: typeof FakeSpeechRecognition }).SpeechRecognition = FakeSpeechRecognition;
+    (window as unknown as { SpeechRecognition: typeof FakeSpeechRecognition; webkitSpeechRecognition: typeof FakeSpeechRecognition }).webkitSpeechRecognition = FakeSpeechRecognition;
+    (window as unknown as { __emitSpeech: (text: string, isFinal?: boolean) => void }).__emitSpeech = (text: string, isFinal = true) => {
+      const recognition = (window as unknown as { __brainBuddyRecognition?: FakeSpeechRecognition }).__brainBuddyRecognition;
+      recognition?.onresult?.({ results: [{ 0: { transcript: text }, isFinal }] });
+    };
+  }, sealedText);
+}
+
 async function emitSpeech(page: Page, text: string, isFinal = true): Promise<void> {
   await page.evaluate(
     ({ spokenText, final }) => (window as unknown as { __emitSpeech: (value: string, isFinal: boolean) => void }).__emitSpeech(spokenText, final),
@@ -325,6 +383,80 @@ test("Voice Brain Dump records provisional cards, reviews edits/deletes and save
     await expect(page.getByText("Buy oat milk for breakfast")).toBeVisible();
     const inbox = await listInboxTasks(page);
     assertStringArrayEquals(inbox.map((task) => task.title), ["Buy oat milk for breakfast"], "Inbox titles after saving brain dump");
+  });
+});
+
+test("Voice Brain Dump grows a mixed-language preview and preserves user choices through accurate reconciliation", async ({ page }) => {
+  await productLabels("Voice Brain Dump reconciliation preserves user choices");
+  await signup(page, unique("voice-reconcile-locks"));
+  await installDeterministicSealedAudioBoundary(
+    page,
+    "Надо починить BrainBuddy, потом сделать production smoke и написать Наташе"
+  );
+  let operationId = "";
+  let breadId = "";
+  let deletedId = "";
+  const editedTitle = "SMOKE Купить хлеб и молоко";
+
+  await test.step("one stable mixed-language result splits потом and grows six provisional proposals", async () => {
+    await page.goto("/brain-dump/new");
+    await page.getByRole("button", { name: "Record" }).click();
+    await waitForStartedOperation(page);
+    operationId = (await page.locator("[data-operation-id]").getAttribute("data-operation-id")) ?? "";
+    await emitSpeech(
+      page,
+      "Сделать production smoke. написать Наташе. купить хлеб и молоко. удалить черновик. Починить brain body потом позвонить маме"
+    );
+    await expect(page.getByText("6 tasks captured")).toBeVisible();
+    await expect(page.getByText("Купить хлеб и молоко", { exact: true })).toBeVisible();
+    await expect(page.getByText("Починить brain body", { exact: true })).toBeVisible();
+    await expect(page.getByText("Позвонить маме", { exact: true })).toBeVisible();
+  });
+
+  await test.step("record a title lock and deletion without writing canonical tasks", async () => {
+    let operation = await apiGet<BrainDumpOperation>(page, `/api/brain-dump-operations/${operationId}`);
+    const bread = operation.proposals.find((proposal) => proposal.title.includes("хлеб"));
+    const disposable = operation.proposals.find((proposal) => proposal.title.includes("черновик"));
+    assertCondition(bread && disposable, "expected bread and disposable preview proposals");
+    breadId = bread.id;
+    deletedId = disposable.id;
+    operation = await apiPatch<BrainDumpOperation>(
+      page,
+      `/api/brain-dump-operations/${operationId}/proposals/${breadId}`,
+      { title: editedTitle, expected_revision: operation.revision },
+      unique("edit-locked-bread")
+    );
+    await apiPatch<BrainDumpOperation>(
+      page,
+      `/api/brain-dump-operations/${operationId}/proposals/${deletedId}`,
+      { deleted: true, expected_revision: operation.revision },
+      unique("delete-preview-draft")
+    );
+    assertArrayLength(await listInboxTasks(page), 0, "Inbox before reconciliation");
+  });
+
+  await test.step("accurate reconciliation keeps the locked proposal and deletion while correcting other tasks", async () => {
+    await page.getByRole("button", { name: "Stop & review" }).click();
+    await expect(page.getByRole("heading", { name: "Review 4 tasks" })).toBeVisible();
+    const reconciled = await apiGet<BrainDumpOperation>(page, `/api/brain-dump-operations/${operationId}`);
+    const activeTitles = reconciled.proposals
+      .filter((proposal) => !proposal.deleted)
+      .map((proposal) => proposal.title)
+      .sort();
+    assertStringArrayEquals(
+      activeTitles,
+      ["Починить BrainBuddy", "Сделать production smoke", "Написать Наташе", editedTitle].sort(),
+      "Reconciled active proposal titles"
+    );
+    const edited = reconciled.proposals.find((proposal) => proposal.id === breadId);
+    const deleted = reconciled.proposals.find((proposal) => proposal.id === deletedId);
+    assertCondition(
+      edited?.title === editedTitle && edited.locked_fields.includes("title") && edited.user_edited,
+      "user-edited bread proposal and title lock must survive reconciliation"
+    );
+    assertCondition(deleted?.deleted, "user-deleted proposal must remain deleted");
+    assertArrayLength(await listInboxTasks(page), 0, "Inbox before explicit Save");
+    await page.getByRole("button", { name: "Discard" }).click();
   });
 });
 

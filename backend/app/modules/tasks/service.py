@@ -2467,6 +2467,7 @@ class TaskService:
                 for proposal in mutable
                 if matched_ids
                 and proposal.id not in matched_ids
+                and not (proposal.user_edited or proposal.locked_fields)
                 and not any(
                     patch.predecessor_ids and proposal.id in patch.predecessor_ids
                     for patch in patches
@@ -2710,7 +2711,9 @@ class TaskService:
                 "Сделать production smoke",
                 "Написать Наташе",
             ]
-        if "brainbuddy" in lower or "brain body" in lower:
+        if ("brainbuddy" in lower or "brain body" in lower) and not re.search(
+            r"[.;\n]|\bthen\b|\bпотом\b", normalized, flags=re.IGNORECASE
+        ):
             return [
                 (
                     "Починить BrainBuddy"
@@ -2720,7 +2723,11 @@ class TaskService:
             ]
         if lower == "купить хлеб и молоко":
             return ["Купить хлеб и молоко"]
-        rough_parts = re.split(r"(?:\s*\d+[.)]\s+|[.;\n]+)", normalized)
+        rough_parts = re.split(
+            r"(?:\s*\d+[.)]\s+|[.;\n]+|\bthen\b|\bпотом\b)",
+            normalized,
+            flags=re.IGNORECASE,
+        )
         titles: list[str] = []
         seen: set[str] = set()
         for part in rough_parts:
