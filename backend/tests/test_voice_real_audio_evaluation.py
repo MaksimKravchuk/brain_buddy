@@ -7,6 +7,11 @@ from pathlib import Path
 
 import pytest
 
+from app.exceptions import (
+    ProviderRetryableError,
+    ProviderTerminalError,
+    ValidationFailure,
+)
 from app.workflows.voice_brain_dump.domain import (
     ProposalPatch,
     TranscriptHypothesis,
@@ -135,6 +140,31 @@ def _corpus(tmp_path: Path) -> Path:
     return tmp_path
 
 
+def _two_case_corpus(tmp_path: Path) -> Path:
+    corpus = _corpus(tmp_path)
+    (corpus / "second.webm").write_bytes((corpus / "sample.webm").read_bytes())
+    (corpus / "second.transcript.txt").write_text(
+        "Надо починить BrainBuddy и сделать production smoke", encoding="utf-8"
+    )
+    (corpus / "second.tasks.json").write_text(
+        (corpus / "sample.tasks.json").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    manifest = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
+    manifest["cases"].append(
+        {
+            "id": "founder-ru-en-2",
+            "audio_file": "second.webm",
+            "ground_truth_transcript_file": "second.transcript.txt",
+            "expected_tasks_file": "second.tasks.json",
+            "language_hints": ["ru", "en"],
+            "vocabulary": ["BrainBuddy", "production smoke"],
+            "critical_terms": ["BrainBuddy", "production smoke"],
+        }
+    )
+    (corpus / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return corpus
+
+
 def test_real_audio_harness_calls_provider_with_audio_not_expected_transcript(
     tmp_path: Path,
 ) -> None:
@@ -240,6 +270,123 @@ def test_real_audio_harness_reports_stt_and_extraction_failures_separately(
     assert report.extraction.exact_task_count_accuracy == 0
     assert any(failure.stage == "stt" for failure in report.failures)
     assert any(failure.stage == "extraction" for failure in report.failures)
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_code"),
+    [
+        (ValidationFailure("sensitive model output"), "RECONCILER_VALIDATION_FAILURE"),
+        (ProviderRetryableError("sensitive provider payload"), "PROVIDER_RETRYABLE_ERROR"),
+        (ProviderTerminalError("sensitive provider payload"), "PROVIDER_TERMINAL_ERROR"),
+        ([{"title": 123}], "INVALID_STRUCTURED_OUTPUT"),
+    ],
+)
+def test_real_audio_harness_records_redacted_extraction_failures_and_continues(
+    tmp_path: Path, failure: Exception | list[dict[str, object]], expected_code: str
+) -> None:
+    calls = 0
+
+    def extractor(_input: EvaluationExtractionInput) -> list[dict[str, object]]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            if isinstance(failure, Exception):
+                raise failure
+            return failure
+        return [
+            {"title": "Починить BrainBuddy", "source_spans": [[0, 500]]},
+            {"title": "Сделать production smoke", "source_spans": [[500, 1000]]},
+        ]
+
+    transcript = "Надо починить BrainBuddy и сделать production smoke"
+    report = evaluate_real_audio_corpus(
+        _two_case_corpus(tmp_path),
+        RecordingProvider(transcript),
+        external_processing_allowed=True,
+        extractor=extractor,
+        monotonic_values=iter((1.0, 1.1, 2.0, 2.1)).__next__,
+    )
+
+    assert report.status == "completed"
+    assert report.case_count == 2
+    assert report.extraction is not None
+    assert report.extraction.exact_task_count_accuracy == 0.5
+    extraction_failures = [
+        item for item in report.failures if item.stage == "extraction"
+    ]
+    assert len(extraction_failures) == 1
+    assert extraction_failures[0].case_id == "founder-ru-en-1"
+    assert extraction_failures[0].code == expected_code
+    assert "sensitive" not in repr(report)
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_code"),
+    [
+        (ValidationFailure("sensitive schema response"), "RECONCILER_VALIDATION_FAILURE"),
+        (ProviderRetryableError("sensitive retry response"), "PROVIDER_RETRYABLE_ERROR"),
+        (ProviderTerminalError("sensitive terminal response"), "PROVIDER_TERMINAL_ERROR"),
+    ],
+)
+def test_real_audio_harness_records_redacted_stt_failures_and_continues(
+    tmp_path: Path, failure: Exception, expected_code: str
+) -> None:
+    class FailingFirstProvider(RecordingProvider):
+        def transcribe_sealed_audio(self, request: AccurateSttRequest) -> SttResult:
+            if request.operation_id == "founder-ru-en-1":
+                raise failure
+            return super().transcribe_sealed_audio(request)
+
+    transcript = "Надо починить BrainBuddy и сделать production smoke"
+    report = evaluate_real_audio_corpus(
+        _two_case_corpus(tmp_path),
+        FailingFirstProvider(transcript),
+        external_processing_allowed=True,
+        monotonic_values=iter((1.0, 1.1, 2.0, 2.1)).__next__,
+    )
+
+    assert report.status == "completed"
+    assert report.case_count == 2
+    assert report.stt.word_error_rate > 0
+    assert report.stt.critical_term_recall < 1
+    assert report.failures == [
+        type(report.failures[0])("founder-ru-en-1", "stt", expected_code)
+    ]
+    assert "sensitive" not in repr(report)
+
+
+def test_real_audio_harness_separates_proxy_estimates_from_actual_provider_usage(
+    tmp_path: Path,
+) -> None:
+    class UsageProvider(RecordingProvider):
+        def transcribe_sealed_audio(self, request: AccurateSttRequest) -> SttResult:
+            result = super().transcribe_sealed_audio(request)
+            return SttResult(
+                role=result.role,
+                provider=result.provider,
+                input_hash=result.input_hash,
+                segments=result.segments,
+                estimated_cost_usd=0.1,
+                cost_estimate_basis="audio_bytes_proxy",
+                actual_cost_usd=0.075,
+                provider_usage={
+                    "input_tokens": 120,
+                    "output_tokens": 15,
+                    "request_id": 999,
+                },
+            )
+
+    report = evaluate_real_audio_corpus(
+        _corpus(tmp_path),
+        UsageProvider("Надо починить BrainBuddy и сделать production smoke"),
+        external_processing_allowed=True,
+        monotonic_values=iter((1.0, 1.1)).__next__,
+    )
+
+    assert report.stt.estimated_cost_usd == pytest.approx(0.1)
+    assert report.stt.cost_estimate_bases == {"audio_bytes_proxy"}
+    assert report.stt.actual_cost_usd == pytest.approx(0.075)
+    assert report.stt.provider_usage == {"input_tokens": 120, "output_tokens": 15}
 
 
 def test_provenance_boundaries_are_reported_separately_from_task_identity(

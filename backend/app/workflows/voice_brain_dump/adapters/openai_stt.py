@@ -11,7 +11,11 @@ import httpx
 
 from app.exceptions import ProviderRetryableError, ProviderTerminalError
 from app.workflows.voice_brain_dump.domain import TranscriptHypothesis
-from app.workflows.voice_brain_dump.providers import AccurateSttRequest, SttResult
+from app.workflows.voice_brain_dump.providers import (
+    AccurateSttRequest,
+    SttResult,
+    redacted_provider_usage,
+)
 
 OPENAI_TRANSCRIPTIONS_URL = "https://api.openai.com/v1/audio/transcriptions"
 _RETRYABLE_STATUS_CODES = {408, 409, 429, 500, 502, 503, 504}
@@ -42,7 +46,7 @@ def _audio_multipart_metadata(audio: bytes) -> tuple[str, str]:
 class OpenAiAccurateStt:
     """Transcribe sealed audio with OpenAI without logging provider payloads."""
 
-    api_key: str
+    api_key: str = field(repr=False)
     model: str = "gpt-4o-mini-transcribe"
     timeout_seconds: float = 60.0
     max_retries: int = 2
@@ -91,6 +95,9 @@ class OpenAiAccurateStt:
             input_hash=hashlib.sha256(request.sealed_audio).hexdigest(),
             segments=[segment],
             estimated_cost_usd=estimated_cost,
+            cost_estimate_basis="audio_bytes_proxy",
+            actual_cost_usd=None,
+            provider_usage=redacted_provider_usage(payload.get("usage")),
         )
 
     def _post_with_retries(self, request: AccurateSttRequest) -> httpx.Response:

@@ -102,6 +102,14 @@ def test_openai_reconciler_materializes_only_schema_valid_server_owned_patches()
     operation_schema = schema["properties"]["operations"]["items"]  # type: ignore[index]
     assert set(operation_schema["required"]) == set(operation_schema["properties"])
     assert operation_schema["additionalProperties"] is False
+    assert set(operation_schema["properties"]["operation"]["enum"]) == {
+        "add",
+        "update",
+        "split",
+        "merge",
+        "remove",
+        "supersede",
+    }
 
 
 @pytest.mark.parametrize(
@@ -314,11 +322,13 @@ def test_openai_reconciler_reallocates_a_colliding_server_id(
 ) -> None:
     from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
 
-    calls = {"count": 0}
+    indexes: list[int] = []
 
-    def server_id(*_args: object) -> str:
-        calls["count"] += 1
-        return "proposal_existing" if calls["count"] == 1 else "proposal_generated"
+    def server_id(_operation_id: str, index: int, _draft: object) -> str:
+        if index in indexes:
+            raise AssertionError("collision retry repeated the same server-ID input")
+        indexes.append(index)
+        return "proposal_existing" if index < 2 else "proposal_generated"
 
     monkeypatch.setattr(OpenAITextReconciler, "_server_id", staticmethod(server_id))
     segment = TranscriptHypothesis(
@@ -359,7 +369,7 @@ def test_openai_reconciler_reallocates_a_colliding_server_id(
     )
 
     assert result.patches[0].proposal_id == "proposal_generated"
-    assert calls["count"] == 2
+    assert indexes == [0, 1, 2]
 
 
 def _minimal_reconcile_request() -> ReconcileTextRequest:
@@ -379,6 +389,48 @@ def _minimal_reconcile_request() -> ReconcileTextRequest:
         active_proposals=[],
         user_locks={},
     )
+
+
+def test_openai_reconciler_schema_allows_only_add_without_active_proposals() -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    captured: dict[str, object] = {}
+
+    def complete(payload: dict[str, object]) -> dict[str, object]:
+        captured.update(payload)
+        return {"operations": []}
+
+    OpenAITextReconciler(api_key="test-key", complete=complete).reconcile(
+        _minimal_reconcile_request()
+    )
+
+    response_format = captured["response_format"]
+    assert isinstance(response_format, dict)
+    json_schema = response_format["json_schema"]
+    assert isinstance(json_schema, dict)
+    schema = json_schema["schema"]
+    assert isinstance(schema, dict)
+    operation_schema = schema["properties"]["operations"]["items"]  # type: ignore[index]
+    assert operation_schema["properties"]["operation"]["enum"] == ["add"]
+    messages = captured["messages"]
+    assert isinstance(messages, list)
+    assert "only add" in str(messages[0]["content"]).casefold()
+
+
+def test_openai_reconciler_redacts_api_key_and_invalid_envelope_cause() -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    reconciler = OpenAITextReconciler(
+        api_key="sensitive-test-key",
+        complete=lambda _payload: {"operations": [{"secret": "raw-model-output"}]},
+    )
+
+    assert "sensitive-test-key" not in repr(reconciler)
+    with pytest.raises(ValidationFailure) as raised:
+        reconciler.reconcile(_minimal_reconcile_request())
+
+    assert raised.value.__cause__ is None
+    assert "raw-model-output" not in repr(raised.value)
 
 
 @pytest.mark.parametrize(
