@@ -1,0 +1,28 @@
+<!doctype html>
+<!-- @dsCard group="Components" name="Buttons" subtitle="Primary, secondary, danger, ghost, icon-only, sm/md/lg, loading" viewport="700x140" -->
+<html><head><meta charset="utf-8"><title>Buttons</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+  body{margin:0;padding:20px;background:#f8fafc;font-family:Inter,sans-serif}
+  .grid{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+  .btn{display:inline-flex;align-items:center;gap:8px;border-radius:8px;font-weight:500;font-size:14px;height:36px;padding:0 16px;border:1px solid transparent;transition:all 200ms cubic-bezier(.22,1,.36,1);cursor:pointer}
+  .primary{background:#0ea5e9;color:#fff;box-shadow:0 1px 2px rgba(15,23,42,.04),0 1px 1px rgba(15,23,42,.03)}
+  .secondary{background:#fff;color:#334155;border-color:#e2e8f0;box-shadow:0 1px 2px rgba(15,23,42,.04),0 1px 1px rgba(15,23,42,.03)}
+  .danger{background:#fff1f2;color:#be123c;border-color:#fecdd3}
+  .ghost{background:transparent;color:#475569}
+  .icon{width:36px;padding:0;justify-content:center}
+  .sm{height:32px;padding:0 12px;font-size:12px}
+  .lg{height:40px;padding:0 20px}
+  svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+</style></head><body>
+<div class="grid">
+  <button class="btn primary"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>New tree</button>
+  <button class="btn secondary">Cancel</button>
+  <button class="btn danger"><svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>Delete</button>
+  <button class="btn ghost">Learn more</button>
+  <button class="btn secondary icon"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+  <button class="btn primary sm">Run validation</button>
+  <button class="btn primary lg">Create account</button>
+  <button class="btn primary" disabled style="opacity:.6;cursor:not-allowed">Saving…</button>
+</div>
+</body></html>

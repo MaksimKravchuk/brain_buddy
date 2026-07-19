@@ -1,0 +1,23 @@
+<!doctype html>
+<!-- @dsCard group="Components" name="Canvas nodes" subtitle="Root, selected-with-handles, and leaf node states" viewport="700x200" -->
+<html><head><meta charset="utf-8"><title>Nodes — states</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+  body{margin:0;padding:24px;background:#f8fafc;font-family:Inter,sans-serif}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;justify-items:center}
+  .node{width:200px;height:108px;border:1px solid #e2e8f0;border-radius:16px 12px 12px 16px;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px;box-shadow:0 1px 2px rgba(15,23,42,.04),0 1px 1px rgba(15,23,42,.03);position:relative;overflow:visible;text-align:center;padding:0 20px}
+  .node .bar{position:absolute;inset:0 auto 0 0;width:8px;background:rgba(14,165,233,.1);border-radius:16px 0 0 16px}
+  .node.sel{box-shadow:0 16px 32px rgba(14,165,233,.18);outline:2px solid rgba(14,165,233,.3);outline-offset:0}
+  .dot{position:absolute;width:14px;height:14px;border-radius:999px;background:#fff;border:1px solid #cbd5e1;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+  .dt{top:-7px;left:50%;transform:translateX(-50%)}
+  .db{bottom:-7px;left:50%;transform:translateX(-50%)}
+  .dl{left:-7px;top:50%;transform:translateY(-50%)}
+  .dr{right:-7px;top:50%;transform:translateY(-50%)}
+  .lbl{font-size:11px;color:#64748b;margin-top:10px;text-align:center}
+</style></head><body>
+<div class="grid">
+  <div><div class="node" style="background:#facc15;color:#1f2937"><span class="bar"></span>High inventory cost</div><div class="lbl">Root · no incoming</div></div>
+  <div><div class="node sel" style="background:#fff;color:#0f172a"><span class="bar"></span>Suppliers deliver late<span class="dot dt"></span><span class="dot db"></span><span class="dot dl"></span><span class="dot dr"></span></div><div class="lbl">Selected · handles visible</div></div>
+  <div><div class="node" style="background:#ef4444;color:#fff"><span class="bar" style="background:rgba(255,255,255,.25)"></span>Customers churn</div><div class="lbl">Leaf · no outgoing</div></div>
+</div>
+</body></html>

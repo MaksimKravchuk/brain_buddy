@@ -1,0 +1,35 @@
+<!doctype html>
+<!-- @dsCard group="Colors" name="Surfaces & semantics" subtitle="Three surface levels and four semantic states" viewport="700x220" -->
+<html><head><meta charset="utf-8"><title>Surfaces & Semantics</title>
+<style>
+  body{margin:0;padding:20px;background:#f8fafc;font-family:Inter,sans-serif;color:#0f172a}
+  h3{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#64748b;font-weight:600;margin:0 0 10px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .stack{border:1px solid #e2e8f0;border-radius:12px;padding:10px;background:#fff}
+  .lvl{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+  .box{width:36px;height:36px;border-radius:8px;border:1px solid #e2e8f0}
+  .label{font-size:12px;font-weight:600}
+  .desc{font-size:11px;color:#64748b}
+  .semgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .sem{border-radius:10px;padding:8px 10px;border:1px solid}
+  .sem .t{font-size:11px;font-weight:600}
+  .sem .h{font-family:ui-monospace,Menlo,monospace;font-size:10px;opacity:.7;margin-top:2px}
+</style></head><body>
+<div class="grid">
+  <div class="stack">
+    <h3>Surface elevation</h3>
+    <div class="lvl"><div class="box" style="background:#f8fafc"></div><div><div class="label">surface-base</div><div class="desc">#F8FAFC · page background</div></div></div>
+    <div class="lvl"><div class="box" style="background:#f1f5f9"></div><div><div class="label">surface-sunken</div><div class="desc">#F1F5F9 · side panel, card interiors</div></div></div>
+    <div class="lvl"><div class="box" style="background:#fff;box-shadow:0 1px 2px rgba(15,23,42,.05),0 8px 24px -12px rgba(15,23,42,.12)"></div><div><div class="label">surface-raised</div><div class="desc">#FFFFFF · cards, dialogs, inputs</div></div></div>
+  </div>
+  <div class="stack">
+    <h3>Semantic colors</h3>
+    <div class="semgrid">
+      <div class="sem" style="background:#ecfdf5;border-color:#a7f3d0;color:#065f46"><div class="t">Success</div><div class="h">emerald-500</div></div>
+      <div class="sem" style="background:#fffbeb;border-color:#fde68a;color:#92400e"><div class="t">Warning</div><div class="h">amber-600</div></div>
+      <div class="sem" style="background:#fff1f2;border-color:#fecdd3;color:#9f1239"><div class="t">Danger</div><div class="h">rose-600</div></div>
+      <div class="sem" style="background:#f0f9ff;border-color:#bae6fd;color:#075985"><div class="t">Info</div><div class="h">sky-500</div></div>
+    </div>
+  </div>
+</div>
+</body></html>

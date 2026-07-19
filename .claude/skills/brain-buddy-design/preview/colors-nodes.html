@@ -1,0 +1,44 @@
+<!doctype html>
+<!-- @dsCard group="Colors" name="Node semantic colors" subtitle="Root (yellow), default (white), leaf (red) — load-bearing logic" viewport="700x220" -->
+<html><head><meta charset="utf-8"><title>Node semantic colors</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+  body{margin:0;padding:20px;background:#f8fafc;font-family:Inter,sans-serif;color:#0f172a}
+  .row{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  .card{display:flex;flex-direction:column;align-items:center;gap:10px}
+  .node{width:180px;height:96px;border:1px solid #e2e8f0;border-radius:16px 10px 10px 16px;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px;letter-spacing:-0.01em;text-align:center;padding:0 16px;box-shadow:0 1px 2px rgba(15,23,42,.04),0 1px 1px rgba(15,23,42,.03);position:relative;overflow:hidden}
+  .node::before{content:"";position:absolute;inset:0 auto 0 0;width:8px;background:rgba(14,165,233,0.1)}
+  .meta{text-align:center}
+  .name{font-size:12px;font-weight:600}
+  .token{font-family:ui-monospace,Menlo,monospace;font-size:10px;color:#64748b;margin-top:3px}
+  .role{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;margin-top:3px;font-weight:600}
+</style></head><body>
+
+<div class="row">
+  <div class="card">
+    <div class="node" style="background:var(--bb-warning,#d97706);color:#fff">Root cause</div>
+    <div class="meta">
+      <div class="name">noIncoming · Warning</div>
+      <div class="token">--bb-warning · #D97706</div>
+      <div class="role">Top of the tree</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="node" style="background:var(--bb-surface-raised,#ffffff);color:var(--bb-fg-1,#0f172a)">Reasoning node</div>
+    <div class="meta">
+      <div class="name">default · Surface</div>
+      <div class="token">--bb-surface-raised · #FFFFFF</div>
+      <div class="role">Intermediate step</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="node" style="background:var(--bb-danger,#e11d48);color:#fff">Undesired effect</div>
+    <div class="meta">
+      <div class="name">noOutgoing · Danger</div>
+      <div class="token">--bb-danger · #E11D48</div>
+      <div class="role">Leaf / problem</div>
+    </div>
+  </div>
+</div>
+
+</body></html>

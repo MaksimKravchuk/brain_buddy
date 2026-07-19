@@ -1,0 +1,54 @@
+<!doctype html>
+<!-- @dsCard group="Components" name="Agents — identity & lifecycle" subtitle="Squircle avatar = agent, circle = human · Queued → Working → Needs you → Ready for review" viewport="700x360" -->
+<html><head><meta charset="utf-8"><title>Agents — identity & lifecycle</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+  body{margin:0;padding:20px 24px;background:#f8fafc;font-family:Inter,sans-serif;font-feature-settings:"cv11","ss01","ss03";-webkit-font-smoothing:antialiased;color:#0f172a}
+  a{color:#0ea5e9}a:hover{color:#38bdf8}
+  .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;color:#64748b;margin:0 0 8px}
+  .grp{margin-bottom:18px}
+  .rowline{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+  .assignee{display:inline-flex;align-items:center;gap:8px;padding:4px 12px 4px 4px;background:#fff;border:1px solid #e2e8f0;border-radius:999px;box-shadow:0 1px 2px rgba(15,23,42,.04);font-size:13px;font-weight:500;color:#0f172a}
+  .av-agent{width:24px;height:24px;border-radius:8px;background:#ecfdf5;color:#047857;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+  .av-human{width:24px;height:24px;border-radius:999px;background:#e0f2fe;color:#0369a1;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex-shrink:0}
+  .chip{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:500;padding:3px 10px;border-radius:999px;border:1px solid}
+  .q{color:#475569;background:#f1f5f9;border-color:#e2e8f0}
+  .work{color:#047857;background:#ecfdf5;border-color:#a7f3d0}
+  .needs{color:#92400e;background:#fffbeb;border-color:#fde68a}
+  .ready{color:#047857;background:#ecfdf5;border-color:#a7f3d0}
+  .fail{color:#9f1239;background:#fff1f2;border-color:#fecdd3}
+  .dot{width:6px;height:6px;border-radius:999px;flex-shrink:0}
+  @keyframes bbPulseDot{0%,100%{opacity:1}50%{opacity:.35}}
+  .live{background:#10b981;animation:bbPulseDot 1.4s cubic-bezier(.22,1,.36,1) infinite}
+  .note{font-size:11px;color:#94a3b8;margin-top:6px}
+  .arrow{color:#cbd5e1;font-size:12px}
+  svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+  .chip svg{width:11px;height:11px}
+</style></head><body>
+<div class="grp">
+  <p class="lbl">Assignee — agent vs human</p>
+  <div class="rowline">
+    <span class="assignee"><span class="av-agent"><svg viewBox="0 0 24 24"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg></span>Drafter</span>
+    <span class="assignee"><span class="av-agent"><svg viewBox="0 0 24 24"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg></span>Researcher</span>
+    <span class="assignee"><span class="av-human">M</span>You</span>
+  </div>
+  <p class="note">Squircle (8px radius, emerald) = agent. Circle = human. Never give an agent a circle.</p>
+</div>
+<div class="grp">
+  <p class="lbl">Lifecycle</p>
+  <div class="rowline">
+    <span class="chip q">Queued</span>
+    <span class="arrow">→</span>
+    <span class="chip work"><span class="dot live"></span>Working — step 4 of 9</span>
+    <span class="arrow">→</span>
+    <span class="chip needs"><svg viewBox="0 0 24 24"><path d="M12 8v4M12 16h.01"/><circle cx="12" cy="12" r="10"/></svg>Needs you — choose a venue</span>
+    <span class="arrow">→</span>
+    <span class="chip ready"><svg viewBox="0 0 24 24"><path d="M22 11.1V12a10 10 0 1 1-5.93-9.14"/><path d="m22 4-10 10-3-3"/></svg>Ready for review</span>
+  </div>
+  <div class="rowline" style="margin-top:8px">
+    <span class="chip work"><span class="dot live"></span>Drafter · ready in ~5 min</span>
+    <span class="chip fail"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg>Couldn't finish — source paywalled</span>
+  </div>
+  <p class="note">"Needs you" is the loudest state — it names the manual action and tints the task row amber-50. Failure always carries the reason. The checkbox stays human-only: agent work ends in review, never done.</p>
+</div>
+</body></html>
