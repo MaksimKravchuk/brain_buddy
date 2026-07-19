@@ -52,7 +52,10 @@ from app.workflows.voice_brain_dump.domain import (
 from app.workflows.voice_brain_dump.providers import (
     AccurateSttPort,
     AccurateSttRequest,
+    DeterministicTextReconciler,
     DisabledAccurateStt,
+    ReconcileTextRequest,
+    TextReconcilerPort,
 )
 
 from .domain import (
@@ -110,10 +113,15 @@ class TaskService:
     """Owns canonical GTD records and their owner-scoped projections."""
 
     def __init__(
-        self, task_repo: TaskRepository, *, accurate_stt: AccurateSttPort | None = None
+        self,
+        task_repo: TaskRepository,
+        *,
+        accurate_stt: AccurateSttPort | None = None,
+        text_reconciler: TextReconcilerPort | None = None,
     ) -> None:
         self.task_repo = task_repo
         self.accurate_stt = accurate_stt or DisabledAccurateStt()
+        self.text_reconciler = text_reconciler or DeterministicTextReconciler()
 
     @_serialized_write
     def create_project(
@@ -681,13 +689,85 @@ class TaskService:
             supersedes_segment_ids=accurate_hypothesis.supersedes_segment_ids,
             created_at=now,
         )
-        proposals, patch_drafts = self._reconcile_accurate_titles(
-            operation.proposals,
-            self._extract_task_titles(accurate_segment.text),
-            operation_id=operation.id,
-            source_segment_id=accurate_segment.id,
-            now=now,
+        accurate_run = BrainDumpProviderRunDocument(
+            id=(
+                claimed_run.id
+                if replaces_claim and claimed_run
+                else generate_id("provider_run")
+            ),
+            role="accurate_stt",
+            status="succeeded",
+            input_hash=input_hash,
+            checkpoint="accurate_transcribed",
+            attempt=attempt,
+            recovery_count=recovery_count,
+            provider=accurate_result.provider or self.accurate_stt.provider_name,
+            model=accurate_hypothesis.model,
+            estimated_cost_usd=accurate_result.estimated_cost_usd,
+            output_segment_ids=[accurate_segment.id],
+            created_at=now,
+            updated_at=now,
         )
+        if not self.text_reconciler.requires_external_processing:
+            # Deterministic fixture extraction is restricted to ordinary CI and
+            # explicitly injected tests. Production adapters always take the
+            # structured semantic branch below.
+            proposals, patch_drafts = self._reconcile_accurate_titles(
+                operation.proposals,
+                self._extract_task_titles(accurate_segment.text),
+                operation_id=operation.id,
+                source_segment_id=accurate_segment.id,
+                now=now,
+            )
+            reconciler_input_hash = hashlib.sha256(
+                f"deterministic|{operation.id}|{accurate_segment.id}".encode()
+            ).hexdigest()
+        else:
+            if not operation.consent.external_processing_allowed:
+                return self._reconciler_failure(
+                    operation,
+                    accurate_segment=accurate_segment,
+                    accurate_run=accurate_run,
+                    prior_runs=prior_runs,
+                    input_hash=input_hash,
+                    error="RECONCILER_CONSENT_REQUIRED",
+                    now=now,
+                )
+            reconciler_request = ReconcileTextRequest(
+                operation_id=operation.id,
+                transcript_segments=[accurate_hypothesis],
+                active_proposals=[
+                    self._proposal_document_to_reconciled(proposal)
+                    for proposal in operation.proposals
+                ],
+                user_locks={
+                    proposal.id: proposal.locked_fields
+                    for proposal in operation.proposals
+                    if proposal.locked_fields
+                },
+            )
+            try:
+                reconcile_result = self.text_reconciler.reconcile(reconciler_request)
+            except (
+                ProviderRetryableError,
+                ProviderTerminalError,
+                ValidationFailure,
+            ) as exc:
+                return self._reconciler_failure(
+                    operation,
+                    accurate_segment=accurate_segment,
+                    accurate_run=accurate_run,
+                    prior_runs=prior_runs,
+                    input_hash=input_hash,
+                    error=str(exc)[:1000],
+                    now=now,
+                    retryable=isinstance(exc, ProviderRetryableError),
+                )
+            proposals = self._apply_reconciler_patches(
+                operation.proposals, reconcile_result.patches, now=now
+            )
+            patch_drafts = reconcile_result.patches
+            reconciler_input_hash = reconcile_result.input_hash
         proposal_patches = self._append_proposal_patch_documents(
             operation_id=operation.id,
             existing=operation.proposal_patches,
@@ -707,23 +787,16 @@ class TaskService:
                 "proposal_patches": proposal_patches,
                 "provider_runs": [
                     *prior_runs,
+                    accurate_run,
                     BrainDumpProviderRunDocument(
-                        id=(
-                            claimed_run.id
-                            if replaces_claim and claimed_run
-                            else generate_id("provider_run")
-                        ),
-                        role="accurate_stt",
+                        id=generate_id("provider_run"),
+                        role="reconciler",
                         status="succeeded",
-                        input_hash=input_hash,
-                        checkpoint="accurate_transcribed",
-                        attempt=attempt,
-                        recovery_count=recovery_count,
-                        provider=accurate_result.provider
-                        or self.accurate_stt.provider_name,
-                        model=accurate_hypothesis.model,
-                        estimated_cost_usd=accurate_result.estimated_cost_usd,
-                        output_segment_ids=[accurate_segment.id],
+                        input_hash=reconciler_input_hash,
+                        checkpoint="reconciled",
+                        attempt=1,
+                        recovery_count=0,
+                        provider=self.text_reconciler.provider_id,
                         created_at=now,
                         updated_at=now,
                     ),
@@ -1002,6 +1075,53 @@ class TaskService:
                 "updated_at": now,
                 "revision": proposal.revision + 1,
             }
+            if payload.conflict_resolution is not None:
+                title_conflicts = [
+                    conflict
+                    for conflict in proposal.conflicts
+                    if conflict.field == "title"
+                ]
+                if not title_conflicts:
+                    raise ValidationFailure(
+                        "Proposal has no title conflict to resolve."
+                    )
+                conflict = title_conflicts[-1]
+                resolved_title = proposal.title
+                if payload.conflict_resolution == "accept":
+                    if not conflict.suggested_value:
+                        raise ValidationFailure(
+                            "Proposal conflict has no suggestion to accept."
+                        )
+                    resolved_title = conflict.suggested_value
+                update.update(
+                    {
+                        "title": resolved_title,
+                        "status": "user_edited",
+                        "user_edited": True,
+                        "title_revision": (
+                            proposal.title_revision + 1
+                            if resolved_title != proposal.title
+                            else proposal.title_revision
+                        ),
+                        "locked_fields": sorted(
+                            {*proposal.locked_fields, "title"}
+                        ),
+                        "conflicts": [],
+                    }
+                )
+                patch_drafts.append(
+                    ProposalPatch.update(
+                        proposal_id=proposal.id,
+                        title=(
+                            resolved_title
+                            if resolved_title != proposal.title
+                            else None
+                        ),
+                        producer="user",
+                        locked_fields=["title"],
+                        base_revision=proposal.title_revision,
+                    )
+                )
             if "title" in payload.model_fields_set and payload.title:
                 title = payload.title.strip()
                 update.update(
@@ -2351,6 +2471,7 @@ class TaskService:
                 )
                 for conflict in proposal.conflicts
             ],
+            tombstoned=proposal.deleted,
             ordinal=proposal.ordinal,
             revision=proposal.revision,
             title_revision=proposal.title_revision,
@@ -2567,6 +2688,136 @@ class TaskService:
                     )
                 )
         return ordered, patches
+
+    def _apply_reconciler_patches(
+        self,
+        existing: list[BrainDumpProposalDocument],
+        patches: list[ProposalPatch],
+        *,
+        now: datetime,
+    ) -> list[BrainDumpProposalDocument]:
+        base = [
+            self._proposal_document_to_reconciled(proposal)
+            for proposal in existing
+        ]
+        projection = apply_proposal_patches(base, patches)
+        by_existing_id = {proposal.id: proposal for proposal in existing}
+        projected_by_id = {proposal.id: proposal for proposal in projection.history}
+        ordered_ids = [proposal.id for proposal in existing]
+        ordered_ids.extend(
+            proposal.id
+            for proposal in projection.history
+            if proposal.id not in by_existing_id
+        )
+        ordered: list[BrainDumpProposalDocument] = []
+        for proposal_id in ordered_ids:
+            reconciled = projected_by_id.get(proposal_id)
+            original = by_existing_id.get(proposal_id)
+            if reconciled is None:
+                if original is not None:
+                    ordered.append(original)
+                continue
+            new_status = self._domain_status_to_doc_status(reconciled.status)
+            new_conflicts = [
+                self._domain_conflict_to_doc(conflict)
+                for conflict in reconciled.conflicts
+            ]
+            if original is None:
+                ordered.append(
+                    BrainDumpProposalDocument(
+                        id=reconciled.id,
+                        ordinal=reconciled.ordinal,
+                        title=reconciled.title,
+                        status=new_status,
+                        source_segment_ids=reconciled.source_segment_ids,
+                        predecessor_ids=reconciled.predecessor_ids,
+                        successor_ids=reconciled.successor_ids,
+                        locked_fields=reconciled.locked_fields,
+                        conflicts=new_conflicts,
+                        deleted=reconciled.tombstoned,
+                        title_revision=reconciled.title_revision,
+                        created_at=now,
+                        updated_at=now,
+                        revision=reconciled.revision,
+                    )
+                )
+                continue
+            unchanged = (
+                original.title == reconciled.title
+                and original.source_segment_ids == reconciled.source_segment_ids
+                and original.status == new_status
+                and original.predecessor_ids == reconciled.predecessor_ids
+                and original.successor_ids == reconciled.successor_ids
+                and original.locked_fields == reconciled.locked_fields
+                and len(original.conflicts) == len(new_conflicts)
+                and original.deleted == reconciled.tombstoned
+            )
+            if unchanged:
+                ordered.append(original)
+                continue
+            ordered.append(
+                original.model_copy(
+                    update={
+                        "title": reconciled.title,
+                        "status": new_status,
+                        "source_segment_ids": reconciled.source_segment_ids,
+                        "predecessor_ids": reconciled.predecessor_ids,
+                        "successor_ids": reconciled.successor_ids,
+                        "locked_fields": reconciled.locked_fields,
+                        "conflicts": new_conflicts,
+                        "deleted": reconciled.tombstoned,
+                        "title_revision": reconciled.title_revision,
+                        "updated_at": now,
+                        "revision": original.revision + 1,
+                    }
+                )
+            )
+        return ordered
+
+    @staticmethod
+    def _reconciler_failure(
+        operation: BrainDumpOperationDocument,
+        *,
+        accurate_segment: BrainDumpTranscriptSegmentDocument,
+        accurate_run: BrainDumpProviderRunDocument,
+        prior_runs: list[BrainDumpProviderRunDocument],
+        input_hash: str,
+        error: str,
+        now: datetime,
+        retryable: bool = False,
+    ) -> BrainDumpOperationDocument:
+        status: Literal["retryable_error", "terminal_error"] = (
+            "retryable_error" if retryable else "terminal_error"
+        )
+        return operation.model_copy(
+            update={
+                "status": status,
+                "status_history": [
+                    *operation.status_history,
+                    "reconciling",
+                    status,
+                ],
+                "segments": [*operation.segments, accurate_segment],
+                "provider_runs": [
+                    *prior_runs,
+                    accurate_run,
+                    BrainDumpProviderRunDocument(
+                        id=generate_id("provider_run"),
+                        role="reconciler",
+                        status=status,
+                        input_hash=input_hash,
+                        checkpoint="accurate_transcribed",
+                        attempt=1,
+                        recovery_count=0,
+                        error=error,
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                ],
+                "updated_at": now,
+                "revision": operation.revision + 1,
+            }
+        )
 
     def _matching_proposal_index(
         self, proposals: list[BrainDumpProposalDocument], title: str

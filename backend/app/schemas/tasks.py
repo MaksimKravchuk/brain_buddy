@@ -278,6 +278,7 @@ class BrainDumpTranscriptAppendRequest(StrictBaseModel):
 class BrainDumpProposalUpdateRequest(StrictBaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=500)
     deleted: bool | None = None
+    conflict_resolution: Literal["keep", "accept"] | None = None
     expected_revision: int = Field(ge=1)
 
 

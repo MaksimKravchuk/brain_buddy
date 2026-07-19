@@ -73,6 +73,7 @@ export function BrainDumpRoute(): JSX.Element {
   const [languageMode, setLanguageMode] = useState<LanguageMode>("ru-en");
   const [externalProcessingAllowed, setExternalProcessingAllowed] = useState(false);
   const [vocabularyText, setVocabularyText] = useState("BrainBuddy, production smoke");
+  const [isSaving, setIsSaving] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -100,6 +101,9 @@ export function BrainDumpRoute(): JSX.Element {
       return;
     }
     sequenceRef.current = Math.max(sequenceRef.current, ...operation.segments.map((segment) => segment.sequence), 0);
+    if (operation.status === "completed") {
+      setSavedCount(operation.committed_task_ids.length);
+    }
   }, [operation]);
 
   useEffect(() => {
@@ -276,6 +280,12 @@ export function BrainDumpRoute(): JSX.Element {
       return;
     }
     setError(null);
+    if (action === "commit") {
+      if (isSaving) {
+        return;
+      }
+      setIsSaving(true);
+    }
     const Recognition = action === "resume" ? speechRecognitionConstructor() : null;
     if (action === "resume") {
       if (!Recognition) {
@@ -346,10 +356,18 @@ export function BrainDumpRoute(): JSX.Element {
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Brain dump command failed.");
+    } finally {
+      if (action === "commit") {
+        setIsSaving(false);
+      }
     }
   }
 
-  async function patchProposal(proposal: BrainDumpProposal, payload: { title?: string; deleted?: boolean }, kind: "edit" | "delete") {
+  async function patchProposal(
+    proposal: BrainDumpProposal,
+    payload: { title?: string; deleted?: boolean; conflict_resolution?: "keep" | "accept" },
+    kind: "edit" | "delete" | "resolve"
+  ) {
     const current = operationRef.current;
     if (!current) {
       return;
@@ -385,6 +403,10 @@ export function BrainDumpRoute(): JSX.Element {
 
   function deleteProposal(proposal: BrainDumpProposal) {
     void queueProposalMutation(() => patchProposal(proposal, { deleted: true }, "delete"));
+  }
+
+  function resolveConflict(proposal: BrainDumpProposal, resolution: "keep" | "accept") {
+    void queueProposalMutation(() => patchProposal(proposal, { conflict_resolution: resolution }, "resolve"));
   }
 
   if (savedCount !== null) {
@@ -431,10 +453,12 @@ export function BrainDumpRoute(): JSX.Element {
       <ReviewSurface
         error={error}
         hasUnresolvedConflicts={hasUnresolvedConflicts}
+        isSaving={isSaving}
         proposals={activeProposals}
         onBack={() => navigate(`/brain-dump/${operation?.id ?? "new"}`, { replace: true })}
         onDelete={deleteProposal}
         onDiscard={() => void command("cancel")}
+        onResolveConflict={resolveConflict}
         onSave={() => void command("commit")}
         onUpdateTitle={updateProposal}
       />
@@ -663,19 +687,23 @@ function ProcessingSurface({
 function ReviewSurface({
   error,
   hasUnresolvedConflicts,
+  isSaving,
   proposals,
   onBack,
   onDelete,
   onDiscard,
+  onResolveConflict,
   onSave,
   onUpdateTitle
 }: {
   error: string | null;
   hasUnresolvedConflicts: boolean;
+  isSaving: boolean;
   proposals: BrainDumpProposal[];
   onBack: () => void;
   onDelete: (proposal: BrainDumpProposal) => void;
   onDiscard: () => void;
+  onResolveConflict: (proposal: BrainDumpProposal, resolution: "keep" | "accept") => void;
   onSave: () => void;
   onUpdateTitle: (proposal: BrainDumpProposal, title: string) => void;
 }): JSX.Element {
@@ -700,7 +728,7 @@ function ReviewSurface({
                 <span className="mt-1 text-xs font-semibold text-slate-500">#{proposal.ordinal}</span>
                 <div className="min-w-0 flex-1">
                   <label className="sr-only" htmlFor={`proposal-title-${proposal.id}`}>Task title #{proposal.ordinal}</label>
-                  <input id={`proposal-title-${proposal.id}`} defaultValue={proposal.title} onBlur={(event) => void onUpdateTitle(proposal, event.currentTarget.value)} className="w-full border-0 border-b-[1.5px] border-sky-200 bg-transparent pb-1 text-[15px] font-medium text-slate-900 outline-none" />
+                  <input key={`${proposal.id}-${proposal.revision}`} id={`proposal-title-${proposal.id}`} defaultValue={proposal.title} onBlur={(event) => void onUpdateTitle(proposal, event.currentTarget.value)} className="w-full border-0 border-b-[1.5px] border-sky-200 bg-transparent pb-1 text-[15px] font-medium text-slate-900 outline-none" />
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700">Inbox</span>
                     <span className="rounded-full bg-sky-50 px-2.5 py-1 text-xs text-sky-700">{statusLabels[proposal.status]}</span>
@@ -720,6 +748,10 @@ function ReviewSurface({
                       <div className="font-semibold">Conflict: {conflict.field}</div>
                       <div>Mine: {conflict.current_value ?? "—"}</div>
                       <div>Suggestion: {conflict.suggested_value ?? "—"}</div>
+                      <div className="mt-2 flex gap-2">
+                        <button type="button" className="rounded-md border border-amber-300 bg-white px-2 py-1 font-semibold" onClick={() => onResolveConflict(proposal, "keep")}>Keep mine</button>
+                        <button type="button" className="rounded-md bg-amber-700 px-2 py-1 font-semibold text-white disabled:opacity-50" disabled={!conflict.suggested_value} onClick={() => onResolveConflict(proposal, "accept")}>Use suggestion</button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -736,9 +768,9 @@ function ReviewSurface({
         <button type="button" className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600" onClick={onDiscard}>
           Discard
         </button>
-        <button type="button" className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-brand-primary text-[15px] font-semibold text-white shadow-glow disabled:cursor-not-allowed disabled:opacity-50" disabled={hasUnresolvedConflicts} onClick={onSave}>
+        <button type="button" className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-brand-primary text-[15px] font-semibold text-white shadow-glow disabled:cursor-not-allowed disabled:opacity-50" disabled={hasUnresolvedConflicts || isSaving} onClick={onSave}>
           <Inbox className="h-4 w-4" aria-hidden />
-          Save {proposals.length} to inbox
+          {isSaving ? "Saving…" : `Save ${proposals.length} to inbox`}
         </button>
       </footer>
     </div>

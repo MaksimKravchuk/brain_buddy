@@ -6,9 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from app.container import _build_accurate_stt
+from app.container import _build_accurate_stt, _build_text_reconciler
 from app.core.config import DEFAULT_SCHEMA_VERSION, get_config
-from app.workflows.voice_brain_dump.providers import DisabledAccurateStt
+from app.workflows.voice_brain_dump.providers import (
+    DisabledAccurateStt,
+    DisabledTextReconciler,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -128,3 +131,34 @@ def test_compose_e2e_runs_backend_in_test_environment() -> None:
     runner = Path(__file__).parents[2] / "scripts" / "run_playwright_e2e.sh"
 
     assert "BRAIN_BUDDY_ENV=test" in runner.read_text(encoding="utf-8")
+
+
+def test_build_container_uses_openai_reconciler_outside_test(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.container import build_container
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "development")
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER", "openai")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_MODEL", "gpt-4o")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    get_config.cache_clear()  # type: ignore[attr-defined]
+
+    container = build_container(get_config())
+
+    assert isinstance(container.task_service.text_reconciler, OpenAITextReconciler)
+    assert container.task_service.text_reconciler.model == "gpt-4o"
+
+
+def test_unsupported_reconciler_provider_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "production")
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER", "unknown")
+
+    provider = _build_text_reconciler(get_config())
+
+    assert isinstance(provider, DisabledTextReconciler)

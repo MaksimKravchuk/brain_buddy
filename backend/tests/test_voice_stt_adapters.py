@@ -63,6 +63,63 @@ def test_openai_adapter_sends_sealed_binary_audio_and_multilingual_context() -> 
     assert result.segments[0].supersedes_segment_ids == ["preview_1"]
 
 
+@pytest.mark.parametrize(
+    ("audio", "expected_filename", "expected_mime"),
+    [
+        (b"\x1aE\xdf\xa3webm-audio", b'recording.webm', b"audio/webm"),
+        (b"RIFF\x00\x00\x00\x00WAVEpcm-audio", b'recording.wav', b"audio/wav"),
+        (b"\x00\x00\x00\x18ftypM4A m4a-audio", b'recording.m4a', b"audio/mp4"),
+        (b"\xff\xf1\x50\x80aac-audio", b'recording.aac', b"audio/aac"),
+    ],
+)
+def test_openai_adapter_sniffs_audio_format_for_matching_multipart_metadata(
+    audio: bytes, expected_filename: bytes, expected_mime: bytes
+) -> None:
+    captured_body = b""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal captured_body
+        captured_body = request.read()
+        return httpx.Response(200, json={"text": "Ready"})
+
+    provider = OpenAiAccurateStt(
+        api_key="secret-test-key",
+        max_retries=0,
+        transport=httpx.MockTransport(handler),
+    )
+    request = _request(audio)
+    request = AccurateSttRequest(
+        operation_id=request.operation_id,
+        media_ref="misleading-recording.mp3",
+        sealed_audio=request.sealed_audio,
+    )
+
+    provider.transcribe_sealed_audio(request)
+
+    assert expected_filename in captured_body
+    assert expected_mime in captured_body
+    assert b"recording.mp3" not in captured_body
+
+
+def test_openai_adapter_rejects_unknown_binary_before_network() -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"text": "must not be called"})
+
+    provider = OpenAiAccurateStt(
+        api_key="secret-test-key",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(ProviderTerminalError, match="STT_AUDIO_FORMAT_UNSUPPORTED"):
+        provider.transcribe_sealed_audio(_request(b"unknown-binary"))
+
+    assert calls == 0
+
+
 def test_openai_adapter_retries_only_retryable_failures_with_a_bounded_budget() -> None:
     attempts = 0
     delays: list[float] = []

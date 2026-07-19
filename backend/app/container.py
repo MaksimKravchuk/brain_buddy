@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass
 
 from app.ai.providers import MockValidationProvider, OpenAIValidationProvider
-from app.core.config import AppConfig
+from app.core.config import AppConfig, AppEnvironment
 from app.modules.tasks import TaskRepository, TaskService
 from app.repositories import (
     IndexRepository,
@@ -26,11 +26,17 @@ from app.services import (
     ValidationService,
     VersionService,
 )
-from app.workflows.voice_brain_dump.adapters import OpenAiAccurateStt
+from app.workflows.voice_brain_dump.adapters import (
+    OpenAiAccurateStt,
+    OpenAITextReconciler,
+)
 from app.workflows.voice_brain_dump.providers import (
     AccurateSttPort,
     DeterministicAccurateStt,
+    DeterministicTextReconciler,
     DisabledAccurateStt,
+    DisabledTextReconciler,
+    TextReconcilerPort,
 )
 
 
@@ -78,6 +84,23 @@ def _build_accurate_stt(config: AppConfig) -> AccurateSttPort:
     return DisabledAccurateStt("STT_PROVIDER_UNSUPPORTED")
 
 
+def _build_text_reconciler(config: AppConfig) -> TextReconcilerPort:
+    settings = config.voice.reconciler
+    if config.environment is AppEnvironment.TEST:
+        return DeterministicTextReconciler()
+    if settings.provider == "openai":
+        api_key = os.getenv(settings.api_key_env)
+        if not api_key:
+            return DisabledTextReconciler()
+        return OpenAITextReconciler(
+            api_key=api_key,
+            model=settings.model,
+            endpoint=settings.endpoint,
+            timeout_seconds=settings.timeout_seconds,
+        )
+    return DisabledTextReconciler()
+
+
 def build_container(config: AppConfig) -> Container:
     data_root = config.data_dir
     tree_repo = TreeRepository(data_root)
@@ -104,7 +127,11 @@ def build_container(config: AppConfig) -> Container:
             "openai": OpenAIValidationProvider(),
         },
     )
-    task_service = TaskService(task_repo, accurate_stt=_build_accurate_stt(config))
+    task_service = TaskService(
+        task_repo,
+        accurate_stt=_build_accurate_stt(config),
+        text_reconciler=_build_text_reconciler(config),
+    )
     auth_service = AuthService(
         user_repo=user_repo,
         session_repo=session_repo,
