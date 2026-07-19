@@ -27,6 +27,36 @@ type BrainDumpOperation = {
 };
 
 const password = "Correct Horse Battery 2026!";
+const forbiddenDemoTitles = [
+  "Draft the launch announcement",
+  "Choose a venue for the offsite",
+  "Review Q3 pricing assumptions"
+];
+const browserDiagnostics = new WeakMap<Page, string[]>();
+
+test.beforeEach(async ({ page }) => {
+  const diagnostics: string[] = [];
+  browserDiagnostics.set(page, diagnostics);
+  page.on("console", (message) => {
+    if (message.type() === "error" || message.type() === "warning") {
+      diagnostics.push(`console.${message.type()}: ${message.text()}`);
+    }
+  });
+  page.on("pageerror", (error) => diagnostics.push(`pageerror: ${error.message}`));
+  page.on("response", (response) => {
+    if (response.status() >= 400) {
+      diagnostics.push(`response ${response.status()}: ${response.request().method()} ${response.url()}`);
+    }
+  });
+});
+
+test.afterEach(async ({ page }, testInfo) => {
+  const diagnostics = browserDiagnostics.get(page) ?? [];
+  await testInfo.attach("browser-console-network-diagnostics", {
+    body: diagnostics.length ? diagnostics.join("\n") : "No console warnings/errors or HTTP error responses captured.",
+    contentType: "text/plain"
+  });
+});
 
 function unique(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -257,11 +287,14 @@ test("native task shell uses real backend counts, filters, reload and relogin pe
     return { ...created, project, tag };
   });
 
-  await test.step("open /tasks/next through frontend nginx and verify backend counts and rows", async () => {
-    await page.goto("/tasks/next");
+  await test.step("open authenticated / through frontend nginx and verify backend counts without demo fixtures", async () => {
+    await page.goto("/");
     await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
     await expect(page.getByText("2 tasks")).toBeVisible();
     await expect(page.getByRole("list", { name: "Tasks" })).toContainText("Draft launch note");
+    for (const title of forbiddenDemoTitles) {
+      await expect(page.getByText(title, { exact: true })).toHaveCount(0);
+    }
     await expect(page.getByRole("navigation", { name: "Task navigation" })).toContainText("Inbox");
     await expect(page.getByRole("navigation", { name: "Task navigation" })).toContainText("2");
   });
@@ -287,6 +320,17 @@ test("native task shell uses real backend counts, filters, reload and relogin pe
     await page.goto(`/tags/${account.tag.id}`);
     await expect(page.getByRole("heading", { name: "#deep-work" })).toBeVisible();
     await expect(page.getByText("Draft launch note")).toBeVisible();
+  });
+
+  await test.step("open the same canonical workspace at 390px without overflow", async () => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
+    await expect(page.getByText("Draft launch note")).toBeVisible();
+    await page.getByRole("button", { name: "Open task navigation" }).click();
+    await expect(page.getByRole("dialog", { name: "Task navigation" })).toContainText("Launch Plan");
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    assertCondition(overflow <= 0, `390px workspace should not horizontally overflow; overflow=${overflow}`);
   });
 });
 

@@ -45,20 +45,20 @@ const PATH_RULES: Array<{ match: RegExp } & EpicFeatureStory> = [
   {
     match: /e2e\/tree-crud/,
     epic: "End-to-end journeys",
-    feature: "Reality tree workspace",
-    story: "Tree lifecycle from browser",
+    feature: "Native task management",
+    story: "Task lifecycle from browser",
   },
   {
     match: /e2e\/tree-relations/,
     epic: "End-to-end journeys",
-    feature: "Reality tree canvas",
-    story: "Node and relation persistence",
+    feature: "Native task organization",
+    story: "Project and tag persistence",
   },
   {
     match: /e2e\/versioning/,
     epic: "End-to-end journeys",
-    feature: "Version history",
-    story: "Snapshot capture and restore",
+    feature: "Optimistic concurrency",
+    story: "Stale task write rejection",
   },
   {
     match: /e2e\/vnext/,

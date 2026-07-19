@@ -190,6 +190,30 @@ function Sidebar({
             </NavLink>
           </li>
         ))}
+        <li>
+          <button
+            type="button"
+            disabled
+            aria-label="Weekly review — Coming later"
+            className="flex min-h-9 w-full cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-slate-400"
+          >
+            <span className="flex h-4 w-4 items-center justify-center" aria-hidden>↻</span>
+            <span className="min-w-0 flex-1 truncate">Weekly review</span>
+            <span className="text-[10px] font-medium uppercase tracking-wide">Later</span>
+          </button>
+        </li>
+        <li>
+          <button
+            type="button"
+            disabled
+            aria-label="Think with CRT — Coming later"
+            className="flex min-h-9 w-full cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-slate-400"
+          >
+            <span className="flex h-4 w-4 items-center justify-center" aria-hidden>◇</span>
+            <span className="min-w-0 flex-1 truncate">Think with CRT</span>
+            <span className="text-[10px] font-medium uppercase tracking-wide">Later</span>
+          </button>
+        </li>
       </ul>
 
       <div className="px-2.5 pt-4 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Dates</div>
@@ -343,9 +367,6 @@ function Sidebar({
       <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-800">
         Weekly review <span className="font-semibold">coming later</span>
       </div>
-      <NavLink to="/crt" className="mt-2 rounded-lg px-2.5 py-2 text-xs font-medium text-slate-600 hover:bg-slate-200/70">
-        CRT (legacy)
-      </NavLink>
     </nav>
   );
 }
