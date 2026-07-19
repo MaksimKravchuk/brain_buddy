@@ -37,6 +37,46 @@ const config: Config = {
           "root-fg": "#1f2937",
           "default-bg": "#ffffff",
           "default-fg": "#0f172a"
+        },
+        info: {
+          DEFAULT: "#0ea5e9",
+          bg: "#f0f9ff",
+          border: "#bae6fd",
+          fg: "#0369a1"
+        },
+        // AI & task-state aliases (post-pivot). emerald = AI executing a task
+        // (Sparkles); sky = thinking canvas (Network). Never mix the two meanings.
+        ai: {
+          DEFAULT: "#10b981",
+          bg: "#ecfdf5",
+          border: "#a7f3d0",
+          fg: "#047857"
+        },
+        agent: {
+          "avatar-bg": "#ecfdf5",
+          "avatar-fg": "#047857"
+        },
+        "needs-you": {
+          DEFAULT: "#d97706",
+          bg: "#fffbeb",
+          border: "#fde68a",
+          fg: "#92400e"
+        },
+        thinking: {
+          DEFAULT: "#0ea5e9",
+          bg: "#f0f9ff",
+          border: "#bae6fd",
+          fg: "#0369a1"
+        },
+        due: {
+          bg: "#fff1f2",
+          border: "#fecdd3",
+          fg: "#be123c"
+        },
+        recording: "#e11d48",
+        context: {
+          bg: "#f1f5f9",
+          fg: "#475569"
         }
       },
       boxShadow: {

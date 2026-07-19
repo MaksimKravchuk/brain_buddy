@@ -160,7 +160,7 @@ describe("AppRoutes", () => {
     expect(within(sidebar).getByText("#deep-work")).toBeInTheDocument();
 
     expect(screen.getByText("Fix onboarding drop-off")).toBeInTheDocument();
-    expect(screen.getAllByText("Onboarding drop-off").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("Onboarding drop-off").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("@Onboarding drop-off")).toBeInTheDocument();
     expect(screen.getAllByText(/#deep-work/).length).toBeGreaterThanOrEqual(2);
   });
@@ -485,29 +485,24 @@ describe("AppRoutes", () => {
       );
     });
 
-    await user.selectOptions(screen.getByLabelText("Project for Fix onboarding drop-off"), "project-launch");
+    await user.click(screen.getByRole("link", { name: "Fix onboarding drop-off" }));
+    expect(await screen.findByRole("heading", { name: "Task detail" })).toBeInTheDocument();
+
+    await user.selectOptions(await screen.findByLabelText("Project"), "project-launch");
+    await user.click(screen.getByLabelText("#calls"));
+    await user.click(screen.getByLabelText("#deep-work"));
+    await user.click(screen.getByRole("button", { name: "Save task detail" }));
+
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
         expect.stringMatching(/\/tasks\/task-1$/),
         expect.objectContaining({ method: "PATCH", body: expect.stringContaining('"project_id":"project-launch"') })
       );
     });
-
-    await user.selectOptions(screen.getByLabelText("Add tag to Fix onboarding drop-off"), "tag-calls");
-    await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith(
-        expect.stringMatching(/\/tasks\/task-1$/),
-        expect.objectContaining({ method: "PATCH", body: expect.stringContaining('"tag_ids":["tag-deep-work","tag-calls"]') })
-      );
-    });
-
-    await user.click(screen.getByRole("button", { name: "Remove deep-work from Fix onboarding drop-off" }));
-    await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith(
-        expect.stringMatching(/\/tasks\/task-1$/),
-        expect.objectContaining({ method: "PATCH", body: expect.stringContaining('"tag_ids":[]') })
-      );
-    });
+    const saveDetailCall = vi.mocked(fetch).mock.calls.find(
+      ([input, init]) => /\/tasks\/task-1$/.test(String(input)) && (init as RequestInit | undefined)?.method === "PATCH"
+    );
+    expect(JSON.parse(String(saveDetailCall?.[1]?.body))).toMatchObject({ tag_ids: ["tag-calls"] });
   });
 
   it("returns to Next actions when the active Project or Tag view is archived or deleted", async () => {
