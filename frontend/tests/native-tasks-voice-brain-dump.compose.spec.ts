@@ -591,6 +591,7 @@ test("Voice Brain Dump failures are visible and preserve recoverable live sessio
       }
     });
     await deniedPage.goto("/brain-dump/new");
+    await allowSecureCloudTranscription(deniedPage);
     await deniedPage.getByRole("button", { name: "Record" }).click();
     await expect(deniedPage.getByRole("alert")).toContainText("Microphone");
     assertArrayLength(startRequests, 0, "Denied microphone should not start backend operations");
@@ -651,7 +652,7 @@ test("owner isolation hides tasks, brain dump operations, drafts and committed l
   const operation = await apiPost<BrainDumpOperation>(
     page,
     "/api/brain-dump-operations",
-    { consent: { microphone: true, external_processing_allowed: false } },
+    { consent: { microphone: true, external_processing_allowed: true } },
     unique("owner-a-start")
   );
   const withDraft = await apiPost<BrainDumpOperation>(

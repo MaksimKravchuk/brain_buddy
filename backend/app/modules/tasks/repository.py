@@ -502,6 +502,31 @@ class TaskRepository(BaseRepository):
             parts.append(path.read_bytes())
         return b"".join(parts)
 
+    def delete_brain_dump_audio_chunks(
+        self, *, owner_id: str, operation_id: str, chunks: list[tuple[int, str]]
+    ) -> None:
+        for chunk_number, sha256 in chunks:
+            self.brain_dump_audio_chunk_path(
+                owner_id, operation_id, chunk_number, sha256
+            ).unlink(missing_ok=True)
+
+    def list_expired_raw_audio_operations(
+        self, *, before: datetime
+    ) -> list[BrainDumpOperationDocument]:
+        terminal_statuses = ("cancelled", "completed", "terminal_error")
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT payload FROM brain_dump_operations
+                WHERE status IN (?, ?, ?) AND updated_at < ?
+                """,
+                (*terminal_statuses, before.isoformat()),
+            ).fetchall()
+        return [
+            BrainDumpOperationDocument.model_validate(json.loads(row["payload"]))
+            for row in rows
+        ]
+
     def get_brain_dump_operation_for_owner(
         self, operation_id: str, *, owner_id: str
     ) -> BrainDumpOperationDocument:

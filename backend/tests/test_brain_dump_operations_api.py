@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import timedelta
 
 import httpx
 import pytest
@@ -20,7 +21,7 @@ def _start_operation(
     api_client,
     key: str = "start-brain-dump",
     *,
-    external_processing_allowed: bool = False,
+    external_processing_allowed: bool = True,
     language_hints: list[str] | None = None,
     vocabulary: list[str] | None = None,
 ):
@@ -680,7 +681,11 @@ def test_reconciler_consent_is_bound_to_the_named_provider(api_client) -> None:
 def test_audio_upload_fails_closed_and_persists_nothing_without_external_consent(
     api_client,
 ) -> None:
-    operation = _start_operation(api_client, key="start-upload-without-consent")
+    operation = _start_operation(
+        api_client,
+        key="start-upload-without-consent",
+        external_processing_allowed=False,
+    )
 
     audio = b"\x1aE\xdf\xa3never-persisted"
     digest = hashlib.sha256(audio).hexdigest()
@@ -1812,3 +1817,93 @@ def test_schema_v2_accurate_reconciliation_persists_split_lineage(api_client) ->
     )
     assert [patch["operation"] for patch in patch_log[-2:]] == ["split", "split"]
     assert len({patch["id"] for patch in patch_log}) == len(patch_log)
+
+
+def test_transcript_append_fails_closed_and_persists_nothing_without_external_consent(
+    api_client,
+) -> None:
+    operation = _start_operation(
+        api_client,
+        key="start-transcript-without-consent",
+        external_processing_allowed=False,
+    )
+
+    appended = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/transcript",
+        headers={"Idempotency-Key": "append-transcript-without-consent"},
+        json={
+            "segments": [
+                {"sequence": 1, "text": "never persist this preview", "stability": "stable"}
+            ]
+        },
+    )
+
+    assert appended.status_code == 400, appended.text
+    assert "TRANSCRIPT_CONSENT_REQUIRED" in appended.text
+    fetched = api_client.get(f"/api/brain-dump-operations/{operation['id']}")
+    assert fetched.status_code == 200
+    assert fetched.json()["segments"] == []
+    assert fetched.json()["proposals"] == []
+
+
+def test_cancel_deletes_stored_raw_audio_and_clears_media_references(api_client) -> None:
+    operation = _start_operation(
+        api_client, key="start-cancel-audio-delete", external_processing_allowed=True
+    )
+    audio = b"private audio that must be deleted"
+    digest = hashlib.sha256(audio).hexdigest()
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": digest},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    repository = api_client.app.state.container.task_repo
+    chunk_path = repository.brain_dump_audio_chunk_path(owner_id, operation["id"], 0, digest)
+    assert chunk_path.exists()
+
+    cancelled = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/cancel",
+        headers={"Idempotency-Key": "cancel-delete-audio"},
+        json={"expected_revision": uploaded.json()["revision"]},
+    )
+
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["status"] == "cancelled"
+    assert cancelled.json()["audio_chunks"] == []
+    assert cancelled.json()["media_ref"] is None
+    assert not chunk_path.exists()
+
+
+def test_raw_audio_retention_sweep_deletes_expired_terminal_media(api_client) -> None:
+    operation = _start_operation(
+        api_client, key="start-retention-audio-delete", external_processing_allowed=True
+    )
+    audio = b"expired raw audio"
+    digest = hashlib.sha256(audio).hexdigest()
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": digest},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+
+    container = api_client.app.state.container
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    persisted = container.task_service.get_brain_dump_operation(
+        operation["id"], owner_id=owner_id
+    )
+    expired = persisted.model_copy(
+        update={
+            "status": "terminal_error",
+            "updated_at": persisted.updated_at - timedelta(days=2),
+        }
+    )
+    container.task_repo.save_brain_dump_operation(expired)
+
+    assert container.task_service.purge_expired_raw_audio() == 1
+    swept = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
+    assert swept["audio_chunks"] == []
+    assert swept["media_ref"] is None

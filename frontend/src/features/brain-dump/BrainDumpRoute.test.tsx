@@ -93,8 +93,12 @@ function TaskListProbe(): JSX.Element {
   return <div>{`Task list route: ${routeParams.state ?? "unknown"}`}</div>;
 }
 
-function renderBrainDump(initialEntry = "/brain-dump/new", queryClient = new QueryClient()) {
-  return render(
+function renderBrainDump(
+  initialEntry = "/brain-dump/new",
+  queryClient = new QueryClient(),
+  allowExternalProcessing = true
+) {
+  const rendered = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialEntry]}>
         <LocationProbe />
@@ -106,6 +110,15 @@ function renderBrainDump(initialEntry = "/brain-dump/new", queryClient = new Que
       </MemoryRouter>
     </QueryClientProvider>
   );
+  if (allowExternalProcessing) {
+    const consent = screen.queryByRole("checkbox", {
+      name: "Allow secure cloud transcription"
+    });
+    if (consent) {
+      fireEvent.click(consent);
+    }
+  }
+  return rendered;
 }
 
 function LocationProbe(): JSX.Element {
@@ -196,7 +209,6 @@ describe("BrainDumpRoute", () => {
     });
 
     renderBrainDump();
-    await userEvent.click(screen.getByRole("checkbox", { name: "Allow secure cloud transcription" }));
     await userEvent.click(screen.getByRole("button", { name: "Record" }));
     expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({ audio: true });
     expect(micTrackStop).not.toHaveBeenCalled();
@@ -241,7 +253,6 @@ describe("BrainDumpRoute", () => {
 
     renderBrainDump();
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Speech languages" }), "ru-en");
-    await userEvent.click(screen.getByRole("checkbox", { name: "Allow secure cloud transcription" }));
     await userEvent.click(screen.getByRole("button", { name: "Record" }));
 
     expect(startBody).toEqual({
@@ -429,7 +440,6 @@ describe("BrainDumpRoute", () => {
     });
 
     renderBrainDump();
-    await userEvent.click(screen.getByRole("checkbox", { name: "Allow secure cloud transcription" }));
     await userEvent.click(screen.getByRole("button", { name: "Record" }));
     await userEvent.click(screen.getByRole("button", { name: "Stop & review" }));
 
@@ -439,7 +449,7 @@ describe("BrainDumpRoute", () => {
     expect(await screen.findByRole("main", { name: "Review brain dump proposals" })).toBeInTheDocument();
   });
 
-  it("performs zero audio-upload and zero seal calls without external processing consent", async () => {
+  it("does not start browser capture or any upload pipeline without external processing consent", async () => {
     const mediaRecorderConstructor = vi.fn(function ChunkingMediaRecorder() {
       return {
         state: "inactive",
@@ -468,19 +478,42 @@ describe("BrainDumpRoute", () => {
       throw new Error(`unexpected fetch ${url}`);
     });
 
-    renderBrainDump();
+    renderBrainDump("/brain-dump/new", new QueryClient(), false);
     await userEvent.click(screen.getByRole("button", { name: "Record" }));
-    act(() => emitSpeech("Renew car insurance."));
-    await screen.findByText("Renew car insurance");
-
-    await userEvent.click(screen.getByRole("button", { name: "Stop & review" }));
-
-    expect(await screen.findByRole("main", { name: "Review brain dump proposals" })).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Renew car insurance")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Secure cloud transcription consent");
     expect(mediaRecorderConstructor).not.toHaveBeenCalled();
+    expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
+    expect(recognitions).toHaveLength(0);
     const calledUrls = fetchMock.mock.calls.map(([input]) => String(input));
     expect(calledUrls.some((calledUrl) => calledUrl.includes("/audio/"))).toBe(false);
     expect(calledUrls.some((calledUrl) => calledUrl.includes("/seal"))).toBe(false);
+  });
+
+  it("opens review without sealing a persisted operation that lacks external-processing consent", async () => {
+    fetchMock.mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("/brain-dump-operations/brain_dump_legacy")) {
+        return jsonResponse(
+          operation({
+            id: "brain_dump_legacy",
+            consent: {
+              microphone: true,
+              external_processing_allowed: false,
+              provider: null,
+              language_hints: ["en"],
+              vocabulary: []
+            }
+          })
+        );
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_legacy", new QueryClient(), false);
+    await userEvent.click(await screen.findByRole("button", { name: "Stop & review" }));
+
+    expect(await screen.findByRole("main", { name: "Review brain dump proposals" })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.map(([input]) => String(input)).some((url) => url.includes("/seal"))).toBe(false);
   });
 
   it("does not create a backend operation when microphone permission fails", async () => {
@@ -799,7 +832,6 @@ describe("BrainDumpRoute", () => {
     });
 
     renderBrainDump();
-    await userEvent.click(screen.getByRole("checkbox", { name: "Allow secure cloud transcription" }));
     await userEvent.click(screen.getByRole("button", { name: "Record" }));
     const activeRecognition = recognition;
     await userEvent.click(screen.getByRole("button", { name: "Stop & review" }));
@@ -885,7 +917,6 @@ describe("BrainDumpRoute", () => {
     });
 
     renderBrainDump();
-    await userEvent.click(screen.getByRole("checkbox", { name: "Allow secure cloud transcription" }));
     await userEvent.click(screen.getByRole("button", { name: "Record" }));
     act(() => emitSpeech("Renew car insurance. Reply to Anna."));
     await userEvent.click(await screen.findByRole("button", { name: "Stop & review" }));
@@ -942,7 +973,6 @@ describe("BrainDumpRoute", () => {
     });
 
     renderBrainDump();
-    await userEvent.click(screen.getByRole("checkbox", { name: "Allow secure cloud transcription" }));
     await userEvent.click(screen.getByRole("button", { name: "Record" }));
     act(() => emitSpeech("Renew car insurance. Reply to Anna."));
     await userEvent.click(await screen.findByRole("button", { name: "Stop & review" }));
@@ -1438,5 +1468,16 @@ describe("BrainDumpRoute", () => {
     expect(screen.queryByRole("button", { name: "Review provisional tasks" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Delete recording" }));
     expect(await screen.findByText("delete failed")).toBeInTheDocument();
+  });
+
+  it("fails closed without cloud-processing consent before browser speech or capture starts", async () => {
+    renderBrainDump("/brain-dump/new", new QueryClient(), false);
+
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Secure cloud transcription consent");
+    expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
+    expect(recognitions).toHaveLength(0);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
