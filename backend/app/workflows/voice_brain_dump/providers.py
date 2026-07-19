@@ -10,6 +10,32 @@ from typing import Protocol
 from app.exceptions import ProviderRetryableError, ProviderTerminalError
 from app.workflows.voice_brain_dump.domain import ProposalPatch, TranscriptHypothesis
 
+SAFE_PROVIDER_USAGE_FIELDS = frozenset(
+    {
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "input_audio_tokens",
+        "output_audio_tokens",
+        "seconds",
+        "duration_seconds",
+    }
+)
+
+
+def redacted_provider_usage(value: object) -> dict[str, float]:
+    """Keep only aggregate numeric provider counters safe for reports."""
+
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(key): float(item)
+        for key, item in value.items()
+        if key in SAFE_PROVIDER_USAGE_FIELDS
+        and isinstance(item, int | float)
+        and not isinstance(item, bool)
+    }
+
 
 @dataclass(frozen=True)
 class FastSttRequest:
@@ -49,6 +75,9 @@ class SttResult:
     segments: list[TranscriptHypothesis]
     provider: str | None = None
     estimated_cost_usd: float = 0.0
+    cost_estimate_basis: str | None = None
+    actual_cost_usd: float | None = None
+    provider_usage: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

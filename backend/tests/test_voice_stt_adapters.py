@@ -34,7 +34,18 @@ def test_openai_adapter_sends_sealed_binary_audio_and_multilingual_context() -> 
         captured["authorization"] = request.headers["Authorization"]
         captured["content_type"] = request.headers["Content-Type"]
         captured["body"] = body
-        return httpx.Response(200, json={"text": "Починить BrainBuddy и сделать production smoke"})
+        return httpx.Response(
+            200,
+            json={
+                "text": "Починить BrainBuddy и сделать production smoke",
+                "usage": {
+                    "input_tokens": 123,
+                    "output_tokens": 17,
+                    "total_tokens": 140,
+                    "request_id": 999,
+                },
+            },
+        )
 
     provider = OpenAiAccurateStt(
         api_key="secret-test-key",
@@ -61,6 +72,19 @@ def test_openai_adapter_sends_sealed_binary_audio_and_multilingual_context() -> 
     assert result.segments[0].model == "gpt-4o-mini-transcribe"
     assert result.segments[0].text == "Починить BrainBuddy и сделать production smoke"
     assert result.segments[0].supersedes_segment_ids == ["preview_1"]
+    assert result.cost_estimate_basis == "audio_bytes_proxy"
+    assert result.actual_cost_usd is None
+    assert result.provider_usage == {
+        "input_tokens": 123,
+        "output_tokens": 17,
+        "total_tokens": 140,
+    }
+
+
+def test_openai_adapter_repr_redacts_api_key() -> None:
+    provider = OpenAiAccurateStt(api_key="sensitive-test-key")
+
+    assert "sensitive-test-key" not in repr(provider)
 
 
 @pytest.mark.parametrize(

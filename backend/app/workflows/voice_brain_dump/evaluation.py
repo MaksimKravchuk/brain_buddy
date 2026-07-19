@@ -1,6 +1,6 @@
 """Versioned, deterministic Voice Brain Dump release evaluation.
 
-The offline gate reads the same labelled ML-01–ML-06 corpus documented by the
+The offline gate reads the same labelled ML-01–ML-07 corpus documented by the
 feature specification. Synthetic WAV files exercise the sealed-audio provider
 boundary without using customer recordings or a paid provider.
 """
@@ -19,6 +19,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from app.exceptions import (
+    ProviderRetryableError,
+    ProviderTerminalError,
+    ValidationFailure,
+)
+
 from .domain import TranscriptHypothesis
 from .providers import (
     AccurateSttRequest,
@@ -26,6 +32,7 @@ from .providers import (
     ReconcileTextRequest,
     TextReconcilerPort,
     _extract_titles,
+    redacted_provider_usage,
 )
 
 
@@ -304,6 +311,9 @@ class SttQualityMetrics:
     mean_latency_seconds: float
     p95_latency_seconds: float
     estimated_cost_usd: float
+    cost_estimate_bases: set[str]
+    actual_cost_usd: float | None
+    provider_usage: dict[str, float]
 
 
 @dataclass(frozen=True)
@@ -478,15 +488,37 @@ def evaluate_real_audio_corpus(
         audio = case.audio_path.read_bytes()
         expected_transcript = case.transcript_path.read_text(encoding="utf-8").strip()
         started = monotonic_values()
-        result = provider.transcribe_sealed_audio(
-            AccurateSttRequest(
-                operation_id=case.id,
-                media_ref=f"evaluation:{case.id}",
-                language_hints=case.language_hints,
-                vocabulary=case.vocabulary,
-                sealed_audio=audio,
+        try:
+            result = provider.transcribe_sealed_audio(
+                AccurateSttRequest(
+                    operation_id=case.id,
+                    media_ref=f"evaluation:{case.id}",
+                    language_hints=case.language_hints,
+                    vocabulary=case.vocabulary,
+                    sealed_audio=audio,
+                )
             )
-        )
+        except (ValidationFailure, ProviderRetryableError, ProviderTerminalError) as exc:
+            latency = max(0.0, monotonic_values() - started)
+            failed_metrics = _score_stt(
+                expected_transcript,
+                "",
+                case.critical_terms,
+                latency,
+                0.0,
+                None,
+                None,
+                {},
+            )
+            aggregate.add(failed_metrics)
+            cohort = _language_cohort(case.language_hints)
+            language_aggregates.setdefault(cohort, _MetricAccumulator()).add(
+                failed_metrics
+            )
+            failures.append(
+                EvaluationFailure(case.id, "stt", _redacted_failure_code(exc))
+            )
+            continue
         latency = max(0.0, monotonic_values() - started)
         predicted_transcript = " ".join(
             segment.text for segment in result.segments
@@ -502,6 +534,9 @@ def evaluate_real_audio_corpus(
             case.critical_terms,
             latency,
             result.estimated_cost_usd,
+            result.cost_estimate_basis,
+            result.actual_cost_usd,
+            result.provider_usage,
         )
         aggregate.add(case_metrics)
         cohort = _language_cohort(case.language_hints)
@@ -520,18 +555,32 @@ def evaluate_real_audio_corpus(
                 case_id=case.id,
                 expected=True,
             )
-            predicted = _task_labels(
-                extractor(
-                    EvaluationExtractionInput(
-                        transcript_segments=tuple(result.segments),
-                        language_hints=tuple(case.language_hints),
-                        vocabulary=tuple(case.vocabulary),
-                    )
-                ),
-                case_id=case.id,
-                expected=False,
-            )
             extraction_cases += 1
+            expected_tasks += len(expected)
+            try:
+                predicted = _task_labels(
+                    extractor(
+                        EvaluationExtractionInput(
+                            transcript_segments=tuple(result.segments),
+                            language_hints=tuple(case.language_hints),
+                            vocabulary=tuple(case.vocabulary),
+                        )
+                    ),
+                    case_id=case.id,
+                    expected=False,
+                )
+            except (
+                ValidationFailure,
+                ProviderRetryableError,
+                ProviderTerminalError,
+                ValueError,
+            ) as exc:
+                failures.append(
+                    EvaluationFailure(
+                        case.id, "extraction", _redacted_failure_code(exc)
+                    )
+                )
+                continue
             exact_task_counts += int(len(predicted) == len(expected))
             matches = _match_task_labels(expected, predicted)
             task_identity_matches = [
@@ -560,7 +609,6 @@ def evaluate_real_audio_corpus(
             invented_task_count += case_invented_task_count
             semantic_score_total += sum(score for _left, _right, score in matches)
             predicted_tasks += len(predicted)
-            expected_tasks += len(expected)
             normalized_transcript = f" {_normalized(expected_transcript)} "
             is_conjunction_case = len(expected) == 1 and (
                 " and " in normalized_transcript or " и " in normalized_transcript
@@ -674,6 +722,10 @@ class _MetricAccumulator:
     latency_seconds: float = 0.0
     latency_samples: list[float] = field(default_factory=list)
     estimated_cost_usd: float = 0.0
+    cost_estimate_bases: set[str] = field(default_factory=set)
+    actual_cost_usd: float = 0.0
+    actual_cost_count: int = 0
+    provider_usage: dict[str, float] = field(default_factory=dict)
     count: int = 0
 
     def add(self, metrics: SttQualityMetrics) -> None:
@@ -686,6 +738,14 @@ class _MetricAccumulator:
         self.latency_seconds += metrics.mean_latency_seconds
         self.latency_samples.append(metrics.mean_latency_seconds)
         self.estimated_cost_usd += metrics.estimated_cost_usd
+        self.cost_estimate_bases.update(metrics.cost_estimate_bases)
+        if metrics.actual_cost_usd is not None:
+            self.actual_cost_usd += metrics.actual_cost_usd
+            self.actual_cost_count += 1
+        for key, value in metrics.provider_usage.items():
+            safe_usage = redacted_provider_usage({key: value})
+            if key in safe_usage:
+                self.provider_usage[key] = self.provider_usage.get(key, 0.0) + safe_usage[key]
         self.count += 1
 
     def finish(self) -> SttQualityMetrics:
@@ -706,6 +766,11 @@ class _MetricAccumulator:
             mean_latency_seconds=self.latency_seconds / self.count,
             p95_latency_seconds=_percentile_95(self.latency_samples),
             estimated_cost_usd=self.estimated_cost_usd,
+            cost_estimate_bases=self.cost_estimate_bases,
+            actual_cost_usd=(
+                self.actual_cost_usd if self.actual_cost_count else None
+            ),
+            provider_usage=self.provider_usage,
         )
 
 
@@ -721,6 +786,9 @@ def _empty_stt_metrics() -> SttQualityMetrics:
         mean_latency_seconds=0.0,
         p95_latency_seconds=0.0,
         estimated_cost_usd=0.0,
+        cost_estimate_bases=set(),
+        actual_cost_usd=None,
+        provider_usage={},
     )
 
 
@@ -730,6 +798,9 @@ def _score_stt(
     critical_terms: list[str],
     latency_seconds: float,
     estimated_cost_usd: float,
+    cost_estimate_basis: str | None,
+    actual_cost_usd: float | None,
+    provider_usage: dict[str, float],
 ) -> SttQualityMetrics:
     expected_chars = list(_normalized(expected))
     predicted_chars = list(_normalized(predicted))
@@ -756,7 +827,20 @@ def _score_stt(
         mean_latency_seconds=round(latency_seconds, 6),
         p95_latency_seconds=round(latency_seconds, 6),
         estimated_cost_usd=estimated_cost_usd,
+        cost_estimate_bases=({cost_estimate_basis} if cost_estimate_basis else set()),
+        actual_cost_usd=actual_cost_usd,
+        provider_usage=provider_usage,
     )
+
+
+def _redacted_failure_code(exc: Exception) -> str:
+    if isinstance(exc, ProviderRetryableError):
+        return "PROVIDER_RETRYABLE_ERROR"
+    if isinstance(exc, ProviderTerminalError):
+        return "PROVIDER_TERMINAL_ERROR"
+    if isinstance(exc, ValidationFailure):
+        return "RECONCILER_VALIDATION_FAILURE"
+    return "INVALID_STRUCTURED_OUTPUT"
 
 
 def _task_labels(

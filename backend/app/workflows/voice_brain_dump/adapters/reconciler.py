@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 import httpx
@@ -49,10 +49,17 @@ class _ReconcileEnvelope(BaseModel):
     operations: list[_OperationDraft] = Field(max_length=100)
 
 
-def _strict_response_schema() -> dict[str, object]:
+def _strict_response_schema(
+    allowed_operations: list[_Operation] | None = None,
+) -> dict[str, object]:
     """Return an OpenAI-strict schema with every property explicitly required."""
 
     nullable_string = {"anyOf": [{"type": "string"}, {"type": "null"}]}
+    operation_values = (
+        allowed_operations
+        if allowed_operations is not None
+        else ["add", "update", "split", "merge", "remove", "supersede"]
+    )
     return {
         "type": "object",
         "additionalProperties": False,
@@ -66,14 +73,7 @@ def _strict_response_schema() -> dict[str, object]:
                     "properties": {
                         "operation": {
                             "type": "string",
-                            "enum": [
-                                "add",
-                                "update",
-                                "split",
-                                "merge",
-                                "remove",
-                                "supersede",
-                            ],
+                            "enum": operation_values,
                         },
                         "proposal_id": nullable_string,
                         "title": nullable_string,
@@ -123,7 +123,7 @@ Completion = Callable[[dict[str, object]], dict[str, object]]
 class OpenAITextReconciler:
     """Call a current OpenAI text model using strict structured output."""
 
-    api_key: str
+    api_key: str = field(repr=False)
     model: str = "gpt-4o"
     endpoint: str = _DEFAULT_ENDPOINT
     timeout_seconds: float = 30.0
@@ -136,8 +136,10 @@ class OpenAITextReconciler:
         raw = self.complete(payload) if self.complete is not None else self._call(payload)
         try:
             envelope = _ReconcileEnvelope.model_validate(raw)
-        except ValidationError as exc:
-            raise ValidationFailure("Reconciler returned an invalid operation envelope.") from exc
+        except ValidationError:
+            raise ValidationFailure(
+                "Reconciler returned an invalid operation envelope."
+            ) from None
         patches = self._materialize(request, envelope.operations)
         return ReconcileResult(
             input_hash=hashlib.sha256(
@@ -165,6 +167,13 @@ class OpenAITextReconciler:
             "language_hints": request.language_hints,
             "vocabulary": request.vocabulary,
         }
+        allowed_operations: list[_Operation] | None = None
+        no_active_proposals_instruction = ""
+        if not proposals:
+            allowed_operations = ["add"]
+            no_active_proposals_instruction = (
+                " No active proposals were supplied, so only add operations are valid."
+            )
         return {
             "model": self.model,
             "temperature": 0,
@@ -173,7 +182,7 @@ class OpenAITextReconciler:
                 "json_schema": {
                     "name": "voice_brain_dump_reconciliation",
                     "strict": True,
-                    "schema": _strict_response_schema(),
+                    "schema": _strict_response_schema(allowed_operations),
                 },
             },
             "messages": [
@@ -190,7 +199,8 @@ class OpenAITextReconciler:
                         "merge/supersede. Existing update/remove targets must use an exact "
                         "supplied ID. Return every schema field; use null or [] when a field "
                         "does not apply."
-                        " Report confidence from 0 to 1 for each proposed task operation."
+                        + no_active_proposals_instruction
+                        + " Report confidence from 0 to 1 for each proposed task operation."
                     ),
                 },
                 {
@@ -247,10 +257,14 @@ class OpenAITextReconciler:
             self._validate_draft(draft, existing, known_segments)
             proposal_id = draft.proposal_id
             if draft.operation in {"add", "split", "merge", "supersede"}:
-                proposal_id = self._server_id(request.operation_id, index, draft)
+                collision_offset = 0
+                proposal_id = self._server_id(
+                    request.operation_id, index + collision_offset, draft
+                )
                 while proposal_id in allocated_ids:
+                    collision_offset += 1
                     proposal_id = self._server_id(
-                        request.operation_id, index + len(allocated_ids), draft
+                        request.operation_id, index + collision_offset, draft
                     )
                 allocated_ids.add(proposal_id)
             assert proposal_id is not None
