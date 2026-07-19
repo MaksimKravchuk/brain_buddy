@@ -172,7 +172,7 @@ def test_deterministic_provider_tolerates_unknown_failure_plans_and_empty_cleanu
     monkeypatch,
 ) -> None:
     provider = providers.DeterministicAccurateStt(
-        fail_plan={"media": ["unknown-outcome"]}
+        fail_plan={"media": ["unknown-outcome"]}, allow_text_fixture_audio=True
     )
     result = provider.transcribe_sealed_audio(
         providers.AccurateSttRequest(
