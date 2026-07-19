@@ -200,8 +200,9 @@ deterministic fakes as speech-quality or product E2E evidence.
 - **FR-018** A real-audio evaluation harness MUST report STT quality
   (CER/WER, critical-term recall, omission/hallucination counts) separately
   from task-extraction quality (task-count accuracy, boundary
-  precision/recall, title cleanliness, conjunction false-split rate,
-  semantic preservation) by provider/model version, without injecting
+  precision/recall, provenance-only boundary precision/recall, task-identity
+  accuracy, invented-task count, title cleanliness, conjunction false-split
+  rate, semantic preservation) by provider/model version, without injecting
   expected transcripts or tone fixtures into the production decision path.
 
 ## Edge cases and failure behavior
@@ -240,10 +241,11 @@ metadata.
 
 - **SC-001** ML-01 through ML-06 pass against a versioned labelled corpus,
   including exact three-task and one-task founder examples.
-- **SC-002** Evaluation reports task-boundary precision/recall, exact-count
-  accuracy, title cleanliness, code-switched-term accuracy, and conjunction
-  false-split rate by language and provider/model version, separated from STT
-  CER/WER and critical-term recall.
+- **SC-002** Evaluation reports identity-aware task-boundary precision/recall,
+  provenance-only boundary precision/recall, task-identity and exact-count
+  accuracy, invented-task count, title cleanliness, code-switched-term
+  accuracy, and conjunction false-split rate by language and provider/model
+  version, separated from STT CER/WER and critical-term recall.
 - **SC-003** Automated tests show zero silent user-edit loss, zero canonical
   writes before confirmation, zero inferred task metadata, and zero duplicate
   tasks after retries.
@@ -261,11 +263,13 @@ metadata.
 - **SC-008** The production task reconciler emits only schema-valid operations;
   regex/hardcoded fixture logic is absent from the production decision path.
 - **SC-009** Release target on the approved founder corpus: 100%
-  critical-term preservation, zero invented tasks, at least 95% exact
-  task-count accuracy, at least 95% task-boundary precision/recall, and all
-  safety/idempotency invariants passing. A measured CER/WER threshold is
-  established from the first baseline rather than invented before corpus
-  evidence.
+  critical-term preservation, zero invented tasks, 100% accepted task
+  identities, at least 95% exact task-count accuracy, at least 95%
+  identity-aware task-boundary precision/recall, and all safety/idempotency
+  invariants passing. Provenance-only boundary precision/recall remains a
+  diagnostic and cannot satisfy the identity-aware gate. A measured CER/WER
+  threshold is established from the first baseline rather than invented before
+  corpus evidence.
 
 ## Release gate
 
