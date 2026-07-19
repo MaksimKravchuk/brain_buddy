@@ -54,6 +54,7 @@ const projectsResponse = [
 ];
 
 const tagsResponse = [
+  { id: "tag-context-calls", name: "@calls", state: "active", revision: 1 },
   { id: "tag-calls", name: "calls", state: "active", revision: 1 },
   { id: "tag-errands", name: "errands", state: "active", revision: 1 },
   { id: "tag-deep-work", name: "deep-work", state: "active", revision: 1 },
@@ -113,6 +114,12 @@ test.beforeEach(async ({ page }) => {
       await route.fulfill({ json: { id: "user-1", email: "max@example.test" } });
       return;
     }
+    const taskDetailMatch = url.pathname.match(/\/tasks\/(task-\d+)$/);
+    if (taskDetailMatch) {
+      const task = taskResponse.items.find((item) => item.id === taskDetailMatch[1]);
+      await route.fulfill({ json: task ?? { detail: "Not found" }, status: task ? 200 : 404 });
+      return;
+    }
     if (url.pathname.includes("/tasks")) {
       await route.fulfill({ json: taskResponse });
       return;
@@ -121,7 +128,7 @@ test.beforeEach(async ({ page }) => {
       await route.fulfill({ json: projectsResponse });
       return;
     }
-    if (url.pathname.includes("/contexts")) {
+    if (url.pathname.includes("/tags")) {
       await route.fulfill({ json: tagsResponse });
       return;
     }
@@ -149,11 +156,28 @@ test("desktop task shell matches the Claude Design 1280x780 source surface", asy
   await expect(page.getByText("Brain Buddy")).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Task navigation" })).toBeVisible();
   await expect(page.getByText("Tags", { exact: true })).toBeVisible();
-  await expect(page.getByText("Contexts")).toHaveCount(0);
+  await expect(page.getByText("Contexts", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "@calls" })).toBeVisible();
   await expect(page.locator("body")).toHaveScreenshot("claude-design-shell-1280x780.png", {
     animations: "disabled",
     maxDiffPixelRatio: 0.08
   });
+});
+
+test("clicking a task expands inline task detail in place", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 780 });
+  await page.goto("/tasks/next");
+
+  await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Task detail" })).toHaveCount(0);
+
+  await page.getByRole("link", { name: "Fix onboarding drop-off" }).click();
+  await expect(page.getByRole("heading", { name: "Task detail" })).toBeVisible();
+  await expect(page.getByLabel("Subtasks")).toBeVisible();
+  await expect(page.getByLabel("Comments")).toBeVisible();
+
+  await page.getByRole("button", { name: "Close" }).click();
+  await expect(page.getByRole("heading", { name: "Task detail" })).toHaveCount(0);
 });
 
 test("mobile task shell uses the labelled drawer and avoids horizontal overflow", async ({ page }) => {
