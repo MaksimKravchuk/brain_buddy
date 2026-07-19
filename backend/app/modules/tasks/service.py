@@ -2723,7 +2723,11 @@ class TaskService:
             ]
         if lower == "купить хлеб и молоко":
             return ["Купить хлеб и молоко"]
-        rough_parts = re.split(r"(?:\s*\d+[.)]\s+|[.;\n]+)", normalized)
+        rough_parts = re.split(
+            r"(?:\s*\d+[.)]\s+|[.;\n]+|\bthen\b|\bпотом\b)",
+            normalized,
+            flags=re.IGNORECASE,
+        )
         titles: list[str] = []
         seen: set[str] = set()
         for part in rough_parts:

@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 
+import pytest
+
 from app.exceptions import ProviderRetryableError
 
 
@@ -103,6 +105,47 @@ def test_mixed_language_final_segment_grows_each_semantic_preview_clause(
         "Удалить черновик",
         "Починить brain body",
     ]
+
+
+@pytest.mark.parametrize(
+    ("transcript", "expected_titles"),
+    [
+        (
+            "Починить brain body потом позвонить маме",
+            ["Починить brain body", "Позвонить маме"],
+        ),
+        (
+            "Fix brain body then call mom",
+            ["Fix brain body", "Call mom"],
+        ),
+    ],
+)
+def test_final_segment_splits_preview_on_explicit_clause_boundaries(
+    api_client,
+    transcript: str,
+    expected_titles: list[str],
+) -> None:
+    boundary_case = hashlib.sha256(transcript.encode()).hexdigest()[:8]
+    operation = _start_operation(api_client, key=f"start-boundary-{boundary_case}")
+
+    appended = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/transcript",
+        headers={"Idempotency-Key": f"append-boundary-{boundary_case}"},
+        json={
+            "segments": [
+                {
+                    "sequence": 1,
+                    "text": transcript,
+                    "stability": "stable",
+                }
+            ]
+        },
+    )
+
+    assert appended.status_code == 200, appended.text
+    assert [proposal["title"] for proposal in appended.json()["proposals"]] == (
+        expected_titles
+    )
 
 
 def test_accurate_reconciliation_preserves_unmatched_locked_and_deleted_proposals(
