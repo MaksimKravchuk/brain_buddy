@@ -398,18 +398,19 @@ test("Voice Brain Dump grows a mixed-language preview and preserves user choices
   let deletedId = "";
   const editedTitle = "SMOKE Купить хлеб и молоко";
 
-  await test.step("one stable mixed-language result grows five provisional proposals", async () => {
+  await test.step("one stable mixed-language result splits потом and grows six provisional proposals", async () => {
     await page.goto("/brain-dump/new");
     await page.getByRole("button", { name: "Record" }).click();
     await waitForStartedOperation(page);
     operationId = (await page.locator("[data-operation-id]").getAttribute("data-operation-id")) ?? "";
     await emitSpeech(
       page,
-      "Сделать production smoke. написать Наташе. купить хлеб и молоко. удалить черновик. Починить brain body"
+      "Сделать production smoke. написать Наташе. купить хлеб и молоко. удалить черновик. Починить brain body потом позвонить маме"
     );
-    await expect(page.getByText("5 tasks captured")).toBeVisible();
+    await expect(page.getByText("6 tasks captured")).toBeVisible();
     await expect(page.getByText("Купить хлеб и молоко", { exact: true })).toBeVisible();
     await expect(page.getByText("Починить brain body", { exact: true })).toBeVisible();
+    await expect(page.getByText("Позвонить маме", { exact: true })).toBeVisible();
   });
 
   await test.step("record a title lock and deletion without writing canonical tasks", async () => {
