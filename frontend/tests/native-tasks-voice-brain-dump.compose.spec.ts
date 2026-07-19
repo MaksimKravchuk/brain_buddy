@@ -274,6 +274,10 @@ async function waitForStartedOperation(page: Page): Promise<void> {
   await expect(page.locator("[data-operation-id]")).not.toHaveAttribute("data-operation-id", "new");
 }
 
+async function allowSecureCloudTranscription(page: Page): Promise<void> {
+  await page.getByRole("checkbox", { name: "Allow secure cloud transcription" }).check();
+}
+
 test("native task shell uses real backend counts, filters, reload and relogin persistence", async ({ page }) => {
   await productLabels("Native task shell navigation");
 
@@ -383,6 +387,7 @@ test("Voice Brain Dump records provisional cards, reviews edits/deletes and save
   await test.step("capture on mobile without hiding primary controls", async () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/brain-dump/new");
+    await allowSecureCloudTranscription(page);
     await page.getByRole("button", { name: "Record" }).click();
     await waitForStartedOperation(page);
     await emitSpeech(page, "buy oat milk", false);
@@ -443,6 +448,7 @@ test("Voice Brain Dump grows a mixed-language preview and preserves user choices
 
   await test.step("one stable mixed-language result splits потом and grows six provisional proposals", async () => {
     await page.goto("/brain-dump/new");
+    await allowSecureCloudTranscription(page);
     await page.getByRole("button", { name: "Record" }).click();
     await waitForStartedOperation(page);
     operationId = (await page.locator("[data-operation-id]").getAttribute("data-operation-id")) ?? "";
@@ -512,6 +518,7 @@ test("Voice Brain Dump resume and commit idempotency do not create duplicate Inb
   await test.step("pause an active operation, reload it, and resume from the persisted projection", async () => {
     await page.goto("/brain-dump/new");
     await page.getByRole("textbox", { name: "Voice key terms" }).fill("untranscribed sealed audio");
+    await allowSecureCloudTranscription(page);
     await page.getByRole("button", { name: "Record" }).click();
     await waitForStartedOperation(page);
     await emitSpeech(page, "write weekly update", true);
@@ -567,6 +574,7 @@ test("Voice Brain Dump failures are visible and preserve recoverable live sessio
       }
     });
     await page.goto("/brain-dump/new");
+    await allowSecureCloudTranscription(page);
     await page.getByRole("button", { name: "Record" }).click();
     await waitForStartedOperation(page);
     assertArrayLength(startRequests, 1, "Unavailable speech recognition should still start one backend operation for original-audio capture");
@@ -594,6 +602,7 @@ test("Voice Brain Dump failures are visible and preserve recoverable live sessio
     await signup(recoveryPage, unique("voice-failures"));
     await installSpeechBoundary(recoveryPage);
     await recoveryPage.goto("/brain-dump/new");
+    await allowSecureCloudTranscription(recoveryPage);
     await recoveryPage.getByRole("button", { name: "Record" }).click();
     await waitForStartedOperation(recoveryPage);
     await emitSpeech(recoveryPage, "prepare quarterly report", true);

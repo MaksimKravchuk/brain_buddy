@@ -92,7 +92,7 @@ const brainDumpRecordingResponse = {
   owner_id: "user-1",
   kind: "voice_brain_dump",
   status: "recording",
-  consent: { microphone: true, external_processing_allowed: false, provider: null, recorded_at: "2026-07-15T10:00:00Z" },
+  consent: { microphone: true, external_processing_allowed: true, provider: "openai", recorded_at: "2026-07-15T10:00:00Z" },
   segments: [],
   proposals: [],
   committed_task_ids: [],
@@ -338,6 +338,7 @@ test("Brain Dump recording and review surfaces use source-derived mobile geometr
   });
 
   await expect(page.getByRole("dialog", { name: "Brain dump" })).toBeVisible();
+  await page.getByRole("checkbox", { name: "Allow secure cloud transcription" }).check();
   await page.getByRole("button", { name: "Record" }).click();
   await expect(page.getByText("Recording")).toBeVisible();
   await expect(page.getByText("Nothing is saved until review")).toBeVisible();
