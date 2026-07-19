@@ -255,6 +255,8 @@ class BrainDumpConsentRequest(StrictBaseModel):
     microphone: bool
     external_processing_allowed: bool = False
     provider: str | None = Field(default=None, max_length=100)
+    language_hints: list[str] = Field(default_factory=list, max_length=10)
+    vocabulary: list[str] = Field(default_factory=list, max_length=200)
 
 
 class BrainDumpOperationStartRequest(StrictBaseModel):
@@ -276,6 +278,7 @@ class BrainDumpTranscriptAppendRequest(StrictBaseModel):
 class BrainDumpProposalUpdateRequest(StrictBaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=500)
     deleted: bool | None = None
+    conflict_resolution: Literal["keep", "accept"] | None = None
     expected_revision: int = Field(ge=1)
 
 
@@ -283,6 +286,8 @@ class BrainDumpConsentResponse(StrictBaseModel):
     microphone: bool
     external_processing_allowed: bool
     provider: str | None = None
+    language_hints: list[str] = Field(default_factory=list)
+    vocabulary: list[str] = Field(default_factory=list)
     recorded_at: datetime
 
 
@@ -339,6 +344,11 @@ class BrainDumpProviderRunResponse(StrictBaseModel):
     attempt: int
     recovery_count: int
     error: str | None = None
+    error_code: str | None = None
+    provider: str | None = None
+    model: str | None = None
+    template_version: str | None = None
+    estimated_cost_usd: float = 0.0
 
 
 class BrainDumpProposalPatchResponse(StrictBaseModel):

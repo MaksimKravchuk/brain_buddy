@@ -9,13 +9,24 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import struct
+import time
 import wave
+from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .providers import AccurateSttRequest, DeterministicAccurateStt, _extract_titles
+from .domain import TranscriptHypothesis
+from .providers import (
+    AccurateSttRequest,
+    DeterministicAccurateStt,
+    ReconcileTextRequest,
+    TextReconcilerPort,
+    _extract_titles,
+)
 
 
 @dataclass(frozen=True)
@@ -279,3 +290,388 @@ def evaluate_release_dataset(
         by_language=by_language,
         failures=failures,
     )
+
+
+@dataclass(frozen=True)
+class SttQualityMetrics:
+    character_error_rate: float
+    word_error_rate: float
+    critical_term_recall: float
+    critical_term_hits: int
+    critical_term_total: int
+    omission_count: int
+    hallucination_count: int
+    mean_latency_seconds: float
+    estimated_cost_usd: float
+
+
+@dataclass(frozen=True)
+class ExtractionQualityMetrics:
+    exact_task_count_accuracy: float
+    boundary_precision: float
+    boundary_recall: float
+    title_accuracy: float
+    conjunction_false_split_rate: float
+    semantic_preservation_rate: float
+    confidence_calibration_error: float | None
+
+
+@dataclass(frozen=True)
+class EvaluationFailure:
+    case_id: str
+    stage: str
+    code: str
+
+
+@dataclass(frozen=True)
+class RealAudioEvaluationReport:
+    status: str
+    disabled_reason: str | None
+    case_count: int
+    provider_models: set[str]
+    stt: SttQualityMetrics
+    extraction: ExtractionQualityMetrics | None
+    by_language: dict[str, SttQualityMetrics]
+    failures: list[EvaluationFailure]
+
+
+@dataclass(frozen=True)
+class _RealAudioCase:
+    id: str
+    audio_path: Path
+    transcript_path: Path
+    expected_tasks_path: Path | None
+    language_hints: list[str]
+    vocabulary: list[str]
+    critical_terms: list[str]
+
+
+def build_semantic_extractor(
+    reconciler: TextReconcilerPort,
+) -> Callable[[str], list[str]]:
+    """Adapt the configured semantic reconciler to the corpus scoring contract."""
+
+    def extract(transcript: str) -> list[str]:
+        digest = hashlib.sha256(transcript.encode("utf-8")).hexdigest()[:12]
+        segment = TranscriptHypothesis(
+            id=f"evaluation_{digest}",
+            sequence=1,
+            start_ms=0,
+            end_ms=max(1, len(transcript.split()) * 500),
+            text=transcript,
+            stability="stable",
+            provider_role="accurate",
+            model="evaluation-input",
+        )
+        result = reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id=f"evaluation_{digest}",
+                transcript_segments=[segment],
+                active_proposals=[],
+            )
+        )
+        return [
+            patch.title
+            for patch in result.patches
+            if patch.operation != "remove" and patch.title is not None
+        ]
+
+    return extract
+
+
+def evaluate_real_audio_corpus(
+    corpus_root: Path,
+    provider: Any,
+    *,
+    external_processing_allowed: bool,
+    extractor: Callable[[str], list[str]] | None = None,
+    monotonic_values: Callable[[], float] = time.monotonic,
+) -> RealAudioEvaluationReport:
+    """Evaluate real audio without passing ground truth into the STT provider.
+
+    The corpus is intentionally external to the repository. Reports contain only
+    aggregate metrics and case IDs; raw audio and transcripts never leave the
+    supplied corpus directory through this API.
+    """
+
+    if not external_processing_allowed:
+        return RealAudioEvaluationReport(
+            status="disabled",
+            disabled_reason="EXTERNAL_PROCESSING_CONSENT_REQUIRED",
+            case_count=0,
+            provider_models=set(),
+            stt=_empty_stt_metrics(),
+            extraction=None,
+            by_language={},
+            failures=[],
+        )
+    if getattr(provider, "provider_name", "disabled") == "disabled":
+        return RealAudioEvaluationReport(
+            status="disabled",
+            disabled_reason=getattr(provider, "reason", "STT_PROVIDER_DISABLED"),
+            case_count=0,
+            provider_models=set(),
+            stt=_empty_stt_metrics(),
+            extraction=None,
+            by_language={},
+            failures=[],
+        )
+
+    cases = _load_real_audio_cases(corpus_root)
+    failures: list[EvaluationFailure] = []
+    provider_models: set[str] = set()
+    aggregate = _MetricAccumulator()
+    language_aggregates: dict[str, _MetricAccumulator] = {}
+    exact_task_counts = matched_boundaries = matched_titles = 0
+    predicted_tasks = expected_tasks = 0
+    extraction_cases = 0
+    conjunction_cases = conjunction_false_splits = 0
+
+    for case in cases:
+        audio = case.audio_path.read_bytes()
+        expected_transcript = case.transcript_path.read_text(encoding="utf-8").strip()
+        started = monotonic_values()
+        result = provider.transcribe_sealed_audio(
+            AccurateSttRequest(
+                operation_id=case.id,
+                media_ref=f"evaluation:{case.id}",
+                language_hints=case.language_hints,
+                vocabulary=case.vocabulary,
+                sealed_audio=audio,
+            )
+        )
+        latency = max(0.0, monotonic_values() - started)
+        predicted_transcript = " ".join(
+            segment.text for segment in result.segments
+        ).strip()
+        model = next(
+            (segment.model for segment in result.segments if segment.model), "unknown"
+        )
+        provider_models.add(f"{result.provider or provider.provider_name}/{model}")
+        case_metrics = _score_stt(
+            expected_transcript,
+            predicted_transcript,
+            case.critical_terms,
+            latency,
+            result.estimated_cost_usd,
+        )
+        aggregate.add(case_metrics)
+        cohort = _language_cohort(case.language_hints)
+        language_aggregates.setdefault(cohort, _MetricAccumulator()).add(case_metrics)
+        if case_metrics.word_error_rate > 0 or case_metrics.critical_term_recall < 1:
+            failures.append(EvaluationFailure(case.id, "stt", "TRANSCRIPT_MISMATCH"))
+
+        if extractor is not None and case.expected_tasks_path is not None:
+            expected = json.loads(case.expected_tasks_path.read_text(encoding="utf-8"))
+            if not isinstance(expected, list) or not all(
+                isinstance(value, str) for value in expected
+            ):
+                raise ValueError(f"{case.id}: expected tasks must be a JSON string list")
+            predicted = extractor(predicted_transcript)
+            extraction_cases += 1
+            exact_task_counts += int(len(predicted) == len(expected))
+            title_matches = sum(
+                _normalized(actual) == _normalized(wanted)
+                for actual, wanted in zip(predicted, expected, strict=False)
+            )
+            matched_boundaries += min(len(predicted), len(expected))
+            matched_titles += title_matches
+            predicted_tasks += len(predicted)
+            expected_tasks += len(expected)
+            normalized_transcript = f" {_normalized(expected_transcript)} "
+            is_conjunction_case = len(expected) == 1 and (
+                " and " in normalized_transcript or " и " in normalized_transcript
+            )
+            if is_conjunction_case:
+                conjunction_cases += 1
+                conjunction_false_splits += int(len(predicted) > 1)
+            if len(predicted) != len(expected) or title_matches != len(expected):
+                failures.append(
+                    EvaluationFailure(case.id, "extraction", "TASK_EXTRACTION_MISMATCH")
+                )
+
+    extraction = None
+    if extraction_cases:
+        extraction = ExtractionQualityMetrics(
+            exact_task_count_accuracy=exact_task_counts / extraction_cases,
+            boundary_precision=(
+                matched_boundaries / predicted_tasks if predicted_tasks else 0.0
+            ),
+            boundary_recall=(
+                matched_boundaries / expected_tasks if expected_tasks else 0.0
+            ),
+            title_accuracy=(
+                matched_titles / expected_tasks if expected_tasks else 0.0
+            ),
+            conjunction_false_split_rate=(
+                conjunction_false_splits / conjunction_cases
+                if conjunction_cases
+                else 0.0
+            ),
+            semantic_preservation_rate=(
+                matched_titles / expected_tasks if expected_tasks else 0.0
+            ),
+            confidence_calibration_error=None,
+        )
+    return RealAudioEvaluationReport(
+        status="completed",
+        disabled_reason=None,
+        case_count=len(cases),
+        provider_models=provider_models,
+        stt=aggregate.finish(),
+        extraction=extraction,
+        by_language={
+            language: values.finish()
+            for language, values in language_aggregates.items()
+        },
+        failures=failures,
+    )
+
+
+@dataclass
+class _MetricAccumulator:
+    character_error_rate: float = 0.0
+    word_error_rate: float = 0.0
+    critical_term_hits: int = 0
+    critical_term_total: int = 0
+    omission_count: int = 0
+    hallucination_count: int = 0
+    latency_seconds: float = 0.0
+    estimated_cost_usd: float = 0.0
+    count: int = 0
+
+    def add(self, metrics: SttQualityMetrics) -> None:
+        self.character_error_rate += metrics.character_error_rate
+        self.word_error_rate += metrics.word_error_rate
+        self.critical_term_hits += metrics.critical_term_hits
+        self.critical_term_total += metrics.critical_term_total
+        self.omission_count += metrics.omission_count
+        self.hallucination_count += metrics.hallucination_count
+        self.latency_seconds += metrics.mean_latency_seconds
+        self.estimated_cost_usd += metrics.estimated_cost_usd
+        self.count += 1
+
+    def finish(self) -> SttQualityMetrics:
+        if not self.count:
+            return _empty_stt_metrics()
+        return SttQualityMetrics(
+            character_error_rate=self.character_error_rate / self.count,
+            word_error_rate=self.word_error_rate / self.count,
+            critical_term_recall=(
+                self.critical_term_hits / self.critical_term_total
+                if self.critical_term_total
+                else 1.0
+            ),
+            critical_term_hits=self.critical_term_hits,
+            critical_term_total=self.critical_term_total,
+            omission_count=self.omission_count,
+            hallucination_count=self.hallucination_count,
+            mean_latency_seconds=self.latency_seconds / self.count,
+            estimated_cost_usd=self.estimated_cost_usd,
+        )
+
+
+def _empty_stt_metrics() -> SttQualityMetrics:
+    return SttQualityMetrics(0.0, 0.0, 0.0, 0, 0, 0, 0, 0.0, 0.0)
+
+
+def _score_stt(
+    expected: str,
+    predicted: str,
+    critical_terms: list[str],
+    latency_seconds: float,
+    estimated_cost_usd: float,
+) -> SttQualityMetrics:
+    expected_chars = list(_normalized(expected))
+    predicted_chars = list(_normalized(predicted))
+    expected_words = _words(expected)
+    predicted_words = _words(predicted)
+    expected_counts = Counter(expected_words)
+    predicted_counts = Counter(predicted_words)
+    omissions = sum((expected_counts - predicted_counts).values())
+    hallucinations = sum((predicted_counts - expected_counts).values())
+    normalized_prediction = _normalized(predicted)
+    term_hits = sum(_normalized(term) in normalized_prediction for term in critical_terms)
+    return SttQualityMetrics(
+        character_error_rate=_levenshtein(expected_chars, predicted_chars)
+        / max(1, len(expected_chars)),
+        word_error_rate=_levenshtein(expected_words, predicted_words)
+        / max(1, len(expected_words)),
+        critical_term_recall=(
+            term_hits / len(critical_terms) if critical_terms else 1.0
+        ),
+        critical_term_hits=term_hits,
+        critical_term_total=len(critical_terms),
+        omission_count=omissions,
+        hallucination_count=hallucinations,
+        mean_latency_seconds=round(latency_seconds, 6),
+        estimated_cost_usd=estimated_cost_usd,
+    )
+
+
+def _language_cohort(language_hints: list[str]) -> str:
+    normalized = {value.casefold().split("-", 1)[0] for value in language_hints}
+    if normalized == {"ru", "en"}:
+        return "ru-en"
+    if len(normalized) == 1:
+        return next(iter(normalized))
+    return "+".join(sorted(normalized)) or "unknown"
+
+
+def _words(value: str) -> list[str]:
+    return re.findall(r"\w+", value.casefold(), flags=re.UNICODE)
+
+
+def _levenshtein(left: list[str], right: list[str]) -> int:
+    previous = list(range(len(right) + 1))
+    for left_index, left_value in enumerate(left, start=1):
+        current = [left_index]
+        for right_index, right_value in enumerate(right, start=1):
+            current.append(
+                min(
+                    current[-1] + 1,
+                    previous[right_index] + 1,
+                    previous[right_index - 1] + (left_value != right_value),
+                )
+            )
+        previous = current
+    return previous[-1]
+
+
+def _load_real_audio_cases(corpus_root: Path) -> list[_RealAudioCase]:
+    root = corpus_root.resolve()
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    if manifest.get("version") != 1:
+        raise ValueError("Unsupported real-audio evaluation manifest version")
+    cases: list[_RealAudioCase] = []
+    for raw in manifest.get("cases", []):
+        case_id = str(raw["id"])
+        cases.append(
+            _RealAudioCase(
+                id=case_id,
+                audio_path=_corpus_path(root, raw["audio_file"]),
+                transcript_path=_corpus_path(
+                    root, raw["ground_truth_transcript_file"]
+                ),
+                expected_tasks_path=(
+                    _corpus_path(root, raw["expected_tasks_file"])
+                    if raw.get("expected_tasks_file")
+                    else None
+                ),
+                language_hints=[str(value) for value in raw.get("language_hints", [])],
+                vocabulary=[str(value) for value in raw.get("vocabulary", [])],
+                critical_terms=[str(value) for value in raw.get("critical_terms", [])],
+            )
+        )
+    if not cases:
+        raise ValueError("Real-audio evaluation corpus contains no cases")
+    return cases
+
+
+def _corpus_path(root: Path, relative_value: object) -> Path:
+    candidate = (root / str(relative_value)).resolve()
+    if candidate != root and root not in candidate.parents:
+        raise ValueError("Evaluation corpus path escapes its root")
+    if not candidate.is_file():
+        raise ValueError("Evaluation corpus file is missing")
+    return candidate
