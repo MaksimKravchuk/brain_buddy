@@ -1174,6 +1174,35 @@ def test_schema_v2_user_title_lock_blocks_accurate_overwrite_with_visible_confli
     ]
 
 
+def test_schema_v2_conflict_resolution_requires_a_visible_title_conflict(
+    api_client,
+) -> None:
+    operation = _start_operation(api_client, key="start-no-title-conflict")
+    preview = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/transcript",
+        headers={"Idempotency-Key": "append-no-title-conflict"},
+        json={
+            "segments": [
+                {"sequence": 1, "text": "Call the dentist", "stability": "stable"}
+            ]
+        },
+    )
+    assert preview.status_code == 200, preview.text
+    proposal_id = preview.json()["proposals"][0]["id"]
+
+    response = api_client.patch(
+        f"/api/brain-dump-operations/{operation['id']}/proposals/{proposal_id}",
+        headers={"Idempotency-Key": "keep-missing-title-conflict"},
+        json={
+            "conflict_resolution": "keep",
+            "expected_revision": preview.json()["revision"],
+        },
+    )
+
+    assert response.status_code == 400
+    assert "no title conflict to resolve" in response.text
+
+
 def test_schema_v2_retryable_provider_failure_recovers_via_retry_command(
     api_client,
 ) -> None:
