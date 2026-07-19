@@ -115,12 +115,12 @@ measure extraction quality independently from STT quality.
 | ID | Scenario | Required assertion |
 |---|---|---|
 | EA-01 | exact task-count accuracy | at least 95% exact task-count accuracy on the approved corpus |
-| EA-02 | boundary precision/recall | at least 95% task-boundary precision and recall |
+| EA-02 | boundary precision/recall | at least 95% identity-aware task-boundary precision and recall; provenance-only boundary precision/recall is reported separately |
 | EA-03 | title cleanliness | titles match ground truth without regex artifacts or positional splits |
 | EA-04 | conjunction false-split rate | `купить хлеб и молоко` and similar cases produce exactly one task; no split on `и`/`and` alone |
 | EA-05 | split/merge accuracy | structural split/merge cases produce expected lineage with stable IDs |
-| EA-06 | semantic preservation | semantic intent is preserved across reconciliation; no invented tasks |
-| EA-07 | confidence calibration | calibration error is reported and within the configured threshold |
+| EA-06 | semantic preservation and task identity | semantic intent is preserved, task-identity accuracy is 100%, and invented-task count is zero even when invented tasks carry valid source provenance |
+| EA-07 | confidence calibration | calibration error is reported against semantic/task identity correctness and is within the configured threshold |
 
 ## Event stream and projection tests
 

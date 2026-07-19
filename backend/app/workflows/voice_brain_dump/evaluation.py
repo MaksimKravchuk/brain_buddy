@@ -311,7 +311,11 @@ class ExtractionQualityMetrics:
     exact_task_count_accuracy: float
     boundary_precision: float
     boundary_recall: float
+    provenance_boundary_precision: float
+    provenance_boundary_recall: float
     title_accuracy: float
+    task_identity_accuracy: float
+    invented_task_count: int
     conjunction_false_split_rate: float
     semantic_preservation_rate: float
     split_merge_accuracy: float | None
@@ -459,7 +463,8 @@ def evaluate_real_audio_corpus(
     provider_models: set[str] = set()
     aggregate = _MetricAccumulator()
     language_aggregates: dict[str, _MetricAccumulator] = {}
-    exact_task_counts = matched_boundaries = matched_titles = 0
+    exact_task_counts = matched_boundaries = matched_provenance_boundaries = 0
+    matched_titles = matched_task_identities = invented_task_count = 0
     predicted_tasks = expected_tasks = 0
     extraction_cases = 0
     conjunction_cases = conjunction_false_splits = 0
@@ -529,14 +534,30 @@ def evaluate_real_audio_corpus(
             extraction_cases += 1
             exact_task_counts += int(len(predicted) == len(expected))
             matches = _match_task_labels(expected, predicted)
-            boundary_matches = _match_task_boundaries(expected, predicted)
+            task_identity_matches = [
+                match for match in matches if match[2] >= _TASK_IDENTITY_THRESHOLD
+            ]
+            provenance_boundary_matches = _match_task_boundaries(expected, predicted)
+            identity_pairs = {
+                (expected_index, predicted_index)
+                for expected_index, predicted_index, _score in task_identity_matches
+            }
+            boundary_matches = [
+                match
+                for match in provenance_boundary_matches
+                if (match[0], match[1]) in identity_pairs
+            ]
             title_matches = sum(
                 _normalized(predicted[predicted_index].title)
                 == _normalized(expected[expected_index].title)
                 for expected_index, predicted_index, _score in matches
             )
             matched_boundaries += len(boundary_matches)
+            matched_provenance_boundaries += len(provenance_boundary_matches)
             matched_titles += title_matches
+            matched_task_identities += len(task_identity_matches)
+            case_invented_task_count = len(predicted) - len(task_identity_matches)
+            invented_task_count += case_invented_task_count
             semantic_score_total += sum(score for _left, _right, score in matches)
             predicted_tasks += len(predicted)
             expected_tasks += len(expected)
@@ -562,7 +583,8 @@ def evaluate_real_audio_corpus(
                     == expected_label.structural_change
                 )
             matched_predicted = {
-                predicted_index for _expected_index, predicted_index, _score in boundary_matches
+                predicted_index
+                for _expected_index, predicted_index, _score in task_identity_matches
             }
             for predicted_index, predicted_label in enumerate(predicted):
                 if predicted_label.confidence is None:
@@ -576,6 +598,10 @@ def evaluate_real_audio_corpus(
                 failures.append(
                     EvaluationFailure(case.id, "extraction", "TASK_EXTRACTION_MISMATCH")
                 )
+            if case_invented_task_count:
+                failures.append(
+                    EvaluationFailure(case.id, "extraction", "INVENTED_TASK_IDENTITY")
+                )
 
     extraction = None
     if extraction_cases:
@@ -587,9 +613,23 @@ def evaluate_real_audio_corpus(
             boundary_recall=(
                 matched_boundaries / expected_tasks if expected_tasks else 0.0
             ),
+            provenance_boundary_precision=(
+                matched_provenance_boundaries / predicted_tasks
+                if predicted_tasks
+                else 0.0
+            ),
+            provenance_boundary_recall=(
+                matched_provenance_boundaries / expected_tasks
+                if expected_tasks
+                else 0.0
+            ),
             title_accuracy=(
                 matched_titles / expected_tasks if expected_tasks else 0.0
             ),
+            task_identity_accuracy=(
+                matched_task_identities / expected_tasks if expected_tasks else 0.0
+            ),
+            invented_task_count=invented_task_count,
             conjunction_false_split_rate=(
                 conjunction_false_splits / conjunction_cases
                 if conjunction_cases
@@ -776,6 +816,9 @@ def _semantic_similarity(left: str, right: str) -> float:
     if not left_words or not right_words:
         return float(_normalized(left) == _normalized(right))
     return 2 * len(left_words & right_words) / (len(left_words) + len(right_words))
+
+
+_TASK_IDENTITY_THRESHOLD = 0.95
 
 
 def _match_task_labels(

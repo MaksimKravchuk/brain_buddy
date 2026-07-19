@@ -252,9 +252,10 @@ corpus-based release gates.
   `backend/app/workflows/voice_brain_dump/evaluation.py` to separate STT
   metrics (CER, WER, critical-term recall, omission/hallucination counts,
   latency) from extraction metrics (task-count accuracy, boundary
-  precision/recall, title cleanliness, conjunction false-split rate,
-  split/merge accuracy, semantic preservation, calibration error); report by
-  language and provider/model version.
+  precision/recall, provenance-only boundary precision/recall, task-identity
+  accuracy, invented-task count, title cleanliness, conjunction false-split
+  rate, split/merge accuracy, semantic preservation, calibration error); report
+  by language and provider/model version.
 - [ ] T053 [US4] Add credentialed-track tests for SA-01–SA-05 (STT accuracy)
   and EA-01–EA-07 (extraction accuracy) in
   `backend/tests/test_voice_brain_dump_evaluation.py`; skip with explicit

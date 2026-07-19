@@ -242,7 +242,9 @@ def test_real_audio_harness_reports_stt_and_extraction_failures_separately(
     assert any(failure.stage == "extraction" for failure in report.failures)
 
 
-def test_task_boundaries_are_scored_separately_from_title_wording(tmp_path: Path) -> None:
+def test_provenance_boundaries_are_reported_separately_from_task_identity(
+    tmp_path: Path,
+) -> None:
     provider = RecordingProvider(
         "Нужно починить BrainBuddy. Потом сделать production smoke."
     )
@@ -263,14 +265,74 @@ def test_task_boundaries_are_scored_separately_from_title_wording(tmp_path: Path
 
     assert report.extraction is not None
     assert report.extraction.exact_task_count_accuracy == 1
-    assert report.extraction.boundary_precision == 1
-    assert report.extraction.boundary_recall == 1
+    assert report.extraction.provenance_boundary_precision == 1
+    assert report.extraction.provenance_boundary_recall == 1
+    assert report.extraction.boundary_precision == 0.5
+    assert report.extraction.boundary_recall == 0.5
     assert report.extraction.title_accuracy == 0.5
+    assert report.extraction.task_identity_accuracy == 0.5
+    assert report.extraction.invented_task_count == 1
 
 
 def test_same_count_invented_tasks_do_not_match_labelled_boundaries(
     tmp_path: Path,
 ) -> None:
+    class ProvenanceBearingProvider(RecordingProvider):
+        def transcribe_sealed_audio(self, request: AccurateSttRequest) -> SttResult:
+            self.requests.append(request)
+            return SttResult(
+                role="accurate",
+                provider=self.provider_name,
+                input_hash="input-hash",
+                segments=[
+                    TranscriptHypothesis(
+                        id="segment_call",
+                        sequence=1,
+                        start_ms=0,
+                        end_ms=500,
+                        text="Call Alice.",
+                        stability="stable",
+                        provider_role="accurate",
+                        model="model-v1",
+                    ),
+                    TranscriptHypothesis(
+                        id="segment_buy",
+                        sequence=2,
+                        start_ms=500,
+                        end_ms=1000,
+                        text="Buy milk.",
+                        stability="stable",
+                        provider_role="accurate",
+                        model="model-v1",
+                    ),
+                ],
+                estimated_cost_usd=0.1,
+            )
+
+    class InventingReconciler:
+        provider_id = "semantic-evaluation"
+        requires_external_processing = True
+
+        def reconcile(self, request):
+            return ReconcileResult(
+                input_hash="semantic-input",
+                patches=[
+                    ProposalPatch.add(
+                        proposal_id="proposal_call",
+                        title="Call Bob",
+                        source_segment_ids=["segment_call"],
+                        producer="reconciler",
+                    ),
+                    ProposalPatch.add(
+                        proposal_id="proposal_buy",
+                        title="Buy yacht",
+                        source_segment_ids=["segment_buy"],
+                        producer="reconciler",
+                    ),
+                ],
+                confidences={"proposal_call": 0.9, "proposal_buy": 0.9},
+            )
+
     corpus = _corpus(tmp_path)
     (corpus / "sample.transcript.txt").write_text(
         "Call Alice. Buy milk.", encoding="utf-8"
@@ -286,23 +348,27 @@ def test_same_count_invented_tasks_do_not_match_labelled_boundaries(
     )
     report = evaluate_real_audio_corpus(
         corpus,
-        RecordingProvider("Call Alice. Buy milk."),
+        ProvenanceBearingProvider("Call Alice. Buy milk."),
         external_processing_allowed=True,
-        extractor=lambda _input: [
-            {"title": "Call Bob", "confidence": 0.9},
-            {"title": "Buy yacht", "confidence": 0.9},
-        ],
+        extractor=build_semantic_extractor(InventingReconciler()),
         monotonic_values=iter((1.0, 1.1)).__next__,
     )
 
     assert report.extraction is not None
     assert report.extraction.exact_task_count_accuracy == 1
+    assert report.extraction.provenance_boundary_precision == 1
+    assert report.extraction.provenance_boundary_recall == 1
     assert report.extraction.boundary_precision == 0
     assert report.extraction.boundary_recall == 0
     assert report.extraction.semantic_preservation_rate == pytest.approx(0.5)
     assert report.extraction.semantic_preservation_rate < 0.95
     assert report.extraction.title_accuracy == 0
+    assert report.extraction.task_identity_accuracy == 0
+    assert report.extraction.invented_task_count == 2
     assert report.extraction.confidence_calibration_error == pytest.approx(0.9)
+    assert any(
+        failure.code == "INVENTED_TASK_IDENTITY" for failure in report.failures
+    )
 
 
 def test_rich_labels_score_split_merge_confidence_and_grouped_p95_latency(

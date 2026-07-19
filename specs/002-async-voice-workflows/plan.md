@@ -381,8 +381,9 @@ The evaluation harness separates the two quality dimensions:
 - Input: the accurate transcript (from STT step).
 - Output: proposal patches (add/update/split/merge/remove/supersede).
 - Metrics: exact task-count accuracy, task-boundary precision/recall, title
-  cleanliness, conjunction false-split rate, split/merge accuracy, semantic
-  preservation score, confidence calibration error.
+  cleanliness, task-identity accuracy, invented-task count, provenance-only
+  boundary precision/recall, conjunction false-split rate, split/merge
+  accuracy, semantic preservation score, confidence calibration error.
 - Ground truth: founder-supplied expected task titles/boundaries.
 - The reconciler is called with the accurate transcript projection; no
   regex/hardcoded fixture logic is in the production decision path.
@@ -395,9 +396,11 @@ The evaluation harness separates the two quality dimensions:
   CER/WER threshold established from the first baseline (not invented before
   corpus evidence).
 - Extraction: at least 95% exact task-count accuracy, at least 95%
-  task-boundary precision/recall, zero invented tasks, zero silent user-edit
-  loss, zero canonical writes before confirmation, zero duplicate tasks after
-  retries.
+  identity-aware task-boundary precision/recall, 100% accepted task identities,
+  zero invented tasks, zero silent user-edit loss, zero canonical writes before
+  confirmation, zero duplicate tasks after retries. Provenance-only boundary
+  precision/recall is reported separately and never substitutes for task
+  identity.
 - Safety invariants are release-blocking regardless of latency/cost.
 
 ## Migration and compatibility constraints with native GTD contracts
