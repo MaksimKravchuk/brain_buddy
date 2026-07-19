@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- @dsCard group="Components" name="Brain dump patterns" subtitle="Pulsing mic, rec timer, live transcript caret, forming task, waveform" viewport="700x320" -->
+<!-- @dsCard group="Components" name="Brain dump patterns" subtitle="Durable capture + Provisional → Stop & review → Confirm additions" viewport="700x320" -->
 <html><head><meta charset="utf-8"><title>Brain dump patterns</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <style>
@@ -24,16 +24,18 @@
   .wave{display:flex;align-items:flex-end;gap:3px;height:24px}
   .wave i{width:4px;height:18px;border-radius:2px;background:#0ea5e9;transform-origin:bottom;animation:bbBar 1s cubic-bezier(.22,1,.36,1) infinite}
   .wave i:nth-child(2){animation-delay:.15s}.wave i:nth-child(3){animation-delay:.3s}.wave i:nth-child(4){animation-delay:.45s}
-  .safety{font-size:12px;color:#94a3b8}
+  .safety{font-size:12px;color:#64748b}.authority{font-size:12px;color:#0f172a;font-weight:600}
   svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 </style></head><body>
 <p class="lbl">The only ambient motion in the product</p>
 <div class="grid">
   <div class="mic"><span class="ring"></span><span class="btn"><svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg></span></div>
-  <div><span class="rec"><span class="d"></span>01:24</span><div class="safety" style="margin-top:4px">Nothing is saved until you stop</div></div>
+  <div><span class="rec"><span class="d"></span>01:24</span><div class="safety" style="margin-top:4px">Recording locally · 8 durable numbered chunks uploaded</div></div>
   <div class="wave"><i></i><i></i><i></i><i></i></div>
   <div class="tr">…take the car in before the weekend. For the launch post, <b>maybe AI can draft it and I'll review it on Thursday</b><span class="caret"></span></div>
   <div style="font-size:11px;color:#94a3b8">forming card</div>
   <div class="forming">Cancel unused SaaS subscriptions<span>forming…</span></div>
+  <div class="authority">Provisional · 9</div>
+  <div class="safety">Stop & review → Confirm N additions<br>No canonical Task is created before explicit confirmation.</div>
 </div>
 </body></html>
