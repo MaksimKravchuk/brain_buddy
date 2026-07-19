@@ -1,0 +1,36 @@
+<!doctype html>
+<!-- @dsCard group="Spacing" name="Radii & 4pt spacing" subtitle="Radius tokens plus 4pt spacing scale" viewport="700x200" -->
+<html><head><meta charset="utf-8"><title>Radii & Spacing</title>
+<style>
+  body{margin:0;padding:20px;background:#f8fafc;font-family:Inter,sans-serif;color:#0f172a}
+  .section{margin-bottom:14px}
+  h3{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#64748b;font-weight:600;margin:0 0 8px}
+  .row{display:flex;gap:10px;align-items:end}
+  .r{background:#fff;border:1px solid #e2e8f0;width:64px;height:52px;box-shadow:0 1px 2px rgba(15,23,42,.04);display:flex;align-items:center;justify-content:center;font-size:10px;color:#64748b;font-weight:600}
+  .sp{display:inline-flex;align-items:center;gap:6px;margin-right:10px;font-size:11px;color:#475569}
+  .sp .b{background:#0ea5e9;height:8px}
+</style></head><body>
+<div class="section">
+  <h3>Radius scale</h3>
+  <div class="row">
+    <div class="r" style="border-radius:6px">6 · sm</div>
+    <div class="r" style="border-radius:8px">8 · md</div>
+    <div class="r" style="border-radius:16px">16 · 2xl</div>
+    <div class="r" style="border-radius:20px">20 · xl</div>
+    <div class="r" style="border-radius:16px 10px 10px 16px">node</div>
+    <div class="r" style="border-radius:999px">full</div>
+  </div>
+</div>
+<div class="section">
+  <h3>Spacing scale (4pt)</h3>
+  <div>
+    <span class="sp"><span class="b" style="width:4px"></span>1 · 4</span>
+    <span class="sp"><span class="b" style="width:8px"></span>2 · 8</span>
+    <span class="sp"><span class="b" style="width:12px"></span>3 · 12</span>
+    <span class="sp"><span class="b" style="width:16px"></span>4 · 16</span>
+    <span class="sp"><span class="b" style="width:20px"></span>5 · 20</span>
+    <span class="sp"><span class="b" style="width:24px"></span>6 · 24</span>
+    <span class="sp"><span class="b" style="width:32px"></span>8 · 32</span>
+  </div>
+</div>
+</body></html>

@@ -1,0 +1,30 @@
+<!doctype html>
+<!-- @dsCard group="Components" name="Inspector sections" subtitle="Node label field + AI feedback emerald section" viewport="700x280" -->
+<html><head><meta charset="utf-8"><title>Inspector card</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+  body{margin:0;padding:20px;background:#f1f5f9;font-family:Inter,sans-serif;color:#0f172a}
+  .panel{max-width:320px;display:flex;flex-direction:column;gap:14px}
+  .sec{border:1px solid #e2e8f0;border-radius:12px;padding:12px;background:rgba(241,245,249,.6)}
+  .sec.emer{background:rgba(236,253,245,.8);border-color:#a7f3d0}
+  .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#64748b;font-weight:600;display:inline-flex;gap:6px;align-items:center;margin-bottom:6px}
+  .lbl.em{color:#047857}
+  input,select{width:100%;box-sizing:border-box;border:1px solid #e2e8f0;border-radius:6px;padding:6px 10px;font-size:13px;background:#fff;font-family:Inter,sans-serif}
+  .meta{font-size:11px;color:#64748b;margin-top:6px}
+  .btn{display:inline-flex;align-items:center;gap:6px;background:#0ea5e9;color:#fff;border:none;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer}
+  .btn.em{background:#10b981}
+  svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+</style></head><body>
+<div class="panel">
+  <div>
+    <div class="lbl"><svg viewBox="0 0 24 24"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/></svg>Node label</div>
+    <input value="Suppliers deliver late">
+    <div class="meta">Incoming: <b style="color:#334155">3</b> · Outgoing: <b style="color:#334155">5</b></div>
+  </div>
+  <div class="sec emer">
+    <div class="lbl em"><svg viewBox="0 0 24 24"><path d="M12 3v2M12 19v2M5 12H3M21 12h-2M7 7l-1-1M18 18l-1-1M7 17l-1 1M18 6l-1 1"/></svg>AI feedback</div>
+    <div style="font-size:12px;color:#047857;margin-bottom:8px">Request a quick summary and recommendations.</div>
+    <button class="btn em">Request feedback</button>
+  </div>
+</div>
+</body></html>
