@@ -410,7 +410,7 @@ export const apiClient = {
   updateBrainDumpProposal(
     operationId: string,
     proposalId: string,
-    payload: { title?: string; deleted?: boolean; expected_revision: number },
+    payload: { title?: string; deleted?: boolean; conflict_resolution?: "keep" | "accept"; expected_revision: number },
     idempotencyKey: string
   ) {
     return request<BrainDumpOperationResponse>(`/brain-dump-operations/${operationId}/proposals/${proposalId}`, {

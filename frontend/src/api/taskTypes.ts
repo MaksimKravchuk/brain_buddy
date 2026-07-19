@@ -200,6 +200,8 @@ export interface BrainDumpOperationResponse {
     microphone: boolean;
     external_processing_allowed: boolean;
     provider: string | null;
+    language_hints: string[];
+    vocabulary: string[];
     recorded_at: string;
   };
   segments: Array<{
@@ -236,7 +238,13 @@ export interface BrainDumpOperationResponse {
 }
 
 export interface BrainDumpStartRequest {
-  consent: { microphone: boolean; external_processing_allowed: boolean; provider?: string | null };
+  consent: {
+    microphone: boolean;
+    external_processing_allowed: boolean;
+    provider?: string | null;
+    language_hints: string[];
+    vocabulary: string[];
+  };
 }
 
 export interface BrainDumpTranscriptAppendRequest {

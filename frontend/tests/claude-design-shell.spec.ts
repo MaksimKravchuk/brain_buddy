@@ -329,6 +329,14 @@ test("Brain Dump recording and review surfaces use source-derived mobile geometr
   await page.setViewportSize({ width: 402, height: 874 });
   await page.goto("/brain-dump/new");
 
+  await test.step("Verify the Brain Dump mobile viewport", async () => {
+    const viewport = page.viewportSize();
+    await attachment("Brain Dump viewport", JSON.stringify(viewport), ContentType.JSON);
+    if (viewport?.width !== 402 || viewport.height !== 874) {
+      throw new Error(`Expected 402x874 viewport, received ${viewport?.width ?? "unknown"}x${viewport?.height ?? "unknown"}`);
+    }
+  });
+
   await expect(page.getByRole("dialog", { name: "Brain dump" })).toBeVisible();
   await page.getByRole("button", { name: "Record" }).click();
   await expect(page.getByText("Recording")).toBeVisible();

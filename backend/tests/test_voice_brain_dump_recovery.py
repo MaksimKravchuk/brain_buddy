@@ -73,7 +73,9 @@ def _service(
 ) -> TaskService:
     repository = TaskRepository(data_dir)
     accurate_stt = DeterministicAccurateStt(
-        {"media_recovery": "почини BrainBuddy"}, fail_plan=fail_plan
+        {"media_recovery": "почини BrainBuddy"},
+        fail_plan=fail_plan,
+        allow_text_fixture_audio=True,
     )
     return TaskService(repository, accurate_stt=accurate_stt)
 
@@ -141,7 +143,9 @@ def test_retryable_provider_failure_persists_checkpoint_and_retry_resumes_it(
     )
 
     assert retried.status == "awaiting_confirmation"
-    resumed_run = retried.provider_runs[-1]
+    resumed_run = next(
+        run for run in reversed(retried.provider_runs) if run.role == "accurate_stt"
+    )
     assert resumed_run.status == "succeeded"
     assert resumed_run.attempt == 2
     assert resumed_run.recovery_count == 1
@@ -200,8 +204,11 @@ def test_process_death_during_provider_call_leaves_a_durable_claimed_checkpoint(
         idempotency_key="recover-expired-provider-claim",
     )
     assert recovered.status == "awaiting_confirmation"
-    assert recovered.provider_runs[-1].attempt == 2
-    assert recovered.provider_runs[-1].recovery_count == 1
+    recovered_accurate = next(
+        run for run in reversed(recovered.provider_runs) if run.role == "accurate_stt"
+    )
+    assert recovered_accurate.attempt == 2
+    assert recovered_accurate.recovery_count == 1
 
 
 def test_process_death_during_retry_persists_the_new_attempt_claim(
