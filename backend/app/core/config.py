@@ -85,6 +85,37 @@ class DataSettings(BaseModel):
         return self.root_dir / SCHEMA_VERSION_FILENAME
 
 
+class VoiceProviderSettings(BaseModel):
+    """Bounded configuration for one voice-processing provider role."""
+
+    provider: str = "disabled"
+    model: str = ""
+    api_key_env: str = "OPENAI_API_KEY"
+    timeout_seconds: float = Field(default=60.0, gt=0, le=300)
+    max_retries: int = Field(default=2, ge=0, le=5)
+    retry_backoff_seconds: tuple[float, ...] = (1.0, 2.0)
+    max_cost_usd_per_operation: float = Field(default=0.50, gt=0, le=100)
+    estimated_cost_usd_per_megabyte: float = Field(default=0.01, gt=0, le=10)
+
+    model_config = ConfigDict(frozen=True)
+
+
+class VoiceRetentionSettings(BaseModel):
+    raw_audio_seconds: int = Field(default=86_400, ge=0)
+    working_artifacts_seconds: int = Field(default=604_800, ge=0)
+
+    model_config = ConfigDict(frozen=True)
+
+
+class VoiceSettings(BaseModel):
+    accurate_stt: VoiceProviderSettings = Field(default_factory=VoiceProviderSettings)
+    fast_stt: VoiceProviderSettings = Field(default_factory=VoiceProviderSettings)
+    reconciler: VoiceProviderSettings = Field(default_factory=VoiceProviderSettings)
+    retention: VoiceRetentionSettings = Field(default_factory=VoiceRetentionSettings)
+
+    model_config = ConfigDict(frozen=True)
+
+
 class AppConfig(BaseModel):
     """Top-level Brain Buddy application configuration."""
 
@@ -94,6 +125,7 @@ class AppConfig(BaseModel):
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     session: SessionSettings = Field(default_factory=SessionSettings)
     password_policy: PasswordPolicy = Field(default_factory=PasswordPolicy)
+    voice: VoiceSettings = Field(default_factory=VoiceSettings)
 
     model_config = ConfigDict(frozen=True)
 
@@ -143,6 +175,71 @@ def _build_config() -> AppConfig:
         secure=environment is AppEnvironment.PRODUCTION,
     )
     password_policy = PasswordPolicy()
+    accurate_provider = os.getenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_PROVIDER")
+    if not accurate_provider:
+        accurate_provider = (
+            "deterministic"
+            if environment is AppEnvironment.TEST
+            else "openai"
+            if os.getenv("OPENAI_API_KEY")
+            else "disabled"
+        )
+    if (
+        environment is AppEnvironment.PRODUCTION
+        and accurate_provider == "deterministic"
+        and os.getenv("BRAINBUDDY_ALLOW_DETERMINISTIC_STT") != "1"
+    ):
+        raise ValueError(
+            "Production cannot use deterministic accurate STT without "
+            "BRAINBUDDY_ALLOW_DETERMINISTIC_STT=1."
+        )
+
+    retry_backoff = tuple(
+        float(value.strip())
+        for value in os.getenv(
+            "BRAIN_BUDDY_VOICE_ACCURATE_STT_RETRY_BACKOFF_SECONDS", "1,2"
+        ).split(",")
+        if value.strip()
+    )
+    accurate_stt = VoiceProviderSettings(
+        provider=accurate_provider,
+        model=os.getenv(
+            "BRAIN_BUDDY_VOICE_ACCURATE_STT_MODEL", "gpt-4o-mini-transcribe"
+        ),
+        api_key_env=os.getenv(
+            "BRAIN_BUDDY_VOICE_ACCURATE_STT_API_KEY_ENV", "OPENAI_API_KEY"
+        ),
+        timeout_seconds=float(
+            os.getenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_TIMEOUT_SECONDS", "60")
+        ),
+        max_retries=int(
+            os.getenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_MAX_RETRIES", "2")
+        ),
+        retry_backoff_seconds=retry_backoff,
+        max_cost_usd_per_operation=float(
+            os.getenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_MAX_COST_USD", "0.50")
+        ),
+        estimated_cost_usd_per_megabyte=float(
+            os.getenv(
+                "BRAIN_BUDDY_VOICE_ACCURATE_STT_ESTIMATED_COST_USD_PER_MB", "0.01"
+            )
+        ),
+    )
+    voice = VoiceSettings(
+        accurate_stt=accurate_stt,
+        fast_stt=VoiceProviderSettings(provider="disabled"),
+        reconciler=VoiceProviderSettings(provider="disabled"),
+        retention=VoiceRetentionSettings(
+            raw_audio_seconds=int(
+                os.getenv("BRAIN_BUDDY_VOICE_RAW_AUDIO_RETENTION_SECONDS", "86400")
+            ),
+            working_artifacts_seconds=int(
+                os.getenv(
+                    "BRAIN_BUDDY_VOICE_WORKING_ARTIFACT_RETENTION_SECONDS", "604800"
+                )
+            ),
+        ),
+    )
 
     return AppConfig(
         environment=environment,
@@ -151,6 +248,7 @@ def _build_config() -> AppConfig:
         logging=logging_config,
         session=session_config,
         password_policy=password_policy,
+        voice=voice,
     )
 
 
@@ -166,5 +264,8 @@ __all__ = [
     "AppEnvironment",
     "PasswordPolicy",
     "SessionSettings",
+    "VoiceProviderSettings",
+    "VoiceRetentionSettings",
+    "VoiceSettings",
     "get_config",
 ]

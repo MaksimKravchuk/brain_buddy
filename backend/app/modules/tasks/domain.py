@@ -159,6 +159,8 @@ class BrainDumpConsent(StorageBaseModel):
     external_processing_allowed: bool = False
     recorded_at: datetime
     provider: str | None = None
+    language_hints: list[str] = Field(default_factory=list, max_length=10)
+    vocabulary: list[str] = Field(default_factory=list, max_length=200)
 
 
 class BrainDumpTranscriptSegmentDocument(StorageBaseModel):
@@ -223,6 +225,11 @@ class BrainDumpProviderRunDocument(StorageBaseModel):
     attempt: int = Field(default=0, ge=0)
     recovery_count: int = Field(default=0, ge=0)
     error: str | None = Field(default=None, max_length=1000)
+    error_code: str | None = Field(default=None, max_length=100)
+    provider: str | None = Field(default=None, max_length=100)
+    model: str | None = Field(default=None, max_length=100)
+    template_version: str | None = Field(default=None, max_length=100)
+    estimated_cost_usd: float = Field(default=0.0, ge=0)
     output_segment_ids: list[str] = Field(default_factory=list)
     lease_owner: str | None = None
     lease_expires_at: datetime | None = None

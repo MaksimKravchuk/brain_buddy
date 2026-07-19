@@ -52,7 +52,7 @@ from app.workflows.voice_brain_dump.domain import (
 from app.workflows.voice_brain_dump.providers import (
     AccurateSttPort,
     AccurateSttRequest,
-    DeterministicAccurateStt,
+    DisabledAccurateStt,
 )
 
 from .domain import (
@@ -113,7 +113,7 @@ class TaskService:
         self, task_repo: TaskRepository, *, accurate_stt: AccurateSttPort | None = None
     ) -> None:
         self.task_repo = task_repo
-        self.accurate_stt = accurate_stt or DeterministicAccurateStt()
+        self.accurate_stt = accurate_stt or DisabledAccurateStt()
 
     @_serialized_write
     def create_project(
@@ -365,6 +365,8 @@ class TaskService:
                 microphone=payload.consent.microphone,
                 external_processing_allowed=payload.consent.external_processing_allowed,
                 provider=payload.consent.provider,
+                language_hints=payload.consent.language_hints,
+                vocabulary=payload.consent.vocabulary,
                 recorded_at=now,
             ),
             created_at=now,
@@ -599,10 +601,22 @@ class TaskService:
             operation.provider_runs[:-1] if replaces_claim else operation.provider_runs
         )
         try:
+            if (
+                self.accurate_stt.requires_external_processing
+                and not operation.consent.external_processing_allowed
+            ):
+                raise ProviderTerminalError("STT_EXTERNAL_PROCESSING_CONSENT_REQUIRED")
+            if (
+                self.accurate_stt.requires_external_processing
+                and operation.consent.provider != self.accurate_stt.provider_name
+            ):
+                raise ProviderTerminalError("STT_CONSENT_PROVIDER_MISMATCH")
             accurate_result = self.accurate_stt.transcribe_sealed_audio(
                 AccurateSttRequest(
                     operation_id=operation.id,
                     media_ref=operation.media_ref or f"media_{operation.id}",
+                    language_hints=operation.consent.language_hints,
+                    vocabulary=operation.consent.vocabulary,
                     supersedes_segment_ids=[
                         segment.id
                         for segment in operation.segments
@@ -639,6 +653,8 @@ class TaskService:
                             attempt=attempt,
                             recovery_count=recovery_count,
                             error=str(exc)[:1000],
+                            error_code=str(exc)[:100],
+                            provider=self.accurate_stt.provider_name,
                             created_at=now,
                             updated_at=now,
                         ),
@@ -660,7 +676,7 @@ class TaskService:
             start_ms=accurate_hypothesis.start_ms,
             end_ms=accurate_hypothesis.end_ms,
             provider_role=accurate_hypothesis.provider_role,
-            provider=operation.consent.provider or "deterministic",
+            provider=accurate_result.provider or self.accurate_stt.provider_name,
             model=accurate_hypothesis.model,
             supersedes_segment_ids=accurate_hypothesis.supersedes_segment_ids,
             created_at=now,
@@ -703,6 +719,10 @@ class TaskService:
                         checkpoint="accurate_transcribed",
                         attempt=attempt,
                         recovery_count=recovery_count,
+                        provider=accurate_result.provider
+                        or self.accurate_stt.provider_name,
+                        model=accurate_hypothesis.model,
+                        estimated_cost_usd=accurate_result.estimated_cost_usd,
                         output_segment_ids=[accurate_segment.id],
                         created_at=now,
                         updated_at=now,

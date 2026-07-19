@@ -378,7 +378,7 @@ test("minimal task management creates, edits, moves, completes, reopens and pers
 test("Voice Brain Dump records provisional cards, reviews edits/deletes and saves exactly one Inbox task", async ({ page }) => {
   await productLabels("Voice Brain Dump happy path");
   await signup(page, unique("voice-happy"));
-  await installSpeechBoundary(page);
+  await installDeterministicSealedAudioBoundary(page, "untranscribed sealed audio");
 
   await test.step("capture on mobile without hiding primary controls", async () => {
     await page.setViewportSize({ width: 390, height: 844 });
@@ -402,9 +402,8 @@ test("Voice Brain Dump records provisional cards, reviews edits/deletes and save
     await page.getByRole("button", { name: "Resume" }).click();
     await expect(page.getByText("Recording")).toBeVisible();
     await page.getByRole("button", { name: "Stop & review" }).click();
-    // Accurate STT reconciles the sealed original audio independently of the browser
-    // preview text; since the E2E capture stream carries no recognizable speech, it
-    // surfaces one additional placeholder draft alongside the two speech-derived drafts.
+    // Accurate STT reconciles the explicit sealed-audio fixture independently of the
+    // browser preview text and surfaces one additional draft beside the preview drafts.
     await expect(page.getByRole("heading", { name: "Review 3 tasks" })).toBeVisible();
   });
 
@@ -507,11 +506,12 @@ test("Voice Brain Dump grows a mixed-language preview and preserves user choices
 test("Voice Brain Dump resume and commit idempotency do not create duplicate Inbox tasks", async ({ page }) => {
   await productLabels("Voice Brain Dump idempotency and recovery");
   const account = await signup(page, unique("voice-recovery"));
-  await installSpeechBoundary(page);
+  await installDeterministicSealedAudioBoundary(page, "untranscribed sealed audio");
   let operationId = "";
 
   await test.step("pause an active operation, reload it, and resume from the persisted projection", async () => {
     await page.goto("/brain-dump/new");
+    await page.getByRole("textbox", { name: "Voice key terms" }).fill("untranscribed sealed audio");
     await page.getByRole("button", { name: "Record" }).click();
     await waitForStartedOperation(page);
     await emitSpeech(page, "write weekly update", true);

@@ -203,6 +203,47 @@ describe("BrainDumpRoute", () => {
     expect(await screen.findByRole("button", { name: "Pause" })).toBeEnabled();
   });
 
+  it("declares RU plus EN hints and keeps browser recognition visibly provisional", async () => {
+    let startBody: unknown;
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
+        startBody = JSON.parse(String(init.body));
+        return jsonResponse(
+          operation({
+            consent: {
+              microphone: true,
+              external_processing_allowed: true,
+              provider: "openai",
+              language_hints: ["ru", "en"],
+              vocabulary: ["BrainBuddy", "production smoke"],
+              recorded_at: "2026-07-16T00:00:00Z"
+            }
+          }),
+          201
+        );
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump();
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Speech languages" }), "ru-en");
+    await userEvent.click(screen.getByRole("checkbox", { name: "Allow secure cloud transcription" }));
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+
+    expect(startBody).toEqual({
+      consent: {
+        microphone: true,
+        external_processing_allowed: true,
+        provider: "openai",
+        language_hints: ["ru", "en"],
+        vocabulary: ["BrainBuddy", "production smoke"]
+      }
+    });
+    expect(recognition?.lang).toBe("ru-RU");
+    expect(screen.getByText("Browser preview · provisional")).toBeInTheDocument();
+  });
+
   it("ignores stale transcript responses that arrive after a newer pause", async () => {
     let resolveTranscript: ((response: Response) => void) | undefined;
     fetchMock.mockImplementation((input, init) => {

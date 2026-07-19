@@ -711,6 +711,8 @@ def _to_brain_dump_response(
             microphone=operation.consent.microphone,
             external_processing_allowed=operation.consent.external_processing_allowed,
             provider=operation.consent.provider,
+            language_hints=operation.consent.language_hints,
+            vocabulary=operation.consent.vocabulary,
             recorded_at=operation.consent.recorded_at,
         ),
         segments=[
@@ -738,6 +740,11 @@ def _to_brain_dump_response(
                 attempt=run.attempt,
                 recovery_count=run.recovery_count,
                 error=run.error,
+                error_code=run.error_code,
+                provider=run.provider,
+                model=run.model,
+                template_version=run.template_version,
+                estimated_cost_usd=run.estimated_cost_usd,
             )
             for run in operation.provider_runs
         ],

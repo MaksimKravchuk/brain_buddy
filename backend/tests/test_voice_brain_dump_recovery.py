@@ -73,7 +73,9 @@ def _service(
 ) -> TaskService:
     repository = TaskRepository(data_dir)
     accurate_stt = DeterministicAccurateStt(
-        {"media_recovery": "почини BrainBuddy"}, fail_plan=fail_plan
+        {"media_recovery": "почини BrainBuddy"},
+        fail_plan=fail_plan,
+        allow_text_fixture_audio=True,
     )
     return TaskService(repository, accurate_stt=accurate_stt)
 

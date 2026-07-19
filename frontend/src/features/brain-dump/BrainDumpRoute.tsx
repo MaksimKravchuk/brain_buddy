@@ -47,6 +47,14 @@ const processingStatusLabels = new Map<string, string>([
   ["committing", "Saving tasks"]
 ]);
 
+const languageOptions = {
+  ru: { hints: ["ru"] },
+  "ru-en": { hints: ["ru", "en"] },
+  en: { hints: ["en"] }
+} as const;
+
+type LanguageMode = keyof typeof languageOptions;
+
 function idempotencyKey(suffix: string) {
   return `brain-dump-${suffix}-${Date.now()}`;
 }
@@ -62,6 +70,9 @@ export function BrainDumpRoute(): JSX.Element {
   const [lastTranscript, setLastTranscript] = useState("");
   const [savedCount, setSavedCount] = useState<number | null>(null);
   const [showProvisionalReview, setShowProvisionalReview] = useState(false);
+  const [languageMode, setLanguageMode] = useState<LanguageMode>("ru-en");
+  const [externalProcessingAllowed, setExternalProcessingAllowed] = useState(false);
+  const [vocabularyText, setVocabularyText] = useState("BrainBuddy, production smoke");
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -136,7 +147,8 @@ export function BrainDumpRoute(): JSX.Element {
     const recognition = new Recognition();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = navigator.language || "en-US";
+    const firstHint = started.consent.language_hints?.[0]?.toLowerCase();
+    recognition.lang = firstHint === "ru" ? "ru-RU" : firstHint === "en" ? "en-US" : navigator.language || "en-US";
     recognition.onresult = (event) => {
       const latest = event.results[event.results.length - 1];
       const transcript = latest?.[0]?.transcript?.trim();
@@ -234,7 +246,16 @@ export function BrainDumpRoute(): JSX.Element {
     setIsStarting(true);
     try {
       const stream = await probeMicrophone();
-      const started = operationRef.current ?? (await apiClient.startBrainDump({ consent: { microphone: true, external_processing_allowed: false } }, idempotencyKey("start")));
+      const vocabulary = vocabularyText.split(",").map((value) => value.trim()).filter(Boolean);
+      const started = operationRef.current ?? (await apiClient.startBrainDump({
+        consent: {
+          microphone: true,
+          external_processing_allowed: externalProcessingAllowed,
+          provider: externalProcessingAllowed ? "openai" : null,
+          language_hints: [...languageOptions[languageMode].hints],
+          vocabulary
+        }
+      }, idempotencyKey("start")));
       applyOperation(started);
       if (params.operationId === "new") {
         navigate(`/brain-dump/${started.id}`, { replace: true });
@@ -422,16 +443,22 @@ export function BrainDumpRoute(): JSX.Element {
 
   return (
     <RecordingSurface
+      externalProcessingAllowed={externalProcessingAllowed}
       error={error}
       isStarting={isStarting}
+      languageMode={languageMode}
       lastTranscript={lastTranscript}
       operation={operation}
       proposals={activeProposals}
       onCancel={() => void command("cancel")}
+      onExternalProcessingAllowedChange={setExternalProcessingAllowed}
       onFinish={() => void command("finish")}
+      onLanguageModeChange={setLanguageMode}
       onPause={() => void command("pause")}
       onResume={() => void command("resume")}
       onStart={() => void startRecording()}
+      onVocabularyTextChange={setVocabularyText}
+      vocabularyText={vocabularyText}
     />
   );
 }
@@ -472,27 +499,39 @@ function RecoverySurface({
 }
 
 function RecordingSurface({
+  externalProcessingAllowed,
   error,
   isStarting,
+  languageMode,
   lastTranscript,
   operation,
   proposals,
   onCancel,
+  onExternalProcessingAllowedChange,
   onFinish,
+  onLanguageModeChange,
   onPause,
   onResume,
-  onStart
+  onStart,
+  onVocabularyTextChange,
+  vocabularyText
 }: {
+  externalProcessingAllowed: boolean;
   error: string | null;
   isStarting: boolean;
+  languageMode: LanguageMode;
   lastTranscript: string;
   operation: BrainDumpOperationResponse | null;
   proposals: BrainDumpProposal[];
   onCancel: () => void;
+  onExternalProcessingAllowedChange: (allowed: boolean) => void;
   onFinish: () => void;
+  onLanguageModeChange: (mode: LanguageMode) => void;
   onPause: () => void;
   onResume: () => void;
   onStart: () => void;
+  onVocabularyTextChange: (value: string) => void;
+  vocabularyText: string;
 }): JSX.Element {
   const count = proposals.length;
   const isPaused = operation?.status === "paused";
@@ -513,6 +552,26 @@ function RecordingSurface({
 
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 sm:px-6" aria-live="polite">
             {error ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
+            {!operation ? (
+              <div className="mb-4 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
+                <label className="grid gap-1 text-slate-700">
+                  <span className="text-xs font-semibold">Speech languages</span>
+                  <select aria-label="Speech languages" className="h-10 rounded-lg border border-slate-300 bg-white px-3" value={languageMode} onChange={(event) => onLanguageModeChange(event.target.value as LanguageMode)}>
+                    <option value="ru-en">Russian + English</option>
+                    <option value="ru">Russian</option>
+                    <option value="en">English</option>
+                  </select>
+                </label>
+                <label className="grid gap-1 text-slate-700">
+                  <span className="text-xs font-semibold">Key terms</span>
+                  <input aria-label="Voice key terms" className="h-10 rounded-lg border border-slate-300 bg-white px-3" value={vocabularyText} onChange={(event) => onVocabularyTextChange(event.target.value)} />
+                </label>
+                <label className="flex items-start gap-2 text-xs text-slate-600">
+                  <input aria-label="Allow secure cloud transcription" className="mt-0.5" type="checkbox" checked={externalProcessingAllowed} onChange={(event) => onExternalProcessingAllowedChange(event.target.checked)} />
+                  <span>Allow secure cloud transcription after Stop. Audio is not sent without this consent.</span>
+                </label>
+              </div>
+            ) : null}
             <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-600">Headed to inbox · {count}</div>
             <div className="flex flex-col gap-2">
               {proposals.map((proposal) => <ProposalCard key={proposal.id} proposal={proposal} />)}
@@ -530,6 +589,7 @@ function RecordingSurface({
               </div>
               <details className="min-w-0 flex-1 text-[13px] leading-normal text-slate-500">
                 <summary className="cursor-pointer list-none overflow-hidden text-ellipsis whitespace-nowrap">{lastTranscript || "Transcript stays collapsed while tasks remain primary"}</summary>
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">Browser preview · provisional</span>
                 <p className="mt-2 whitespace-pre-wrap rounded-lg bg-white p-2 text-xs text-slate-500">{lastTranscript || "No transcript yet."}</p>
               </details>
               {!operation ? (
