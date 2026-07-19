@@ -62,7 +62,8 @@ const tagsResponse = [
   { id: "tag-calls", name: "calls", state: "active", revision: 1, open_task_count: 2 },
   { id: "tag-errands", name: "errands", state: "active", revision: 1, open_task_count: 1 },
   { id: "tag-deep-work", name: "deep-work", state: "active", revision: 1, open_task_count: 1 },
-  { id: "tag-laptop", name: "laptop", state: "active", revision: 1, open_task_count: 0 }
+  { id: "tag-laptop", name: "laptop", state: "active", revision: 1, open_task_count: 0 },
+  { id: "tag-long-context", name: "waiting-for-quarterly-budget-approval", state: "active", revision: 1, open_task_count: 0 }
 ];
 
 const brainDumpProposals = Array.from({ length: 9 }, (_, index) => ({
@@ -152,19 +153,72 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("desktop task shell matches the Claude Design 1280x780 source surface", async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 780 });
-  await page.goto("/tasks/next");
+test.describe("desktop task shell at the canonical 1240x800 viewport", () => {
+  test.use({ viewport: { width: 1240, height: 800 } });
 
-  await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
-  await expect(page.getByText("Brain Buddy")).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "Task navigation" })).toBeVisible();
-  await expect(page.getByText("Tags", { exact: true })).toBeVisible();
-  await expect(page.getByText("Contexts", { exact: true })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "@calls" })).toBeVisible();
-  await expect(page.locator("body")).toHaveScreenshot("claude-design-shell-1280x780.png", {
-    animations: "disabled",
-    maxDiffPixelRatio: 0.08
+  test("desktop task shell matches the Claude Design 1240x800 source surface", async ({ page }) => {
+    await page.goto("/tasks/next");
+
+    await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
+    await expect(page.getByText("Brain Buddy")).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Task navigation" })).toBeVisible();
+    await expect(page.getByText("Tags", { exact: true })).toBeVisible();
+    await expect(page.getByText("Contexts", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "@calls" })).toBeVisible();
+
+    await test.step("verify canonical shell geometry and honest gating", async () => {
+      const banner = page.locator("header").first();
+      const bannerBox = await banner.boundingBox();
+      if (Math.round(bannerBox?.height ?? 0) !== 56) {
+        throw new Error(`Expected a 56px topbar, received ${bannerBox?.height}px`);
+      }
+      const sidebar = page.locator("aside").first();
+      const sidebarBox = await sidebar.boundingBox();
+      if (Math.round(sidebarBox?.width ?? 0) !== 248) {
+        throw new Error(`Expected a 248px sidebar, received ${sidebarBox?.width}px`);
+      }
+      // Zero secondary counts stay visible (Someday / maybe has 0 open tasks).
+      await expect(page.getByRole("link", { name: "Someday / maybe 0" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Weekly review" })).toBeEnabled();
+      await expect(page.getByRole("button", { name: "Think with CRT — Coming soon" })).toBeDisabled();
+    });
+
+    await test.step("keep wrapped desktop tag actions inside the sidebar", async () => {
+      const sidebar = page.locator("aside").first();
+      const tagName = "waiting-for-quarterly-budget-approval";
+      await page.getByRole("link", { name: `#${tagName}` }).hover();
+      await page.getByRole("button", { name: `Tag options ${tagName}` }).click();
+      const dialog = page.getByRole("dialog", { name: `Edit tag ${tagName}` });
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByRole("button", { name: "Rename" })).toBeVisible();
+      await expect(dialog.getByRole("button", { name: "Delete" })).toBeVisible();
+
+      const [sidebarBox, dialogBox, overflow] = await Promise.all([
+        sidebar.boundingBox(),
+        dialog.boundingBox(),
+        sidebar.evaluate((element) => element.scrollWidth - element.clientWidth)
+      ]);
+      if (!sidebarBox || !dialogBox) {
+        throw new Error("Expected desktop sidebar and tag dialog geometry");
+      }
+      if (dialogBox.x < sidebarBox.x || dialogBox.x + dialogBox.width > sidebarBox.x + sidebarBox.width) {
+        throw new Error(`Expected desktop tag dialog inside sidebar bounds: ${JSON.stringify({ sidebarBox, dialogBox })}`);
+      }
+      if (dialogBox.y < sidebarBox.y || dialogBox.y + dialogBox.height > sidebarBox.y + sidebarBox.height) {
+        throw new Error(`Expected desktop tag dialog inside sidebar vertical bounds: ${JSON.stringify({ sidebarBox, dialogBox })}`);
+      }
+      if (overflow !== 0) {
+        throw new Error(`Expected no desktop sidebar overflow, received ${overflow}px`);
+      }
+
+      await page.getByRole("button", { name: `Tag options ${tagName}` }).click();
+      await expect(dialog).toHaveCount(0);
+    });
+
+    await expect(page.locator("body")).toHaveScreenshot("claude-design-shell-1240x800.png", {
+      animations: "disabled",
+      maxDiffPixelRatio: 0.08
+    });
   });
 });
 
@@ -184,23 +238,65 @@ test("clicking a task expands inline task detail in place", async ({ page }) => 
   await expect(page.getByRole("heading", { name: "Task detail" })).toHaveCount(0);
 });
 
-test("mobile task shell uses the labelled drawer and avoids horizontal overflow", async ({ page }) => {
-  await page.setViewportSize({ width: 402, height: 874 });
-  await page.goto("/tasks/next");
+test.describe("mobile task shell at the canonical 375x812 viewport", () => {
+  test.use({ viewport: { width: 375, height: 812 } });
 
-  await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
-  await page.getByRole("button", { name: "Open task navigation" }).click();
-  await expect(page.getByRole("dialog", { name: "Task navigation" })).toBeVisible();
-  await test.step("Verify the mobile task drawer fits inside the viewport", async () => {
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-    await attachment("Viewport overflow", `Horizontal overflow: ${overflow}px`, ContentType.TEXT);
-    if (overflow > 0) {
-      throw new Error(`Expected no horizontal overflow, received ${overflow}px`);
-    }
-  });
-  await expect(page.locator("body")).toHaveScreenshot("claude-design-shell-mobile-402x874.png", {
-    animations: "disabled",
-    maxDiffPixelRatio: 0.08
+  test("mobile task shell uses the labelled drawer and avoids horizontal overflow", async ({ page }) => {
+    await page.goto("/tasks/next");
+
+    await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
+    await page.getByRole("button", { name: "Open task navigation" }).click();
+    await expect(page.getByRole("dialog", { name: "Task navigation" })).toBeVisible();
+    await test.step("Verify the mobile task drawer fits inside the viewport", async () => {
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      await attachment("Viewport overflow", `Horizontal overflow: ${overflow}px`, ContentType.TEXT);
+      if (overflow > 0) {
+        throw new Error(`Expected no horizontal overflow, received ${overflow}px`);
+      }
+    });
+    await test.step("Verify drawer CRUD stays reachable and Escape closes the drawer", async () => {
+      const drawer = page.getByRole("dialog", { name: "Task navigation" });
+      await expect(drawer.getByRole("button", { name: "New project" })).toBeVisible();
+      await expect(drawer.getByRole("button", { name: "New tag" })).toBeVisible();
+      await expect(drawer.getByRole("button", { name: "Project options Launch v2" })).toBeVisible();
+    });
+    await test.step("Keep wrapped mobile tag actions inside the drawer", async () => {
+      const drawer = page.getByRole("dialog", { name: "Task navigation" });
+      const scroller = drawer.locator(".overflow-y-auto");
+      const tagName = "waiting-for-quarterly-budget-approval";
+      await drawer.getByRole("button", { name: `Tag options ${tagName}` }).click();
+      const dialog = drawer.getByRole("dialog", { name: `Edit tag ${tagName}` });
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByRole("button", { name: "Rename" })).toBeVisible();
+      await expect(dialog.getByRole("button", { name: "Delete" })).toBeVisible();
+
+      const [scrollerBox, dialogBox, overflow] = await Promise.all([
+        scroller.boundingBox(),
+        dialog.boundingBox(),
+        scroller.evaluate((element) => element.scrollWidth - element.clientWidth)
+      ]);
+      if (!scrollerBox || !dialogBox) {
+        throw new Error("Expected mobile drawer scroller and tag dialog geometry");
+      }
+      if (dialogBox.x < scrollerBox.x || dialogBox.x + dialogBox.width > scrollerBox.x + scrollerBox.width) {
+        throw new Error(`Expected mobile tag dialog inside drawer bounds: ${JSON.stringify({ scrollerBox, dialogBox })}`);
+      }
+      if (dialogBox.y < scrollerBox.y || dialogBox.y + dialogBox.height > scrollerBox.y + scrollerBox.height) {
+        throw new Error(`Expected mobile tag dialog inside drawer vertical bounds: ${JSON.stringify({ scrollerBox, dialogBox })}`);
+      }
+      if (overflow !== 0) {
+        throw new Error(`Expected no mobile drawer overflow, received ${overflow}px`);
+      }
+
+      await drawer.getByRole("button", { name: `Tag options ${tagName}` }).click();
+      await expect(dialog).toHaveCount(0);
+    });
+    await expect(page.locator("body")).toHaveScreenshot("claude-design-shell-mobile-375x812.png", {
+      animations: "disabled",
+      maxDiffPixelRatio: 0.08
+    });
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "Task navigation" })).toHaveCount(0);
   });
 });
 
