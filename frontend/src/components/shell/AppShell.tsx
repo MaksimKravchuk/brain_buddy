@@ -482,24 +482,24 @@ function Sidebar({
 
       <div>
         <SectionLabel>Tags</SectionLabel>
-        <div className="flex flex-wrap gap-1.5 px-2.5">
+        <div className="relative flex flex-wrap gap-1.5 px-2.5">
           {tags.length ? (
             tags.map((tag) => {
               const popoverId = `tag-${tag.id}`;
               return (
-                <span key={tag.id} className="group relative inline-flex">
-                  <NavLink
-                    to={`/tags/${tag.id}`}
-                    className={`rounded-full border px-2.5 py-[3px] text-xs font-medium transition-colors ${
-                      !weeklyReviewOpen && activeTagId === tag.id
-                        ? "border-brand-primary bg-info-bg text-info-fg"
-                        : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
-                    }`}
-                  >
-                    {tag.name.startsWith("@") ? tag.name : `#${tag.name.replace(/^#/, "")}`}
-                  </NavLink>
-                  {onRenameTag || onDeleteTag ? (
-                    <>
+                <span key={tag.id} className="group inline-flex">
+                  <span className="relative inline-flex">
+                    <NavLink
+                      to={`/tags/${tag.id}`}
+                      className={`rounded-full border px-2.5 py-[3px] text-xs font-medium transition-colors ${
+                        !weeklyReviewOpen && activeTagId === tag.id
+                          ? "border-brand-primary bg-info-bg text-info-fg"
+                          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
+                      }`}
+                    >
+                      {tag.name.startsWith("@") ? tag.name : `#${tag.name.replace(/^#/, "")}`}
+                    </NavLink>
+                    {onRenameTag || onDeleteTag ? (
                       <button
                         type="button"
                         aria-label={`Tag options ${tag.name}`}
@@ -509,13 +509,16 @@ function Sidebar({
                       >
                         <MoreHorizontal className="h-2.5 w-2.5" aria-hidden />
                       </button>
-                      {openPopover === popoverId ? (
-                        <div
-                          role="dialog"
-                          aria-label={`Edit tag ${tag.name}`}
-                          className="absolute left-0 top-7 z-50 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-floating"
-                          onKeyDown={popoverKeyDown}
-                        >
+                    ) : null}
+                  </span>
+                  {onRenameTag || onDeleteTag ? (
+                    openPopover === popoverId ? (
+                      <div
+                        role="dialog"
+                        aria-label={`Edit tag ${tag.name}`}
+                        className="absolute right-0 top-full z-50 mt-1 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-floating"
+                        onKeyDown={popoverKeyDown}
+                      >
                           <form
                             className="flex flex-col gap-2"
                             onSubmit={(event) => {
@@ -552,9 +555,8 @@ function Sidebar({
                               </button>
                             </div>
                           </form>
-                        </div>
-                      ) : null}
-                    </>
+                      </div>
+                    ) : null
                   ) : null}
                 </span>
               );
