@@ -1,0 +1,25 @@
+<!doctype html>
+<!-- @dsCard group="Components" name="Inputs" subtitle="Text, password, select, focus ring, error, consent checkbox" viewport="700x300" -->
+<html><head><meta charset="utf-8"><title>Inputs</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+  body{margin:0;padding:20px;background:#f8fafc;font-family:Inter,sans-serif;color:#0f172a}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  label{display:block;font-size:14px}
+  .fl{display:block;font-weight:500;color:#334155;margin-bottom:4px;font-size:13px}
+  input,select,textarea{width:100%;box-sizing:border-box;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;font-size:14px;color:#0f172a;background:#fff;font-family:Inter,sans-serif;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+  .focused{border-color:#0ea5e9;box-shadow:0 0 0 2px #fff,0 0 0 4px rgba(14,165,233,.5)}
+  .hint{font-size:12px;color:#64748b;margin-top:4px}
+  .err{font-size:12px;color:#e11d48;margin-top:4px}
+  .check{display:inline-flex;align-items:flex-start;gap:8px;font-size:12px;color:#065f46;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px;padding:10px}
+  .check input{width:16px;height:16px;margin-top:2px}
+</style></head><body>
+<div class="grid">
+  <label><span class="fl">Email</span><input value="taylor@example.com"></label>
+  <label><span class="fl">Password</span><input type="password" value="••••••••••••" class="focused"><span class="hint">At least 12 characters. Longer is better.</span></label>
+  <label><span class="fl">Invite code</span><input value="BB-9F3X-MAP2" style="font-family:ui-monospace,Menlo,monospace"></label>
+  <label><span class="fl">Node type</span><select><option>Parent</option><option selected>Child</option></select></label>
+  <label style="grid-column:1/3"><span class="fl">Snapshot label</span><input placeholder="e.g. Pre-interview notes"><span class="err">Invite code is invalid or already used.</span></label>
+  <label style="grid-column:1/3" class="check"><input type="checkbox" checked><span>I consent to send the current tree to the AI provider for analysis.</span></label>
+</div>
+</body></html>

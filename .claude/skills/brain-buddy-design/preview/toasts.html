@@ -1,0 +1,28 @@
+<!doctype html>
+<!-- @dsCard group="Components" name="Toasts" subtitle="Success, info, warning, error — floating blurred cards" viewport="700x340" -->
+<html><head><meta charset="utf-8"><title>Toasts</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+  body{margin:0;padding:20px;background:#f8fafc;font-family:Inter,sans-serif}
+  .col{display:flex;flex-direction:column;gap:10px;max-width:440px;margin:0 auto}
+  .toast{border-radius:20px;border:1px solid;padding:12px 16px;backdrop-filter:blur(8px);box-shadow:0 1px 2px rgba(15,23,42,.04),0 12px 32px -16px rgba(15,23,42,.18);display:flex;gap:12px;align-items:start}
+  .info{background:rgba(255,255,255,.9);border-color:#e2e8f0;color:#1e293b}
+  .ok{background:rgba(236,253,245,.95);border-color:#a7f3d0;color:#065f46}
+  .warn{background:rgba(255,251,235,.95);border-color:#fde68a;color:#92400e}
+  .err{background:rgba(255,241,242,.95);border-color:#fecdd3;color:#9f1239}
+  .ico{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .info .ico{background:#f1f5f9;color:#475569}
+  .ok .ico{background:#d1fae5;color:#047857}
+  .warn .ico{background:#fef3c7;color:#b45309}
+  .err .ico{background:#fecdd3;color:#be123c}
+  .t{font-weight:600;font-size:14px}
+  .d{font-size:12px;opacity:.8;margin-top:2px}
+  svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+</style></head><body>
+<div class="col">
+  <div class="toast ok"><div class="ico"><svg viewBox="0 0 24 24"><path d="M22 11.1V12a10 10 0 1 1-5.93-9.14"/><path d="m22 4-10 10-3-3"/></svg></div><div><div class="t">Snapshot captured</div><div class="d">Nodes +3/-0/~1, Relations +2/-0/~0</div></div></div>
+  <div class="toast info"><div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></div><div><div class="t">Importing…</div><div class="d">Validating JSON structure</div></div></div>
+  <div class="toast warn"><div class="ico"><svg viewBox="0 0 24 24"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg></div><div><div class="t">Unsaved changes</div><div class="d">Autosave paused while offline.</div></div></div>
+  <div class="toast err"><div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg></div><div><div class="t">Validation failed</div><div class="d">Reference: 7c8a-abf1-004d</div></div></div>
+</div>
+</body></html>
