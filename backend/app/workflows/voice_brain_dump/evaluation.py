@@ -19,7 +19,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .providers import AccurateSttRequest, DeterministicAccurateStt, _extract_titles
+from .domain import TranscriptHypothesis
+from .providers import (
+    AccurateSttRequest,
+    DeterministicAccurateStt,
+    ReconcileTextRequest,
+    TextReconcilerPort,
+    _extract_titles,
+)
 
 
 @dataclass(frozen=True)
@@ -290,9 +297,12 @@ class SttQualityMetrics:
     character_error_rate: float
     word_error_rate: float
     critical_term_recall: float
+    critical_term_hits: int
+    critical_term_total: int
     omission_count: int
     hallucination_count: int
     mean_latency_seconds: float
+    estimated_cost_usd: float
 
 
 @dataclass(frozen=True)
@@ -301,6 +311,9 @@ class ExtractionQualityMetrics:
     boundary_precision: float
     boundary_recall: float
     title_accuracy: float
+    conjunction_false_split_rate: float
+    semantic_preservation_rate: float
+    confidence_calibration_error: float | None
 
 
 @dataclass(frozen=True)
@@ -331,6 +344,39 @@ class _RealAudioCase:
     language_hints: list[str]
     vocabulary: list[str]
     critical_terms: list[str]
+
+
+def build_semantic_extractor(
+    reconciler: TextReconcilerPort,
+) -> Callable[[str], list[str]]:
+    """Adapt the configured semantic reconciler to the corpus scoring contract."""
+
+    def extract(transcript: str) -> list[str]:
+        digest = hashlib.sha256(transcript.encode("utf-8")).hexdigest()[:12]
+        segment = TranscriptHypothesis(
+            id=f"evaluation_{digest}",
+            sequence=1,
+            start_ms=0,
+            end_ms=max(1, len(transcript.split()) * 500),
+            text=transcript,
+            stability="stable",
+            provider_role="accurate",
+            model="evaluation-input",
+        )
+        result = reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id=f"evaluation_{digest}",
+                transcript_segments=[segment],
+                active_proposals=[],
+            )
+        )
+        return [
+            patch.title
+            for patch in result.patches
+            if patch.operation != "remove" and patch.title is not None
+        ]
+
+    return extract
 
 
 def evaluate_real_audio_corpus(
@@ -379,6 +425,7 @@ def evaluate_real_audio_corpus(
     exact_task_counts = matched_boundaries = matched_titles = 0
     predicted_tasks = expected_tasks = 0
     extraction_cases = 0
+    conjunction_cases = conjunction_false_splits = 0
 
     for case in cases:
         audio = case.audio_path.read_bytes()
@@ -406,12 +453,11 @@ def evaluate_real_audio_corpus(
             predicted_transcript,
             case.critical_terms,
             latency,
+            result.estimated_cost_usd,
         )
         aggregate.add(case_metrics)
-        for language in case.language_hints or ["unknown"]:
-            language_aggregates.setdefault(language, _MetricAccumulator()).add(
-                case_metrics
-            )
+        cohort = _language_cohort(case.language_hints)
+        language_aggregates.setdefault(cohort, _MetricAccumulator()).add(case_metrics)
         if case_metrics.word_error_rate > 0 or case_metrics.critical_term_recall < 1:
             failures.append(EvaluationFailure(case.id, "stt", "TRANSCRIPT_MISMATCH"))
 
@@ -432,6 +478,13 @@ def evaluate_real_audio_corpus(
             matched_titles += title_matches
             predicted_tasks += len(predicted)
             expected_tasks += len(expected)
+            normalized_transcript = f" {_normalized(expected_transcript)} "
+            is_conjunction_case = len(expected) == 1 and (
+                " and " in normalized_transcript or " и " in normalized_transcript
+            )
+            if is_conjunction_case:
+                conjunction_cases += 1
+                conjunction_false_splits += int(len(predicted) > 1)
             if len(predicted) != len(expected) or title_matches != len(expected):
                 failures.append(
                     EvaluationFailure(case.id, "extraction", "TASK_EXTRACTION_MISMATCH")
@@ -450,6 +503,15 @@ def evaluate_real_audio_corpus(
             title_accuracy=(
                 matched_titles / expected_tasks if expected_tasks else 0.0
             ),
+            conjunction_false_split_rate=(
+                conjunction_false_splits / conjunction_cases
+                if conjunction_cases
+                else 0.0
+            ),
+            semantic_preservation_rate=(
+                matched_titles / expected_tasks if expected_tasks else 0.0
+            ),
+            confidence_calibration_error=None,
         )
     return RealAudioEvaluationReport(
         status="completed",
@@ -470,19 +532,23 @@ def evaluate_real_audio_corpus(
 class _MetricAccumulator:
     character_error_rate: float = 0.0
     word_error_rate: float = 0.0
-    critical_term_recall: float = 0.0
+    critical_term_hits: int = 0
+    critical_term_total: int = 0
     omission_count: int = 0
     hallucination_count: int = 0
     latency_seconds: float = 0.0
+    estimated_cost_usd: float = 0.0
     count: int = 0
 
     def add(self, metrics: SttQualityMetrics) -> None:
         self.character_error_rate += metrics.character_error_rate
         self.word_error_rate += metrics.word_error_rate
-        self.critical_term_recall += metrics.critical_term_recall
+        self.critical_term_hits += metrics.critical_term_hits
+        self.critical_term_total += metrics.critical_term_total
         self.omission_count += metrics.omission_count
         self.hallucination_count += metrics.hallucination_count
         self.latency_seconds += metrics.mean_latency_seconds
+        self.estimated_cost_usd += metrics.estimated_cost_usd
         self.count += 1
 
     def finish(self) -> SttQualityMetrics:
@@ -491,15 +557,22 @@ class _MetricAccumulator:
         return SttQualityMetrics(
             character_error_rate=self.character_error_rate / self.count,
             word_error_rate=self.word_error_rate / self.count,
-            critical_term_recall=self.critical_term_recall / self.count,
+            critical_term_recall=(
+                self.critical_term_hits / self.critical_term_total
+                if self.critical_term_total
+                else 1.0
+            ),
+            critical_term_hits=self.critical_term_hits,
+            critical_term_total=self.critical_term_total,
             omission_count=self.omission_count,
             hallucination_count=self.hallucination_count,
             mean_latency_seconds=self.latency_seconds / self.count,
+            estimated_cost_usd=self.estimated_cost_usd,
         )
 
 
 def _empty_stt_metrics() -> SttQualityMetrics:
-    return SttQualityMetrics(0.0, 0.0, 0.0, 0, 0, 0.0)
+    return SttQualityMetrics(0.0, 0.0, 0.0, 0, 0, 0, 0, 0.0, 0.0)
 
 
 def _score_stt(
@@ -507,6 +580,7 @@ def _score_stt(
     predicted: str,
     critical_terms: list[str],
     latency_seconds: float,
+    estimated_cost_usd: float,
 ) -> SttQualityMetrics:
     expected_chars = list(_normalized(expected))
     predicted_chars = list(_normalized(predicted))
@@ -526,10 +600,22 @@ def _score_stt(
         critical_term_recall=(
             term_hits / len(critical_terms) if critical_terms else 1.0
         ),
+        critical_term_hits=term_hits,
+        critical_term_total=len(critical_terms),
         omission_count=omissions,
         hallucination_count=hallucinations,
         mean_latency_seconds=round(latency_seconds, 6),
+        estimated_cost_usd=estimated_cost_usd,
     )
+
+
+def _language_cohort(language_hints: list[str]) -> str:
+    normalized = {value.casefold().split("-", 1)[0] for value in language_hints}
+    if normalized == {"ru", "en"}:
+        return "ru-en"
+    if len(normalized) == 1:
+        return next(iter(normalized))
+    return "+".join(sorted(normalized)) or "unknown"
 
 
 def _words(value: str) -> list[str]:

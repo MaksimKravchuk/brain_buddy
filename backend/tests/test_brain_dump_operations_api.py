@@ -8,15 +8,30 @@ import json
 import httpx
 import pytest
 
-from app.exceptions import ProviderRetryableError
+from app.exceptions import (
+    ProviderRetryableError,
+    ProviderTerminalError,
+    ValidationFailure,
+)
 from app.workflows.voice_brain_dump.adapters import OpenAiAccurateStt
 
 
-def _start_operation(api_client, key: str = "start-brain-dump"):
+def _start_operation(
+    api_client,
+    key: str = "start-brain-dump",
+    *,
+    external_processing_allowed: bool = False,
+):
     response = api_client.post(
         "/api/brain-dump-operations",
         headers={"Idempotency-Key": key},
-        json={"consent": {"microphone": True, "external_processing_allowed": False}},
+        json={
+            "consent": {
+                "microphone": True,
+                "external_processing_allowed": external_processing_allowed,
+                "provider": "openai" if external_processing_allowed else None,
+            }
+        },
     )
     assert response.status_code == 201, response.text
     return response.json()
@@ -65,6 +80,299 @@ def _upload_and_seal(api_client, operation: dict[str, object], audio: bytes, key
     )
 
 
+def test_seal_uses_semantic_reconciler_when_external_processing_is_allowed(
+    api_client,
+) -> None:
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    operation = _start_operation(
+        api_client,
+        key="start-semantic-reconciler",
+        external_processing_allowed=True,
+    )
+
+    def complete(payload: dict[str, object]) -> dict[str, object]:
+        context = json.loads(payload["messages"][1]["content"])  # type: ignore[index]
+        segment_id = context["transcript_segments"][0]["id"]
+        return {
+            "operations": [
+                {
+                    "operation": "add",
+                    "proposal_id": None,
+                    "title": "Заказать новый загранпаспорт",
+                    "source_segment_ids": [segment_id],
+                    "predecessor_ids": [],
+                    "base_revision": None,
+                }
+            ]
+        }
+
+    api_client.app.state.container.task_service.text_reconciler = OpenAITextReconciler(
+        api_key="test-key", complete=complete
+    )
+    sealed = _upload_and_seal(
+        api_client,
+        operation,
+        "надо разобраться с документами для поездки".encode(),
+        "seal-semantic-reconciler",
+    )
+
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["status"] == "awaiting_confirmation"
+    assert [proposal["title"] for proposal in sealed.json()["proposals"]] == [
+        "Заказать новый загранпаспорт"
+    ]
+
+
+def test_semantic_reconciler_updates_and_removes_existing_proposals(
+    api_client,
+) -> None:
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    operation = _start_operation(
+        api_client,
+        key="start-semantic-update-remove",
+        external_processing_allowed=True,
+    )
+    preview = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/transcript",
+        headers={"Idempotency-Key": "preview-semantic-update-remove"},
+        json={
+            "segments": [
+                {
+                    "sequence": 1,
+                    "text": "Починить brain body. Удалить лишний черновик.",
+                    "stability": "stable",
+                }
+            ]
+        },
+    ).json()
+    first, second = preview["proposals"]
+
+    def complete(payload: dict[str, object]) -> dict[str, object]:
+        context = json.loads(payload["messages"][1]["content"])  # type: ignore[index]
+        segment_id = context["transcript_segments"][0]["id"]
+        return {
+            "operations": [
+                {
+                    "operation": "update",
+                    "proposal_id": first["id"],
+                    "title": "Починить BrainBuddy",
+                    "source_segment_ids": [segment_id],
+                    "predecessor_ids": [],
+                    "base_revision": first["revision"],
+                },
+                {
+                    "operation": "remove",
+                    "proposal_id": second["id"],
+                    "title": None,
+                    "source_segment_ids": [],
+                    "predecessor_ids": [],
+                    "base_revision": second["revision"],
+                },
+            ]
+        }
+
+    api_client.app.state.container.task_service.text_reconciler = OpenAITextReconciler(
+        api_key="test-key", complete=complete
+    )
+    sealed = _upload_and_seal(
+        api_client, operation, "Починить BrainBuddy".encode(), "seal-update-remove"
+    )
+
+    assert sealed.status_code == 200, sealed.text
+    by_id = {proposal["id"]: proposal for proposal in sealed.json()["proposals"]}
+    assert by_id[first["id"]]["title"] == "Починить BrainBuddy"
+    assert by_id[first["id"]]["status"] == "reconciled"
+    assert by_id[second["id"]]["deleted"] is True
+
+
+@pytest.mark.parametrize(
+    ("provider_error", "expected_status"),
+    [
+        (ProviderRetryableError("temporary outage"), "retryable_error"),
+        (ProviderTerminalError("provider rejected"), "terminal_error"),
+        (ValidationFailure("invalid model output"), "terminal_error"),
+    ],
+)
+def test_seal_persists_semantic_reconciler_failures_for_recovery(
+    api_client, provider_error: Exception, expected_status: str
+) -> None:
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    operation = _start_operation(
+        api_client,
+        key=f"start-semantic-failure-{type(provider_error).__name__}",
+        external_processing_allowed=True,
+    )
+
+    def fail(_payload: dict[str, object]) -> dict[str, object]:
+        raise provider_error
+
+    service = api_client.app.state.container.task_service
+    service.text_reconciler = OpenAITextReconciler(api_key="test-key", complete=fail)
+    sealed = _upload_and_seal(
+        api_client, operation, b"provider failure recovery", "seal-semantic-failure"
+    )
+
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["status"] == expected_status
+    assert sealed.json()["provider_runs"][-1]["role"] == "reconciler"
+    assert sealed.json()["provider_runs"][-1]["status"] == expected_status
+
+
+def test_schema_v2_conflict_resolution_requires_a_visible_title_conflict(
+    api_client,
+) -> None:
+    operation = _start_operation(api_client, key="start-no-title-conflict")
+    preview = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/transcript",
+        headers={"Idempotency-Key": "append-no-title-conflict"},
+        json={
+            "segments": [
+                {"sequence": 1, "text": "Call the dentist", "stability": "stable"}
+            ]
+        },
+    )
+    proposal_id = preview.json()["proposals"][0]["id"]
+
+    response = api_client.patch(
+        f"/api/brain-dump-operations/{operation['id']}/proposals/{proposal_id}",
+        headers={"Idempotency-Key": "keep-missing-title-conflict"},
+        json={
+            "conflict_resolution": "keep",
+            "expected_revision": preview.json()["revision"],
+        },
+    )
+
+    assert response.status_code == 400
+    assert "no title conflict to resolve" in response.text
+
+
+def test_seal_rejects_external_reconciliation_without_explicit_consent(
+    api_client,
+) -> None:
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    operation = _start_operation(api_client, key="start-reconciler-without-consent")
+    api_client.app.state.container.task_service.text_reconciler = OpenAITextReconciler(
+        api_key="test-key", complete=lambda _payload: {"operations": []}
+    )
+    sealed = _upload_and_seal(
+        api_client, operation, b"no external consent", "seal-without-consent"
+    )
+
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["status"] == "terminal_error"
+    assert sealed.json()["provider_runs"][-1]["error"] == (
+        "RECONCILER_CONSENT_REQUIRED"
+    )
+
+
+@pytest.mark.parametrize(
+    ("resolution", "expected_title"),
+    [("keep", "Починить BrainBuddy MVP"), ("accept", "Починить BrainBuddy")],
+)
+def test_user_resolves_visible_semantic_title_conflict(
+    api_client, resolution: str, expected_title: str
+) -> None:
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    operation = _start_operation(
+        api_client,
+        key=f"start-conflict-{resolution}",
+        external_processing_allowed=True,
+    )
+    preview = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/transcript",
+        headers={"Idempotency-Key": f"preview-conflict-{resolution}"},
+        json={
+            "segments": [
+                {"sequence": 1, "text": "Починить brain body", "stability": "stable"}
+            ]
+        },
+    ).json()
+    proposal = preview["proposals"][0]
+    edited = api_client.patch(
+        f"/api/brain-dump-operations/{operation['id']}/proposals/{proposal['id']}",
+        headers={"Idempotency-Key": f"edit-conflict-{resolution}"},
+        json={
+            "title": "Починить BrainBuddy MVP",
+            "expected_revision": preview["revision"],
+        },
+    ).json()
+
+    def complete(payload: dict[str, object]) -> dict[str, object]:
+        context = json.loads(payload["messages"][1]["content"])  # type: ignore[index]
+        segment_id = context["transcript_segments"][0]["id"]
+        active = context["proposals"][0]
+        return {
+            "operations": [
+                {
+                    "operation": "update",
+                    "proposal_id": active["id"],
+                    "title": "Починить BrainBuddy",
+                    "source_segment_ids": [segment_id],
+                    "predecessor_ids": [],
+                    "base_revision": active["title_revision"],
+                }
+            ]
+        }
+
+    api_client.app.state.container.task_service.text_reconciler = OpenAITextReconciler(
+        api_key="test-key", complete=complete
+    )
+    sealed = _upload_and_seal(
+        api_client, edited, "Починить BrainBuddy".encode(), f"seal-conflict-{resolution}"
+    ).json()
+    conflicted = sealed["proposals"][0]
+    assert conflicted["conflicts"][0]["suggested_value"] == "Починить BrainBuddy"
+
+    if resolution == "accept":
+        service = api_client.app.state.container.task_service
+        owner_id = api_client.get("/api/auth/me").json()["id"]
+        persisted = service.get_brain_dump_operation(
+            operation["id"], owner_id=owner_id
+        )
+        persisted_proposal = persisted.proposals[0]
+        malformed_proposal = persisted_proposal.model_copy(
+            update={
+                "conflicts": [
+                    persisted_proposal.conflicts[0].model_copy(
+                        update={"suggested_value": None}
+                    )
+                ]
+            }
+        )
+        api_client.app.state.container.task_repo.save_brain_dump_operation(
+            persisted.model_copy(update={"proposals": [malformed_proposal]})
+        )
+        malformed = api_client.patch(
+            f"/api/brain-dump-operations/{operation['id']}/proposals/{conflicted['id']}",
+            headers={"Idempotency-Key": "accept-conflict-without-suggestion"},
+            json={
+                "conflict_resolution": "accept",
+                "expected_revision": sealed["revision"],
+            },
+        )
+        assert malformed.status_code == 400
+        assert "no suggestion to accept" in malformed.text
+        api_client.app.state.container.task_repo.save_brain_dump_operation(persisted)
+
+    resolved = api_client.patch(
+        f"/api/brain-dump-operations/{operation['id']}/proposals/{conflicted['id']}",
+        headers={"Idempotency-Key": f"resolve-conflict-{resolution}"},
+        json={
+            "conflict_resolution": resolution,
+            "expected_revision": sealed["revision"],
+        },
+    )
+
+    assert resolved.status_code == 200, resolved.text
+    assert resolved.json()["proposals"][0]["title"] == expected_title
+    assert resolved.json()["proposals"][0]["conflicts"] == []
+
+
 def test_external_stt_receives_declared_hints_through_the_real_decision_path(
     api_client,
 ) -> None:
@@ -102,7 +410,10 @@ def test_external_stt_receives_declared_hints_through_the_real_decision_path(
     assert b"\x1aE\xdf\xa3real-webm" in bodies[0]
     assert b'name="language"' in bodies[0] and b"ru" in bodies[0]
     assert b"BrainBuddy" in bodies[0] and b"production smoke" in bodies[0]
-    assert sealed.json()["provider_runs"][-1]["provider"] == "openai"
+    accurate_run = next(
+        run for run in sealed.json()["provider_runs"] if run["role"] == "accurate_stt"
+    )
+    assert accurate_run["provider"] == "openai"
 
 
 def test_external_stt_is_not_called_without_operation_consent(api_client) -> None:
@@ -1104,8 +1415,13 @@ def test_schema_v2_retryable_provider_failure_recovers_via_retry_command(
     assert retried.status_code == 200, retried.text
     retried_body = retried.json()
     assert retried_body["status"] == "awaiting_confirmation"
-    assert retried_body["provider_runs"][-1]["status"] == "succeeded"
-    assert retried_body["provider_runs"][-1]["recovery_count"] == 1
+    accurate_run = next(
+        run
+        for run in reversed(retried_body["provider_runs"])
+        if run["role"] == "accurate_stt"
+    )
+    assert accurate_run["status"] == "succeeded"
+    assert accurate_run["recovery_count"] == 1
     assert calls["count"] == 2
 
     task_service.accurate_stt.transcribe_sealed_audio = original_transcribe

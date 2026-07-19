@@ -7,11 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from app.workflows.voice_brain_dump.domain import TranscriptHypothesis
-from app.workflows.voice_brain_dump.evaluation import evaluate_real_audio_corpus
+from app.workflows.voice_brain_dump.domain import ProposalPatch, TranscriptHypothesis
+from app.workflows.voice_brain_dump.evaluation import (
+    build_semantic_extractor,
+    evaluate_real_audio_corpus,
+)
 from app.workflows.voice_brain_dump.providers import (
     AccurateSttRequest,
     DisabledAccurateStt,
+    ReconcileResult,
     SttResult,
 )
 
@@ -20,12 +24,17 @@ class RecordingProvider:
     provider_name = "evaluation-provider"
     requires_external_processing = True
 
-    def __init__(self, transcript: str) -> None:
+    def __init__(self, transcript: str | dict[str, str]) -> None:
         self.transcript = transcript
         self.requests: list[AccurateSttRequest] = []
 
     def transcribe_sealed_audio(self, request: AccurateSttRequest) -> SttResult:
         self.requests.append(request)
+        transcript = (
+            self.transcript[request.operation_id]
+            if isinstance(self.transcript, dict)
+            else self.transcript
+        )
         return SttResult(
             role="accurate",
             provider=self.provider_name,
@@ -36,12 +45,36 @@ class RecordingProvider:
                     sequence=1,
                     start_ms=0,
                     end_ms=1000,
-                    text=self.transcript,
+                    text=transcript,
                     stability="stable",
                     provider_role="accurate",
                     language=",".join(request.language_hints),
                     model="model-v1",
                 )
+            ],
+            estimated_cost_usd=0.1,
+        )
+
+
+class RecordingReconciler:
+    provider_id = "semantic-evaluation"
+    requires_external_processing = True
+
+    def reconcile(self, request):
+        segment = request.transcript_segments[0]
+        return ReconcileResult(
+            input_hash="semantic-input",
+            patches=[
+                ProposalPatch.add(
+                    proposal_id="proposal_1",
+                    title="Починить BrainBuddy",
+                    source_segment_ids=[segment.id],
+                    producer="reconciler",
+                ),
+                ProposalPatch.remove(
+                    proposal_id="proposal_removed",
+                    producer="reconciler",
+                ),
             ],
         )
 
@@ -115,6 +148,12 @@ def test_real_audio_harness_calls_provider_with_audio_not_expected_transcript(
     assert report.failures == []
 
 
+def test_semantic_extractor_scores_provider_generated_proposals() -> None:
+    extractor = build_semantic_extractor(RecordingReconciler())
+
+    assert extractor("Надо разобраться с brain body") == ["Починить BrainBuddy"]
+
+
 def test_real_audio_harness_reports_stt_and_extraction_failures_separately(
     tmp_path: Path,
 ) -> None:
@@ -157,6 +196,62 @@ def test_task_boundaries_are_scored_separately_from_title_wording(tmp_path: Path
     assert report.extraction.boundary_precision == 1
     assert report.extraction.boundary_recall == 1
     assert report.extraction.title_accuracy == 0.5
+
+
+def test_real_audio_harness_uses_disjoint_language_cohorts_and_micro_averages_terms(
+    tmp_path: Path,
+) -> None:
+    corpus = _corpus(tmp_path)
+    (corpus / "mixed.wav").write_bytes(b"RIFF\x00\x00\x00\x00WAVE-mixed")
+    (corpus / "mixed.transcript.txt").write_text(
+        "Сделать production smoke и позвонить Наташе", encoding="utf-8"
+    )
+    (corpus / "mixed.tasks.json").write_text(
+        json.dumps(["Сделать production smoke"]), encoding="utf-8"
+    )
+    manifest = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
+    manifest["cases"][0]["language_hints"] = ["ru"]
+    manifest["cases"][0]["critical_terms"] = ["BrainBuddy", "production smoke"]
+    manifest["cases"].append(
+        {
+            "id": "founder-ru-en-2",
+            "audio_file": "mixed.wav",
+            "ground_truth_transcript_file": "mixed.transcript.txt",
+            "expected_tasks_file": "mixed.tasks.json",
+            "language_hints": ["ru", "en"],
+            "critical_terms": ["production smoke"],
+        }
+    )
+    (corpus / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    provider = RecordingProvider(
+        {
+            "founder-ru-en-1": "Надо починить BrainBuddy",
+            "founder-ru-en-2": "Сделать production smoke",
+        }
+    )
+
+    report = evaluate_real_audio_corpus(
+        corpus,
+        provider,
+        external_processing_allowed=True,
+        extractor=lambda transcript: (
+            ["Сделать production smoke", "Позвонить Наташе"]
+            if "production smoke" in transcript
+            else ["Починить BrainBuddy"]
+        ),
+        monotonic_values=iter((1.0, 1.2, 2.0, 2.4)).__next__,
+    )
+
+    assert report.stt.critical_term_recall == pytest.approx(2 / 3)
+    assert report.stt.critical_term_hits == 2
+    assert report.stt.critical_term_total == 3
+    assert report.stt.estimated_cost_usd == pytest.approx(0.2)
+    assert set(report.by_language) == {"ru", "ru-en"}
+    assert report.by_language["ru-en"].critical_term_recall == 1
+    assert report.extraction is not None
+    assert report.extraction.conjunction_false_split_rate == 1
+    assert report.extraction.semantic_preservation_rate == pytest.approx(2 / 3)
+    assert report.extraction.confidence_calibration_error is None
 
 
 def test_real_audio_harness_is_explicitly_disabled_without_consent(

@@ -24,6 +24,20 @@ _LANGUAGE_ALIASES = {
 }
 
 
+def _audio_multipart_metadata(audio: bytes) -> tuple[str, str]:
+    """Sniff supported container signatures instead of trusting upload metadata."""
+
+    if audio.startswith(b"\x1aE\xdf\xa3"):
+        return "recording.webm", "audio/webm"
+    if audio.startswith(b"RIFF") and audio[8:12] == b"WAVE":
+        return "recording.wav", "audio/wav"
+    if len(audio) >= 12 and audio[4:8] == b"ftyp":
+        return "recording.m4a", "audio/mp4"
+    if len(audio) >= 2 and audio[0] == 0xFF and audio[1] & 0xF0 == 0xF0:
+        return "recording.aac", "audio/aac"
+    raise ProviderTerminalError("STT_AUDIO_FORMAT_UNSUPPORTED")
+
+
 @dataclass(slots=True)
 class OpenAiAccurateStt:
     """Transcribe sealed audio with OpenAI without logging provider payloads."""
@@ -80,6 +94,7 @@ class OpenAiAccurateStt:
         )
 
     def _post_with_retries(self, request: AccurateSttRequest) -> httpx.Response:
+        filename, content_type = _audio_multipart_metadata(request.sealed_audio)
         attempt = 0
         while True:
             try:
@@ -93,9 +108,9 @@ class OpenAiAccurateStt:
                         data=self._form_fields(request),
                         files={
                             "file": (
-                                "recording.webm",
+                                filename,
                                 request.sealed_audio,
-                                "audio/webm",
+                                content_type,
                             )
                         },
                     )

@@ -67,6 +67,9 @@ class AccurateSttPort(Protocol):
 
 
 class TextReconcilerPort(Protocol):
+    provider_id: str
+    requires_external_processing: bool
+
     def reconcile(self, request: ReconcileTextRequest) -> ReconcileResult: ...
 
 
@@ -175,6 +178,9 @@ class DisabledAccurateStt:
 class DeterministicTextReconciler:
     """Deterministic multilingual extractor/reconciler for CI fixtures."""
 
+    provider_id = "deterministic"
+    requires_external_processing = False
+
     def reconcile(self, request: ReconcileTextRequest) -> ReconcileResult:
         patches: list[ProposalPatch] = []
         for segment in request.transcript_segments:
@@ -195,6 +201,17 @@ class DeterministicTextReconciler:
             ),
             patches=patches,
         )
+
+
+class DisabledTextReconciler:
+    """Fail closed when production text-model configuration is unavailable."""
+
+    provider_id = "disabled"
+    requires_external_processing = True
+
+    def reconcile(self, request: ReconcileTextRequest) -> ReconcileResult:
+        del request
+        raise ProviderTerminalError("RECONCILER_PROVIDER_DISABLED")
 
 
 def _extract_titles(text: str) -> list[str]:

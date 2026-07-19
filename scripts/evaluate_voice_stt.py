@@ -12,9 +12,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "backend"))
 
-from app.container import _build_accurate_stt  # noqa: E402
+from app.container import _build_accurate_stt, _build_text_reconciler  # noqa: E402
 from app.core.config import get_config  # noqa: E402
 from app.workflows.voice_brain_dump.evaluation import (  # noqa: E402
+    build_semantic_extractor,
     evaluate_real_audio_corpus,
 )
 
@@ -45,10 +46,17 @@ def main() -> int:
     args = parser.parse_args()
 
     provider = _build_accurate_stt(get_config())
+    reconciler = _build_text_reconciler(get_config())
+    extractor = (
+        build_semantic_extractor(reconciler)
+        if reconciler.provider_id != "disabled"
+        else None
+    )
     report = evaluate_real_audio_corpus(
         args.corpus,
         provider,
         external_processing_allowed=args.consent_external_processing,
+        extractor=extractor,
     )
     print(json.dumps(_json_value(asdict(report)), indent=2, sort_keys=True))
     return 0 if report.status in {"completed", "disabled"} else 1
