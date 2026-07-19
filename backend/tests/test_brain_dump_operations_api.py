@@ -7,14 +7,29 @@ import json
 
 import pytest
 
-from app.exceptions import ProviderRetryableError
+from app.exceptions import (
+    ProviderRetryableError,
+    ProviderTerminalError,
+    ValidationFailure,
+)
 
 
-def _start_operation(api_client, key: str = "start-brain-dump"):
+def _start_operation(
+    api_client,
+    key: str = "start-brain-dump",
+    *,
+    external_processing_allowed: bool = False,
+):
     response = api_client.post(
         "/api/brain-dump-operations",
         headers={"Idempotency-Key": key},
-        json={"consent": {"microphone": True, "external_processing_allowed": False}},
+        json={
+            "consent": {
+                "microphone": True,
+                "external_processing_allowed": external_processing_allowed,
+                "provider": "openai" if external_processing_allowed else None,
+            }
+        },
     )
     assert response.status_code == 201, response.text
     return response.json()
@@ -29,6 +44,222 @@ def _manifest_hash(audio: bytes) -> str:
             separators=(",", ":"),
         ).encode()
     ).hexdigest()
+
+
+def test_seal_uses_semantic_reconciler_when_external_processing_is_allowed(
+    api_client,
+) -> None:
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    operation = _start_operation(
+        api_client,
+        key="start-semantic-reconciler",
+        external_processing_allowed=True,
+    )
+    def complete(payload: dict[str, object]) -> dict[str, object]:
+        context = json.loads(payload["messages"][1]["content"])  # type: ignore[index]
+        accurate_segment_id = context["transcript_segments"][0]["id"]
+        return {
+            "operations": [
+                {
+                    "operation": "add",
+                    "proposal_id": None,
+                    "title": "Заказать новый загранпаспорт",
+                    "source_segment_ids": [accurate_segment_id],
+                    "predecessor_ids": [],
+                    "base_revision": None,
+                }
+            ]
+        }
+
+    api_client.app.state.container.task_service.text_reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=complete,
+    )
+    audio = "надо разобраться с документами для поездки".encode()
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+
+    sealed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers={"Idempotency-Key": "seal-semantic-reconciler"},
+        json={
+            "expected_revision": uploaded.json()["revision"],
+            "expected_chunks": 1,
+            "manifest_hash": _manifest_hash(audio),
+        },
+    )
+
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["status"] == "awaiting_confirmation"
+    assert [proposal["title"] for proposal in sealed.json()["proposals"]] == [
+        "Заказать новый загранпаспорт"
+    ]
+    assert sealed.json()["provider_runs"][-1]["role"] == "reconciler"
+
+
+def test_semantic_reconciler_updates_and_removes_existing_proposals(
+    api_client,
+) -> None:
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    operation = _start_operation(
+        api_client,
+        key="start-semantic-update-remove",
+        external_processing_allowed=True,
+    )
+    preview = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/transcript",
+        headers={"Idempotency-Key": "preview-semantic-update-remove"},
+        json={
+            "segments": [
+                {
+                    "sequence": 1,
+                    "text": "Починить brain body. Удалить лишний черновик.",
+                    "stability": "stable",
+                }
+            ]
+        },
+    ).json()
+    first, second = preview["proposals"]
+
+    def complete(payload: dict[str, object]) -> dict[str, object]:
+        context = json.loads(payload["messages"][1]["content"])  # type: ignore[index]
+        accurate_segment_id = context["transcript_segments"][0]["id"]
+        return {
+            "operations": [
+                {
+                    "operation": "update",
+                    "proposal_id": first["id"],
+                    "title": "Починить BrainBuddy",
+                    "source_segment_ids": [accurate_segment_id],
+                    "predecessor_ids": [],
+                    "base_revision": first["revision"],
+                },
+                {
+                    "operation": "remove",
+                    "proposal_id": second["id"],
+                    "title": None,
+                    "source_segment_ids": [],
+                    "predecessor_ids": [],
+                    "base_revision": second["revision"],
+                },
+            ]
+        }
+
+    api_client.app.state.container.task_service.text_reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=complete,
+    )
+    audio = "Починить BrainBuddy".encode()
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+    sealed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers={"Idempotency-Key": "seal-semantic-update-remove"},
+        json={
+            "expected_revision": uploaded.json()["revision"],
+            "expected_chunks": 1,
+            "manifest_hash": _manifest_hash(audio),
+        },
+    )
+
+    assert sealed.status_code == 200, sealed.text
+    by_id = {proposal["id"]: proposal for proposal in sealed.json()["proposals"]}
+    assert by_id[first["id"]]["title"] == "Починить BrainBuddy"
+    assert by_id[first["id"]]["status"] == "reconciled"
+    assert by_id[second["id"]]["deleted"] is True
+
+
+@pytest.mark.parametrize(
+    ("provider_error", "expected_status"),
+    [
+        (ProviderRetryableError("temporary outage"), "retryable_error"),
+        (ProviderTerminalError("provider rejected"), "terminal_error"),
+        (ValidationFailure("invalid model output"), "terminal_error"),
+    ],
+)
+def test_seal_persists_semantic_reconciler_failures_for_recovery(
+    api_client,
+    provider_error: Exception,
+    expected_status: str,
+) -> None:
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    operation = _start_operation(
+        api_client,
+        key=f"start-reconciler-failure-{expected_status}-{type(provider_error).__name__}",
+        external_processing_allowed=True,
+    )
+
+    def fail(_payload: dict[str, object]) -> dict[str, object]:
+        raise provider_error
+
+    api_client.app.state.container.task_service.text_reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=fail,
+    )
+    audio = b"provider failure recovery"
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+
+    sealed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers={"Idempotency-Key": f"seal-{type(provider_error).__name__}"},
+        json={
+            "expected_revision": uploaded.json()["revision"],
+            "expected_chunks": 1,
+            "manifest_hash": _manifest_hash(audio),
+        },
+    )
+
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["status"] == expected_status
+    assert sealed.json()["provider_runs"][-1]["role"] == "reconciler"
+    assert sealed.json()["provider_runs"][-1]["status"] == expected_status
+
+
+def test_seal_rejects_external_reconciliation_without_explicit_consent(
+    api_client,
+) -> None:
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    operation = _start_operation(api_client, key="start-reconciler-without-consent")
+    api_client.app.state.container.task_service.text_reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {"operations": []},
+    )
+    audio = b"no external consent"
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+
+    sealed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers={"Idempotency-Key": "seal-reconciler-without-consent"},
+        json={
+            "expected_revision": uploaded.json()["revision"],
+            "expected_chunks": 1,
+            "manifest_hash": _manifest_hash(audio),
+        },
+    )
+
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["status"] == "terminal_error"
+    assert sealed.json()["provider_runs"][-1]["error"] == (
+        "RECONCILER_CONSENT_REQUIRED"
+    )
 
 
 def test_brain_dump_operation_collects_provisional_tasks_without_inbox_writes(
@@ -611,17 +842,15 @@ def test_schema_v2_upload_seal_runs_accurate_reconciliation_from_original_audio(
     assert body["segments"][0]["start_ms"] == 0
     assert body["segments"][0]["end_ms"] > 0
     assert body["sealed_manifest_hash"]
-    assert body["provider_runs"] == [
-        {
-            "id": body["provider_runs"][0]["id"],
-            "role": "accurate_stt",
-            "status": "succeeded",
-            "checkpoint": "accurate_transcribed",
-            "attempt": 1,
-            "recovery_count": 0,
-            "error": None,
-        }
+    assert [run["role"] for run in body["provider_runs"]] == [
+        "accurate_stt",
+        "reconciler",
     ]
+    assert [run["checkpoint"] for run in body["provider_runs"]] == [
+        "accurate_transcribed",
+        "reconciled",
+    ]
+    assert all(run["status"] == "succeeded" for run in body["provider_runs"])
 
 
 def test_schema_v2_accurate_correction_supersedes_fast_preview_without_canonical_write(
@@ -918,6 +1147,32 @@ def test_schema_v2_user_title_lock_blocks_accurate_overwrite_with_visible_confli
     assert blocked_save.status_code == 400
     assert "conflicts must be reviewed" in blocked_save.text
 
+    resolved = api_client.patch(
+        f"/api/brain-dump-operations/{operation['id']}/proposals/{proposal_id}",
+        headers={"Idempotency-Key": "resolve-conflicted-title"},
+        json={
+            "conflict_resolution": "accept",
+            "expected_revision": sealed.json()["revision"],
+        },
+    )
+    assert resolved.status_code == 200, resolved.text
+    resolved_proposal = resolved.json()["proposals"][0]
+    assert resolved_proposal["title"] == "Починить BrainBuddy"
+    assert resolved_proposal["conflicts"] == []
+    assert resolved_proposal["user_edited"] is True
+
+    committed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/commit",
+        headers={"Idempotency-Key": "commit-resolved-title"},
+        json={"expected_revision": resolved.json()["revision"]},
+    )
+    assert committed.status_code == 200, committed.text
+    task_id = committed.json()["committed_task_ids"][0]
+    task = api_client.get(f"/api/tasks/{task_id}").json()
+    assert task["source_capture_ids"] == [
+        f"brain_dump:{operation['id']}:{proposal_id}"
+    ]
+
 
 def test_schema_v2_retryable_provider_failure_recovers_via_retry_command(
     api_client,
@@ -969,8 +1224,13 @@ def test_schema_v2_retryable_provider_failure_recovers_via_retry_command(
     assert retried.status_code == 200, retried.text
     retried_body = retried.json()
     assert retried_body["status"] == "awaiting_confirmation"
-    assert retried_body["provider_runs"][-1]["status"] == "succeeded"
-    assert retried_body["provider_runs"][-1]["recovery_count"] == 1
+    accurate_run = next(
+        run
+        for run in reversed(retried_body["provider_runs"])
+        if run["role"] == "accurate_stt"
+    )
+    assert accurate_run["status"] == "succeeded"
+    assert accurate_run["recovery_count"] == 1
     assert calls["count"] == 2
 
     task_service.accurate_stt.transcribe_sealed_audio = original_transcribe

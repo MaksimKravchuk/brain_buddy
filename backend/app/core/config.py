@@ -85,6 +85,17 @@ class DataSettings(BaseModel):
         return self.root_dir / SCHEMA_VERSION_FILENAME
 
 
+class VoiceReconcilerSettings(BaseModel):
+    """Configuration for the production semantic task reconciler."""
+
+    provider: str = "disabled"
+    model: str = "gpt-4o"
+    endpoint: str = "https://api.openai.com/v1/chat/completions"
+    timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+
+    model_config = ConfigDict(frozen=True)
+
+
 class AppConfig(BaseModel):
     """Top-level Brain Buddy application configuration."""
 
@@ -94,6 +105,9 @@ class AppConfig(BaseModel):
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     session: SessionSettings = Field(default_factory=SessionSettings)
     password_policy: PasswordPolicy = Field(default_factory=PasswordPolicy)
+    voice_reconciler: VoiceReconcilerSettings = Field(
+        default_factory=VoiceReconcilerSettings
+    )
 
     model_config = ConfigDict(frozen=True)
 
@@ -143,6 +157,17 @@ def _build_config() -> AppConfig:
         secure=environment is AppEnvironment.PRODUCTION,
     )
     password_policy = PasswordPolicy()
+    voice_reconciler = VoiceReconcilerSettings(
+        provider=os.getenv("BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER", "disabled"),
+        model=os.getenv("BRAIN_BUDDY_VOICE_RECONCILER_MODEL", "gpt-4o"),
+        endpoint=os.getenv(
+            "BRAIN_BUDDY_VOICE_RECONCILER_ENDPOINT",
+            "https://api.openai.com/v1/chat/completions",
+        ),
+        timeout_seconds=float(
+            os.getenv("BRAIN_BUDDY_VOICE_RECONCILER_TIMEOUT_SECONDS", "30")
+        ),
+    )
 
     return AppConfig(
         environment=environment,
@@ -151,6 +176,7 @@ def _build_config() -> AppConfig:
         logging=logging_config,
         session=session_config,
         password_policy=password_policy,
+        voice_reconciler=voice_reconciler,
     )
 
 
@@ -166,5 +192,6 @@ __all__ = [
     "AppEnvironment",
     "PasswordPolicy",
     "SessionSettings",
+    "VoiceReconcilerSettings",
     "get_config",
 ]

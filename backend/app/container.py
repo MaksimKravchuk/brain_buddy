@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 from app.ai.providers import MockValidationProvider, OpenAIValidationProvider
-from app.core.config import AppConfig
+from app.core.config import AppConfig, AppEnvironment
 from app.modules.tasks import TaskRepository, TaskService
 from app.repositories import (
     IndexRepository,
@@ -24,6 +25,12 @@ from app.services import (
     TreeService,
     ValidationService,
     VersionService,
+)
+from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+from app.workflows.voice_brain_dump.providers import (
+    DeterministicTextReconciler,
+    DisabledTextReconciler,
+    TextReconcilerPort,
 )
 
 
@@ -75,7 +82,22 @@ def build_container(config: AppConfig) -> Container:
             "openai": OpenAIValidationProvider(),
         },
     )
-    task_service = TaskService(task_repo)
+    text_reconciler: TextReconcilerPort
+    if config.environment is AppEnvironment.TEST:
+        text_reconciler = DeterministicTextReconciler()
+    elif (
+        config.voice_reconciler.provider == "openai"
+        and os.getenv("OPENAI_API_KEY")
+    ):
+        text_reconciler = OpenAITextReconciler(
+            api_key=os.environ["OPENAI_API_KEY"],
+            model=config.voice_reconciler.model,
+            endpoint=config.voice_reconciler.endpoint,
+            timeout_seconds=config.voice_reconciler.timeout_seconds,
+        )
+    else:
+        text_reconciler = DisabledTextReconciler()
+    task_service = TaskService(task_repo, text_reconciler=text_reconciler)
     auth_service = AuthService(
         user_repo=user_repo,
         session_repo=session_repo,

@@ -203,6 +203,34 @@ describe("BrainDumpRoute", () => {
     expect(await screen.findByRole("button", { name: "Pause" })).toBeEnabled();
   });
 
+  it("sends explicit external-processing consent only after opt-in", async () => {
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
+        return jsonResponse(operation(), 201);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump();
+    await userEvent.click(
+      screen.getByRole("checkbox", { name: /Allow the configured AI provider/i })
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+
+    const startCall = fetchMock.mock.calls.find(([input]) =>
+      String(input).endsWith("/brain-dump-operations")
+    );
+    expect(startCall).toBeDefined();
+    expect(JSON.parse(String(startCall?.[1]?.body))).toEqual({
+      consent: {
+        microphone: true,
+        external_processing_allowed: true,
+        provider: "openai"
+      }
+    });
+  });
+
   it("ignores stale transcript responses that arrive after a newer pause", async () => {
     let resolveTranscript: ((response: Response) => void) | undefined;
     fetchMock.mockImplementation((input, init) => {
@@ -1081,6 +1109,21 @@ describe("BrainDumpRoute", () => {
       if (url.endsWith("/brain_dump_conflict") && (!init?.method || init.method === "GET")) {
         return jsonResponse(conflicted);
       }
+      if (url.includes("/proposals/proposal_locked") && init?.method === "PATCH") {
+        return jsonResponse(operation({
+          ...conflicted,
+          revision: 7,
+          proposals: [
+            proposal("proposal_locked", 1, "Починить BrainBuddy", {
+              status: "user_edited",
+              user_edited: true,
+              locked_fields: ["title"],
+              conflicts: [],
+              revision: 2
+            })
+          ]
+        }));
+      }
       throw new Error(`unexpected fetch ${url}`);
     });
 
@@ -1090,6 +1133,17 @@ describe("BrainDumpRoute", () => {
     expect(screen.getByText("Mine: Починить BrainBuddy MVP")).toBeInTheDocument();
     expect(screen.getByText("Suggestion: Починить BrainBuddy")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save 1 to inbox" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Use suggestion" }));
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("Починить BrainBuddy")).toBeInTheDocument()
+    );
+    expect(screen.getByRole("button", { name: "Save 1 to inbox" })).toBeEnabled();
+    const resolutionCall = fetchMock.mock.calls.find(([input]) =>
+      String(input).includes("/proposals/proposal_locked")
+    );
+    expect(JSON.parse(String(resolutionCall?.[1]?.body))).toMatchObject({
+      conflict_resolution: "accept"
+    });
   });
 
   it("does not replace a named recording route when starting after load fails", async () => {
