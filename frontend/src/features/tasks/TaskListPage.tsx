@@ -1,6 +1,7 @@
 /* istanbul ignore file -- task shell rendering is covered by route tests and Playwright snapshots. */
 import { AlertTriangle, Check, Edit3, Plus, RotateCcw, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
@@ -350,16 +351,21 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             onComplete={(task) => transitionMutation.mutate({ task, action: "complete" })}
             onEditTitle={(title) => setEditingTitle(title)}
             onMoveToNext={(task) => transitionMutation.mutate({ task, action: "move", toState: "next" })}
-            onProjectChange={(task, nextProjectId) =>
-              updateMutation.mutate({ task, payload: { project_id: nextProjectId || null } })
-            }
-            onAddTag={(task, tagIdToAdd) =>
-              updateMutation.mutate({ task, payload: { tag_ids: Array.from(new Set([...task.tag_ids, tagIdToAdd])) } })
-            }
-            onRemoveTag={(task, tagIdToRemove) =>
-              updateMutation.mutate({ task, payload: { tag_ids: task.tag_ids.filter((id) => id !== tagIdToRemove) } })
-            }
             onSaveEdit={(task) => updateMutation.mutate({ task, payload: { title: editingTitle.trim() } })}
+            expandedTaskId={taskId}
+            onCollapse={() => navigate(listPath)}
+            detailTask={detailQuery.data}
+            detailIsLoading={detailQuery.isLoading}
+            detailError={detailQuery.error}
+            onSaveDetail={(task, payload) => detailUpdateMutation.mutate({ task, payload })}
+            onTransitionDetail={(task, action, toState, waitingFor) =>
+              detailTransitionMutation.mutate({ task, action, toState, waitingFor })
+            }
+            onCreateSubtask={(task, title) => subtaskCreateMutation.mutate({ task, title })}
+            onTransitionSubtask={(task, subtask, action) =>
+              subtaskTransitionMutation.mutate({ task, subtask, action })
+            }
+            onCreateComment={(task, body) => commentCreateMutation.mutate({ task, body })}
           />
         ) : (
           <EmptyState state={state} />
@@ -397,29 +403,25 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             onToggleCompleted={setShowCompleted}
           />
         )}
-
-        {taskId ? (
-          <TaskDetailPanel
-            task={detailQuery.data}
-            projects={projects}
-            tags={tags}
-            isLoading={detailQuery.isLoading}
-            error={detailQuery.error}
-            onClose={() => navigate(listPath)}
-            onSave={(task, payload) => detailUpdateMutation.mutate({ task, payload })}
-            onTransition={(task, action, toState, waitingFor) =>
-              detailTransitionMutation.mutate({ task, action, toState, waitingFor })
-            }
-            onCreateSubtask={(task, title) => subtaskCreateMutation.mutate({ task, title })}
-            onTransitionSubtask={(task, subtask, action) =>
-              subtaskTransitionMutation.mutate({ task, subtask, action })
-            }
-            onCreateComment={(task, body) => commentCreateMutation.mutate({ task, body })}
-          />
-        ) : null}
       </section>
     </AppShell>
   );
+}
+
+function Chip({ variant = "neutral", children }: { variant?: "due" | "neutral"; children: ReactNode }): JSX.Element {
+  const variantClass =
+    variant === "due"
+      ? "border-due-border bg-due-bg text-due-fg"
+      : "border-transparent bg-context-bg text-context-fg";
+  return (
+    <span className={`inline-flex h-[22px] shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 text-[11px] font-medium ${variantClass}`}>
+      {children}
+    </span>
+  );
+}
+
+function tagLabel(tag: TagResponse): string {
+  return tag.name.startsWith("@") ? tag.name : `#${tag.name.replace(/^#/, "")}`;
 }
 
 function TaskList({
@@ -434,10 +436,17 @@ function TaskList({
   onComplete,
   onEditTitle,
   onMoveToNext,
-  onProjectChange,
-  onAddTag,
-  onRemoveTag,
-  onSaveEdit
+  onSaveEdit,
+  expandedTaskId,
+  onCollapse,
+  detailTask,
+  detailIsLoading,
+  detailError,
+  onSaveDetail,
+  onTransitionDetail,
+  onCreateSubtask,
+  onTransitionSubtask,
+  onCreateComment
 }: {
   tasks: TaskResponse[];
   projects: ProjectResponse[];
@@ -450,10 +459,17 @@ function TaskList({
   onComplete: (task: TaskResponse) => void;
   onEditTitle: (title: string) => void;
   onMoveToNext: (task: TaskResponse) => void;
-  onProjectChange: (task: TaskResponse, projectId: string) => void;
-  onAddTag: (task: TaskResponse, tagId: string) => void;
-  onRemoveTag: (task: TaskResponse, tagId: string) => void;
   onSaveEdit: (task: TaskResponse) => void;
+  expandedTaskId?: string;
+  onCollapse: () => void;
+  detailTask?: TaskResponse;
+  detailIsLoading: boolean;
+  detailError: unknown;
+  onSaveDetail: (task: TaskResponse, payload: Parameters<typeof apiClient.updateTask>[1]) => void;
+  onTransitionDetail: (task: TaskResponse, action: "move" | "complete" | "reopen" | "cancel", toState?: OpenTaskState, waitingFor?: string) => void;
+  onCreateSubtask: (task: TaskResponse, title: string) => void;
+  onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") => void;
+  onCreateComment: (task: TaskResponse, body: string) => void;
 }): JSX.Element {
   const projectById = new Map(projects.map((project) => [project.id, project]));
   const tagById = new Map(tags.map((tag) => [tag.id, tag]));
@@ -463,6 +479,7 @@ function TaskList({
       {tasks.map((task) => {
         const project = task.project_id ? projectById.get(task.project_id) : undefined;
         const taskTags = task.tag_ids.map((id) => tagById.get(id)).filter((tag): tag is TagResponse => Boolean(tag));
+        const isExpanded = expandedTaskId === task.id;
         return (
           <TaskRow
             key={task.id}
@@ -477,13 +494,25 @@ function TaskList({
             onComplete={onComplete}
             onEditTitle={onEditTitle}
             onMoveToNext={onMoveToNext}
-            projects={projects}
-            allTags={tags}
-            onProjectChange={onProjectChange}
-            onAddTag={onAddTag}
-            onRemoveTag={onRemoveTag}
             onSaveEdit={onSaveEdit}
-          />
+            isExpanded={isExpanded}
+          >
+            {isExpanded ? (
+              <TaskDetailPanel
+                task={detailTask}
+                projects={projects}
+                tags={tags}
+                isLoading={detailIsLoading}
+                error={detailError}
+                onClose={onCollapse}
+                onSave={onSaveDetail}
+                onTransition={onTransitionDetail}
+                onCreateSubtask={onCreateSubtask}
+                onTransitionSubtask={onTransitionSubtask}
+                onCreateComment={onCreateComment}
+              />
+            ) : null}
+          </TaskRow>
         );
       })}
     </div>
@@ -502,12 +531,9 @@ function TaskRow({
   onComplete,
   onEditTitle,
   onMoveToNext,
-  projects,
-  allTags,
-  onProjectChange,
-  onAddTag,
-  onRemoveTag,
-  onSaveEdit
+  onSaveEdit,
+  isExpanded,
+  children
 }: {
   task: TaskResponse;
   project?: ProjectResponse;
@@ -515,131 +541,96 @@ function TaskRow({
   detailPath: string;
   isEditing: boolean;
   editingTitle: string;
-  projects: ProjectResponse[];
-  allTags: TagResponse[];
   onBeginEdit: (task: TaskResponse) => void;
   onCancelEdit: () => void;
   onComplete: (task: TaskResponse) => void;
   onEditTitle: (title: string) => void;
   onMoveToNext: (task: TaskResponse) => void;
-  onProjectChange: (task: TaskResponse, projectId: string) => void;
-  onAddTag: (task: TaskResponse, tagId: string) => void;
-  onRemoveTag: (task: TaskResponse, tagId: string) => void;
   onSaveEdit: (task: TaskResponse) => void;
+  isExpanded: boolean;
+  children?: ReactNode;
 }): JSX.Element {
   const isTerminal = task.state === "completed" || task.state === "cancelled";
-  const availableTags = allTags.filter((tag) => !task.tag_ids.includes(tag.id));
 
   return (
     <article
-      className={`flex min-h-[48px] flex-col gap-2 rounded-xl border px-4 py-3 shadow-soft transition hover:shadow-raised sm:flex-row sm:items-center sm:gap-3 ${isTerminal ? "border-emerald-100 bg-emerald-50/50" : "border-slate-200 bg-white"}`}
+      className={`group flex flex-col gap-2 rounded-xl border px-4 py-3 shadow-soft transition hover:shadow-raised ${
+        isTerminal ? "border-emerald-100 bg-emerald-50/50" : isExpanded ? "border-slate-200 bg-white shadow-raised" : "border-slate-200 bg-white"
+      }`}
       role="listitem"
     >
-      {isTerminal ? (
-        <span className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-white px-2 text-xs font-medium text-emerald-700">
-          {task.state === "completed" ? "Completed" : "Cancelled"}
-        </span>
-      ) : (
-        <button
-          type="button"
-          className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full border border-[1.5px] border-slate-300 bg-white text-white hover:border-emerald-400 hover:bg-emerald-500"
-          aria-label={`Complete ${task.title}`}
-          onClick={() => onComplete(task)}
-        >
-          <Check className="h-3.5 w-3.5" aria-hidden />
-        </button>
-      )}
-      {isEditing ? (
-        <form
-          className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (editingTitle.trim()) {
-              onSaveEdit(task);
-            }
-          }}
-        >
-          <label className="sr-only" htmlFor={`task-title-${task.id}`}>Task title</label>
-          <input
-            id={`task-title-${task.id}`}
-            aria-label="Task title"
-            className="min-w-0 flex-1 rounded-lg border border-sky-200 px-3 py-2 text-sm font-medium text-slate-900 outline-none focus:border-sky-400"
-            value={editingTitle}
-            onChange={(event) => onEditTitle(event.currentTarget.value)}
-          />
-          <button type="submit" className="h-9 rounded-lg bg-brand-primary px-3 text-xs font-semibold text-white">Save task title</button>
-          <button type="button" className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-600" onClick={onCancelEdit}>Cancel</button>
-        </form>
-      ) : (
-        <Link to={detailPath} className={`min-w-0 flex-1 text-sm font-medium text-slate-900 hover:text-brand-primary ${isTerminal ? "line-through decoration-emerald-500/70" : ""}`}>{task.title}</Link>
-      )}
-      {task.due_date ? (
-        <span className="w-fit rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] text-rose-700">
-          {formatDueDate(task.due_date)}
-        </span>
-      ) : null}
-      <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
-        {project ? (
-          <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-slate-600">
-            @{project.name.replace(/^@/, "")}
+      <div className="flex min-h-[32px] flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+        {isTerminal ? (
+          <span className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-white px-2 text-xs font-medium text-emerald-700">
+            {task.state === "completed" ? "Completed" : "Cancelled"}
+          </span>
+        ) : (
+          <button
+            type="button"
+            className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border border-[1.5px] border-slate-300 bg-white text-white hover:border-emerald-400 hover:bg-emerald-500"
+            aria-label={`Complete ${task.title}`}
+            onClick={() => onComplete(task)}
+          >
+            <Check className="h-3 w-3" aria-hidden />
+          </button>
+        )}
+        {isEditing ? (
+          <form
+            className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (editingTitle.trim()) {
+                onSaveEdit(task);
+              }
+            }}
+          >
+            <label className="sr-only" htmlFor={`task-title-${task.id}`}>Task title</label>
+            <input
+              id={`task-title-${task.id}`}
+              aria-label="Task title"
+              className="min-w-0 flex-1 rounded-lg border border-sky-200 px-3 py-2 text-sm font-medium text-slate-900 outline-none focus:border-sky-400"
+              value={editingTitle}
+              onChange={(event) => onEditTitle(event.currentTarget.value)}
+            />
+            <button type="submit" className="h-9 rounded-lg bg-brand-primary px-3 text-xs font-semibold text-white">Save task title</button>
+            <button type="button" className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-600" onClick={onCancelEdit}>Cancel</button>
+          </form>
+        ) : (
+          <Link to={detailPath} className={`min-w-0 flex-1 truncate text-sm font-medium text-slate-900 hover:text-brand-primary ${isTerminal ? "line-through decoration-emerald-500/70" : ""}`}>
+            {task.title}
+          </Link>
+        )}
+        {!isEditing && !isTerminal ? (
+          <span className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100">
+            <button
+              type="button"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-slate-900"
+              aria-label={`Edit ${task.title}`}
+              onClick={() => onBeginEdit(task)}
+            >
+              <Edit3 className="h-3.5 w-3.5" aria-hidden />
+            </button>
+            {task.state !== "next" ? (
+              <button
+                type="button"
+                className="h-7 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-2 text-[11px] text-slate-600 hover:text-slate-900"
+                aria-label={`Move ${task.title} to Next`}
+                onClick={() => onMoveToNext(task)}
+              >
+                → Next
+              </button>
+            ) : null}
           </span>
         ) : null}
+        {task.due_date ? <Chip variant="due">{formatDueDate(task.due_date)}</Chip> : null}
         {tags.map((tag) => (
-          <button
-            key={tag.id}
-            type="button"
-            className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-slate-600 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
-            aria-label={`Remove ${tag.name} from ${task.title}`}
-            onClick={() => onRemoveTag(task, tag.id)}
-            disabled={isTerminal}
-          >
-            #{tag.name.replace(/^[#@]/, "")} ×
-          </button>
+          <Chip key={tag.id} variant="neutral">{tagLabel(tag)}</Chip>
         ))}
-        <label className="sr-only" htmlFor={`task-project-${task.id}`}>Project</label>
-        <select
-          id={`task-project-${task.id}`}
-          aria-label={`Project for ${task.title}`}
-          className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-600"
-          value={project?.id ?? ""}
-          onChange={(event) => onProjectChange(task, event.currentTarget.value)}
-          disabled={isTerminal}
-        >
-          <option value="">No project</option>
-          {projects.map((option) => (
-            <option key={option.id} value={option.id}>{option.name}</option>
-          ))}
-        </select>
-        <label className="sr-only" htmlFor={`task-tag-${task.id}`}>Add tag</label>
-        <select
-          id={`task-tag-${task.id}`}
-          aria-label={`Add tag to ${task.title}`}
-          className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-600"
-          value=""
-          onChange={(event) => {
-            if (event.currentTarget.value) {
-              onAddTag(task, event.currentTarget.value);
-            }
-          }}
-          disabled={isTerminal || availableTags.length === 0}
-        >
-          <option value="">Add tag</option>
-          {availableTags.map((option) => (
-            <option key={option.id} value={option.id}>#{option.name.replace(/^[#@]/, "")}</option>
-          ))}
-        </select>
-        {!isEditing && !isTerminal ? (
-          <button type="button" className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-600" aria-label={`Edit ${task.title}`} onClick={() => onBeginEdit(task)}>
-            <Edit3 className="h-3.5 w-3.5" aria-hidden />
-            Edit
-          </button>
-        ) : null}
-        {!isEditing && !isTerminal && task.state !== "next" ? (
-          <button type="button" className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-600" aria-label={`Move ${task.title} to Next`} onClick={() => onMoveToNext(task)}>
-            Move to Next
-          </button>
+        {project ? (
+          <span className="shrink-0 truncate text-[11px] text-slate-500 sm:ml-auto">@{project.name.replace(/^@/, "")}</span>
         ) : null}
       </div>
+      {children}
     </article>
   );
 }
@@ -670,9 +661,9 @@ function TaskDetailPanel({
   onCreateComment: (task: TaskResponse, body: string) => void;
 }): JSX.Element {
   return (
-    <aside className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-raised" aria-labelledby="task-detail-title">
-      <div className="mb-3 flex items-center gap-3">
-        <h2 id="task-detail-title" className="m-0 flex-1 text-lg font-semibold text-slate-900">
+    <aside className="mt-3 flex flex-col gap-4 border-t border-slate-200 pt-3" aria-labelledby="task-detail-title">
+      <div className="flex items-center gap-3">
+        <h2 id="task-detail-title" className="m-0 flex-1 text-sm font-semibold uppercase tracking-wide text-slate-500">
           Task detail
         </h2>
         <button type="button" className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 px-2 text-xs text-slate-600" onClick={onClose}>
@@ -799,18 +790,25 @@ function TaskDetailPanel({
             <input name="subtask_title" aria-label="New subtask title" className="min-h-10 flex-1 rounded-lg border border-slate-200 px-3 text-sm" placeholder="Add a subtask" />
             <button type="submit" className="h-10 rounded-lg border border-slate-200 px-3 text-sm">Add subtask</button>
           </form>
-          <div className="space-y-2" aria-label="Subtasks">
-            {(task.subtasks ?? []).map((subtask) => (
-              <div key={subtask.id} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
-                <span className="flex-1">{subtask.title}</span>
-                <span className="text-xs text-slate-500">{subtask.state}</span>
-                {subtask.state === "open" ? (
-                  <button type="button" className="text-xs text-emerald-700" onClick={() => onTransitionSubtask(task, subtask, "complete")}>Complete</button>
-                ) : (
-                  <button type="button" className="text-xs text-slate-700" onClick={() => onTransitionSubtask(task, subtask, "reopen")}>Reopen</button>
-                )}
-              </div>
-            ))}
+          <div className="flex flex-col gap-1.5" aria-label="Subtasks">
+            {(task.subtasks ?? []).map((subtask) => {
+              const done = subtask.state !== "open";
+              return (
+                <div key={subtask.id} className="flex items-center gap-2 text-sm">
+                  <button
+                    type="button"
+                    className={`flex h-[14px] w-[14px] shrink-0 items-center justify-center rounded-full border border-[1.5px] ${
+                      done ? "border-brand-primary bg-brand-primary text-white" : "border-slate-300 bg-white text-white"
+                    }`}
+                    aria-label={done ? `Reopen ${subtask.title}` : `Complete ${subtask.title}`}
+                    onClick={() => onTransitionSubtask(task, subtask, done ? "reopen" : "complete")}
+                  >
+                    <Check className="h-2.5 w-2.5" aria-hidden />
+                  </button>
+                  <span className={done ? "text-slate-500 line-through" : "text-slate-800"}>{subtask.title}</span>
+                </div>
+              );
+            })}
           </div>
 
           <form
@@ -828,9 +826,14 @@ function TaskDetailPanel({
             <input name="comment_body" aria-label="New comment" className="min-h-10 flex-1 rounded-lg border border-slate-200 px-3 text-sm" placeholder="Add a comment" />
             <button type="submit" className="h-10 rounded-lg border border-slate-200 px-3 text-sm">Add comment</button>
           </form>
-          <div className="space-y-2" aria-label="Comments">
+          <div className="flex flex-col gap-2" aria-label="Comments">
             {(task.comments ?? []).map((comment) => (
-              <p key={comment.id} className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">{comment.body}</p>
+              <div key={comment.id} className="flex items-start gap-2">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-sky-100 text-[10px] font-semibold text-sky-700">
+                  {comment.actor_id.slice(0, 2).toUpperCase()}
+                </span>
+                <p className="m-0 min-w-0 flex-1 text-sm text-slate-700">{comment.body}</p>
+              </div>
             ))}
           </div>
         </div>
