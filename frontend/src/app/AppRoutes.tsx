@@ -6,8 +6,6 @@ import { BrainDumpRoute } from "../features/brain-dump/BrainDumpRoute";
 import { TaskListPage } from "../features/tasks/TaskListPage";
 import LoginPage from "../pages/LoginPage";
 import SignupPage from "../pages/SignupPage";
-import TaskWorkspace from "../pages/TaskWorkspace";
-import TreeWorkspace from "../pages/TreeWorkspace";
 
 export function AppRoutes(): JSX.Element {
   return (
@@ -18,7 +16,7 @@ export function AppRoutes(): JSX.Element {
         path="/"
         element={
           <ProtectedRoute>
-            <TaskWorkspace />
+            <TaskListPage mode="state" />
           </ProtectedRoute>
         }
       />
@@ -90,7 +88,7 @@ export function AppRoutes(): JSX.Element {
         path="/crt/*"
         element={
           <ProtectedRoute>
-            <TreeWorkspace />
+            <ComingLater title="Think with CRT" />
           </ProtectedRoute>
         }
       />
@@ -103,5 +101,19 @@ export function AppRoutes(): JSX.Element {
         }
       />
     </Routes>
+  );
+}
+
+function ComingLater({ title }: { title: string }): JSX.Element {
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-surface-base px-6 text-center">
+      <section className="rounded-2xl border border-slate-200 bg-white px-8 py-10 shadow-raised">
+        <p className="text-xs font-semibold uppercase tracking-[0.06em] text-brand-primary">Coming later</p>
+        <h1 className="mt-2 text-title font-semibold text-slate-900">{title}</h1>
+        <p className="mt-2 max-w-md text-sm text-slate-600">
+          This workspace is intentionally unavailable while the canonical GTD flow remains focused.
+        </p>
+      </section>
+    </main>
   );
 }

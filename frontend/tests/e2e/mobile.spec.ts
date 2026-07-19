@@ -1,185 +1,47 @@
 import { expect, test } from "../allure.fixtures";
-import { ContentType, attachment } from "allure-js-commons";
 
-import {
-  createTreeViaUi,
-  loginThroughUi,
-  mintInvite,
-  openCrtWorkspace,
-  signOut,
-  signupThroughUi,
-  uniqueEmail
-} from "./helpers";
-
-const treeListResponse = [
-  { id: "tree-1", name: "Current tree", updated_at: "2026-07-15T10:00:00Z", owner_id: "user-1" }
-];
-
-const treeResponse = {
-  id: "tree-1",
-  name: "Current tree",
-  metadata: {
-    version: 1,
-    created_at: "2026-07-15T10:00:00Z",
-    updated_at: "2026-07-15T10:00:00Z",
-    owner_id: "user-1",
-    layout: null
-  },
-  nodes: [],
-  relations: [],
-  owner_id: "user-1"
-};
+import { createTaskViaApi, loginThroughUi, logoutSession, mintInvite, signupThroughUi, uniqueEmail } from "./gtdHelpers";
 
 test.describe("mobile acceptance", () => {
-  test("E2E-MOBILE-02 planned workflow placeholders are visible and inert at 390px", async ({ page }) => {
-    let nodeCreationRequests = 0;
-
-    await page.route("**/*", async (route) => {
-      const url = new URL(route.request().url());
-      if (!url.pathname.startsWith("/api/")) {
-        await route.continue();
-        return;
-      }
-      if (url.pathname === "/api/auth/me") {
-        await route.fulfill({ json: { id: "user-1", email: "max@example.test" } });
-        return;
-      }
-      if (url.pathname === "/api/trees") {
-        await route.fulfill({ json: treeListResponse });
-        return;
-      }
-      if (url.pathname === "/api/trees/tree-1") {
-        await route.fulfill({ json: treeResponse });
-        return;
-      }
-      if (url.pathname === "/api/trees/tree-1/nodes" && route.request().method() === "POST") {
-        nodeCreationRequests += 1;
-        const payload = route.request().postDataJSON() as {
-          label: string;
-          position: { x: number; y: number };
-          type: "parent" | "child";
-        };
-        await route.fulfill({
-          json: {
-            id: `node-${nodeCreationRequests}`,
-            label: payload.label,
-            position: payload.position,
-            type: payload.type,
-            highlight_state: "none",
-            relation_counts: { up_count: 0, down_count: 0 }
-          }
-        });
-        return;
-      }
-      await route.fulfill({ status: 404, json: { detail: "Not found" } });
-    });
-
-    const defaultNodeCreationResponse = page.waitForResponse(
-      (response) =>
-        new URL(response.url()).pathname === "/api/trees/tree-1/nodes" &&
-        response.request().method() === "POST"
-    );
-
+  test("E2E-MOBILE-02 planned workflows remain visible, disabled, and non-navigable at 390px", async ({ page }, testInfo) => {
+    await signupThroughUi(page, uniqueEmail("mobile-planned", testInfo), await mintInvite());
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/crt");
 
-    const plannedWorkflows = page.getByRole("navigation", { name: "Planned workflows" });
-    const crt = plannedWorkflows.getByRole("button", { name: "CRT — Coming Later" });
-    const weeklyReview = plannedWorkflows.getByRole("button", { name: "Weekly Review — Coming Later" });
-
-    await expect(page.getByLabel("Tree menu")).toContainText("Current tree");
-    await expect(crt).toBeVisible();
-    await expect(weeklyReview).toBeVisible();
-    await expect(crt).toBeDisabled();
-    await expect(weeklyReview).toBeDisabled();
-    await expect(crt).toHaveCSS("pointer-events", "auto");
-    await expect(weeklyReview).toHaveCSS("pointer-events", "auto");
-    await expect(plannedWorkflows.getByRole("link")).toHaveCount(0);
-
-    await test.step("Verify both planned placeholders are not clipped in the 390px viewport", async () => {
-      for (const item of [crt, weeklyReview]) {
-        const box = await item.boundingBox();
-        await attachment("Placeholder bounding box", JSON.stringify(box, null, 2), ContentType.JSON);
-        if (!box || box.width <= 40 || box.x < 0 || box.x + box.width > 390) {
-          throw new Error(`Expected visible placeholder inside 390px viewport, received ${JSON.stringify(box)}`);
-        }
-      }
+    await test.step("open the real GTD navigation drawer", async () => {
+      await page.goto("/");
+      await page.getByRole("button", { name: "Open task navigation" }).click();
+      await expect(page.getByRole("dialog", { name: "Task navigation" })).toBeVisible();
     });
-
-    let nodeCreationRequestsBeforePlaceholderClicks = 0;
-    await test.step("Confirm the tree bootstrap issued exactly one node-creation call before any placeholder interaction", async () => {
-      const response = await defaultNodeCreationResponse;
-      nodeCreationRequestsBeforePlaceholderClicks = nodeCreationRequests;
-      await attachment(
-        "Node creation response observed before placeholder clicks",
-        JSON.stringify(
-          {
-            url: response.url(),
-            status: response.status(),
-            requestsSoFar: nodeCreationRequestsBeforePlaceholderClicks
-          },
-          null,
-          2
-        ),
-        ContentType.JSON
-      );
-      if (response.status() !== 200) {
-        throw new Error(
-          `Expected bootstrap node creation to succeed with status 200, received ${response.status()}`
-        );
-      }
-      if (nodeCreationRequestsBeforePlaceholderClicks !== 1) {
-        throw new Error(
-          `Expected exactly one node-creation call before placeholder interaction, observed ${nodeCreationRequestsBeforePlaceholderClicks}`
-        );
-      }
-    });
-
-    await test.step("Click each placeholder at its rendered coordinates without activating the CRT canvas", async () => {
-      for (const item of [crt, weeklyReview]) {
-        const box = await item.boundingBox();
-        if (!box) {
-          throw new Error("Expected planned workflow placeholder to have a rendered bounding box");
-        }
-
-        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-        await page.waitForTimeout(125);
-        await attachment(
-          "Node creation request count after placeholder click",
-          JSON.stringify(
-            {
-              expected: nodeCreationRequestsBeforePlaceholderClicks,
-              actual: nodeCreationRequests
-            },
-            null,
-            2
-          ),
-          ContentType.JSON
-        );
-        if (nodeCreationRequests !== nodeCreationRequestsBeforePlaceholderClicks) {
-          throw new Error(
-            "A planned workflow placeholder activated the CRT canvas instead of remaining inert"
-          );
-        }
-      }
-
-      await expect(page.getByText("Failed to create node")).toHaveCount(0);
+    await test.step("verify planned workflows are disabled and the legacy CRT link is absent", async () => {
+      const navigation = page.getByRole("navigation", { name: "Task navigation" });
+      await expect(navigation.getByRole("button", { name: "Weekly review — Coming later" })).toBeDisabled();
+      await expect(navigation.getByRole("button", { name: "Think with CRT — Coming later" })).toBeDisabled();
+      await expect(navigation.getByRole("link", { name: /CRT.*legacy/i })).toHaveCount(0);
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      if (overflow > 0) throw new Error(`390px planned-workflow drawer overflowed by ${overflow}px`);
     });
   });
 
-  test("E2E-MOBILE-01 mobile auth and tree menu smoke", async ({ page }, testInfo) => {
+  test("E2E-MOBILE-01 mobile auth, navigation, and task persistence smoke", async ({ page }, testInfo) => {
     const email = uniqueEmail("mobile", testInfo);
-    const treeName = `Mobile Tree ${testInfo.workerIndex}`;
-
     await signupThroughUi(page, email, await mintInvite());
-    await openCrtWorkspace(page, email);
-    await createTreeViaUi(page, treeName);
-    await expect(page.locator("body")).toBeVisible();
-    await expect(page.getByLabel("Tree menu")).toContainText(treeName);
+    await createTaskViaApi(page, "Mobile persisted task", { state: "next" });
+    await page.setViewportSize({ width: 390, height: 844 });
 
-    await signOut(page);
-    await loginThroughUi(page, email);
-    await openCrtWorkspace(page, email);
-    await expect(page.getByLabel("Tree menu")).toContainText(treeName);
+    await test.step("render the persisted task and accessible drawer without horizontal overflow", async () => {
+      await page.goto("/");
+      await expect(page.getByText("Mobile persisted task")).toBeVisible();
+      await page.getByRole("button", { name: "Open task navigation" }).click();
+      await expect(page.getByRole("dialog", { name: "Task navigation" })).toContainText("Inbox");
+      await page.getByRole("button", { name: "Close task navigation" }).last().click();
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      if (overflow > 0) throw new Error(`390px task workspace overflowed by ${overflow}px`);
+    });
+    await test.step("relogin and recover the same API-backed task", async () => {
+      await logoutSession(page);
+      await loginThroughUi(page, email);
+      await page.goto("/tasks/next");
+      await expect(page.getByText("Mobile persisted task")).toBeVisible();
+    });
   });
 });
