@@ -367,9 +367,6 @@ function Sidebar({
       <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-800">
         Weekly review <span className="font-semibold">coming later</span>
       </div>
-      <NavLink to="/crt" className="mt-2 rounded-lg px-2.5 py-2 text-xs font-medium text-slate-600 hover:bg-slate-200/70">
-        CRT (legacy)
-      </NavLink>
     </nav>
   );
 }
