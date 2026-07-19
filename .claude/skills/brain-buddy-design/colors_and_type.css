@@ -52,9 +52,10 @@
   --bb-info-border: #bae6fd;
   --bb-info-fg: #0369a1;
 
-  /* === AI & task-state aliases (post-pivot) ===
-   * emerald = AI executing a task (Sparkles); sky = thinking canvas (Network).
-   * Never mix the two meanings. */
+  /* === Reserved Execution aliases + thinking projection ===
+   * AI/agent/needs-you tokens are speculative and non-shipped until an accepted
+   * Execution contract enables them. They are never Task lifecycle tokens.
+   * Sky remains the thinking-canvas projection. */
   --bb-ai: var(--bb-success);
   --bb-ai-bg: #ecfdf5;          /* emerald-50 */
   --bb-ai-border: #a7f3d0;      /* emerald-200 — also the card border while an agent works */
@@ -82,8 +83,8 @@
 
   --bb-recording: #e11d48;      /* rose dot + timer */
 
-  --bb-context-bg: #f1f5f9;     /* @tag pill in rows (white + border in sidebar) */
-  --bb-context-fg: #475569;
+  --bb-tag-bg: #f1f5f9;         /* tag pill in rows (white + border in sidebar) */
+  --bb-tag-fg: #475569;
 
   /* === Node semantics (load-bearing color logic) === */
   --bb-node-leaf-bg: #ef4444;   /* no outgoing */

@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- @dsCard group="Components" name="Task rows" subtitle="Checkbox · title · due / agent chips · context · assignee — the list-view unit" viewport="700x380" -->
+<!-- @dsCard group="Components" name="Task rows" subtitle="Checkbox · title · due / future Execution chips · tag · project — the list-view unit" viewport="700x380" -->
 <html><head><meta charset="utf-8"><title>Task rows</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <style>
@@ -22,18 +22,20 @@
   .due{color:#be123c;background:#fff1f2;border:1px solid #fecdd3}
   .aichip{display:inline-flex;align-items:center;gap:5px;font-weight:500;color:#047857;background:#ecfdf5;border:1px solid #a7f3d0;padding:2px 9px;white-space:nowrap;flex-shrink:0}
   .think{display:inline-flex;align-items:center;gap:5px;font-weight:500;color:#0369a1;background:#f0f9ff;border:1px solid #bae6fd;padding:2px 9px;white-space:nowrap;flex-shrink:0}
-  .ctx{margin-left:auto;font-size:12px;padding:2px 9px;border-radius:999px;background:#f1f5f9;color:#475569}
+  .tag{margin-left:auto;font-size:12px;padding:2px 9px;border-radius:999px;background:#f1f5f9;color:#475569}
   .proj{font-size:11px;color:#94a3b8;width:110px;text-align:right}
   .add{display:flex;align-items:center;gap:8px;padding:12px 16px;border:1px dashed #e2e8f0;border-radius:12px;background:rgba(248,250,252,.6);font-size:12px;color:#64748b}
+  .notice{font-size:11px;color:#64748b;padding:8px 10px;background:#f1f5f9;border-radius:8px}
   svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
   .add svg{width:14px;height:14px}
 </style></head><body>
 <div class="col">
-  <div class="row"><span class="chk"></span><span class="title">Take car in for the flat tire</span><span class="chip due">before Sat</span><span class="ctx">@errands</span><span class="proj">Personal admin</span></div>
-  <div class="row ai"><span class="chk"></span><span class="title">Draft launch announcement post</span><span class="chip aichip"><span class="live"></span>Drafter · ready in ~5 min</span><span class="ctx">@laptop</span><span class="proj">Launch v2</span><span class="av"><svg viewBox="0 0 24 24"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg></span></div>
-  <div class="row needs"><span class="chk"></span><span class="title">Book offsite venue</span><span class="needschip"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>Needs you — choose a venue</span><span class="ctx">@calls</span><span class="proj">Personal admin</span><span class="av"><svg viewBox="0 0 24 24"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg></span></div>
-  <div class="row"><span class="chk"></span><span class="title">Fix onboarding drop-off</span><span class="chip think"><svg viewBox="0 0 24 24"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></svg>Thinking · 12 steps</span><span class="ctx">@deep-work</span><span class="proj">Onboarding drop-off</span></div>
-  <div class="row"><span class="chk"></span><span class="title">Email venue about September offsite</span><span class="ctx">@calls</span><span class="proj">Personal admin</span></div>
+  <div class="notice"><strong>Speculative, non-shipped:</strong> executor chips and assignment marks below require an accepted Execution contract. Execution stays separate from Task lifecycle; the ordinary rows, Tags, Projects, due date, and Thinking chip are independent.</div>
+  <div class="row"><span class="chk"></span><span class="title">Take car in for the flat tire</span><span class="chip due">before Sat</span><span class="tag">errands</span><span class="proj">Personal admin</span></div>
+  <div class="row ai"><span class="chk"></span><span class="title">Draft launch announcement post</span><span class="chip aichip"><span class="live"></span>Drafter · ready in ~5 min</span><span class="tag">laptop</span><span class="proj">Launch v2</span><span class="av"><svg viewBox="0 0 24 24"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg></span></div>
+  <div class="row needs"><span class="chk"></span><span class="title">Book offsite venue</span><span class="needschip"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>Needs you — choose a venue</span><span class="tag">calls</span><span class="proj">Personal admin</span><span class="av"><svg viewBox="0 0 24 24"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg></span></div>
+  <div class="row"><span class="chk"></span><span class="title">Fix onboarding drop-off</span><span class="chip think"><svg viewBox="0 0 24 24"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></svg>Thinking · 12 steps</span><span class="tag">deep-work</span><span class="proj">Onboarding drop-off</span></div>
+  <div class="row"><span class="chk"></span><span class="title">Email venue about September offsite</span><span class="tag">calls</span><span class="proj">Personal admin</span></div>
   <div class="add"><svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></svg>Add a next action — or dump everything on your mind with the mic above</div>
 </div>
 </body></html>
