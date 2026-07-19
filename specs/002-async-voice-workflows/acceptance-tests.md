@@ -1,26 +1,38 @@
 # Async voice workflows: acceptance test specification
 
-Status: Design contract
+Status: Materially amended 2026-07-19 to separate STT accuracy from extraction
+accuracy and add real-provider, consent, and observability scenarios.
+
 Decision: [ADR-0002](../../docs/decisions/0002-async-voice-operation-substrate.md)
 
-These scenarios are implementation requirements. Unit tests should cover transition and
-merge functions; repository tests should cover append/idempotency recovery; API tests
-should cover owner scoping and command envelopes; frontend tests should use a fake ordered
-event stream and fake timers. Provider tests use deterministic fakes, never live models.
+These scenarios are implementation requirements. Unit tests should cover
+transition and merge functions; repository tests should cover
+append/idempotency recovery; API tests should cover owner scoping and command
+envelopes; frontend tests should use a fake ordered event stream and fake
+timers. Provider tests use deterministic fakes for ordinary state-machine CI,
+never live models. Real-audio corpus tests run in a credentialed track separate
+from ordinary CI and never commit recordings or ground-truth transcripts to
+the repo.
 
 ## Fixtures
 
 - owner A and owner B;
-- a schema-v2 voice brain-dump operation with three numbered, time-aligned audio chunks and
-  an opaque sealed `media_ref`;
-- an open Weekly Review snapshot containing capture `c1@revision=4` and `c2@revision=2`;
-- browser-preview, fast-STT, accurate-STT, and text-reconciler fakes able to emit controlled
-  segment versions, patches, delays, timeout-after-accept, and errors;
-- a task-tracker fake that records idempotency keys and can time out after accepting;
-- a native Task port fake that records complete Inbox task payloads and child idempotency
-  keys;
-- a clock, process lease owner, and event stream whose delivery can duplicate, delay, or
-  omit events.
+- a schema-v2 voice brain-dump operation with three numbered, time-aligned
+  audio chunks and an opaque sealed `media_ref`;
+- an open Weekly Review snapshot containing capture `c1@revision=4` and
+  `c2@revision=2`;
+- browser-preview, fast-STT, accurate-STT, and text-reconciler fakes able to
+  emit controlled segment versions, patches, delays, timeout-after-accept,
+  and errors;
+- a task-tracker fake that records idempotency keys and can time out after
+  accepting;
+- a native Task port fake that records complete Inbox task payloads and child
+  idempotency keys;
+- a clock, process lease owner, and event stream whose delivery can
+  duplicate, delay, or omit events;
+- a versioned founder corpus of genuine Russian and RU/EN spoken audio with
+  ground-truth transcripts and expected task titles/boundaries, stored outside
+  the repo and consumed only by the credentialed evaluation track.
 
 ## State-machine tests
 
@@ -61,11 +73,15 @@ event stream and fake timers. Provider tests use deterministic fakes, never live
 | PV-05 | invalid provider output | missing/negative spans, unknown segment/proposal IDs, oversized text, or unsupported schema is rejected before revision changes |
 | PV-06 | duplicate provider result | the same role/method/input hash returns the stored run, segment IDs, patch IDs, and proposal-ID mapping exactly once |
 | PV-07 | browser preview | fixed-locale browser text is labelled `browser_preview`, has a coarse capture-clock span, and never becomes authoritative when accurate output exists |
+| PV-08 | no UTF-8 audio decoding | the production accurate-STT adapter never calls `bytes.decode("utf-8")` on audio input; binary audio is passed to the provider audio API |
+| PV-09 | no deterministic default in production | production startup refuses `DeterministicAccurateStt` unless an explicit env escape hatch is set; missing credentials surface as `disabled` |
+| PV-10 | browser locale from hints | `recognition.lang` is set from declared `language_hints`, not `navigator.language` alone |
 
 ## Multilingual semantic acceptance
 
-Provider fakes use versioned labelled audio/text fixtures; ordinary CI never calls a live or
-paid model. The required founder examples are release-blocking, not illustrative only.
+Provider fakes use versioned labelled audio/text fixtures; ordinary CI never
+calls a live or paid model. The required founder examples are release-blocking,
+not illustrative only. Real-audio corpus cases run in the credentialed track.
 
 | ID | Scenario | Required assertion |
 |---|---|---|
@@ -75,6 +91,36 @@ paid model. The required founder examples are release-blocking, not illustrative
 | ML-04 | `купить хлеб и молоко` | active Review projection contains exactly one task; no patch splits solely on `и` or another conjunction |
 | ML-05 | in-sentence RU→EN→RU code switch | code-switched-term accuracy and exact task count meet the versioned fixture expectations; per-segment language labels may contain both `ru` and `en` |
 | ML-06 | edit then accurate correction | an edited title remains locked; a differing accurate suggestion becomes an open visible conflict and cannot be frozen until the user resolves it |
+
+## STT accuracy tests (credentialed track, real audio)
+
+These tests call the real accurate-STT adapter over genuine founder-corpus
+audio and measure STT quality independently from downstream task extraction.
+They run only when credentials and consent are present; otherwise they skip
+with an explicit disabled-state report.
+
+| ID | Scenario | Required assertion |
+|---|---|---|
+| SA-01 | Russian corpus STT | CER and WER are reported per case; critical-term recall is 100% on the approved corpus |
+| SA-02 | RU+EN code-switch STT | code-switched terms (`BrainBuddy`, `production smoke`) are preserved in the transcript; per-segment language labels reflect both languages |
+| SA-03 | omission/hallucination counts | dropped-word and invented-word counts are reported per case and per provider/model version |
+| SA-04 | STT latency | p95 transcription latency is reported by duration and language; a labelled fallback is allowed when the budget is missed, never a safety weakening |
+| SA-05 | provider comparison | at least one credible alternative provider is benchmarked before locking; the chosen provider is justified by corpus metrics, not marketing claims |
+
+## Task extraction accuracy tests (credentialed track, real transcript)
+
+These tests call the real text reconciler over the accurate transcript and
+measure extraction quality independently from STT quality.
+
+| ID | Scenario | Required assertion |
+|---|---|---|
+| EA-01 | exact task-count accuracy | at least 95% exact task-count accuracy on the approved corpus |
+| EA-02 | boundary precision/recall | at least 95% task-boundary precision and recall |
+| EA-03 | title cleanliness | titles match ground truth without regex artifacts or positional splits |
+| EA-04 | conjunction false-split rate | `купить хлеб и молоко` and similar cases produce exactly one task; no split on `и`/`and` alone |
+| EA-05 | split/merge accuracy | structural split/merge cases produce expected lineage with stable IDs |
+| EA-06 | semantic preservation | semantic intent is preserved across reconciliation; no invented tasks |
+| EA-07 | confidence calibration | calibration error is reported and within the configured threshold |
 
 ## Event stream and projection tests
 
@@ -108,6 +154,8 @@ paid model. The required founder examples are release-blocking, not illustrative
 | PA-14 | reconciler touches locked title | suggested change is stored as an open conflict; title is unchanged and freeze fails until explicit resolution |
 | PA-15 | remove/supersede audit | tombstoned and structurally superseded proposals are hidden from active list but remain in owner-scoped history with predecessor/successor links |
 | PA-16 | wording correction, same intent | `update` preserves proposal ID and revises wording/source spans; array position is not used to match the proposal |
+| PA-17 | schema-valid operations only | the real reconciler emits only `add/update/split/merge/remove/supersede/reorder` patches; invalid operations are rejected before revision changes |
+| PA-18 | no regex in production path | the production reconciler path contains no regex/hardcoded fixture extraction; deterministic `_extract_titles` is CI-only |
 
 ## Target-resolution tests
 
@@ -148,6 +196,7 @@ paid model. The required founder examples are release-blocking, not illustrative
 | UI-03 | conflict review | Review shows mine/suggestion values and blocks Save until every open conflict is explicitly kept or accepted |
 | UI-04 | leave/resume without events | polling restores exact stage, authoritative transcript quality, active proposals, locks, conflicts, and last sequence |
 | UI-05 | provisional-only fallback | after bounded accurate/reconciler failure, manual Review is opt-in and visibly labelled unreconciled; it never looks like the successful accurate path |
+| UI-06 | declared language on preview | the browser preview recognition locale follows declared `language_hints`, not `navigator.language` alone |
 
 ## Undo tests
 
@@ -186,6 +235,9 @@ paid model. The required founder examples are release-blocking, not illustrative
 | PR-04 | retention sweep | raw and working artifacts delete at configured boundaries, not before |
 | PR-05 | provenance inspection | committed action traces to segments/source, model/template, user patches, and confirmer |
 | PR-06 | analytics export | only pseudonymous IDs, timings, bands, counts, and error codes leave app logs |
+| PR-07 | language hints propagate | `language_hints` and `vocabulary` from consent reach every STT and reconciler invocation |
+| PR-08 | cost limit reached | provider call is refused with a redacted retryable/disabled error code; no silent fallback to deterministic fakes |
+| PR-09 | missing credentials | operation surfaces explicit `disabled` state; no silent deterministic default |
 
 ## Runner recovery and migration tests
 
@@ -201,9 +253,10 @@ paid model. The required founder examples are release-blocking, not illustrative
 
 ## Latency and evaluation gates
 
-Automated performance tests use deterministic delayed fakes and verify telemetry/budget
-classification rather than relying on wall-clock model calls. A release candidate reports
-p50/p95 by audio duration, language, device/network class, and model version.
+Automated performance tests use deterministic delayed fakes and verify
+telemetry/budget classification rather than relying on wall-clock model calls.
+A release candidate reports p50/p95 by audio duration, language,
+device/network class, and model version.
 
 - p95 local recording feedback `<100 ms`;
 - stable partial transcript `<700 ms` after segment end;
@@ -213,12 +266,16 @@ p50/p95 by audio duration, language, device/network class, and model version.
 - reconciled batch `<8 s` for two minutes and `<20 s` at configured maximum;
 - local commit acknowledgement `<1 s`.
 
-Confidence thresholds cannot ship from intuition alone. A versioned offline labelled
-text/audio corpus must cover Russian, English, useful Dutch fixtures, in-sentence code
-switching, missing/wrong punctuation, product names, low-confidence audio, retries, and
-edit-then-reconcile. Report task-boundary precision/recall, exact task-count accuracy,
-title cleanliness, code-switched-term accuracy, conjunction false-split rate, proposal
-split/merge quality, and calibration by language/model. Required safety invariants are zero
-silent user-edit loss, zero automatic canonical writes, zero destructive/routing actions
-without confirmation, and zero duplicate tasks after retries. Latency degradation may
-trigger a labelled fallback but never relax those invariants.
+Confidence thresholds cannot ship from intuition alone. A versioned offline
+labelled text/audio corpus must cover Russian, English, useful Dutch fixtures,
+in-sentence code switching, missing/wrong punctuation, product names,
+low-confidence audio, retries, and edit-then-reconcile. The real-audio
+evaluation harness reports STT quality (CER/WER, critical-term recall,
+omission/hallucination counts) separately from task-extraction quality
+(task-boundary precision/recall, exact task-count accuracy, title cleanliness,
+code-switched-term accuracy, conjunction false-split rate, proposal
+split/merge quality, and calibration by language/model). Required safety
+invariants are zero silent user-edit loss, zero automatic canonical writes,
+zero destructive/routing actions without confirmation, and zero duplicate
+tasks after retries. Latency degradation may trigger a labelled fallback but
+never relaxes those invariants.
