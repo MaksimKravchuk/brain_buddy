@@ -7,15 +7,18 @@ from pathlib import Path
 
 import pytest
 
-from app.workflows.voice_brain_dump.domain import ProposalPatch, TranscriptHypothesis
+from app.workflows.voice_brain_dump.domain import (
+    ProposalPatch,
+    TranscriptHypothesis,
+)
 from app.workflows.voice_brain_dump.evaluation import (
-    _TaskLabel,
     _duration_cohort,
     _language_cohort,
     _match_task_labels,
     _percentile_95,
     _semantic_similarity,
     _task_labels,
+    _TaskLabel,
     build_semantic_extractor,
     evaluate_real_audio_corpus,
 )
