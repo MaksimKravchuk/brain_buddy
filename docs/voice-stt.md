@@ -39,13 +39,16 @@ Founder audio and ground truth stay outside the repository. A corpus directory u
 }
 ```
 
-For extraction scoring, `expected_tasks_file` may remain a JSON string list or
-use labelled objects such as
-`{"title":"Починить BrainBuddy","structural_change":"split"}`. The semantic
-reconciler supplies per-operation confidence and split/merge labels so the
-report can calculate labelled boundary precision/recall, semantic preservation,
-split/merge accuracy, and confidence calibration rather than treating matching
-task counts as matching boundaries.
+For title/count-only extraction scoring, `expected_tasks_file` may remain a JSON
+string list. Boundary scoring requires labelled source provenance, for example
+`{"title":"Починить BrainBuddy","source_spans":[[0,1500]],"structural_change":"split"}`.
+Each span is a non-negative `[start_ms, end_ms]` pair. The semantic reconciler
+receives the STT provider's actual segments plus the case language hints and
+vocabulary; its `source_segment_ids` are resolved back to these spans. Boundary
+precision/recall then matches source provenance only. Title equality and semantic
+similarity remain separate metrics, so shared title tokens or matching task counts
+cannot masquerade as labelled boundaries. Reconciler confidence and split/merge
+labels continue to drive calibration and structural accuracy.
 
 Run the credentialed STT-only track from the repository root:
 

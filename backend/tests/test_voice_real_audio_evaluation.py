@@ -12,6 +12,7 @@ from app.workflows.voice_brain_dump.domain import (
     TranscriptHypothesis,
 )
 from app.workflows.voice_brain_dump.evaluation import (
+    EvaluationExtractionInput,
     _duration_cohort,
     _language_cohort,
     _match_task_labels,
@@ -70,7 +71,11 @@ class RecordingReconciler:
     provider_id = "semantic-evaluation"
     requires_external_processing = True
 
+    def __init__(self) -> None:
+        self.requests = []
+
     def reconcile(self, request):
+        self.requests.append(request)
         segment = request.transcript_segments[0]
         return ReconcileResult(
             input_hash="semantic-input",
@@ -97,7 +102,15 @@ def _corpus(tmp_path: Path) -> Path:
         "Надо починить BrainBuddy и сделать production smoke", encoding="utf-8"
     )
     (tmp_path / "sample.tasks.json").write_text(
-        json.dumps(["Починить BrainBuddy", "Сделать production smoke"]),
+        json.dumps(
+            [
+                {"title": "Починить BrainBuddy", "source_spans": [[0, 500]]},
+                {
+                    "title": "Сделать production smoke",
+                    "source_spans": [[500, 1000]],
+                },
+            ]
+        ),
         encoding="utf-8",
     )
     (tmp_path / "manifest.json").write_text(
@@ -160,15 +173,52 @@ def test_real_audio_harness_calls_provider_with_audio_not_expected_transcript(
 
 
 def test_semantic_extractor_scores_provider_generated_proposals() -> None:
-    extractor = build_semantic_extractor(RecordingReconciler())
+    reconciler = RecordingReconciler()
+    extractor = build_semantic_extractor(reconciler)
 
-    assert extractor("Надо разобраться с brain body") == [
+    assert extractor(
+        EvaluationExtractionInput(
+            transcript_segments=(
+                TranscriptHypothesis(
+                    id="segment_1",
+                    sequence=1,
+                    start_ms=0,
+                    end_ms=1500,
+                    text="Надо разобраться с brain body",
+                    stability="stable",
+                    provider_role="accurate",
+                ),
+            ),
+            language_hints=("ru", "en"),
+            vocabulary=("BrainBuddy", "brain body"),
+        )
+    ) == [
         {
             "title": "Починить BrainBuddy",
             "structural_change": None,
             "confidence": 0.8,
+            "source_spans": [[0, 1500]],
         }
     ]
+    assert reconciler.requests[0].language_hints == ["ru", "en"]
+    assert reconciler.requests[0].vocabulary == ["BrainBuddy", "brain body"]
+
+
+def test_real_audio_harness_forwards_case_hints_to_application_reconciler(
+    tmp_path: Path,
+) -> None:
+    reconciler = RecordingReconciler()
+
+    evaluate_real_audio_corpus(
+        _corpus(tmp_path),
+        RecordingProvider("Надо починить BrainBuddy и сделать production smoke"),
+        external_processing_allowed=True,
+        extractor=build_semantic_extractor(reconciler),
+        monotonic_values=iter((1.0, 1.1)).__next__,
+    )
+
+    assert reconciler.requests[0].language_hints == ["ru", "en"]
+    assert reconciler.requests[0].vocabulary == ["BrainBuddy", "production smoke"]
 
 
 def test_real_audio_harness_reports_stt_and_extraction_failures_separately(
@@ -201,9 +251,12 @@ def test_task_boundaries_are_scored_separately_from_title_wording(tmp_path: Path
         _corpus(tmp_path),
         provider,
         external_processing_allowed=True,
-        extractor=lambda _transcript: [
-            "Починить BrainBuddy",
-            "Сделать production check",
+        extractor=lambda _input: [
+            {"title": "Починить BrainBuddy", "source_spans": [[0, 500]]},
+            {
+                "title": "Сделать production check",
+                "source_spans": [[500, 1000]],
+            },
         ],
         monotonic_values=iter((1.0, 1.1)).__next__,
     )
@@ -218,13 +271,27 @@ def test_task_boundaries_are_scored_separately_from_title_wording(tmp_path: Path
 def test_same_count_invented_tasks_do_not_match_labelled_boundaries(
     tmp_path: Path,
 ) -> None:
-    report = evaluate_real_audio_corpus(
-        _corpus(tmp_path),
-        RecordingProvider(
-            "Нужно починить BrainBuddy. Потом сделать production smoke."
+    corpus = _corpus(tmp_path)
+    (corpus / "sample.transcript.txt").write_text(
+        "Call Alice. Buy milk.", encoding="utf-8"
+    )
+    (corpus / "sample.tasks.json").write_text(
+        json.dumps(
+            [
+                {"title": "Call Alice", "source_spans": [[0, 500]]},
+                {"title": "Buy milk", "source_spans": [[500, 1000]]},
+            ]
         ),
+        encoding="utf-8",
+    )
+    report = evaluate_real_audio_corpus(
+        corpus,
+        RecordingProvider("Call Alice. Buy milk."),
         external_processing_allowed=True,
-        extractor=lambda _transcript: ["Купить яхту", "Выучить латынь"],
+        extractor=lambda _input: [
+            {"title": "Call Bob", "confidence": 0.9},
+            {"title": "Buy yacht", "confidence": 0.9},
+        ],
         monotonic_values=iter((1.0, 1.1)).__next__,
     )
 
@@ -232,7 +299,10 @@ def test_same_count_invented_tasks_do_not_match_labelled_boundaries(
     assert report.extraction.exact_task_count_accuracy == 1
     assert report.extraction.boundary_precision == 0
     assert report.extraction.boundary_recall == 0
-    assert report.extraction.semantic_preservation_rate == 0
+    assert report.extraction.semantic_preservation_rate == pytest.approx(0.5)
+    assert report.extraction.semantic_preservation_rate < 0.95
+    assert report.extraction.title_accuracy == 0
+    assert report.extraction.confidence_calibration_error == pytest.approx(0.9)
 
 
 def test_rich_labels_score_split_merge_confidence_and_grouped_p95_latency(
@@ -245,8 +315,12 @@ def test_rich_labels_score_split_merge_confidence_and_grouped_p95_latency(
                 {
                     "title": "Починить BrainBuddy",
                     "structural_change": "split",
+                    "source_spans": [[0, 500]],
                 },
-                {"title": "Сделать production smoke"},
+                {
+                    "title": "Сделать production smoke",
+                    "source_spans": [[500, 1000]],
+                },
             ]
         ),
         encoding="utf-8",
@@ -264,8 +338,13 @@ def test_rich_labels_score_split_merge_confidence_and_grouped_p95_latency(
                 "title": "Починить BrainBuddy",
                 "structural_change": "split",
                 "confidence": 0.8,
+                "source_spans": [[0, 500]],
             },
-            {"title": "Сделать production smoke", "confidence": 0.6},
+            {
+                "title": "Сделать production smoke",
+                "confidence": 0.6,
+                "source_spans": [[500, 1000]],
+            },
         ],
         monotonic_values=iter((1.0, 1.4)).__next__,
     )
@@ -315,9 +394,9 @@ def test_real_audio_harness_uses_disjoint_language_cohorts_and_micro_averages_te
         corpus,
         provider,
         external_processing_allowed=True,
-        extractor=lambda transcript: (
+        extractor=lambda extraction_input: (
             ["Сделать production smoke", "Позвонить Наташе"]
-            if "production smoke" in transcript
+            if "production smoke" in extraction_input.transcript
             else ["Починить BrainBuddy"]
         ),
         monotonic_values=iter((1.0, 1.2, 2.0, 2.4)).__next__,
