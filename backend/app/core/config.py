@@ -224,18 +224,40 @@ def _build_config() -> AppConfig:
             )
         ),
     )
+    reconciler_retry_backoff = tuple(
+        float(value.strip())
+        for value in os.getenv(
+            "BRAIN_BUDDY_VOICE_RECONCILER_RETRY_BACKOFF_SECONDS", "1,2"
+        ).split(",")
+        if value.strip()
+    )
     voice = VoiceSettings(
         accurate_stt=accurate_stt,
         fast_stt=VoiceProviderSettings(provider="disabled"),
         reconciler=VoiceProviderSettings(
             provider=os.getenv("BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER", "disabled"),
             model=os.getenv("BRAIN_BUDDY_VOICE_RECONCILER_MODEL", "gpt-4o"),
+            api_key_env=os.getenv(
+                "BRAIN_BUDDY_VOICE_RECONCILER_API_KEY_ENV", "OPENAI_API_KEY"
+            ),
             endpoint=os.getenv(
                 "BRAIN_BUDDY_VOICE_RECONCILER_ENDPOINT",
                 "https://api.openai.com/v1/chat/completions",
             ),
             timeout_seconds=float(
                 os.getenv("BRAIN_BUDDY_VOICE_RECONCILER_TIMEOUT_SECONDS", "30")
+            ),
+            max_retries=int(
+                os.getenv("BRAIN_BUDDY_VOICE_RECONCILER_MAX_RETRIES", "2")
+            ),
+            retry_backoff_seconds=reconciler_retry_backoff,
+            max_cost_usd_per_operation=float(
+                os.getenv("BRAIN_BUDDY_VOICE_RECONCILER_MAX_COST_USD", "0.50")
+            ),
+            estimated_cost_usd_per_megabyte=float(
+                os.getenv(
+                    "BRAIN_BUDDY_VOICE_RECONCILER_ESTIMATED_COST_USD_PER_MB", "0.01"
+                )
             ),
         ),
         retention=VoiceRetentionSettings(

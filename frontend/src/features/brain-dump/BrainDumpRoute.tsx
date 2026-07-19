@@ -264,7 +264,13 @@ export function BrainDumpRoute(): JSX.Element {
       if (params.operationId === "new") {
         navigate(`/brain-dump/${started.id}`, { replace: true });
       }
-      startMediaRecorderFor(started, stream);
+      if (started.consent.external_processing_allowed) {
+        startMediaRecorderFor(started, stream);
+      } else {
+        // No external-processing consent: never open the original-audio
+        // upload pipeline. Browser preview (below) stays local-only.
+        stream.getTracks().forEach((track) => track.stop());
+      }
       if (Recognition) {
         startRecognitionFor(started, Recognition);
       }
@@ -315,6 +321,13 @@ export function BrainDumpRoute(): JSX.Element {
         await audioUploadQueueRef.current;
         const sealedInput = operationRef.current;
         if (!sealedInput) {
+          return;
+        }
+        if (!sealedInput.consent.external_processing_allowed) {
+          // Without external-processing consent no audio was ever uploaded,
+          // so there is nothing to seal; open review on the browser-preview
+          // proposals collected so far instead of calling seal.
+          navigate(`/brain-dump/${sealedInput.id}/review`, { replace: true });
           return;
         }
         const expectedChunks = audioChunkNumberRef.current;

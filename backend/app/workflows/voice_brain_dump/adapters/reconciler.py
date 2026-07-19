@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
@@ -127,12 +128,23 @@ class OpenAITextReconciler:
     model: str = "gpt-4o"
     endpoint: str = _DEFAULT_ENDPOINT
     timeout_seconds: float = 30.0
+    max_retries: int = 2
+    retry_backoff_seconds: Sequence[float] = (1.0, 2.0)
+    max_cost_usd_per_operation: float = 0.50
+    estimated_cost_usd_per_megabyte: float = 0.01
+    transport: httpx.BaseTransport | None = None
+    sleep: Callable[[float], None] = time.sleep
     complete: Completion | None = None
     provider_id: str = "openai"
     requires_external_processing: bool = True
 
     def reconcile(self, request: ReconcileTextRequest) -> ReconcileResult:
         payload = self._payload(request)
+        estimated_cost = (
+            len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) / 1_000_000
+        ) * self.estimated_cost_usd_per_megabyte * (self.max_retries + 1)
+        if estimated_cost > self.max_cost_usd_per_operation:
+            raise ProviderTerminalError("RECONCILER_COST_LIMIT_EXCEEDED")
         raw = self.complete(payload) if self.complete is not None else self._call(payload)
         try:
             envelope = _ReconcileEnvelope.model_validate(raw)
@@ -194,6 +206,10 @@ class OpenAITextReconciler:
                         "IDs, existing proposal identity, user locks, and deletions. Use only "
                         "add, update, split, merge, remove, or supersede. Never infer details, "
                         "tags, projects, priority, due dates, routes, or destructive actions. "
+                        "Never invent, fabricate, or hallucinate a task whose meaning is not "
+                        "actually present in the supplied transcript segments; every operation "
+                        "must be grounded in and traceable to its cited source_segment_ids, and "
+                        "an ambiguous or empty transcript span must not be turned into a task. "
                         "Do not split a single shopping intent solely on a conjunction. New "
                         "proposal IDs are server-owned: set proposal_id to null for add/split/"
                         "merge/supersede. Existing update/remove targets must use an exact "
@@ -211,26 +227,7 @@ class OpenAITextReconciler:
         }
 
     def _call(self, payload: dict[str, object]) -> dict[str, object]:
-        try:
-            with httpx.Client(timeout=self.timeout_seconds) as client:
-                response = client.post(
-                    self.endpoint,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=payload,
-                )
-                if response.status_code == 429 or response.status_code >= 500:
-                    raise ProviderRetryableError("RECONCILER_PROVIDER_RETRYABLE")
-                response.raise_for_status()
-        except ProviderRetryableError:
-            raise
-        except (httpx.TimeoutException, httpx.NetworkError) as exc:
-            raise ProviderRetryableError("RECONCILER_PROVIDER_RETRYABLE") from exc
-        except httpx.HTTPError as exc:
-            raise ProviderTerminalError("RECONCILER_PROVIDER_REJECTED") from exc
-
+        response = self._post_with_retries(payload)
         try:
             body: dict[str, Any] = response.json()
             content = body["choices"][0]["message"]["content"]
@@ -240,6 +237,46 @@ class OpenAITextReconciler:
         if not isinstance(parsed, dict):
             raise ProviderTerminalError("RECONCILER_INVALID_RESPONSE")
         return parsed
+
+    def _post_with_retries(self, payload: dict[str, object]) -> httpx.Response:
+        attempt = 0
+        while True:
+            try:
+                with httpx.Client(
+                    timeout=self.timeout_seconds, transport=self.transport
+                ) as client:
+                    response = client.post(
+                        self.endpoint,
+                        headers={
+                            "Authorization": f"Bearer {self.api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json=payload,
+                    )
+            except (httpx.TimeoutException, httpx.NetworkError) as exc:
+                if attempt >= self.max_retries:
+                    raise ProviderRetryableError("RECONCILER_PROVIDER_RETRYABLE") from exc
+                self._backoff(attempt)
+                attempt += 1
+                continue
+
+            if response.status_code == 429 or response.status_code >= 500:
+                if attempt >= self.max_retries:
+                    raise ProviderRetryableError("RECONCILER_PROVIDER_RETRYABLE")
+                self._backoff(attempt)
+                attempt += 1
+                continue
+            try:
+                response.raise_for_status()
+            except httpx.HTTPError as exc:
+                raise ProviderTerminalError("RECONCILER_PROVIDER_REJECTED") from exc
+            return response
+
+    def _backoff(self, attempt: int) -> None:
+        if not self.retry_backoff_seconds:
+            return
+        index = min(attempt, len(self.retry_backoff_seconds) - 1)
+        self.sleep(float(self.retry_backoff_seconds[index]))
 
     def _materialize(
         self, request: ReconcileTextRequest, operations: list[_OperationDraft]

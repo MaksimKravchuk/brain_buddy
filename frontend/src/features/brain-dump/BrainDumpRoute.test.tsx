@@ -52,6 +52,18 @@ function operation(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function consentedOperation(overrides: Record<string, unknown> = {}) {
+  return operation({
+    consent: {
+      microphone: true,
+      external_processing_allowed: true,
+      provider: "openai",
+      recorded_at: "2026-07-16T00:00:00Z"
+    },
+    ...overrides
+  });
+}
+
 function proposal(id: string, ordinal: number, title: string, extras: Record<string, unknown> = {}) {
   return {
     id,
@@ -186,7 +198,9 @@ describe("BrainDumpRoute", () => {
     renderBrainDump();
     await userEvent.click(screen.getByRole("button", { name: "Record" }));
     expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({ audio: true });
-    expect(micTrackStop).not.toHaveBeenCalled();
+    // No external-processing consent was granted, so the recording stream is
+    // released immediately instead of feeding a MediaRecorder upload.
+    expect(micTrackStop).toHaveBeenCalledTimes(1);
     expect(recognition?.start).toHaveBeenCalledTimes(1);
 
     act(() => emitSpeech("Renew car insurance. Reply to Anna about the offsite."));
@@ -402,20 +416,21 @@ describe("BrainDumpRoute", () => {
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
-        return jsonResponse(operation(), 201);
+        return jsonResponse(consentedOperation(), 201);
       }
       if (url.endsWith("/brain_dump_1/audio/0")) {
         uploadedHash = new Headers(init?.headers).get("X-Content-SHA256") ?? "";
-        return jsonResponse(operation({ revision: 2, audio_chunks: [{ chunk_number: 0, sha256: uploadedHash, size_bytes: 14 }] }));
+        return jsonResponse(consentedOperation({ revision: 2, audio_chunks: [{ chunk_number: 0, sha256: uploadedHash, size_bytes: 14 }] }));
       }
       if (url.endsWith("/brain_dump_1/seal")) {
         sealPayload = JSON.parse(String(init?.body));
-        return jsonResponse(operation({ status: "awaiting_confirmation", revision: 3 }));
+        return jsonResponse(consentedOperation({ status: "awaiting_confirmation", revision: 3 }));
       }
       throw new Error(`unexpected fetch ${url}`);
     });
 
     renderBrainDump();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Allow secure cloud transcription" }));
     await userEvent.click(screen.getByRole("button", { name: "Record" }));
     await userEvent.click(screen.getByRole("button", { name: "Stop & review" }));
 
@@ -423,6 +438,50 @@ describe("BrainDumpRoute", () => {
     await waitFor(() => expect(sealPayload).not.toBeNull());
     expect(sealPayload).toMatchObject({ expected_chunks: 1, manifest_hash: expect.stringMatching(/^[a-f0-9]{64}$/) });
     expect(await screen.findByRole("main", { name: "Review brain dump proposals" })).toBeInTheDocument();
+  });
+
+  it("performs zero audio-upload and zero seal calls without external processing consent", async () => {
+    const mediaRecorderConstructor = vi.fn(function ChunkingMediaRecorder() {
+      return {
+        state: "inactive",
+        ondataavailable: null as ((event: { data: Blob }) => void) | null,
+        onstop: null as ((event: Event) => void) | null,
+        start(this: { state: string }) {
+          this.state = "recording";
+        },
+        stop(this: { state: string; onstop: ((event: Event) => void) | null }) {
+          this.state = "inactive";
+          this.onstop?.(new Event("stop"));
+        }
+      };
+    });
+    vi.stubGlobal("MediaRecorder", mediaRecorderConstructor);
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
+        return jsonResponse(operation(), 201);
+      }
+      if (url.endsWith("/brain_dump_1/transcript")) {
+        return jsonResponse(
+          operation({ revision: 2, proposals: [proposal("proposal_1", 1, "Renew car insurance")] })
+        );
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump();
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+    act(() => emitSpeech("Renew car insurance."));
+    await screen.findByText("Renew car insurance");
+
+    await userEvent.click(screen.getByRole("button", { name: "Stop & review" }));
+
+    expect(await screen.findByRole("main", { name: "Review brain dump proposals" })).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Renew car insurance")).toBeInTheDocument();
+    expect(mediaRecorderConstructor).not.toHaveBeenCalled();
+    const calledUrls = fetchMock.mock.calls.map(([input]) => String(input));
+    expect(calledUrls.some((calledUrl) => calledUrl.includes("/audio/"))).toBe(false);
+    expect(calledUrls.some((calledUrl) => calledUrl.includes("/seal"))).toBe(false);
   });
 
   it("does not create a backend operation when microphone permission fails", async () => {
@@ -727,7 +786,7 @@ describe("BrainDumpRoute", () => {
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
-        return jsonResponse(operation(), 201);
+        return jsonResponse(consentedOperation(), 201);
       }
       if (url.endsWith("/brain_dump_1/seal")) {
         return Promise.reject(new Error("finish failed"));
@@ -735,12 +794,13 @@ describe("BrainDumpRoute", () => {
       if (url.endsWith("/brain_dump_1/transcript")) {
         const body = JSON.parse(String(init?.body));
         expect(body.segments[0]).toMatchObject({ sequence: 1, text: "Still recording after failed finish", stability: "stable" });
-        return jsonResponse(operation({ revision: 2, proposals: [proposal("proposal_1", 1, "Still recording after failed finish")] }));
+        return jsonResponse(consentedOperation({ revision: 2, proposals: [proposal("proposal_1", 1, "Still recording after failed finish")] }));
       }
       throw new Error(`unexpected fetch ${url}`);
     });
 
     renderBrainDump();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Allow secure cloud transcription" }));
     await userEvent.click(screen.getByRole("button", { name: "Record" }));
     const activeRecognition = recognition;
     await userEvent.click(screen.getByRole("button", { name: "Stop & review" }));
@@ -803,7 +863,7 @@ describe("BrainDumpRoute", () => {
   });
 
   it("reports plural saved task counts after confirmation", async () => {
-    const captured = operation({
+    const captured = consentedOperation({
       revision: 2,
       status: "awaiting_confirmation",
       proposals: [proposal("proposal_1", 1, "Renew car insurance"), proposal("proposal_2", 2, "Reply to Anna")]
@@ -811,21 +871,22 @@ describe("BrainDumpRoute", () => {
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
-        return jsonResponse(operation(), 201);
+        return jsonResponse(consentedOperation(), 201);
       }
       if (url.endsWith("/brain_dump_1/transcript")) {
         return jsonResponse(captured);
       }
       if (url.endsWith("/brain_dump_1/seal")) {
-        return jsonResponse(operation({ ...captured, status: "awaiting_confirmation", revision: 3 }));
+        return jsonResponse(consentedOperation({ ...captured, status: "awaiting_confirmation", revision: 3 }));
       }
       if (url.endsWith("/brain_dump_1/commit")) {
-        return jsonResponse(operation({ ...captured, status: "completed", revision: 4, committed_task_ids: ["task_1", "task_2"] }));
+        return jsonResponse(consentedOperation({ ...captured, status: "completed", revision: 4, committed_task_ids: ["task_1", "task_2"] }));
       }
       throw new Error(`unexpected fetch ${url}`);
     });
 
     renderBrainDump();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Allow secure cloud transcription" }));
     await userEvent.click(screen.getByRole("button", { name: "Record" }));
     act(() => emitSpeech("Renew car insurance. Reply to Anna."));
     await userEvent.click(await screen.findByRole("button", { name: "Stop & review" }));
@@ -835,24 +896,24 @@ describe("BrainDumpRoute", () => {
   });
 
   it("preserves user-edited wording, deletes proposals and saves to native Inbox only after confirmation", async () => {
-    const captured = operation({
+    const captured = consentedOperation({
       revision: 2,
       proposals: [proposal("proposal_1", 1, "Renew car insurance"), proposal("proposal_2", 2, "Reply to Anna")]
     });
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
-        return jsonResponse(operation(), 201);
+        return jsonResponse(consentedOperation(), 201);
       }
       if (url.endsWith("/brain_dump_1/transcript")) {
         return jsonResponse(captured);
       }
       if (url.endsWith("/brain_dump_1/seal")) {
-        return jsonResponse(operation({ ...captured, status: "awaiting_confirmation", revision: 3 }));
+        return jsonResponse(consentedOperation({ ...captured, status: "awaiting_confirmation", revision: 3 }));
       }
       if (url.includes("/proposals/proposal_1")) {
         return jsonResponse(
-          operation({
+          consentedOperation({
             ...captured,
             revision: 4,
             proposals: [proposal("proposal_1", 1, "Renew car insurance before Friday", { status: "user_edited", user_edited: true }), proposal("proposal_2", 2, "Reply to Anna")]
@@ -861,7 +922,7 @@ describe("BrainDumpRoute", () => {
       }
       if (url.includes("/proposals/proposal_2")) {
         return jsonResponse(
-          operation({
+          consentedOperation({
             ...captured,
             revision: 5,
             proposals: [proposal("proposal_1", 1, "Renew car insurance before Friday", { status: "user_edited", user_edited: true }), proposal("proposal_2", 2, "Reply to Anna", { deleted: true })]
@@ -870,7 +931,7 @@ describe("BrainDumpRoute", () => {
       }
       if (url.endsWith("/brain_dump_1/commit")) {
         return jsonResponse(
-          operation({
+          consentedOperation({
             status: "completed",
             revision: 6,
             committed_task_ids: ["task_1"],
@@ -882,6 +943,7 @@ describe("BrainDumpRoute", () => {
     });
 
     renderBrainDump();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Allow secure cloud transcription" }));
     await userEvent.click(screen.getByRole("button", { name: "Record" }));
     act(() => emitSpeech("Renew car insurance. Reply to Anna."));
     await userEvent.click(await screen.findByRole("button", { name: "Stop & review" }));

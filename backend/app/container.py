@@ -97,6 +97,10 @@ def _build_text_reconciler(config: AppConfig) -> TextReconcilerPort:
             model=settings.model,
             endpoint=settings.endpoint,
             timeout_seconds=settings.timeout_seconds,
+            max_retries=settings.max_retries,
+            retry_backoff_seconds=settings.retry_backoff_seconds,
+            max_cost_usd_per_operation=settings.max_cost_usd_per_operation,
+            estimated_cost_usd_per_megabyte=settings.estimated_cost_usd_per_megabyte,
         )
     return DisabledTextReconciler()
 
