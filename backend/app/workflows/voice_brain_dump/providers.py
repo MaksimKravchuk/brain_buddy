@@ -45,6 +45,8 @@ class SttResult:
     role: str
     input_hash: str
     segments: list[TranscriptHypothesis]
+    provider: str | None = None
+    estimated_cost_usd: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -58,6 +60,9 @@ class FastSttPort(Protocol):
 
 
 class AccurateSttPort(Protocol):
+    provider_name: str
+    requires_external_processing: bool
+
     def transcribe_sealed_audio(self, request: AccurateSttRequest) -> SttResult: ...
 
 
@@ -94,11 +99,15 @@ class DeterministicFastStt:
 class DeterministicAccurateStt:
     """Fake accurate STT that enforces sealed-original-audio input."""
 
+    provider_name = "deterministic"
+    requires_external_processing = False
+
     def __init__(
         self,
         transcripts: dict[str, str] | None = None,
         *,
         fail_plan: dict[str, list[str]] | None = None,
+        allow_text_fixture_audio: bool = False,
     ) -> None:
         self.transcripts = transcripts or {}
         # Per-media_ref queue of forced outcomes ("retryable" | "terminal"),
@@ -107,6 +116,7 @@ class DeterministicAccurateStt:
             key: list(value) for key, value in (fail_plan or {}).items()
         }
         self.calls: list[AccurateSttRequest] = []
+        self.allow_text_fixture_audio = allow_text_fixture_audio
 
     def transcribe_sealed_audio(self, request: AccurateSttRequest) -> SttResult:
         self.calls.append(request)
@@ -121,12 +131,13 @@ class DeterministicAccurateStt:
                 raise ProviderTerminalError(
                     f"Deterministic accurate STT terminal failure for '{request.media_ref}'."
                 )
-        text = self.transcripts.get(
-            request.media_ref,
-            request.sealed_audio.decode("utf-8", errors="ignore")
-            or "".join(request.vocabulary)
-            or "",
-        )
+        text = self.transcripts.get(request.media_ref, "")
+        if not text and self.allow_text_fixture_audio:
+            text = request.sealed_audio.decode("utf-8", errors="strict")
+        if not text:
+            text = " ".join(request.vocabulary)
+        if not text:
+            raise ProviderTerminalError("DETERMINISTIC_STT_FIXTURE_MISSING")
         segment = TranscriptHypothesis(
             id=_stable_id("accurate", request.operation_id, request.media_ref, text),
             sequence=1,
@@ -141,9 +152,24 @@ class DeterministicAccurateStt:
         )
         return SttResult(
             role="accurate",
+            provider=self.provider_name,
             input_hash=_input_hash(request.media_ref, text, ",".join(request.supersedes_segment_ids)),
             segments=[segment],
         )
+
+
+class DisabledAccurateStt:
+    """Safe explicit state used when accurate STT cannot be called."""
+
+    provider_name = "disabled"
+    requires_external_processing = False
+
+    def __init__(self, reason: str = "STT_PROVIDER_DISABLED") -> None:
+        self.reason = reason
+
+    def transcribe_sealed_audio(self, request: AccurateSttRequest) -> SttResult:
+        del request
+        raise ProviderTerminalError(self.reason)
 
 
 class DeterministicTextReconciler:
