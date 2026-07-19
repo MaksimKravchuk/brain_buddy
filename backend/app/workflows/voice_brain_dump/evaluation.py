@@ -15,7 +15,7 @@ import time
 import wave
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -302,6 +302,7 @@ class SttQualityMetrics:
     omission_count: int
     hallucination_count: int
     mean_latency_seconds: float
+    p95_latency_seconds: float
     estimated_cost_usd: float
 
 
@@ -313,6 +314,7 @@ class ExtractionQualityMetrics:
     title_accuracy: float
     conjunction_false_split_rate: float
     semantic_preservation_rate: float
+    split_merge_accuracy: float | None
     confidence_calibration_error: float | None
 
 
@@ -332,6 +334,7 @@ class RealAudioEvaluationReport:
     stt: SttQualityMetrics
     extraction: ExtractionQualityMetrics | None
     by_language: dict[str, SttQualityMetrics]
+    p95_latency_by_duration_language_provider_model: dict[str, float]
     failures: list[EvaluationFailure]
 
 
@@ -344,14 +347,22 @@ class _RealAudioCase:
     language_hints: list[str]
     vocabulary: list[str]
     critical_terms: list[str]
+    duration_seconds: float | None
+
+
+@dataclass(frozen=True)
+class _TaskLabel:
+    title: str
+    structural_change: str | None = None
+    confidence: float | None = None
 
 
 def build_semantic_extractor(
     reconciler: TextReconcilerPort,
-) -> Callable[[str], list[str]]:
+) -> Callable[[str], list[dict[str, object]]]:
     """Adapt the configured semantic reconciler to the corpus scoring contract."""
 
-    def extract(transcript: str) -> list[str]:
+    def extract(transcript: str) -> list[dict[str, object]]:
         digest = hashlib.sha256(transcript.encode("utf-8")).hexdigest()[:12]
         segment = TranscriptHypothesis(
             id=f"evaluation_{digest}",
@@ -371,7 +382,13 @@ def build_semantic_extractor(
             )
         )
         return [
-            patch.title
+            {
+                "title": patch.title,
+                "structural_change": (
+                    patch.operation if patch.operation in {"split", "merge"} else None
+                ),
+                "confidence": result.confidences.get(patch.proposal_id),
+            }
             for patch in result.patches
             if patch.operation != "remove" and patch.title is not None
         ]
@@ -384,7 +401,7 @@ def evaluate_real_audio_corpus(
     provider: Any,
     *,
     external_processing_allowed: bool,
-    extractor: Callable[[str], list[str]] | None = None,
+    extractor: Callable[[str], list[str] | list[dict[str, object]]] | None = None,
     monotonic_values: Callable[[], float] = time.monotonic,
 ) -> RealAudioEvaluationReport:
     """Evaluate real audio without passing ground truth into the STT provider.
@@ -403,6 +420,7 @@ def evaluate_real_audio_corpus(
             stt=_empty_stt_metrics(),
             extraction=None,
             by_language={},
+            p95_latency_by_duration_language_provider_model={},
             failures=[],
         )
     if getattr(provider, "provider_name", "disabled") == "disabled":
@@ -414,6 +432,7 @@ def evaluate_real_audio_corpus(
             stt=_empty_stt_metrics(),
             extraction=None,
             by_language={},
+            p95_latency_by_duration_language_provider_model={},
             failures=[],
         )
 
@@ -426,6 +445,11 @@ def evaluate_real_audio_corpus(
     predicted_tasks = expected_tasks = 0
     extraction_cases = 0
     conjunction_cases = conjunction_false_splits = 0
+    semantic_score_total = 0.0
+    structural_cases = structural_hits = 0
+    confidence_error = 0.0
+    confidence_count = 0
+    grouped_latencies: dict[str, list[float]] = {}
 
     for case in cases:
         audio = case.audio_path.read_bytes()
@@ -447,7 +471,8 @@ def evaluate_real_audio_corpus(
         model = next(
             (segment.model for segment in result.segments if segment.model), "unknown"
         )
-        provider_models.add(f"{result.provider or provider.provider_name}/{model}")
+        provider_model = f"{result.provider or provider.provider_name}/{model}"
+        provider_models.add(provider_model)
         case_metrics = _score_stt(
             expected_transcript,
             predicted_transcript,
@@ -458,24 +483,35 @@ def evaluate_real_audio_corpus(
         aggregate.add(case_metrics)
         cohort = _language_cohort(case.language_hints)
         language_aggregates.setdefault(cohort, _MetricAccumulator()).add(case_metrics)
+        duration_seconds = case.duration_seconds or max(
+            (segment.end_ms for segment in result.segments), default=0
+        ) / 1000
+        latency_group = f"{_duration_cohort(duration_seconds)}|{cohort}|{provider_model}"
+        grouped_latencies.setdefault(latency_group, []).append(latency)
         if case_metrics.word_error_rate > 0 or case_metrics.critical_term_recall < 1:
             failures.append(EvaluationFailure(case.id, "stt", "TRANSCRIPT_MISMATCH"))
 
         if extractor is not None and case.expected_tasks_path is not None:
-            expected = json.loads(case.expected_tasks_path.read_text(encoding="utf-8"))
-            if not isinstance(expected, list) or not all(
-                isinstance(value, str) for value in expected
-            ):
-                raise ValueError(f"{case.id}: expected tasks must be a JSON string list")
-            predicted = extractor(predicted_transcript)
+            expected = _task_labels(
+                json.loads(case.expected_tasks_path.read_text(encoding="utf-8")),
+                case_id=case.id,
+                expected=True,
+            )
+            predicted = _task_labels(
+                extractor(predicted_transcript), case_id=case.id, expected=False
+            )
             extraction_cases += 1
             exact_task_counts += int(len(predicted) == len(expected))
+            matches = _match_task_labels(expected, predicted)
+            boundary_matches = [match for match in matches if match[2] >= 0.5]
             title_matches = sum(
-                _normalized(actual) == _normalized(wanted)
-                for actual, wanted in zip(predicted, expected, strict=False)
+                _normalized(predicted[predicted_index].title)
+                == _normalized(expected[expected_index].title)
+                for expected_index, predicted_index, _score in matches
             )
-            matched_boundaries += min(len(predicted), len(expected))
+            matched_boundaries += len(boundary_matches)
             matched_titles += title_matches
+            semantic_score_total += sum(score for _left, _right, score in matches)
             predicted_tasks += len(predicted)
             expected_tasks += len(expected)
             normalized_transcript = f" {_normalized(expected_transcript)} "
@@ -485,6 +521,31 @@ def evaluate_real_audio_corpus(
             if is_conjunction_case:
                 conjunction_cases += 1
                 conjunction_false_splits += int(len(predicted) > 1)
+            matches_by_expected = {
+                expected_index: predicted_index
+                for expected_index, predicted_index, score in boundary_matches
+            }
+            for expected_index, expected_label in enumerate(expected):
+                if expected_label.structural_change is None:
+                    continue
+                structural_cases += 1
+                predicted_index = matches_by_expected.get(expected_index)
+                structural_hits += int(
+                    predicted_index is not None
+                    and predicted[predicted_index].structural_change
+                    == expected_label.structural_change
+                )
+            matched_predicted = {
+                predicted_index for _expected_index, predicted_index, _score in boundary_matches
+            }
+            for predicted_index, predicted_label in enumerate(predicted):
+                if predicted_label.confidence is None:
+                    continue
+                confidence_count += 1
+                confidence_error += abs(
+                    predicted_label.confidence
+                    - float(predicted_index in matched_predicted)
+                )
             if len(predicted) != len(expected) or title_matches != len(expected):
                 failures.append(
                     EvaluationFailure(case.id, "extraction", "TASK_EXTRACTION_MISMATCH")
@@ -509,9 +570,14 @@ def evaluate_real_audio_corpus(
                 else 0.0
             ),
             semantic_preservation_rate=(
-                matched_titles / expected_tasks if expected_tasks else 0.0
+                semantic_score_total / expected_tasks if expected_tasks else 0.0
             ),
-            confidence_calibration_error=None,
+            split_merge_accuracy=(
+                structural_hits / structural_cases if structural_cases else None
+            ),
+            confidence_calibration_error=(
+                confidence_error / confidence_count if confidence_count else None
+            ),
         )
     return RealAudioEvaluationReport(
         status="completed",
@@ -523,6 +589,9 @@ def evaluate_real_audio_corpus(
         by_language={
             language: values.finish()
             for language, values in language_aggregates.items()
+        },
+        p95_latency_by_duration_language_provider_model={
+            group: _percentile_95(values) for group, values in grouped_latencies.items()
         },
         failures=failures,
     )
@@ -537,6 +606,7 @@ class _MetricAccumulator:
     omission_count: int = 0
     hallucination_count: int = 0
     latency_seconds: float = 0.0
+    latency_samples: list[float] = field(default_factory=list)
     estimated_cost_usd: float = 0.0
     count: int = 0
 
@@ -548,6 +618,7 @@ class _MetricAccumulator:
         self.omission_count += metrics.omission_count
         self.hallucination_count += metrics.hallucination_count
         self.latency_seconds += metrics.mean_latency_seconds
+        self.latency_samples.append(metrics.mean_latency_seconds)
         self.estimated_cost_usd += metrics.estimated_cost_usd
         self.count += 1
 
@@ -567,12 +638,24 @@ class _MetricAccumulator:
             omission_count=self.omission_count,
             hallucination_count=self.hallucination_count,
             mean_latency_seconds=self.latency_seconds / self.count,
+            p95_latency_seconds=_percentile_95(self.latency_samples),
             estimated_cost_usd=self.estimated_cost_usd,
         )
 
 
 def _empty_stt_metrics() -> SttQualityMetrics:
-    return SttQualityMetrics(0.0, 0.0, 0.0, 0, 0, 0, 0, 0.0, 0.0)
+    return SttQualityMetrics(
+        character_error_rate=0.0,
+        word_error_rate=0.0,
+        critical_term_recall=0.0,
+        critical_term_hits=0,
+        critical_term_total=0,
+        omission_count=0,
+        hallucination_count=0,
+        mean_latency_seconds=0.0,
+        p95_latency_seconds=0.0,
+        estimated_cost_usd=0.0,
+    )
 
 
 def _score_stt(
@@ -605,8 +688,92 @@ def _score_stt(
         omission_count=omissions,
         hallucination_count=hallucinations,
         mean_latency_seconds=round(latency_seconds, 6),
+        p95_latency_seconds=round(latency_seconds, 6),
         estimated_cost_usd=estimated_cost_usd,
     )
+
+
+def _task_labels(
+    raw_values: object, *, case_id: str, expected: bool
+) -> list[_TaskLabel]:
+    if not isinstance(raw_values, list):
+        raise ValueError(
+            f"{case_id}: expected tasks must be a JSON string list or labelled object list"
+        )
+    labels: list[_TaskLabel] = []
+    for raw in raw_values:
+        if isinstance(raw, str):
+            labels.append(_TaskLabel(title=raw))
+            continue
+        if not isinstance(raw, dict) or not isinstance(raw.get("title"), str):
+            kind = "expected tasks" if expected else "extracted tasks"
+            raise ValueError(f"{case_id}: {kind} require string titles")
+        structural_change = raw.get("structural_change")
+        if structural_change is not None and structural_change not in {"split", "merge"}:
+            raise ValueError(f"{case_id}: structural_change must be split or merge")
+        confidence_value = raw.get("confidence")
+        confidence = float(confidence_value) if confidence_value is not None else None
+        if confidence is not None and not 0 <= confidence <= 1:
+            raise ValueError(f"{case_id}: confidence must be between zero and one")
+        labels.append(
+            _TaskLabel(
+                title=str(raw["title"]),
+                structural_change=(
+                    str(structural_change) if structural_change is not None else None
+                ),
+                confidence=confidence,
+            )
+        )
+    return labels
+
+
+def _semantic_similarity(left: str, right: str) -> float:
+    left_words = set(_words(left))
+    right_words = set(_words(right))
+    if not left_words or not right_words:
+        return float(_normalized(left) == _normalized(right))
+    return 2 * len(left_words & right_words) / (len(left_words) + len(right_words))
+
+
+def _match_task_labels(
+    expected: list[_TaskLabel], predicted: list[_TaskLabel]
+) -> list[tuple[int, int, float]]:
+    candidates = sorted(
+        (
+            (_semantic_similarity(wanted.title, actual.title), expected_index, predicted_index)
+            for expected_index, wanted in enumerate(expected)
+            for predicted_index, actual in enumerate(predicted)
+        ),
+        reverse=True,
+    )
+    matched_expected: set[int] = set()
+    matched_predicted: set[int] = set()
+    matches: list[tuple[int, int, float]] = []
+    for score, expected_index, predicted_index in candidates:
+        if score <= 0:
+            break
+        if expected_index in matched_expected or predicted_index in matched_predicted:
+            continue
+        matched_expected.add(expected_index)
+        matched_predicted.add(predicted_index)
+        matches.append((expected_index, predicted_index, score))
+    return matches
+
+
+def _percentile_95(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    index = max(0, ((95 * len(ordered) + 99) // 100) - 1)
+    return round(ordered[index], 6)
+
+
+def _duration_cohort(duration_seconds: float) -> str:
+    if duration_seconds < 30:
+        return "<30s"
+    if duration_seconds <= 120:
+        return "30-120s"
+    return ">120s"
 
 
 def _language_cohort(language_hints: list[str]) -> str:
@@ -661,6 +828,11 @@ def _load_real_audio_cases(corpus_root: Path) -> list[_RealAudioCase]:
                 language_hints=[str(value) for value in raw.get("language_hints", [])],
                 vocabulary=[str(value) for value in raw.get("vocabulary", [])],
                 critical_terms=[str(value) for value in raw.get("critical_terms", [])],
+                duration_seconds=(
+                    float(raw["duration_seconds"])
+                    if raw.get("duration_seconds") is not None
+                    else None
+                ),
             )
         )
     if not cases:

@@ -21,6 +21,8 @@ def _start_operation(
     key: str = "start-brain-dump",
     *,
     external_processing_allowed: bool = False,
+    language_hints: list[str] | None = None,
+    vocabulary: list[str] | None = None,
 ):
     response = api_client.post(
         "/api/brain-dump-operations",
@@ -30,6 +32,8 @@ def _start_operation(
                 "microphone": True,
                 "external_processing_allowed": external_processing_allowed,
                 "provider": "openai" if external_processing_allowed else None,
+                "language_hints": language_hints or [],
+                "vocabulary": vocabulary or [],
             }
         },
     )
@@ -89,10 +93,14 @@ def test_seal_uses_semantic_reconciler_when_external_processing_is_allowed(
         api_client,
         key="start-semantic-reconciler",
         external_processing_allowed=True,
+        language_hints=["ru", "en"],
+        vocabulary=["BrainBuddy", "production smoke"],
     )
 
     def complete(payload: dict[str, object]) -> dict[str, object]:
         context = json.loads(payload["messages"][1]["content"])  # type: ignore[index]
+        assert context["language_hints"] == ["ru", "en"]
+        assert context["vocabulary"] == ["BrainBuddy", "production smoke"]
         segment_id = context["transcript_segments"][0]["id"]
         return {
             "operations": [
@@ -219,6 +227,84 @@ def test_seal_persists_semantic_reconciler_failures_for_recovery(
     assert sealed.json()["status"] == expected_status
     assert sealed.json()["provider_runs"][-1]["role"] == "reconciler"
     assert sealed.json()["provider_runs"][-1]["status"] == expected_status
+
+
+def test_retryable_reconciler_failure_resumes_without_rerunning_accurate_stt(
+    api_client,
+) -> None:
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    operation = _start_operation(
+        api_client,
+        key="start-reconciler-checkpoint-retry",
+        external_processing_allowed=True,
+        language_hints=["ru", "en"],
+        vocabulary=["BrainBuddy"],
+    )
+    service = api_client.app.state.container.task_service
+    original_transcribe = service.accurate_stt.transcribe_sealed_audio
+    stt_calls = 0
+    reconcile_calls = 0
+
+    def recording_transcribe(request):
+        nonlocal stt_calls
+        stt_calls += 1
+        return original_transcribe(request)
+
+    def flaky_reconcile(payload: dict[str, object]) -> dict[str, object]:
+        nonlocal reconcile_calls
+        reconcile_calls += 1
+        if reconcile_calls == 1:
+            raise ProviderRetryableError("temporary reconciler outage")
+        context = json.loads(payload["messages"][1]["content"])  # type: ignore[index]
+        return {
+            "operations": [
+                {
+                    "operation": "add",
+                    "proposal_id": None,
+                    "title": "Починить BrainBuddy",
+                    "source_segment_ids": [context["transcript_segments"][0]["id"]],
+                    "predecessor_ids": [],
+                    "base_revision": None,
+                }
+            ]
+        }
+
+    service.accurate_stt.transcribe_sealed_audio = recording_transcribe
+    service.text_reconciler = OpenAITextReconciler(
+        api_key="test-key", complete=flaky_reconcile
+    )
+    sealed = _upload_and_seal(
+        api_client,
+        operation,
+        "Починить BrainBuddy".encode(),
+        "seal-reconciler-checkpoint-retry",
+    )
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["status"] == "retryable_error"
+    assert stt_calls == 1
+
+    retried = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/retry",
+        headers={"Idempotency-Key": "retry-reconciler-checkpoint"},
+        json={"expected_revision": sealed.json()["revision"]},
+    )
+
+    assert retried.status_code == 200, retried.text
+    body = retried.json()
+    assert body["status"] == "awaiting_confirmation"
+    assert stt_calls == 1
+    assert reconcile_calls == 2
+    assert len(
+        [segment for segment in body["segments"] if segment["provider_role"] == "accurate"]
+    ) == 1
+    assert len(
+        [
+            run
+            for run in body["provider_runs"]
+            if run["role"] == "accurate_stt" and run["status"] == "succeeded"
+        ]
+    ) == 1
 
 
 def test_schema_v2_conflict_resolution_requires_a_visible_title_conflict(
