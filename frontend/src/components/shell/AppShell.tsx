@@ -516,7 +516,7 @@ function Sidebar({
                       <div
                         role="dialog"
                         aria-label={`Edit tag ${tag.name}`}
-                        className="absolute right-0 top-full z-50 mt-1 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-floating"
+                        className="absolute bottom-full right-0 z-50 mb-1 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-floating"
                         onKeyDown={popoverKeyDown}
                       >
                           <form

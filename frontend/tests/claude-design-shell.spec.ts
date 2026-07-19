@@ -62,7 +62,8 @@ const tagsResponse = [
   { id: "tag-calls", name: "calls", state: "active", revision: 1, open_task_count: 2 },
   { id: "tag-errands", name: "errands", state: "active", revision: 1, open_task_count: 1 },
   { id: "tag-deep-work", name: "deep-work", state: "active", revision: 1, open_task_count: 1 },
-  { id: "tag-laptop", name: "laptop", state: "active", revision: 1, open_task_count: 0 }
+  { id: "tag-laptop", name: "laptop", state: "active", revision: 1, open_task_count: 0 },
+  { id: "tag-long-context", name: "waiting-for-quarterly-budget-approval", state: "active", revision: 1, open_task_count: 0 }
 ];
 
 const brainDumpProposals = Array.from({ length: 9 }, (_, index) => ({
@@ -184,10 +185,13 @@ test.describe("desktop task shell at the canonical 1240x800 viewport", () => {
 
     await test.step("keep wrapped desktop tag actions inside the sidebar", async () => {
       const sidebar = page.locator("aside").first();
-      await page.getByRole("link", { name: "#deep-work" }).hover();
-      await page.getByRole("button", { name: "Tag options deep-work" }).click();
-      const dialog = page.getByRole("dialog", { name: "Edit tag deep-work" });
+      const tagName = "waiting-for-quarterly-budget-approval";
+      await page.getByRole("link", { name: `#${tagName}` }).hover();
+      await page.getByRole("button", { name: `Tag options ${tagName}` }).click();
+      const dialog = page.getByRole("dialog", { name: `Edit tag ${tagName}` });
       await expect(dialog).toBeVisible();
+      await expect(dialog.getByRole("button", { name: "Rename" })).toBeVisible();
+      await expect(dialog.getByRole("button", { name: "Delete" })).toBeVisible();
 
       const [sidebarBox, dialogBox, overflow] = await Promise.all([
         sidebar.boundingBox(),
@@ -200,11 +204,14 @@ test.describe("desktop task shell at the canonical 1240x800 viewport", () => {
       if (dialogBox.x < sidebarBox.x || dialogBox.x + dialogBox.width > sidebarBox.x + sidebarBox.width) {
         throw new Error(`Expected desktop tag dialog inside sidebar bounds: ${JSON.stringify({ sidebarBox, dialogBox })}`);
       }
+      if (dialogBox.y < sidebarBox.y || dialogBox.y + dialogBox.height > sidebarBox.y + sidebarBox.height) {
+        throw new Error(`Expected desktop tag dialog inside sidebar vertical bounds: ${JSON.stringify({ sidebarBox, dialogBox })}`);
+      }
       if (overflow !== 0) {
         throw new Error(`Expected no desktop sidebar overflow, received ${overflow}px`);
       }
 
-      await page.getByRole("button", { name: "Tag options deep-work" }).click();
+      await page.getByRole("button", { name: `Tag options ${tagName}` }).click();
       await expect(dialog).toHaveCount(0);
     });
 
@@ -256,9 +263,12 @@ test.describe("mobile task shell at the canonical 375x812 viewport", () => {
     await test.step("Keep wrapped mobile tag actions inside the drawer", async () => {
       const drawer = page.getByRole("dialog", { name: "Task navigation" });
       const scroller = drawer.locator(".overflow-y-auto");
-      await drawer.getByRole("button", { name: "Tag options errands" }).click();
-      const dialog = drawer.getByRole("dialog", { name: "Edit tag errands" });
+      const tagName = "waiting-for-quarterly-budget-approval";
+      await drawer.getByRole("button", { name: `Tag options ${tagName}` }).click();
+      const dialog = drawer.getByRole("dialog", { name: `Edit tag ${tagName}` });
       await expect(dialog).toBeVisible();
+      await expect(dialog.getByRole("button", { name: "Rename" })).toBeVisible();
+      await expect(dialog.getByRole("button", { name: "Delete" })).toBeVisible();
 
       const [scrollerBox, dialogBox, overflow] = await Promise.all([
         scroller.boundingBox(),
@@ -271,11 +281,14 @@ test.describe("mobile task shell at the canonical 375x812 viewport", () => {
       if (dialogBox.x < scrollerBox.x || dialogBox.x + dialogBox.width > scrollerBox.x + scrollerBox.width) {
         throw new Error(`Expected mobile tag dialog inside drawer bounds: ${JSON.stringify({ scrollerBox, dialogBox })}`);
       }
+      if (dialogBox.y < scrollerBox.y || dialogBox.y + dialogBox.height > scrollerBox.y + scrollerBox.height) {
+        throw new Error(`Expected mobile tag dialog inside drawer vertical bounds: ${JSON.stringify({ scrollerBox, dialogBox })}`);
+      }
       if (overflow !== 0) {
         throw new Error(`Expected no mobile drawer overflow, received ${overflow}px`);
       }
 
-      await drawer.getByRole("button", { name: "Tag options errands" }).click();
+      await drawer.getByRole("button", { name: `Tag options ${tagName}` }).click();
       await expect(dialog).toHaveCount(0);
     });
     await expect(page.locator("body")).toHaveScreenshot("claude-design-shell-mobile-375x812.png", {
