@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import httpx
 import pytest
 
-from app.exceptions import ValidationFailure
+from app.exceptions import (
+    ProviderRetryableError,
+    ProviderTerminalError,
+    ValidationFailure,
+)
 from app.workflows.voice_brain_dump.domain import (
     ProposalPatch,
     ReconciledProposal,
@@ -21,6 +26,520 @@ from app.workflows.voice_brain_dump.providers import (
     ReconcileTextRequest,
     _extract_titles,
 )
+
+
+def test_openai_reconciler_materializes_only_schema_valid_server_owned_patches() -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    captured: list[dict[str, object]] = []
+
+    def complete(payload: dict[str, object]) -> dict[str, object]:
+        captured.append(payload)
+        return {
+            "operations": [
+                {
+                    "operation": "update",
+                    "proposal_id": "proposal_existing",
+                    "title": "Починить BrainBuddy",
+                    "source_segment_ids": ["segment_accurate"],
+                    "base_revision": 2,
+                },
+                {
+                    "operation": "add",
+                    "title": "Написать Наташе",
+                    "source_segment_ids": ["segment_accurate"],
+                },
+            ]
+        }
+
+    reconciler = OpenAITextReconciler(
+        api_key="test-key", model="gpt-4o", complete=complete
+    )
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=2000,
+        text="Починить BrainBuddy и написать Наташе",
+        stability="stable",
+        provider_role="accurate",
+    )
+    existing = ReconciledProposal(
+        id="proposal_existing",
+        title="Починить brain body",
+        source_segment_ids=["segment_fast"],
+        status="user_edited",
+        locked_fields=["title"],
+        revision=2,
+        title_revision=2,
+    )
+
+    result = reconciler.reconcile(
+        ReconcileTextRequest(
+            operation_id="operation_1",
+            transcript_segments=[segment],
+            active_proposals=[existing],
+            user_locks={"proposal_existing": ["title"]},
+        )
+    )
+
+    assert [patch.operation for patch in result.patches] == ["update", "add"]
+    assert result.patches[0].proposal_id == "proposal_existing"
+    assert result.patches[1].proposal_id.startswith("proposal_")
+    assert result.patches[1].proposal_id != "proposal_existing"
+    assert all(patch.producer == "reconciler" for patch in result.patches)
+    assert captured[0]["model"] == "gpt-4o"
+    assert captured[0]["response_format"] == {
+        "type": "json_schema",
+        "json_schema": captured[0]["response_format"]["json_schema"],  # type: ignore[index]
+    }
+    response_format = captured[0]["response_format"]
+    assert isinstance(response_format, dict)
+    json_schema = response_format["json_schema"]
+    assert isinstance(json_schema, dict)
+    schema = json_schema["schema"]
+    assert isinstance(schema, dict)
+    operation_schema = schema["properties"]["operations"]["items"]  # type: ignore[index]
+    assert set(operation_schema["required"]) == set(operation_schema["properties"])
+    assert operation_schema["additionalProperties"] is False
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        {"operation": "rename", "proposal_id": "proposal_existing", "title": "Bad"},
+        {"operation": "update", "proposal_id": "unknown", "title": "Bad"},
+        {
+            "operation": "add",
+            "title": "Invented source",
+            "source_segment_ids": ["segment_unknown"],
+        },
+        {
+            "operation": "remove",
+            "proposal_id": "proposal_existing",
+            "title": "remove cannot carry title",
+        },
+        {
+            "operation": "add",
+            "proposal_id": "provider_owned_id",
+            "title": "Bad ID",
+            "source_segment_ids": ["segment_accurate"],
+        },
+        {
+            "operation": "add",
+            "title": " ",
+            "source_segment_ids": ["segment_accurate"],
+        },
+        {
+            "operation": "add",
+            "title": "Bad predecessor",
+            "source_segment_ids": ["segment_accurate"],
+            "predecessor_ids": ["proposal_existing"],
+        },
+        {
+            "operation": "split",
+            "title": "Missing split predecessor",
+            "source_segment_ids": ["segment_accurate"],
+        },
+        {
+            "operation": "merge",
+            "title": "Only one merge predecessor",
+            "source_segment_ids": ["segment_accurate"],
+            "predecessor_ids": ["proposal_existing"],
+        },
+        {
+            "operation": "supersede",
+            "title": "Missing supersede predecessor",
+            "source_segment_ids": ["segment_accurate"],
+        },
+        {
+            "operation": "split",
+            "title": "Unknown predecessor",
+            "source_segment_ids": ["segment_accurate"],
+            "predecessor_ids": ["proposal_unknown"],
+        },
+    ],
+)
+def test_openai_reconciler_rejects_invalid_or_untrusted_operations(
+    operation: dict[str, object],
+) -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        model="gpt-4o",
+        complete=lambda _payload: {"operations": [operation]},
+    )
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text="Do a task",
+        stability="stable",
+        provider_role="accurate",
+    )
+    existing = ReconciledProposal(
+        id="proposal_existing",
+        title="Existing",
+        source_segment_ids=["segment_fast"],
+        status="provisional",
+    )
+
+    with pytest.raises(ValidationFailure):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id="operation_1",
+                transcript_segments=[segment],
+                active_proposals=[existing],
+                user_locks={},
+            )
+        )
+
+
+def test_openai_reconciler_materializes_structural_and_remove_operations() -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text="Split, merge, replace, and remove tasks",
+        stability="stable",
+        provider_role="accurate",
+    )
+    first = ReconciledProposal(
+        id="proposal_first",
+        title="First",
+        source_segment_ids=["segment_fast"],
+        status="provisional",
+    )
+    second = ReconciledProposal(
+        id="proposal_second",
+        title="Second",
+        source_segment_ids=["segment_fast"],
+        status="provisional",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": "split",
+                    "title": "Split result",
+                    "source_segment_ids": [segment.id],
+                    "predecessor_ids": [first.id],
+                },
+                {
+                    "operation": "merge",
+                    "title": "Merged result",
+                    "source_segment_ids": [segment.id],
+                    "predecessor_ids": [first.id, second.id],
+                },
+                {
+                    "operation": "supersede",
+                    "title": "Replacement",
+                    "source_segment_ids": [segment.id],
+                    "predecessor_ids": [second.id],
+                },
+                {"operation": "remove", "proposal_id": first.id},
+            ]
+        },
+    )
+
+    result = reconciler.reconcile(
+        ReconcileTextRequest(
+            operation_id="operation_structural",
+            transcript_segments=[segment],
+            active_proposals=[first, second],
+            user_locks={},
+        )
+    )
+
+    assert [patch.operation for patch in result.patches] == [
+        "split",
+        "merge",
+        "supersede",
+        "remove",
+    ]
+    assert result.patches[-1].proposal_id == first.id
+
+
+def test_openai_reconciler_cannot_restore_a_user_deleted_proposal() -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text="Restore deleted task",
+        stability="stable",
+        provider_role="accurate",
+    )
+    deleted = ReconciledProposal(
+        id="proposal_deleted",
+        title="Do not restore",
+        source_segment_ids=["segment_fast"],
+        status="provisional",
+        tombstoned=True,
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": "add",
+                    "title": deleted.title,
+                    "source_segment_ids": [segment.id],
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(ValidationFailure, match="cannot restore"):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id="operation_deleted",
+                transcript_segments=[segment],
+                active_proposals=[deleted],
+                user_locks={},
+            )
+        )
+
+
+def test_openai_reconciler_reallocates_a_colliding_server_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    calls = {"count": 0}
+
+    def server_id(*_args: object) -> str:
+        calls["count"] += 1
+        return "proposal_existing" if calls["count"] == 1 else "proposal_generated"
+
+    monkeypatch.setattr(OpenAITextReconciler, "_server_id", staticmethod(server_id))
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text="Add another task",
+        stability="stable",
+        provider_role="accurate",
+    )
+    existing = ReconciledProposal(
+        id="proposal_existing",
+        title="Existing",
+        source_segment_ids=[segment.id],
+        status="provisional",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": "add",
+                    "title": "Generated",
+                    "source_segment_ids": [segment.id],
+                }
+            ]
+        },
+    )
+
+    result = reconciler.reconcile(
+        ReconcileTextRequest(
+            operation_id="operation_collision",
+            transcript_segments=[segment],
+            active_proposals=[existing],
+            user_locks={},
+        )
+    )
+
+    assert result.patches[0].proposal_id == "proposal_generated"
+    assert calls["count"] == 2
+
+
+def _minimal_reconcile_request() -> ReconcileTextRequest:
+    return ReconcileTextRequest(
+        operation_id="operation_provider_call",
+        transcript_segments=[
+            TranscriptHypothesis(
+                id="segment_accurate",
+                sequence=1,
+                start_ms=0,
+                end_ms=1000,
+                text="Do the task",
+                stability="stable",
+                provider_role="accurate",
+            )
+        ],
+        active_proposals=[],
+        user_locks={},
+    )
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected_error"),
+    [
+        (429, ProviderRetryableError),
+        (503, ProviderRetryableError),
+        (400, ProviderTerminalError),
+    ],
+)
+def test_openai_reconciler_maps_provider_http_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    status_code: int,
+    expected_error: type[Exception],
+) -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    class Response:
+        def __init__(self) -> None:
+            self.status_code = status_code
+
+        def raise_for_status(self) -> None:
+            if self.status_code >= 400:
+                raise httpx.HTTPStatusError(
+                    "provider rejected request",
+                    request=httpx.Request("POST", "https://provider.invalid"),
+                    response=httpx.Response(self.status_code),
+                )
+
+    class Client:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def post(self, *_args: object, **_kwargs: object) -> Response:
+            return Response()
+
+    monkeypatch.setattr(httpx, "Client", Client)
+
+    with pytest.raises(expected_error):
+        OpenAITextReconciler(api_key="test-key").reconcile(
+            _minimal_reconcile_request()
+        )
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        '{"operations": []}',
+        {"operations": []},
+    ],
+)
+def test_openai_reconciler_accepts_string_or_object_structured_content(
+    monkeypatch: pytest.MonkeyPatch,
+    content: object,
+) -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"choices": [{"message": {"content": content}}]}
+
+    class Client:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def post(self, *_args: object, **_kwargs: object) -> Response:
+            return Response()
+
+    monkeypatch.setattr(httpx, "Client", Client)
+    assert OpenAITextReconciler(api_key="test-key").reconcile(
+        _minimal_reconcile_request()
+    ).patches == []
+
+
+@pytest.mark.parametrize("content", ["{", [], None])
+def test_openai_reconciler_rejects_malformed_provider_content(
+    monkeypatch: pytest.MonkeyPatch,
+    content: object,
+) -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"choices": [{"message": {"content": content}}]}
+
+    class Client:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def post(self, *_args: object, **_kwargs: object) -> Response:
+            return Response()
+
+    monkeypatch.setattr(httpx, "Client", Client)
+    with pytest.raises(ProviderTerminalError, match="INVALID_RESPONSE"):
+        OpenAITextReconciler(api_key="test-key").reconcile(
+            _minimal_reconcile_request()
+        )
+
+
+def test_openai_reconciler_maps_provider_timeout_to_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    class Client:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def post(self, *_args: object, **_kwargs: object) -> None:
+            raise httpx.TimeoutException("provider timed out")
+
+    monkeypatch.setattr(httpx, "Client", Client)
+    with pytest.raises(ProviderRetryableError, match="RETRYABLE"):
+        OpenAITextReconciler(api_key="test-key").reconcile(
+            _minimal_reconcile_request()
+        )
+
+
+def test_production_reconciler_module_has_no_regex_or_fixture_extractor() -> None:
+    import inspect
+
+    from app.workflows.voice_brain_dump.adapters import reconciler
+
+    source = inspect.getsource(reconciler)
+    assert "_extract_titles" not in source
+    assert "re.split" not in source
+    assert "brainbuddy\" in lower" not in source.casefold()
 
 
 def test_dual_stt_roles_keep_accurate_audio_input_separate_from_fast_text() -> None:

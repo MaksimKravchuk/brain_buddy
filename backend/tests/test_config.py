@@ -50,3 +50,22 @@ def test_get_config_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     assert config.environment.value == "development"
     assert config.data_dir == tmp_path.resolve()
     assert config.data.schema_version == DEFAULT_SCHEMA_VERSION
+
+
+def test_build_container_uses_openai_reconciler_outside_test(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.container import build_container
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "development")
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER", "openai")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_MODEL", "gpt-4o")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    get_config.cache_clear()  # type: ignore[attr-defined]
+
+    container = build_container(get_config())
+
+    assert isinstance(container.task_service.text_reconciler, OpenAITextReconciler)
+    assert container.task_service.text_reconciler.model == "gpt-4o"
