@@ -1,42 +1,38 @@
 import { expect, test } from "../allure.fixtures";
 
-import {
-  createTreeViaUi,
-  deleteCurrentTreeViaUi,
-  openCrtWorkspace,
-  renameCurrentTreeViaUi,
-  signOut,
-  signupThroughUi,
-  switchTreeViaUi,
-  mintInvite,
-  uniqueEmail
-} from "./helpers";
+import { loginThroughUi, logoutSession, mintInvite, signupThroughUi, uniqueEmail } from "./gtdHelpers";
 
-test.describe("tree CRUD acceptance", () => {
-  test("E2E-TREE-01 create, rename, switch, delete, and persist tree list", async ({ page }, testInfo) => {
-    const email = uniqueEmail("tree-crud", testInfo);
+test.describe("native task CRUD acceptance", () => {
+  test("E2E-TASK-01 create, edit, move, complete, and persist tasks", async ({ page }, testInfo) => {
+    const email = uniqueEmail("task-crud", testInfo);
     await signupThroughUi(page, email, await mintInvite());
-    await openCrtWorkspace(page, email);
 
-    const primaryName = `E2E Primary Tree ${testInfo.workerIndex}`;
-    const renamedName = `E2E Renamed Tree ${testInfo.workerIndex}`;
-    const secondaryName = `E2E Secondary Tree ${testInfo.workerIndex}`;
+    await test.step("create and edit a real Inbox task", async () => {
+      await page.goto("/tasks/inbox");
+      await page.getByLabel("New task title").fill("Plan quarterly review");
+      await page.getByRole("button", { name: "Add task" }).click();
+      await expect(page.getByText("Plan quarterly review")).toBeVisible();
+      await page.getByRole("button", { name: "Edit Plan quarterly review" }).click();
+      await page.getByRole("textbox", { name: "Task title", exact: true }).fill("Prepare quarterly review");
+      await page.getByRole("button", { name: "Save task title" }).click();
+      await expect(page.getByText("Prepare quarterly review")).toBeVisible();
+    });
 
-    await createTreeViaUi(page, primaryName);
-    await expect(page.getByTestId("tree-canvas")).toBeVisible();
+    await test.step("move the task to Next and persist across reload and relogin", async () => {
+      await page.getByRole("button", { name: "Move Prepare quarterly review to Next" }).click();
+      await page.goto("/tasks/next");
+      await expect(page.getByText("Prepare quarterly review")).toBeVisible();
+      await page.reload();
+      await expect(page.getByText("Prepare quarterly review")).toBeVisible();
+      await logoutSession(page);
+      await loginThroughUi(page, email);
+      await page.goto("/tasks/next");
+      await expect(page.getByText("Prepare quarterly review")).toBeVisible();
+    });
 
-    await renameCurrentTreeViaUi(page, renamedName);
-    await createTreeViaUi(page, secondaryName);
-    await switchTreeViaUi(page, renamedName);
-    await switchTreeViaUi(page, secondaryName);
-    await deleteCurrentTreeViaUi(page, secondaryName);
-
-    await page.reload();
-    await expect(page.getByLabel("Tree menu")).toContainText(renamedName);
-    await page.getByLabel("Tree menu").click();
-    await expect(page.getByRole("menu")).not.toContainText(secondaryName);
-    await page.keyboard.press("Escape");
-
-    await signOut(page);
+    await test.step("complete without leaving a stale open row", async () => {
+      await page.getByRole("button", { name: "Complete Prepare quarterly review" }).click();
+      await expect(page.getByText("Prepare quarterly review")).toHaveCount(0);
+    });
   });
 });

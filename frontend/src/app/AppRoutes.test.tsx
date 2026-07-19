@@ -143,6 +143,7 @@ describe("AppRoutes", () => {
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/tasks?state=next"), expect.anything());
     expect(screen.getByRole("button", { name: "Weekly review — Coming later" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Think with CRT — Coming later" })).toBeDisabled();
+    expect(screen.queryByRole("link", { name: /CRT.*legacy/i })).not.toBeInTheDocument();
   });
 
   it("renders projects, tags and task rows from server projections without Context copy", async () => {
