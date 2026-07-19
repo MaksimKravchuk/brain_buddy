@@ -40,6 +40,7 @@ class _OperationDraft(BaseModel):
     source_segment_ids: list[str] = Field(default_factory=list, max_length=100)
     predecessor_ids: list[str] = Field(default_factory=list, max_length=100)
     base_revision: int | None = Field(default=None, ge=1)
+    confidence: float | None = Field(default=None, ge=0, le=1)
 
 
 class _ReconcileEnvelope(BaseModel):
@@ -92,6 +93,12 @@ def _strict_response_schema() -> dict[str, object]:
                                 {"type": "null"},
                             ]
                         },
+                        "confidence": {
+                            "anyOf": [
+                                {"type": "number", "minimum": 0, "maximum": 1},
+                                {"type": "null"},
+                            ]
+                        },
                     },
                     "required": [
                         "operation",
@@ -100,6 +107,7 @@ def _strict_response_schema() -> dict[str, object]:
                         "source_segment_ids",
                         "predecessor_ids",
                         "base_revision",
+                        "confidence",
                     ],
                 },
             }
@@ -136,6 +144,11 @@ class OpenAITextReconciler:
                 json.dumps(payload["messages"], sort_keys=True).encode("utf-8")
             ).hexdigest(),
             patches=patches,
+            confidences={
+                patch.proposal_id: draft.confidence
+                for patch, draft in zip(patches, envelope.operations, strict=True)
+                if draft.confidence is not None
+            },
         )
 
     def _payload(self, request: ReconcileTextRequest) -> dict[str, object]:
@@ -149,6 +162,8 @@ class OpenAITextReconciler:
             "transcript_segments": transcript,
             "proposals": proposals,
             "user_locks": request.user_locks,
+            "language_hints": request.language_hints,
+            "vocabulary": request.vocabulary,
         }
         return {
             "model": self.model,
@@ -175,6 +190,7 @@ class OpenAITextReconciler:
                         "merge/supersede. Existing update/remove targets must use an exact "
                         "supplied ID. Return every schema field; use null or [] when a field "
                         "does not apply."
+                        " Report confidence from 0 to 1 for each proposed task operation."
                     ),
                 },
                 {

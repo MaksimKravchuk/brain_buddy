@@ -47,6 +47,7 @@ from app.workflows.voice_brain_dump.domain import (
     ProposalConflict,
     ProposalPatch,
     ReconciledProposal,
+    TranscriptHypothesis,
     apply_proposal_patches,
 )
 from app.workflows.voice_brain_dump.providers import (
@@ -599,6 +600,61 @@ class TaskService:
 
         input_hash = hashlib.sha256(audio).hexdigest()
         claimed_run = operation.provider_runs[-1] if operation.provider_runs else None
+        if (
+            claimed_run
+            and claimed_run.role == "reconciler"
+            and claimed_run.status == "running"
+            and claimed_run.checkpoint == "accurate_transcribed"
+        ):
+            checkpoint_runs = operation.provider_runs[:-1]
+            accurate_run = next(
+                (
+                    run
+                    for run in reversed(checkpoint_runs)
+                    if run.role == "accurate_stt"
+                    and run.status == "succeeded"
+                    and run.checkpoint == "accurate_transcribed"
+                ),
+                None,
+            )
+            if accurate_run is None or not accurate_run.output_segment_ids:
+                raise ValidationFailure(
+                    "Brain dump has no accurate transcript checkpoint to reconcile."
+                )
+            accurate_segment = next(
+                (
+                    segment
+                    for segment in operation.segments
+                    if segment.id in accurate_run.output_segment_ids
+                ),
+                None,
+            )
+            if accurate_segment is None:
+                raise ValidationFailure(
+                    "Brain dump accurate transcript checkpoint is incomplete."
+                )
+            accurate_hypothesis = TranscriptHypothesis(
+                id=accurate_segment.id,
+                sequence=accurate_segment.sequence,
+                start_ms=accurate_segment.start_ms,
+                end_ms=accurate_segment.end_ms,
+                text=accurate_segment.text,
+                stability=accurate_segment.stability,
+                provider_role="accurate",
+                model=accurate_segment.model,
+                supersedes_segment_ids=accurate_segment.supersedes_segment_ids,
+            )
+            return self._reconcile_accurate_checkpoint(
+                operation,
+                accurate_hypothesis=accurate_hypothesis,
+                accurate_segment=accurate_segment,
+                checkpoint_runs=checkpoint_runs,
+                checkpoint_segments=operation.segments,
+                input_hash=accurate_run.input_hash,
+                now=now,
+                attempt=claimed_run.attempt,
+                recovery_count=claimed_run.recovery_count,
+            )
         replaces_claim = bool(
             claimed_run
             and claimed_run.role == "accurate_stt"
@@ -708,6 +764,31 @@ class TaskService:
             created_at=now,
             updated_at=now,
         )
+        return self._reconcile_accurate_checkpoint(
+            operation,
+            accurate_hypothesis=accurate_hypothesis,
+            accurate_segment=accurate_segment,
+            checkpoint_runs=[*prior_runs, accurate_run],
+            checkpoint_segments=[*operation.segments, accurate_segment],
+            input_hash=input_hash,
+            now=now,
+            attempt=1,
+            recovery_count=0,
+        )
+
+    def _reconcile_accurate_checkpoint(
+        self,
+        operation: BrainDumpOperationDocument,
+        *,
+        accurate_hypothesis: TranscriptHypothesis,
+        accurate_segment: BrainDumpTranscriptSegmentDocument,
+        checkpoint_runs: list[BrainDumpProviderRunDocument],
+        checkpoint_segments: list[BrainDumpTranscriptSegmentDocument],
+        input_hash: str,
+        now: datetime,
+        attempt: int,
+        recovery_count: int,
+    ) -> BrainDumpOperationDocument:
         if not self.text_reconciler.requires_external_processing:
             # Deterministic fixture extraction is restricted to ordinary CI and
             # explicitly injected tests. Production adapters always take the
@@ -726,12 +807,13 @@ class TaskService:
             if not operation.consent.external_processing_allowed:
                 return self._reconciler_failure(
                     operation,
-                    accurate_segment=accurate_segment,
-                    accurate_run=accurate_run,
-                    prior_runs=prior_runs,
+                    checkpoint_segments=checkpoint_segments,
+                    checkpoint_runs=checkpoint_runs,
                     input_hash=input_hash,
                     error="RECONCILER_CONSENT_REQUIRED",
                     now=now,
+                    attempt=attempt,
+                    recovery_count=recovery_count,
                 )
             reconciler_request = ReconcileTextRequest(
                 operation_id=operation.id,
@@ -745,6 +827,8 @@ class TaskService:
                     for proposal in operation.proposals
                     if proposal.locked_fields
                 },
+                language_hints=operation.consent.language_hints,
+                vocabulary=operation.consent.vocabulary,
             )
             try:
                 reconcile_result = self.text_reconciler.reconcile(reconciler_request)
@@ -755,13 +839,14 @@ class TaskService:
             ) as exc:
                 return self._reconciler_failure(
                     operation,
-                    accurate_segment=accurate_segment,
-                    accurate_run=accurate_run,
-                    prior_runs=prior_runs,
+                    checkpoint_segments=checkpoint_segments,
+                    checkpoint_runs=checkpoint_runs,
                     input_hash=input_hash,
                     error=str(exc)[:1000],
                     now=now,
                     retryable=isinstance(exc, ProviderRetryableError),
+                    attempt=attempt,
+                    recovery_count=recovery_count,
                 )
             proposals = self._apply_reconciler_patches(
                 operation.proposals, reconcile_result.patches, now=now
@@ -782,20 +867,19 @@ class TaskService:
                     "reconciling",
                     "awaiting_confirmation",
                 ],
-                "segments": [*operation.segments, accurate_segment],
+                "segments": checkpoint_segments,
                 "proposals": proposals,
                 "proposal_patches": proposal_patches,
                 "provider_runs": [
-                    *prior_runs,
-                    accurate_run,
+                    *checkpoint_runs,
                     BrainDumpProviderRunDocument(
                         id=generate_id("provider_run"),
                         role="reconciler",
                         status="succeeded",
                         input_hash=reconciler_input_hash,
                         checkpoint="reconciled",
-                        attempt=1,
-                        recovery_count=0,
+                        attempt=attempt,
+                        recovery_count=recovery_count,
                         provider=self.text_reconciler.provider_id,
                         created_at=now,
                         updated_at=now,
@@ -814,7 +898,7 @@ class TaskService:
         owner_id: str,
         idempotency_key: str,
     ) -> BrainDumpOperationDocument:
-        """Resume the accurate-STT stage from its persisted sealed checkpoint."""
+        """Resume the failed provider stage from its latest durable checkpoint."""
 
         command = f"brain_dump_retry:{operation_id}"
         request_hash = self._request_hash(command, payload)
@@ -837,7 +921,7 @@ class TaskService:
                 payload.expected_revision,
             )
             recoverable_claim = (
-                operation.status == "accurate_transcribing"
+                operation.status in {"accurate_transcribing", "reconciling"}
                 and bool(operation.provider_runs)
                 and operation.provider_runs[-1].status == "running"
                 and operation.provider_runs[-1].lease_expires_at is not None
@@ -845,7 +929,19 @@ class TaskService:
             )
             if operation.status != "retryable_error" and not recoverable_claim:
                 raise ValidationFailure("Only a retryable brain dump can be retried.")
-            last_run = next(
+            latest_provider_run = (
+                operation.provider_runs[-1] if operation.provider_runs else None
+            )
+            resume_reconciliation = bool(
+                latest_provider_run
+                and latest_provider_run.role == "reconciler"
+                and latest_provider_run.checkpoint == "accurate_transcribed"
+                and (
+                    latest_provider_run.status == "retryable_error"
+                    or recoverable_claim
+                )
+            )
+            last_run = latest_provider_run if resume_reconciliation else next(
                 (
                     run
                     for run in reversed(operation.provider_runs)
@@ -857,32 +953,44 @@ class TaskService:
                 raise ValidationFailure(
                     "Brain dump has no sealed checkpoint to resume from."
                 )
-            audio = self.task_repo.load_brain_dump_audio_chunks(
-                owner_id=owner_id,
-                operation_id=operation.id,
-                chunks=[
-                    (chunk.chunk_number, chunk.sha256)
-                    for chunk in operation.audio_chunks
-                ],
-            )
+            audio = b""
+            if not resume_reconciliation:
+                audio = self.task_repo.load_brain_dump_audio_chunks(
+                    owner_id=owner_id,
+                    operation_id=operation.id,
+                    chunks=[
+                        (chunk.chunk_number, chunk.sha256)
+                        for chunk in operation.audio_chunks
+                    ],
+                )
             now = utcnow()
             attempt = last_run.attempt + 1
             recovery_count = last_run.recovery_count + 1
+            claimed_status: Literal["accurate_transcribing", "reconciling"] = (
+                "reconciling" if resume_reconciliation else "accurate_transcribing"
+            )
+            claimed_role: Literal["accurate_stt", "reconciler"] = (
+                "reconciler" if resume_reconciliation else "accurate_stt"
+            )
+            claimed_checkpoint: Literal["sealed", "accurate_transcribed"] = (
+                "accurate_transcribed" if resume_reconciliation else "sealed"
+            )
             claimed = operation.model_copy(
                 update={
-                    "status": "accurate_transcribing",
-                    "status_history": [
-                        *operation.status_history,
-                        "accurate_transcribing",
-                    ],
+                    "status": claimed_status,
+                    "status_history": [*operation.status_history, claimed_status],
                     "provider_runs": [
                         *operation.provider_runs,
                         BrainDumpProviderRunDocument(
                             id=generate_id("provider_run"),
-                            role="accurate_stt",
+                            role=claimed_role,
                             status="running",
-                            input_hash=hashlib.sha256(audio).hexdigest(),
-                            checkpoint="sealed",
+                            input_hash=(
+                                last_run.input_hash
+                                if resume_reconciliation
+                                else hashlib.sha256(audio).hexdigest()
+                            ),
+                            checkpoint=claimed_checkpoint,
                             attempt=attempt,
                             recovery_count=recovery_count,
                             lease_owner=generate_id("runner"),
@@ -2778,13 +2886,14 @@ class TaskService:
     def _reconciler_failure(
         operation: BrainDumpOperationDocument,
         *,
-        accurate_segment: BrainDumpTranscriptSegmentDocument,
-        accurate_run: BrainDumpProviderRunDocument,
-        prior_runs: list[BrainDumpProviderRunDocument],
+        checkpoint_segments: list[BrainDumpTranscriptSegmentDocument],
+        checkpoint_runs: list[BrainDumpProviderRunDocument],
         input_hash: str,
         error: str,
         now: datetime,
         retryable: bool = False,
+        attempt: int = 1,
+        recovery_count: int = 0,
     ) -> BrainDumpOperationDocument:
         status: Literal["retryable_error", "terminal_error"] = (
             "retryable_error" if retryable else "terminal_error"
@@ -2797,18 +2906,17 @@ class TaskService:
                     "reconciling",
                     status,
                 ],
-                "segments": [*operation.segments, accurate_segment],
+                "segments": checkpoint_segments,
                 "provider_runs": [
-                    *prior_runs,
-                    accurate_run,
+                    *checkpoint_runs,
                     BrainDumpProviderRunDocument(
                         id=generate_id("provider_run"),
                         role="reconciler",
                         status=status,
                         input_hash=input_hash,
                         checkpoint="accurate_transcribed",
-                        attempt=1,
-                        recovery_count=0,
+                        attempt=attempt,
+                        recovery_count=recovery_count,
                         error=error,
                         created_at=now,
                         updated_at=now,

@@ -33,10 +33,19 @@ Founder audio and ground truth stay outside the repository. A corpus directory u
     "expected_tasks_file": "sample.tasks.json",
     "language_hints": ["ru", "en"],
     "vocabulary": ["BrainBuddy", "production smoke"],
-    "critical_terms": ["BrainBuddy", "production smoke"]
+    "critical_terms": ["BrainBuddy", "production smoke"],
+    "duration_seconds": 42
   }]
 }
 ```
+
+For extraction scoring, `expected_tasks_file` may remain a JSON string list or
+use labelled objects such as
+`{"title":"Починить BrainBuddy","structural_change":"split"}`. The semantic
+reconciler supplies per-operation confidence and split/merge labels so the
+report can calculate labelled boundary precision/recall, semantic preservation,
+split/merge accuracy, and confidence calibration rather than treating matching
+task counts as matching boundaries.
 
 Run the credentialed STT-only track from the repository root:
 
@@ -45,6 +54,6 @@ cd backend
 uv run python ../scripts/evaluate_voice_stt.py /absolute/path/to/corpus --consent-external-processing
 ```
 
-The command prints aggregate CER, WER, critical-term recall, omission/hallucination counts, latency, and per-language/provider-model breakdowns. Ground truth is read by the scorer after the provider call and is never included in `AccurateSttRequest`. Without consent or configured credentials, the report is explicitly `disabled` and makes no provider call.
+The command prints aggregate CER, WER, critical-term recall, omission/hallucination counts, mean/p95 latency, and p95 latency grouped by duration, disjoint language cohort, and provider/model. Ground truth is read by the scorer after the provider call and is never included in `AccurateSttRequest`. Without consent or configured credentials, the report is explicitly `disabled` and makes no provider call.
 
 Task-extraction metrics are a separate optional scorer input in `evaluate_real_audio_corpus`; STT output is never presented as proof of downstream extraction quality. No speech-accuracy threshold is claimed until the founder corpus produces a measured baseline.

@@ -38,6 +38,8 @@ class ReconcileTextRequest:
     transcript_segments: list[TranscriptHypothesis]
     active_proposals: list[object]
     user_locks: dict[str, list[str]] = field(default_factory=dict)
+    language_hints: list[str] = field(default_factory=list)
+    vocabulary: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,7 @@ class SttResult:
 class ReconcileResult:
     input_hash: str
     patches: list[ProposalPatch]
+    confidences: dict[str, float] = field(default_factory=dict)
 
 
 class FastSttPort(Protocol):
