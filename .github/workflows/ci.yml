@@ -20,6 +20,9 @@ jobs:
       - name: Run actionlint
         uses: raven-actions/actionlint@v2
 
+      - name: Validate Brain Buddy design skill contracts
+        run: python3 -m unittest scripts/test_validate_brain_buddy_design_skill.py -v
+
       - name: Validate CI artifact contract
         run: |
           python3 scripts/validate_ci_artifacts.py workflow \

@@ -10,86 +10,37 @@
   .brand{background:#0ea5e9;border-color:#0ea5e9}
   .lbl{font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;font-weight:600}
   .lock{display:flex;align-items:center;gap:10px;font-weight:600;font-size:20px;letter-spacing:-0.02em}
+  .mark{width:48px;height:48px}.lockup{width:220px;height:40px}
 </style></head><body>
 
-<!-- Mark: a causality tree — one root node branching into two children, bottom node (undesired effect) emphasized in brand primary. -->
+<!-- The files in assets/ are authoritative. This preview never redraws or invents marks. -->
 <div class="b">
   <div class="sq">
-    <svg width="44" height="44" viewBox="0 0 44 44" fill="none">
-      <path d="M22 13 L12 26" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round"/>
-      <path d="M22 13 L32 26" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round"/>
-      <path d="M12 26 L22 34" stroke="#0ea5e9" stroke-width="2" stroke-linecap="round"/>
-      <path d="M32 26 L22 34" stroke="#0ea5e9" stroke-width="2" stroke-linecap="round"/>
-      <circle cx="22" cy="10" r="4" fill="#fff" stroke="#0f172a" stroke-width="2"/>
-      <circle cx="12" cy="26" r="4" fill="#fff" stroke="#0f172a" stroke-width="2"/>
-      <circle cx="32" cy="26" r="4" fill="#fff" stroke="#0f172a" stroke-width="2"/>
-      <circle cx="22" cy="36" r="5" fill="#0ea5e9" stroke="#0ea5e9" stroke-width="2"/>
-    </svg>
+    <img class="mark" src="../assets/logo.svg" alt="Brain Buddy Sprout mark">
   </div>
-  <div class="lbl">Mark · on light</div>
+  <div class="lbl">Canonical mark</div>
 </div>
 
-<div class="b">
-  <div class="sq dark">
-    <svg width="44" height="44" viewBox="0 0 44 44" fill="none">
-      <path d="M22 13 L12 26" stroke="#334155" stroke-width="2" stroke-linecap="round"/>
-      <path d="M22 13 L32 26" stroke="#334155" stroke-width="2" stroke-linecap="round"/>
-      <path d="M12 26 L22 34" stroke="#38bdf8" stroke-width="2" stroke-linecap="round"/>
-      <path d="M32 26 L22 34" stroke="#38bdf8" stroke-width="2" stroke-linecap="round"/>
-      <circle cx="22" cy="10" r="4" fill="#0f172a" stroke="#f1f5f9" stroke-width="2"/>
-      <circle cx="12" cy="26" r="4" fill="#0f172a" stroke="#f1f5f9" stroke-width="2"/>
-      <circle cx="32" cy="26" r="4" fill="#0f172a" stroke="#f1f5f9" stroke-width="2"/>
-      <circle cx="22" cy="36" r="5" fill="#38bdf8" stroke="#38bdf8" stroke-width="2"/>
-    </svg>
-  </div>
-  <div class="lbl">On dark</div>
-</div>
-
-<div class="b">
-  <div class="sq brand">
-    <svg width="44" height="44" viewBox="0 0 44 44" fill="none">
-      <path d="M22 13 L12 26" stroke="rgba(255,255,255,.55)" stroke-width="2" stroke-linecap="round"/>
-      <path d="M22 13 L32 26" stroke="rgba(255,255,255,.55)" stroke-width="2" stroke-linecap="round"/>
-      <path d="M12 26 L22 34" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
-      <path d="M32 26 L22 34" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
-      <circle cx="22" cy="10" r="4" fill="#0ea5e9" stroke="#fff" stroke-width="2"/>
-      <circle cx="12" cy="26" r="4" fill="#0ea5e9" stroke="#fff" stroke-width="2"/>
-      <circle cx="32" cy="26" r="4" fill="#0ea5e9" stroke="#fff" stroke-width="2"/>
-      <circle cx="22" cy="36" r="5" fill="#fff" stroke="#fff" stroke-width="2"/>
-    </svg>
-  </div>
-  <div class="lbl">Reversed</div>
-</div>
-
-<!-- Monogram alternate: 'BB' overlapped as two linked nodes. -->
 <div class="b">
   <div class="sq">
-    <svg width="44" height="44" viewBox="0 0 44 44" fill="none">
-      <path d="M16 14 L16 30" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round"/>
-      <path d="M16 14 L23 14 a5 5 0 0 1 0 10 L16 24" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-      <path d="M16 22 L24 22 a5 5 0 0 1 0 10 L16 32 L16 22" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-      <circle cx="32" cy="30" r="3" fill="#0ea5e9"/>
-    </svg>
+    <img class="mark" src="../assets/logo.svg" alt="Brain Buddy Sprout mark">
   </div>
-  <div class="lbl">Monogram</div>
+  <div class="lbl">Small size</div>
+</div>
+
+<div class="b">
+  <div class="sq">
+    <img class="mark" src="../assets/logo.svg" alt="Brain Buddy Sprout mark">
+  </div>
+  <div class="lbl">No alternate mark</div>
 </div>
 
 <!-- Full horizontal lockup -->
 <div class="b">
   <div class="lock">
-    <svg width="28" height="28" viewBox="0 0 44 44" fill="none">
-      <path d="M22 13 L12 26" stroke="#cbd5e1" stroke-width="2.2" stroke-linecap="round"/>
-      <path d="M22 13 L32 26" stroke="#cbd5e1" stroke-width="2.2" stroke-linecap="round"/>
-      <path d="M12 26 L22 34" stroke="#0ea5e9" stroke-width="2.2" stroke-linecap="round"/>
-      <path d="M32 26 L22 34" stroke="#0ea5e9" stroke-width="2.2" stroke-linecap="round"/>
-      <circle cx="22" cy="10" r="3.8" fill="#fff" stroke="#0f172a" stroke-width="2"/>
-      <circle cx="12" cy="26" r="3.8" fill="#fff" stroke="#0f172a" stroke-width="2"/>
-      <circle cx="32" cy="26" r="3.8" fill="#fff" stroke="#0f172a" stroke-width="2"/>
-      <circle cx="22" cy="36" r="4.6" fill="#0ea5e9" stroke="#0ea5e9" stroke-width="2"/>
-    </svg>
-    <span>Brain Buddy</span>
+    <img class="lockup" src="../assets/logo-lockup.svg" alt="Brain Buddy">
   </div>
-  <div class="lbl">Horizontal lockup</div>
+  <div class="lbl">Canonical lockup</div>
 </div>
 
 </body></html>

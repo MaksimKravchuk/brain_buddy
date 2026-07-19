@@ -1,12 +1,12 @@
 # Brain Buddy Design System
 
-Brain Buddy is a **thinking assistant + AI task tracker**. It pairs a GTD-style task system (Inbox, Next actions, Waiting for, Someday, projects, contexts) with a chain-of-thought canvas (5 whys, CRT-style trees) that opens *from a task*, plus a voice **brain dump** that extracts tasks live as you speak. AI is a first-class executor: it can take a task (draft a post, research an option) and report back for your review.
+Brain Buddy is a **thinking assistant with native GTD**. It pairs exactly four open GTD primary lists (Inbox, Next actions, Waiting for, Someday / maybe) with Projects and Tags, a thinking canvas that opens from the task workspace, and a voice **brain dump** that proposes tasks while you speak. Autonomous execution is deferred and is not part of the shipped Task lifecycle.
 
 The interface is deliberately quiet — a calm, bright workspace where your tasks and the structure of your thinking are the hero, not the chrome around it.
 
 This design system captures the visual language, content voice, and UI kit needed to design new surfaces for Brain Buddy that feel native to the product.
 
-> **Pivot note (2026).** Brain Buddy pivoted from a canvas-only knowledge-graph tool to tasks-first. The task shell, brain dump, and AI-executor patterns below are established in `Pivot Explorations` (design work, options 1a/1c/1d/1e); the canvas patterns are carried over from the original production code. Where they conflict, the pivot direction wins.
+> **Contract note (2026).** Brain Buddy pivoted from a canvas-only knowledge-graph tool to tasks-first. Accepted records under `docs/decisions/` and shipped behavior outrank `Pivot Explorations`. Exploration cards may illustrate future ideas, but they are not production contracts.
 
 ## Sources
 
@@ -22,10 +22,10 @@ No Figma file, logo asset, or marketing site was provided. Where visual marks ar
 ## Products
 
 - **Brain Buddy web app** — tasks-first workspace:
-  - **Task shell** — GTD sidebar (Inbox with count, Next actions, Waiting for, Someday / maybe, Weekly review, Projects list, Contexts tag cloud) + a task list main pane. Top bar: logo, search ("Search tasks and trees"), primary **Brain dump** mic button, avatar.
-  - **Brain dump** — voice capture overlay (desktop) / full screen (mobile). Live transcription strip + tasks extracted on the fly; nothing is saved until you stop. Followed by a **review** step where you edit extracted tasks before they land in the inbox.
+  - **Task shell** — GTD sidebar (Inbox with count, Next actions, Waiting for, Someday / maybe, Projects list, Tags cloud, and a non-interactive `Weekly Review · coming later` disclosure) + a task list main pane. Top bar: logo, search, primary **Brain dump** mic button, avatar.
+  - **Brain dump** — voice capture overlay (desktop) / full screen (mobile). The accepted async design uploads durable numbered chunks while recording and presents provisional task proposals. No canonical Task is created before explicit confirmation. The shipped bounded flow does not yet implement every offline, chunk, retention, or reconciliation capability in ADR-0002.
   - **Thinking canvas** — the original tree workspace (`BrainNode`s, bezier edges, zoom controls, inspector). Now opened *from a project or task* ("Think" affordance), not the app's root.
-  - **AI executor** — AI takes suitable tasks and reports status inline in the task row.
+  - **Future Execution exploration** — speculative cards illustrate how an enabled run might report status. This is not shipped capability or current Task vocabulary.
   - Auth shell, modals, toast stack — carried over from the original app.
 - **Mobile (iOS)** — brain dump capture + review flows exist as designs. Same visual language, 44px+ hit targets.
 
@@ -33,30 +33,21 @@ There is still no marketing site, pricing, or docs portal. Future surfaces shoul
 
 ---
 
-## Task & AI vocabulary
+## Task and capture vocabulary
 
-The pivot introduces a fixed vocabulary. Use it verbatim — don't invent synonyms.
+Accepted product contracts fix the following vocabulary. Use it verbatim; exploratory cards cannot override it.
 
-**GTD lists** (sidebar order): `Inbox` → `Next actions` → `Waiting for` → `Someday / maybe` → `Weekly review`, then `Projects`, then `Contexts`.
+**GTD primary lists** (sidebar order): `Inbox` → `Next actions` → `Waiting for` → `Someday / maybe`. These are exactly four open GTD primary lists. `Projects` and `Tags` are secondary organization.
 - Inbox count is a sky-500 pill badge; other counts are plain slate-400 numerals.
-- Weekly review gets an amber "due Sun"-style chip when due.
+- Weekly Review remains visibly deferred as non-interactive `coming later` status; do not invent cadence, due state, or a fifth primary list.
 
-**Contexts** are lowercase `@tags`: `@calls`, `@errands`, `@deep-work`, `@laptop`. Rendered as neutral pills (white bg, slate-200 border, slate-600 text in sidebar; slate-100 bg in task rows).
+**Tags** use plain names such as `calls`, `errands`, `deep-work`, and `laptop`. Render them as neutral pills (white bg, slate-200 border, slate-600 text in the sidebar; slate-100 bg in task rows). Do not restore retired `@` prefixes.
 
-**Task row anatomy** (list view): circle checkbox (18px, slate-300 border) · title (14px/500) · optional chips in order: due date (rose), AI status (emerald/sky), then right-aligned: context pill, project name (11px slate-400, right-aligned fixed column). White card, slate-200 border, radius 12px, shadow-soft; hover → shadow-raised.
+**Task row anatomy** (list view): circle checkbox (18px, slate-300 border) · title (14px/500) · optional due-date chip (rose), then right-aligned Tag pill and project name (11px slate-400, right-aligned fixed column). White card, slate-200 border, radius 12px, shadow-soft; hover → shadow-raised.
 
-**AI states** — two distinct meanings, two colors:
-- **Agent executing a task** → emerald family + Lucide `Sparkles`. Chip copy patterns: "AI can draft" (offer), "Drafter · ready in ~5 min" (running, agent name + ETA), "Ready for review" (done). A task with active agent work gets an emerald-200 card border.
-- **Thinking canvas attached/running** → sky/info family + Lucide `Network`. Chip copy: "Thinking · 12 steps". Also the sidebar "Think" affordance on projects.
-- Never mix: emerald = an agent does the work, sky = the canvas/thinking layer.
-- Agents never act silently: work is offered ("AI can draft"), then visibly running with a live run log, then reviewed by the human. Checkbox stays human-only — agent work ends in "review", not "done".
+**Speculative, non-shipped Execution reference.** Named agents, autonomous work, assignment semantics, lifecycle chips, and run logs in the preview cards are exploratory material only. Do not generate them in production until an accepted Execution contract authorizes the capability and its user-visible semantics. Execution remains separate from Task lifecycle: a run may reference a Task and return evidence, but it cannot add Task states or own Task completion. A successful run never completes a Task; completion requires an explicit Tasks command.
 
-**Agents** are named executors. A task is assigned to an agent the same way it would be to a person — the agent shows in the assignee slot.
-- **Agent identity:** a name (sentence case, role-like: `Drafter`, `Researcher`, `Scheduler`) + a **squircle avatar** — 8px-radius rounded square, emerald-50 bg, emerald-700 Sparkles glyph. Humans keep **circle** avatars (sky-100/sky-700 initials). The circle-vs-squircle distinction is the load-bearing tell; never give an agent a circle.
-- **Agent lifecycle** (status chips, in order): `Queued` (slate neutral) → `Working — step 4 of 9` or `· ready in ~5 min` (emerald, pulsing 6px dot) → `Needs you` (amber — blocked on a manual action) → `Ready for review` (emerald, check). Terminal failure → rose "Couldn't finish" + reason.
-- **`Needs you` is the loudest agent state.** Amber chip + amber-50 row tint. It always names the concrete manual action and offers 1–2 buttons inline ("Connect account", "Choose one", "Approve send"). Agent work never silently stalls.
-- **Run log**: every agent task exposes a chronological log (drawer/inspector section, label "RUN LOG"). Step anatomy: 6px status dot (emerald done · pulsing emerald current · amber needs-you · slate upcoming) · step text 13px · timestamp 11px slate-400 right-aligned. Manual-action requests and the human's responses appear inline in the log as amber cards, so the trail reads as one conversation. Artifacts the agent produced ("Draft v2") are white chip-cards linked from the step.
-- **Attribution copy** is matter-of-fact and past-tense in logs: "Searched 14 sources", "Drafted outline", "Asked you to choose a venue". No first person, no personality.
+If a future accepted Execution contract enables these patterns, use emerald + Lucide `Sparkles` for run state and keep sky + Lucide `Network` for the thinking canvas. The speculative cards show named executor identities, queued/working/needs-you/review/failure chips, and chronological evidence logs solely to preserve design exploration. Revalidate every label and assignment control against the accepted contract before reuse.
 
 **Due dates** are rose chips ("before Sat", "Sat") — rose-50 bg, rose-200 border, rose-700 text. Only for real deadlines; no decorative dates.
 
@@ -66,7 +57,9 @@ The pivot introduces a fixed vocabulary. Use it verbatim — don't invent synony
 - Recording indicator: 7px rose dot + mm:ss, rose-600.
 - Task "forming…": dashed slate-300 border card with a slow shimmer sweep.
 - Waveform: 4px sky bars, scaleY animation, staggered 150ms.
-- Safety copy: "Nothing is saved until you stop."
+- Capture status must state that audio is recorded locally and uploaded as durable numbered chunks; never imply that stopping is the first persistence boundary.
+- Authority sequence is fixed: `Provisional · N` → `Stop & review` → `Confirm N additions`.
+- Privacy/authority copy: "No canonical Task is created before explicit confirmation." Working audio and operation artifacts follow the accepted retention/deletion policy.
 
 ---
 
@@ -79,21 +72,21 @@ Brain Buddy's voice is **calm, second-person, and action-oriented**. It talks to
 - **Second person.** "You" addresses the user directly; "we" only appears in neutral error recovery ("We couldn't load this tree").
 - **Explain then enable.** Empty states pair a one-line headline with a plain-language hint, then a single CTA — never a wall of text.
 - **Honest about errors.** Failures show a specific reason + correlation ID when available, plus a Retry affordance.
-- **AI is matter-of-fact.** Status chips state what's happening and when it's done ("AI drafting — ready in ~5 min"). No personality, no "I'm on it!".
+- **Automation is matter-of-fact when enabled.** Future Execution copy states what happened without personality. Do not expose run copy before an accepted contract enables it.
 
 **Casing**
 - **Sentence case everywhere.** Headings, buttons, menu items, section labels. "Send 9 to inbox", not "Send To Inbox".
-- **UPPERCASE micro-labels** — only for section labels and dropdown headers (tracking-wide, 10px, e.g. "PROJECTS", "CONTEXTS", "HEADED TO INBOX · 9").
+- **UPPERCASE micro-labels** — only for section labels and dropdown headers (tracking-wide, 10px, e.g. "PROJECTS", "TAGS", "PROVISIONAL · 9").
 - **Sparing em-dashes and ellipses** for in-progress states: "Importing…", "forming…", "Preparing export…".
 
 **Grammar quirks**
 - Uses `·` (middle dot) as inline metadata separator: `6 tasks · 1 running on AI`, `Thinking · 12 steps`.
-- User concepts stay lowercase ("task", "tree", "node", "inbox", "context") even as product nouns.
+- User concepts stay lowercase ("task", "tree", "node", "inbox", "tag") even as product nouns.
 - Contractions are fine: "can't", "couldn't", "you'll".
 
 **Emoji: never.** Do not introduce them in slides, marketing, or UI.
 
-**Examples pulled from the product + pivot designs**
+**Examples pulled from the product + pivot designs.** Rows describing agents or run logs are speculative, non-shipped Execution examples and are not current product copy.
 
 | Situation | Copy |
 |---|---|
@@ -105,10 +98,11 @@ Brain Buddy's voice is **calm, second-person, and action-oriented**. It talks to
 | Agent done | "Ready for review" |
 | Thinking chip | "Thinking · 12 steps" |
 | Add-task hint | "Add a next action — or dump everything on your mind with the mic above" |
-| Brain dump header | "Brain dump · 9 tasks captured" |
-| Brain dump safety line | "Nothing is saved until you stop" |
-| Stop CTA | "Stop & send 9 to inbox" |
-| Review header | "Review 9 tasks" — "Edit before they land in your inbox" |
+| Brain dump header | "Provisional · 9" |
+| Brain dump capture line | "Recording locally · 8 durable numbered chunks uploaded" |
+| Stop CTA | "Stop & review" |
+| Review header | "Review 9 additions" — "Edit before anything is added to your inbox" |
+| Confirm CTA | "Confirm N additions" (replace `N` with the current frozen count) |
 | Empty canvas heading | "Start with your first undesired effect" |
 | Load error heading | "We couldn't load this tree" |
 | Toast success (snapshot) | "Snapshot captured" → "Nodes +3/-0/~1, Relations +2/-0/~0" |
@@ -127,8 +121,8 @@ Brain Buddy's voice is **calm, second-person, and action-oriented**. It talks to
 - **Brand secondary** `#6366F1` (indigo-500) — secondary accents, project dot colors; used sparingly.
 - **Neutrals:** slate scale (`#0F172A` → `#F8FAFC`). Body text is `slate-900` on `surface-base`.
 - **Surface tokens:** `surface-base` `#F8FAFC`, `surface-sunken` `#F1F5F9`, `surface-raised` `#FFFFFF`. Three levels of depth, nothing darker.
-- **Semantics:** rose-600 destructive + due dates + recording, emerald-500 success + **agent states**, amber-600 warnings + review-due + **agent "Needs you"**, sky-500 info + **thinking/canvas states**.
-- **Node semantics** (canvas, from `nodeColors.json`): leaf (no outgoing) `#EF4444` white text, root (no incoming) `#FACC15` dark text, default white on slate-900. Load-bearing color logic, not decoration.
+- **Semantics:** rose-600 destructive + due dates + recording, emerald-500 success, amber-600 warnings, sky-500 info + thinking/canvas states. Emerald/amber Execution aliases are reserved speculative tokens until an accepted Execution contract enables them.
+- **Node semantics:** `colors_and_type.css` defines the authoritative node-color tokens mirrored from production `nodeColors.json`: leaf (no outgoing) `#EF4444` white text, root (no incoming) `#FACC15` dark text, default white on slate-900. Preview cards must reference these tokens, never generic warning/danger aliases.
 
 ### Type
 - **Family:** Inter with font-feature-settings `"cv11", "ss01", "ss03"`.
@@ -183,7 +177,7 @@ Brain Buddy's voice is **calm, second-person, and action-oriented**. It talks to
 - **Double-ring focus** everywhere.
 - **ALL-CAPS 10px section labels** as the only uppercase.
 - **The pulsing sky mic** — the brain dump entry point, always visible in the top bar.
-- **Emerald Sparkles chips + squircle agent avatars** = an agent is doing work for you.
+- **Future-only:** emerald Sparkles chips + squircle executor avatars are speculative Execution exploration, not a shipped product tell.
 
 ---
 
@@ -191,12 +185,12 @@ Brain Buddy's voice is **calm, second-person, and action-oriented**. It talks to
 
 **[Lucide](https://lucide.dev)** only — stroke-based, 1.5–2px stroke, 24×24 viewbox, rounded caps. Rendered 16px in buttons/rows, 20px next to headings, 28px in circular badges. Color inherits (`currentColor`); rest state slate-500/600, brand slots sky-500.
 
-**Core icons post-pivot:** `Mic` (brain dump), `Square` (stop recording), `Inbox`, `ArrowRight` (next actions), `Clock` (waiting for), `Archive` (someday), `RotateCcw` (weekly review), `Search`, `Sparkles` (AI executor), `Network` (thinking canvas), `Calendar`, `Trash2`, `Plus`, `X`, `ChevronDown`, `ChevronRight`, `ArrowDownUp` (sort). Canvas set carried over: `Sprout`, `Minus`, `Maximize2`, `AlertTriangle`, `CheckCircle2`, `Info`, `LogOut`, `Download`, `Upload`, `Pencil`, `Save`, `History`, `Layers`, `ShieldCheck`, `Tag`.
+**Core icons post-pivot:** `Mic` (brain dump), `Square` (stop recording), `Inbox`, `ArrowRight` (next actions), `Clock` (waiting for), `Archive` (someday), `Search`, `Network` (thinking canvas), `Calendar`, `Trash2`, `Plus`, `X`, `ChevronDown`, `ChevronRight`, `ArrowDownUp` (sort). Canvas set carried over: `Sprout`, `Minus`, `Maximize2`, `AlertTriangle`, `CheckCircle2`, `Info`, `LogOut`, `Download`, `Upload`, `Pencil`, `Save`, `History`, `Layers`, `ShieldCheck`, `Tag`. `RotateCcw` for Weekly Review and `Sparkles` for Execution remain deferred.
 
-No custom SVG illustration, no emoji, no icon fonts. If a symbol is missing, pick the closest Lucide match — never mix libraries.
+No custom SVG illustration, no emoji, no icon fonts. If a symbol is missing, pick the closest Lucide match — never mix libraries. The exported Sprout logo files are the only branded-asset exception.
 
 ### Logo mark
-Lucide `Sprout` doubles as the product logo (top bar) — see `assets/logo.svg` and `assets/logo-lockup.svg`. **Inferred from product use — flag for review.**
+Lucide `Sprout` doubles as the product logo (top bar). `assets/logo.svg` and `assets/logo-lockup.svg` are the authoritative logo sources for every generated design; reference those files directly and do not redraw, reinterpret, or add alternate marks.
 
 ---
 
@@ -209,13 +203,14 @@ Lucide `Sprout` doubles as the product logo (top bar) — see `assets/logo.svg` 
 - `assets/` — logo, wordmark
 - `preview/` — design-system cards for each token set and component cluster
 - `ui_kits/workspace/` — Brain Buddy canvas-workspace UI kit (React JSX, interactive demo)
+- `_ds_bundle.js` — generated artifact; do not edit by hand or import into production code
 
 ### UI kits
 - `ui_kits/workspace/` — the **pre-pivot** canvas app: auth, top bar, canvas with `BrainNode`s, inspector, modals, toasts. Still valid for the thinking-canvas surface, which now opens from a task. A tasks-first shell kit is not built yet — use the task-row/GTD preview cards + Pivot Explorations as reference.
 
 ### Notes for iterators
 - Everything visual derives from production code + the Pivot Explorations; there is no Figma.
-- The tasks-first shell (option 1a), brain dump (1c/1d), and review (1e) are **approved directions, not shipped code** — treat details as canonical until production exists.
+- Contract-correct GTD and voice guidance in this README may guide implementation; exploratory named-agent, assignment, autonomous-run, and run-log cards remain speculative and non-shipped.
 - `Sprout`-as-logo is pragmatic; a real brand mark may exist.
 - Font delivery via Google Fonts import in `colors_and_type.css`.
 
@@ -223,4 +218,12 @@ Lucide `Sprout` doubles as the product logo (top bar) — see `assets/logo.svg` 
 
 ## Syncing this skill
 
-This directory is pulled from the "Brain Buddy Design System" project on claude.ai/design (project id `ade33f3b-852a-4b58-ae75-256156754f68`) via the `DesignSync` tool. To refresh it, re-pull the listed files from that project; to push local edits back, use `DesignSync` with `finalize_plan` / `write_files` against the same project.
+This directory originated from the "Brain Buddy Design System" project on claude.ai/design (project id `ade33f3b-852a-4b58-ae75-256156754f68`) via the `DesignSync` tool. Accepted repository contracts take precedence over remote design content, so never overwrite contract corrections with a blind pull.
+
+`ui_kits/workspace/app.jsx` and `ui_kits/workspace/components.jsx` are editable sources. `_ds_bundle.js` is a duplicated generated artifact; do not edit it directly. After either source changes, use `DesignSync` against the same project to Regenerate `_ds_bundle.js`, then verify the metadata header's `sourceHashes` before commit. Each value is the lowercase 12-character SHA-256 prefix of the exact UTF-8 source bytes. This command prints the expected values:
+
+```bash
+python3 -c 'import hashlib,pathlib; root=pathlib.Path(".claude/skills/brain-buddy-design"); [print(p, hashlib.sha256((root/p).read_bytes()).hexdigest()[:12]) for p in ("ui_kits/workspace/app.jsx", "ui_kits/workspace/components.jsx")]'
+```
+
+Run `python3 -m unittest scripts/test_validate_brain_buddy_design_skill.py -v` after regeneration. The test fails if a recorded hash differs, the manifest points to a missing card, or accepted design contracts drift.

@@ -1,6 +1,6 @@
 <!doctype html>
-<!-- @dsCard group="Components" name="GTD sidebar & contexts" subtitle="Fixed list order, inbox count pill, project dots, @context tags" viewport="700x400" -->
-<html><head><meta charset="utf-8"><title>GTD sidebar & contexts</title>
+<!-- @dsCard group="Components" name="GTD sidebar & tags" subtitle="Four primary lists, secondary projects and tags, deferred Weekly Review" viewport="700x400" -->
+<html><head><meta charset="utf-8"><title>GTD sidebar & tags</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <style>
   body{margin:0;padding:20px;background:#f8fafc;font-family:Inter,sans-serif;font-feature-settings:"cv11","ss01","ss03";-webkit-font-smoothing:antialiased;color:#0f172a}
@@ -11,7 +11,7 @@
   .item.active{background:#fff;border:1px solid #e2e8f0;box-shadow:0 1px 2px rgba(15,23,42,.04);color:#0f172a;font-weight:500}
   .cnt{margin-left:auto;font-size:11px;color:#94a3b8}
   .badge{margin-left:auto;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:#0ea5e9;color:#fff;font-size:11px;font-weight:600;display:inline-flex;align-items:center;justify-content:center}
-  .duechip{margin-left:auto;font-size:10px;font-weight:600;color:#b45309;background:#fef3c7;border:1px solid #fde68a;border-radius:999px;padding:2px 7px}
+  .deferred{font-size:11px;color:#94a3b8;padding:10px;margin-top:8px;border-top:1px solid #e2e8f0}
   .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;color:#94a3b8;padding:14px 10px 6px}
   .dot{width:8px;height:8px;border-radius:999px;flex-shrink:0}
   .think{margin-left:auto;display:inline-flex;align-items:center;gap:4px;font-size:10px;color:#0369a1}
@@ -26,12 +26,12 @@
   <div class="item active"><svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>Next actions<span class="cnt">6</span></div>
   <div class="item"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Waiting for<span class="cnt">3</span></div>
   <div class="item"><svg viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>Someday / maybe</div>
-  <div class="item"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>Weekly review<span class="duechip">due Sun</span></div>
   <div class="lbl">Projects</div>
   <div class="item" style="padding:7px 10px"><span class="dot" style="background:#0ea5e9"></span>Launch v2<span class="cnt">4</span></div>
   <div class="item" style="padding:7px 10px"><span class="dot" style="background:#6366f1"></span>Onboarding drop-off<span class="think"><svg viewBox="0 0 24 24"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></svg>Think</span></div>
   <div class="item" style="padding:7px 10px"><span class="dot" style="background:#94a3b8"></span>Personal admin<span class="cnt">5</span></div>
-  <div class="lbl">Contexts</div>
-  <div class="ctxs"><span class="tag">@calls</span><span class="tag">@errands</span><span class="tag">@deep-work</span><span class="tag">@laptop</span></div>
+  <div class="lbl">Tags</div>
+  <div class="ctxs"><span class="tag">calls</span><span class="tag">errands</span><span class="tag">deep-work</span><span class="tag">laptop</span></div>
+  <div class="deferred">Weekly Review · coming later</div>
 </div>
 </body></html>
