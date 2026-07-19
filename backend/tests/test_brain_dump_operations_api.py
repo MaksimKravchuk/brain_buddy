@@ -5,9 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 
+import httpx
 import pytest
 
 from app.exceptions import ProviderRetryableError
+from app.workflows.voice_brain_dump.adapters import OpenAiAccurateStt
 
 
 def _start_operation(api_client, key: str = "start-brain-dump"):
@@ -29,6 +31,140 @@ def _manifest_hash(audio: bytes) -> str:
             separators=(",", ":"),
         ).encode()
     ).hexdigest()
+
+
+def _real_adapter(transport: httpx.BaseTransport) -> OpenAiAccurateStt:
+    return OpenAiAccurateStt(
+        api_key="test-key",
+        model="gpt-4o-mini-transcribe",
+        timeout_seconds=1,
+        max_retries=0,
+        retry_backoff_seconds=(),
+        max_cost_usd_per_operation=1,
+        estimated_cost_usd_per_megabyte=0.01,
+        transport=transport,
+    )
+
+
+def _upload_and_seal(api_client, operation: dict[str, object], audio: bytes, key: str):
+    digest = hashlib.sha256(audio).hexdigest()
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": digest},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    return api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers={"Idempotency-Key": key},
+        json={
+            "expected_revision": uploaded.json()["revision"],
+            "expected_chunks": 1,
+            "manifest_hash": _manifest_hash(audio),
+        },
+    )
+
+
+def test_external_stt_receives_declared_hints_through_the_real_decision_path(
+    api_client,
+) -> None:
+    bodies: list[bytes] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(request.read())
+        return httpx.Response(200, json={"text": "Починить BrainBuddy"})
+
+    api_client.app.state.container.task_service.accurate_stt = _real_adapter(
+        httpx.MockTransport(handler)
+    )
+    started = api_client.post(
+        "/api/brain-dump-operations",
+        headers={"Idempotency-Key": "start-real-hints"},
+        json={
+            "consent": {
+                "microphone": True,
+                "external_processing_allowed": True,
+                "provider": "openai",
+                "language_hints": ["ru", "en"],
+                "vocabulary": ["BrainBuddy", "production smoke"],
+            }
+        },
+    )
+    assert started.status_code == 201, started.text
+
+    sealed = _upload_and_seal(
+        api_client, started.json(), b"\x1aE\xdf\xa3real-webm", "seal-real-hints"
+    )
+
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["status"] == "awaiting_confirmation"
+    assert len(bodies) == 1
+    assert b"\x1aE\xdf\xa3real-webm" in bodies[0]
+    assert b'name="language"' in bodies[0] and b"ru" in bodies[0]
+    assert b"BrainBuddy" in bodies[0] and b"production smoke" in bodies[0]
+    assert sealed.json()["provider_runs"][-1]["provider"] == "openai"
+
+
+def test_external_stt_is_not_called_without_operation_consent(api_client) -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"text": "must not be called"})
+
+    api_client.app.state.container.task_service.accurate_stt = _real_adapter(
+        httpx.MockTransport(handler)
+    )
+    operation = _start_operation(api_client, key="start-no-external-consent")
+
+    sealed = _upload_and_seal(
+        api_client, operation, b"\x1aE\xdf\xa3private-webm", "seal-no-consent"
+    )
+
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["status"] == "terminal_error"
+    assert sealed.json()["provider_runs"][-1]["error_code"] == (
+        "STT_EXTERNAL_PROCESSING_CONSENT_REQUIRED"
+    )
+    assert calls == 0
+
+
+def test_external_stt_consent_is_bound_to_the_named_provider(api_client) -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"text": "must not be called"})
+
+    api_client.app.state.container.task_service.accurate_stt = OpenAiAccurateStt(
+        api_key="test-key", transport=httpx.MockTransport(handler), sleep=lambda _: None
+    )
+    response = api_client.post(
+        "/api/brain-dump-operations",
+        headers={"Idempotency-Key": "start-provider-mismatch"},
+        json={
+            "consent": {
+                "microphone": True,
+                "external_processing_allowed": True,
+                "provider": "another-provider",
+                "language_hints": ["ru"],
+                "vocabulary": [],
+            }
+        },
+    )
+    assert response.status_code == 201
+
+    sealed = _upload_and_seal(
+        api_client, response.json(), b"audio", "seal-provider-mismatch"
+    )
+
+    assert calls == 0
+    assert sealed.json()["status"] == "terminal_error"
+    assert sealed.json()["provider_runs"][-1]["error_code"] == (
+        "STT_CONSENT_PROVIDER_MISMATCH"
+    )
 
 
 def test_brain_dump_operation_collects_provisional_tasks_without_inbox_writes(
@@ -611,17 +747,16 @@ def test_schema_v2_upload_seal_runs_accurate_reconciliation_from_original_audio(
     assert body["segments"][0]["start_ms"] == 0
     assert body["segments"][0]["end_ms"] > 0
     assert body["sealed_manifest_hash"]
-    assert body["provider_runs"] == [
-        {
-            "id": body["provider_runs"][0]["id"],
-            "role": "accurate_stt",
-            "status": "succeeded",
-            "checkpoint": "accurate_transcribed",
-            "attempt": 1,
-            "recovery_count": 0,
-            "error": None,
-        }
-    ]
+    provider_run = body["provider_runs"][0]
+    assert provider_run["role"] == "accurate_stt"
+    assert provider_run["status"] == "succeeded"
+    assert provider_run["checkpoint"] == "accurate_transcribed"
+    assert provider_run["attempt"] == 1
+    assert provider_run["recovery_count"] == 0
+    assert provider_run["error"] is None
+    assert provider_run["provider"] == "deterministic"
+    assert provider_run["model"] == "deterministic-accurate-v1"
+    assert provider_run["estimated_cost_usd"] == 0
 
 
 def test_schema_v2_accurate_correction_supersedes_fast_preview_without_canonical_write(
