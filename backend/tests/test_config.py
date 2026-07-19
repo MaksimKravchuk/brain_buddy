@@ -120,3 +120,11 @@ def test_openai_configuration_without_named_credential_wires_disabled_provider(
 
     assert isinstance(provider, DisabledAccurateStt)
     assert provider.reason == "STT_PROVIDER_CREDENTIALS_MISSING"
+
+
+def test_compose_e2e_runs_backend_in_test_environment() -> None:
+    """Compose product tests must opt into the deterministic test-only STT provider."""
+
+    runner = Path(__file__).parents[2] / "scripts" / "run_playwright_e2e.sh"
+
+    assert "BRAIN_BUDDY_ENV=test" in runner.read_text(encoding="utf-8")
