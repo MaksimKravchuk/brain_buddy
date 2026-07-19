@@ -1,7 +1,22 @@
 /* istanbul ignore file -- source-faithful responsive shell is covered by Playwright visual snapshots. */
-import { Menu, Mic, Search, Sprout, X } from "lucide-react";
+import {
+  AlertTriangle,
+  Archive,
+  ArrowRight,
+  CalendarDays,
+  CalendarRange,
+  Clock,
+  Inbox,
+  Menu,
+  Mic,
+  Network,
+  RotateCcw,
+  Search,
+  Sprout,
+  X
+} from "lucide-react";
 import { useState } from "react";
-import type { ReactNode } from "react";
+import type { ComponentType, ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts } from "../../api/taskTypes";
@@ -23,17 +38,17 @@ interface AppShellProps {
   onDeleteTag?: (tag: TagResponse) => void;
 }
 
-const listItems: Array<{ state: OpenTaskState; label: string; icon: string }> = [
-  { state: "inbox", label: "Inbox", icon: "⌂" },
-  { state: "next", label: "Next actions", icon: "→" },
-  { state: "waiting", label: "Waiting for", icon: "◷" },
-  { state: "someday", label: "Someday / maybe", icon: "□" }
+const listItems: Array<{ state: OpenTaskState; label: string; icon: ComponentType<{ className?: string }> }> = [
+  { state: "inbox", label: "Inbox", icon: Inbox },
+  { state: "next", label: "Next actions", icon: ArrowRight },
+  { state: "waiting", label: "Waiting for", icon: Clock },
+  { state: "someday", label: "Someday / maybe", icon: Archive }
 ];
 
-const dateItems: Array<{ path: string; label: string; icon: string }> = [
-  { path: "/tasks/overdue", label: "Overdue", icon: "!" },
-  { path: "/tasks/today", label: "Today", icon: "●" },
-  { path: "/tasks/upcoming", label: "Upcoming", icon: "↗" }
+const dateItems: Array<{ path: string; label: string; icon: ComponentType<{ className?: string }> }> = [
+  { path: "/tasks/overdue", label: "Overdue", icon: AlertTriangle },
+  { path: "/tasks/today", label: "Today", icon: CalendarDays },
+  { path: "/tasks/upcoming", label: "Upcoming", icon: CalendarRange }
 ];
 
 const fallbackProjectColors = ["#0ea5e9", "#6366f1", "#94a3b8", "#10b981"];
@@ -165,6 +180,9 @@ function Sidebar({
   const [newTagName, setNewTagName] = useState("");
   const [tagEdits, setTagEdits] = useState<Record<string, string>>({});
 
+  const contextTags = tags.filter((tag) => tag.name.startsWith("@"));
+  const plainTags = tags.filter((tag) => !tag.name.startsWith("@"));
+
   return (
     <nav aria-label="Task navigation" className="flex flex-col gap-0.5 text-sm">
       <ul className="space-y-0.5">
@@ -180,7 +198,7 @@ function Sidebar({
                 }`
               }
             >
-              <span className="flex h-4 w-4 items-center justify-center text-brand-primary" aria-hidden>{item.icon}</span>
+              <item.icon className="h-4 w-4 shrink-0 text-brand-primary" aria-hidden />
               <span className="min-w-0 flex-1 truncate">{item.label}</span>
               {counts[item.state] ? (
                 <span className={item.state === "inbox" ? "rounded-full bg-brand-primary px-2 py-0.5 text-[11px] font-semibold text-white" : "text-[11px] text-slate-500"}>
@@ -197,9 +215,9 @@ function Sidebar({
             aria-label="Weekly review — Coming later"
             className="flex min-h-9 w-full cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-slate-400"
           >
-            <span className="flex h-4 w-4 items-center justify-center" aria-hidden>↻</span>
+            <RotateCcw className="h-4 w-4 shrink-0" aria-hidden />
             <span className="min-w-0 flex-1 truncate">Weekly review</span>
-            <span className="text-[10px] font-medium uppercase tracking-wide">Later</span>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">Later</span>
           </button>
         </li>
         <li>
@@ -209,9 +227,9 @@ function Sidebar({
             aria-label="Think with CRT — Coming later"
             className="flex min-h-9 w-full cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-slate-400"
           >
-            <span className="flex h-4 w-4 items-center justify-center" aria-hidden>◇</span>
+            <Network className="h-4 w-4 shrink-0" aria-hidden />
             <span className="min-w-0 flex-1 truncate">Think with CRT</span>
-            <span className="text-[10px] font-medium uppercase tracking-wide">Later</span>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">Later</span>
           </button>
         </li>
       </ul>
@@ -226,7 +244,7 @@ function Sidebar({
                 `flex min-h-8 items-center gap-2.5 rounded-lg px-2.5 py-1.5 ${isActive ? "bg-white font-medium text-slate-900 shadow-soft" : "text-slate-700 hover:bg-slate-200/70"}`
               }
             >
-              <span className="flex h-4 w-4 items-center justify-center text-brand-primary" aria-hidden>{item.icon}</span>
+              <item.icon className="h-4 w-4 shrink-0 text-brand-primary" aria-hidden />
               <span className="min-w-0 flex-1 truncate">{item.label}</span>
             </NavLink>
           </li>
@@ -326,7 +344,7 @@ function Sidebar({
         </form>
       ) : null}
       <div className="flex flex-col gap-1.5 px-2.5">
-        {tags.length ? tags.map((tag) => (
+        {plainTags.length ? plainTags.map((tag) => (
           <div key={tag.id} className="flex flex-col gap-1">
             <NavLink
               to={`/tags/${tag.id}`}
@@ -364,9 +382,26 @@ function Sidebar({
         )}
       </div>
 
-      <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-800">
-        Weekly review <span className="font-semibold">coming later</span>
-      </div>
+      {contextTags.length ? (
+        <>
+          <div className="px-2.5 pt-4 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Contexts</div>
+          <div className="flex flex-wrap gap-1.5 px-2.5">
+            {contextTags.map((tag) => (
+              <NavLink
+                key={tag.id}
+                to={`/tags/${tag.id}`}
+                className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+                  activeTagId === tag.id
+                    ? "border-brand-primary bg-info-bg text-sky-700"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
+                }`}
+              >
+                {tag.name}
+              </NavLink>
+            ))}
+          </div>
+        </>
+      ) : null}
     </nav>
   );
 }
