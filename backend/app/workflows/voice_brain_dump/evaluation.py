@@ -355,30 +355,40 @@ class _TaskLabel:
     title: str
     structural_change: str | None = None
     confidence: float | None = None
+    source_spans: tuple[tuple[int, int], ...] = ()
+
+
+@dataclass(frozen=True)
+class EvaluationExtractionInput:
+    """Provider output and corpus context supplied to an evaluation extractor."""
+
+    transcript_segments: tuple[TranscriptHypothesis, ...]
+    language_hints: tuple[str, ...]
+    vocabulary: tuple[str, ...]
+
+    @property
+    def transcript(self) -> str:
+        return " ".join(segment.text for segment in self.transcript_segments).strip()
 
 
 def build_semantic_extractor(
     reconciler: TextReconcilerPort,
-) -> Callable[[str], list[dict[str, object]]]:
+) -> Callable[[EvaluationExtractionInput], list[dict[str, object]]]:
     """Adapt the configured semantic reconciler to the corpus scoring contract."""
 
-    def extract(transcript: str) -> list[dict[str, object]]:
+    def extract(evaluation_input: EvaluationExtractionInput) -> list[dict[str, object]]:
+        transcript = evaluation_input.transcript
         digest = hashlib.sha256(transcript.encode("utf-8")).hexdigest()[:12]
-        segment = TranscriptHypothesis(
-            id=f"evaluation_{digest}",
-            sequence=1,
-            start_ms=0,
-            end_ms=max(1, len(transcript.split()) * 500),
-            text=transcript,
-            stability="stable",
-            provider_role="accurate",
-            model="evaluation-input",
-        )
+        segments_by_id = {
+            segment.id: segment for segment in evaluation_input.transcript_segments
+        }
         result = reconciler.reconcile(
             ReconcileTextRequest(
                 operation_id=f"evaluation_{digest}",
-                transcript_segments=[segment],
+                transcript_segments=list(evaluation_input.transcript_segments),
                 active_proposals=[],
+                language_hints=list(evaluation_input.language_hints),
+                vocabulary=list(evaluation_input.vocabulary),
             )
         )
         return [
@@ -388,6 +398,11 @@ def build_semantic_extractor(
                     patch.operation if patch.operation in {"split", "merge"} else None
                 ),
                 "confidence": result.confidences.get(patch.proposal_id),
+                "source_spans": [
+                    [segments_by_id[segment_id].start_ms, segments_by_id[segment_id].end_ms]
+                    for segment_id in patch.source_segment_ids
+                    if segment_id in segments_by_id
+                ],
             }
             for patch in result.patches
             if patch.operation != "remove" and patch.title is not None
@@ -401,7 +416,10 @@ def evaluate_real_audio_corpus(
     provider: Any,
     *,
     external_processing_allowed: bool,
-    extractor: Callable[[str], list[str] | list[dict[str, object]]] | None = None,
+    extractor: Callable[
+        [EvaluationExtractionInput], list[str] | list[dict[str, object]]
+    ]
+    | None = None,
     monotonic_values: Callable[[], float] = time.monotonic,
 ) -> RealAudioEvaluationReport:
     """Evaluate real audio without passing ground truth into the STT provider.
@@ -498,12 +516,20 @@ def evaluate_real_audio_corpus(
                 expected=True,
             )
             predicted = _task_labels(
-                extractor(predicted_transcript), case_id=case.id, expected=False
+                extractor(
+                    EvaluationExtractionInput(
+                        transcript_segments=tuple(result.segments),
+                        language_hints=tuple(case.language_hints),
+                        vocabulary=tuple(case.vocabulary),
+                    )
+                ),
+                case_id=case.id,
+                expected=False,
             )
             extraction_cases += 1
             exact_task_counts += int(len(predicted) == len(expected))
             matches = _match_task_labels(expected, predicted)
-            boundary_matches = [match for match in matches if match[2] >= 0.5]
+            boundary_matches = _match_task_boundaries(expected, predicted)
             title_matches = sum(
                 _normalized(predicted[predicted_index].title)
                 == _normalized(expected[expected_index].title)
@@ -715,6 +741,22 @@ def _task_labels(
         confidence = float(confidence_value) if confidence_value is not None else None
         if confidence is not None and not 0 <= confidence <= 1:
             raise ValueError(f"{case_id}: confidence must be between zero and one")
+        source_spans_value = raw.get("source_spans", [])
+        if not isinstance(source_spans_value, list):
+            raise ValueError(f"{case_id}: source_spans must be a list of [start_ms, end_ms]")
+        source_spans: list[tuple[int, int]] = []
+        for span in source_spans_value:
+            if (
+                not isinstance(span, list)
+                or len(span) != 2
+                or not all(isinstance(value, int) for value in span)
+                or span[0] < 0
+                or span[1] <= span[0]
+            ):
+                raise ValueError(
+                    f"{case_id}: source_spans require non-negative [start_ms, end_ms] pairs"
+                )
+            source_spans.append((span[0], span[1]))
         labels.append(
             _TaskLabel(
                 title=str(raw["title"]),
@@ -722,6 +764,7 @@ def _task_labels(
                     str(structural_change) if structural_change is not None else None
                 ),
                 confidence=confidence,
+                source_spans=tuple(source_spans),
             )
         )
     return labels
@@ -757,6 +800,25 @@ def _match_task_labels(
         matched_expected.add(expected_index)
         matched_predicted.add(predicted_index)
         matches.append((expected_index, predicted_index, score))
+    return matches
+
+
+def _match_task_boundaries(
+    expected: list[_TaskLabel], predicted: list[_TaskLabel]
+) -> list[tuple[int, int, float]]:
+    """Match genuine labelled source provenance, never title-token similarity."""
+
+    predicted_by_spans: dict[tuple[tuple[int, int], ...], list[int]] = {}
+    for predicted_index, label in enumerate(predicted):
+        if label.source_spans:
+            predicted_by_spans.setdefault(label.source_spans, []).append(predicted_index)
+    matches: list[tuple[int, int, float]] = []
+    for expected_index, label in enumerate(expected):
+        if not label.source_spans:
+            continue
+        candidates = predicted_by_spans.get(label.source_spans)
+        if candidates:
+            matches.append((expected_index, candidates.pop(0), 1.0))
     return matches
 
 
