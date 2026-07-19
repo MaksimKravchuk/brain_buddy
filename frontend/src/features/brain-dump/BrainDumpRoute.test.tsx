@@ -173,7 +173,7 @@ describe("BrainDumpRoute", () => {
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
-        return jsonResponse(operation(), 201);
+        return jsonResponse(consentedOperation(), 201);
       }
       if (url.endsWith("/brain_dump_1/transcript")) {
         return jsonResponse(
@@ -196,11 +196,10 @@ describe("BrainDumpRoute", () => {
     });
 
     renderBrainDump();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Allow secure cloud transcription" }));
     await userEvent.click(screen.getByRole("button", { name: "Record" }));
     expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({ audio: true });
-    // No external-processing consent was granted, so the recording stream is
-    // released immediately instead of feeding a MediaRecorder upload.
-    expect(micTrackStop).toHaveBeenCalledTimes(1);
+    expect(micTrackStop).not.toHaveBeenCalled();
     expect(recognition?.start).toHaveBeenCalledTimes(1);
 
     act(() => emitSpeech("Renew car insurance. Reply to Anna about the offsite."));
