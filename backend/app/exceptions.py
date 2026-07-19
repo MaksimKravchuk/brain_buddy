@@ -46,10 +46,20 @@ class ValidationFailure(BrainBuddyError):
         self.detail = detail
 
 
+class ProviderRetryableError(BrainBuddyError):
+    """Raised by a provider port when a call fails but a retry may succeed."""
+
+
+class ProviderTerminalError(BrainBuddyError):
+    """Raised by a provider port when a call fails in a way retries cannot fix."""
+
+
 __all__ = [
     "BrainBuddyError",
     "ConflictError",
     "NotFoundError",
+    "ProviderRetryableError",
+    "ProviderTerminalError",
     "RepositoryError",
     "StorageUnavailableError",
     "ValidationFailure",

@@ -36,7 +36,21 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
         ("/api/auth/signup", "post"): {"400", "409", "422"},
         ("/api/brain-dump-operations", "post"): {"400", "401", "409", "422"},
         ("/api/brain-dump-operations/{operation_id}", "get"): {"401", "404", "422"},
+        ("/api/brain-dump-operations/{operation_id}/audio/{chunk_number}", "put"): {
+            "400",
+            "401",
+            "404",
+            "409",
+            "422",
+        },
         ("/api/brain-dump-operations/{operation_id}/proposals/{proposal_id}", "patch"): {
+            "400",
+            "401",
+            "404",
+            "409",
+            "422",
+        },
+        ("/api/brain-dump-operations/{operation_id}/seal", "post"): {
             "400",
             "401",
             "404",
@@ -75,6 +89,7 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
         ("/api/tags/{tag_id}", "patch"): {"400", "401", "404", "409", "422"},
         ("/api/tasks", "get"): {"400", "401", "404", "422"},
         ("/api/tasks", "post"): {"400", "401", "404", "409", "422"},
+        ("/api/tasks/smart-add", "post"): {"400", "401", "404", "409", "422"},
         ("/api/tasks/{task_id}", "get"): {"401", "404", "422"},
         ("/api/tasks/{task_id}", "patch"): {"400", "401", "404", "409", "422"},
         ("/api/tasks/{task_id}/comments", "post"): {

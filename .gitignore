@@ -55,3 +55,4 @@ data/
 .claude/CLAUDE.local.md
 .claude/**/*.local.*
 .claude/**/.credentials*
+backend/.qa-tmp/

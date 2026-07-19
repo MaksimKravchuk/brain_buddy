@@ -308,7 +308,7 @@ function Sidebar({
               to={`/tags/${tag.id}`}
               className={`w-fit rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600 hover:border-slate-300 hover:text-slate-900 ${activeTagId === tag.id ? "border-sky-200 bg-sky-50 text-sky-700" : ""}`}
             >
-              @{tag.name.replace(/^@/, "")}
+              #{tag.name.replace(/^[#@]/, "")}
             </NavLink>
             {onRenameTag || onDeleteTag ? (
               <form

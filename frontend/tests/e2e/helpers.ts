@@ -43,7 +43,7 @@ export async function signupThroughUi(page: Page, email: string, inviteCode: str
   await page.getByLabel("Invite code").fill(inviteCode);
   await page.getByRole("button", { name: "Create account" }).click();
   await expect(page).not.toHaveURL(/\/signup$/);
-  await expect(page.getByRole("link", { name: "Brain Buddy" })).toBeVisible();
+  await expect(page.getByText("Brain Buddy", { exact: true })).toBeVisible();
 }
 
 export async function createUserViaApi(request: APIRequestContext, testInfo: TestInfo, prefix = "user"): Promise<string> {
