@@ -129,15 +129,20 @@ afterEach(() => {
 });
 
 describe("AppRoutes", () => {
-  it("renders the literal source workspace at the authenticated root route", async () => {
+  it("renders persisted GTD projections at the authenticated root route without demo fixtures", async () => {
     renderRoutes("/");
 
     expect(await screen.findByRole("heading", { name: "Next actions" })).toBeInTheDocument();
-    expect(screen.getByRole("banner")).toHaveStyle({ height: "56px" });
+    expect(screen.getByRole("banner")).toHaveStyle({ height: "52px" });
     expect(screen.getByText("Brain Buddy")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Search tasks and trees")).toBeEnabled();
+    expect(screen.getByRole("searchbox", { name: "Search tasks" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Brain dump" })).toBeEnabled();
-    expect(screen.getByText("6 tasks · 1 running on AI")).toBeInTheDocument();
+    expect(await screen.findByText("Fix onboarding drop-off")).toBeInTheDocument();
+    expect(screen.getByText("6 tasks")).toBeInTheDocument();
+    expect(screen.queryByText("Draft the launch announcement")).not.toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/tasks?state=next"), expect.anything());
+    expect(screen.getByRole("button", { name: "Weekly review — Coming later" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Think with CRT — Coming later" })).toBeDisabled();
   });
 
   it("renders projects, tags and task rows from server projections without Context copy", async () => {
@@ -208,10 +213,11 @@ describe("AppRoutes", () => {
     });
   });
 
-  it("keeps the legacy CRT workspace isolated under /crt/*", async () => {
+  it("keeps direct CRT routes inert until the feature is available", async () => {
     renderRoutes("/crt/demo-tree");
 
-    expect(await screen.findByText("legacy CRT workspace")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Think with CRT" })).toBeInTheDocument();
+    expect(screen.getByText("Coming later")).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.queryByRole("heading", { name: "Next actions" })).not.toBeInTheDocument();
     });
