@@ -68,6 +68,133 @@ def test_brain_dump_operation_collects_provisional_tasks_without_inbox_writes(
     assert still_empty.json()["counts_by_state"]["inbox"] == 0
 
 
+def test_mixed_language_final_segment_grows_each_semantic_preview_clause(
+    api_client,
+) -> None:
+    operation = _start_operation(api_client, key="start-mixed-preview-clauses")
+
+    appended = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/transcript",
+        headers={"Idempotency-Key": "append-mixed-preview-clauses"},
+        json={
+            "segments": [
+                {
+                    "sequence": 1,
+                    "text": (
+                        "Сделать production smoke. написать Наташе. "
+                        "купить хлеб и молоко. удалить черновик. "
+                        "Починить brain body"
+                    ),
+                    "stability": "stable",
+                }
+            ]
+        },
+    )
+
+    assert appended.status_code == 200, appended.text
+    assert [
+        proposal["title"]
+        for proposal in appended.json()["proposals"]
+        if not proposal["deleted"]
+    ] == [
+        "Сделать production smoke",
+        "Написать Наташе",
+        "Купить хлеб и молоко",
+        "Удалить черновик",
+        "Починить brain body",
+    ]
+
+
+def test_accurate_reconciliation_preserves_unmatched_locked_and_deleted_proposals(
+    api_client,
+) -> None:
+    operation = _start_operation(api_client, key="start-preserve-preview-choices")
+    preview = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/transcript",
+        headers={"Idempotency-Key": "append-preserve-preview-choices"},
+        json={
+            "segments": [
+                {
+                    "sequence": 1,
+                    "text": (
+                        "Сделать production smoke. написать Наташе. "
+                        "купить хлеб и молоко. удалить черновик. "
+                        "Починить brain body"
+                    ),
+                    "stability": "stable",
+                }
+            ]
+        },
+    )
+    assert preview.status_code == 200, preview.text
+    bread = next(
+        proposal
+        for proposal in preview.json()["proposals"]
+        if "хлеб" in proposal["title"].casefold()
+    )
+    disposable = next(
+        proposal
+        for proposal in preview.json()["proposals"]
+        if "черновик" in proposal["title"].casefold()
+    )
+    edited_title = "SMOKE Купить хлеб и молоко"
+
+    edited = api_client.patch(
+        f"/api/brain-dump-operations/{operation['id']}/proposals/{bread['id']}",
+        headers={"Idempotency-Key": "edit-preserved-bread"},
+        json={
+            "title": edited_title,
+            "expected_revision": preview.json()["revision"],
+        },
+    )
+    assert edited.status_code == 200, edited.text
+    deleted = api_client.patch(
+        f"/api/brain-dump-operations/{operation['id']}/proposals/{disposable['id']}",
+        headers={"Idempotency-Key": "delete-preserved-draft"},
+        json={"deleted": True, "expected_revision": edited.json()["revision"]},
+    )
+    assert deleted.status_code == 200, deleted.text
+
+    audio = (
+        "Надо починить BrainBuddy, потом сделать production smoke и написать Наташе"
+    ).encode()
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    sealed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers={"Idempotency-Key": "seal-preserved-preview-choices"},
+        json={
+            "expected_revision": uploaded.json()["revision"],
+            "expected_chunks": 1,
+            "manifest_hash": _manifest_hash(audio),
+        },
+    )
+
+    assert sealed.status_code == 200, sealed.text
+    proposals = sealed.json()["proposals"]
+    active_titles = [
+        proposal["title"] for proposal in proposals if not proposal["deleted"]
+    ]
+    assert active_titles == [
+        "Сделать production smoke",
+        "Написать Наташе",
+        edited_title,
+        "Починить BrainBuddy",
+    ]
+    edited_after = next(proposal for proposal in proposals if proposal["id"] == bread["id"])
+    deleted_after = next(
+        proposal for proposal in proposals if proposal["id"] == disposable["id"]
+    )
+    assert edited_after["title"] == edited_title
+    assert edited_after["locked_fields"] == ["title"]
+    assert edited_after["user_edited"] is True
+    assert deleted_after["deleted"] is True
+
+
 def test_brain_dump_cumulative_final_replaces_interim_words(api_client) -> None:
     operation = _start_operation(api_client, key="start-cumulative-final-operation")
 
