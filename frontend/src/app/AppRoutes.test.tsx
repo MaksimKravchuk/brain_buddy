@@ -133,7 +133,7 @@ describe("AppRoutes", () => {
     renderRoutes("/");
 
     expect(await screen.findByRole("heading", { name: "Next actions" })).toBeInTheDocument();
-    expect(screen.getByRole("banner")).toHaveStyle({ height: "52px" });
+    expect(screen.getByRole("banner")).toHaveStyle({ height: "56px" });
     expect(screen.getByText("Brain Buddy")).toBeInTheDocument();
     expect(screen.getByRole("searchbox", { name: "Search tasks" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Brain dump" })).toBeEnabled();
@@ -141,8 +141,8 @@ describe("AppRoutes", () => {
     expect(screen.getByText("6 tasks")).toBeInTheDocument();
     expect(screen.queryByText("Draft the launch announcement")).not.toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/tasks?state=next"), expect.anything());
-    expect(screen.getByRole("button", { name: "Weekly review — Coming later" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Think with CRT — Coming later" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Weekly review" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Think with CRT — Coming soon" })).toBeDisabled();
     expect(screen.queryByRole("link", { name: /CRT.*legacy/i })).not.toBeInTheDocument();
   });
 
@@ -450,6 +450,7 @@ describe("AppRoutes", () => {
 
     expect(await screen.findByText("Fix onboarding drop-off")).toBeInTheDocument();
 
+    await user.click(screen.getByRole("button", { name: "New project" }));
     await user.type(screen.getByLabelText("New project name"), "Client work{Enter}");
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
@@ -458,6 +459,7 @@ describe("AppRoutes", () => {
       );
     });
 
+    await user.click(screen.getByRole("button", { name: "Project options Onboarding drop-off" }));
     await user.clear(screen.getByLabelText("Project name Onboarding drop-off"));
     await user.type(screen.getByLabelText("Project name Onboarding drop-off"), "Activation{Enter}");
     await waitFor(() => {
@@ -467,7 +469,8 @@ describe("AppRoutes", () => {
       );
     });
 
-    await user.click(screen.getAllByRole("button", { name: "Archive" })[1]);
+    await user.click(screen.getByRole("button", { name: "Project options Onboarding drop-off" }));
+    await user.click(screen.getByRole("button", { name: "Archive" }));
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
         expect.stringMatching(/\/projects\/project-onboarding\/archive$/),
@@ -479,6 +482,7 @@ describe("AppRoutes", () => {
       expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/tasks?state=next"), expect.anything());
     });
 
+    await user.click(screen.getByRole("button", { name: "New tag" }));
     await user.type(screen.getByLabelText("New tag name"), "errands{Enter}");
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
@@ -487,6 +491,7 @@ describe("AppRoutes", () => {
       );
     });
 
+    await user.click(screen.getByRole("button", { name: "Tag options deep-work" }));
     await user.clear(screen.getByLabelText("Tag name deep-work"));
     await user.type(screen.getByLabelText("Tag name deep-work"), "focus{Enter}");
     await waitFor(() => {
@@ -496,7 +501,8 @@ describe("AppRoutes", () => {
       );
     });
 
-    await user.click(screen.getAllByRole("button", { name: "Delete" })[1]);
+    await user.click(screen.getByRole("button", { name: "Tag options deep-work" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
         expect.stringMatching(/\/tags\/tag-deep-work\?expected_revision=1$/),
@@ -529,7 +535,8 @@ describe("AppRoutes", () => {
     const projectView = renderRoutes("/projects/project-onboarding");
 
     expect(await screen.findByRole("heading", { name: "Onboarding drop-off" })).toBeInTheDocument();
-    await user.click(screen.getAllByRole("button", { name: "Archive" })[1]);
+    await user.click(screen.getByRole("button", { name: "Project options Onboarding drop-off" }));
+    await user.click(screen.getByRole("button", { name: "Archive" }));
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/tasks?state=next"), expect.anything());
     });
@@ -538,7 +545,8 @@ describe("AppRoutes", () => {
     renderRoutes("/tags/tag-deep-work");
 
     expect(await screen.findByRole("heading", { name: "#deep-work" })).toBeInTheDocument();
-    await user.click(screen.getAllByRole("button", { name: "Delete" })[1]);
+    await user.click(screen.getByRole("button", { name: "Tag options deep-work" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/tasks?state=next"), expect.anything());
     });
