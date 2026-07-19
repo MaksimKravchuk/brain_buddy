@@ -9,8 +9,9 @@ const taskResponse = {
       details: null,
       state: "next",
       project_id: "project-personal",
-      context_ids: ["tag-errands"],
+      tag_ids: ["tag-errands"],
       due_date: "2026-07-18",
+      priority: "none",
       waiting_for: null,
       waiting_since: null,
       order_key: 1,
@@ -18,6 +19,7 @@ const taskResponse = {
       created_at: "2026-07-15T10:00:00Z",
       updated_at: "2026-07-15T10:00:00Z",
       completed_at: null,
+      cancelled_at: null,
       revision: 1,
       subtasks: [],
       comments: []
@@ -28,8 +30,9 @@ const taskResponse = {
       details: null,
       state: "next",
       project_id: "project-onboarding",
-      context_ids: ["tag-deep-work"],
+      tag_ids: ["tag-deep-work"],
       due_date: null,
+      priority: "none",
       waiting_for: null,
       waiting_since: null,
       order_key: 2,
@@ -37,6 +40,7 @@ const taskResponse = {
       created_at: "2026-07-15T10:00:00Z",
       updated_at: "2026-07-15T10:00:00Z",
       completed_at: null,
+      cancelled_at: null,
       revision: 1,
       subtasks: [],
       comments: []
@@ -48,17 +52,17 @@ const taskResponse = {
 };
 
 const projectsResponse = [
-  { id: "project-launch", name: "Launch v2", color: "#0ea5e9", state: "active", revision: 1 },
-  { id: "project-onboarding", name: "Onboarding drop-off", color: "#6366f1", state: "active", revision: 1 },
-  { id: "project-personal", name: "Personal admin", color: "#94a3b8", state: "active", revision: 1 }
+  { id: "project-launch", name: "Launch v2", color: "#0ea5e9", state: "active", revision: 1, open_task_count: 2 },
+  { id: "project-onboarding", name: "Onboarding drop-off", color: "#6366f1", state: "active", revision: 1, open_task_count: 1 },
+  { id: "project-personal", name: "Personal admin", color: "#94a3b8", state: "active", revision: 1, open_task_count: 1 }
 ];
 
 const tagsResponse = [
-  { id: "tag-context-calls", name: "@calls", state: "active", revision: 1 },
-  { id: "tag-calls", name: "calls", state: "active", revision: 1 },
-  { id: "tag-errands", name: "errands", state: "active", revision: 1 },
-  { id: "tag-deep-work", name: "deep-work", state: "active", revision: 1 },
-  { id: "tag-laptop", name: "laptop", state: "active", revision: 1 }
+  { id: "tag-context-calls", name: "@calls", state: "active", revision: 1, open_task_count: 1 },
+  { id: "tag-calls", name: "calls", state: "active", revision: 1, open_task_count: 2 },
+  { id: "tag-errands", name: "errands", state: "active", revision: 1, open_task_count: 1 },
+  { id: "tag-deep-work", name: "deep-work", state: "active", revision: 1, open_task_count: 1 },
+  { id: "tag-laptop", name: "laptop", state: "active", revision: 1, open_task_count: 0 }
 ];
 
 const brainDumpProposals = Array.from({ length: 9 }, (_, index) => ({
@@ -136,7 +140,7 @@ test.beforeEach(async ({ page }) => {
       await route.fulfill({ json: brainDumpRecordingResponse });
       return;
     }
-    if (url.pathname === "/api/brain-dump-operations/brain_dump_1/finish") {
+    if (url.pathname === "/api/brain-dump-operations/brain_dump_1/seal") {
       await route.fulfill({ json: brainDumpReviewResponse });
       return;
     }
@@ -156,7 +160,7 @@ test("desktop task shell matches the Claude Design 1280x780 source surface", asy
   await expect(page.getByText("Brain Buddy")).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Task navigation" })).toBeVisible();
   await expect(page.getByText("Tags", { exact: true })).toBeVisible();
-  await expect(page.getByText("Contexts", { exact: true })).toBeVisible();
+  await expect(page.getByText("Contexts", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "@calls" })).toBeVisible();
   await expect(page.locator("body")).toHaveScreenshot("claude-design-shell-1280x780.png", {
     animations: "disabled",
@@ -173,8 +177,8 @@ test("clicking a task expands inline task detail in place", async ({ page }) => 
 
   await page.getByRole("link", { name: "Fix onboarding drop-off" }).click();
   await expect(page.getByRole("heading", { name: "Task detail" })).toBeVisible();
-  await expect(page.getByLabel("Subtasks")).toBeVisible();
-  await expect(page.getByLabel("Comments")).toBeVisible();
+  await expect(page.getByLabel("New subtask title")).toBeVisible();
+  await expect(page.getByLabel("New comment")).toBeVisible();
 
   await page.getByRole("button", { name: "Close" }).click();
   await expect(page.getByRole("heading", { name: "Task detail" })).toHaveCount(0);

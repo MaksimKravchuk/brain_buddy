@@ -180,9 +180,6 @@ function Sidebar({
   const [newTagName, setNewTagName] = useState("");
   const [tagEdits, setTagEdits] = useState<Record<string, string>>({});
 
-  const contextTags = tags.filter((tag) => tag.name.startsWith("@"));
-  const plainTags = tags.filter((tag) => !tag.name.startsWith("@"));
-
   return (
     <nav aria-label="Task navigation" className="flex flex-col gap-0.5 text-sm">
       <ul className="space-y-0.5">
@@ -344,13 +341,13 @@ function Sidebar({
         </form>
       ) : null}
       <div className="flex flex-col gap-1.5 px-2.5">
-        {plainTags.length ? plainTags.map((tag) => (
+        {tags.length ? tags.map((tag) => (
           <div key={tag.id} className="flex flex-col gap-1">
             <NavLink
               to={`/tags/${tag.id}`}
               className={`w-fit rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600 hover:border-slate-300 hover:text-slate-900 ${activeTagId === tag.id ? "border-sky-200 bg-sky-50 text-sky-700" : ""}`}
             >
-              #{tag.name.replace(/^[#@]/, "")}
+              {tag.name.startsWith("@") ? tag.name : `#${tag.name.replace(/^#/, "")}`}
             </NavLink>
             {onRenameTag || onDeleteTag ? (
               <form
@@ -382,26 +379,6 @@ function Sidebar({
         )}
       </div>
 
-      {contextTags.length ? (
-        <>
-          <div className="px-2.5 pt-4 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Contexts</div>
-          <div className="flex flex-wrap gap-1.5 px-2.5">
-            {contextTags.map((tag) => (
-              <NavLink
-                key={tag.id}
-                to={`/tags/${tag.id}`}
-                className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${
-                  activeTagId === tag.id
-                    ? "border-brand-primary bg-info-bg text-sky-700"
-                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
-                }`}
-              >
-                {tag.name}
-              </NavLink>
-            ))}
-          </div>
-        </>
-      ) : null}
     </nav>
   );
 }
