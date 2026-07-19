@@ -3,7 +3,7 @@ import { expect, test } from "../allure.fixtures";
 import { createTaskViaApi, loginThroughUi, logoutSession, mintInvite, signupThroughUi, uniqueEmail } from "./gtdHelpers";
 
 test.describe("mobile acceptance", () => {
-  test("E2E-MOBILE-02 planned workflows remain visible, disabled, and non-navigable at 390px", async ({ page }, testInfo) => {
+  test("E2E-MOBILE-02 planned workflows remain visible and honestly gated at 390px", async ({ page }, testInfo) => {
     await signupThroughUi(page, uniqueEmail("mobile-planned", testInfo), await mintInvite());
     await page.setViewportSize({ width: 390, height: 844 });
 
@@ -12,10 +12,10 @@ test.describe("mobile acceptance", () => {
       await page.getByRole("button", { name: "Open task navigation" }).click();
       await expect(page.getByRole("dialog", { name: "Task navigation" })).toBeVisible();
     });
-    await test.step("verify planned workflows are disabled and the legacy CRT link is absent", async () => {
+    await test.step("verify planned workflows are honestly marked Soon and the legacy CRT link is absent", async () => {
       const navigation = page.getByRole("navigation", { name: "Task navigation" });
-      await expect(navigation.getByRole("button", { name: "Weekly review — Coming later" })).toBeDisabled();
-      await expect(navigation.getByRole("button", { name: "Think with CRT — Coming later" })).toBeDisabled();
+      await expect(navigation.getByRole("button", { name: "Weekly review" })).toBeEnabled();
+      await expect(navigation.getByRole("button", { name: "Think with CRT — Coming soon" })).toBeDisabled();
       await expect(navigation.getByRole("link", { name: /CRT.*legacy/i })).toHaveCount(0);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       if (overflow > 0) throw new Error(`390px planned-workflow drawer overflowed by ${overflow}px`);
