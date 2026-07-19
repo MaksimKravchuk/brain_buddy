@@ -79,6 +79,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const tags = tagsQuery.data ?? emptyTags;
   const tasks = taskQuery.data?.items ?? [];
   const counts = taskQuery.data?.counts_by_state ?? emptyCounts;
+  const detailIsInProjection = Boolean(taskId && tasks.some((task) => task.id === taskId));
 
   const invalidateTasks = () => queryClient.invalidateQueries({ queryKey: ["tasks"] });
   const listPath = projectId
@@ -370,6 +371,26 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
         ) : (
           <EmptyState state={state} />
         )}
+
+        {taskId && !detailIsInProjection ? (
+          <TaskDetailPanel
+            task={detailQuery.data}
+            projects={projects}
+            tags={tags}
+            isLoading={detailQuery.isLoading}
+            error={detailQuery.error}
+            onClose={() => navigate(listPath)}
+            onSave={(task, payload) => detailUpdateMutation.mutate({ task, payload })}
+            onTransition={(task, action, toState, waitingFor) =>
+              detailTransitionMutation.mutate({ task, action, toState, waitingFor })
+            }
+            onCreateSubtask={(task, title) => subtaskCreateMutation.mutate({ task, title })}
+            onTransitionSubtask={(task, subtask, action) =>
+              subtaskTransitionMutation.mutate({ task, subtask, action })
+            }
+            onCreateComment={(task, body) => commentCreateMutation.mutate({ task, body })}
+          />
+        ) : null}
 
         {taskQuery.hasNextPage ? (
           <div className="mt-3 flex justify-center">
