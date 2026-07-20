@@ -243,6 +243,28 @@ test("clicking a task expands inline task detail in place", async ({ page }) => 
   await expect(page.getByRole("heading", { name: "Task detail" })).toHaveCount(0);
 });
 
+test("task detail preserves the filtered route, focus, and Back history after detail whitespace clicks", async ({ page }) => {
+  await page.setViewportSize({ width: 1240, height: 800 });
+  await page.goto("/tasks/next?sort=priority&q=Persisted");
+
+  const originLink = page.getByRole("link", { name: "Fix onboarding drop-off" });
+  await originLink.click();
+  await expect(page).toHaveURL(/\/tasks\/next\/task-2\?sort=priority&q=Persisted$/);
+
+  const detailHeading = page.getByRole("heading", { name: "Task detail" });
+  await expect(detailHeading).toBeFocused();
+
+  await test.step("ignore noninteractive Agent whitespace without adding a same-URL history entry", async () => {
+    await page.getByTestId("task-detail-agent").click();
+    await expect(page).toHaveURL(/\/tasks\/next\/task-2\?sort=priority&q=Persisted$/);
+  });
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/tasks\/next\?sort=priority&q=Persisted$/);
+  await expect(detailHeading).toHaveCount(0);
+  await expect(originLink).toBeFocused();
+});
+
 test("mobile task detail pushes the list pane and browser back restores it", async ({ page }) => {
   await page.setViewportSize({ width: 402, height: 874 });
   await page.goto("/tasks/next");
@@ -261,6 +283,29 @@ test("mobile task detail pushes the list pane and browser back restores it", asy
   await page.goBack();
   await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Back to list" })).toHaveCount(0);
+});
+
+test("mobile task detail wraps a long task title without horizontal overflow", async ({ page }) => {
+  const longTitle = "Prepare a comprehensive accessibility and route-history regression evidence package for the task-detail workflow";
+  await page.route("**/api/tasks/task-2", async (route) => {
+    await route.fulfill({ json: { ...taskResponse.items[1], title: longTitle } });
+  });
+  await page.setViewportSize({ width: 402, height: 874 });
+  await page.goto("/tasks/next");
+  await page.getByRole("link", { name: "Fix onboarding drop-off" }).click();
+
+  const mobileTitle = page.getByText(longTitle, { exact: true });
+  await expect(mobileTitle).toBeVisible();
+  await test.step("keep the full mobile detail title readable inside the viewport", async () => {
+    const titleMetrics = await mobileTitle.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      whiteSpace: getComputedStyle(element).whiteSpace
+    }));
+    if (titleMetrics.scrollWidth > titleMetrics.clientWidth || titleMetrics.whiteSpace === "nowrap") {
+      throw new Error(`Expected a wrapped mobile title, received ${JSON.stringify(titleMetrics)}`);
+    }
+  });
 });
 
 test.describe("mobile task shell at the canonical 375x812 viewport", () => {

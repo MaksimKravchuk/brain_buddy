@@ -703,11 +703,12 @@ describe("AppRoutes", () => {
     expect(await screen.findByRole("heading", { name: "Task detail" })).toBeInTheDocument();
   });
 
-  it("focuses the Task detail heading on open and restores focus to the originating row link on close", async () => {
+  it("preserves filtered task routes while focusing detail and restoring the originating row link", async () => {
     const user = userEvent.setup();
-    renderRoutes("/tasks/next");
+    renderRoutes("/tasks/next?sort=priority&q=Persisted");
 
     const rowLink = await screen.findByRole("link", { name: "Fix onboarding drop-off" });
+    expect(rowLink).toHaveAttribute("href", "/tasks/next/task-1?sort=priority&q=Persisted");
     await user.click(rowLink);
 
     const heading = await screen.findByRole("heading", { name: "Task detail" });
@@ -715,6 +716,8 @@ describe("AppRoutes", () => {
 
     await user.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Task detail" })).not.toBeInTheDocument());
+    expect(screen.getByRole("searchbox", { name: "Search tasks" })).toHaveValue("Persisted");
+    expect(screen.getByLabelText("Sort tasks")).toHaveValue("priority");
     expect(screen.getByRole("link", { name: "Fix onboarding drop-off" })).toHaveFocus();
   });
 
