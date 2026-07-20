@@ -353,8 +353,8 @@ def test_voice_sweep_iteration_runs_all_three_duties_and_survives_a_failure(
     log and return rather than propagate and kill the caller/loop."""
 
     calls: list[str] = []
-    real_recover = container.task_service.recover_due_provider_leases
-    real_purge_raw = container.task_service.purge_expired_raw_audio
+    real_recover = container.voice_brain_dump_service.recover_due_provider_leases
+    real_purge_raw = container.voice_brain_dump_service.purge_expired_raw_audio
 
     def recover_due_provider_leases(**kwargs: object) -> int:
         calls.append("recover")
@@ -368,9 +368,9 @@ def test_voice_sweep_iteration_runs_all_three_duties_and_survives_a_failure(
         calls.append("working_artifacts")
         raise RuntimeError("transient repository error")
 
-    container.task_service.recover_due_provider_leases = recover_due_provider_leases
-    container.task_service.purge_expired_raw_audio = purge_expired_raw_audio
-    container.task_service.purge_expired_working_artifacts = (
+    container.voice_brain_dump_service.recover_due_provider_leases = recover_due_provider_leases
+    container.voice_brain_dump_service.purge_expired_raw_audio = purge_expired_raw_audio
+    container.voice_brain_dump_service.purge_expired_working_artifacts = (
         purge_expired_working_artifacts
     )
 
@@ -388,13 +388,13 @@ def test_voice_sweep_thread_wakes_immediately_and_stops_cleanly(container) -> No
     import time
 
     iterations = threading.Event()
-    original_recover = container.task_service.recover_due_provider_leases
+    original_recover = container.voice_brain_dump_service.recover_due_provider_leases
 
     def recover_due_provider_leases(**kwargs: object) -> int:
         iterations.set()
         return original_recover(**kwargs)
 
-    container.task_service.recover_due_provider_leases = recover_due_provider_leases
+    container.voice_brain_dump_service.recover_due_provider_leases = recover_due_provider_leases
 
     stop_event = threading.Event()
     wake_event = threading.Event()
@@ -424,9 +424,9 @@ def test_voice_sweep_logs_completed_recovery_and_retention_work(
     import logging
 
     caplog.set_level(logging.INFO, logger="app.main")
-    container.task_service.recover_due_provider_leases = lambda: 1
-    container.task_service.purge_expired_raw_audio = lambda: 2
-    container.task_service.purge_expired_working_artifacts = lambda: 3
+    container.voice_brain_dump_service.recover_due_provider_leases = lambda: 1
+    container.voice_brain_dump_service.purge_expired_raw_audio = lambda: 2
+    container.voice_brain_dump_service.purge_expired_working_artifacts = lambda: 3
 
     _run_voice_sweep(container)
 

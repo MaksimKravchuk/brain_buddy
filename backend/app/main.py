@@ -30,11 +30,11 @@ def _run_voice_sweep(container: Container) -> None:
     """
 
     try:
-        recovered_leases = container.task_service.recover_due_provider_leases()
-        advanced_runs = container.task_service.run_due_brain_dump_provider_runs()
-        purged_raw_audio = container.task_service.purge_expired_raw_audio()
+        recovered_leases = container.voice_brain_dump_service.recover_due_provider_leases()
+        advanced_runs = container.voice_brain_dump_service.run_due_brain_dump_provider_runs()
+        purged_raw_audio = container.voice_brain_dump_service.purge_expired_raw_audio()
         purged_working_artifacts = (
-            container.task_service.purge_expired_working_artifacts()
+            container.voice_brain_dump_service.purge_expired_working_artifacts()
         )
     except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
         logger.exception("Voice operation sweep iteration failed")
@@ -112,7 +112,9 @@ def create_app() -> FastAPI:
 
     app.state.voice_sweep_stop_event = threading.Event()
     app.state.voice_sweep_wake_event = threading.Event()
-    app.state.container.task_service.runner_wake = app.state.voice_sweep_wake_event.set
+    app.state.container.voice_brain_dump_service.runner_wake = (
+        app.state.voice_sweep_wake_event.set
+    )
     app.state.voice_sweep_thread = None
     enable_test_voice_sweep = (
         os.getenv("BRAIN_BUDDY_ENABLE_VOICE_SWEEP_IN_TEST", "").strip() == "1"

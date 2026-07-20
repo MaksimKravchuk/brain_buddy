@@ -76,7 +76,7 @@ def _withdraw_consent(api_client, operation_id: str) -> None:
 
     owner_id = api_client.get("/api/auth/me").json()["id"]
     container = api_client.app.state.container
-    persisted = container.task_service.get_brain_dump_operation(
+    persisted = container.voice_brain_dump_service.get_brain_dump_operation(
         operation_id, owner_id=owner_id
     )
     withdrawn = persisted.model_copy(
@@ -86,13 +86,13 @@ def _withdraw_consent(api_client, operation_id: str) -> None:
             )
         }
     )
-    container.task_repo.save_brain_dump_operation(withdrawn)
+    container.voice_operation_repo.save_brain_dump_operation(withdrawn)
 
 
 def _advance_persisted_provider_runs(api_client, operation_id: str):
     """Drive the persisted in-process runner until this operation is idle in tests."""
 
-    service = api_client.app.state.container.task_service
+    service = api_client.app.state.container.voice_brain_dump_service
     for _ in range(3):
         if service.run_due_brain_dump_provider_runs() == 0:
             break
@@ -151,7 +151,7 @@ def test_seal_uses_semantic_reconciler_when_external_processing_is_allowed(
             ]
         }
 
-    api_client.app.state.container.task_service.text_reconciler = OpenAITextReconciler(
+    api_client.app.state.container.voice_brain_dump_service.text_reconciler = OpenAITextReconciler(
         api_key="test-key", complete=complete
     )
     sealed = _upload_and_seal(
@@ -217,7 +217,7 @@ def test_semantic_reconciler_updates_and_removes_existing_proposals(
             ]
         }
 
-    api_client.app.state.container.task_service.text_reconciler = OpenAITextReconciler(
+    api_client.app.state.container.voice_brain_dump_service.text_reconciler = OpenAITextReconciler(
         api_key="test-key", complete=complete
     )
     sealed = _upload_and_seal(
@@ -271,7 +271,7 @@ def test_retention_sweep_never_purges_a_retryable_error_operation(api_client) ->
     def fail(_payload: dict[str, object]) -> dict[str, object]:
         raise ProviderRetryableError("temporary outage")
 
-    service = api_client.app.state.container.task_service
+    service = api_client.app.state.container.voice_brain_dump_service
     service.text_reconciler = OpenAITextReconciler(api_key="test-key", complete=fail)
     sealed = _upload_and_seal(
         api_client, operation, b"retryable retention guard", "seal-retryable-retention"
@@ -281,7 +281,7 @@ def test_retention_sweep_never_purges_a_retryable_error_operation(api_client) ->
 
     container = api_client.app.state.container
     owner_id = api_client.get("/api/auth/me").json()["id"]
-    persisted = container.task_service.get_brain_dump_operation(
+    persisted = container.voice_brain_dump_service.get_brain_dump_operation(
         operation["id"], owner_id=owner_id
     )
     aged = persisted.model_copy(
@@ -290,10 +290,10 @@ def test_retention_sweep_never_purges_a_retryable_error_operation(api_client) ->
             "raw_audio_expires_at": persisted.created_at - timedelta(days=30),
         }
     )
-    container.task_repo.save_brain_dump_operation(aged)
+    container.voice_operation_repo.save_brain_dump_operation(aged)
 
-    assert container.task_service.purge_expired_raw_audio() == 0
-    assert container.task_service.purge_expired_working_artifacts() == 0
+    assert container.voice_brain_dump_service.purge_expired_raw_audio() == 0
+    assert container.voice_brain_dump_service.purge_expired_working_artifacts() == 0
     swept = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
     assert swept["status"] == "retryable_error"
     assert swept["audio_chunks"] != []
@@ -334,7 +334,7 @@ def test_seal_persists_semantic_reconciler_failures_for_recovery(
     def fail(_payload: dict[str, object]) -> dict[str, object]:
         raise provider_error
 
-    service = api_client.app.state.container.task_service
+    service = api_client.app.state.container.voice_brain_dump_service
     service.text_reconciler = OpenAITextReconciler(api_key="test-key", complete=fail)
     sealed = _upload_and_seal(
         api_client, operation, b"provider failure recovery", "seal-semantic-failure"
@@ -356,7 +356,7 @@ def test_accurate_stt_failure_records_a_conservative_cost_estimate(api_client) -
     operation-wide cost cap sees it, rather than silently recording zero for
     every failed attempt."""
 
-    api_client.app.state.container.task_service.accurate_stt = _real_adapter(
+    api_client.app.state.container.voice_brain_dump_service.accurate_stt = _real_adapter(
         httpx.MockTransport(lambda _request: httpx.Response(503))
     )
     operation = _start_operation(
@@ -385,7 +385,7 @@ def test_reconciler_success_records_its_estimated_cost_in_the_operation(
     operation = _start_operation(
         api_client, key="start-reconciler-cost", external_processing_allowed=True
     )
-    api_client.app.state.container.task_service.text_reconciler = OpenAITextReconciler(
+    api_client.app.state.container.voice_brain_dump_service.text_reconciler = OpenAITextReconciler(
         api_key="test-key",
         estimated_cost_usd_per_megabyte=1.0,
         complete=lambda _payload: {"operations": []},
@@ -417,7 +417,7 @@ def test_operation_admission_rejects_next_call_when_worst_case_would_exceed_cap(
         calls += 1
         return httpx.Response(200, json={"text": "must not be called"})
 
-    task_service = api_client.app.state.container.task_service
+    task_service = api_client.app.state.container.voice_brain_dump_service
     task_service.max_cumulative_cost_usd_per_operation = 1.0
     task_service.accurate_stt = OpenAiAccurateStt(
         api_key="test-key",
@@ -432,11 +432,11 @@ def test_operation_admission_rejects_next_call_when_worst_case_would_exceed_cap(
     )
     owner_id = api_client.get("/api/auth/me").json()["id"]
     container = api_client.app.state.container
-    persisted = container.task_service.get_brain_dump_operation(
+    persisted = container.voice_brain_dump_service.get_brain_dump_operation(
         operation["id"], owner_id=owner_id
     )
-    from app.modules.tasks.domain import BrainDumpProviderRunDocument
     from app.utils.time import utcnow
+    from app.workflows.voice_brain_dump.domain import BrainDumpProviderRunDocument
 
     now = utcnow()
     already_spent = persisted.model_copy(
@@ -458,7 +458,7 @@ def test_operation_admission_rejects_next_call_when_worst_case_would_exceed_cap(
             "revision": persisted.revision + 1,
         }
     )
-    container.task_repo.save_brain_dump_operation(already_spent)
+    container.voice_operation_repo.save_brain_dump_operation(already_spent)
 
     audio = b"\x1aE\xdf\xa3worst-case-webm"
     uploaded = api_client.put(
@@ -499,7 +499,7 @@ def test_retryable_reconciler_failure_resumes_without_rerunning_accurate_stt(
         language_hints=["ru", "en"],
         vocabulary=["BrainBuddy"],
     )
-    service = api_client.app.state.container.task_service
+    service = api_client.app.state.container.voice_brain_dump_service
     original_transcribe = service.accurate_stt.transcribe_sealed_audio
     stt_calls = 0
     reconcile_calls = 0
@@ -614,7 +614,7 @@ def test_seal_rejects_external_reconciliation_without_explicit_consent(
         key="start-reconciler-without-consent",
         external_processing_allowed=True,
     )
-    api_client.app.state.container.task_service.text_reconciler = OpenAITextReconciler(
+    api_client.app.state.container.voice_brain_dump_service.text_reconciler = OpenAITextReconciler(
         api_key="test-key", complete=complete
     )
     audio = b"no external consent"
@@ -696,7 +696,7 @@ def test_user_resolves_visible_semantic_title_conflict(
             ]
         }
 
-    api_client.app.state.container.task_service.text_reconciler = OpenAITextReconciler(
+    api_client.app.state.container.voice_brain_dump_service.text_reconciler = OpenAITextReconciler(
         api_key="test-key", complete=complete
     )
     sealed = _upload_and_seal(
@@ -706,7 +706,7 @@ def test_user_resolves_visible_semantic_title_conflict(
     assert conflicted["conflicts"][0]["suggested_value"] == "Починить BrainBuddy"
 
     if resolution == "accept":
-        service = api_client.app.state.container.task_service
+        service = api_client.app.state.container.voice_brain_dump_service
         owner_id = api_client.get("/api/auth/me").json()["id"]
         persisted = service.get_brain_dump_operation(
             operation["id"], owner_id=owner_id
@@ -721,7 +721,7 @@ def test_user_resolves_visible_semantic_title_conflict(
                 ]
             }
         )
-        api_client.app.state.container.task_repo.save_brain_dump_operation(
+        api_client.app.state.container.voice_operation_repo.save_brain_dump_operation(
             persisted.model_copy(update={"proposals": [malformed_proposal]})
         )
         malformed = api_client.patch(
@@ -734,7 +734,7 @@ def test_user_resolves_visible_semantic_title_conflict(
         )
         assert malformed.status_code == 400
         assert "no suggestion to accept" in malformed.text
-        api_client.app.state.container.task_repo.save_brain_dump_operation(persisted)
+        api_client.app.state.container.voice_operation_repo.save_brain_dump_operation(persisted)
 
     resolved = api_client.patch(
         f"/api/brain-dump-operations/{operation['id']}/proposals/{conflicted['id']}",
@@ -759,7 +759,7 @@ def test_external_stt_receives_declared_hints_through_the_real_decision_path(
         bodies.append(request.read())
         return httpx.Response(200, json={"text": "Починить BrainBuddy"})
 
-    api_client.app.state.container.task_service.accurate_stt = _real_adapter(
+    api_client.app.state.container.voice_brain_dump_service.accurate_stt = _real_adapter(
         httpx.MockTransport(handler)
     )
     started = api_client.post(
@@ -801,7 +801,7 @@ def test_external_stt_is_not_called_without_operation_consent(api_client) -> Non
         calls += 1
         return httpx.Response(200, json={"text": "must not be called"})
 
-    api_client.app.state.container.task_service.accurate_stt = _real_adapter(
+    api_client.app.state.container.voice_brain_dump_service.accurate_stt = _real_adapter(
         httpx.MockTransport(handler)
     )
     # Audio can only be uploaded with consent (see the upload-consent-gate
@@ -847,7 +847,7 @@ def test_external_stt_consent_is_bound_to_the_named_provider(api_client) -> None
         calls += 1
         return httpx.Response(200, json={"text": "must not be called"})
 
-    api_client.app.state.container.task_service.accurate_stt = OpenAiAccurateStt(
+    api_client.app.state.container.voice_brain_dump_service.accurate_stt = OpenAiAccurateStt(
         api_key="test-key", transport=httpx.MockTransport(handler), sleep=lambda _: None
     )
     response = api_client.post(
@@ -886,7 +886,7 @@ def test_reconciler_consent_is_bound_to_the_named_provider(api_client) -> None:
         calls += 1
         return {"operations": []}
 
-    api_client.app.state.container.task_service.text_reconciler = OpenAITextReconciler(
+    api_client.app.state.container.voice_brain_dump_service.text_reconciler = OpenAITextReconciler(
         api_key="test-key", complete=complete
     )
     response = api_client.post(
@@ -942,7 +942,7 @@ def test_audio_upload_fails_closed_and_persists_nothing_without_external_consent
 
 
 def test_audio_upload_succeeds_with_explicit_external_consent(api_client) -> None:
-    api_client.app.state.container.task_service.accurate_stt = _real_adapter(
+    api_client.app.state.container.voice_brain_dump_service.accurate_stt = _real_adapter(
         httpx.MockTransport(lambda _request: httpx.Response(200, json={"text": "ok"}))
     )
     operation = _start_operation(
@@ -973,10 +973,10 @@ def test_explicit_empty_provider_allowlist_fails_closed_before_audio_upload(
     never persist raw audio -- distinct from the unit-test-only default of
     ``None``, which permits "openai" for isolated deterministic tests."""
 
-    api_client.app.state.container.task_service.accurate_stt = _real_adapter(
+    api_client.app.state.container.voice_brain_dump_service.accurate_stt = _real_adapter(
         httpx.MockTransport(lambda _request: httpx.Response(200, json={"text": "ok"}))
     )
-    api_client.app.state.container.task_service.allowed_external_provider_categories = (
+    api_client.app.state.container.voice_brain_dump_service.allowed_external_provider_categories = (
         frozenset()
     )
     operation = _start_operation(
@@ -1591,7 +1591,7 @@ def test_commit_rejects_an_untouched_fast_proposal_after_a_successful_reconcile(
             ]
         }
 
-    api_client.app.state.container.task_service.text_reconciler = OpenAITextReconciler(
+    api_client.app.state.container.voice_brain_dump_service.text_reconciler = OpenAITextReconciler(
         api_key="test-key", complete=complete
     )
     sealed = _upload_and_seal(
@@ -1734,13 +1734,13 @@ def test_withdraw_consent_invalidates_an_in_flight_leased_provider_run(
     )
     owner_id = api_client.get("/api/auth/me").json()["id"]
     container = api_client.app.state.container
-    persisted = container.task_service.get_brain_dump_operation(
+    persisted = container.voice_brain_dump_service.get_brain_dump_operation(
         operation["id"], owner_id=owner_id
     )
     from datetime import timedelta
 
-    from app.modules.tasks.domain import BrainDumpProviderRunDocument
     from app.utils.time import utcnow
+    from app.workflows.voice_brain_dump.domain import BrainDumpProviderRunDocument
 
     now = utcnow()
     leased = persisted.model_copy(
@@ -1765,7 +1765,7 @@ def test_withdraw_consent_invalidates_an_in_flight_leased_provider_run(
             "revision": persisted.revision + 1,
         }
     )
-    container.task_repo.save_brain_dump_operation(leased)
+    container.voice_operation_repo.save_brain_dump_operation(leased)
 
     withdrawn = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/withdraw_consent",
@@ -1886,7 +1886,7 @@ def test_schema_v2_upload_seal_runs_accurate_reconciliation_from_original_audio(
     # One bounded runner invocation must immediately re-drive the dependent
     # reconciler stage queued by successful accurate STT. Waiting for the next
     # 60-second sweep would violate the post-stop latency contract.
-    service = api_client.app.state.container.task_service
+    service = api_client.app.state.container.voice_brain_dump_service
     assert service.run_due_brain_dump_provider_runs() == 2
     body = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
     assert body["status"] == "awaiting_confirmation"
@@ -2247,7 +2247,7 @@ def test_schema_v2_retryable_provider_failure_recovers_via_retry_command(
     )
     assert uploaded.status_code == 200, uploaded.text
 
-    task_service = api_client.app.state.container.task_service
+    task_service = api_client.app.state.container.voice_brain_dump_service
     original_transcribe = task_service.accurate_stt.transcribe_sealed_audio
     calls = {"count": 0}
 
@@ -2459,7 +2459,7 @@ def test_cancel_deletes_stored_raw_audio_and_clears_media_references(api_client)
     assert uploaded.status_code == 200, uploaded.text
 
     owner_id = api_client.get("/api/auth/me").json()["id"]
-    repository = api_client.app.state.container.task_repo
+    repository = api_client.app.state.container.voice_operation_repo
     chunk_path = repository.brain_dump_audio_chunk_path(owner_id, operation["id"], 0, digest)
     assert chunk_path.exists()
 
@@ -2528,7 +2528,7 @@ def test_owner_can_delete_reconciled_raw_audio_idempotently(api_client) -> None:
     assert sealed["raw_audio_present"] is True
 
     owner_id = api_client.get("/api/auth/me").json()["id"]
-    repository = api_client.app.state.container.task_repo
+    repository = api_client.app.state.container.voice_operation_repo
     chunk_path = repository.brain_dump_audio_chunk_path(
         owner_id, operation["id"], 0, hashlib.sha256(audio).hexdigest()
     )
@@ -2584,21 +2584,21 @@ def test_raw_audio_sweep_defers_expired_pending_provider_work(api_client) -> Non
     container = api_client.app.state.container
     # Periodic workers honour their bounded batch size, and a queued run is
     # not an expired lease eligible for recovery.
-    assert container.task_service.run_due_brain_dump_provider_runs(limit=0) == 0
-    assert container.task_service.recover_due_provider_leases(limit=0) == 0
-    assert container.task_service.recover_due_provider_leases() == 0
+    assert container.voice_brain_dump_service.run_due_brain_dump_provider_runs(limit=0) == 0
+    assert container.voice_brain_dump_service.recover_due_provider_leases(limit=0) == 0
+    assert container.voice_brain_dump_service.recover_due_provider_leases() == 0
 
     owner_id = api_client.get("/api/auth/me").json()["id"]
-    persisted = container.task_service.get_brain_dump_operation(
+    persisted = container.voice_brain_dump_service.get_brain_dump_operation(
         operation["id"], owner_id=owner_id
     )
-    container.task_repo.save_brain_dump_operation(
+    container.voice_operation_repo.save_brain_dump_operation(
         persisted.model_copy(
             update={"raw_audio_expires_at": persisted.created_at - timedelta(seconds=1)}
         )
     )
 
-    assert container.task_service.purge_expired_raw_audio() == 0
+    assert container.voice_brain_dump_service.purge_expired_raw_audio() == 0
     reloaded = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
     assert reloaded["raw_audio_present"] is True
     assert reloaded["provider_runs"][-1]["status"] == "pending"
@@ -2609,9 +2609,9 @@ def test_proposal_helpers_keep_empty_preview_and_semantic_match_paths_explicit(
 ) -> None:
     """Preview extraction and matching retain conservative no-op behavior."""
 
-    from app.modules.tasks.domain import BrainDumpProposalDocument
+    from app.workflows.voice_brain_dump.domain import BrainDumpProposalDocument
 
-    service = api_client.app.state.container.task_service
+    service = api_client.app.state.container.voice_brain_dump_service
     now = _start_operation(api_client, key="start-proposal-helper-coverage")["created_at"]
     proposal = BrainDumpProposalDocument(
         id="proposal_helper",
@@ -2641,7 +2641,7 @@ def test_raw_audio_retention_sweep_deletes_expired_terminal_media(api_client) ->
 
     container = api_client.app.state.container
     owner_id = api_client.get("/api/auth/me").json()["id"]
-    persisted = container.task_service.get_brain_dump_operation(
+    persisted = container.voice_brain_dump_service.get_brain_dump_operation(
         operation["id"], owner_id=owner_id
     )
     expired = persisted.model_copy(
@@ -2650,9 +2650,9 @@ def test_raw_audio_retention_sweep_deletes_expired_terminal_media(api_client) ->
             "updated_at": persisted.updated_at - timedelta(days=2),
         }
     )
-    container.task_repo.save_brain_dump_operation(expired)
+    container.voice_operation_repo.save_brain_dump_operation(expired)
 
-    assert container.task_service.purge_expired_raw_audio() == 1
+    assert container.voice_brain_dump_service.purge_expired_raw_audio() == 1
     swept = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
     assert swept["audio_chunks"] == []
     assert swept["media_ref"] is None
@@ -2680,7 +2680,7 @@ def test_raw_audio_retention_sweep_purges_expired_audio_but_preserves_active_rev
 
     container = api_client.app.state.container
     owner_id = api_client.get("/api/auth/me").json()["id"]
-    persisted = container.task_service.get_brain_dump_operation(
+    persisted = container.voice_brain_dump_service.get_brain_dump_operation(
         operation["id"], owner_id=owner_id
     )
     assert persisted.raw_audio_expires_at is not None
@@ -2689,9 +2689,9 @@ def test_raw_audio_retention_sweep_purges_expired_audio_but_preserves_active_rev
             "raw_audio_expires_at": persisted.raw_audio_expires_at - timedelta(days=2)
         }
     )
-    container.task_repo.save_brain_dump_operation(expired)
+    container.voice_operation_repo.save_brain_dump_operation(expired)
 
-    assert container.task_service.purge_expired_raw_audio() == 1
+    assert container.voice_brain_dump_service.purge_expired_raw_audio() == 1
     swept = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
     assert swept["status"] == "awaiting_confirmation"
     assert swept["audio_chunks"] == []
@@ -2708,13 +2708,13 @@ def test_raw_audio_retention_sweep_purges_expired_audio_but_preserves_active_rev
     assert committed.json()["committed_task_ids"]
 
     completed_owner_id = api_client.get("/api/auth/me").json()["id"]
-    completed_operation = container.task_service.get_brain_dump_operation(
+    completed_operation = container.voice_brain_dump_service.get_brain_dump_operation(
         operation["id"], owner_id=completed_owner_id
     )
     assert completed_operation.status == "completed"
     assert completed_operation.raw_audio_expires_at is not None
     assert completed_operation.raw_audio_expires_at == expired.raw_audio_expires_at
-    assert container.task_service.purge_expired_raw_audio() == 0
+    assert container.voice_brain_dump_service.purge_expired_raw_audio() == 0
     final = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
     assert final["audio_chunks"] == []
 
@@ -2737,7 +2737,7 @@ def test_raw_audio_expiry_starts_at_reconciliation_and_is_not_extended(
 
     container = api_client.app.state.container
     owner_id = api_client.get("/api/auth/me").json()["id"]
-    persisted = container.task_service.get_brain_dump_operation(
+    persisted = container.voice_brain_dump_service.get_brain_dump_operation(
         operation["id"], owner_id=owner_id
     )
     assert persisted.raw_audio_expires_at is not None
@@ -2750,7 +2750,7 @@ def test_raw_audio_expiry_starts_at_reconciliation_and_is_not_extended(
         json={"title": "Buy oat milk", "expected_revision": sealed["revision"]},
     )
     assert edited.status_code == 200, edited.text
-    reloaded = container.task_service.get_brain_dump_operation(
+    reloaded = container.voice_brain_dump_service.get_brain_dump_operation(
         operation["id"], owner_id=owner_id
     )
     assert reloaded.raw_audio_expires_at == original_anchor
@@ -2766,15 +2766,15 @@ def test_raw_audio_expiry_starts_at_reconciliation_and_is_not_extended(
     terminal_anchor = committed.json()["raw_audio_expires_at"]
     assert terminal_anchor == original_anchor.isoformat().replace("+00:00", "Z")
 
-    purged = container.task_service.purge_expired_raw_audio(
+    purged = container.voice_brain_dump_service.purge_expired_raw_audio(
         now=original_anchor + timedelta(seconds=1)
     )
     assert purged == 1
-    completed_operation = container.task_service.get_brain_dump_operation(
+    completed_operation = container.voice_brain_dump_service.get_brain_dump_operation(
         operation["id"], owner_id=owner_id
     )
     assert completed_operation.raw_audio_expires_at is not None
-    assert container.task_service.purge_expired_raw_audio() == 0
+    assert container.voice_brain_dump_service.purge_expired_raw_audio() == 0
     swept = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
     assert swept["audio_chunks"] == []
     assert swept["media_ref"] is None
@@ -2827,7 +2827,7 @@ def test_working_artifact_retention_sweep_clears_uncommitted_data_but_not_commit
     container = api_client.app.state.container
     owner_id = api_client.get("/api/auth/me").json()["id"]
     for operation_id in (abandoned["id"], committed_source["id"]):
-        persisted = container.task_service.get_brain_dump_operation(
+        persisted = container.voice_brain_dump_service.get_brain_dump_operation(
             operation_id, owner_id=owner_id
         )
         expired = persisted.model_copy(
@@ -2838,15 +2838,15 @@ def test_working_artifact_retention_sweep_clears_uncommitted_data_but_not_commit
                 ),
             }
         )
-        container.task_repo.save_brain_dump_operation(expired)
+        container.voice_operation_repo.save_brain_dump_operation(expired)
 
     # The abandoned operation is still "recording" (an active status): even
     # though it looks ancient, it must never be purged.
-    still_recording = container.task_service.get_brain_dump_operation(
+    still_recording = container.voice_brain_dump_service.get_brain_dump_operation(
         abandoned["id"], owner_id=owner_id
     )
     assert still_recording.status == "recording"
-    assert container.task_service.purge_expired_working_artifacts() == 1
+    assert container.voice_brain_dump_service.purge_expired_working_artifacts() == 1
 
     swept_abandoned = api_client.get(
         f"/api/brain-dump-operations/{abandoned['id']}"
@@ -2887,7 +2887,7 @@ def test_working_artifact_retention_sweep_clears_uncommitted_data_but_not_commit
         json={"expected_revision": swept_abandoned["revision"]},
     )
     assert cancelled.status_code == 200, cancelled.text
-    persisted_cancelled = container.task_service.get_brain_dump_operation(
+    persisted_cancelled = container.voice_brain_dump_service.get_brain_dump_operation(
         abandoned["id"], owner_id=owner_id
     )
     aged_cancelled = persisted_cancelled.model_copy(
@@ -2898,9 +2898,9 @@ def test_working_artifact_retention_sweep_clears_uncommitted_data_but_not_commit
             ),
         }
     )
-    container.task_repo.save_brain_dump_operation(aged_cancelled)
+    container.voice_operation_repo.save_brain_dump_operation(aged_cancelled)
 
-    assert container.task_service.purge_expired_working_artifacts() == 1
+    assert container.voice_brain_dump_service.purge_expired_working_artifacts() == 1
     swept_cancelled = api_client.get(
         f"/api/brain-dump-operations/{abandoned['id']}"
     ).json()
@@ -2919,7 +2919,7 @@ def test_task_port_is_a_real_adapter_not_the_service_self_adapting(api_client) -
     from app.workflows.voice_brain_dump.task_port import InProcessTaskPort
 
     container = api_client.app.state.container
-    task_service = container.task_service
+    task_service = container.voice_brain_dump_service
 
     assert isinstance(task_service.task_port, InProcessTaskPort)
     assert task_service.task_port is not task_service
@@ -2940,23 +2940,27 @@ def test_task_port_is_a_real_adapter_not_the_service_self_adapting(api_client) -
     assert committed.json()["committed_task_ids"]
 
 
-def test_task_service_defaults_to_a_real_adapter_when_constructed_without_a_port() -> (
+def test_voice_workflow_requires_an_explicit_real_task_port() -> (
     None
 ):
-    """Even outside container wiring, the default must not fall back to
-    ``self`` -- callers that construct ``TaskService`` directly (as most
-    unit tests do) still get a real, narrow adapter object."""
+    """The workflow boundary owns voice orchestration and crosses Tasks via a port."""
 
     import tempfile
     from pathlib import Path
 
     from app.modules.tasks import TaskRepository, TaskService
+    from app.workflows.voice_brain_dump.repository import OperationRepository
+    from app.workflows.voice_brain_dump.service import VoiceBrainDumpService
     from app.workflows.voice_brain_dump.task_port import InProcessTaskPort
 
     with tempfile.TemporaryDirectory() as data_dir:
-        service = TaskService(TaskRepository(Path(data_dir)))
+        task_service = TaskService(TaskRepository(Path(data_dir)))
+        service = VoiceBrainDumpService(
+            OperationRepository(Path(data_dir)),
+            task_port=InProcessTaskPort(task_service.create_native_inbox_task),
+        )
         assert isinstance(service.task_port, InProcessTaskPort)
-        assert service.task_port is not service
+        assert service.task_port is not task_service
 
 
 def test_recover_due_provider_leases_resumes_an_expired_in_flight_lease(
@@ -2978,11 +2982,11 @@ def test_recover_due_provider_leases_resumes_an_expired_in_flight_lease(
 
     container = api_client.app.state.container
     owner_id = api_client.get("/api/auth/me").json()["id"]
-    persisted = container.task_service.get_brain_dump_operation(
+    persisted = container.voice_brain_dump_service.get_brain_dump_operation(
         operation["id"], owner_id=owner_id
     )
-    from app.modules.tasks.domain import BrainDumpProviderRunDocument
     from app.utils.time import utcnow
+    from app.workflows.voice_brain_dump.domain import BrainDumpProviderRunDocument
 
     now = utcnow()
     leased = persisted.model_copy(
@@ -3008,9 +3012,9 @@ def test_recover_due_provider_leases_resumes_an_expired_in_flight_lease(
             "revision": persisted.revision + 1,
         }
     )
-    container.task_repo.save_brain_dump_operation(leased)
+    container.voice_operation_repo.save_brain_dump_operation(leased)
 
-    assert container.task_service.recover_due_provider_leases() == 1
+    assert container.voice_brain_dump_service.recover_due_provider_leases() == 1
 
     _advance_persisted_provider_runs(api_client, str(operation["id"]))
 
@@ -3023,7 +3027,7 @@ def test_recover_due_provider_leases_resumes_an_expired_in_flight_lease(
     assert resumed_run["recovery_count"] == 1
 
     # A second sweep pass with nothing due recovers nothing.
-    assert container.task_service.recover_due_provider_leases() == 0
+    assert container.voice_brain_dump_service.recover_due_provider_leases() == 0
 
 
 def test_commit_does_not_restamp_raw_audio_clock_after_explicit_deletion(
@@ -3056,7 +3060,7 @@ def test_commit_does_not_restamp_raw_audio_clock_after_explicit_deletion(
             ]
         }
 
-    api_client.app.state.container.task_service.text_reconciler = OpenAITextReconciler(
+    api_client.app.state.container.voice_brain_dump_service.text_reconciler = OpenAITextReconciler(
         api_key="test-key", complete=complete
     )
     sealed = _upload_and_seal(api_client, operation, b"Buy milk", "seal-no-restamp")
@@ -3141,7 +3145,7 @@ def test_active_legacy_preview_only_operation_can_be_committed_provisionally(
         "schema_version": 1,
         "revision": 3,
     }
-    conn = sqlite3.connect(container.task_repo.db_path)
+    conn = sqlite3.connect(container.voice_operation_repo.db_path)
     try:
         conn.execute(
             """
@@ -3197,7 +3201,7 @@ def test_validation_failure_uses_bounded_retry_then_preserves_proposals_terminal
         # semantic/grounding failure rather than a flaky transport.
         return {}
 
-    service = api_client.app.state.container.task_service
+    service = api_client.app.state.container.voice_brain_dump_service
     assert service.max_operation_recoveries == 2
     service.text_reconciler = OpenAITextReconciler(
         api_key="test-key", complete=always_invalid
@@ -3272,7 +3276,7 @@ def test_upload_rejects_unsupported_mime_type(api_client) -> None:
     assert response.status_code == 400, response.text
     assert "AUDIO_CHUNK_MIME_TYPE_UNSUPPORTED" in response.text
 
-    persisted = api_client.app.state.container.task_service.get_brain_dump_operation(
+    persisted = api_client.app.state.container.voice_brain_dump_service.get_brain_dump_operation(
         operation["id"], owner_id=api_client.get("/api/auth/me").json()["id"]
     )
     assert persisted.audio_chunks == []
@@ -3286,7 +3290,7 @@ def test_upload_rejects_chunk_exceeding_max_chunk_bytes_via_content_length(
 
     from app.core.config import VoiceAudioLimits
 
-    service = api_client.app.state.container.task_service
+    service = api_client.app.state.container.voice_brain_dump_service
     service.audio_limits = VoiceAudioLimits(max_chunk_bytes=16)
 
     operation = _start_operation(api_client, key="start-oversized-chunk")
@@ -3311,7 +3315,7 @@ def test_upload_rejects_chunk_exceeding_max_chunk_bytes_when_length_understated(
 
     from app.core.config import VoiceAudioLimits
 
-    service = api_client.app.state.container.task_service
+    service = api_client.app.state.container.voice_brain_dump_service
     service.audio_limits = VoiceAudioLimits(max_chunk_bytes=16)
 
     operation = _start_operation(api_client, key="start-understated-length")
@@ -3328,7 +3332,7 @@ def test_upload_rejects_chunk_exceeding_max_chunk_bytes_when_length_understated(
 def test_upload_rejects_total_exceeding_max_total_bytes(api_client) -> None:
     from app.core.config import VoiceAudioLimits
 
-    service = api_client.app.state.container.task_service
+    service = api_client.app.state.container.voice_brain_dump_service
     service.audio_limits = VoiceAudioLimits(max_total_bytes=48, max_chunk_bytes=32)
 
     operation = _start_operation(api_client, key="start-total-bytes-exceeded")
@@ -3353,7 +3357,7 @@ def test_upload_rejects_total_exceeding_max_total_bytes(api_client) -> None:
 def test_upload_rejects_chunk_count_exceeding_max_chunk_count(api_client) -> None:
     from app.core.config import VoiceAudioLimits
 
-    service = api_client.app.state.container.task_service
+    service = api_client.app.state.container.voice_brain_dump_service
     service.audio_limits = VoiceAudioLimits(max_chunk_count=1)
 
     operation = _start_operation(api_client, key="start-chunk-count-exceeded")
@@ -3383,7 +3387,7 @@ def test_seal_rejects_audio_exceeding_duration_limit(api_client) -> None:
 
     from app.core.config import VoiceAudioLimits
 
-    service = api_client.app.state.container.task_service
+    service = api_client.app.state.container.voice_brain_dump_service
 
     operation = _start_operation(api_client, key="start-duration-exceeded")
     audio = b"Buy milk."

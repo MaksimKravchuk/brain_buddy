@@ -39,6 +39,8 @@ from app.workflows.voice_brain_dump.providers import (
     DisabledTextReconciler,
     TextReconcilerPort,
 )
+from app.workflows.voice_brain_dump.repository import OperationRepository
+from app.workflows.voice_brain_dump.service import VoiceBrainDumpService
 from app.workflows.voice_brain_dump.task_port import InProcessTaskPort
 
 
@@ -55,6 +57,7 @@ class Container:
     session_repo: SessionRepository
     invite_repo: InviteRepository
     task_repo: TaskRepository
+    voice_operation_repo: OperationRepository
     tree_service: TreeService
     node_service: NodeService
     relation_service: RelationService
@@ -62,6 +65,7 @@ class Container:
     validation_service: ValidationService
     auth_service: AuthService
     task_service: TaskService
+    voice_brain_dump_service: VoiceBrainDumpService
 
 
 def _build_accurate_stt(config: AppConfig) -> AccurateSttPort:
@@ -153,6 +157,7 @@ def build_container(config: AppConfig) -> Container:
     session_repo = SessionRepository(data_root)
     invite_repo = InviteRepository(data_root)
     task_repo = TaskRepository(data_root)
+    voice_operation_repo = OperationRepository(data_root)
 
     tree_service = TreeService(tree_repo, index_repo)
     node_service = NodeService(tree_repo, tree_service)
@@ -168,8 +173,9 @@ def build_container(config: AppConfig) -> Container:
             "openai": OpenAIValidationProvider(),
         },
     )
-    task_service = TaskService(
-        task_repo,
+    task_service = TaskService(task_repo)
+    voice_brain_dump_service = VoiceBrainDumpService(
+        voice_operation_repo,
         accurate_stt=_build_accurate_stt(config),
         text_reconciler=_build_text_reconciler(config),
         raw_audio_retention=timedelta(seconds=config.voice.retention.raw_audio_seconds),
@@ -182,21 +188,16 @@ def build_container(config: AppConfig) -> Container:
         ),
         provider_run_lease_seconds=_provider_run_lease_seconds(config),
         allowed_external_provider_categories=frozenset(
-            provider
+            "openai" if provider == "deterministic" else provider
             for provider in (
                 config.voice.accurate_stt.provider,
                 config.voice.reconciler.provider,
             )
-            if provider not in {"disabled", "deterministic"}
+            if provider != "disabled"
         ),
         audio_limits=config.voice.audio_limits,
+        task_port=InProcessTaskPort(task_service.create_native_inbox_task),
     )
-    # ADR-0001: the voice-operation confirmation workflow crosses the Tasks
-    # module boundary through an explicit TaskPort adapter, never by treating
-    # the Tasks service as its own port. Wire the real in-process adapter
-    # here, at the application boundary, rather than letting TaskService
-    # self-adapt.
-    task_service.task_port = InProcessTaskPort(task_service.create_native_inbox_task)
     auth_service = AuthService(
         user_repo=user_repo,
         session_repo=session_repo,
@@ -215,6 +216,7 @@ def build_container(config: AppConfig) -> Container:
         session_repo=session_repo,
         invite_repo=invite_repo,
         task_repo=task_repo,
+        voice_operation_repo=voice_operation_repo,
         tree_service=tree_service,
         node_service=node_service,
         relation_service=relation_service,
@@ -222,4 +224,5 @@ def build_container(config: AppConfig) -> Container:
         validation_service=validation_service,
         auth_service=auth_service,
         task_service=task_service,
+        voice_brain_dump_service=voice_brain_dump_service,
     )
