@@ -300,6 +300,9 @@ test.describe("mobile task shell at the canonical 375x812 viewport", () => {
   });
 });
 
+test.describe("Brain Dump mobile design surface", () => {
+  test.use({ viewport: { width: 402, height: 874 } });
+
 test("Brain Dump recording and review surfaces use source-derived mobile geometry", async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "mediaDevices", {
@@ -326,7 +329,6 @@ test("Brain Dump recording and review surfaces use source-derived mobile geometr
     writableWindow.SpeechRecognition = FakeSpeechRecognition;
     writableWindow.webkitSpeechRecognition = FakeSpeechRecognition;
   });
-  await page.setViewportSize({ width: 402, height: 874 });
   await page.goto("/brain-dump/new");
 
   await test.step("Verify the Brain Dump mobile viewport", async () => {
@@ -354,4 +356,5 @@ test("Brain Dump recording and review surfaces use source-derived mobile geometr
     animations: "disabled",
     maxDiffPixelRatio: 0.08
   });
+});
 });

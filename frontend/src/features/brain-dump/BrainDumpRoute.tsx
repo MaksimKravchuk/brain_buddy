@@ -92,6 +92,7 @@ export function BrainDumpRoute(): JSX.Element {
   const sequenceRef = useRef(0);
   const pendingInterimSequenceRef = useRef<number | null>(null);
   const operationRef = useRef<BrainDumpOperationResponse | null>(null);
+  const localCaptureOperationIdRef = useRef<string | null>(null);
   const proposalMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const isReviewPath = location.pathname.endsWith("/review");
   const activeProposals = useMemo(() => (operation?.proposals ?? []).filter((proposal) => !proposal.deleted), [operation]);
@@ -319,8 +320,9 @@ export function BrainDumpRoute(): JSX.Element {
       return;
     }
     setIsStarting(true);
+    let stream: MediaStream | null = null;
     try {
-      const stream = await probeMicrophone();
+      stream = await probeMicrophone();
       const vocabulary = vocabularyText.split(",").map((value) => value.trim()).filter(Boolean);
       const started = operationRef.current ?? (await apiClient.startBrainDump({
         consent: {
@@ -331,6 +333,7 @@ export function BrainDumpRoute(): JSX.Element {
           vocabulary
         }
       }, idempotencyKey("start")));
+      localCaptureOperationIdRef.current = started.id;
       applyOperation(started);
       if (params.operationId === "new") {
         navigate(`/brain-dump/${started.id}`, { replace: true });
@@ -340,6 +343,16 @@ export function BrainDumpRoute(): JSX.Element {
         startRecognitionFor(started, Recognition);
       }
     } catch (caught) {
+      // getUserMedia may have already granted the microphone even though a
+      // later step (operation creation, MediaRecorder construction/start, or
+      // recognition startup) failed; every acquired track must still be
+      // released or the browser keeps the microphone indicator held open.
+      stopRecognition();
+      const streamIsManagedByRecorder = mediaStreamRef.current === stream;
+      await stopMediaRecorder({ discardPendingAudio: true });
+      if (!streamIsManagedByRecorder) {
+        stream?.getTracks().forEach((track) => track.stop());
+      }
       setError(caught instanceof Error ? caught.message : "Microphone permission was denied.");
     } finally {
       setIsStarting(false);
@@ -356,6 +369,16 @@ export function BrainDumpRoute(): JSX.Element {
         return;
       }
       setIsSaving(true);
+    }
+    if (action === "withdraw_consent") {
+      // Fail-closed: release the microphone, recognizer, and any future
+      // transcript/audio uploads locally before the server round-trip. A
+      // slow or rejected withdraw_consent response must never leave local
+      // capture still running -- see the retry affordance below, which
+      // stays available for as long as the server has not confirmed.
+      stopRecognition();
+      await stopMediaRecorder({ discardPendingAudio: true });
+      setConsentWithdrawnMidCapture(true);
     }
     const Recognition = action === "resume" ? speechRecognitionConstructor() : null;
     if (action === "resume") {
@@ -446,6 +469,7 @@ export function BrainDumpRoute(): JSX.Element {
         mediaRecorderRef.current.resume();
       }
       if (action === "cancel") {
+        localCaptureOperationIdRef.current = null;
         applyOperation(null);
         setConsentWithdrawnMidCapture(false);
         setLastTranscript("");
@@ -535,7 +559,7 @@ export function BrainDumpRoute(): JSX.Element {
     );
   }
 
-  if (operation && processingStatusLabels.has(operation.status) && operation.status !== "committing") {
+  if (operation && processingStatusLabels.has(operation.status)) {
     return <ProcessingSurface error={error} operation={operation} proposals={activeProposals} />;
   }
 
@@ -579,6 +603,7 @@ export function BrainDumpRoute(): JSX.Element {
       isStarting={isStarting}
       languageMode={languageMode}
       lastTranscript={lastTranscript}
+      locallyStartedOperationId={localCaptureOperationIdRef.current}
       operation={operation}
       proposals={activeProposals}
       onCancel={() => void command("cancel")}
@@ -637,6 +662,7 @@ function RecordingSurface({
   isStarting,
   languageMode,
   lastTranscript,
+  locallyStartedOperationId,
   operation,
   proposals,
   onCancel,
@@ -656,6 +682,7 @@ function RecordingSurface({
   isStarting: boolean;
   languageMode: LanguageMode;
   lastTranscript: string;
+  locallyStartedOperationId: string | null;
   operation: BrainDumpOperationResponse | null;
   proposals: BrainDumpProposal[];
   onCancel: () => void;
@@ -674,8 +701,15 @@ function RecordingSurface({
   // withdrawal already stopped local capture (see `stopMediaRecorder` in
   // `command()`), even though the server may leave `status` unchanged for a
   // mid-recording withdrawal (see ADR-0002 -- withdrawal is not cancel).
-  const isPaused = operation?.status === "paused" && !consentWithdrawnMidCapture;
-  const isRecording = operation?.status === "recording" && !consentWithdrawnMidCapture;
+  const captureStoppedByConsent = Boolean(
+    operation &&
+      locallyStartedOperationId !== operation.id &&
+      !operation.consent.external_processing_allowed &&
+      (operation.status === "recording" || operation.status === "paused")
+  );
+  const captureStopped = consentWithdrawnMidCapture || captureStoppedByConsent;
+  const isPaused = operation?.status === "paused" && !captureStopped;
+  const isRecording = operation?.status === "recording" && !captureStopped;
   return (
     <div className="min-h-screen bg-surface-base text-slate-900" data-operation-id={operation?.id ?? "new"}>
       <div className="fixed inset-0 flex items-center justify-center bg-slate-50/80 p-0 backdrop-blur-sm sm:p-4">
@@ -686,7 +720,7 @@ function RecordingSurface({
             <span className="text-xs font-semibold text-slate-900">{count} {count === 1 ? "task" : "tasks"} captured</span>
             <span className={`ml-auto inline-flex items-center gap-1.5 text-xs font-medium ${isRecording ? "text-rose-600" : "text-slate-500"}`}>
               <span className={`h-1.5 w-1.5 rounded-full ${isRecording ? "bg-rose-600" : "bg-slate-400"}`} aria-hidden />
-              {consentWithdrawnMidCapture ? "Cloud processing stopped" : isPaused ? "Paused" : isRecording ? "Recording" : "Ready"}
+              {captureStopped ? "Cloud processing stopped" : isPaused ? "Paused" : isRecording ? "Recording" : "Ready"}
             </span>
           </header>
 
@@ -737,7 +771,7 @@ function RecordingSurface({
                   <Mic className="h-4 w-4" aria-hidden />
                   Record
                 </button>
-              ) : consentWithdrawnMidCapture ? (
+              ) : captureStopped ? (
                 <span className="inline-flex h-10 items-center rounded-lg border border-amber-200 bg-amber-50 px-4 text-sm font-medium text-amber-800">
                   Cloud processing stopped
                 </span>
