@@ -380,7 +380,7 @@ def test_voice_sweep_iteration_runs_all_three_duties_and_survives_a_failure(
     assert calls == ["recover", "raw_audio", "working_artifacts"]
 
 
-def test_voice_sweep_thread_is_tracked_and_stops_cleanly(container) -> None:
+def test_voice_sweep_thread_wakes_immediately_and_stops_cleanly(container) -> None:
     """The periodic sweep runs on a thread that is referenced (not an
     untracked fire-and-forget task) and stops promptly once signalled."""
 
@@ -397,14 +397,16 @@ def test_voice_sweep_thread_is_tracked_and_stops_cleanly(container) -> None:
     container.task_service.recover_due_provider_leases = recover_due_provider_leases
 
     stop_event = threading.Event()
+    wake_event = threading.Event()
     from app import main as main_module
 
     original_interval = main_module._VOICE_SWEEP_INTERVAL_SECONDS
-    main_module._VOICE_SWEEP_INTERVAL_SECONDS = 0.01
+    main_module._VOICE_SWEEP_INTERVAL_SECONDS = 60
     try:
-        thread = _start_voice_sweep_thread(container, stop_event)
+        thread = _start_voice_sweep_thread(container, stop_event, wake_event)
         assert thread.is_alive()
-        assert iterations.wait(timeout=2), "sweep loop never ran an iteration"
+        wake_event.set()
+        assert iterations.wait(timeout=2), "durable runner wake never ran an iteration"
         stop_event.set()
         thread.join(timeout=2)
         assert not thread.is_alive()
@@ -453,7 +455,7 @@ def test_development_app_tracks_and_stops_the_periodic_voice_sweep(
     sweep_thread = SweepThread()
     seen_stop_events = []
 
-    def start_sweep(_container, stop_event):
+    def start_sweep(_container, stop_event, _wake_event):
         seen_stop_events.append(stop_event)
         return sweep_thread
 
@@ -502,7 +504,9 @@ def test_compose_e2e_can_opt_in_to_the_periodic_voice_sweep(
     monkeypatch.setenv("BRAIN_BUDDY_ENV", "test")
     monkeypatch.setenv("BRAIN_BUDDY_ENABLE_VOICE_SWEEP_IN_TEST", "1")
     monkeypatch.setattr(
-        main_module, "_start_voice_sweep_thread", lambda _container, _stop: sweep_thread
+        main_module,
+        "_start_voice_sweep_thread",
+        lambda _container, _stop, _wake: sweep_thread,
     )
     get_config.cache_clear()
     try:

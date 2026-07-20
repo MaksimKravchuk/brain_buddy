@@ -527,3 +527,60 @@ def test_unknown_brain_dump_schema_version_fails_closed(
         repository.get_brain_dump_operation_for_owner(
             str(payload["id"]), owner_id=OWNER
         )
+
+
+def test_purge_expired_raw_audio_does_not_mutate_terminal_schema_v1_record(
+    repository: TaskRepository, service: TaskService
+) -> None:
+    """Blocker 7b: a terminal schema-v1 operation is a byte-immutable
+    historical record. The raw-audio retention sweep must never rewrite it
+    even when it looks old and still carries audio chunks."""
+
+    old = utcnow() - timedelta(days=400)
+    payload = _legacy_brain_dump_payload(status="completed")
+    payload["updated_at"] = old.isoformat()
+    payload["audio_chunks"] = [
+        {
+            "chunk_number": 0,
+            "sha256": "a" * 64,
+            "size_bytes": 10,
+            "received_at": old.isoformat(),
+        }
+    ]
+    _insert_brain_dump_payload(repository, payload)
+
+    purged = service.purge_expired_raw_audio()
+
+    assert purged == 0
+    with sqlite3.connect(repository.db_path) as conn:
+        stored = json.loads(
+            conn.execute(
+                "SELECT payload FROM brain_dump_operations WHERE owner_id = ? AND id = ?",
+                (OWNER, payload["id"]),
+            ).fetchone()[0]
+        )
+    assert stored == payload
+
+
+def test_purge_expired_working_artifacts_does_not_mutate_terminal_schema_v1_record(
+    repository: TaskRepository, service: TaskService
+) -> None:
+    """Blocker 7b: a terminal schema-v1 operation's segments/proposals must
+    survive the working-artifact retention sweep byte-for-byte."""
+
+    old = utcnow() - timedelta(days=400)
+    payload = _legacy_brain_dump_payload(status="completed")
+    payload["updated_at"] = old.isoformat()
+    _insert_brain_dump_payload(repository, payload)
+
+    purged = service.purge_expired_working_artifacts()
+
+    assert purged == 0
+    with sqlite3.connect(repository.db_path) as conn:
+        stored = json.loads(
+            conn.execute(
+                "SELECT payload FROM brain_dump_operations WHERE owner_id = ? AND id = ?",
+                (OWNER, payload["id"]),
+            ).fetchone()[0]
+        )
+    assert stored == payload

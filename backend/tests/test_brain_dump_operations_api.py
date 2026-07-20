@@ -301,15 +301,27 @@ def test_retention_sweep_never_purges_a_retryable_error_operation(api_client) ->
 
 
 @pytest.mark.parametrize(
-    ("provider_error", "expected_status"),
+    ("provider_error", "expected_status", "expected_code"),
     [
-        (ProviderRetryableError("temporary outage"), "retryable_error"),
-        (ProviderTerminalError("provider rejected"), "terminal_error"),
-        (ValidationFailure("invalid model output"), "terminal_error"),
+        (
+            ProviderRetryableError("temporary outage"),
+            "retryable_error",
+            "PROVIDER_ERROR_UNSPECIFIED",
+        ),
+        (
+            ProviderTerminalError("provider rejected"),
+            "terminal_error",
+            "PROVIDER_ERROR_UNSPECIFIED",
+        ),
+        (
+            ValidationFailure("invalid model output"),
+            "retryable_error",
+            "RECONCILER_VALIDATION_REJECTED",
+        ),
     ],
 )
 def test_seal_persists_semantic_reconciler_failures_for_recovery(
-    api_client, provider_error: Exception, expected_status: str
+    api_client, provider_error: Exception, expected_status: str, expected_code: str
 ) -> None:
     from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
 
@@ -333,8 +345,8 @@ def test_seal_persists_semantic_reconciler_failures_for_recovery(
     persisted_run = sealed.json()["provider_runs"][-1]
     assert persisted_run["role"] == "reconciler"
     assert persisted_run["status"] == expected_status
-    assert persisted_run["error"] == "PROVIDER_ERROR_UNSPECIFIED"
-    assert persisted_run["error_code"] == "PROVIDER_ERROR_UNSPECIFIED"
+    assert persisted_run["error"] == expected_code
+    assert persisted_run["error_code"] == expected_code
     assert str(provider_error) not in sealed.text
 
 
@@ -3012,3 +3024,418 @@ def test_recover_due_provider_leases_resumes_an_expired_in_flight_lease(
 
     # A second sweep pass with nothing due recovers nothing.
     assert container.task_service.recover_due_provider_leases() == 0
+
+
+def test_commit_does_not_restamp_raw_audio_clock_after_explicit_deletion(
+    api_client,
+) -> None:
+    """Residual gap from the exact-head review of blocker 3: once raw audio
+    has been explicitly deleted (``raw_audio_expires_at`` set to the
+    deletion instant), a later ``commit`` must never push that clock back
+    out to ``now + retention`` for a row that no longer has any audio."""
+
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    operation = _start_operation(
+        api_client, key="start-no-restamp", external_processing_allowed=True
+    )
+
+    def complete(payload: dict[str, object]) -> dict[str, object]:
+        context = json.loads(payload["messages"][1]["content"])  # type: ignore[index]
+        segment_id = context["transcript_segments"][0]["id"]
+        return {
+            "operations": [
+                {
+                    "operation": "add",
+                    "proposal_id": None,
+                    "title": "Buy milk",
+                    "source_segment_ids": [segment_id],
+                    "predecessor_ids": [],
+                    "base_revision": None,
+                }
+            ]
+        }
+
+    api_client.app.state.container.task_service.text_reconciler = OpenAITextReconciler(
+        api_key="test-key", complete=complete
+    )
+    sealed = _upload_and_seal(api_client, operation, b"Buy milk", "seal-no-restamp")
+    assert sealed.status_code == 200, sealed.text
+    body = sealed.json()
+    assert body["status"] == "awaiting_confirmation"
+
+    deleted = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/delete_raw_audio",
+        headers={"Idempotency-Key": "delete-raw-audio-no-restamp"},
+        json={"expected_revision": body["revision"]},
+    )
+    assert deleted.status_code == 200, deleted.text
+    deleted_body = deleted.json()
+    assert deleted_body["raw_audio_present"] is False
+    stamped_at_deletion = deleted_body["raw_audio_expires_at"]
+    assert stamped_at_deletion is not None
+
+    committed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/commit",
+        headers={"Idempotency-Key": "commit-no-restamp"},
+        json={"expected_revision": deleted_body["revision"]},
+    )
+    assert committed.status_code == 200, committed.text
+    assert committed.json()["raw_audio_expires_at"] == stamped_at_deletion
+
+
+def test_active_legacy_preview_only_operation_can_be_committed_provisionally(
+    api_client,
+) -> None:
+    """ADR-0002 "Current implementation migration" rule 3: an active
+    schema-v1 operation imported as ``legacy_preview_only`` has no durable
+    original audio and can never earn a reconciler success record, but it
+    must still be explicitly, visibly commitable as provisional-only --
+    otherwise every in-flight pre-migration operation is stuck forever."""
+
+    import sqlite3
+
+    from app.utils.time import utcnow
+
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    container = api_client.app.state.container
+    now = utcnow().isoformat()
+    operation_id = "brain_dump_legacy_active_commit"
+    payload = {
+        "id": operation_id,
+        "owner_id": owner_id,
+        "kind": "voice_brain_dump",
+        "status": "awaiting_confirmation",
+        "consent": {
+            "microphone": True,
+            "external_processing_allowed": False,
+            "recorded_at": now,
+            "provider": None,
+        },
+        "segments": [
+            {
+                "id": "segment_legacy_active",
+                "sequence": 1,
+                "text": "Buy milk.",
+                "stability": "stable",
+                "created_at": now,
+            }
+        ],
+        "proposals": [
+            {
+                "id": "proposal_legacy_active",
+                "ordinal": 1,
+                "title": "Buy milk",
+                "status": "provisional",
+                "source_segment_ids": ["segment_legacy_active"],
+                "deleted": False,
+                "user_edited": False,
+                "created_at": now,
+                "updated_at": now,
+                "revision": 1,
+            }
+        ],
+        "committed_task_ids": [],
+        "created_at": now,
+        "updated_at": now,
+        "schema_version": 1,
+        "revision": 3,
+    }
+    conn = sqlite3.connect(container.task_repo.db_path)
+    try:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO brain_dump_operations
+                (owner_id, id, status, updated_at, payload)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (owner_id, operation_id, payload["status"], now, json.dumps(payload)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    fetched = api_client.get(f"/api/brain-dump-operations/{operation_id}")
+    assert fetched.status_code == 200, fetched.text
+    fetched_body = fetched.json()
+    assert fetched_body["reconciliation_quality"] == "provisional_only"
+
+    committed = api_client.post(
+        f"/api/brain-dump-operations/{operation_id}/commit",
+        headers={"Idempotency-Key": "commit-legacy-active"},
+        json={"expected_revision": fetched_body["revision"]},
+    )
+    assert committed.status_code == 200, committed.text
+    assert committed.json()["committed_task_ids"]
+
+    inbox = api_client.get("/api/tasks", params={"state": "inbox"}).json()
+    assert [item["title"] for item in inbox["items"]] == ["Buy milk"]
+
+
+def test_validation_failure_uses_bounded_retry_then_preserves_proposals_terminally(
+    api_client,
+) -> None:
+    """A semantic ``ValidationFailure`` (the model itself returned an
+    invalid/ungrounded operation, not a transport/provider outage) must get
+    the same bounded, durable retry budget as a provider outage -- never an
+    immediate, unrecoverable dead end -- and once that budget is exhausted
+    the outcome must still be user-visible (redacted, allowlisted error
+    code) and manual-review-preserving: the operation never silently wipes
+    its prior transcript/proposal state."""
+
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    operation = _start_operation(
+        api_client,
+        key="start-validation-failure-budget",
+        external_processing_allowed=True,
+    )
+
+    def always_invalid(_payload: dict[str, object]) -> dict[str, object]:
+        # Missing the required ``operations`` key -- every attempt fails the
+        # same deterministic schema-validation way, modelling a persistent
+        # semantic/grounding failure rather than a flaky transport.
+        return {}
+
+    service = api_client.app.state.container.task_service
+    assert service.max_operation_recoveries == 2
+    service.text_reconciler = OpenAITextReconciler(
+        api_key="test-key", complete=always_invalid
+    )
+    sealed = _upload_and_seal(
+        api_client, operation, b"Buy milk.", "seal-validation-failure-budget"
+    )
+    assert sealed.status_code == 200, sealed.text
+    body = sealed.json()
+    assert body["status"] == "retryable_error"
+    first_run = body["provider_runs"][-1]
+    assert first_run["error_code"] == "RECONCILER_VALIDATION_REJECTED"
+    assert body["segments"], "checkpoint transcript must survive the failure"
+
+    retried_once = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/retry",
+        headers={"Idempotency-Key": "retry-validation-failure-1"},
+        json={"expected_revision": body["revision"]},
+    )
+    assert retried_once.status_code == 200, retried_once.text
+    retried_once = _advance_persisted_provider_runs(api_client, str(operation["id"]))
+    once_body = retried_once.json()
+    assert once_body["status"] == "retryable_error"
+    assert once_body["provider_runs"][-1]["error_code"] == (
+        "RECONCILER_VALIDATION_REJECTED"
+    )
+
+    retried_twice = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/retry",
+        headers={"Idempotency-Key": "retry-validation-failure-2"},
+        json={"expected_revision": once_body["revision"]},
+    )
+    assert retried_twice.status_code == 200, retried_twice.text
+    final_body = retried_twice.json()
+    assert final_body["status"] == "terminal_error"
+    assert final_body["provider_runs"][-1]["error_code"] == (
+        "OPERATION_RECOVERY_BUDGET_EXHAUSTED"
+    )
+    # Terminal is a dead end for new confirmation, but it is neither opaque
+    # nor destructive: the transcript/proposal state from before the
+    # exhausted retry budget remains fully visible for manual inspection,
+    # and the operation is visibly flagged ``conflicted`` rather than
+    # reading as an ordinary, undifferentiated provider failure.
+    assert final_body["segments"]
+    assert final_body["reconciliation_quality"] == "conflicted"
+    fetched_after_terminal = api_client.get(
+        f"/api/brain-dump-operations/{operation['id']}"
+    )
+    assert fetched_after_terminal.status_code == 200
+    assert fetched_after_terminal.json()["status"] == "terminal_error"
+    assert fetched_after_terminal.json()["segments"] == final_body["segments"]
+
+    rejected_commit = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/commit",
+        headers={"Idempotency-Key": "commit-after-validation-exhaustion"},
+        json={"expected_revision": final_body["revision"]},
+    )
+    assert rejected_commit.status_code == 400, rejected_commit.text
+
+
+def test_upload_rejects_unsupported_mime_type(api_client) -> None:
+    operation = _start_operation(api_client, key="start-bad-mime")
+    audio = b"not really audio but plausible bytes"
+    response = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={
+            "X-Content-SHA256": hashlib.sha256(audio).hexdigest(),
+            "Content-Type": "text/plain",
+        },
+    )
+    assert response.status_code == 400, response.text
+    assert "AUDIO_CHUNK_MIME_TYPE_UNSUPPORTED" in response.text
+
+    persisted = api_client.app.state.container.task_service.get_brain_dump_operation(
+        operation["id"], owner_id=api_client.get("/api/auth/me").json()["id"]
+    )
+    assert persisted.audio_chunks == []
+
+
+def test_upload_rejects_chunk_exceeding_max_chunk_bytes_via_content_length(
+    api_client,
+) -> None:
+    """The Content-Length pre-check refuses an oversized chunk before any
+    bytes are streamed into memory."""
+
+    from app.core.config import VoiceAudioLimits
+
+    service = api_client.app.state.container.task_service
+    service.audio_limits = VoiceAudioLimits(max_chunk_bytes=16)
+
+    operation = _start_operation(api_client, key="start-oversized-chunk")
+    audio = b"x" * 64
+    response = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={
+            "X-Content-SHA256": hashlib.sha256(audio).hexdigest(),
+            "Content-Length": str(len(audio)),
+        },
+    )
+    assert response.status_code == 400, response.text
+    assert "AUDIO_CHUNK_TOO_LARGE" in response.text
+
+
+def test_upload_rejects_chunk_exceeding_max_chunk_bytes_when_length_understated(
+    api_client,
+) -> None:
+    """Even if a caller lies about (or omits) Content-Length, the bounded
+    stream read must still refuse an oversized chunk once actually read."""
+
+    from app.core.config import VoiceAudioLimits
+
+    service = api_client.app.state.container.task_service
+    service.audio_limits = VoiceAudioLimits(max_chunk_bytes=16)
+
+    operation = _start_operation(api_client, key="start-understated-length")
+    audio = b"y" * 64
+    response = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+    assert response.status_code == 400, response.text
+    assert "AUDIO_CHUNK_TOO_LARGE" in response.text
+
+
+def test_upload_rejects_total_exceeding_max_total_bytes(api_client) -> None:
+    from app.core.config import VoiceAudioLimits
+
+    service = api_client.app.state.container.task_service
+    service.audio_limits = VoiceAudioLimits(max_total_bytes=48, max_chunk_bytes=32)
+
+    operation = _start_operation(api_client, key="start-total-bytes-exceeded")
+    first = b"a" * 32
+    first_response = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=first,
+        headers={"X-Content-SHA256": hashlib.sha256(first).hexdigest()},
+    )
+    assert first_response.status_code == 200, first_response.text
+
+    second = b"b" * 32
+    second_response = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/1",
+        content=second,
+        headers={"X-Content-SHA256": hashlib.sha256(second).hexdigest()},
+    )
+    assert second_response.status_code == 400, second_response.text
+    assert "AUDIO_TOTAL_BYTES_EXCEEDED" in second_response.text
+
+
+def test_upload_rejects_chunk_count_exceeding_max_chunk_count(api_client) -> None:
+    from app.core.config import VoiceAudioLimits
+
+    service = api_client.app.state.container.task_service
+    service.audio_limits = VoiceAudioLimits(max_chunk_count=1)
+
+    operation = _start_operation(api_client, key="start-chunk-count-exceeded")
+    first = b"first chunk"
+    first_response = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=first,
+        headers={"X-Content-SHA256": hashlib.sha256(first).hexdigest()},
+    )
+    assert first_response.status_code == 200, first_response.text
+
+    second = b"second chunk"
+    second_response = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/1",
+        content=second,
+        headers={"X-Content-SHA256": hashlib.sha256(second).hexdigest()},
+    )
+    assert second_response.status_code == 400, second_response.text
+    assert "AUDIO_CHUNK_COUNT_EXCEEDED" in second_response.text
+
+
+def test_seal_rejects_audio_exceeding_duration_limit(api_client) -> None:
+    """Seal re-checks the whole sealed manifest against the duration cap as
+    its own defense-in-depth gate -- distinct from the per-upload check --
+    so a manifest assembled under a since-tightened limit is still caught
+    before the accurate-STT/reconciler pipeline ever sees it."""
+
+    from app.core.config import VoiceAudioLimits
+
+    service = api_client.app.state.container.task_service
+
+    operation = _start_operation(api_client, key="start-duration-exceeded")
+    audio = b"Buy milk."
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+
+    # The operator tightens the duration budget after the chunk was
+    # accepted but before seal -- e.g. a config rollout mid-recording.
+    service.audio_limits = VoiceAudioLimits(
+        max_duration_seconds=1, assumed_chunk_duration_seconds=5
+    )
+
+    sealed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers={"Idempotency-Key": "seal-duration-exceeded"},
+        json={
+            "expected_revision": uploaded.json()["revision"],
+            "expected_chunks": 1,
+            "manifest_hash": _manifest_hash(audio),
+        },
+    )
+    assert sealed.status_code == 400, sealed.text
+    assert "AUDIO_DURATION_LIMIT_EXCEEDED" in sealed.text
+
+
+def test_config_audio_limits_env_overrides(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from app.core.config import get_config
+
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "test")
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path / "config-audio-limits"))
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_AUDIO_ALLOWED_MIME_TYPES", "audio/wav")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_AUDIO_MAX_CHUNK_BYTES", "1024")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_AUDIO_MAX_TOTAL_BYTES", "2048")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_AUDIO_MAX_CHUNK_COUNT", "3")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_AUDIO_MAX_DURATION_SECONDS", "42")
+    monkeypatch.setenv(
+        "BRAIN_BUDDY_VOICE_AUDIO_ASSUMED_CHUNK_DURATION_SECONDS", "2"
+    )
+    get_config.cache_clear()
+    try:
+        limits = get_config().voice.audio_limits
+        assert limits.allowed_mime_types == frozenset({"audio/wav"})
+        assert limits.max_chunk_bytes == 1024
+        assert limits.max_total_bytes == 2048
+        assert limits.max_chunk_count == 3
+        assert limits.max_duration_seconds == 42
+        assert limits.assumed_chunk_duration_seconds == 2
+    finally:
+        get_config.cache_clear()
