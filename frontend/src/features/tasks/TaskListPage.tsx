@@ -1,12 +1,12 @@
 /* istanbul ignore file -- task shell rendering is covered by route tests and Playwright snapshots. */
-import { AlertTriangle, ArrowLeft, Check, Edit3, Plus, RotateCcw, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowUpDown, Check, Edit3, Layers, Plus, RotateCcw, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { apiClient } from "../../api/client";
-import { parseOpenTaskState, parseTaskDateView, useProjects, useTags, useTaskDetail, useTaskList } from "../../api/taskHooks";
+import { parseOpenTaskState, parseTaskDateView, useAllTaskPages, useProjects, useTags, useTaskDetail, useTaskList } from "../../api/taskHooks";
 import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts, TaskPriority, TaskResponse, TaskSort, TaskSubtaskResponse, TaskUpdateRequest } from "../../api/taskTypes";
 import { AppShell, SoonChip } from "../../components/shell/AppShell";
 import { getErrorMessage } from "../../utils/error";
@@ -93,7 +93,9 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const searchQuery = searchParams.get("q") ?? "";
   const today = localDateIso();
   const isInboxProductView = state === "inbox" && !projectId && !tagId && !dateView;
-  const taskQuery = useTaskList({
+  const canGroupByProject = !projectId;
+  const groupByProject = canGroupByProject && searchParams.get("group") === "project";
+  const listFilters = {
     state,
     projectId,
     tagId,
@@ -105,7 +107,9 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     dueBefore: dateView === "overdue" ? today : undefined,
     dueOn: dateView === "today" ? today : undefined,
     dueAfter: dateView === "upcoming" ? today : undefined
-  });
+  };
+  const taskQuery = useTaskList(listFilters, { enabled: !groupByProject });
+  const allTasksQuery = useAllTaskPages(listFilters, { enabled: groupByProject });
   const inboxBadgeQuery = useTaskList({ state: "inbox", unassignedProject: true, limit: 1 });
   const detailQuery = useTaskDetail(taskId);
   const projectsQuery = useProjects();
@@ -128,8 +132,11 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const projects = projectsQuery.data ?? emptyProjects;
   const tags = tagsQuery.data ?? emptyTags;
   const tasks = taskQuery.data?.items ?? [];
-  const counts = taskQuery.data?.counts_by_state ?? emptyCounts;
-  const detailIsInProjection = Boolean(taskId && tasks.some((task) => task.id === taskId));
+  const counts = groupByProject
+    ? allTasksQuery.data?.counts_by_state ?? emptyCounts
+    : taskQuery.data?.counts_by_state ?? emptyCounts;
+  const activeProjectionTasks = groupByProject ? allTasksQuery.data?.items ?? [] : tasks;
+  const detailIsInProjection = Boolean(taskId && activeProjectionTasks.some((task) => task.id === taskId));
 
   const invalidateTasks = () => queryClient.invalidateQueries({ queryKey: ["tasks"] });
   const listPath = projectId
@@ -325,6 +332,57 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
 
   const hasFrameError = taskQuery.isError || projectsQuery.isError || tagsQuery.isError;
 
+  const toggleGroupByProject = () => {
+    const next = new URLSearchParams(searchParams);
+    if (groupByProject) {
+      next.delete("group");
+    } else {
+      next.set("group", "project");
+    }
+    setSearchParams(next, { replace: true });
+  };
+
+  const projectGroups = useMemo(
+    () => (allTasksQuery.data ? groupTasksByProject(allTasksQuery.data.items, projects) : []),
+    [allTasksQuery.data, projects]
+  );
+
+  const sharedTaskListProps = {
+    projects,
+    tags,
+    taskPathBase: listPath,
+    taskSearch: searchParams.toString(),
+    editingTaskId,
+    editingTitle,
+    registerRowLink,
+    onBeginEdit: (task: TaskResponse) => {
+      setEditingTaskId(task.id);
+      setEditingTitle(task.title);
+    },
+    onCancelEdit: () => {
+      setEditingTaskId(null);
+      setEditingTitle("");
+    },
+    onComplete: (task: TaskResponse) => transitionMutation.mutate({ task, action: "complete" }),
+    onEditTitle: (title: string) => setEditingTitle(title),
+    onMoveToNext: (task: TaskResponse) => transitionMutation.mutate({ task, action: "move", toState: "next" }),
+    onSaveEdit: (task: TaskResponse) => updateMutation.mutate({ task, payload: { title: editingTitle.trim() } }),
+    expandedTaskId: taskId,
+    onCollapse: () => navigate(closeTarget),
+    detailHeadingRef,
+    detailTask: detailQuery.data,
+    detailIsLoading: detailQuery.isLoading,
+    detailError: detailQuery.error,
+    onSaveDetail: (task: TaskResponse, payload: Parameters<typeof apiClient.updateTask>[1]) =>
+      detailUpdateMutation.mutate({ task, payload }),
+    onTransitionDetail: (task: TaskResponse, action: "move" | "complete" | "reopen" | "cancel", toState?: OpenTaskState, waitingFor?: string) =>
+      detailTransitionMutation.mutate({ task, action, toState, waitingFor }),
+    onCreateSubtask: (task: TaskResponse, title: string) => subtaskCreateMutation.mutate({ task, title }),
+    onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") =>
+      subtaskTransitionMutation.mutate({ task, subtask, action }),
+    onCreateComment: (task: TaskResponse, body: string) => commentCreateMutation.mutate({ task, body })
+  };
+
   return (
     <AppShell
       counts={shellCounts}
@@ -342,41 +400,102 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     >
       <section aria-labelledby="task-list-title" className="mx-auto max-w-[760px]">
         {isDesktop || !taskId ? (
-          <div className="mb-4 flex flex-wrap items-baseline gap-3">
-          <h1 id="task-list-title" ref={listHeadingRef} tabIndex={-1} className="m-0 text-title font-semibold text-slate-900 outline-none">
-            {title}
-          </h1>
-          <span className="text-xs text-slate-600">{subtitle}</span>
-          <label className="ml-auto inline-flex items-center gap-2 text-xs text-slate-600">
-            Sort
-            <select
-              aria-label="Sort tasks"
-              className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-700"
-              value={sort}
-              onChange={(event) => {
-                const next = new URLSearchParams(searchParams);
-                const value = parseTaskSort(event.currentTarget.value);
-                if (value === "manual") {
-                  next.delete("sort");
-                } else {
-                  next.set("sort", value);
-                }
-                setSearchParams(next, { replace: true });
-              }}
-            >
-              <option value="manual">Manual</option>
-              <option value="due">Due date</option>
-              <option value="priority">Priority</option>
-              <option value="title">Title</option>
-            </select>
-          </label>
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div className="flex flex-col gap-0.5">
+              <h1 id="task-list-title" ref={listHeadingRef} tabIndex={-1} className="m-0 text-[20px] font-semibold leading-[1.3] text-slate-900 outline-none">
+                {title}
+              </h1>
+              <span className="text-xs text-slate-500">{subtitle}</span>
+            </div>
+            <div className="flex items-center gap-1">
+              {canGroupByProject ? (
+                <button
+                  type="button"
+                  aria-pressed={groupByProject}
+                  className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium transition ${
+                    groupByProject ? "bg-info-bg text-info-fg" : "text-slate-600 hover:bg-surface-sunken hover:text-slate-900"
+                  }`}
+                  onClick={toggleGroupByProject}
+                >
+                  <Layers className="h-3.5 w-3.5" aria-hidden />
+                  Group by project
+                </button>
+              ) : null}
+              <label className="inline-flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-medium text-slate-600 transition hover:bg-surface-sunken hover:text-slate-900">
+                <ArrowUpDown className="h-3.5 w-3.5" aria-hidden />
+                <span className="sr-only">Sort</span>
+                <select
+                  aria-label="Sort tasks"
+                  className="h-full max-w-[90px] border-0 bg-transparent pr-1 text-xs font-medium text-slate-600 outline-none"
+                  value={sort}
+                  onChange={(event) => {
+                    const next = new URLSearchParams(searchParams);
+                    const value = parseTaskSort(event.currentTarget.value);
+                    if (value === "manual") {
+                      next.delete("sort");
+                    } else {
+                      next.set("sort", value);
+                    }
+                    setSearchParams(next, { replace: true });
+                  }}
+                >
+                  <option value="manual">Manual</option>
+                  <option value="due">Due date</option>
+                  <option value="priority">Priority</option>
+                  <option value="title">Title</option>
+                </select>
+              </label>
+            </div>
           </div>
         ) : null}
 
         {mutationError ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{mutationError}</div> : null}
 
         {isDesktop || !taskId ? (
-          hasFrameError ? (
+          groupByProject ? (
+            allTasksQuery.isError || projectsQuery.isError || tagsQuery.isError ? (
+              <ErrorState
+                message={getErrorMessage(allTasksQuery.error ?? projectsQuery.error ?? tagsQuery.error)}
+                onRetry={() => {
+                  void allTasksQuery.refetch();
+                  void projectsQuery.refetch();
+                  void tagsQuery.refetch();
+                }}
+              />
+            ) : allTasksQuery.isLoading || projectsQuery.isLoading || tagsQuery.isLoading ? (
+              <LoadingState label={`${title} grouped by project`} />
+            ) : projectGroups.length ? (
+              <div className="flex flex-col gap-5" data-testid="grouped-task-list" aria-label={`${title} grouped by project`}>
+                {projectGroups.map((group) => {
+                  const groupKey = group.project?.id ?? "no-project";
+                  return (
+                    <section key={groupKey} aria-labelledby={`task-group-${groupKey}`}>
+                      <h2
+                        id={`task-group-${groupKey}`}
+                        className="mb-2 flex items-center gap-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500"
+                      >
+                        <span
+                          aria-hidden
+                          className="h-2 w-2 shrink-0 rounded-full"
+                          style={{ backgroundColor: group.project?.color ?? "#94a3b8" }}
+                        />
+                        <span>{group.project ? group.project.name : "No project"}</span>
+                        <span className="font-normal normal-case tracking-normal text-slate-400">{group.tasks.length}</span>
+                      </h2>
+                      <TaskList
+                        {...sharedTaskListProps}
+                        tasks={group.tasks}
+                        showProjectColumn={false}
+                        listLabel={group.project ? `Tasks in ${group.project.name}` : "Tasks with no project"}
+                      />
+                    </section>
+                  );
+                })}
+              </div>
+            ) : (
+              <EmptyState state={state} />
+            )
+          ) : hasFrameError ? (
             <ErrorState
               message={getErrorMessage(taskQuery.error ?? projectsQuery.error ?? tagsQuery.error)}
               onRetry={() => {
@@ -388,43 +507,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
           ) : taskQuery.isLoading || projectsQuery.isLoading || tagsQuery.isLoading ? (
             <LoadingState label={title} />
           ) : tasks.length ? (
-            <TaskList
-              tasks={tasks}
-              projects={projects}
-              tags={tags}
-              taskPathBase={listPath}
-              taskSearch={searchParams.toString()}
-              editingTaskId={editingTaskId}
-              editingTitle={editingTitle}
-              registerRowLink={registerRowLink}
-              onBeginEdit={(task) => {
-                setEditingTaskId(task.id);
-                setEditingTitle(task.title);
-              }}
-              onCancelEdit={() => {
-                setEditingTaskId(null);
-                setEditingTitle("");
-              }}
-              onComplete={(task) => transitionMutation.mutate({ task, action: "complete" })}
-              onEditTitle={(title) => setEditingTitle(title)}
-              onMoveToNext={(task) => transitionMutation.mutate({ task, action: "move", toState: "next" })}
-              onSaveEdit={(task) => updateMutation.mutate({ task, payload: { title: editingTitle.trim() } })}
-              expandedTaskId={taskId}
-              onCollapse={() => navigate(closeTarget)}
-              detailHeadingRef={detailHeadingRef}
-              detailTask={detailQuery.data}
-              detailIsLoading={detailQuery.isLoading}
-              detailError={detailQuery.error}
-              onSaveDetail={(task, payload) => detailUpdateMutation.mutate({ task, payload })}
-              onTransitionDetail={(task, action, toState, waitingFor) =>
-                detailTransitionMutation.mutate({ task, action, toState, waitingFor })
-              }
-              onCreateSubtask={(task, title) => subtaskCreateMutation.mutate({ task, title })}
-              onTransitionSubtask={(task, subtask, action) =>
-                subtaskTransitionMutation.mutate({ task, subtask, action })
-              }
-              onCreateComment={(task, body) => commentCreateMutation.mutate({ task, body })}
-            />
+            <TaskList {...sharedTaskListProps} tasks={tasks} showProjectColumn />
           ) : (
             <EmptyState state={state} />
           )
@@ -451,7 +534,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
           />
         ) : null}
 
-        {(isDesktop || !taskId) && taskQuery.hasNextPage ? (
+        {(isDesktop || !taskId) && !groupByProject && taskQuery.hasNextPage ? (
           <div className="mt-3 flex justify-center">
             <button
               type="button"
@@ -510,6 +593,8 @@ function TaskList({
   tags,
   taskPathBase,
   taskSearch,
+  showProjectColumn = true,
+  listLabel = "Tasks",
   editingTaskId,
   editingTitle,
   registerRowLink,
@@ -536,6 +621,8 @@ function TaskList({
   tags: TagResponse[];
   taskPathBase: string;
   taskSearch: string;
+  showProjectColumn?: boolean;
+  listLabel?: string;
   editingTaskId: string | null;
   editingTitle: string;
   registerRowLink: (taskId: string, el: HTMLAnchorElement | null) => void;
@@ -561,7 +648,7 @@ function TaskList({
   const tagById = new Map(tags.map((tag) => [tag.id, tag]));
 
   return (
-    <div className="flex flex-col gap-2" role="list" aria-label="Tasks">
+    <div className="flex flex-col gap-2" role="list" aria-label={listLabel}>
       {tasks.map((task) => {
         const project = task.project_id ? projectById.get(task.project_id) : undefined;
         const taskTags = task.tag_ids.map((id) => tagById.get(id)).filter((tag): tag is TagResponse => Boolean(tag));
@@ -572,6 +659,7 @@ function TaskList({
             task={task}
             project={project}
             tags={taskTags}
+            showProjectColumn={showProjectColumn}
             detailPath={`${taskPathBase}/${task.id}${taskSearch ? `?${taskSearch}` : ""}`}
             isEditing={editingTaskId === task.id}
             editingTitle={editingTitle}
@@ -611,6 +699,7 @@ function TaskRow({
   task,
   project,
   tags,
+  showProjectColumn,
   detailPath,
   isEditing,
   editingTitle,
@@ -627,6 +716,7 @@ function TaskRow({
   task: TaskResponse;
   project?: ProjectResponse;
   tags: TagResponse[];
+  showProjectColumn: boolean;
   detailPath: string;
   isEditing: boolean;
   editingTitle: string;
@@ -641,11 +731,12 @@ function TaskRow({
   children?: ReactNode;
 }): JSX.Element {
   const isTerminal = task.state === "completed" || task.state === "cancelled";
+  const isWaiting = task.state === "waiting" && Boolean(task.waiting_for);
   const navigate = useNavigate();
 
   return (
     <article
-      className={`group flex flex-col gap-2 rounded-[12px] border px-3 py-4 shadow-soft transition hover:shadow-raised ${
+      className={`group flex flex-col gap-1.5 rounded-[14px] border p-3.5 shadow-soft transition hover:shadow-raised sm:gap-2 sm:rounded-[12px] sm:px-3 sm:py-4 ${
         isTerminal ? "border-emerald-100 bg-emerald-50/50" : isExpanded ? "border-slate-200 bg-white shadow-raised" : "border-slate-200 bg-white"
       }`}
       role="listitem"
@@ -660,7 +751,7 @@ function TaskRow({
         navigate(detailPath);
       }}
     >
-      <div className="flex min-h-[32px] flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+      <div className="flex items-start gap-3 sm:items-center">
         {isTerminal ? (
           <span className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-white px-2 text-xs font-medium text-emerald-700">
             {task.state === "completed" ? "Completed" : "Cancelled"}
@@ -668,11 +759,14 @@ function TaskRow({
         ) : (
           <button
             type="button"
-            className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border border-[1.5px] border-slate-300 bg-white text-white hover:border-sky-400 hover:bg-sky-500"
+            className="relative -m-[11px] flex h-11 w-11 shrink-0 items-center justify-center sm:m-0 sm:h-[18px] sm:w-[18px] sm:rounded-full sm:border-[1.5px] sm:border-slate-300 sm:bg-white sm:text-white sm:hover:border-sky-400 sm:hover:bg-sky-500"
             aria-label={`Complete ${task.title}`}
             onClick={() => onComplete(task)}
           >
-            <Check className="h-3 w-3" aria-hidden />
+            <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full border-[1.5px] border-slate-300 bg-white text-white sm:hidden" aria-hidden>
+              <Check className="h-3.5 w-3.5" />
+            </span>
+            <Check className="hidden h-3 w-3 sm:block" aria-hidden />
           </button>
         )}
         {isEditing ? (
@@ -700,7 +794,7 @@ function TaskRow({
           <Link
             ref={(el) => registerRowLink(task.id, el)}
             to={detailPath}
-            className={`min-w-0 flex-1 truncate text-sm font-medium text-slate-900 hover:text-brand-primary ${isTerminal ? "line-through decoration-emerald-500/70" : ""}`}
+            className={`min-w-0 flex-1 break-words text-sm font-medium leading-snug text-slate-900 hover:text-brand-primary ${isTerminal ? "line-through decoration-emerald-500/70" : ""}`}
           >
             {task.title}
           </Link>
@@ -727,14 +821,29 @@ function TaskRow({
             ) : null}
           </span>
         ) : null}
-        {task.due_date ? <Chip variant="due">{formatDueDate(task.due_date)}</Chip> : null}
-        {tags.map((tag) => (
-          <Chip key={tag.id} variant="neutral">{tagLabel(tag)}</Chip>
-        ))}
-        {project ? (
-          <span className="shrink-0 truncate text-[11px] text-slate-500 sm:ml-auto lg:max-w-[160px]">{project.name}</span>
+        {project && showProjectColumn ? (
+          <span className="hidden shrink-0 self-start pt-0.5 text-right text-[11px] leading-snug text-slate-500 sm:block sm:w-[96px]">
+            {project.name}
+          </span>
         ) : null}
       </div>
+      {isWaiting || task.due_date || tags.length || (project && showProjectColumn) ? (
+        <div className="flex flex-wrap items-center gap-1.5 pl-[34px] sm:pl-[30px]">
+          {isWaiting ? (
+            <span className="text-[11px] text-slate-500">
+              Waiting on {task.waiting_for}
+              {task.waiting_since ? ` · since ${formatWaitingSince(task.waiting_since)}` : ""}
+            </span>
+          ) : null}
+          {task.due_date ? <Chip variant="due">{formatDueDate(task.due_date)}</Chip> : null}
+          {tags.map((tag) => (
+            <Chip key={tag.id} variant="neutral">{tagLabel(tag)}</Chip>
+          ))}
+          {project && showProjectColumn ? (
+            <span className="text-[11px] text-slate-500 sm:hidden">{project.name}</span>
+          ) : null}
+        </div>
+      ) : null}
       {children}
     </article>
   );
@@ -1248,6 +1357,40 @@ function formatDueDate(value: string): string {
     return value;
   }
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+function formatWaitingSince(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+interface ProjectGroup {
+  project: ProjectResponse | null;
+  tasks: TaskResponse[];
+}
+
+function groupTasksByProject(tasks: TaskResponse[], projects: ProjectResponse[]): ProjectGroup[] {
+  const byProjectId = new Map<string, TaskResponse[]>();
+  const unassigned: TaskResponse[] = [];
+  for (const task of tasks) {
+    if (task.project_id) {
+      const bucket = byProjectId.get(task.project_id) ?? [];
+      bucket.push(task);
+      byProjectId.set(task.project_id, bucket);
+    } else {
+      unassigned.push(task);
+    }
+  }
+  const groups: ProjectGroup[] = projects
+    .filter((project) => byProjectId.has(project.id))
+    .map((project) => ({ project, tasks: byProjectId.get(project.id) ?? [] }));
+  if (unassigned.length) {
+    groups.push({ project: null, tasks: unassigned });
+  }
+  return groups;
 }
 
 function parseTaskSort(value: string | null): TaskSort {

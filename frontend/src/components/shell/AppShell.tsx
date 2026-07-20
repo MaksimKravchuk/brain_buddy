@@ -162,9 +162,9 @@ function TopBar({ onOpenDrawer }: { onOpenDrawer: () => void }): JSX.Element {
       >
         <Menu className="h-5 w-5" />
       </button>
-      <Link to="/tasks/next" className="flex items-center gap-2 text-[15px] font-semibold tracking-[-0.005em] text-slate-900">
-        <Sprout className="h-[22px] w-[22px] text-brand-primary" aria-hidden />
-        <span>Brain Buddy</span>
+      <Link to="/tasks/next" className="flex items-center gap-2 text-[15px] font-semibold tracking-[-0.005em] text-slate-900" aria-label="Brain Buddy — Next actions">
+        <Sprout className="h-[22px] w-[22px] shrink-0 text-brand-primary" aria-hidden />
+        <span className="hidden lg:inline">Brain Buddy</span>
       </Link>
       <label className="hidden h-[34px] w-[340px] max-w-[32vw] items-center gap-2 rounded-lg border border-transparent bg-surface-sunken px-3 text-slate-400 transition focus-within:border-brand-primary focus-within:bg-white md:flex">
         <Search className="h-[15px] w-[15px] shrink-0" aria-hidden />
@@ -180,13 +180,14 @@ function TopBar({ onOpenDrawer }: { onOpenDrawer: () => void }): JSX.Element {
       <div className="ml-auto flex items-center gap-2 sm:gap-3">
         <button
           type="button"
-          className="inline-flex h-9 items-center gap-2 rounded-lg bg-brand-primary px-4 text-sm font-medium text-white shadow-soft transition hover:bg-brand-primary-hover active:scale-[0.98]"
+          aria-label="Brain dump"
+          className="inline-flex h-9 items-center gap-2 rounded-lg bg-brand-primary px-2.5 text-sm font-medium text-white shadow-soft transition hover:bg-brand-primary-hover active:scale-[0.98] lg:px-4"
           onClick={() => navigate("/brain-dump/new")}
         >
-          <Mic className="h-[15px] w-[15px]" aria-hidden />
-          Brain dump
+          <Mic className="h-[15px] w-[15px] shrink-0" aria-hidden />
+          <span className="hidden lg:inline">Brain dump</span>
         </button>
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-100 text-xs font-semibold text-sky-700" aria-label={user?.email ?? "User avatar"}>
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sky-100 text-xs font-semibold text-sky-700" aria-label={user?.email ?? "User avatar"}>
           {initial}
         </div>
       </div>

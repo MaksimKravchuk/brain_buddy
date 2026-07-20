@@ -219,7 +219,7 @@ test.describe("desktop task shell at the canonical 1240x800 viewport", () => {
 
     await expect(page.locator("body")).toHaveScreenshot("claude-design-shell-1240x800.png", {
       animations: "disabled",
-      maxDiffPixelRatio: 0.08
+      maxDiffPixelRatio: 0.02
     });
   });
 });
@@ -279,7 +279,7 @@ test("mobile task detail pushes the list pane and browser back restores it", asy
   await expect(page.getByText("Coming soon")).toBeVisible();
   await expect(page.locator("body")).toHaveScreenshot("claude-design-task-detail-mobile-402x874.png", {
     animations: "disabled",
-    maxDiffPixelRatio: 0.08
+    maxDiffPixelRatio: 0.02
   });
 
   await page.goBack();
@@ -365,7 +365,7 @@ test.describe("mobile task shell at the canonical 375x812 viewport", () => {
     });
     await expect(page.locator("body")).toHaveScreenshot("claude-design-shell-mobile-375x812.png", {
       animations: "disabled",
-      maxDiffPixelRatio: 0.08
+      maxDiffPixelRatio: 0.02
     });
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog", { name: "Task navigation" })).toHaveCount(0);
@@ -429,4 +429,301 @@ test("Brain Dump recording and review surfaces use source-derived mobile geometr
     maxDiffPixelRatio: 0.08
   });
 });
+});
+
+test.describe("desktop at-rest pane header and row anatomy at 1240x800", () => {
+  test.use({ viewport: { width: 1240, height: 800 } });
+
+  test("pane header stacks title over count with ghost Group by project and Sort actions", async ({ page }) => {
+    await page.goto("/tasks/next");
+
+    const heading = page.getByRole("heading", { name: "Next actions" });
+    await expect(heading).toBeVisible();
+    const count = page.getByText("6 tasks", { exact: true });
+    await expect(count).toBeVisible();
+
+    await test.step("title sits above the count, not inline with it", async () => {
+      const [headingBox, countBox] = await Promise.all([heading.boundingBox(), count.boundingBox()]);
+      if (!headingBox || !countBox) {
+        throw new Error("Expected header title and count geometry");
+      }
+      if (countBox.y <= headingBox.y + headingBox.height / 2) {
+        throw new Error(`Expected the count to sit below the title, received ${JSON.stringify({ headingBox, countBox })}`);
+      }
+      if (Math.round(headingBox.height) < 20) {
+        throw new Error(`Expected a >=20px title line, received ${headingBox.height}px`);
+      }
+    });
+
+    const groupButton = page.getByRole("button", { name: "Group by project" });
+    const sortControl = page.getByLabel("Sort tasks");
+    await expect(groupButton).toBeVisible();
+    await expect(groupButton).toHaveAttribute("aria-pressed", "false");
+    await expect(sortControl).toBeVisible();
+
+    await test.step("ghost actions sit to the right of the stacked title/count", async () => {
+      const [headingBox, groupBox] = await Promise.all([heading.boundingBox(), groupButton.boundingBox()]);
+      if (!headingBox || !groupBox) {
+        throw new Error("Expected title and Group by project geometry");
+      }
+      if (groupBox.x <= headingBox.x) {
+        throw new Error(`Expected Group by project to sit right of the title, received ${JSON.stringify({ headingBox, groupBox })}`);
+      }
+    });
+  });
+
+  test("rows keep a readable title and a fixed right project column, wrapping metadata instead of truncating", async ({ page }) => {
+    const longTitle = "Reconcile the Q3 quarterly budget approval workflow across finance, legal and the vendor onboarding pipeline";
+    await page.route("**/api/tasks?**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("state") !== "next") {
+        await route.fallback();
+        return;
+      }
+      await route.fulfill({
+        json: {
+          items: [
+            {
+              ...taskResponse.items[0],
+              id: "task-many-tags",
+              title: longTitle,
+              tag_ids: ["tag-context-calls", "tag-calls", "tag-errands", "tag-deep-work", "tag-laptop", "tag-long-context"],
+              project_id: "project-onboarding"
+            }
+          ],
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: taskResponse.counts_by_state
+        }
+      });
+    });
+
+    await page.goto("/tasks/next");
+    const titleLink = page.getByRole("link", { name: longTitle });
+    await expect(titleLink).toBeVisible();
+
+    await test.step("the full title renders on more than one line instead of truncating", async () => {
+      const metrics = await titleLink.evaluate((element) => ({
+        scrollWidth: element.scrollWidth,
+        clientWidth: element.clientWidth,
+        clientHeight: element.clientHeight,
+        lineHeight: parseFloat(getComputedStyle(element).lineHeight || "0"),
+        textOverflow: getComputedStyle(element).textOverflow
+      }));
+      if (metrics.textOverflow === "ellipsis") {
+        throw new Error("Expected the row title to wrap, not truncate with an ellipsis");
+      }
+      if (!metrics.lineHeight || metrics.clientHeight < metrics.lineHeight * 1.5) {
+        throw new Error(`Expected the title to span multiple lines, received ${JSON.stringify(metrics)}`);
+      }
+      if (metrics.scrollWidth > metrics.clientWidth + 1) {
+        throw new Error(`Expected the wrapped title to fit its column without horizontal overflow, received ${JSON.stringify(metrics)}`);
+      }
+    });
+
+    await test.step("the project name renders in a fixed right-hand column near the row's top edge", async () => {
+      const row = page.locator('[role="listitem"]').first();
+      const [rowBox, projectBox] = await Promise.all([
+        row.boundingBox(),
+        row.getByText("Onboarding drop-off", { exact: true }).first().boundingBox()
+      ]);
+      if (!rowBox || !projectBox) {
+        throw new Error("Expected row and project column geometry");
+      }
+      if (projectBox.x + projectBox.width < rowBox.x + rowBox.width * 0.6) {
+        throw new Error(`Expected the project label near the row's right edge, received ${JSON.stringify({ rowBox, projectBox })}`);
+      }
+    });
+  });
+});
+
+test.describe("mobile at-rest topbar and card density at 402x874", () => {
+  test.use({ viewport: { width: 402, height: 874 } });
+
+  test("topbar stays compact: 44px hamburger, icon-only Brain dump, 32px avatar, no crowding wordmark", async ({ page }) => {
+    await page.goto("/tasks/next");
+    await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
+
+    const hamburger = page.getByRole("button", { name: "Open task navigation" });
+    const brainDump = page.getByRole("button", { name: "Brain dump" });
+    const avatar = page.getByLabel("max@example.test");
+
+    const [hamburgerBox, brainDumpBox, avatarBox] = await Promise.all([
+      hamburger.boundingBox(),
+      brainDump.boundingBox(),
+      avatar.boundingBox()
+    ]);
+    if (!hamburgerBox || !brainDumpBox || !avatarBox) {
+      throw new Error("Expected compact mobile topbar geometry");
+    }
+    if (Math.round(hamburgerBox.height) < 44 || Math.round(hamburgerBox.width) < 44) {
+      throw new Error(`Expected a >=44px hamburger target, received ${JSON.stringify(hamburgerBox)}`);
+    }
+    if (Math.round(avatarBox.height) !== 32 || Math.round(avatarBox.width) !== 32) {
+      throw new Error(`Expected a 32px avatar, received ${JSON.stringify(avatarBox)}`);
+    }
+
+    await test.step("Brain dump is icon-only with an accessible name, not a wide labelled button", async () => {
+      await expect(brainDump.getByText("Brain dump", { exact: true })).toBeHidden();
+      if (brainDumpBox.width > 60) {
+        throw new Error(`Expected an icon-only Brain dump control, received ${brainDumpBox.width}px wide`);
+      }
+    });
+
+    await test.step("the wordmark text does not crowd the compact topbar", async () => {
+      await expect(page.getByText("Brain Buddy", { exact: true })).toBeHidden();
+    });
+
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    if (overflow > 0) {
+      throw new Error(`Expected no horizontal overflow, received ${overflow}px`);
+    }
+  });
+
+  test("task cards use compact ~14px padding/radius, a >=44px check target, a wrapping title, and inline-wrapping chips instead of full-width strips", async ({ page }) => {
+    await page.goto("/tasks/next");
+    const row = page.locator('[role="listitem"]', { hasText: "Fix onboarding drop-off" });
+    await expect(row).toBeVisible();
+
+    await test.step("card padding and radius are compact", async () => {
+      const styles = await row.evaluate((element) => {
+        const computed = getComputedStyle(element);
+        return { paddingLeft: parseFloat(computed.paddingLeft), borderRadius: parseFloat(computed.borderTopLeftRadius) };
+      });
+      if (styles.paddingLeft < 12 || styles.paddingLeft > 16) {
+        throw new Error(`Expected ~14px card padding, received ${styles.paddingLeft}px`);
+      }
+      if (styles.borderRadius < 12 || styles.borderRadius > 16) {
+        throw new Error(`Expected ~14px card radius, received ${styles.borderRadius}px`);
+      }
+    });
+
+    await test.step("the complete checkbox exposes a >=44px hit target", async () => {
+      const checkButton = row.getByRole("button", { name: "Complete Fix onboarding drop-off" });
+      const box = await checkButton.boundingBox();
+      if (!box || box.width < 44 || box.height < 44) {
+        throw new Error(`Expected a >=44px mobile check target, received ${JSON.stringify(box)}`);
+      }
+    });
+
+    await test.step("tag chips wrap inline below the title instead of rendering as full-width strips", async () => {
+      const chip = row.getByText("#deep-work", { exact: true });
+      const [rowBox, chipBox] = await Promise.all([row.boundingBox(), chip.boundingBox()]);
+      if (!rowBox || !chipBox) {
+        throw new Error("Expected row and chip geometry");
+      }
+      if (chipBox.width > rowBox.width * 0.6) {
+        throw new Error(`Expected a compact inline chip, received ${chipBox.width}px wide inside a ${rowBox.width}px row`);
+      }
+    });
+
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    if (overflow > 0) {
+      throw new Error(`Expected no horizontal overflow, received ${overflow}px`);
+    }
+
+    await expect(page.locator("body")).toHaveScreenshot("claude-design-task-cards-mobile-402x874.png", {
+      animations: "disabled",
+      maxDiffPixelRatio: 0.02
+    });
+  });
+
+  test("Waiting rows render real waiting metadata, never a fabricated status", async ({ page }) => {
+    await page.route("**/api/tasks?**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("state") !== "waiting") {
+        await route.fallback();
+        return;
+      }
+      await route.fulfill({
+        json: {
+          items: [
+            {
+              ...taskResponse.items[1],
+              id: "task-waiting",
+              title: "Get sign-off from finance",
+              state: "waiting",
+              waiting_for: "Finance approval from Priya",
+              waiting_since: "2026-07-14T09:00:00Z",
+              project_id: null,
+              tag_ids: []
+            }
+          ],
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: taskResponse.counts_by_state
+        }
+      });
+    });
+
+    await page.goto("/tasks/waiting");
+    await expect(page.getByText("Get sign-off from finance")).toBeVisible();
+    await expect(page.getByText(/Waiting on Finance approval from Priya/)).toBeVisible();
+    await expect(page.getByText(/since Jul 14/)).toBeVisible();
+    await expect(page.getByText("sent Tue", { exact: false })).toHaveCount(0);
+  });
+});
+
+test.describe("Group by project at 1240x800", () => {
+  test.use({ viewport: { width: 1240, height: 800 } });
+
+  test("Group by project is URL-backed, drains every cursor page, orders No project last, and hides duplicate row labels", async ({ page }) => {
+    const pageOne = {
+      items: [
+        { ...taskResponse.items[0], id: "grp-1", title: "Grouped launch task", project_id: "project-launch", tag_ids: [] },
+        { ...taskResponse.items[1], id: "grp-2", title: "Grouped onboarding task", project_id: "project-onboarding", tag_ids: [] },
+        { ...taskResponse.items[0], id: "grp-3", title: "Grouped unassigned task", project_id: null, tag_ids: [] }
+      ],
+      next_cursor: "group-page-2",
+      has_more: true,
+      counts_by_state: taskResponse.counts_by_state
+    };
+    const pageTwo = {
+      items: [{ ...taskResponse.items[0], id: "grp-4", title: "Second page launch task", project_id: "project-launch", tag_ids: [] }],
+      next_cursor: null,
+      has_more: false,
+      counts_by_state: taskResponse.counts_by_state
+    };
+
+    await page.route("**/api/tasks?**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("state") !== "next") {
+        await route.fallback();
+        return;
+      }
+      if (url.searchParams.get("cursor") === "group-page-2") {
+        await route.fulfill({ json: pageTwo });
+        return;
+      }
+      await route.fulfill({ json: pageOne });
+    });
+
+    await page.goto("/tasks/next");
+    await expect(page.getByText("Grouped launch task")).toBeVisible();
+
+    await page.getByRole("button", { name: "Group by project" }).click();
+    await expect(page).toHaveURL(/[?&]group=project/);
+
+    const groupedList = page.getByTestId("grouped-task-list");
+    await expect(groupedList).toBeVisible();
+    await expect(groupedList.getByText("Second page launch task")).toBeVisible({ timeout: 10_000 });
+
+    await test.step("groups are ordered with No project last", async () => {
+      const headingTexts = await groupedList.getByRole("heading", { level: 2 }).allTextContents();
+      const noProjectIndex = headingTexts.findIndex((text) => text.includes("No project"));
+      if (noProjectIndex !== headingTexts.length - 1) {
+        throw new Error(`Expected No project last, received ${JSON.stringify(headingTexts)}`);
+      }
+    });
+
+    await test.step("a row inside a group does not repeat the project label already shown in the group heading", async () => {
+      const launchHeading = groupedList.getByRole("heading", { name: /Launch v2/ });
+      const launchSection = page.locator("section", { has: launchHeading });
+      await expect(launchSection.getByText("Launch v2", { exact: true })).toHaveCount(1);
+    });
+
+    await page.reload();
+    await expect(page.getByTestId("grouped-task-list")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Group by project" })).toHaveAttribute("aria-pressed", "true");
+  });
 });
