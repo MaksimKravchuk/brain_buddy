@@ -883,6 +883,41 @@ def test_audio_upload_succeeds_with_explicit_external_consent(api_client) -> Non
     assert chunks[0]["size_bytes"] == len(audio)
 
 
+def test_explicit_empty_provider_allowlist_fails_closed_before_audio_upload(
+    api_client,
+) -> None:
+    """An explicitly configured empty allowlist (e.g. a deployment with no
+    external voice provider wired up) must reject any named provider and
+    never persist raw audio -- distinct from the unit-test-only default of
+    ``None``, which permits "openai" for isolated deterministic tests."""
+
+    api_client.app.state.container.task_service.accurate_stt = _real_adapter(
+        httpx.MockTransport(lambda _request: httpx.Response(200, json={"text": "ok"}))
+    )
+    api_client.app.state.container.task_service.allowed_external_provider_categories = (
+        frozenset()
+    )
+    operation = _start_operation(
+        api_client, key="start-locked-down-allowlist", external_processing_allowed=True
+    )
+
+    audio = b"\x1aE\xdf\xa3must-not-be-persisted"
+    digest = hashlib.sha256(audio).hexdigest()
+    rejected = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": digest},
+    )
+
+    assert rejected.status_code == 400, rejected.text
+    assert "AUDIO_UPLOAD_PROVIDER_CONSENT_REQUIRED" in rejected.text
+
+    fetched = api_client.get(f"/api/brain-dump-operations/{operation['id']}")
+    assert fetched.status_code == 200
+    assert fetched.json()["audio_chunks"] == []
+    assert fetched.json()["media_ref"] is None
+
+
 def test_brain_dump_operation_collects_provisional_tasks_without_inbox_writes(
     api_client,
 ) -> None:
@@ -2685,7 +2720,10 @@ def test_working_artifact_retention_sweep_clears_uncommitted_data_but_not_commit
         f"/api/brain-dump-operations/{committed_source['id']}"
     ).json()
     assert swept_committed["status"] == "completed"
-    assert swept_committed["proposals"] == []
+    # Confirmation receipts and their proposal/source/patch evidence are
+    # immutable audit provenance, not disposable working artifacts.
+    assert swept_committed["proposals"]
+    assert swept_committed["action_receipts"]
     assert swept_committed["committed_task_ids"]
 
 

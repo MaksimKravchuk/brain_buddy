@@ -401,6 +401,100 @@ class OpenAITextReconciler:
         if draft.predecessor_ids and not set(draft.predecessor_ids) <= set(existing):
             raise ValidationFailure("Reconciler used unknown predecessor IDs.")
 
+    _DESTRUCTIVE_SINGLE_TERMS = frozenset(
+        {
+            # English: explicit destructive/negating vocabulary.
+            "remove",
+            "removed",
+            "delete",
+            "deleted",
+            "cancel",
+            "cancelled",
+            "canceled",
+            "drop",
+            "scrap",
+            "discard",
+            "unnecessary",
+            "obsolete",
+            "undo",
+            "revert",
+            "skip",
+            # Russian equivalents.
+            "удалить",
+            "удали",
+            "убрать",
+            "убери",
+            "отменить",
+            "отмени",
+            "вычеркнуть",
+            "стереть",
+            "выкинуть",
+            "отказаться",
+            "ненужно",
+        }
+    )
+    _DESTRUCTIVE_NEGATION_PAIRS = frozenset(
+        {
+            ("no", "longer"),
+            ("not", "needed"),
+            ("not", "necessary"),
+            ("do", "not"),
+            ("не", "нужно"),
+            ("не", "надо"),
+            ("не", "актуально"),
+            ("не", "актуальна"),
+            ("не", "актуален"),
+            ("не", "требуется"),
+        }
+    )
+
+    @staticmethod
+    def _has_destructive_support(source_text: str) -> bool:
+        """Explicit destructive/negating vocabulary, not mere identity overlap.
+
+        A removal must be justified by language that actually asks for
+        something to go away (or says it is no longer needed) -- positive,
+        constructive text about the same subject (e.g. "Buy milk") must
+        never be read as authorization to delete an existing proposal.
+        """
+
+        tokens = [
+            token.casefold()
+            for token in re.findall(r"[^\W\d_]+", source_text, flags=re.UNICODE)
+        ]
+        if any(
+            token in OpenAITextReconciler._DESTRUCTIVE_SINGLE_TERMS for token in tokens
+        ):
+            return True
+        return any(
+            pair in OpenAITextReconciler._DESTRUCTIVE_NEGATION_PAIRS
+            for pair in zip(tokens, tokens[1:], strict=False)
+        )
+
+    @staticmethod
+    def _named_entities(text: str) -> set[str]:
+        """Capitalized, non-sentence-leading tokens as a proper-noun proxy.
+
+        Works the same way across Latin and Cyrillic script without a
+        language-specific name list: sentence-initial capitalization is a
+        punctuation convention (every title and every transcript sentence
+        starts with one), so it is excluded; a capital letter elsewhere in a
+        sentence is the language-neutral signal for a concrete named target
+        (a person, product, or place) rather than a generic action word.
+        """
+
+        entities: set[str] = set()
+        stripped = text.strip()
+        for match in re.finditer(r"[^\W\d_]+", stripped, flags=re.UNICODE):
+            token = match.group()
+            preceding = stripped[: match.start()].rstrip()
+            is_sentence_start = not preceding or preceding[-1] in ".!?"
+            if is_sentence_start:
+                continue
+            if token[:1].isupper() and len(token) >= 2:
+                entities.add(token.casefold())
+        return entities
+
     @staticmethod
     def _assert_semantic_support(
         title: str, source_text: str, *, destructive: bool = False
@@ -410,9 +504,18 @@ class OpenAITextReconciler:
         The model may normalize wording (``Call`` -> ``Phone``; equivalent
         verbs in Russian/other languages) but cannot invent a different
         concrete target. We intentionally avoid a language-specific verb
-        allowlist: shared substantial Unicode terms are the inspectable
-        evidence, and ambiguity becomes a conflict/user edit rather than a
-        destructive guess.
+        allowlist for the base grounding check: shared substantial Unicode
+        terms are the inspectable evidence, and ambiguity becomes a
+        conflict/user edit rather than a destructive guess.
+
+        Sharing only a generic action word (e.g. "call"/"позвонить") is not
+        enough on its own when each side also names its OWN distinct
+        concrete target ("Call Bob" cited against transcript "Call Alice"):
+        that is a concrete-identity mismatch, not a wording normalization,
+        and must fail closed even though the generic verb overlaps. A
+        destructive removal additionally requires the cited text to carry
+        explicit destructive/negating language -- positive, constructive
+        text about the same subject can never authorize a deletion.
         """
 
         def identity_terms(text: str) -> set[str]:
@@ -423,12 +526,28 @@ class OpenAITextReconciler:
                 and (len(token) >= 4 or any(character.isdigit() for character in token))
             }
 
+        operation = "destructive removal" if destructive else "task identity"
         title_terms = identity_terms(title)
         source_terms = identity_terms(source_text)
         if not title_terms or not source_terms or not title_terms & source_terms:
-            operation = "destructive removal" if destructive else "task identity"
             raise ValidationFailure(
                 f"unsupported {operation} is not grounded in cited transcript evidence."
+            )
+
+        title_entities = OpenAITextReconciler._named_entities(title)
+        source_entities = OpenAITextReconciler._named_entities(source_text)
+        if (title_entities - source_entities) and (source_entities - title_entities):
+            raise ValidationFailure(
+                f"unsupported {operation} names a different concrete identity than "
+                "the cited transcript evidence supports."
+            )
+
+        if destructive and not OpenAITextReconciler._has_destructive_support(
+            source_text
+        ):
+            raise ValidationFailure(
+                "unsupported destructive removal has no explicit destructive or "
+                "negating language in the cited transcript evidence."
             )
 
     @staticmethod

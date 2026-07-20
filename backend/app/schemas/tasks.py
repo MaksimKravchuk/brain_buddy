@@ -367,6 +367,16 @@ class BrainDumpProposalPatchResponse(StrictBaseModel):
     base_revision: int | None = None
 
 
+class BrainDumpActionReceiptResponse(StrictBaseModel):
+    id: str
+    proposal_id: str
+    task_id: str
+    child_idempotency_key: str
+    source_segment_ids: list[str] = Field(default_factory=list)
+    proposal_patch_ids: list[str] = Field(default_factory=list)
+    confirmed_at: datetime
+
+
 class BrainDumpOperationResponse(StrictBaseModel):
     id: str
     owner_id: str
@@ -387,6 +397,7 @@ class BrainDumpOperationResponse(StrictBaseModel):
     committable: bool = False
     provider_runs: list[BrainDumpProviderRunResponse] = Field(default_factory=list)
     proposal_patches: list[BrainDumpProposalPatchResponse] = Field(default_factory=list)
+    action_receipts: list[BrainDumpActionReceiptResponse] = Field(default_factory=list)
     status_history: list[BrainDumpStatus] = Field(default_factory=list)
     committed_task_ids: list[str] = Field(default_factory=list)
     created_at: datetime

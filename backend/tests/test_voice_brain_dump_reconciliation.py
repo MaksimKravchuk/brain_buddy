@@ -1447,3 +1447,314 @@ def test_openai_reconciler_rejects_an_ungrounded_removal() -> None:
                 user_locks={},
             )
         )
+
+
+@pytest.mark.parametrize(
+    ("operation", "predecessor_ids"),
+    [
+        ("add", []),
+        ("update", []),
+        ("split", ["proposal_existing"]),
+        ("merge", ["proposal_existing", "proposal_other"]),
+        ("supersede", ["proposal_existing"]),
+    ],
+)
+def test_openai_reconciler_rejects_concrete_identity_mismatch_despite_generic_overlap(
+    operation: str, predecessor_ids: list[str]
+) -> None:
+    """A shared generic action word ("call") is not sufficient grounding
+    when each side also names its OWN distinct concrete target: citing
+    transcript "Call Alice" to justify a title of "Call Bob" is a
+    concrete-identity mismatch, not a wording normalization, and must fail
+    closed in every patch shape (item 3 of the exact-head review). This is
+    not zero lexical overlap -- "call" is shared -- so only the dedicated
+    identity-mismatch guard, not the base grounding check, can catch it."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text="Call Alice",
+        stability="stable",
+        provider_role="accurate",
+    )
+    existing = ReconciledProposal(
+        id="proposal_existing",
+        title="Call Alice",
+        source_segment_ids=[segment.id],
+        status="provisional",
+        title_revision=1,
+    )
+    other = ReconciledProposal(
+        id="proposal_other",
+        title="Call Alice too",
+        source_segment_ids=[segment.id],
+        status="provisional",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": operation,
+                    "proposal_id": (
+                        "proposal_existing" if operation == "update" else None
+                    ),
+                    "title": "Call Bob",
+                    "source_segment_ids": [segment.id],
+                    "predecessor_ids": predecessor_ids,
+                    "base_revision": 1 if operation == "update" else None,
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(ValidationFailure, match="different concrete identity"):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id="operation_identity_mismatch",
+                transcript_segments=[segment],
+                active_proposals=[existing, other],
+                user_locks={},
+            )
+        )
+
+
+def test_openai_reconciler_rejects_concrete_identity_mismatch_in_russian() -> None:
+    """The same concrete-identity guard must fire in Russian, not only
+    English: a shared generic verb ("позвонить") cannot ground a title that
+    names a different person than the one the transcript actually cites."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text="Позвонить Ивану",
+        stability="stable",
+        provider_role="accurate",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": "add",
+                    "title": "Позвонить Петру",
+                    "source_segment_ids": [segment.id],
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(ValidationFailure, match="different concrete identity"):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id="operation_identity_mismatch_ru",
+                transcript_segments=[segment],
+                active_proposals=[],
+                user_locks={},
+            )
+        )
+
+
+def test_openai_reconciler_rejects_concrete_identity_mismatch_in_mixed_ru_en() -> None:
+    """Mixed-language transcripts must ground the same way: a Russian
+    generic verb shared with an English title's own verb is still not
+    enough when the named target itself differs (item 3, EN/RU+EN data)."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text="надо написать Alice про отчет",
+        stability="stable",
+        provider_role="accurate",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": "add",
+                    "title": "Написать Bob",
+                    "source_segment_ids": [segment.id],
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(ValidationFailure, match="different concrete identity"):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id="operation_identity_mismatch_mixed",
+                transcript_segments=[segment],
+                active_proposals=[],
+                user_locks={},
+            )
+        )
+
+
+def test_openai_reconciler_preserves_verb_normalization_when_concrete_identity_matches() -> (
+    None
+):
+    """The model may still normalize the verb itself (e.g. "Call" ->
+    "Phone") as long as the concrete named target is the same one the
+    transcript cites; that is a legitimate wording correction, not an
+    invented identity, and must keep passing."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text="Call Alice",
+        stability="stable",
+        provider_role="accurate",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": "add",
+                    "title": "Phone Alice",
+                    "source_segment_ids": [segment.id],
+                }
+            ]
+        },
+    )
+
+    result = reconciler.reconcile(
+        ReconcileTextRequest(
+            operation_id="operation_verb_normalization",
+            transcript_segments=[segment],
+            active_proposals=[],
+            user_locks={},
+        )
+    )
+
+    assert result.patches[0].title == "Phone Alice"
+
+
+def test_openai_reconciler_rejects_a_positive_removal_without_destructive_language() -> (
+    None
+):
+    """Positive, constructive text about the same subject ("Buy milk") must
+    never authorize deleting an existing proposal -- concrete-identity
+    overlap alone is not consent to destroy (item 3 of the exact-head
+    review)."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text="Buy milk",
+        stability="stable",
+        provider_role="accurate",
+    )
+    existing = ReconciledProposal(
+        id="proposal_existing",
+        title="Buy milk",
+        source_segment_ids=[segment.id],
+        status="provisional",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": "remove",
+                    "proposal_id": "proposal_existing",
+                    "title": None,
+                    "source_segment_ids": [segment.id],
+                    "predecessor_ids": [],
+                    "base_revision": None,
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(ValidationFailure, match="no explicit destructive or"):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id="operation_positive_removal",
+                transcript_segments=[segment],
+                active_proposals=[existing],
+                user_locks={},
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("source_text", "title"),
+    [
+        ("Delete the milk task", "Buy milk"),
+        ("Удалить эту задачу про молоко", "Купить молоко"),
+        ("No longer need to buy milk", "Buy milk"),
+        ("Не нужно покупать молоко", "Купить молоко"),
+    ],
+)
+def test_openai_reconciler_accepts_a_removal_with_explicit_destructive_language(
+    source_text: str, title: str
+) -> None:
+    """Explicit destructive/negating language -- in English or Russian --
+    still authorizes a removal grounded in the same concrete subject."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text=source_text,
+        stability="stable",
+        provider_role="accurate",
+    )
+    existing = ReconciledProposal(
+        id="proposal_existing",
+        title=title,
+        source_segment_ids=[segment.id],
+        status="provisional",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": "remove",
+                    "proposal_id": "proposal_existing",
+                    "title": None,
+                    "source_segment_ids": [segment.id],
+                    "predecessor_ids": [],
+                    "base_revision": None,
+                }
+            ]
+        },
+    )
+
+    result = reconciler.reconcile(
+        ReconcileTextRequest(
+            operation_id="operation_valid_removal",
+            transcript_segments=[segment],
+            active_proposals=[existing],
+            user_locks={},
+        )
+    )
+
+    assert result.patches[0].operation == "remove"
+    assert result.patches[0].proposal_id == "proposal_existing"

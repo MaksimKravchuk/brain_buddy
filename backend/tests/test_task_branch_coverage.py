@@ -9,6 +9,7 @@ provenance rejection, and the active-reference validation paths.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from app.exceptions import ConflictError, NotFoundError, ValidationFailure
 from app.modules.tasks import TaskRepository, TaskService
 from app.modules.tasks.domain import (
     BrainDumpProviderRunDocument,
+    BrainDumpTranscriptSegmentDocument,
     IdempotencyRecord,
     ProjectDocument,
     TagDocument,
@@ -1523,3 +1525,327 @@ def test_next_order_key_increments_per_state(service: TaskService) -> None:
     assert second_inbox.order_key == 1
     first_next = _make_task(service, key="order-next-one", state="next")
     assert first_next.order_key == 0
+
+
+# --- allowed_external_provider_categories -----------------------------------
+
+
+def _start_and_upload(
+    service: TaskService, *, key_prefix: str, provider: str = "openai"
+) -> None:
+    operation = service.start_brain_dump_operation(
+        BrainDumpOperationStartRequest.model_validate(
+            {
+                "consent": {
+                    "microphone": True,
+                    "external_processing_allowed": True,
+                    "provider": provider,
+                }
+            }
+        ),
+        owner_id=OWNER,
+        idempotency_key=f"{key_prefix}-start",
+    )
+    service.upload_brain_dump_audio_chunk(
+        operation.id,
+        0,
+        b"audio",
+        owner_id=OWNER,
+        content_sha256=hashlib.sha256(b"audio").hexdigest(),
+    )
+
+
+def test_unconfigured_allowlist_defaults_to_openai_for_unit_tests(
+    data_dir: Path,
+) -> None:
+    """A ``TaskService`` built with no ``allowed_external_provider_categories``
+    argument (``None``) keeps the permissive "openai" default so isolated
+    unit tests that never wire a real container keep working."""
+
+    service = TaskService(TaskRepository(data_dir))
+    assert service.allowed_external_provider_categories == frozenset({"openai"})
+    _start_and_upload(service, key_prefix="default-allowlist")
+
+
+def test_explicit_empty_allowlist_fails_closed_even_for_openai(
+    data_dir: Path,
+) -> None:
+    """An *explicitly* configured empty allowlist -- e.g. a deployment with
+    no external voice provider wired up -- must reject every provider name,
+    including "openai". This must not silently fall back to the unit-test
+    default the way a falsy-``or`` check would."""
+
+    service = TaskService(
+        TaskRepository(data_dir), allowed_external_provider_categories=frozenset()
+    )
+    assert service.allowed_external_provider_categories == frozenset()
+
+    with pytest.raises(ValidationFailure, match="AUDIO_UPLOAD_PROVIDER_CONSENT_REQUIRED"):
+        _start_and_upload(service, key_prefix="empty-allowlist")
+
+
+# --- run_due_brain_dump_provider_runs lease claim time -----------------------
+
+
+def test_run_due_provider_runs_claims_a_fresh_lease_per_candidate(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Item 2 (runner lease): ``run_due_brain_dump_provider_runs`` visits up
+    to ``limit`` candidates in one call. The claim time for each candidate's
+    new lease must be read inside *that* candidate's own owner lock, not
+    once before the whole loop -- otherwise a slow earlier candidate lets
+    wall-clock time drift far past the loop-start timestamp, and every later
+    candidate's freshly claimed lease is stamped as though claimed long ago.
+
+    This seeds two owners' operations with a due ``accurate_stt`` run. The
+    first owner's provider call advances a controlled clock by 1000s to
+    simulate slow processing; the second owner's freshly claimed lease must
+    reflect that advanced clock, not the loop-start time.
+    """
+
+    from datetime import timedelta
+
+    from app.utils import time as time_module
+    from app.workflows.voice_brain_dump.domain import TranscriptHypothesis
+    from app.workflows.voice_brain_dump.providers import SttResult
+
+    start = time_module.utcnow()
+    clock = {"now": start}
+
+    def fake_utcnow() -> object:
+        return clock["now"]
+
+    monkeypatch.setattr("app.modules.tasks.service.utcnow", fake_utcnow)
+
+    class SlowFirstCallAccurateStt:
+        provider_name = "deterministic"
+        requires_external_processing = False
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def transcribe_sealed_audio(self, request):  # type: ignore[no-untyped-def]
+            self.calls += 1
+            if self.calls == 1:
+                # Simulate the first candidate's provider call taking a long
+                # time while it runs outside any owner lock.
+                clock["now"] = clock["now"] + timedelta(seconds=1000)
+            return SttResult(
+                role="accurate",
+                provider=self.provider_name,
+                input_hash="0" * 64,
+                segments=[
+                    TranscriptHypothesis(
+                        id=f"segment_{request.operation_id}_{self.calls}",
+                        sequence=1,
+                        start_ms=0,
+                        end_ms=500,
+                        text="Buy milk",
+                        stability="stable",
+                        provider_role="accurate",
+                    )
+                ],
+            )
+
+    repository = TaskRepository(data_dir)
+    lease_seconds = 30.0
+    service = TaskService(
+        repository,
+        accurate_stt=SlowFirstCallAccurateStt(),
+        provider_run_lease_seconds=lease_seconds,
+    )
+
+    claim_snapshots: dict[str, list[BrainDumpProviderRunDocument]] = {
+        "owner_lease_a": [],
+        "owner_lease_b": [],
+    }
+    original_save = repository.save_brain_dump_operation
+
+    def spying_save(operation):  # type: ignore[no-untyped-def]
+        if operation.owner_id in claim_snapshots and operation.provider_runs:
+            last = operation.provider_runs[-1]
+            if last.status == "running":
+                claim_snapshots[operation.owner_id].append(last)
+        return original_save(operation)
+
+    monkeypatch.setattr(repository, "save_brain_dump_operation", spying_save)
+
+    def _seed_due_operation(owner_id: str) -> None:
+        operation = service.start_brain_dump_operation(
+            BrainDumpOperationStartRequest.model_validate(
+                {"consent": {"microphone": True, "external_processing_allowed": False}}
+            ),
+            owner_id=owner_id,
+            idempotency_key=f"{owner_id}-start",
+        )
+        pending_run = BrainDumpProviderRunDocument(
+            id=f"{owner_id}-run",
+            role="accurate_stt",
+            status="pending",
+            input_hash="0" * 64,
+            checkpoint="sealed",
+            attempt=1,
+            recovery_count=0,
+            created_at=clock["now"],
+            updated_at=clock["now"],
+        )
+        seeded = operation.model_copy(
+            update={
+                "status": "accurate_transcribing",
+                "provider_runs": [pending_run],
+                "media_ref": f"media_{operation.id}",
+                "revision": operation.revision + 1,
+            }
+        )
+        repository.save_brain_dump_operation(seeded)
+
+    _seed_due_operation("owner_lease_a")
+    _seed_due_operation("owner_lease_b")
+
+    advanced = service.run_due_brain_dump_provider_runs(limit=50)
+
+    assert advanced == 2
+    assert len(claim_snapshots["owner_lease_a"]) == 1
+    assert len(claim_snapshots["owner_lease_b"]) == 1
+
+    claim_a = claim_snapshots["owner_lease_a"][0]
+    claim_b = claim_snapshots["owner_lease_b"][0]
+
+    # The first candidate claims before the clock advances.
+    assert claim_a.lease_expires_at == start + timedelta(seconds=lease_seconds)
+
+    # The second candidate's lease must be stamped from the claim time taken
+    # inside ITS OWN lock -- after the first candidate's slow processing --
+    # not from the stale loop-start ``now``. A stale claim would wrongly
+    # produce ``start + lease_seconds`` here too, leaving the lease already
+    # expired (1000s in the past) the instant it is persisted.
+    assert claim_b.lease_expires_at == start + timedelta(seconds=1000 + lease_seconds)
+    assert claim_b.created_at == start + timedelta(seconds=1000)
+
+
+# --- reconciler cost admission ----------------------------------------------
+
+
+class _CountingReconciler:
+    provider_id = "deterministic"
+    requires_external_processing = False
+    max_cost_usd_per_operation = 0.5
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def reconcile(self, request):  # type: ignore[no-untyped-def]
+        from app.workflows.voice_brain_dump.providers import ReconcileResult
+
+        self.calls += 1
+        return ReconcileResult(input_hash="0" * 64, patches=[], estimated_cost_usd=0.1)
+
+
+def test_reconciler_admission_accounts_for_a_crashed_reconciler_reservation(
+    data_dir: Path,
+) -> None:
+    """Item 4 (costs): reconciler admission must include outstanding
+    unknown/crashed reserved provider costs -- e.g. a prior reconciler
+    attempt whose process died mid-call, leaving its reservation
+    unresolved -- exactly like accurate-STT admission already does.
+
+    Before this fix, ``_reconcile_accurate_checkpoint`` summed only
+    ``estimated``/``consumed`` cost across prior runs and silently dropped
+    any outstanding ``reserved_cost_usd`` still held by a "running" prior
+    run, letting a new reconciler attempt be wrongly admitted -- and the
+    provider wrongly called -- even though the operation's true committed
+    exposure (0.3 accurate spend + 0.5 crashed reservation + 0.5 worst-case
+    next call = 1.3) already exceeds its 1.0 cap.
+    """
+
+    repository = TaskRepository(data_dir)
+    reconciler = _CountingReconciler()
+    service = TaskService(
+        repository,
+        text_reconciler=reconciler,
+        max_cumulative_cost_usd_per_operation=1.0,
+    )
+
+    operation = service.start_brain_dump_operation(
+        BrainDumpOperationStartRequest.model_validate(
+            {"consent": {"microphone": True, "external_processing_allowed": False}}
+        ),
+        owner_id=OWNER,
+        idempotency_key="crashed-reservation-start",
+    )
+    now = utcnow()
+    accurate_segment = BrainDumpTranscriptSegmentDocument(
+        id="segment_accurate_crash",
+        sequence=1,
+        text="Buy milk",
+        stability="stable",
+        start_ms=0,
+        end_ms=500,
+        provider_role="accurate",
+        created_at=now,
+    )
+    accurate_run = BrainDumpProviderRunDocument(
+        id="run_accurate_succeeded",
+        role="accurate_stt",
+        status="succeeded",
+        input_hash="0" * 64,
+        checkpoint="accurate_transcribed",
+        attempt=1,
+        recovery_count=0,
+        estimated_cost_usd=0.3,
+        consumed_cost_usd=0.3,
+        reserved_cost_usd=0.0,
+        output_segment_ids=[accurate_segment.id],
+        created_at=now,
+        updated_at=now,
+    )
+    # A previous reconciler attempt that reserved budget and then never
+    # resolved -- e.g. the worker process died mid-call -- so it is still
+    # "running" with no estimated/consumed cost recorded.
+    crashed_reconciler_run = BrainDumpProviderRunDocument(
+        id="run_reconciler_crashed",
+        role="reconciler",
+        status="running",
+        input_hash="0" * 64,
+        checkpoint="accurate_transcribed",
+        attempt=1,
+        recovery_count=0,
+        estimated_cost_usd=0.0,
+        consumed_cost_usd=0.0,
+        reserved_cost_usd=0.5,
+        created_at=now,
+        updated_at=now,
+    )
+    pending_reconciler_run = BrainDumpProviderRunDocument(
+        id="run_reconciler_new",
+        role="reconciler",
+        status="pending",
+        input_hash="0" * 64,
+        checkpoint="accurate_transcribed",
+        attempt=1,
+        recovery_count=0,
+        reserved_cost_usd=0.5,
+        created_at=now,
+        updated_at=now,
+    )
+    seeded = operation.model_copy(
+        update={
+            "status": "reconciling",
+            "segments": [accurate_segment],
+            "provider_runs": [
+                accurate_run,
+                crashed_reconciler_run,
+                pending_reconciler_run,
+            ],
+            "revision": operation.revision + 1,
+        }
+    )
+    repository.save_brain_dump_operation(seeded)
+
+    advanced = service.run_due_brain_dump_provider_runs(limit=50)
+
+    assert advanced == 1
+    assert reconciler.calls == 0, "provider must never be called once admission fails"
+    final = service.get_brain_dump_operation(operation.id, owner_id=OWNER)
+    assert final.status == "terminal_error"
+    assert final.provider_runs[-1].error_code == "OPERATION_COST_BUDGET_EXCEEDED"
