@@ -69,6 +69,45 @@ The admin account is a normal account — it has no elevated privileges, it just
 
 None of these are urgent at the current scale, but they're worth knowing about.
 
+## Voice Brain Dump external-processing consent
+
+Microphone permission and external-processing consent are separate controls.
+Recording requires only microphone permission; audio may leave the device only
+after a *current* external-processing consent grant naming the exact policy
+version and provider-category set the server currently requires:
+
+1. the client fetches `GET /api/brain-dump-processing-policy` (authenticated,
+   non-secret, `Cache-Control: no-store`) for the current
+   `consent_policy_version`, `required_provider_categories`, and validity
+   window;
+2. it records a `grant` via `POST /api/brain-dump-operations/{id}/consent-decisions`
+   naming that exact policy version and category set — a mismatch is rejected
+   (`CONSENT_POLICY_VERSION_MISMATCH` / `CONSENT_CATEGORY_SET_MISMATCH`)
+   rather than silently accepted;
+3. before every upload, seal, or retry, the server re-derives current consent
+   from the grant's policy version, category set, and `valid_until` — never
+   from a persisted boolean — and fails closed
+   (`CONSENT_EXPIRED` / `CONSENT_POLICY_MISMATCH` / `CONSENT_WITHDRAWN`) the
+   moment any of those drift;
+4. a `withdraw` decision is idempotent, stops future upload/provider work
+   immediately, invalidates an in-flight provider run, and schedules
+   uncommitted raw audio for deletion — confirmed Tasks and action receipts
+   are unaffected.
+
+Raw audio is retained under a configurable window after successful
+reconciliation (`raw_audio.retained_until`) and is independently visible and
+user-deletable: `POST /api/brain-dump-operations/{id}/audio/delete` is
+idempotent and restart-safe (`deletion_pending` → `deleted`), physically
+removes stored chunks, and never removes a confirmed Task, its action receipt,
+or the committed batch's action snapshot.
+
+Direct proposal `PATCH`, `/finish`, and `/commit` are deprecated
+web-compatibility aliases retained for the browser overlap window; they are
+excluded from the mobile operation allowlist (`mobile/scripts/generate-api.sh`
+drops every OpenAPI operation marked `deprecated: true` before generating the
+mobile client) so no released mobile build can depend on them. See
+`docs/api-compatibility.md` for the full canonical route list.
+
 ## Where the code lives
 
 - **Schemas** — `backend/app/schemas/auth.py`

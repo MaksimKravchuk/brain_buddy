@@ -197,6 +197,11 @@ def build_container(config: AppConfig) -> Container:
         ),
         audio_limits=config.voice.audio_limits,
         task_port=InProcessTaskPort(task_service.create_native_inbox_task),
+        consent_policy_version=config.voice.consent.policy_version,
+        required_consent_categories=frozenset(
+            config.voice.consent.required_provider_categories
+        ),
+        consent_valid_for_seconds=config.voice.consent.valid_for_seconds,
     )
     auth_service = AuthService(
         user_repo=user_repo,

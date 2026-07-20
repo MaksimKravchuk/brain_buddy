@@ -336,6 +336,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/brain-dump-processing-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Brain Dump Processing Policy */
+        get: operations["get_brain_dump_processing_policy_api_brain_dump_processing_policy_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/brain-dump-operations": {
         parameters: {
             query?: never;
@@ -421,7 +438,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/brain-dump-operations/{operation_id}/proposals/{proposal_id}": {
+    "/api/brain-dump-operations/{operation_id}/consent-decisions": {
         parameters: {
             query?: never;
             header?: never;
@@ -430,12 +447,98 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post?: never;
+        /**
+         * Record Brain Dump Consent Decision
+         * @description Canonical append-only external-processing consent grant/withdraw.
+         */
+        post: operations["record_brain_dump_consent_decision_api_brain_dump_operations__operation_id__consent_decisions_post"];
         delete?: never;
         options?: never;
         head?: never;
-        /** Update Brain Dump Proposal */
-        patch: operations["update_brain_dump_proposal_api_brain_dump_operations__operation_id__proposals__proposal_id__patch"];
+        patch?: never;
+        trace?: never;
+    };
+    "/api/brain-dump-operations/{operation_id}/proposals/{proposal_id}/patches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit Brain Dump Proposal Patch
+         * @description Canonical user proposal edit/remove (mobile-api.md ``.../patches``).
+         */
+        post: operations["submit_brain_dump_proposal_patch_api_brain_dump_operations__operation_id__proposals__proposal_id__patches_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/brain-dump-operations/{operation_id}/proposal-batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Freeze Brain Dump Proposal Batch
+         * @description Freeze the current conflict-free active proposals into an immutable
+         *     ``ProposalBatch`` snapshot.
+         */
+        post: operations["freeze_brain_dump_proposal_batch_api_brain_dump_operations__operation_id__proposal_batches_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/brain-dump-operations/{operation_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm Brain Dump Proposal Batch
+         * @description Canonical idempotent confirmation of the current frozen batch. No
+         *     Task exists before this command.
+         */
+        post: operations["confirm_brain_dump_proposal_batch_api_brain_dump_operations__operation_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/brain-dump-operations/{operation_id}/audio/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete Brain Dump Raw Audio Canonical
+         * @description Canonical, idempotent, restart-safe raw-audio deletion after
+         *     processing reaches review or a terminal/cancelled state.
+         */
+        post: operations["delete_brain_dump_raw_audio_canonical_api_brain_dump_operations__operation_id__audio_delete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/brain-dump-operations/{operation_id}/{action}": {
@@ -447,7 +550,14 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Command Brain Dump Operation */
+        /**
+         * Command Brain Dump Operation
+         * @description Canonical recovery/lifecycle command dispatcher.
+         *
+         *     ``commit`` and ``finish`` are intentionally not reachable here -- they
+         *     have their own dedicated, explicitly deprecated routes above, which
+         *     Starlette matches before this generic ``{action}`` path.
+         */
         post: operations["command_brain_dump_operation_api_brain_dump_operations__operation_id___action__post"];
         delete?: never;
         options?: never;
@@ -772,6 +882,77 @@ export interface components {
              */
             request_id?: string | null;
         };
+        /** BrainDumpActionReceiptResponse */
+        BrainDumpActionReceiptResponse: {
+            /** Id */
+            id: string;
+            /** Proposal Id */
+            proposal_id: string;
+            /** Task Id */
+            task_id: string;
+            /** Child Idempotency Key */
+            child_idempotency_key: string;
+            /** Source Segment Ids */
+            source_segment_ids?: string[];
+            /** Proposal Patch Ids */
+            proposal_patch_ids?: string[];
+            /** Source Operation Id */
+            source_operation_id?: string | null;
+            /** Source Manifest Hash */
+            source_manifest_hash?: string | null;
+            /** Reconciliation Run Id */
+            reconciliation_run_id?: string | null;
+            /** Reconciliation Provider */
+            reconciliation_provider?: string | null;
+            /** Reconciliation Model */
+            reconciliation_model?: string | null;
+            /** Reconciliation Template Version */
+            reconciliation_template_version?: string | null;
+            /**
+             * Reconciliation Quality
+             * @default none
+             * @enum {string}
+             */
+            reconciliation_quality: "none" | "provisional_only" | "accurate" | "conflicted";
+            /** Confirmed Title Sha256 */
+            confirmed_title_sha256?: string | null;
+            /** Proposal Revision */
+            proposal_revision?: number | null;
+            /**
+             * User Edited
+             * @default false
+             */
+            user_edited: boolean;
+            /**
+             * Confidence
+             * @default unknown
+             * @constant
+             */
+            confidence: "unknown";
+            /** Confirmed By Actor Id */
+            confirmed_by_actor_id?: string | null;
+            /**
+             * Decision
+             * @default create_native_inbox_task
+             * @constant
+             */
+            decision: "create_native_inbox_task";
+            /**
+             * Confirmed At
+             * Format: date-time
+             */
+            confirmed_at: string;
+            /** Batch Id */
+            batch_id?: string | null;
+            /** Action Id */
+            action_id?: string | null;
+            /**
+             * Outcome
+             * @default succeeded
+             * @enum {string}
+             */
+            outcome: "succeeded" | "failed" | "skipped";
+        };
         /** BrainDumpAudioChunkResponse */
         BrainDumpAudioChunkResponse: {
             /** Chunk Number */
@@ -780,6 +961,45 @@ export interface components {
             sha256: string;
             /** Size Bytes */
             size_bytes: number;
+        };
+        /**
+         * BrainDumpAudioDeleteRequest
+         * @description Canonical raw-audio delete request (mobile-api.md ``.../audio/delete``).
+         */
+        BrainDumpAudioDeleteRequest: {
+            /** Expected Operation Revision */
+            expected_operation_revision: number;
+        };
+        /**
+         * BrainDumpConfirmRequest
+         * @description Canonical confirm request (mobile-api.md ``.../confirm``).
+         */
+        BrainDumpConfirmRequest: {
+            /** Proposal Batch Id */
+            proposal_batch_id: string;
+            /** Expected Batch Revision */
+            expected_batch_revision: number;
+            /** Expected Operation Revision */
+            expected_operation_revision: number;
+        };
+        /**
+         * BrainDumpConsentDecisionRequest
+         * @description Canonical append-only consent grant/withdraw decision.
+         */
+        BrainDumpConsentDecisionRequest: {
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "grant" | "withdraw";
+            /** Consent Policy Version */
+            consent_policy_version?: string | null;
+            /** Allowed Provider Categories */
+            allowed_provider_categories?: string[];
+            /** Decision Recorded At */
+            decision_recorded_at?: string | null;
+            /** Expected Operation Revision */
+            expected_operation_revision: number;
         };
         /** BrainDumpConsentRequest */
         BrainDumpConsentRequest: {
@@ -792,6 +1012,16 @@ export interface components {
             external_processing_allowed: boolean;
             /** Provider */
             provider?: string | null;
+            /** Language Hints */
+            language_hints?: string[];
+            /** Vocabulary */
+            vocabulary?: string[];
+            /** Consent Policy Version */
+            consent_policy_version?: string | null;
+            /** Allowed Provider Categories */
+            allowed_provider_categories?: string[];
+            /** Decision Recorded At */
+            decision_recorded_at?: string | null;
         };
         /** BrainDumpConsentResponse */
         BrainDumpConsentResponse: {
@@ -801,11 +1031,25 @@ export interface components {
             external_processing_allowed: boolean;
             /** Provider */
             provider?: string | null;
+            /** Language Hints */
+            language_hints?: string[];
+            /** Vocabulary */
+            vocabulary?: string[];
             /**
              * Recorded At
              * Format: date-time
              */
             recorded_at: string;
+            /** Status */
+            status?: ("granted" | "withdrawn") | null;
+            /** Consent Policy Version */
+            consent_policy_version?: string | null;
+            /** Allowed Provider Categories */
+            allowed_provider_categories?: string[];
+            /** Valid Until */
+            valid_until?: string | null;
+            /** Withdrawn At */
+            withdrawn_at?: string | null;
         };
         /** BrainDumpOperationResponse */
         BrainDumpOperationResponse: {
@@ -834,10 +1078,34 @@ export interface components {
             audio_chunks?: components["schemas"]["BrainDumpAudioChunkResponse"][];
             /** Sealed Manifest Hash */
             sealed_manifest_hash?: string | null;
+            /** Raw Audio Expires At */
+            raw_audio_expires_at?: string | null;
+            /**
+             * Raw Audio Present
+             * @default false
+             */
+            raw_audio_present: boolean;
+            /** Working Artifacts Expires At */
+            working_artifacts_expires_at?: string | null;
+            /**
+             * Reconciliation Quality
+             * @default none
+             * @enum {string}
+             */
+            reconciliation_quality: "none" | "provisional_only" | "accurate" | "conflicted";
+            /**
+             * Committable
+             * @default false
+             */
+            committable: boolean;
+            /** Available Recovery Actions */
+            available_recovery_actions?: ("retry" | "review_provisional" | "cancel")[];
             /** Provider Runs */
             provider_runs?: components["schemas"]["BrainDumpProviderRunResponse"][];
             /** Proposal Patches */
             proposal_patches?: components["schemas"]["BrainDumpProposalPatchResponse"][];
+            /** Action Receipts */
+            action_receipts?: components["schemas"]["BrainDumpActionReceiptResponse"][];
             /** Status History */
             status_history?: ("recording" | "paused" | "sealing" | "fast_processing" | "accurate_transcribing" | "reconciling" | "retryable_error" | "terminal_error" | "awaiting_confirmation" | "committing" | "completed" | "cancelled")[];
             /** Committed Task Ids */
@@ -854,10 +1122,143 @@ export interface components {
             updated_at: string;
             /** Revision */
             revision: number;
+            /**
+             * Proposal Revision
+             * @default 1
+             */
+            proposal_revision: number;
+            active_proposal_batch?: components["schemas"]["BrainDumpProposalBatchResponse"] | null;
+            committed_proposal_batch?: components["schemas"]["BrainDumpProposalBatchResponse"] | null;
+            /**
+             * Import Mode
+             * @default native_v2
+             * @enum {string}
+             */
+            import_mode: "native_v2" | "legacy_preview_only";
+            /**
+             * Accurate Reconciliation Available
+             * @default true
+             */
+            accurate_reconciliation_available: boolean;
+            /** Operation Warning Codes */
+            operation_warning_codes?: string[];
+            /** Provisional Review Accepted At */
+            provisional_review_accepted_at?: string | null;
+            raw_audio?: components["schemas"]["BrainDumpRawAudioResponse"];
         };
         /** BrainDumpOperationStartRequest */
         BrainDumpOperationStartRequest: {
             consent: components["schemas"]["BrainDumpConsentRequest"];
+        };
+        /**
+         * BrainDumpProcessingPolicyResponse
+         * @description Non-secret current consent/upload policy (``GET .../processing-policy``).
+         */
+        BrainDumpProcessingPolicyResponse: {
+            /** Consent Policy Version */
+            consent_policy_version: string;
+            /** Required Provider Categories */
+            required_provider_categories: string[];
+            /** Consent Valid For Seconds */
+            consent_valid_for_seconds: number;
+            /** Max Chunk Size Bytes */
+            max_chunk_size_bytes: number;
+            /** Max Operation Size Bytes */
+            max_operation_size_bytes: number;
+            /** Accepted Audio Formats */
+            accepted_audio_formats: string[];
+        };
+        /**
+         * BrainDumpProposalBatchActionResponse
+         * @description Immutable per-action review snapshot; never carries a result field.
+         */
+        BrainDumpProposalBatchActionResponse: {
+            /** Action Id */
+            action_id: string;
+            /** Proposal Id */
+            proposal_id: string;
+            /** Title */
+            title: string;
+            /**
+             * Target
+             * @default native_inbox
+             * @constant
+             */
+            target: "native_inbox";
+            /** Before Summary */
+            before_summary: string;
+            /** After Summary */
+            after_summary: string;
+            /** Source Cue */
+            source_cue?: string | null;
+            /**
+             * Confidence
+             * @default unknown
+             * @constant
+             */
+            confidence: "unknown";
+            /** Warnings */
+            warnings?: string[];
+            /**
+             * Destination
+             * @default native_inbox
+             * @constant
+             */
+            destination: "native_inbox";
+        };
+        /**
+         * BrainDumpProposalBatchActionResultResponse
+         * @description Receipt-derived result folded beside (never into) the action snapshot.
+         */
+        BrainDumpProposalBatchActionResultResponse: {
+            /** Action Id */
+            action_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "succeeded" | "failed" | "skipped";
+            /** Result Task Id */
+            result_task_id?: string | null;
+        };
+        /**
+         * BrainDumpProposalBatchFreezeRequest
+         * @description Canonical freeze request (mobile-api.md ``.../proposal-batches``).
+         */
+        BrainDumpProposalBatchFreezeRequest: {
+            /** Based On Proposal Revision */
+            based_on_proposal_revision: number;
+            /** Expected Operation Revision */
+            expected_operation_revision: number;
+            /** Selected Proposal Ids */
+            selected_proposal_ids: string[];
+        };
+        /** BrainDumpProposalBatchResponse */
+        BrainDumpProposalBatchResponse: {
+            /** Id */
+            id: string;
+            /** Based On Proposal Revision */
+            based_on_proposal_revision: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "frozen" | "committed" | "superseded";
+            /** Snapshot */
+            snapshot?: components["schemas"]["BrainDumpProposalBatchActionResponse"][];
+            /** Warnings */
+            warnings?: string[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Committed At */
+            committed_at?: string | null;
+            /** Revision */
+            revision: number;
+            /** Results */
+            results?: components["schemas"]["BrainDumpProposalBatchActionResultResponse"][];
         };
         /** BrainDumpProposalConflictResponse */
         BrainDumpProposalConflictResponse: {
@@ -874,6 +1275,23 @@ export interface components {
             producer: "fast" | "accurate" | "reconciler" | "user";
             /** Source Segment Ids */
             source_segment_ids?: string[];
+        };
+        /**
+         * BrainDumpProposalPatchRequest
+         * @description Canonical user proposal edit/remove (mobile-api.md ``.../patches``).
+         */
+        BrainDumpProposalPatchRequest: {
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "update" | "remove";
+            /** Title */
+            title?: string | null;
+            /** Base Proposal Revision */
+            base_proposal_revision: number;
+            /** Expected Operation Revision */
+            expected_operation_revision: number;
         };
         /** BrainDumpProposalPatchResponse */
         BrainDumpProposalPatchResponse: {
@@ -942,6 +1360,8 @@ export interface components {
             title?: string | null;
             /** Deleted */
             deleted?: boolean | null;
+            /** Conflict Resolution */
+            conflict_resolution?: ("keep" | "accept") | null;
             /** Expected Revision */
             expected_revision: number;
         };
@@ -970,6 +1390,46 @@ export interface components {
             recovery_count: number;
             /** Error */
             error?: string | null;
+            /** Error Code */
+            error_code?: string | null;
+            /** Provider */
+            provider?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Template Version */
+            template_version?: string | null;
+            /**
+             * Estimated Cost Usd
+             * @default 0
+             */
+            estimated_cost_usd: number;
+            /**
+             * Reserved Cost Usd
+             * @default 0
+             */
+            reserved_cost_usd: number;
+            /**
+             * Consumed Cost Usd
+             * @default 0
+             */
+            consumed_cost_usd: number;
+        };
+        /** BrainDumpRawAudioResponse */
+        BrainDumpRawAudioResponse: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "not_received" | "retained" | "deletion_pending" | "deleted";
+            /** Retained Until */
+            retained_until?: string | null;
+            /**
+             * Delete Now Available
+             * @default false
+             */
+            delete_now_available: boolean;
+            /** Deleted At */
+            deleted_at?: string | null;
         };
         /** BrainDumpSealRequest */
         BrainDumpSealRequest: {
@@ -3313,6 +3773,35 @@ export interface operations {
             };
         };
     };
+    get_brain_dump_processing_policy_api_brain_dump_processing_policy_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrainDumpProcessingPolicyResponse"];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     start_brain_dump_operation_api_brain_dump_operations_post: {
         parameters: {
             query?: never;
@@ -3640,7 +4129,80 @@ export interface operations {
             };
         };
     };
-    update_brain_dump_proposal_api_brain_dump_operations__operation_id__proposals__proposal_id__patch: {
+    record_brain_dump_consent_decision_api_brain_dump_operations__operation_id__consent_decisions_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BrainDumpConsentDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrainDumpOperationResponse"];
+                };
+            };
+            /** @description The command violates a domain invariant. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested resource is absent or belongs to another owner. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request conflicts with the current resource state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    submit_brain_dump_proposal_patch_api_brain_dump_operations__operation_id__proposals__proposal_id__patches_post: {
         parameters: {
             query?: never;
             header?: {
@@ -3654,7 +4216,226 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["BrainDumpProposalUpdateRequest"];
+                "application/json": components["schemas"]["BrainDumpProposalPatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrainDumpOperationResponse"];
+                };
+            };
+            /** @description The command violates a domain invariant. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested resource is absent or belongs to another owner. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request conflicts with the current resource state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    freeze_brain_dump_proposal_batch_api_brain_dump_operations__operation_id__proposal_batches_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BrainDumpProposalBatchFreezeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrainDumpOperationResponse"];
+                };
+            };
+            /** @description The command violates a domain invariant. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested resource is absent or belongs to another owner. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request conflicts with the current resource state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    confirm_brain_dump_proposal_batch_api_brain_dump_operations__operation_id__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BrainDumpConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrainDumpOperationResponse"];
+                };
+            };
+            /** @description The command violates a domain invariant. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested resource is absent or belongs to another owner. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request conflicts with the current resource state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_brain_dump_raw_audio_canonical_api_brain_dump_operations__operation_id__audio_delete_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BrainDumpAudioDeleteRequest"];
             };
         };
         responses: {

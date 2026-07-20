@@ -1661,6 +1661,38 @@
         }
       }
     },
+    "/api/brain-dump-processing-policy": {
+      "get": {
+        "tags": [
+          "trees",
+          "tasks"
+        ],
+        "summary": "Get Brain Dump Processing Policy",
+        "operationId": "get_brain_dump_processing_policy_api_brain_dump_processing_policy_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainDumpProcessingPolicyResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required or the session is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/brain-dump-operations": {
       "post": {
         "tags": [
@@ -2147,7 +2179,9 @@
           "tasks"
         ],
         "summary": "Update Brain Dump Proposal",
+        "description": "Deprecated web-compatibility adapter.\n\nDelegates to the same canonical proposal-projection write path\n(``update_brain_dump_proposal`` appends the identical append-only\n``BrainDumpProposalPatchDocument`` records and supersedes any active\nfrozen batch) as ``POST .../proposals/{proposal_id}/patches``. Excluded\nfrom the mobile operation allowlist; kept for the bounded web overlap\nwindow (ADR-0002).",
         "operationId": "update_brain_dump_proposal_api_brain_dump_operations__operation_id__proposals__proposal_id__patch",
+        "deprecated": true,
         "parameters": [
           {
             "name": "operation_id",
@@ -2258,6 +2292,787 @@
         }
       }
     },
+    "/api/brain-dump-operations/{operation_id}/consent-decisions": {
+      "post": {
+        "tags": [
+          "trees",
+          "tasks"
+        ],
+        "summary": "Record Brain Dump Consent Decision",
+        "description": "Canonical append-only external-processing consent grant/withdraw.",
+        "operationId": "record_brain_dump_consent_decision_api_brain_dump_operations__operation_id__consent_decisions_post",
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Operation Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrainDumpConsentDecisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainDumpOperationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The command violates a domain invariant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required or the session is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource is absent or belongs to another owner.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request path, query, or body does not match the API schema.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/brain-dump-operations/{operation_id}/proposals/{proposal_id}/patches": {
+      "post": {
+        "tags": [
+          "trees",
+          "tasks"
+        ],
+        "summary": "Submit Brain Dump Proposal Patch",
+        "description": "Canonical user proposal edit/remove (mobile-api.md ``.../patches``).",
+        "operationId": "submit_brain_dump_proposal_patch_api_brain_dump_operations__operation_id__proposals__proposal_id__patches_post",
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Operation Id"
+            }
+          },
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Proposal Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrainDumpProposalPatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainDumpOperationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The command violates a domain invariant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required or the session is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource is absent or belongs to another owner.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request path, query, or body does not match the API schema.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/brain-dump-operations/{operation_id}/proposal-batches": {
+      "post": {
+        "tags": [
+          "trees",
+          "tasks"
+        ],
+        "summary": "Freeze Brain Dump Proposal Batch",
+        "description": "Freeze the current conflict-free active proposals into an immutable\n``ProposalBatch`` snapshot.",
+        "operationId": "freeze_brain_dump_proposal_batch_api_brain_dump_operations__operation_id__proposal_batches_post",
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Operation Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrainDumpProposalBatchFreezeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainDumpOperationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The command violates a domain invariant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required or the session is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource is absent or belongs to another owner.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request path, query, or body does not match the API schema.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/brain-dump-operations/{operation_id}/confirm": {
+      "post": {
+        "tags": [
+          "trees",
+          "tasks"
+        ],
+        "summary": "Confirm Brain Dump Proposal Batch",
+        "description": "Canonical idempotent confirmation of the current frozen batch. No\nTask exists before this command.",
+        "operationId": "confirm_brain_dump_proposal_batch_api_brain_dump_operations__operation_id__confirm_post",
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Operation Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrainDumpConfirmRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainDumpOperationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The command violates a domain invariant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required or the session is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource is absent or belongs to another owner.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request path, query, or body does not match the API schema.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/brain-dump-operations/{operation_id}/audio/delete": {
+      "post": {
+        "tags": [
+          "trees",
+          "tasks"
+        ],
+        "summary": "Delete Brain Dump Raw Audio Canonical",
+        "description": "Canonical, idempotent, restart-safe raw-audio deletion after\nprocessing reaches review or a terminal/cancelled state.",
+        "operationId": "delete_brain_dump_raw_audio_canonical_api_brain_dump_operations__operation_id__audio_delete_post",
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Operation Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrainDumpAudioDeleteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainDumpOperationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The command violates a domain invariant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required or the session is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource is absent or belongs to another owner.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request path, query, or body does not match the API schema.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/brain-dump-operations/{operation_id}/commit": {
+      "post": {
+        "tags": [
+          "trees",
+          "tasks"
+        ],
+        "summary": "Commit Brain Dump Operation Deprecated",
+        "description": "Deprecated web-compatibility adapter for ``commit``.\n\nPer ADR-0002's migration section, a legacy ``/commit`` with no explicit\nbatch atomically freezes the current conflict-free active proposals\nbefore confirming -- ``commit_brain_dump_operation`` persists the\nidentical canonical ``ProposalBatch``/action-receipt records the\ntwo-step ``proposal-batches`` + ``confirm`` route produces, and applies\nthe same provisional-review gate (no bypass). Excluded from the mobile\noperation allowlist; kept for the bounded web overlap window.",
+        "operationId": "commit_brain_dump_operation_deprecated_api_brain_dump_operations__operation_id__commit_post",
+        "deprecated": true,
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Operation Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExpectedRevisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainDumpOperationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The command violates a domain invariant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required or the session is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource is absent or belongs to another owner.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request path, query, or body does not match the API schema.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/brain-dump-operations/{operation_id}/finish": {
+      "post": {
+        "tags": [
+          "trees",
+          "tasks"
+        ],
+        "summary": "Finish Brain Dump Operation Deprecated",
+        "description": "Deprecated web-compatibility alias for seal/transition-to-review.\n\nExcluded from the mobile operation allowlist; kept for the bounded web\noverlap window (ADR-0002: ``/transcript``, ``/finish``, ``/commit``, and\ndirect proposal ``PATCH`` remain aliases for v1-aware clients).",
+        "operationId": "finish_brain_dump_operation_deprecated_api_brain_dump_operations__operation_id__finish_post",
+        "deprecated": true,
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Operation Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExpectedRevisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainDumpOperationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The command violates a domain invariant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required or the session is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource is absent or belongs to another owner.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request path, query, or body does not match the API schema.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/brain-dump-operations/{operation_id}/{action}": {
       "post": {
         "tags": [
@@ -2265,6 +3080,7 @@
           "tasks"
         ],
         "summary": "Command Brain Dump Operation",
+        "description": "Canonical recovery/lifecycle command dispatcher.\n\n``commit`` and ``finish`` are intentionally not reachable here -- they\nhave their own dedicated, explicitly deprecated routes above, which\nStarlette matches before this generic ``{action}`` path.",
         "operationId": "command_brain_dump_operation_api_brain_dump_operations__operation_id___action__post",
         "parameters": [
           {
@@ -4637,6 +5453,214 @@
         "title": "AiFeedbackResponse",
         "description": "Response payload containing AI feedback results."
       },
+      "BrainDumpActionReceiptResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "proposal_id": {
+            "type": "string",
+            "title": "Proposal Id"
+          },
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "child_idempotency_key": {
+            "type": "string",
+            "title": "Child Idempotency Key"
+          },
+          "source_segment_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Source Segment Ids"
+          },
+          "proposal_patch_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Proposal Patch Ids"
+          },
+          "source_operation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Operation Id"
+          },
+          "source_manifest_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Manifest Hash"
+          },
+          "reconciliation_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reconciliation Run Id"
+          },
+          "reconciliation_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reconciliation Provider"
+          },
+          "reconciliation_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reconciliation Model"
+          },
+          "reconciliation_template_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reconciliation Template Version"
+          },
+          "reconciliation_quality": {
+            "type": "string",
+            "enum": [
+              "none",
+              "provisional_only",
+              "accurate",
+              "conflicted"
+            ],
+            "title": "Reconciliation Quality",
+            "default": "none"
+          },
+          "confirmed_title_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed Title Sha256"
+          },
+          "proposal_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposal Revision"
+          },
+          "user_edited": {
+            "type": "boolean",
+            "title": "User Edited",
+            "default": false
+          },
+          "confidence": {
+            "type": "string",
+            "const": "unknown",
+            "title": "Confidence",
+            "default": "unknown"
+          },
+          "confirmed_by_actor_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed By Actor Id"
+          },
+          "decision": {
+            "type": "string",
+            "const": "create_native_inbox_task",
+            "title": "Decision",
+            "default": "create_native_inbox_task"
+          },
+          "confirmed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Confirmed At"
+          },
+          "batch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Id"
+          },
+          "action_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Id"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "succeeded",
+              "failed",
+              "skipped"
+            ],
+            "title": "Outcome",
+            "default": "succeeded"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "proposal_id",
+          "task_id",
+          "child_idempotency_key",
+          "confirmed_at"
+        ],
+        "title": "BrainDumpActionReceiptResponse"
+      },
       "BrainDumpAudioChunkResponse": {
         "properties": {
           "chunk_number": {
@@ -4661,6 +5685,108 @@
         ],
         "title": "BrainDumpAudioChunkResponse"
       },
+      "BrainDumpAudioDeleteRequest": {
+        "properties": {
+          "expected_operation_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Operation Revision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_operation_revision"
+        ],
+        "title": "BrainDumpAudioDeleteRequest",
+        "description": "Canonical raw-audio delete request (mobile-api.md ``.../audio/delete``)."
+      },
+      "BrainDumpConfirmRequest": {
+        "properties": {
+          "proposal_batch_id": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Proposal Batch Id"
+          },
+          "expected_batch_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Batch Revision"
+          },
+          "expected_operation_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Operation Revision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "proposal_batch_id",
+          "expected_batch_revision",
+          "expected_operation_revision"
+        ],
+        "title": "BrainDumpConfirmRequest",
+        "description": "Canonical confirm request (mobile-api.md ``.../confirm``)."
+      },
+      "BrainDumpConsentDecisionRequest": {
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "grant",
+              "withdraw"
+            ],
+            "title": "Decision"
+          },
+          "consent_policy_version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consent Policy Version"
+          },
+          "allowed_provider_categories": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Allowed Provider Categories"
+          },
+          "decision_recorded_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Recorded At"
+          },
+          "expected_operation_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Operation Revision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "decision",
+          "expected_operation_revision"
+        ],
+        "title": "BrainDumpConsentDecisionRequest",
+        "description": "Canonical append-only consent grant/withdraw decision."
+      },
       "BrainDumpConsentRequest": {
         "properties": {
           "microphone": {
@@ -4683,6 +5809,54 @@
               }
             ],
             "title": "Provider"
+          },
+          "language_hints": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Language Hints"
+          },
+          "vocabulary": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "title": "Vocabulary"
+          },
+          "consent_policy_version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consent Policy Version"
+          },
+          "allowed_provider_categories": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Allowed Provider Categories"
+          },
+          "decision_recorded_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Recorded At"
           }
         },
         "additionalProperties": false,
@@ -4713,10 +5887,81 @@
             ],
             "title": "Provider"
           },
+          "language_hints": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Language Hints"
+          },
+          "vocabulary": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Vocabulary"
+          },
           "recorded_at": {
             "type": "string",
             "format": "date-time",
             "title": "Recorded At"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "granted",
+                  "withdrawn"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "consent_policy_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consent Policy Version"
+          },
+          "allowed_provider_categories": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Provider Categories"
+          },
+          "valid_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid Until"
+          },
+          "withdrawn_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withdrawn At"
           }
         },
         "additionalProperties": false,
@@ -4807,6 +6052,63 @@
             ],
             "title": "Sealed Manifest Hash"
           },
+          "raw_audio_expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Audio Expires At"
+          },
+          "raw_audio_present": {
+            "type": "boolean",
+            "title": "Raw Audio Present",
+            "default": false
+          },
+          "working_artifacts_expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Working Artifacts Expires At"
+          },
+          "reconciliation_quality": {
+            "type": "string",
+            "enum": [
+              "none",
+              "provisional_only",
+              "accurate",
+              "conflicted"
+            ],
+            "title": "Reconciliation Quality",
+            "default": "none"
+          },
+          "committable": {
+            "type": "boolean",
+            "title": "Committable",
+            "default": false
+          },
+          "available_recovery_actions": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "retry",
+                "review_provisional",
+                "cancel"
+              ]
+            },
+            "type": "array",
+            "title": "Available Recovery Actions"
+          },
           "provider_runs": {
             "items": {
               "$ref": "#/components/schemas/BrainDumpProviderRunResponse"
@@ -4820,6 +6122,13 @@
             },
             "type": "array",
             "title": "Proposal Patches"
+          },
+          "action_receipts": {
+            "items": {
+              "$ref": "#/components/schemas/BrainDumpActionReceiptResponse"
+            },
+            "type": "array",
+            "title": "Action Receipts"
           },
           "status_history": {
             "items": {
@@ -4862,6 +6171,67 @@
           "revision": {
             "type": "integer",
             "title": "Revision"
+          },
+          "proposal_revision": {
+            "type": "integer",
+            "title": "Proposal Revision",
+            "default": 1
+          },
+          "active_proposal_batch": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BrainDumpProposalBatchResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "committed_proposal_batch": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BrainDumpProposalBatchResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "import_mode": {
+            "type": "string",
+            "enum": [
+              "native_v2",
+              "legacy_preview_only"
+            ],
+            "title": "Import Mode",
+            "default": "native_v2"
+          },
+          "accurate_reconciliation_available": {
+            "type": "boolean",
+            "title": "Accurate Reconciliation Available",
+            "default": true
+          },
+          "operation_warning_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Operation Warning Codes"
+          },
+          "provisional_review_accepted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provisional Review Accepted At"
+          },
+          "raw_audio": {
+            "$ref": "#/components/schemas/BrainDumpRawAudioResponse"
           }
         },
         "additionalProperties": false,
@@ -4890,6 +6260,268 @@
           "consent"
         ],
         "title": "BrainDumpOperationStartRequest"
+      },
+      "BrainDumpProcessingPolicyResponse": {
+        "properties": {
+          "consent_policy_version": {
+            "type": "string",
+            "title": "Consent Policy Version"
+          },
+          "required_provider_categories": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Required Provider Categories"
+          },
+          "consent_valid_for_seconds": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Consent Valid For Seconds"
+          },
+          "max_chunk_size_bytes": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Max Chunk Size Bytes"
+          },
+          "max_operation_size_bytes": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Max Operation Size Bytes"
+          },
+          "accepted_audio_formats": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Accepted Audio Formats"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "consent_policy_version",
+          "required_provider_categories",
+          "consent_valid_for_seconds",
+          "max_chunk_size_bytes",
+          "max_operation_size_bytes",
+          "accepted_audio_formats"
+        ],
+        "title": "BrainDumpProcessingPolicyResponse",
+        "description": "Non-secret current consent/upload policy (``GET .../processing-policy``)."
+      },
+      "BrainDumpProposalBatchActionResponse": {
+        "properties": {
+          "action_id": {
+            "type": "string",
+            "title": "Action Id"
+          },
+          "proposal_id": {
+            "type": "string",
+            "title": "Proposal Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "target": {
+            "type": "string",
+            "const": "native_inbox",
+            "title": "Target",
+            "default": "native_inbox"
+          },
+          "before_summary": {
+            "type": "string",
+            "title": "Before Summary"
+          },
+          "after_summary": {
+            "type": "string",
+            "title": "After Summary"
+          },
+          "source_cue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Cue"
+          },
+          "confidence": {
+            "type": "string",
+            "const": "unknown",
+            "title": "Confidence",
+            "default": "unknown"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "destination": {
+            "type": "string",
+            "const": "native_inbox",
+            "title": "Destination",
+            "default": "native_inbox"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "action_id",
+          "proposal_id",
+          "title",
+          "before_summary",
+          "after_summary"
+        ],
+        "title": "BrainDumpProposalBatchActionResponse",
+        "description": "Immutable per-action review snapshot; never carries a result field."
+      },
+      "BrainDumpProposalBatchActionResultResponse": {
+        "properties": {
+          "action_id": {
+            "type": "string",
+            "title": "Action Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "succeeded",
+              "failed",
+              "skipped"
+            ],
+            "title": "Status"
+          },
+          "result_task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Task Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "action_id",
+          "status"
+        ],
+        "title": "BrainDumpProposalBatchActionResultResponse",
+        "description": "Receipt-derived result folded beside (never into) the action snapshot."
+      },
+      "BrainDumpProposalBatchFreezeRequest": {
+        "properties": {
+          "based_on_proposal_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Based On Proposal Revision"
+          },
+          "expected_operation_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Operation Revision"
+          },
+          "selected_proposal_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Selected Proposal Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "based_on_proposal_revision",
+          "expected_operation_revision",
+          "selected_proposal_ids"
+        ],
+        "title": "BrainDumpProposalBatchFreezeRequest",
+        "description": "Canonical freeze request (mobile-api.md ``.../proposal-batches``)."
+      },
+      "BrainDumpProposalBatchResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "based_on_proposal_revision": {
+            "type": "integer",
+            "title": "Based On Proposal Revision"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "frozen",
+              "committed",
+              "superseded"
+            ],
+            "title": "Status"
+          },
+          "snapshot": {
+            "items": {
+              "$ref": "#/components/schemas/BrainDumpProposalBatchActionResponse"
+            },
+            "type": "array",
+            "title": "Snapshot"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "committed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Committed At"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/BrainDumpProposalBatchActionResultResponse"
+            },
+            "type": "array",
+            "title": "Results"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "based_on_proposal_revision",
+          "status",
+          "created_at",
+          "revision"
+        ],
+        "title": "BrainDumpProposalBatchResponse"
       },
       "BrainDumpProposalConflictResponse": {
         "properties": {
@@ -4944,6 +6576,50 @@
           "producer"
         ],
         "title": "BrainDumpProposalConflictResponse"
+      },
+      "BrainDumpProposalPatchRequest": {
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": [
+              "update",
+              "remove"
+            ],
+            "title": "Operation"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "base_proposal_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Base Proposal Revision"
+          },
+          "expected_operation_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Operation Revision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "operation",
+          "base_proposal_revision",
+          "expected_operation_revision"
+        ],
+        "title": "BrainDumpProposalPatchRequest",
+        "description": "Canonical user proposal edit/remove (mobile-api.md ``.../patches``)."
       },
       "BrainDumpProposalPatchResponse": {
         "properties": {
@@ -5156,6 +6832,21 @@
             ],
             "title": "Deleted"
           },
+          "conflict_resolution": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "keep",
+                  "accept"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conflict Resolution"
+          },
           "expected_revision": {
             "type": "integer",
             "minimum": 1.0,
@@ -5221,6 +6912,65 @@
               }
             ],
             "title": "Error"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "template_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Version"
+          },
+          "estimated_cost_usd": {
+            "type": "number",
+            "title": "Estimated Cost Usd",
+            "default": 0.0
+          },
+          "reserved_cost_usd": {
+            "type": "number",
+            "title": "Reserved Cost Usd",
+            "default": 0.0
+          },
+          "consumed_cost_usd": {
+            "type": "number",
+            "title": "Consumed Cost Usd",
+            "default": 0.0
           }
         },
         "additionalProperties": false,
@@ -5234,6 +6984,55 @@
           "recovery_count"
         ],
         "title": "BrainDumpProviderRunResponse"
+      },
+      "BrainDumpRawAudioResponse": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "not_received",
+              "retained",
+              "deletion_pending",
+              "deleted"
+            ],
+            "title": "State"
+          },
+          "retained_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retained Until"
+          },
+          "delete_now_available": {
+            "type": "boolean",
+            "title": "Delete Now Available",
+            "default": false
+          },
+          "deleted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "title": "BrainDumpRawAudioResponse"
       },
       "BrainDumpSealRequest": {
         "properties": {

@@ -128,6 +128,21 @@ class VoiceRetentionSettings(BaseModel):
     model_config = ConfigDict(frozen=True)
 
 
+class VoiceConsentSettings(BaseModel):
+    """Non-secret, current external-processing consent policy (ADR-0008)."""
+
+    policy_version: str = Field(default="voice-external-v1", min_length=1, max_length=100)
+    required_provider_categories: tuple[str, ...] = (
+        "brainbuddy_cloud_storage",
+        "cloud_stt",
+        "cloud_text_reconciler",
+    )
+    valid_for_seconds: int = Field(default=604_800, ge=1)
+    accepted_audio_formats: tuple[str, ...] = ("audio/m4a",)
+
+    model_config = ConfigDict(frozen=True)
+
+
 class VoiceAudioLimits(BaseModel):
     """Configuration-backed bounds enforced before any audio byte persists."""
 
@@ -159,6 +174,7 @@ class VoiceSettings(BaseModel):
     reconciler: VoiceProviderSettings = Field(default_factory=VoiceProviderSettings)
     retention: VoiceRetentionSettings = Field(default_factory=VoiceRetentionSettings)
     audio_limits: VoiceAudioLimits = Field(default_factory=VoiceAudioLimits)
+    consent: VoiceConsentSettings = Field(default_factory=VoiceConsentSettings)
     max_operation_recoveries: int = Field(default=2, ge=0, le=5)
     max_cumulative_cost_usd_per_operation: float = Field(default=1.00, gt=0, le=200)
     lease_recovery_margin_seconds: float = Field(default=30.0, ge=0, le=600)
@@ -347,6 +363,29 @@ def _build_config() -> AppConfig:
                 )
             ),
         ),
+        consent=VoiceConsentSettings(
+            policy_version=os.getenv(
+                "BRAIN_BUDDY_VOICE_CONSENT_POLICY_VERSION", "voice-external-v1"
+            ),
+            required_provider_categories=tuple(
+                value.strip()
+                for value in os.getenv(
+                    "BRAIN_BUDDY_VOICE_CONSENT_REQUIRED_CATEGORIES",
+                    "brainbuddy_cloud_storage,cloud_stt,cloud_text_reconciler",
+                ).split(",")
+                if value.strip()
+            ),
+            valid_for_seconds=int(
+                os.getenv("BRAIN_BUDDY_VOICE_CONSENT_VALID_FOR_SECONDS", "604800")
+            ),
+            accepted_audio_formats=tuple(
+                value.strip()
+                for value in os.getenv(
+                    "BRAIN_BUDDY_VOICE_CONSENT_ACCEPTED_AUDIO_FORMATS", "audio/m4a"
+                ).split(",")
+                if value.strip()
+            ),
+        ),
         max_operation_recoveries=int(
             os.getenv("BRAIN_BUDDY_VOICE_MAX_OPERATION_RECOVERIES", "2")
         ),
@@ -384,6 +423,7 @@ __all__ = [
     "PasswordPolicy",
     "SessionSettings",
     "VoiceAudioLimits",
+    "VoiceConsentSettings",
     "VoiceProviderSettings",
     "VoiceRetentionSettings",
     "VoiceSettings",

@@ -74,6 +74,26 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
         "Voice brain dump reconciliation",
         "Schema v2 dual-STT contracts",
     ),
+    "brain_dump_confirmation_contract": (
+        EPIC_TASKS,
+        "Brain dump canonical confirmation",
+        "Proposal patch, freeze, and confirm contracts",
+    ),
+    "brain_dump_operation_migration": (
+        EPIC_TASKS,
+        "Brain dump legacy migration",
+        "Schema-v1 import and deprecated-alias overlap",
+    ),
+    "brain_dump_consent": (
+        EPIC_TASKS,
+        "Brain dump consent",
+        "Canonical external-processing consent decisions",
+    ),
+    "brain_dump_retention": (
+        EPIC_TASKS,
+        "Brain dump retention",
+        "Raw-audio retention and delete-now",
+    ),
     # Authentication & access
     "auth_service": (EPIC_AUTH, "Auth service", "Credential and session logic"),
     "auth_routes": (EPIC_AUTH, "Auth API", "Auth HTTP endpoints"),
