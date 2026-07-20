@@ -65,6 +65,7 @@ from app.schemas.tasks import (
     TaskTransitionRequest,
     TaskUpdateRequest,
 )
+from app.workflows.voice_brain_dump.audio_media import canonical_audio_mime_type
 from app.workflows.voice_brain_dump.domain import (
     BrainDumpOperationDocument,
     BrainDumpProposalDocument,
@@ -155,8 +156,14 @@ async def upload_brain_dump_audio_chunk(
     if not x_content_sha256:
         raise ValidationFailure("X-Content-SHA256 header is required.")
     limits = voice_brain_dump_service.audio_limits
-    content_type = (request.headers.get("content-type") or "").split(";", 1)[0].strip()
-    if content_type and content_type not in limits.allowed_mime_types:
+    content_type = canonical_audio_mime_type(request.headers.get("content-type") or "")
+    if not content_type:
+        raise ValidationFailure(
+            "AUDIO_CHUNK_MIME_TYPE_REQUIRED: Content-Type is required for audio uploads."
+        )
+    if content_type not in {
+        canonical_audio_mime_type(value) for value in limits.allowed_mime_types
+    }:
         raise ValidationFailure(
             "AUDIO_CHUNK_MIME_TYPE_UNSUPPORTED: audio chunk content type is not "
             "an allowed audio MIME type."
@@ -193,6 +200,7 @@ async def upload_brain_dump_audio_chunk(
             content,
             owner_id=current_user.id,
             content_sha256=x_content_sha256,
+            content_type=content_type,
         )
     )
 

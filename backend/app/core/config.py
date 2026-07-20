@@ -131,7 +131,8 @@ class VoiceAudioLimits(BaseModel):
                 "audio/x-wav",
                 "audio/ogg",
                 "audio/webm",
-                "application/octet-stream",
+                "audio/mp4",
+                "audio/aac",
             }
         )
     )
@@ -311,7 +312,12 @@ def _build_config() -> AppConfig:
                 for value in os.getenv(
                     "BRAIN_BUDDY_VOICE_AUDIO_ALLOWED_MIME_TYPES",
                     "audio/wav,audio/wave,audio/x-wav,audio/ogg,audio/webm,"
-                    "application/octet-stream",
+                    "audio/mp4,audio/aac"
+                    + (
+                        ",audio/x-brain-buddy-test-text"
+                        if environment is AppEnvironment.TEST
+                        else ""
+                    ),
                 ).split(",")
                 if value.strip()
             ),

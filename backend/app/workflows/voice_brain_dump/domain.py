@@ -473,6 +473,8 @@ class BrainDumpAudioChunkDocument(StorageBaseModel):
     chunk_number: int = Field(ge=0)
     sha256: str = Field(min_length=64, max_length=64)
     size_bytes: int = Field(ge=0)
+    mime_type: str | None = None
+    cumulative_duration_seconds: float | None = Field(default=None, gt=0)
     received_at: datetime
 
 

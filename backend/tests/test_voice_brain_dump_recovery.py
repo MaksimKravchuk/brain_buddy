@@ -15,6 +15,7 @@ from typing import cast
 
 import pytest
 
+from app.core.config import VoiceAudioLimits
 from app.exceptions import ValidationFailure
 from app.modules.tasks import TaskRepository, TaskService
 from app.schemas.tasks import (
@@ -93,6 +94,9 @@ def _service(
         repository,
         task_port=InProcessTaskPort(task_service.create_native_inbox_task),
         accurate_stt=accurate_stt,
+        audio_limits=VoiceAudioLimits(
+            allowed_mime_types=frozenset({"audio/x-brain-buddy-test-text"})
+        ),
         max_operation_recoveries=max_operation_recoveries,
         max_cumulative_cost_usd_per_operation=max_cumulative_cost_usd_per_operation,
         provider_run_lease_seconds=provider_run_lease_seconds,
@@ -134,6 +138,7 @@ def _seal(
         audio,
         owner_id=OWNER,
         content_sha256=hashlib.sha256(audio).hexdigest(),
+        content_type="audio/x-brain-buddy-test-text",
     )
     operation = service.get_brain_dump_operation(operation.id, owner_id=OWNER)
     return operation, service
@@ -407,6 +412,7 @@ def test_existing_chunk_upload_repairs_a_missing_atomic_file(data_dir: Path) -> 
         audio,
         owner_id=OWNER,
         content_sha256=sha256,
+        content_type="audio/x-brain-buddy-test-text",
     )
 
     assert repaired.id == operation.id

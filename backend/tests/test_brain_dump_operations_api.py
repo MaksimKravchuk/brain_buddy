@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import wave
 from datetime import timedelta
 
 import httpx
 import pytest
 
 from app.exceptions import (
+    ConflictError,
     ProviderRetryableError,
     ProviderTerminalError,
     ValidationFailure,
@@ -51,6 +54,16 @@ def _manifest_hash(audio: bytes) -> str:
             separators=(",", ":"),
         ).encode()
     ).hexdigest()
+
+
+def _wav_audio(*, duration_seconds: float = 1.0, sample_rate: int = 8_000) -> bytes:
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as fixture:
+        fixture.setnchannels(1)
+        fixture.setsampwidth(2)
+        fixture.setframerate(sample_rate)
+        fixture.writeframes(b"\0\0" * int(duration_seconds * sample_rate))
+    return buffer.getvalue()
 
 
 def _real_adapter(transport: httpx.BaseTransport) -> OpenAiAccurateStt:
@@ -3285,6 +3298,152 @@ def test_upload_rejects_unsupported_mime_type(api_client) -> None:
     assert persisted.audio_chunks == []
 
 
+def test_upload_rejects_missing_mime_type_before_persistence(api_client) -> None:
+    operation = _start_operation(api_client, key="start-missing-mime")
+    audio = _wav_audio()
+
+    response = api_client.request(
+        "PUT",
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+
+    assert response.status_code == 400, response.text
+    assert "AUDIO_CHUNK_MIME_TYPE_REQUIRED" in response.text
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    service = api_client.app.state.container.voice_brain_dump_service
+    persisted = service.get_brain_dump_operation(operation["id"], owner_id=owner_id)
+    assert persisted.audio_chunks == []
+
+
+def test_direct_audio_upload_callers_cannot_bypass_admission_checks(api_client) -> None:
+    from app.core.config import VoiceAudioLimits
+
+    service = api_client.app.state.container.voice_brain_dump_service
+    original_limits = service.audio_limits
+    operation = _start_operation(api_client, key="direct-admission-checks")
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    content = b"ab"
+
+    try:
+        service.audio_limits = VoiceAudioLimits(
+            allowed_mime_types=original_limits.allowed_mime_types,
+            max_chunk_bytes=1,
+        )
+        with pytest.raises(ValidationFailure, match="AUDIO_CHUNK_TOO_LARGE"):
+            service.upload_brain_dump_audio_chunk(
+                operation["id"],
+                0,
+                content,
+                owner_id=owner_id,
+                content_sha256=hashlib.sha256(content).hexdigest(),
+                content_type="audio/x-brain-buddy-test-text",
+            )
+
+        service.audio_limits = original_limits
+        with pytest.raises(ValidationFailure, match="MIME_TYPE_UNSUPPORTED"):
+            service.upload_brain_dump_audio_chunk(
+                operation["id"],
+                0,
+                content,
+                owner_id=owner_id,
+                content_sha256=hashlib.sha256(content).hexdigest(),
+                content_type="application/octet-stream",
+            )
+        with pytest.raises(ConflictError, match="hash does not match"):
+            service.upload_brain_dump_audio_chunk(
+                operation["id"],
+                0,
+                content,
+                owner_id=owner_id,
+                content_sha256="0" * 64,
+                content_type="audio/x-brain-buddy-test-text",
+            )
+    finally:
+        service.audio_limits = original_limits
+
+
+def test_upload_rejects_declared_audio_with_mismatched_signature(api_client) -> None:
+    operation = _start_operation(api_client, key="start-signature-mismatch")
+    content = b"plain text posing as wave audio"
+
+    response = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=content,
+        headers={
+            "X-Content-SHA256": hashlib.sha256(content).hexdigest(),
+            "Content-Type": "audio/wav",
+        },
+    )
+
+    assert response.status_code == 400, response.text
+    assert "AUDIO_CHUNK_FORMAT_MISMATCH" in response.text
+
+
+def test_upload_rejects_out_of_order_audio_chunk(api_client) -> None:
+    operation = _start_operation(api_client, key="start-out-of-order-audio")
+    content = b"fixture audio"
+
+    response = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/1",
+        content=content,
+        headers={"X-Content-SHA256": hashlib.sha256(content).hexdigest()},
+    )
+
+    assert response.status_code == 400, response.text
+    assert "AUDIO_CHUNK_SEQUENCE_INVALID" in response.text
+
+
+def test_upload_rejects_actual_media_duration_over_limit_before_persistence(
+    api_client,
+) -> None:
+    from app.core.config import VoiceAudioLimits
+
+    service = api_client.app.state.container.voice_brain_dump_service
+    service.audio_limits = VoiceAudioLimits(
+        max_duration_seconds=1, assumed_chunk_duration_seconds=0.25
+    )
+    operation = _start_operation(api_client, key="start-actual-duration-exceeded")
+    audio = _wav_audio(duration_seconds=2)
+
+    response = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={
+            "X-Content-SHA256": hashlib.sha256(audio).hexdigest(),
+            "Content-Type": "audio/wav",
+        },
+    )
+
+    assert response.status_code == 400, response.text
+    assert "AUDIO_DURATION_LIMIT_EXCEEDED" in response.text
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    persisted = service.get_brain_dump_operation(operation["id"], owner_id=owner_id)
+    assert persisted.audio_chunks == []
+
+
+def test_upload_persists_verified_media_type_and_actual_duration(api_client) -> None:
+    operation = _start_operation(api_client, key="start-verified-audio")
+    audio = _wav_audio(duration_seconds=0.5)
+
+    response = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={
+            "X-Content-SHA256": hashlib.sha256(audio).hexdigest(),
+            "Content-Type": "audio/x-wav",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    service = api_client.app.state.container.voice_brain_dump_service
+    persisted = service.get_brain_dump_operation(operation["id"], owner_id=owner_id)
+    assert persisted.audio_chunks[0].mime_type == "audio/wav"
+    assert persisted.audio_chunks[0].cumulative_duration_seconds == pytest.approx(0.5)
+
+
 def test_upload_rejects_chunk_exceeding_max_chunk_bytes_via_content_length(
     api_client,
 ) -> None:
@@ -3294,7 +3453,10 @@ def test_upload_rejects_chunk_exceeding_max_chunk_bytes_via_content_length(
     from app.core.config import VoiceAudioLimits
 
     service = api_client.app.state.container.voice_brain_dump_service
-    service.audio_limits = VoiceAudioLimits(max_chunk_bytes=16)
+    service.audio_limits = VoiceAudioLimits(
+        allowed_mime_types=service.audio_limits.allowed_mime_types,
+        max_chunk_bytes=16,
+    )
 
     operation = _start_operation(api_client, key="start-oversized-chunk")
     audio = b"x" * 64
@@ -3319,7 +3481,10 @@ def test_upload_rejects_chunk_exceeding_max_chunk_bytes_when_length_understated(
     from app.core.config import VoiceAudioLimits
 
     service = api_client.app.state.container.voice_brain_dump_service
-    service.audio_limits = VoiceAudioLimits(max_chunk_bytes=16)
+    service.audio_limits = VoiceAudioLimits(
+        allowed_mime_types=service.audio_limits.allowed_mime_types,
+        max_chunk_bytes=16,
+    )
 
     operation = _start_operation(api_client, key="start-understated-length")
     audio = b"y" * 64
@@ -3336,7 +3501,11 @@ def test_upload_rejects_total_exceeding_max_total_bytes(api_client) -> None:
     from app.core.config import VoiceAudioLimits
 
     service = api_client.app.state.container.voice_brain_dump_service
-    service.audio_limits = VoiceAudioLimits(max_total_bytes=48, max_chunk_bytes=32)
+    service.audio_limits = VoiceAudioLimits(
+        allowed_mime_types=service.audio_limits.allowed_mime_types,
+        max_total_bytes=48,
+        max_chunk_bytes=32,
+    )
 
     operation = _start_operation(api_client, key="start-total-bytes-exceeded")
     first = b"a" * 32
@@ -3361,7 +3530,10 @@ def test_upload_rejects_chunk_count_exceeding_max_chunk_count(api_client) -> Non
     from app.core.config import VoiceAudioLimits
 
     service = api_client.app.state.container.voice_brain_dump_service
-    service.audio_limits = VoiceAudioLimits(max_chunk_count=1)
+    service.audio_limits = VoiceAudioLimits(
+        allowed_mime_types=service.audio_limits.allowed_mime_types,
+        max_chunk_count=1,
+    )
 
     operation = _start_operation(api_client, key="start-chunk-count-exceeded")
     first = b"first chunk"
@@ -3393,18 +3565,21 @@ def test_seal_rejects_audio_exceeding_duration_limit(api_client) -> None:
     service = api_client.app.state.container.voice_brain_dump_service
 
     operation = _start_operation(api_client, key="start-duration-exceeded")
-    audio = b"Buy milk."
+    audio = _wav_audio(duration_seconds=1)
     uploaded = api_client.put(
         f"/api/brain-dump-operations/{operation['id']}/audio/0",
         content=audio,
-        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+        headers={
+            "X-Content-SHA256": hashlib.sha256(audio).hexdigest(),
+            "Content-Type": "audio/wav",
+        },
     )
     assert uploaded.status_code == 200, uploaded.text
 
     # The operator tightens the duration budget after the chunk was
     # accepted but before seal -- e.g. a config rollout mid-recording.
     service.audio_limits = VoiceAudioLimits(
-        max_duration_seconds=1, assumed_chunk_duration_seconds=5
+        max_duration_seconds=0.5, assumed_chunk_duration_seconds=0.25
     )
 
     sealed = api_client.post(

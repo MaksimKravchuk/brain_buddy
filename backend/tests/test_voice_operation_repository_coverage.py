@@ -11,6 +11,7 @@ from shutil import rmtree
 
 import pytest
 
+from app.core.config import VoiceAudioLimits
 from app.exceptions import NotFoundError, RepositoryError
 from app.modules.tasks import TaskRepository, TaskService
 from app.schemas.tasks import BrainDumpOperationStartRequest
@@ -30,6 +31,9 @@ def _service(data_dir: Path) -> VoiceBrainDumpService:
     task_service = TaskService(TaskRepository(data_dir))
     return VoiceBrainDumpService(
         OperationRepository(data_dir),
+        audio_limits=VoiceAudioLimits(
+            allowed_mime_types=frozenset({"audio/x-brain-buddy-test-text"})
+        ),
         task_port=InProcessTaskPort(task_service.create_native_inbox_task),
     )
 
@@ -154,6 +158,7 @@ def test_voice_operation_repository_purges_only_untracked_media(data_dir: Path) 
         content,
         owner_id=OWNER,
         content_sha256=sha256(content).hexdigest(),
+        content_type="audio/x-brain-buddy-test-text",
     )
     persisted = repository.get_brain_dump_operation_for_owner(operation.id, owner_id=OWNER)
     known_chunk = persisted.audio_chunks[0]
