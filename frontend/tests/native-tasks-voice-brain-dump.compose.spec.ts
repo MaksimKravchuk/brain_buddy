@@ -482,7 +482,7 @@ test("Voice Brain Dump records provisional cards, reviews edits/deletes and save
   await test.step("edit one draft, delete two drafts and prove nothing canonical exists before Save", async () => {
     await page.getByLabel("Task title #1").fill("Buy oat milk for breakfast");
     await page.keyboard.press("Tab");
-    await expect(page.getByText("Edited")).toBeVisible();
+    await expect(page.getByText("Edited", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Delete Call dentist" }).click();
     await expect(page.getByText("Call dentist")).toHaveCount(0);
     await page.getByRole("button", { name: "Delete Untranscribed sealed audio" }).click();
@@ -623,7 +623,7 @@ test("Voice Brain Dump resume and commit idempotency do not create duplicate Inb
     // eligible for canonical-task commit.
     await page.getByLabel("Task title #1").fill("Write weekly update for the team");
     await page.keyboard.press("Tab");
-    await expect(page.getByText("Edited")).toBeVisible();
+    await expect(page.getByText("Edited", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Save 1 to inbox" }).click();
     await expect(page.getByRole("heading", { name: "Saved 1 task to Inbox" })).toBeVisible();
     const completed = await apiGet<BrainDumpOperation>(page, `/api/brain-dump-operations/${operationId}`);
