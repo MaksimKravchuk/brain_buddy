@@ -236,7 +236,9 @@ export function BrainDumpRoute(): JSX.Element {
   }
 
   async function sha256(bytes: ArrayBuffer) {
-    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    // Normalize cross-realm ArrayBuffers (for example MediaRecorder/Blob data
+    // supplied by jsdom or an embedded browser) into this realm's BufferSource.
+    const digest = await crypto.subtle.digest("SHA-256", new Uint8Array(bytes));
     return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
   }
 
