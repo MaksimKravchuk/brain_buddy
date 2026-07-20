@@ -13,6 +13,7 @@ from typing import Concatenate, Literal, ParamSpec, TypeVar, cast
 
 from pydantic import BaseModel
 
+from app.core.config import VoiceAudioLimits
 from app.exceptions import (
     ConflictError,
     NotFoundError,
@@ -129,6 +130,8 @@ class TaskService:
         provider_run_lease_seconds: float = 30.0,
         allowed_external_provider_categories: frozenset[str] | None = None,
         task_port: TaskPort | None = None,
+        runner_wake: Callable[[], None] | None = None,
+        audio_limits: VoiceAudioLimits | None = None,
     ) -> None:
         self.task_repo = task_repo
         self.accurate_stt = accurate_stt or DisabledAccurateStt()
@@ -140,6 +143,8 @@ class TaskService:
             max_cumulative_cost_usd_per_operation
         )
         self.provider_run_lease_seconds = provider_run_lease_seconds
+        self.runner_wake = runner_wake or (lambda: None)
+        self.audio_limits = audio_limits or VoiceAudioLimits()
         # Voice confirmation crosses the Tasks boundary through this narrow
         # application-workflow port (ADR-0001), never by treating this Tasks
         # service as its own adapter. The default binds only the one
@@ -183,6 +188,18 @@ class TaskService:
     # still needs, not merely "abandoned" work.
     _TERMINAL_PURGE_ELIGIBLE_STATUSES = frozenset({"completed", "cancelled", "terminal_error"})
 
+    # Raw audio's retention clock starts at successful reconciliation, not
+    # only at operation completion/cancellation/failure, so an operation
+    # left ``awaiting_confirmation`` (reconciled, in review, not yet
+    # committed) is additionally eligible once its own
+    # ``raw_audio_expires_at`` anchor is due -- unlike the terminal set
+    # above, this deliberately excludes ``retryable_error`` (a recoverable
+    # failure whose retry still needs the original bytes) and every stage
+    # of the active processing pipeline.
+    _RAW_AUDIO_PURGE_ELIGIBLE_STATUSES = _TERMINAL_PURGE_ELIGIBLE_STATUSES | {
+        "awaiting_confirmation"
+    }
+
     # Every fixed, safe code an adapter/port or this service ever raises as
     # a ``ProviderRetryableError``/``ProviderTerminalError``/
     # ``ValidationFailure`` message. Only a code in this set may ever reach
@@ -212,6 +229,7 @@ class TaskService:
             "RECONCILER_INVALID_RESPONSE",
             "RECONCILER_PROVIDER_RETRYABLE",
             "RECONCILER_PROVIDER_REJECTED",
+            "RECONCILER_VALIDATION_REJECTED",
             "RECONCILER_CONSENT_REQUIRED",
             "RECONCILER_CONSENT_PROVIDER_MISMATCH",
             "OPERATION_COST_BUDGET_EXCEEDED",
@@ -255,10 +273,17 @@ class TaskService:
                 operation = self.get_brain_dump_operation(
                     candidate.id, owner_id=candidate.owner_id
                 )
-                if (
-                    operation.raw_audio_expires_at is None
-                    and operation.status not in self._TERMINAL_PURGE_ELIGIBLE_STATUSES
-                ):
+                if operation.status not in self._RAW_AUDIO_PURGE_ELIGIBLE_STATUSES:
+                    # A retryable/active operation must never be purged, even
+                    # if it already carries a stale ``raw_audio_expires_at``
+                    # from a prior (since-failed) reconciliation attempt.
+                    continue
+                if operation.schema_version == 1:
+                    # Terminal schema-v1 rows are historical, byte-immutable
+                    # audit records (ADR-0002 migration rule 1): never
+                    # rewrite them via a retention sweep. Filesystem media
+                    # orphans are still reclaimed below without touching the
+                    # payload.
                     continue
                 expires_at = (
                     operation.raw_audio_expires_at
@@ -337,6 +362,11 @@ class TaskService:
                     operation.status
                     not in self._TERMINAL_PURGE_ELIGIBLE_STATUSES
                 ):
+                    continue
+                if operation.schema_version == 1:
+                    # Terminal schema-v1 rows are historical, byte-immutable
+                    # audit records (ADR-0002 migration rule 1): never
+                    # rewrite them via a retention sweep.
                     continue
                 expires_at = (
                     operation.working_artifacts_expires_at
@@ -745,6 +775,15 @@ class TaskService:
         owner_id: str,
         content_sha256: str,
     ) -> BrainDumpOperationDocument:
+        # Defense in depth: the API layer already enforces MIME type,
+        # declared Content-Length, and a bounded stream read before this is
+        # ever called, but any direct/in-process caller (tests, a future
+        # non-HTTP transport) must hit the exact same per-chunk ceiling.
+        if len(content) > self.audio_limits.max_chunk_bytes:
+            raise ValidationFailure(
+                "AUDIO_CHUNK_TOO_LARGE: audio chunk exceeds the configured "
+                "per-chunk byte limit."
+            )
         actual_sha256 = hashlib.sha256(content).hexdigest()
         if actual_sha256 != content_sha256:
             raise ConflictError(
@@ -783,6 +822,27 @@ class TaskService:
                         content=content,
                     )
                 return operation
+            if len(operation.audio_chunks) >= self.audio_limits.max_chunk_count:
+                raise ValidationFailure(
+                    "AUDIO_CHUNK_COUNT_EXCEEDED: operation already has the "
+                    "configured maximum number of audio chunks."
+                )
+            total_bytes = sum(
+                chunk.size_bytes for chunk in operation.audio_chunks
+            ) + len(content)
+            if total_bytes > self.audio_limits.max_total_bytes:
+                raise ValidationFailure(
+                    "AUDIO_TOTAL_BYTES_EXCEEDED: operation audio would exceed "
+                    "the configured total-byte limit."
+                )
+            estimated_duration_seconds = (
+                len(operation.audio_chunks) + 1
+            ) * self.audio_limits.assumed_chunk_duration_seconds
+            if estimated_duration_seconds > self.audio_limits.max_duration_seconds:
+                raise ValidationFailure(
+                    "AUDIO_DURATION_LIMIT_EXCEEDED: operation audio would "
+                    "exceed the configured maximum recording duration."
+                )
             now = utcnow()
             chunks = [
                 *operation.audio_chunks,
@@ -867,6 +927,29 @@ class TaskService:
                     operation.id,
                     "MANIFEST_CONFLICT: sealed manifest does not match uploaded audio chunks.",
                 )
+            # Defense in depth: re-check the audio-limits manifest as a whole
+            # before minting it, even though every individual chunk upload
+            # already enforced these ceilings -- this catches any manifest
+            # assembled from chunks uploaded under a since-lowered limit.
+            if len(consumed_chunks) > self.audio_limits.max_chunk_count:
+                raise ValidationFailure(
+                    "AUDIO_CHUNK_COUNT_EXCEEDED: sealed manifest exceeds the "
+                    "configured maximum number of audio chunks."
+                )
+            sealed_total_bytes = sum(chunk.size_bytes for chunk in consumed_chunks)
+            if sealed_total_bytes > self.audio_limits.max_total_bytes:
+                raise ValidationFailure(
+                    "AUDIO_TOTAL_BYTES_EXCEEDED: sealed manifest exceeds the "
+                    "configured total-byte limit."
+                )
+            sealed_duration_seconds = (
+                len(consumed_chunks) * self.audio_limits.assumed_chunk_duration_seconds
+            )
+            if sealed_duration_seconds > self.audio_limits.max_duration_seconds:
+                raise ValidationFailure(
+                    "AUDIO_DURATION_LIMIT_EXCEEDED: sealed manifest exceeds "
+                    "the configured maximum recording duration."
+                )
             now = utcnow()
             reservation = getattr(
                 self.accurate_stt, "max_cost_usd_per_operation", 0.0
@@ -909,6 +992,7 @@ class TaskService:
                 resource_id=claimed.id,
                 response=claimed,
             )
+        self.runner_wake()
         return claimed
 
     def run_due_brain_dump_provider_runs(self, *, limit: int = 50) -> int:
@@ -1368,18 +1452,32 @@ class TaskService:
                 ProviderTerminalError,
                 ValidationFailure,
             ) as exc:
+                # A ``ValidationFailure`` here means the model itself
+                # returned a schema-invalid or ungrounded operation
+                # envelope -- semantic rejection, not a transport/provider
+                # outage. It gets its own allowlisted, redacted code
+                # (never the raw provider/validation message) so a
+                # terminal outcome after budget exhaustion is still
+                # inspectable as "the model's output was rejected" rather
+                # than a generic, undifferentiated provider error.
+                redacted_code = (
+                    "RECONCILER_VALIDATION_REJECTED"
+                    if isinstance(exc, ValidationFailure)
+                    else self._redact_provider_error(str(exc))
+                )
                 return self._reconciler_failure(
                     operation,
                     checkpoint_segments=checkpoint_segments,
                     checkpoint_runs=checkpoint_runs,
                     input_hash=input_hash,
-                    error=self._redact_provider_error(str(exc)),
-                    error_code=self._redact_provider_error(str(exc)),
+                    error=redacted_code,
+                    error_code=redacted_code,
                     now=now,
-                    retryable=isinstance(exc, ProviderRetryableError),
+                    retryable=isinstance(exc, ProviderRetryableError | ValidationFailure),
                     attempt=attempt,
                     recovery_count=recovery_count,
                     estimated_cost_usd=exc.estimated_cost_usd,
+                    validation_rejected=isinstance(exc, ValidationFailure),
                 )
             proposals = self._apply_reconciler_patches(
                 operation.proposals, reconcile_result.patches, now=now
@@ -1513,9 +1611,22 @@ class TaskService:
             attempt = last_run.attempt + 1
             recovery_count = last_run.recovery_count + 1
             if recovery_count >= self.max_operation_recoveries:
+                # A reconciler role whose last recorded failure was a
+                # semantic validation rejection (not a provider outage)
+                # stays flagged ``conflicted`` on the way to a bounded-
+                # retry-exhausted terminal state, so proposals stay
+                # visible for manual review rather than reading as an
+                # ordinary provider failure.
+                exhausted_reconciliation_quality = (
+                    "conflicted"
+                    if last_run.role == "reconciler"
+                    and last_run.error_code == "RECONCILER_VALIDATION_REJECTED"
+                    else operation.reconciliation_quality
+                )
                 exhausted = operation.model_copy(
                     update={
                         "status": "terminal_error",
+                        "reconciliation_quality": exhausted_reconciliation_quality,
                         "status_history": [*operation.status_history, "terminal_error"],
                         "provider_runs": [
                             *operation.provider_runs,
@@ -1602,6 +1713,7 @@ class TaskService:
                 resource_id=claimed.id,
                 response=claimed,
             )
+        self.runner_wake()
         return claimed
 
     @_serialized_write
@@ -2304,7 +2416,19 @@ class TaskService:
             raise ValidationFailure(
                 "Brain dump must be awaiting confirmation before save."
             )
-        if not self._has_frozen_reconciled_batch(operation):
+        # ADR-0002 "Current implementation migration": an active schema-v1
+        # workspace imported as ``legacy_preview_only`` has no durable
+        # original audio and therefore can never produce a reconciler
+        # success record. It remains explicitly, visibly
+        # provisional-only (``reconciliation_quality`` is forced to that
+        # value at import) but must still be confirmable -- otherwise
+        # every pre-migration in-flight operation is permanently stuck.
+        # This bypasses only the "was this reconciled" gates below, never
+        # the conflict gate, which still protects open user decisions.
+        is_legacy_provisional = operation.legacy_import == "legacy_preview_only"
+        if not is_legacy_provisional and not self._has_frozen_reconciled_batch(
+            operation
+        ):
             raise ValidationFailure(
                 "BRAIN_DUMP_NOT_RECONCILED: canonical tasks require a sealed "
                 "audio checkpoint that completed accurate STT and reconciler "
@@ -2320,19 +2444,20 @@ class TaskService:
                 "Brain dump conflicts must be reviewed before save.",
                 {"proposal_ids": conflicted},
             )
-        unreconciled = [
-            proposal.id
-            for proposal in operation.proposals
-            if not proposal.deleted
-            and proposal.status not in {"reconciled", "user_edited"}
-        ]
-        if unreconciled:
-            raise ValidationFailure(
-                "BRAIN_DUMP_PROPOSAL_NOT_RECONCILED: an operation-level "
-                "reconciler success cannot make an untouched browser-preview/"
-                "fast proposal canonical; edit or delete it before save.",
-                {"proposal_ids": unreconciled},
-            )
+        if not is_legacy_provisional:
+            unreconciled = [
+                proposal.id
+                for proposal in operation.proposals
+                if not proposal.deleted
+                and proposal.status not in {"reconciled", "user_edited"}
+            ]
+            if unreconciled:
+                raise ValidationFailure(
+                    "BRAIN_DUMP_PROPOSAL_NOT_RECONCILED: an operation-level "
+                    "reconciler success cannot make an untouched browser-preview/"
+                    "fast proposal canonical; edit or delete it before save.",
+                    {"proposal_ids": unreconciled},
+                )
         now = utcnow()
         confirmed_actions = confirm_native_inbox_actions(
             operation_id=operation.id,
@@ -3854,6 +3979,7 @@ class TaskService:
         recovery_count: int = 0,
         error_code: str | None = None,
         estimated_cost_usd: float = 0.0,
+        validation_rejected: bool = False,
     ) -> BrainDumpOperationDocument:
         status: Literal["retryable_error", "terminal_error"] = (
             "retryable_error"
@@ -3861,9 +3987,19 @@ class TaskService:
             else "terminal_error"
         )
         active_reconciler_run = operation.provider_runs[-1]
+        reconciliation_quality = operation.reconciliation_quality
+        if status == "terminal_error" and validation_rejected:
+            # The model's semantic reasoning was rejected (ungrounded/
+            # invalid output), not merely unavailable: mark the operation
+            # ``conflicted`` rather than leaving ``reconciliation_quality``
+            # at its prior value, so a terminal, unrecoverable outcome is
+            # still visibly flagged for manual review instead of reading
+            # as an ordinary, undifferentiated provider failure.
+            reconciliation_quality = "conflicted"
         return operation.model_copy(
             update={
                 "status": status,
+                "reconciliation_quality": reconciliation_quality,
                 "status_history": [
                     *operation.status_history,
                     "reconciling",

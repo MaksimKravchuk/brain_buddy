@@ -147,7 +147,38 @@ async def upload_brain_dump_audio_chunk(
 ) -> BrainDumpOperationResponse:
     if not x_content_sha256:
         raise ValidationFailure("X-Content-SHA256 header is required.")
-    content = await request.body()
+    limits = task_service.audio_limits
+    content_type = (request.headers.get("content-type") or "").split(";", 1)[0].strip()
+    if content_type and content_type not in limits.allowed_mime_types:
+        raise ValidationFailure(
+            "AUDIO_CHUNK_MIME_TYPE_UNSUPPORTED: audio chunk content type is not "
+            "an allowed audio MIME type."
+        )
+    declared_length = request.headers.get("content-length")
+    if declared_length is not None:
+        try:
+            declared_bytes = int(declared_length)
+        except ValueError as exc:
+            raise ValidationFailure(
+                "Content-Length header must be an integer."
+            ) from exc
+        if declared_bytes > limits.max_chunk_bytes:
+            raise ValidationFailure(
+                "AUDIO_CHUNK_TOO_LARGE: declared Content-Length exceeds the "
+                "configured per-chunk limit."
+            )
+    # Read via a bounded stream rather than ``request.body()`` so an
+    # attacker who omits/understates Content-Length cannot force the whole
+    # unbounded body into memory before this limit is enforced.
+    buffer = bytearray()
+    async for piece in request.stream():
+        buffer.extend(piece)
+        if len(buffer) > limits.max_chunk_bytes:
+            raise ValidationFailure(
+                "AUDIO_CHUNK_TOO_LARGE: audio chunk exceeds the configured "
+                "per-chunk byte limit."
+            )
+    content = bytes(buffer)
     return _to_brain_dump_response(
         task_service.upload_brain_dump_audio_chunk(
             operation_id,

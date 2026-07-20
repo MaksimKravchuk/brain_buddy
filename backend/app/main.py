@@ -51,7 +51,7 @@ def _run_voice_sweep(container: Container) -> None:
 
 
 def _start_voice_sweep_thread(
-    container: Container, stop_event: threading.Event
+    container: Container, stop_event: threading.Event, wake_event: threading.Event
 ) -> threading.Thread:
     """Start a tracked, stoppable daemon thread running the periodic sweep.
 
@@ -61,7 +61,11 @@ def _start_voice_sweep_thread(
     """
 
     def _loop() -> None:
-        while not stop_event.wait(_VOICE_SWEEP_INTERVAL_SECONDS):
+        while not stop_event.is_set():
+            wake_event.wait(_VOICE_SWEEP_INTERVAL_SECONDS)
+            wake_event.clear()
+            if stop_event.is_set():
+                break
             _run_voice_sweep(container)
 
     thread = threading.Thread(target=_loop, name="voice-operation-sweep", daemon=True)
@@ -107,6 +111,8 @@ def create_app() -> FastAPI:
     _run_voice_sweep(app.state.container)
 
     app.state.voice_sweep_stop_event = threading.Event()
+    app.state.voice_sweep_wake_event = threading.Event()
+    app.state.container.task_service.runner_wake = app.state.voice_sweep_wake_event.set
     app.state.voice_sweep_thread = None
     enable_test_voice_sweep = (
         os.getenv("BRAIN_BUDDY_ENABLE_VOICE_SWEEP_IN_TEST", "").strip() == "1"
@@ -121,12 +127,15 @@ def create_app() -> FastAPI:
         # temp-dir teardown would race and deadlock unrelated tests. The
         # Compose E2E runner is a separate process and opts in explicitly.
         app.state.voice_sweep_thread = _start_voice_sweep_thread(
-            app.state.container, app.state.voice_sweep_stop_event
+            app.state.container,
+            app.state.voice_sweep_stop_event,
+            app.state.voice_sweep_wake_event,
         )
 
         @app.on_event("shutdown")
         def _stop_voice_sweep() -> None:
             app.state.voice_sweep_stop_event.set()
+            app.state.voice_sweep_wake_event.set()
             if app.state.voice_sweep_thread is not None:
                 app.state.voice_sweep_thread.join(timeout=5)
 

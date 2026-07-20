@@ -189,6 +189,7 @@ def build_container(config: AppConfig) -> Container:
             )
             if provider not in {"disabled", "deterministic"}
         ),
+        audio_limits=config.voice.audio_limits,
     )
     # ADR-0001: the voice-operation confirmation workflow crosses the Tasks
     # module boundary through an explicit TaskPort adapter, never by treating
