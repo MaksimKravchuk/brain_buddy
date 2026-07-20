@@ -237,19 +237,15 @@ class TaskService:
         )
 
     def purge_expired_raw_audio(self, *, now: datetime | None = None) -> int:
-        """Purge raw audio from terminal operations past the configured retention.
+        """Purge raw audio past its reconciliation-anchored privacy deadline.
 
         The clock is ``raw_audio_expires_at`` — stamped once, at successful
         reconciliation, to ``reconciled_at + raw_audio_retention`` — never a
         later ``updated_at``. A proposal edit, consent withdrawal, or any
         other post-reconciliation mutation must not push this deadline out.
-        An operation that never reconciled has no such anchor; it falls back
-        to ``updated_at + raw_audio_retention``. Either way, this only ever
-        fires for a terminal operation (``completed``/``cancelled``/
-        ``terminal_error``); every active status -- recording, paused,
-        sealing, fast_processing, accurate_transcribing, reconciling,
-        awaiting_confirmation, committing -- and the recoverable
-        ``retryable_error`` status are never purged, regardless of age.
+        Active transcript/proposal review artifacts are independent and are
+        never removed here. Audio is deferred only while a provider run is
+        pending/running and may still need the bytes.
         """
 
         current_time = now or utcnow()
@@ -260,8 +256,8 @@ class TaskService:
                     candidate.id, owner_id=candidate.owner_id
                 )
                 if (
-                    operation.status
-                    not in self._TERMINAL_PURGE_ELIGIBLE_STATUSES
+                    operation.raw_audio_expires_at is None
+                    and operation.status not in self._TERMINAL_PURGE_ELIGIBLE_STATUSES
                 ):
                     continue
                 expires_at = (
@@ -2401,7 +2397,9 @@ class TaskService:
                 # point at data erased by the confirmation itself.
                 "action_receipts": [*operation.action_receipts, *action_receipts],
                 "committed_task_ids": committed_task_ids,
-                "raw_audio_expires_at": now + self.raw_audio_retention,
+                "raw_audio_expires_at": (
+                    operation.raw_audio_expires_at or now + self.raw_audio_retention
+                ),
                 "working_artifacts_expires_at": now + self.working_artifacts_retention,
                 "updated_at": now,
                 "revision": operation.revision + 1,

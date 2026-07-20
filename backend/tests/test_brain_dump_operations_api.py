@@ -2646,14 +2646,11 @@ def test_raw_audio_retention_sweep_deletes_expired_terminal_media(api_client) ->
     assert swept["media_ref"] is None
 
 
-def test_raw_audio_retention_sweep_never_purges_an_awaiting_confirmation_operation(
+def test_raw_audio_retention_sweep_purges_expired_audio_but_preserves_active_review(
     api_client,
 ) -> None:
-    """Raw audio must never be purged while status is awaiting_confirmation
-    (exact-head review item 3): an operation reconciled and then simply
-    never committed keeps its audio until it reaches a terminal status
-    (completed/cancelled/terminal_error), even past what would otherwise be
-    an expired anchor."""
+    """The reconciliation-anchored privacy deadline applies during Review,
+    but transcript/proposal artifacts stay committable after audio is gone."""
 
     operation = _start_operation(
         api_client,
@@ -2682,12 +2679,14 @@ def test_raw_audio_retention_sweep_never_purges_an_awaiting_confirmation_operati
     )
     container.task_repo.save_brain_dump_operation(expired)
 
-    assert container.task_service.purge_expired_raw_audio() == 0
+    assert container.task_service.purge_expired_raw_audio() == 1
     swept = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
     assert swept["status"] == "awaiting_confirmation"
-    assert swept["audio_chunks"] != []
-    assert swept["sealed_manifest_hash"] is not None
-    # The reconciled batch stays committable, audio untouched.
+    assert swept["audio_chunks"] == []
+    assert swept["media_ref"] is None
+    assert swept["segments"]
+    assert swept["proposals"]
+    # The reconciled batch stays committable without retaining raw audio.
     committed = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/commit",
         headers={"Idempotency-Key": "commit-after-retention-sweep"},
@@ -2696,34 +2695,22 @@ def test_raw_audio_retention_sweep_never_purges_an_awaiting_confirmation_operati
     assert committed.status_code == 200, committed.text
     assert committed.json()["committed_task_ids"]
 
-    # Reaching a terminal status starts a fresh configured retention window;
-    # time spent safely active in Review cannot consume terminal retention.
     completed_owner_id = api_client.get("/api/auth/me").json()["id"]
     completed_operation = container.task_service.get_brain_dump_operation(
         operation["id"], owner_id=completed_owner_id
     )
     assert completed_operation.status == "completed"
     assert completed_operation.raw_audio_expires_at is not None
-    assert completed_operation.raw_audio_expires_at > expired.raw_audio_expires_at
+    assert completed_operation.raw_audio_expires_at == expired.raw_audio_expires_at
     assert container.task_service.purge_expired_raw_audio() == 0
-    assert (
-        container.task_service.purge_expired_raw_audio(
-            now=completed_operation.raw_audio_expires_at + timedelta(seconds=1)
-        )
-        == 1
-    )
     final = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
     assert final["audio_chunks"] == []
 
 
-def test_raw_audio_expiry_starts_at_terminal_transition_not_a_review_edit(
+def test_raw_audio_expiry_starts_at_reconciliation_and_is_not_extended(
     api_client,
 ) -> None:
-    """Active Review time never consumes terminal raw-audio retention.
-
-    A proposal edit cannot start the clock. Commit does, exactly once, so a
-    completed operation retains audio for the full configured terminal window.
-    """
+    """Neither a Review edit nor commit extends the reconciliation deadline."""
 
     operation = _start_operation(
         api_client,
@@ -2765,24 +2752,17 @@ def test_raw_audio_expiry_starts_at_terminal_transition_not_a_review_edit(
     assert committed.status_code == 200, committed.text
     assert committed.json()["status"] == "completed"
     terminal_anchor = committed.json()["raw_audio_expires_at"]
-    assert terminal_anchor != original_anchor.isoformat().replace("+00:00", "Z")
+    assert terminal_anchor == original_anchor.isoformat().replace("+00:00", "Z")
 
-    # The old reconciliation timestamp is irrelevant while the terminal
-    # window remains open; only the commit-anchored deadline is enforceable.
     purged = container.task_service.purge_expired_raw_audio(
-        now=original_anchor
+        now=original_anchor + timedelta(seconds=1)
     )
-    assert purged == 0
+    assert purged == 1
     completed_operation = container.task_service.get_brain_dump_operation(
         operation["id"], owner_id=owner_id
     )
     assert completed_operation.raw_audio_expires_at is not None
-    assert (
-        container.task_service.purge_expired_raw_audio(
-            now=completed_operation.raw_audio_expires_at + timedelta(seconds=1)
-        )
-        == 1
-    )
+    assert container.task_service.purge_expired_raw_audio() == 0
     swept = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
     assert swept["audio_chunks"] == []
     assert swept["media_ref"] is None
