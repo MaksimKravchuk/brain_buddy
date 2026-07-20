@@ -17,10 +17,6 @@ import pytest
 
 from app.exceptions import ValidationFailure
 from app.modules.tasks import TaskRepository, TaskService
-from app.modules.tasks.domain import (
-    BrainDumpOperationDocument,
-    BrainDumpProviderRunDocument,
-)
 from app.schemas.tasks import (
     BrainDumpOperationStartRequest,
     BrainDumpSealRequest,
@@ -28,41 +24,46 @@ from app.schemas.tasks import (
 )
 from app.utils.time import utcnow
 from app.workflows.voice_brain_dump.domain import (
+    BrainDumpOperationDocument,
+    BrainDumpProviderRunDocument,
     ProposalPatch,
     ReconciledProposal,
     apply_proposal_patches,
 )
 from app.workflows.voice_brain_dump.providers import DeterministicAccurateStt
+from app.workflows.voice_brain_dump.repository import OperationRepository
+from app.workflows.voice_brain_dump.service import VoiceBrainDumpService
+from app.workflows.voice_brain_dump.task_port import InProcessTaskPort
 
 OWNER = "user_recovery_owner"
 
 
 def test_structural_lineage_requires_meaningful_textual_evidence() -> None:
-    assert TaskService._titles_form_split(
+    assert VoiceBrainDumpService._titles_form_split(
         "Buy oat milk and call the dentist",
         ["Buy oat milk", "Call the dentist"],
     )
-    assert not TaskService._titles_form_split(
+    assert not VoiceBrainDumpService._titles_form_split(
         "Buy oat milk",
         ["Untranscribed sealed audio", "Call the dentist"],
     )
-    assert not TaskService._titles_form_split("and the", ["Call dentist"])
+    assert not VoiceBrainDumpService._titles_form_split("and the", ["Call dentist"])
 
-    assert TaskService._titles_form_merge(
+    assert VoiceBrainDumpService._titles_form_merge(
         ["Buy oat milk", "Call the dentist"],
         "Buy oat milk and call the dentist",
     )
-    assert not TaskService._titles_form_merge(
+    assert not VoiceBrainDumpService._titles_form_merge(
         ["Buy oat milk", "Call the dentist"],
         "Untranscribed sealed audio",
     )
-    assert not TaskService._titles_form_merge(["and the"], "Call dentist")
-    assert TaskService._title_content_words("The call to Anna") == {"call", "anna"}
-    assert TaskService._extract_task_titles("купить хлеб и молоко") == [
+    assert not VoiceBrainDumpService._titles_form_merge(["and the"], "Call dentist")
+    assert VoiceBrainDumpService._title_content_words("The call to Anna") == {"call", "anna"}
+    assert VoiceBrainDumpService._extract_task_titles("купить хлеб и молоко") == [
         "Купить хлеб и молоко"
     ]
-    assert TaskService._titles_refer_to_same_item("Call", "Call")
-    assert not TaskService._titles_refer_to_same_item("Call", "Email")
+    assert VoiceBrainDumpService._titles_refer_to_same_item("Call", "Call")
+    assert not VoiceBrainDumpService._titles_refer_to_same_item("Call", "Email")
 
 
 def _manifest_hash(audio: bytes) -> str:
@@ -80,15 +81,17 @@ def _service(
     max_operation_recoveries: int = 2,
     max_cumulative_cost_usd_per_operation: float = 1.00,
     provider_run_lease_seconds: float = 30.0,
-) -> TaskService:
-    repository = TaskRepository(data_dir)
+) -> VoiceBrainDumpService:
+    task_service = TaskService(TaskRepository(data_dir))
+    repository = OperationRepository(data_dir)
     accurate_stt = DeterministicAccurateStt(
         {"media_recovery": "почини BrainBuddy"},
         fail_plan=fail_plan,
         allow_text_fixture_audio=True,
     )
-    return TaskService(
+    return VoiceBrainDumpService(
         repository,
+        task_port=InProcessTaskPort(task_service.create_native_inbox_task),
         accurate_stt=accurate_stt,
         max_operation_recoveries=max_operation_recoveries,
         max_cumulative_cost_usd_per_operation=max_cumulative_cost_usd_per_operation,
@@ -97,20 +100,20 @@ def _service(
 
 
 def _advance_persisted_provider_runs(
-    service: TaskService, operation_id: str
+    service: VoiceBrainDumpService, operation_id: str
 ) -> BrainDumpOperationDocument:
     """Drive queued provider work explicitly; request commands never call providers."""
 
     for _ in range(3):
         if service.run_due_brain_dump_provider_runs() == 0:
             break
-    return service.task_repo.get_brain_dump_operation_for_owner(
+    return service.operation_repo.get_brain_dump_operation_for_owner(
         operation_id, owner_id=OWNER
     )
 
 
 def _seal(
-    service: TaskService, *, audio: bytes = b"audio bytes"
+    service: VoiceBrainDumpService, *, audio: bytes = b"audio bytes"
 ) -> tuple[BrainDumpOperationDocument, TaskService]:
     operation = service.start_brain_dump_operation(
         BrainDumpOperationStartRequest.model_validate(
@@ -142,11 +145,11 @@ def test_retryable_provider_failure_persists_checkpoint_and_retry_resumes_it(
     service = _service(data_dir, fail_plan={"media_recovery": ["retryable"]})
     operation, _ = _seal(service)
     # Force a deterministic media_ref so the fake fail plan keys match.
-    operation = service.task_repo.get_brain_dump_operation_for_owner(
+    operation = service.operation_repo.get_brain_dump_operation_for_owner(
         operation.id, owner_id=OWNER
     )
     operation = operation.model_copy(update={"media_ref": "media_recovery"})
-    service.task_repo.save_brain_dump_operation(operation)
+    service.operation_repo.save_brain_dump_operation(operation)
 
     sealed = service.seal_brain_dump_operation(
         operation.id,
@@ -200,10 +203,10 @@ def test_operation_recovery_budget_terminally_exhausts_before_a_new_provider_cal
         max_operation_recoveries=1,
     )
     operation, _ = _seal(service)
-    operation = service.task_repo.get_brain_dump_operation_for_owner(
+    operation = service.operation_repo.get_brain_dump_operation_for_owner(
         operation.id, owner_id=OWNER
     ).model_copy(update={"media_ref": "media_recovery"})
-    service.task_repo.save_brain_dump_operation(operation)
+    service.operation_repo.save_brain_dump_operation(operation)
 
     failed = service.seal_brain_dump_operation(
         operation.id,
@@ -241,7 +244,7 @@ def test_cumulative_cost_budget_blocks_the_next_attempt_without_calling_the_prov
 
     service = _service(data_dir, max_cumulative_cost_usd_per_operation=1.0)
     operation, _ = _seal(service)
-    operation = service.task_repo.get_brain_dump_operation_for_owner(
+    operation = service.operation_repo.get_brain_dump_operation_for_owner(
         operation.id, owner_id=OWNER
     )
     now = utcnow()
@@ -266,7 +269,7 @@ def test_cumulative_cost_budget_blocks_the_next_attempt_without_calling_the_prov
             "revision": operation.revision + 1,
         }
     )
-    service.task_repo.save_brain_dump_operation(seeded)
+    service.operation_repo.save_brain_dump_operation(seeded)
 
     blocked = service.retry_brain_dump_operation(
         seeded.id,
@@ -290,7 +293,7 @@ def test_due_provider_lease_sweep_honors_a_zero_claim_limit(data_dir: Path) -> N
 
     service = _service(data_dir)
     operation, _ = _seal(service)
-    service.task_repo.list_in_flight_provider_run_operations = lambda: [operation]
+    service.operation_repo.list_in_flight_provider_run_operations = lambda: [operation]
 
     assert service.recover_due_provider_leases(limit=0) == 0
 
@@ -311,7 +314,7 @@ def test_seal_claims_a_lease_covering_the_configured_provider_timing(
     original_transcribe = service.accurate_stt.transcribe_sealed_audio
 
     def snapshot_claim_then_transcribe(request):
-        persisted = service.task_repo.get_brain_dump_operation_for_owner(
+        persisted = service.operation_repo.get_brain_dump_operation_for_owner(
             request.operation_id, owner_id=OWNER
         )
         claimed_run = persisted.provider_runs[-1]
@@ -348,7 +351,7 @@ def test_expired_lease_still_recovers_through_the_bounded_retry_path(
     service = _service(data_dir, provider_run_lease_seconds=245.0)
     operation, _ = _seal(service)
     operation = operation.model_copy(update={"media_ref": "media_recovery"})
-    service.task_repo.save_brain_dump_operation(operation)
+    service.operation_repo.save_brain_dump_operation(operation)
 
     now = utcnow()
     claimed = operation.model_copy(
@@ -377,7 +380,7 @@ def test_expired_lease_still_recovers_through_the_bounded_retry_path(
             "revision": operation.revision + 1,
         }
     )
-    service.task_repo.save_brain_dump_operation(claimed)
+    service.operation_repo.save_brain_dump_operation(claimed)
 
     assert service.recover_due_provider_leases() == 1
     recovered = _advance_persisted_provider_runs(service, operation.id)
@@ -393,7 +396,7 @@ def test_existing_chunk_upload_repairs_a_missing_atomic_file(data_dir: Path) -> 
     operation, _ = _seal(service)
     audio = b"audio bytes"
     sha256 = hashlib.sha256(audio).hexdigest()
-    chunk_path = service.task_repo.brain_dump_audio_chunk_path(
+    chunk_path = service.operation_repo.brain_dump_audio_chunk_path(
         OWNER, operation.id, 0, sha256
     )
     chunk_path.unlink()
@@ -436,7 +439,7 @@ def test_process_death_during_provider_call_leaves_a_durable_claimed_checkpoint(
     with pytest.raises(SystemExit, match="simulated process death"):
         service.run_due_brain_dump_provider_runs()
 
-    persisted = TaskRepository(data_dir).get_brain_dump_operation_for_owner(
+    persisted = OperationRepository(data_dir).get_brain_dump_operation_for_owner(
         operation.id, owner_id=OWNER
     )
     assert persisted.status == "accurate_transcribing"
@@ -452,7 +455,7 @@ def test_process_death_during_provider_call_leaves_a_durable_claimed_checkpoint(
     persisted = persisted.model_copy(
         update={"provider_runs": [*persisted.provider_runs[:-1], expired_run]}
     )
-    service.task_repo.save_brain_dump_operation(persisted)
+    service.operation_repo.save_brain_dump_operation(persisted)
 
     recovered_service = _service(data_dir)
     recovered = recovered_service.retry_brain_dump_operation(
@@ -477,7 +480,7 @@ def test_process_death_during_retry_persists_the_new_attempt_claim(
     service = _service(data_dir, fail_plan={"media_recovery": ["retryable"]})
     operation, _ = _seal(service, audio=audio)
     operation = operation.model_copy(update={"media_ref": "media_recovery"})
-    service.task_repo.save_brain_dump_operation(operation)
+    service.operation_repo.save_brain_dump_operation(operation)
     retryable = service.seal_brain_dump_operation(
         operation.id,
         BrainDumpSealRequest(
@@ -505,7 +508,7 @@ def test_process_death_during_retry_persists_the_new_attempt_claim(
     with pytest.raises(SystemExit, match="simulated retry process death"):
         service.run_due_brain_dump_provider_runs()
 
-    persisted = TaskRepository(data_dir).get_brain_dump_operation_for_owner(
+    persisted = OperationRepository(data_dir).get_brain_dump_operation_for_owner(
         operation.id, owner_id=OWNER
     )
     claimed_run = persisted.provider_runs[-1]
@@ -524,11 +527,11 @@ def test_recovery_budget_exhausts_into_terminal_error_without_hot_loop(
         data_dir, fail_plan={"media_recovery": ["retryable", "retryable", "retryable"]}
     )
     operation, _ = _seal(service)
-    operation = service.task_repo.get_brain_dump_operation_for_owner(
+    operation = service.operation_repo.get_brain_dump_operation_for_owner(
         operation.id, owner_id=OWNER
     )
     operation = operation.model_copy(update={"media_ref": "media_recovery"})
-    service.task_repo.save_brain_dump_operation(operation)
+    service.operation_repo.save_brain_dump_operation(operation)
 
     sealed = service.seal_brain_dump_operation(
         operation.id,
@@ -577,11 +580,11 @@ def test_recovery_budget_exhausts_into_terminal_error_without_hot_loop(
 def test_terminal_provider_failure_skips_retryable_state(data_dir: Path) -> None:
     service = _service(data_dir, fail_plan={"media_recovery": ["terminal"]})
     operation, _ = _seal(service)
-    operation = service.task_repo.get_brain_dump_operation_for_owner(
+    operation = service.operation_repo.get_brain_dump_operation_for_owner(
         operation.id, owner_id=OWNER
     )
     operation = operation.model_copy(update={"media_ref": "media_recovery"})
-    service.task_repo.save_brain_dump_operation(operation)
+    service.operation_repo.save_brain_dump_operation(operation)
 
     sealed = service.seal_brain_dump_operation(
         operation.id,
@@ -603,7 +606,7 @@ def test_terminal_provider_failure_skips_retryable_state(data_dir: Path) -> None
 def test_retry_requires_retryable_state(data_dir: Path) -> None:
     service = _service(data_dir)
     operation, _ = _seal(service)
-    operation = service.task_repo.get_brain_dump_operation_for_owner(
+    operation = service.operation_repo.get_brain_dump_operation_for_owner(
         operation.id, owner_id=OWNER
     )
 
@@ -622,11 +625,11 @@ def test_retry_replays_cached_idempotent_response(data_dir: Path) -> None:
 
     service = _service(data_dir, fail_plan={"media_recovery": ["retryable"]})
     operation, _ = _seal(service)
-    operation = service.task_repo.get_brain_dump_operation_for_owner(
+    operation = service.operation_repo.get_brain_dump_operation_for_owner(
         operation.id, owner_id=OWNER
     )
     operation = operation.model_copy(update={"media_ref": "media_recovery"})
-    service.task_repo.save_brain_dump_operation(operation)
+    service.operation_repo.save_brain_dump_operation(operation)
 
     sealed = service.seal_brain_dump_operation(
         operation.id,
@@ -670,13 +673,13 @@ def test_retry_without_sealed_checkpoint_is_rejected(data_dir: Path) -> None:
 
     service = _service(data_dir)
     operation, _ = _seal(service)
-    operation = service.task_repo.get_brain_dump_operation_for_owner(
+    operation = service.operation_repo.get_brain_dump_operation_for_owner(
         operation.id, owner_id=OWNER
     )
     broken = operation.model_copy(
         update={"status": "retryable_error", "sealed_manifest_hash": None}
     )
-    service.task_repo.save_brain_dump_operation(broken)
+    service.operation_repo.save_brain_dump_operation(broken)
 
     with pytest.raises(ValidationFailure, match="no sealed checkpoint"):
         service.retry_brain_dump_operation(

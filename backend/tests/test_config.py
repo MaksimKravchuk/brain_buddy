@@ -190,11 +190,11 @@ def test_compose_e2e_configures_a_genuinely_allowlisted_openai_category(
 
     container = build_container(get_config())
 
-    assert container.task_service.allowed_external_provider_categories == frozenset(
+    assert container.voice_brain_dump_service.allowed_external_provider_categories == frozenset(
         {"openai"}
     )
     assert isinstance(
-        container.task_service.text_reconciler, DeterministicTextReconciler
+        container.voice_brain_dump_service.text_reconciler, DeterministicTextReconciler
     )
 
 
@@ -213,8 +213,8 @@ def test_build_container_uses_openai_reconciler_outside_test(
 
     container = build_container(get_config())
 
-    assert isinstance(container.task_service.text_reconciler, OpenAITextReconciler)
-    assert container.task_service.text_reconciler.model == "gpt-4o"
+    assert isinstance(container.voice_brain_dump_service.text_reconciler, OpenAITextReconciler)
+    assert container.voice_brain_dump_service.text_reconciler.model == "gpt-4o"
 
 
 def test_voice_reconciler_configuration_is_bounded_and_resolves_credentials(
@@ -267,12 +267,12 @@ def test_build_container_forwards_bounded_reconciler_settings_to_the_adapter(
 
     container = build_container(get_config())
 
-    reconciler = container.task_service.text_reconciler
+    reconciler = container.voice_brain_dump_service.text_reconciler
     assert reconciler.max_retries == 4
     assert reconciler.retry_backoff_seconds == (0.5, 1.5)
     assert reconciler.max_cost_usd_per_operation == 0.05
     assert reconciler.estimated_cost_usd_per_megabyte == 0.03
-    assert container.task_service.raw_audio_retention.total_seconds() == 123
+    assert container.voice_brain_dump_service.raw_audio_retention.total_seconds() == 123
 
 
 def test_build_container_derives_recovery_lease_from_worst_case_provider_timing(
@@ -303,7 +303,7 @@ def test_build_container_derives_recovery_lease_from_worst_case_provider_timing(
     # accurate_stt worst case: 3 attempts * 10s timeout + (1 + 2)s backoff = 33s
     # reconciler worst case: 2 attempts * 5s timeout + 3s backoff = 13s
     # lease = max(33, 13) + 30s margin = 63s
-    assert container.task_service.provider_run_lease_seconds == pytest.approx(63.0)
+    assert container.voice_brain_dump_service.provider_run_lease_seconds == pytest.approx(63.0)
 
 
 def test_unsupported_reconciler_provider_fails_closed(

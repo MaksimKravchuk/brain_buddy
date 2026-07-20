@@ -21,6 +21,7 @@ from .providers import (
     ReconcileTextRequest,
     TextReconcilerPort,
 )
+from .service import VoiceBrainDumpService
 from .task_port import InProcessTaskPort, TaskPort
 
 __all__ = [
@@ -41,6 +42,7 @@ __all__ = [
     "TaskPort",
     "TextReconcilerPort",
     "TranscriptHypothesis",
+    "VoiceBrainDumpService",
     "active_transcript_hypotheses",
     "apply_proposal_patches",
     "confirm_native_inbox_actions",

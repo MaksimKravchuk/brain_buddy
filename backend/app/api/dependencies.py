@@ -18,6 +18,7 @@ from app.services import (
     ValidationService,
     VersionService,
 )
+from app.workflows.voice_brain_dump.service import VoiceBrainDumpService
 
 
 def get_container(request: Request) -> Container:
@@ -66,6 +67,12 @@ def get_auth_service(container: Container = Depends(get_container)) -> AuthServi
 
 def get_task_service(container: Container = Depends(get_container)) -> TaskService:
     return container.task_service
+
+
+def get_voice_brain_dump_service(
+    container: Container = Depends(get_container),
+) -> VoiceBrainDumpService:
+    return container.voice_brain_dump_service
 
 
 def get_current_user(

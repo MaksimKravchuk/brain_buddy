@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import shutil
 import sqlite3
 import threading
 import unicodedata
@@ -14,7 +12,6 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import ClassVar, TypeVar
-from uuid import uuid4
 
 from pydantic import BaseModel
 
@@ -28,8 +25,6 @@ from app.repositories.base import BaseRepository
 from app.utils.time import utcnow
 
 from .domain import (
-    BrainDumpOperationDocument,
-    BrainDumpProposalPatchDocument,
     IdempotencyRecord,
     ProjectDocument,
     TagDocument,
@@ -42,9 +37,6 @@ ModelT = TypeVar("ModelT", bound=BaseModel)
 
 IDEMPOTENCY_RETENTION = timedelta(hours=24)
 """How long replayed command results stay addressable by their key."""
-
-_BRAIN_DUMP_SCHEMA_VERSION = 2
-_LEGACY_TERMINAL_STATUSES = frozenset({"completed", "cancelled"})
 
 
 @contextmanager
@@ -214,14 +206,6 @@ class TaskRepository(BaseRepository):
                         REFERENCES tasks(owner_id, id)
                         ON DELETE CASCADE
                 );
-                CREATE TABLE IF NOT EXISTS brain_dump_operations (
-                    owner_id TEXT NOT NULL,
-                    id TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    payload TEXT NOT NULL,
-                    PRIMARY KEY (owner_id, id)
-                );
                 CREATE TABLE IF NOT EXISTS idempotency_records (
                     owner_id TEXT NOT NULL,
                     key_hash TEXT NOT NULL,
@@ -242,8 +226,6 @@ class TaskRepository(BaseRepository):
                     ON tasks(owner_id, state, order_key, created_at, id);
                 CREATE INDEX IF NOT EXISTS idx_task_tags_owner_tag
                     ON task_tags(owner_id, tag_id, task_id);
-                CREATE INDEX IF NOT EXISTS idx_brain_dump_operations_owner_status
-                    ON brain_dump_operations(owner_id, status, updated_at, id);
                 CREATE INDEX IF NOT EXISTS idx_idempotency_owner_created
                     ON idempotency_records(owner_id, created_at);
                 """
@@ -258,7 +240,7 @@ class TaskRepository(BaseRepository):
                 return
             conn.execute("BEGIN IMMEDIATE")
             try:
-                counts = {"projects": 0, "tags": 0, "tasks": 0, "brain_dump_operations": 0}
+                counts = {"projects": 0, "tags": 0, "tasks": 0}
                 for path in self.resolve("projects").glob("*/*.json"):
                     project = self.load_model(path, ProjectDocument)
                     project = project.model_copy(
@@ -287,12 +269,6 @@ class TaskRepository(BaseRepository):
                     task = task.model_copy(update={"tag_ids": task.tag_ids})
                     self._upsert_task(conn, task)
                     counts["tasks"] += 1
-                for path in self.resolve("brain-dump-operations").glob("*/*.json"):
-                    operation, _ = self._decode_brain_dump_operation(
-                        json.loads(path.read_text(encoding="utf-8"))
-                    )
-                    self._upsert_brain_dump_operation(conn, operation)
-                    counts["brain_dump_operations"] += 1
                 conn.execute(
                     "INSERT INTO migration_ledger (id, migrated_at, payload) VALUES (?, ?, ?)",
                     (
@@ -313,19 +289,6 @@ class TaskRepository(BaseRepository):
     def comment_path(self, owner_id: str, task_id: str, comment_id: str) -> Path:
         return self.resolve("task-comments", owner_id, task_id, f"{comment_id}.json")
 
-    def brain_dump_operation_path(self, owner_id: str, operation_id: str) -> Path:
-        return self.resolve("brain-dump-operations", owner_id, f"{operation_id}.json")
-
-    def brain_dump_audio_chunk_path(
-        self, owner_id: str, operation_id: str, chunk_number: int, sha256: str
-    ) -> Path:
-        return self.resolve(
-            "brain-dump-media", owner_id, operation_id, f"{chunk_number:06d}-{sha256}.bin"
-        )
-
-    def brain_dump_audio_operation_path(self, owner_id: str, operation_id: str) -> Path:
-        return self.resolve("brain-dump-media", owner_id, operation_id)
-
     def project_path(self, owner_id: str, project_id: str) -> Path:
         return self.resolve("projects", owner_id, f"{project_id}.json")
 
@@ -342,99 +305,6 @@ class TaskRepository(BaseRepository):
     @staticmethod
     def _payload(model: BaseModel) -> str:
         return json.dumps(model.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
-
-    @staticmethod
-    def _legacy_patch_id(
-        operation_id: str, proposal_id: str, operation: str
-    ) -> str:
-        digest = hashlib.sha256(
-            f"{operation_id}:{proposal_id}:{operation}".encode()
-        ).hexdigest()[:24]
-        return f"proposal_patch_legacy_{digest}"
-
-    @classmethod
-    def _decode_brain_dump_operation(
-        cls, payload: dict[str, object]
-    ) -> tuple[BrainDumpOperationDocument, bool]:
-        """Dispatch persisted operation payloads by explicit schema version."""
-
-        raw_version = payload.get("schema_version", 1)
-        if not isinstance(raw_version, int) or isinstance(raw_version, bool):
-            raise RepositoryError("Brain dump operation schema version must be an integer.")
-        if raw_version not in {1, _BRAIN_DUMP_SCHEMA_VERSION}:
-            raise RepositoryError(
-                f"Brain dump operation has unsupported schema version {raw_version}."
-            )
-        if raw_version == _BRAIN_DUMP_SCHEMA_VERSION:
-            return BrainDumpOperationDocument.model_validate(payload), False
-
-        legacy = BrainDumpOperationDocument.model_validate(
-            {**payload, "schema_version": 1}
-        )
-        if legacy.status in _LEGACY_TERMINAL_STATUSES:
-            return legacy, False
-
-        proposals = []
-        patches: list[BrainDumpProposalPatchDocument] = []
-        sequence = 0
-        for proposal in legacy.proposals:
-            locked_fields = list(proposal.locked_fields)
-            if proposal.user_edited and "title" not in locked_fields:
-                locked_fields.append("title")
-            proposals.append(
-                proposal.model_copy(
-                    update={
-                        "locked_fields": locked_fields,
-                        "status": (
-                            "user_edited" if proposal.user_edited else "provisional"
-                        ),
-                    }
-                )
-            )
-            sequence += 1
-            patches.append(
-                BrainDumpProposalPatchDocument(
-                    id=cls._legacy_patch_id(legacy.id, proposal.id, "add"),
-                    sequence=sequence,
-                    operation="add",
-                    proposal_id=proposal.id,
-                    producer="user",
-                    title=proposal.title,
-                    source_segment_ids=proposal.source_segment_ids,
-                    locked_fields=locked_fields,
-                    created_at=legacy.updated_at,
-                )
-            )
-            if proposal.deleted:
-                sequence += 1
-                patches.append(
-                    BrainDumpProposalPatchDocument(
-                        id=cls._legacy_patch_id(legacy.id, proposal.id, "remove"),
-                        sequence=sequence,
-                        operation="remove",
-                        proposal_id=proposal.id,
-                        producer="user",
-                        source_segment_ids=proposal.source_segment_ids,
-                        created_at=legacy.updated_at,
-                    )
-                )
-
-        migrated = legacy.model_copy(
-            update={
-                "segments": [
-                    segment.model_copy(update={"provider_role": "browser_preview"})
-                    for segment in legacy.segments
-                ],
-                "proposals": proposals,
-                "provider_runs": [],
-                "proposal_patches": patches,
-                "reconciliation_quality": "provisional_only",
-                "legacy_import": "legacy_preview_only",
-                "schema_version": _BRAIN_DUMP_SCHEMA_VERSION,
-                "revision": legacy.revision + 1,
-            }
-        )
-        return migrated, True
 
     @staticmethod
     def _model(row: sqlite3.Row, model_cls: type[ModelT]) -> ModelT:
@@ -507,31 +377,6 @@ class TaskRepository(BaseRepository):
         )
         BaseRepository.dump_model(self.task_path(task.owner_id, task.id), task)
 
-    def _upsert_brain_dump_operation(
-        self, conn: sqlite3.Connection, operation: BrainDumpOperationDocument
-    ) -> None:
-        conn.execute(
-            """
-            INSERT INTO brain_dump_operations
-                (owner_id, id, status, updated_at, payload)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(owner_id, id) DO UPDATE SET
-                status = excluded.status,
-                updated_at = excluded.updated_at,
-                payload = excluded.payload
-            """,
-            (
-                operation.owner_id,
-                operation.id,
-                operation.status,
-                operation.updated_at.isoformat(),
-                self._payload(operation),
-            ),
-        )
-        BaseRepository.dump_model(
-            self.brain_dump_operation_path(operation.owner_id, operation.id), operation
-        )
-
     def create_project(self, project: ProjectDocument) -> None:
         with self._connection() as conn, _sqlite_guard("Project", project.id):
             if self._exists(conn, "projects", project.owner_id, project.id):
@@ -581,227 +426,6 @@ class TaskRepository(BaseRepository):
 
     def list_for_owner(self, *, owner_id: str) -> list[TaskDocument]:
         return self._list("tasks", TaskDocument, owner_id=owner_id)
-
-    def save_brain_dump_operation(self, operation: BrainDumpOperationDocument) -> None:
-        with (
-            self._connection() as conn,
-            _sqlite_guard("Brain dump operation", operation.id),
-        ):
-            self._upsert_brain_dump_operation(conn, operation)
-
-    def save_brain_dump_audio_chunk(
-        self, *, owner_id: str, operation_id: str, chunk_number: int, sha256: str, content: bytes
-    ) -> None:
-        path = self.brain_dump_audio_chunk_path(owner_id, operation_id, chunk_number, sha256)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        staging_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-        try:
-            staging_path.write_bytes(content)
-            os.replace(staging_path, path)
-        finally:
-            staging_path.unlink(missing_ok=True)
-
-    def load_brain_dump_audio_chunks(
-        self, *, owner_id: str, operation_id: str, chunks: list[tuple[int, str]]
-    ) -> bytes:
-        parts: list[bytes] = []
-        for chunk_number, sha256 in sorted(chunks):
-            path = self.brain_dump_audio_chunk_path(owner_id, operation_id, chunk_number, sha256)
-            if not path.exists():
-                raise NotFoundError("Brain dump audio chunk", f"{operation_id}:{chunk_number}")
-            parts.append(path.read_bytes())
-        return b"".join(parts)
-
-    def delete_brain_dump_audio_chunks(
-        self, *, owner_id: str, operation_id: str, chunks: list[tuple[int, str]]
-    ) -> None:
-        del chunks
-        shutil.rmtree(
-            self.brain_dump_audio_operation_path(owner_id, operation_id), ignore_errors=True
-        )
-
-    def list_expired_raw_audio_operations(
-        self,
-    ) -> list[BrainDumpOperationDocument]:
-        # "awaiting_confirmation" is included alongside the terminal statuses
-        # because raw audio's retention clock starts at successful
-        # reconciliation, not only at operation completion/cancellation/
-        # failure — an operation left awaiting confirmation and never
-        # committed must still have its raw audio purged on schedule.
-        #
-        # No SQL column tracks the artifact-specific ``raw_audio_expires_at``
-        # anchor (it lives inside the JSON payload), so this returns every
-        # candidate in an eligible status; the caller compares each
-        # document's own anchor against the current time to decide whether
-        # it is actually due, exactly like the provider-lease sweep does for
-        # ``lease_expires_at``.
-        with self._connection() as conn:
-            rows = conn.execute(
-                """
-                SELECT payload FROM brain_dump_operations
-                """
-            ).fetchall()
-        return [
-            self._decode_brain_dump_operation(json.loads(row["payload"]))[0]
-            for row in rows
-        ]
-
-    def list_in_flight_provider_run_operations(
-        self,
-    ) -> list[BrainDumpOperationDocument]:
-        """Operations whose latest provider run may hold a due/expired lease.
-
-        No SQL column tracks ``lease_expires_at`` directly (it lives inside
-        the JSON payload), so this returns every ``accurate_transcribing``/
-        ``reconciling`` operation across all owners; the caller inspects each
-        document's last provider run to decide whether its lease is actually
-        due before claiming it.
-        """
-
-        with self._connection() as conn:
-            rows = conn.execute(
-                """
-                SELECT payload FROM brain_dump_operations
-                WHERE status IN ('accurate_transcribing', 'reconciling')
-                """
-            ).fetchall()
-        return [
-            self._decode_brain_dump_operation(json.loads(row["payload"]))[0]
-            for row in rows
-        ]
-
-    def list_expired_working_artifact_operations(
-        self, *, before: datetime
-    ) -> list[BrainDumpOperationDocument]:
-        """Operations whose uncommitted transcript/proposal working data may
-        be purged: anything that never reached ``completed`` (so committed
-        provenance behind an already-created ``TaskDocument`` is never
-        touched), including abandoned ``recording``/``awaiting_confirmation``
-        operations no one ever finished or discarded."""
-
-        with self._connection() as conn:
-            rows = conn.execute(
-                """
-                SELECT payload FROM brain_dump_operations
-                WHERE updated_at < ?
-                """,
-                (before.isoformat(),),
-            ).fetchall()
-        return [
-            self._decode_brain_dump_operation(json.loads(row["payload"]))[0]
-            for row in rows
-        ]
-
-    def list_brain_dump_operations(self) -> list[BrainDumpOperationDocument]:
-        with self._connection() as conn:
-            rows = conn.execute("SELECT payload FROM brain_dump_operations").fetchall()
-        return [
-            self._decode_brain_dump_operation(json.loads(row["payload"]))[0]
-            for row in rows
-        ]
-
-    def purge_brain_dump_media_orphans(self) -> int:
-        """Remove untracked media and interrupted atomic-write temp files.
-
-        Runs under the same global command lock used to serialize owner
-        writes (audio-chunk uploads included), and re-reads the "known
-        media" snapshot from the database only after acquiring it. Without
-        this, a chunk durably uploaded between an outside caller listing
-        operations and this sweep scanning the filesystem would look
-        orphaned -- and get deleted moments after being written -- because
-        the snapshot and the filesystem scan were not atomic with respect
-        to a concurrent upload.
-        """
-
-        with self.command_lock("system:media-orphan-sweep"):
-            operations = self.list_brain_dump_operations()
-            expected = {
-                (operation.owner_id, operation.id): {
-                    f"{chunk.chunk_number:06d}-{chunk.sha256}.bin"
-                    for chunk in operation.audio_chunks
-                }
-                for operation in operations
-            }
-            root = self.resolve("brain-dump-media")
-            if not root.exists():
-                return 0
-            removed = 0
-            for owner_path in root.iterdir():
-                if not owner_path.is_dir():
-                    owner_path.unlink(missing_ok=True)
-                    removed += 1
-                    continue
-                for operation_path in owner_path.iterdir():
-                    if not operation_path.is_dir():
-                        operation_path.unlink(missing_ok=True)
-                        removed += 1
-                        continue
-                    known = expected.get((owner_path.name, operation_path.name))
-                    if known is None:
-                        shutil.rmtree(operation_path, ignore_errors=True)
-                        removed += 1
-                        continue
-                    for media_path in operation_path.iterdir():
-                        if media_path.name not in known:
-                            media_path.unlink(missing_ok=True)
-                            removed += 1
-            return removed
-
-    def get_brain_dump_operation_for_owner(
-        self, operation_id: str, *, owner_id: str
-    ) -> BrainDumpOperationDocument:
-        loaded = self._load_brain_dump_operation(operation_id, owner_id=owner_id)
-        if loaded is not None:
-            operation, migrated = loaded
-            if not migrated:
-                return operation
-            if getattr(self._thread_state, "conn", None) is not None:
-                self.save_brain_dump_operation(operation)
-                return operation
-            with self.command_lock(owner_id):
-                current = self._load_brain_dump_operation(
-                    operation_id, owner_id=owner_id
-                )
-                if current is None:
-                    raise NotFoundError("Brain dump operation", operation_id)
-                current_operation, current_migrated = current
-                if current_migrated:
-                    self.save_brain_dump_operation(current_operation)
-                return current_operation
-
-        path = self.brain_dump_operation_path(owner_id, operation_id)
-        if not path.exists():
-            raise NotFoundError("Brain dump operation", operation_id)
-        legacy, _ = self._decode_brain_dump_operation(
-            json.loads(path.read_text(encoding="utf-8"))
-        )
-        if getattr(self._thread_state, "conn", None) is not None:
-            # Already inside this thread's serialized command transaction.
-            self.save_brain_dump_operation(legacy)
-            return legacy
-        with self.command_lock(owner_id):
-            # Re-check under the lock so a concurrent write is never clobbered
-            # by the stale legacy JSON snapshot.
-            current = self._load_brain_dump_operation(operation_id, owner_id=owner_id)
-            if current is not None:
-                return current[0]
-            self.save_brain_dump_operation(legacy)
-            return legacy
-
-    def _load_brain_dump_operation(
-        self, operation_id: str, *, owner_id: str
-    ) -> tuple[BrainDumpOperationDocument, bool] | None:
-        with self._connection() as conn:
-            row = conn.execute(
-                """
-                SELECT payload FROM brain_dump_operations
-                WHERE owner_id = ? AND id = ?
-                """,
-                (owner_id, operation_id),
-            ).fetchone()
-        if row is None:
-            return None
-        return self._decode_brain_dump_operation(json.loads(row["payload"]))
 
     def create_subtask(self, subtask: TaskSubtaskDocument) -> None:
         with self._connection() as conn, _sqlite_guard("Task subtask", subtask.id):

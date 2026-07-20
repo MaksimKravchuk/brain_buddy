@@ -23,7 +23,6 @@ from app.exceptions import (
 )
 from app.modules.tasks import TaskRepository, TaskService
 from app.modules.tasks.domain import (
-    BrainDumpOperationDocument,
     IdempotencyRecord,
     TaskDocument,
     TaskSubtaskDocument,
@@ -31,6 +30,10 @@ from app.modules.tasks.domain import (
 from app.modules.tasks.repository import IDEMPOTENCY_RETENTION
 from app.schemas.tasks import BrainDumpOperationStartRequest, TaskCreateRequest
 from app.utils.time import utcnow
+from app.workflows.voice_brain_dump.domain import BrainDumpOperationDocument
+from app.workflows.voice_brain_dump.repository import OperationRepository
+from app.workflows.voice_brain_dump.service import VoiceBrainDumpService
+from app.workflows.voice_brain_dump.task_port import InProcessTaskPort
 
 OWNER = "user_repo_owner"
 
@@ -43,6 +46,21 @@ def repository(data_dir: Path) -> TaskRepository:
 @pytest.fixture()
 def service(repository: TaskRepository) -> TaskService:
     return TaskService(repository)
+
+
+@pytest.fixture()
+def voice_repository(data_dir: Path) -> OperationRepository:
+    return OperationRepository(data_dir)
+
+
+@pytest.fixture()
+def voice_service(
+    voice_repository: OperationRepository, service: TaskService
+) -> VoiceBrainDumpService:
+    return VoiceBrainDumpService(
+        voice_repository,
+        task_port=InProcessTaskPort(service.create_native_inbox_task),
+    )
 
 
 def _make_task(
@@ -67,9 +85,9 @@ def _task_doc(task_id: str = "task_direct") -> TaskDocument:
 
 
 def _start_brain_dump(
-    service: TaskService, *, key: str = "brain-dump-start"
+    voice_service: VoiceBrainDumpService, *, key: str = "brain-dump-start"
 ) -> BrainDumpOperationDocument:
-    return service.start_brain_dump_operation(
+    return voice_service.start_brain_dump_operation(
         BrainDumpOperationStartRequest.model_validate(
             {"consent": {"microphone": True, "external_processing_allowed": False}}
         ),
@@ -78,7 +96,7 @@ def _start_brain_dump(
     )
 
 
-def _delete_brain_dump_row(repository: TaskRepository, operation_id: str) -> None:
+def _delete_brain_dump_row(repository: OperationRepository, operation_id: str) -> None:
     conn = sqlite3.connect(repository.db_path)
     try:
         conn.execute(
@@ -91,7 +109,7 @@ def _delete_brain_dump_row(repository: TaskRepository, operation_id: str) -> Non
 
 
 def _insert_brain_dump_payload(
-    repository: TaskRepository, payload: dict[str, object]
+    repository: OperationRepository, payload: dict[str, object]
 ) -> None:
     conn = sqlite3.connect(repository.db_path)
     try:
@@ -349,10 +367,10 @@ def test_repository_construction_closes_every_connection(
 
 
 def test_brain_dump_backfill_runs_under_command_lock(
-    service: TaskService, monkeypatch: pytest.MonkeyPatch
+    voice_service: VoiceBrainDumpService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    operation = _start_brain_dump(service, key="backfill-lock")
-    repo = service.task_repo
+    operation = _start_brain_dump(voice_service, key="backfill-lock")
+    repo = voice_service.operation_repo
     _delete_brain_dump_row(repo, operation.id)
 
     locks: list[str] = []
@@ -380,10 +398,10 @@ def test_brain_dump_backfill_runs_under_command_lock(
 
 
 def test_brain_dump_backfill_inside_active_command_does_not_deadlock(
-    service: TaskService,
+    voice_service: VoiceBrainDumpService,
 ) -> None:
-    operation = _start_brain_dump(service, key="backfill-nested")
-    repo = service.task_repo
+    operation = _start_brain_dump(voice_service, key="backfill-nested")
+    repo = voice_service.operation_repo
     _delete_brain_dump_row(repo, operation.id)
 
     with repo.command_lock(OWNER):
@@ -393,10 +411,10 @@ def test_brain_dump_backfill_inside_active_command_does_not_deadlock(
 
 
 def test_brain_dump_backfill_does_not_clobber_concurrent_write(
-    service: TaskService, monkeypatch: pytest.MonkeyPatch
+    voice_service: VoiceBrainDumpService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    operation = _start_brain_dump(service, key="backfill-race")
-    repo = service.task_repo
+    operation = _start_brain_dump(voice_service, key="backfill-race")
+    repo = voice_service.operation_repo
     newer = operation.model_copy(
         update={
             "status": "paused",
@@ -427,9 +445,10 @@ def test_brain_dump_backfill_does_not_clobber_concurrent_write(
 
 
 def test_active_schema_v1_operation_is_imported_once_as_legacy_preview_only(
-    repository: TaskRepository,
+    voice_repository: OperationRepository,
 ) -> None:
     payload = _legacy_brain_dump_payload(status="awaiting_confirmation")
+    repository = voice_repository
     _insert_brain_dump_payload(repository, payload)
 
     migrated = repository.get_brain_dump_operation_for_owner(
@@ -474,8 +493,9 @@ def test_active_schema_v1_operation_is_imported_once_as_legacy_preview_only(
 
 @pytest.mark.parametrize("status", ["completed", "cancelled"])
 def test_terminal_schema_v1_operation_remains_readable_and_immutable(
-    repository: TaskRepository, status: str
+    voice_repository: OperationRepository, status: str
 ) -> None:
+    repository = voice_repository
     payload = _legacy_brain_dump_payload(status=status)
     _insert_brain_dump_payload(repository, payload)
 
@@ -501,8 +521,9 @@ def test_terminal_schema_v1_operation_remains_readable_and_immutable(
 
 
 def test_missing_schema_version_dispatches_as_legacy_v1(
-    repository: TaskRepository,
+    voice_repository: OperationRepository,
 ) -> None:
+    repository = voice_repository
     payload = _legacy_brain_dump_payload(status="recording")
     payload.pop("schema_version")
     _insert_brain_dump_payload(repository, payload)
@@ -517,8 +538,9 @@ def test_missing_schema_version_dispatches_as_legacy_v1(
 
 
 def test_unknown_brain_dump_schema_version_fails_closed(
-    repository: TaskRepository,
+    voice_repository: OperationRepository,
 ) -> None:
+    repository = voice_repository
     payload = _legacy_brain_dump_payload(status="recording")
     payload["schema_version"] = 99
     _insert_brain_dump_payload(repository, payload)
@@ -530,7 +552,7 @@ def test_unknown_brain_dump_schema_version_fails_closed(
 
 
 def test_purge_expired_raw_audio_does_not_mutate_terminal_schema_v1_record(
-    repository: TaskRepository, service: TaskService
+    voice_repository: OperationRepository, voice_service: VoiceBrainDumpService
 ) -> None:
     """Blocker 7b: a terminal schema-v1 operation is a byte-immutable
     historical record. The raw-audio retention sweep must never rewrite it
@@ -547,9 +569,10 @@ def test_purge_expired_raw_audio_does_not_mutate_terminal_schema_v1_record(
             "received_at": old.isoformat(),
         }
     ]
+    repository = voice_repository
     _insert_brain_dump_payload(repository, payload)
 
-    purged = service.purge_expired_raw_audio()
+    purged = voice_service.purge_expired_raw_audio()
 
     assert purged == 0
     with sqlite3.connect(repository.db_path) as conn:
@@ -563,7 +586,7 @@ def test_purge_expired_raw_audio_does_not_mutate_terminal_schema_v1_record(
 
 
 def test_purge_expired_working_artifacts_does_not_mutate_terminal_schema_v1_record(
-    repository: TaskRepository, service: TaskService
+    voice_repository: OperationRepository, voice_service: VoiceBrainDumpService
 ) -> None:
     """Blocker 7b: a terminal schema-v1 operation's segments/proposals must
     survive the working-artifact retention sweep byte-for-byte."""
@@ -571,9 +594,10 @@ def test_purge_expired_working_artifacts_does_not_mutate_terminal_schema_v1_reco
     old = utcnow() - timedelta(days=400)
     payload = _legacy_brain_dump_payload(status="completed")
     payload["updated_at"] = old.isoformat()
+    repository = voice_repository
     _insert_brain_dump_payload(repository, payload)
 
-    purged = service.purge_expired_working_artifacts()
+    purged = voice_service.purge_expired_working_artifacts()
 
     assert purged == 0
     with sqlite3.connect(repository.db_path) as conn:

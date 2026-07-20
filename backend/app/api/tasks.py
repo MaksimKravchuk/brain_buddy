@@ -8,13 +8,14 @@ from datetime import date
 from fastapi import APIRouter, Depends, Header, Query, Request, status
 
 from app.api.contracts import error_responses
-from app.api.dependencies import get_current_user, get_task_service
+from app.api.dependencies import (
+    get_current_user,
+    get_task_service,
+    get_voice_brain_dump_service,
+)
 from app.exceptions import ValidationFailure
 from app.modules.tasks import TaskService
 from app.modules.tasks.domain import (
-    BrainDumpOperationDocument,
-    BrainDumpProposalDocument,
-    BrainDumpTranscriptSegmentDocument,
     ProjectDocument,
     SmartAddTaskResultDocument,
     TagDocument,
@@ -64,6 +65,12 @@ from app.schemas.tasks import (
     TaskTransitionRequest,
     TaskUpdateRequest,
 )
+from app.workflows.voice_brain_dump.domain import (
+    BrainDumpOperationDocument,
+    BrainDumpProposalDocument,
+    BrainDumpTranscriptSegmentDocument,
+)
+from app.workflows.voice_brain_dump.service import VoiceBrainDumpService
 
 router = APIRouter(tags=["tasks"])
 
@@ -84,10 +91,10 @@ def start_brain_dump_operation(
     payload: BrainDumpOperationStartRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
-    task_service: TaskService = Depends(get_task_service),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     return _to_brain_dump_response(
-        task_service.start_brain_dump_operation(
+        voice_brain_dump_service.start_brain_dump_operation(
             payload,
             owner_id=current_user.id,
             idempotency_key=_require_idempotency_key(idempotency_key),
@@ -103,10 +110,10 @@ def start_brain_dump_operation(
 def get_brain_dump_operation(
     operation_id: str,
     current_user: User = Depends(get_current_user),
-    task_service: TaskService = Depends(get_task_service),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     return _to_brain_dump_response(
-        task_service.get_brain_dump_operation(operation_id, owner_id=current_user.id)
+        voice_brain_dump_service.get_brain_dump_operation(operation_id, owner_id=current_user.id)
     )
 
 
@@ -120,10 +127,10 @@ def append_brain_dump_transcript(
     payload: BrainDumpTranscriptAppendRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
-    task_service: TaskService = Depends(get_task_service),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     return _to_brain_dump_response(
-        task_service.append_brain_dump_transcript(
+        voice_brain_dump_service.append_brain_dump_transcript(
             operation_id,
             payload,
             owner_id=current_user.id,
@@ -143,11 +150,11 @@ async def upload_brain_dump_audio_chunk(
     request: Request,
     x_content_sha256: str | None = Header(default=None, alias="X-Content-SHA256"),
     current_user: User = Depends(get_current_user),
-    task_service: TaskService = Depends(get_task_service),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     if not x_content_sha256:
         raise ValidationFailure("X-Content-SHA256 header is required.")
-    limits = task_service.audio_limits
+    limits = voice_brain_dump_service.audio_limits
     content_type = (request.headers.get("content-type") or "").split(";", 1)[0].strip()
     if content_type and content_type not in limits.allowed_mime_types:
         raise ValidationFailure(
@@ -180,7 +187,7 @@ async def upload_brain_dump_audio_chunk(
             )
     content = bytes(buffer)
     return _to_brain_dump_response(
-        task_service.upload_brain_dump_audio_chunk(
+        voice_brain_dump_service.upload_brain_dump_audio_chunk(
             operation_id,
             chunk_number,
             content,
@@ -200,10 +207,10 @@ def seal_brain_dump_operation(
     payload: BrainDumpSealRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
-    task_service: TaskService = Depends(get_task_service),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     return _to_brain_dump_response(
-        task_service.seal_brain_dump_operation(
+        voice_brain_dump_service.seal_brain_dump_operation(
             operation_id,
             payload,
             owner_id=current_user.id,
@@ -223,10 +230,10 @@ def update_brain_dump_proposal(
     payload: BrainDumpProposalUpdateRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
-    task_service: TaskService = Depends(get_task_service),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     return _to_brain_dump_response(
-        task_service.update_brain_dump_proposal(
+        voice_brain_dump_service.update_brain_dump_proposal(
             operation_id,
             proposal_id,
             payload,
@@ -247,27 +254,27 @@ def command_brain_dump_operation(
     payload: ExpectedRevisionRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
-    task_service: TaskService = Depends(get_task_service),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     idempotency = _require_idempotency_key(idempotency_key)
     if action == "commit":
-        operation = task_service.commit_brain_dump_operation(
+        operation = voice_brain_dump_service.commit_brain_dump_operation(
             operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
         )
     elif action == "retry":
-        operation = task_service.retry_brain_dump_operation(
+        operation = voice_brain_dump_service.retry_brain_dump_operation(
             operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
         )
     elif action == "withdraw_consent":
-        operation = task_service.withdraw_brain_dump_consent(
+        operation = voice_brain_dump_service.withdraw_brain_dump_consent(
             operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
         )
     elif action == "delete_raw_audio":
-        operation = task_service.delete_brain_dump_raw_audio(
+        operation = voice_brain_dump_service.delete_brain_dump_raw_audio(
             operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
         )
     elif action in {"pause", "resume", "finish", "cancel"}:
-        operation = task_service.transition_brain_dump_operation(
+        operation = voice_brain_dump_service.transition_brain_dump_operation(
             operation_id,
             payload,
             owner_id=current_user.id,
