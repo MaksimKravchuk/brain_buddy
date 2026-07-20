@@ -3254,12 +3254,15 @@ def test_validation_failure_uses_bounded_retry_then_preserves_proposals_terminal
     assert fetched_after_terminal.json()["status"] == "terminal_error"
     assert fetched_after_terminal.json()["segments"] == final_body["segments"]
 
-    rejected_commit = api_client.post(
-        f"/api/brain-dump-operations/{operation['id']}/commit",
-        headers={"Idempotency-Key": "commit-after-validation-exhaustion"},
+    reviewed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/review_provisional",
+        headers={"Idempotency-Key": "review-after-validation-exhaustion"},
         json={"expected_revision": final_body["revision"]},
     )
-    assert rejected_commit.status_code == 400, rejected_commit.text
+    assert reviewed.status_code == 200, reviewed.text
+    reviewed_body = reviewed.json()
+    assert reviewed_body["status"] == "awaiting_confirmation"
+    assert reviewed_body["reconciliation_quality"] == "provisional_only"
 
 
 def test_upload_rejects_unsupported_mime_type(api_client) -> None:

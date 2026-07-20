@@ -2002,6 +2002,9 @@ def test_openai_reconciler_rejects_additive_and_cross_clause_invention(
         ("Do not ever permanently delete buy milk", "Buy milk"),
         ("Never under any circumstances delete buy milk", "Buy milk"),
         ("Не надо ни в коем случае удалить задачу купить молоко", "Купить молоко"),
+        ("Не надо ни в коем случае удалять задачу купить молоко", "Купить молоко"),
+        ("Не нужно ни в коем случае удалять задачу купить молоко", "Купить молоко"),
+        ("Do not удалять задачу купить молоко", "Купить молоко"),
     ],
 )
 def test_openai_reconciler_rejects_wrong_target_and_long_distance_negated_removal(
@@ -2043,6 +2046,54 @@ def test_openai_reconciler_rejects_wrong_target_and_long_distance_negated_remova
                 operation_id="operation_scoped_removal",
                 transcript_segments=[segment],
                 active_proposals=[existing],
+                user_locks={},
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("source_text", "draft_title"),
+    [
+        ("Save money", "Transfer money"),
+        ("Купить молоко", "Украсть молоко"),
+        ("Write Alice about report", "Pay Alice about report"),
+    ],
+)
+def test_openai_reconciler_rejects_single_clause_material_action_invention(
+    source_text: str, draft_title: str
+) -> None:
+    """Same-target action changes need source evidence, not matching objects."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text=source_text,
+        stability="stable",
+        provider_role="accurate",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": "add",
+                    "title": draft_title,
+                    "source_segment_ids": [segment.id],
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(ValidationFailure, match="unsupported task identity"):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id="operation_single_clause_action_invention",
+                transcript_segments=[segment],
+                active_proposals=[],
                 user_locks={},
             )
         )

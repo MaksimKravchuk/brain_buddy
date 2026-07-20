@@ -581,6 +581,8 @@ class BrainDumpOperationDocument(StorageBaseModel):
     committed_task_ids: list[str] = Field(default_factory=list)
     legacy_import: Literal["legacy_preview_only"] | None = None
     """One-time marker for an active schema-v1 workspace projected into v2."""
+    manual_review: bool = False
+    """Explicit owner-selected provisional review after validation retries exhaust."""
     created_at: datetime
     updated_at: datetime
     schema_version: int = Field(default=2, ge=1)

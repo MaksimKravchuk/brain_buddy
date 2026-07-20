@@ -359,7 +359,7 @@ export function BrainDumpRoute(): JSX.Element {
     }
   }
 
-  async function command(action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry" | "withdraw_consent" | "delete_raw_audio") {
+  async function command(action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry" | "review_provisional" | "withdraw_consent" | "delete_raw_audio") {
     if (!operationRef.current) {
       return;
     }
@@ -572,7 +572,7 @@ export function BrainDumpRoute(): JSX.Element {
         operation={operation}
         providerError={providerError}
         onDelete={() => void command("cancel")}
-        onReview={() => setShowProvisionalReview(true)}
+        onReview={() => void command("review_provisional")}
         onRetry={() => void command("retry")}
       />
     );
