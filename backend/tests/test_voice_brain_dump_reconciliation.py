@@ -235,23 +235,27 @@ def test_openai_reconciler_materializes_structural_and_remove_operations() -> No
             "operations": [
                 {
                     "operation": "split",
-                    "title": "Split result",
+                    "title": "Split tasks",
                     "source_segment_ids": [segment.id],
                     "predecessor_ids": [first.id],
                 },
                 {
                     "operation": "merge",
-                    "title": "Merged result",
+                    "title": "Merge tasks",
                     "source_segment_ids": [segment.id],
                     "predecessor_ids": [first.id, second.id],
                 },
                 {
                     "operation": "supersede",
-                    "title": "Replacement",
+                    "title": "Replace tasks",
                     "source_segment_ids": [segment.id],
                     "predecessor_ids": [second.id],
                 },
-                {"operation": "remove", "proposal_id": first.id},
+                {
+                    "operation": "remove",
+                    "proposal_id": first.id,
+                    "source_segment_ids": [segment.id],
+                },
             ]
         },
     )
@@ -1114,6 +1118,122 @@ def test_openai_reconciler_rejects_a_provenance_bearing_invented_task_identity()
                 operation_id="operation_identity",
                 transcript_segments=[segment],
                 active_proposals=[],
+                user_locks={},
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("operation", "predecessor_ids"),
+    [
+        ("update", []),
+        ("split", ["proposal_existing"]),
+        ("merge", ["proposal_existing", "proposal_other"]),
+        ("supersede", ["proposal_existing"]),
+    ],
+)
+def test_openai_reconciler_rejects_invented_identity_for_every_structural_and_update_shape(
+    operation: str, predecessor_ids: list[str]
+) -> None:
+    """A transcript that only says "Buy milk" must never yield "Buy yacht",
+    regardless of which patch shape carries the invention (item 2 of the
+    exact-head review: zero-invention must be fail-closed for ALL shapes)."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text="Buy milk",
+        stability="stable",
+        provider_role="accurate",
+    )
+    existing = ReconciledProposal(
+        id="proposal_existing",
+        title="Buy milk",
+        source_segment_ids=[segment.id],
+        status="provisional",
+    )
+    other = ReconciledProposal(
+        id="proposal_other",
+        title="Buy milk too",
+        source_segment_ids=[segment.id],
+        status="provisional",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": operation,
+                    "proposal_id": (
+                        "proposal_existing" if operation == "update" else None
+                    ),
+                    "title": "Buy yacht",
+                    "source_segment_ids": [segment.id],
+                    "predecessor_ids": predecessor_ids,
+                    "base_revision": 1 if operation == "update" else None,
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(ValidationFailure, match="unsupported task identity"):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id="operation_identity_all_shapes",
+                transcript_segments=[segment],
+                active_proposals=[existing, other],
+                user_locks={},
+            )
+        )
+
+
+def test_openai_reconciler_rejects_an_ungrounded_removal() -> None:
+    """A destructive removal with no cited transcript evidence must be
+    rejected fail-closed, not applied purely on the model's say-so."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text="Buy milk",
+        stability="stable",
+        provider_role="accurate",
+    )
+    existing = ReconciledProposal(
+        id="proposal_existing",
+        title="Buy milk",
+        source_segment_ids=[segment.id],
+        status="provisional",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": "remove",
+                    "proposal_id": "proposal_existing",
+                    "title": None,
+                    "source_segment_ids": [],
+                    "predecessor_ids": [],
+                    "base_revision": None,
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(ValidationFailure, match="unknown transcript provenance"):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id="operation_ungrounded_removal",
+                transcript_segments=[segment],
+                active_proposals=[existing],
                 user_locks={},
             )
         )

@@ -489,13 +489,29 @@ describe("BrainDumpRoute", () => {
     expect(calledUrls.some((calledUrl) => calledUrl.includes("/seal"))).toBe(false);
   });
 
-  it("opens review without sealing a persisted operation that lacks external-processing consent", async () => {
-    fetchMock.mockImplementation((input) => {
+  it("records a no-consent finish before opening its provisional-only review", async () => {
+    fetchMock.mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith("/brain-dump-operations/brain_dump_legacy")) {
         return jsonResponse(
           operation({
             id: "brain_dump_legacy",
+            consent: {
+              microphone: true,
+              external_processing_allowed: false,
+              provider: null,
+              language_hints: ["en"],
+              vocabulary: []
+            }
+          })
+        );
+      }
+      if (url.endsWith("/brain_dump_legacy/finish") && init?.method === "POST") {
+        return jsonResponse(
+          operation({
+            id: "brain_dump_legacy",
+            status: "awaiting_confirmation",
+            revision: 2,
             consent: {
               microphone: true,
               external_processing_allowed: false,
@@ -514,6 +530,9 @@ describe("BrainDumpRoute", () => {
 
     expect(await screen.findByRole("main", { name: "Review brain dump proposals" })).toBeInTheDocument();
     expect(fetchMock.mock.calls.map(([input]) => String(input)).some((url) => url.includes("/seal"))).toBe(false);
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain(
+      "/api/brain-dump-operations/brain_dump_legacy/finish"
+    );
   });
 
   it("does not create a backend operation when microphone permission fails", async () => {

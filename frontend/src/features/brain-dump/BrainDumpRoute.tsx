@@ -222,10 +222,16 @@ export function BrainDumpRoute(): JSX.Element {
     mediaStreamRef.current = stream;
   }
 
-  async function stopMediaRecorder() {
+  async function stopMediaRecorder({ discardPendingAudio = false } = {}) {
     const recorder = mediaRecorderRef.current;
     if (!recorder || recorder.state === "inactive") {
       return;
+    }
+    if (discardPendingAudio) {
+      // `stop()` may synchronously emit a final dataavailable event. Once the
+      // user discards capture or revokes cloud-processing consent that final
+      // blob must not enter the upload queue after the server has revoked it.
+      recorder.ondataavailable = null;
     }
     await new Promise<void>((resolve) => {
       const previousStop = recorder.onstop;
@@ -279,7 +285,7 @@ export function BrainDumpRoute(): JSX.Element {
     }
   }
 
-  async function command(action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry") {
+  async function command(action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry" | "withdraw_consent") {
     if (!operationRef.current) {
       return;
     }
@@ -322,10 +328,22 @@ export function BrainDumpRoute(): JSX.Element {
           return;
         }
         if (!sealedInput.consent.external_processing_allowed) {
-          // Without external-processing consent no audio was ever uploaded,
-          // so there is nothing to seal; open review on the browser-preview
-          // proposals collected so far instead of calling seal.
-          navigate(`/brain-dump/${sealedInput.id}/review`, { replace: true });
+          // Without external-processing consent no audio was ever uploaded, so
+          // there is nothing to seal. Still record the "finish" transition
+          // server-side before routing to review: the server must never be
+          // left thinking the operation is still recording/paused while the
+          // UI shows Review. The operation lands in the same
+          // "awaiting_confirmation" status finish always produces, but with
+          // no sealed/reconciled checkpoint, so the backend's commit gate
+          // keeps it provisional-only (review/discard, never save-as-tasks).
+          const finished = await apiClient.commandBrainDump(
+            sealedInput.id,
+            "finish",
+            sealedInput.revision,
+            idempotencyKey("finish")
+          );
+          applyOperation(finished);
+          navigate(`/brain-dump/${finished.id}/review`, { replace: true });
           return;
         }
         const expectedChunks = audioChunkNumberRef.current;
@@ -344,8 +362,15 @@ export function BrainDumpRoute(): JSX.Element {
       }
       const updated = await apiClient.commandBrainDump(current.id, action, current.revision, idempotencyKey(action));
       applyOperation(updated);
-      if (action === "pause" || action === "cancel") {
+      if (action === "pause" || action === "cancel" || action === "withdraw_consent") {
         stopRecognition();
+      }
+      if (action === "cancel" || action === "withdraw_consent") {
+        // Discarding a recording must release the microphone immediately:
+        // stop the MediaRecorder and every live MediaStream track, not just
+        // browser speech recognition, or the browser keeps the mic indicator
+        // (and the underlying device) held open after the user cancels.
+        await stopMediaRecorder({ discardPendingAudio: true });
       }
       if (action === "pause" && mediaRecorderRef.current?.state === "recording") {
         mediaRecorderRef.current.pause();
@@ -492,6 +517,7 @@ export function BrainDumpRoute(): JSX.Element {
       onPause={() => void command("pause")}
       onResume={() => void command("resume")}
       onStart={() => void startRecording()}
+      onWithdrawConsent={() => void command("withdraw_consent")}
       onVocabularyTextChange={setVocabularyText}
       vocabularyText={vocabularyText}
     />
@@ -548,6 +574,7 @@ function RecordingSurface({
   onPause,
   onResume,
   onStart,
+  onWithdrawConsent,
   onVocabularyTextChange,
   vocabularyText
 }: {
@@ -565,6 +592,7 @@ function RecordingSurface({
   onPause: () => void;
   onResume: () => void;
   onStart: () => void;
+  onWithdrawConsent: () => void;
   onVocabularyTextChange: (value: string) => void;
   vocabularyText: string;
 }): JSX.Element {
@@ -644,6 +672,11 @@ function RecordingSurface({
                 </button>
               )}
               <button type="button" className="hidden h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 sm:inline-flex sm:items-center" onClick={onCancel}>Discard</button>
+              {operation?.consent.external_processing_allowed ? (
+                <button type="button" className="hidden h-10 rounded-lg border border-amber-200 bg-white px-4 text-sm font-medium text-amber-800 sm:inline-flex sm:items-center" onClick={onWithdrawConsent}>
+                  Stop cloud processing
+                </button>
+              ) : null}
               <button type="button" className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white shadow-soft hover:bg-brand-primary-hover sm:px-5" disabled={!operation} onClick={onFinish}>
                 <Square className="h-3.5 w-3.5" aria-hidden />
                 Stop & review

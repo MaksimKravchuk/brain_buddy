@@ -17,6 +17,7 @@ import pytest
 from app.exceptions import ConflictError, NotFoundError, ValidationFailure
 from app.modules.tasks import TaskRepository, TaskService
 from app.modules.tasks.domain import (
+    BrainDumpProviderRunDocument,
     IdempotencyRecord,
     ProjectDocument,
     TagDocument,
@@ -878,6 +879,31 @@ def test_brain_dump_commit_replay_invalid_state_and_deleted_proposals(
         idempotency_key="brain-dump-finish-before-commit",
         action="finish",
     )
+    # Commit requires a frozen, reconciled batch (see
+    # ``TaskService._has_frozen_reconciled_batch``); this unit test exercises
+    # commit replay/idempotency directly against the repository rather than
+    # through a real sealed-audio pipeline, so record the checkpoint that a
+    # successful seal+accurate-STT+reconciler run would have left behind.
+    finished = finished.model_copy(
+        update={
+            "sealed_manifest_hash": "0" * 64,
+            "provider_runs": [
+                BrainDumpProviderRunDocument(
+                    id="provider_run_test_reconciled",
+                    role="reconciler",
+                    status="succeeded",
+                    input_hash="0" * 64,
+                    checkpoint="reconciled",
+                    attempt=1,
+                    recovery_count=0,
+                    created_at=finished.updated_at,
+                    updated_at=finished.updated_at,
+                )
+            ],
+            "revision": finished.revision + 1,
+        }
+    )
+    service.task_repo.save_brain_dump_operation(finished)
     committed = service.commit_brain_dump_operation(
         operation.id,
         ExpectedRevisionRequest(expected_revision=finished.revision),

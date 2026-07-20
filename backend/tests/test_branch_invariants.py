@@ -20,7 +20,7 @@ from app.api.errors import register_exception_handlers
 from app.api.middleware import CORRELATION_HEADER, CorrelationIdMiddleware
 from app.core.rate_limit import InMemoryRateLimiter
 from app.exceptions import ConflictError, NotFoundError, ValidationFailure
-from app.main import _maybe_seed_admin
+from app.main import _maybe_seed_admin, _run_voice_sweep, _start_voice_sweep_thread
 from app.repositories.index import IndexRepository
 from app.repositories.tree import TreeRepository
 from app.repositories.version import VersionRepository
@@ -338,3 +338,71 @@ def test_index_missing_delete_and_configured_admin_seed(
     monkeypatch.setenv("BRAIN_BUDDY_ADMIN_PASSWORD", "correct-horse-battery-staple")
     _maybe_seed_admin(container)
     assert container.user_repo.get_by_email("admin@example.com") is not None
+
+
+def test_voice_sweep_iteration_runs_all_three_duties_and_survives_a_failure(
+    container,
+) -> None:
+    """``_run_voice_sweep`` is the body of both the startup scan and the
+    periodic thread; one bad pass (e.g. a transient repository error) must
+    log and return rather than propagate and kill the caller/loop."""
+
+    calls: list[str] = []
+    real_recover = container.task_service.recover_due_provider_leases
+    real_purge_raw = container.task_service.purge_expired_raw_audio
+
+    def recover_due_provider_leases(**kwargs: object) -> int:
+        calls.append("recover")
+        return real_recover(**kwargs)
+
+    def purge_expired_raw_audio(**kwargs: object) -> int:
+        calls.append("raw_audio")
+        return real_purge_raw(**kwargs)
+
+    def purge_expired_working_artifacts(**kwargs: object) -> int:
+        calls.append("working_artifacts")
+        raise RuntimeError("transient repository error")
+
+    container.task_service.recover_due_provider_leases = recover_due_provider_leases
+    container.task_service.purge_expired_raw_audio = purge_expired_raw_audio
+    container.task_service.purge_expired_working_artifacts = (
+        purge_expired_working_artifacts
+    )
+
+    # Must not raise even though the third duty fails.
+    _run_voice_sweep(container)
+
+    assert calls == ["recover", "raw_audio", "working_artifacts"]
+
+
+def test_voice_sweep_thread_is_tracked_and_stops_cleanly(container) -> None:
+    """The periodic sweep runs on a thread that is referenced (not an
+    untracked fire-and-forget task) and stops promptly once signalled."""
+
+    import threading
+    import time
+
+    iterations = threading.Event()
+    original_recover = container.task_service.recover_due_provider_leases
+
+    def recover_due_provider_leases(**kwargs: object) -> int:
+        iterations.set()
+        return original_recover(**kwargs)
+
+    container.task_service.recover_due_provider_leases = recover_due_provider_leases
+
+    stop_event = threading.Event()
+    from app import main as main_module
+
+    original_interval = main_module._VOICE_SWEEP_INTERVAL_SECONDS
+    main_module._VOICE_SWEEP_INTERVAL_SECONDS = 0.01
+    try:
+        thread = _start_voice_sweep_thread(container, stop_event)
+        assert thread.is_alive()
+        assert iterations.wait(timeout=2), "sweep loop never ran an iteration"
+        stop_event.set()
+        thread.join(timeout=2)
+        assert not thread.is_alive()
+    finally:
+        main_module._VOICE_SWEEP_INTERVAL_SECONDS = original_interval
+        time.sleep(0)

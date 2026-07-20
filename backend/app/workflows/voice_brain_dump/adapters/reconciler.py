@@ -211,7 +211,11 @@ class OpenAITextReconciler:
                         "actually present in the supplied transcript segments; every operation "
                         "must be grounded in and traceable to its cited source_segment_ids, and "
                         "an ambiguous or empty transcript span must not be turned into a task. "
-                        "Do not split a single shopping intent solely on a conjunction. New "
+                        "This applies to every operation shape, including update/split/merge/"
+                        "supersede renames. A remove must also cite the source_segment_ids that "
+                        "justify deleting the proposal; never remove an existing proposal without "
+                        "transcript evidence for that removal. Do not split a single shopping "
+                        "intent solely on a conjunction. New "
                         "proposal IDs are server-owned: set proposal_id to null for add/split/"
                         "merge/supersede. Existing update/remove targets must use an exact "
                         "supplied ID. Return every schema field; use null or [] when a field "
@@ -335,8 +339,16 @@ class OpenAITextReconciler:
         if draft.operation in {"update", "remove"} and draft.proposal_id not in existing:
             raise ValidationFailure("Reconciler targeted an unknown proposal ID.")
         if draft.operation == "remove":
-            if draft.title is not None or draft.source_segment_ids or draft.predecessor_ids:
+            if draft.title is not None or draft.predecessor_ids:
                 raise ValidationFailure("Remove accepts only an existing proposal target.")
+            if (
+                not draft.source_segment_ids
+                or not set(draft.source_segment_ids) <= known_segments
+            ):
+                raise ValidationFailure(
+                    "Reconciler used unknown transcript provenance for removal; "
+                    "a destructive removal must be grounded in cited segments."
+                )
             return
         if not draft.title or not draft.title.strip():
             raise ValidationFailure("Reconciler operation requires a task title.")
@@ -352,14 +364,16 @@ class OpenAITextReconciler:
             raise ValidationFailure(
                 "Reconciler cannot restore a user-deleted proposal."
             )
-        if draft.operation == "add":
-            source_text = " ".join(
-                source_text_by_id[source_id]
-                for source_id in draft.source_segment_ids
-            )
-            OpenAITextReconciler._assert_transcript_supported_identity(
-                draft.title, source_text
-            )
+        # Every operation that mints or rewrites a title (add/update/split/
+        # merge/supersede) must be grounded in its cited source segments so a
+        # transcript that only says "Buy milk" can never yield "Buy yacht"
+        # regardless of which patch shape carries the invention.
+        source_text = " ".join(
+            source_text_by_id[source_id] for source_id in draft.source_segment_ids
+        )
+        OpenAITextReconciler._assert_transcript_supported_identity(
+            draft.title, source_text
+        )
         if draft.operation == "split" and len(draft.predecessor_ids) != 1:
             raise ValidationFailure("Split requires exactly one predecessor.")
         if draft.operation == "merge" and len(draft.predecessor_ids) < 2:

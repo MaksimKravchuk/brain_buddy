@@ -212,9 +212,7 @@ voice:
 ```
 
 - `provider: "deterministic"` is valid ONLY in CI/test configuration. Production
-  startup MUST refuse `"deterministic"` for `accurate_stt` unless an explicit
-  `BRAINBUDDY_ALLOW_DETERMINISTIC_STT=1` env var is set (escape hatch for
-  local dev, logged as a warning).
+  startup MUST refuse `"deterministic"` for `accurate_stt` unconditionally.
 - `provider: "disabled"` is the safe default when no credentials or consent are
   present. The operation enters `terminal_error` or `provisional_only` review
   with a redacted error code; it never silently falls back to deterministic
@@ -430,9 +428,8 @@ The evaluation harness separates the two quality dimensions:
 
 ### Provider adapter migration
 
-- `DeterministicAccurateStt` is moved to a CI-only import path or guarded by
-  an explicit `BRAINBUDDY_ALLOW_DETERMINISTIC_STT=1` env var. Production
-  startup refuses it silently.
+- `DeterministicAccurateStt` is moved to a CI-only import path. Production
+  startup refuses it unconditionally.
 - `TaskService.__init__` no longer defaults to `DeterministicAccurateStt()`.
   The container wires the configured real adapter; missing
   credentials/consent surface as `provider: "disabled"`.
