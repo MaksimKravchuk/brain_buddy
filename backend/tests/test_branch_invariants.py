@@ -20,7 +20,12 @@ from app.api.errors import register_exception_handlers
 from app.api.middleware import CORRELATION_HEADER, CorrelationIdMiddleware
 from app.core.rate_limit import InMemoryRateLimiter
 from app.exceptions import ConflictError, NotFoundError, ValidationFailure
-from app.main import _maybe_seed_admin, _run_voice_sweep, _start_voice_sweep_thread
+from app.main import (
+    _maybe_seed_admin,
+    _run_voice_sweep,
+    _start_voice_sweep_thread,
+    create_app,
+)
 from app.repositories.index import IndexRepository
 from app.repositories.tree import TreeRepository
 from app.repositories.version import VersionRepository
@@ -406,3 +411,71 @@ def test_voice_sweep_thread_is_tracked_and_stops_cleanly(container) -> None:
     finally:
         main_module._VOICE_SWEEP_INTERVAL_SECONDS = original_interval
         time.sleep(0)
+
+
+def test_voice_sweep_logs_completed_recovery_and_retention_work(
+    container, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A completed sweep reports non-zero recovery and retention work without
+    exposing any operation content in its observability message."""
+
+    import logging
+
+    caplog.set_level(logging.INFO, logger="app.main")
+    container.task_service.recover_due_provider_leases = lambda: 1
+    container.task_service.purge_expired_raw_audio = lambda: 2
+    container.task_service.purge_expired_working_artifacts = lambda: 3
+
+    _run_voice_sweep(container)
+
+    assert (
+        "Voice sweep: recovered 1 lease(s), purged 2 raw-audio, 3 working-artifact"
+        in (caplog.text)
+    )
+
+
+def test_development_app_tracks_and_stops_the_periodic_voice_sweep(
+    data_dir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A non-test app owns its periodic sweep thread and signals then joins it
+    during shutdown, rather than leaking an untracked background worker."""
+
+    from app import main as main_module
+    from app.core import get_config
+
+    class SweepThread:
+        def __init__(self) -> None:
+            self.join_timeouts: list[float | None] = []
+
+        def join(self, timeout: float | None = None) -> None:
+            self.join_timeouts.append(timeout)
+
+    sweep_thread = SweepThread()
+    seen_stop_events = []
+
+    def start_sweep(_container, stop_event):
+        seen_stop_events.append(stop_event)
+        return sweep_thread
+
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "development")
+    monkeypatch.setattr(main_module, "_start_voice_sweep_thread", start_sweep)
+    get_config.cache_clear()
+    try:
+        app = create_app()
+        with TestClient(app):
+            assert app.state.voice_sweep_thread is sweep_thread
+
+        assert seen_stop_events[0].is_set()
+        assert sweep_thread.join_timeouts == [5]
+
+        # Shutdown must also remain safe if startup did not retain a thread
+        # reference (for example, after a failed worker handoff).
+        app_without_sweep_thread = create_app()
+        app_without_sweep_thread.state.voice_sweep_thread = None
+        with TestClient(app_without_sweep_thread):
+            pass
+
+        assert sweep_thread.join_timeouts == [5]
+    finally:
+        get_config.cache_clear()
