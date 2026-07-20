@@ -265,6 +265,10 @@ def command_brain_dump_operation(
         operation = voice_brain_dump_service.retry_brain_dump_operation(
             operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
         )
+    elif action == "review_provisional":
+        operation = voice_brain_dump_service.review_brain_dump_provisionally(
+            operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
+        )
     elif action == "withdraw_consent":
         operation = voice_brain_dump_service.withdraw_brain_dump_consent(
             operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency

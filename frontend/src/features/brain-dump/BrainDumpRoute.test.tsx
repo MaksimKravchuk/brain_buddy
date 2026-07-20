@@ -1517,10 +1517,19 @@ describe("BrainDumpRoute", () => {
         }
       ]
     });
-    fetchMock.mockImplementation((input) => {
+    const provisionalReview = operation({
+      ...terminal,
+      status: "awaiting_confirmation",
+      revision: 5,
+      reconciliation_quality: "provisional_only"
+    });
+    fetchMock.mockImplementation((input, init) => {
       const url = String(input);
-      if (url.endsWith("/brain_dump_terminal")) {
+      if (url.endsWith("/brain_dump_terminal") && (!init?.method || init.method === "GET")) {
         return jsonResponse(terminal);
+      }
+      if (url.endsWith("/brain_dump_terminal/review_provisional") && init?.method === "POST") {
+        return jsonResponse(provisionalReview);
       }
       throw new Error(`unexpected fetch ${url}`);
     });
@@ -1534,6 +1543,10 @@ describe("BrainDumpRoute", () => {
     await userEvent.click(screen.getByRole("button", { name: "Review provisional tasks" }));
     expect(screen.getByText("Merged from 2 tasks")).toBeInTheDocument();
     expect(screen.getByText("Split from an earlier task")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/brain_dump_terminal/review_provisional"),
+      expect.objectContaining({ method: "POST" })
+    );
   });
 
   it("shows fallback terminal copy and preserves the recovery surface when deletion fails", async () => {

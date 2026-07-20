@@ -391,7 +391,11 @@ class OpenAITextReconciler:
         source_text = " ".join(
             source_text_by_id[source_id] for source_id in draft.source_segment_ids
         )
-        OpenAITextReconciler._assert_semantic_support(draft.title, source_text)
+        OpenAITextReconciler._assert_semantic_support(
+            draft.title,
+            source_text,
+            enforce_action=draft.operation in {"add", "update"},
+        )
         if draft.operation == "split" and len(draft.predecessor_ids) != 1:
             raise ValidationFailure("Split requires exactly one predecessor.")
         if draft.operation == "merge" and len(draft.predecessor_ids) < 2:
@@ -422,6 +426,7 @@ class OpenAITextReconciler:
             # Russian equivalents.
             "удалить",
             "удали",
+            "удалять",
             "убрать",
             "убери",
             "отменить",
@@ -471,6 +476,51 @@ class OpenAITextReconciler:
             "нельзя",
         }
     )
+
+    # Action changes are material intent changes. The reconciler may normalize
+    # only an explicitly listed equivalent, never infer that matching objects
+    # make arbitrary verbs interchangeable.
+    _ACTION_NORMALIZATION_PAIRS = frozenset({frozenset({"call", "phone"})})
+    _MATERIAL_ACTION_TERMS = frozenset(
+        {
+            "add",
+            "buy",
+            "call",
+            "delete",
+            "merge",
+            "pay",
+            "phone",
+            "remove",
+            "replace",
+            "save",
+            "schedule",
+            "split",
+            "transfer",
+            "write",
+            "купить",
+            "украсть",
+            "удалить",
+            "удалять",
+        }
+    )
+
+    @staticmethod
+    def _first_material_action(tokens: list[str]) -> str | None:
+        return next(
+            (
+                token
+                for token in tokens
+                if token in OpenAITextReconciler._MATERIAL_ACTION_TERMS
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _actions_are_equivalent(proposed: str, source: str) -> bool:
+        return proposed == source or frozenset({proposed, source}) in (
+            OpenAITextReconciler._ACTION_NORMALIZATION_PAIRS
+        )
+
     @staticmethod
     def _has_destructive_support(source_text: str) -> bool:
         """Explicit, unnegated destructive/negating vocabulary is required.
@@ -598,7 +648,11 @@ class OpenAITextReconciler:
 
     @staticmethod
     def _assert_semantic_support(
-        title: str, source_text: str, *, destructive: bool = False
+        title: str,
+        source_text: str,
+        *,
+        destructive: bool = False,
+        enforce_action: bool = False,
     ) -> None:
         """Fail closed unless cited text carries a language-neutral identity anchor.
 
@@ -649,7 +703,7 @@ class OpenAITextReconciler:
 
         clauses = OpenAITextReconciler._source_clauses(source_text)
         title_tokens = re.findall(r"[^\W\d_]+", title.casefold(), flags=re.UNICODE)
-        title_action = title_tokens[0] if title_tokens else ""
+        title_action = OpenAITextReconciler._first_material_action(title_tokens)
         clause_supports_title = []
         for clause in clauses:
             clause_entities = OpenAITextReconciler._named_entities(
@@ -658,14 +712,22 @@ class OpenAITextReconciler:
             if title_entities <= clause_entities:
                 clause_supports_title.append(clause)
 
-        if not clause_supports_title or (
-            len(clauses) > 1
-            and not any(
-                title_action
-                in re.findall(r"[^\W\d_]+", clause.casefold(), flags=re.UNICODE)
-                for clause in clause_supports_title
+        action_supported = not enforce_action or destructive or title_action is None or any(
+            source_action is not None
+            and OpenAITextReconciler._actions_are_equivalent(title_action, source_action)
+            for clause in clause_supports_title
+            if (
+                clause_tokens := re.findall(
+                    r"[^\W\d_]+", clause.casefold(), flags=re.UNICODE
+                )
             )
-        ):
+            if (
+                source_action := OpenAITextReconciler._first_material_action(
+                    clause_tokens
+                )
+            )
+        )
+        if not clause_supports_title or not action_supported:
             raise ValidationFailure(
                 f"unsupported {operation} is not grounded in one cited transcript clause."
             )

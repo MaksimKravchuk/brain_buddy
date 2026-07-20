@@ -471,6 +471,68 @@ class VoiceBrainDumpService:
             operation_id, owner_id=owner_id
         )
 
+    @_serialized_write
+    def review_brain_dump_provisionally(
+        self,
+        operation_id: str,
+        payload: ExpectedRevisionRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> BrainDumpOperationDocument:
+        """Enter an owner-chosen, visibly provisional confirmation workspace."""
+
+        command = f"brain_dump_review_provisional:{operation_id}"
+        request_hash = self._request_hash(command, payload)
+        record = self._idempotency_record(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+        )
+        if record is not None:
+            return self._brain_dump_operation_result(record, owner_id=owner_id)
+        operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
+        self._assert_revision(
+            "Brain dump operation",
+            operation.id,
+            operation.revision,
+            payload.expected_revision,
+        )
+        if (
+            operation.status != "terminal_error"
+            or not operation.provider_runs
+            or operation.provider_runs[-1].error_code
+            not in {
+                "RECONCILER_VALIDATION_REJECTED",
+                "OPERATION_RECOVERY_BUDGET_EXHAUSTED",
+            }
+        ):
+            raise ValidationFailure(
+                "Only an exhausted reconciler validation failure can enter provisional review."
+            )
+        now = utcnow()
+        reviewed = operation.model_copy(
+            update={
+                "status": "awaiting_confirmation",
+                "manual_review": True,
+                "reconciliation_quality": "provisional_only",
+                "status_history": [*operation.status_history, "awaiting_confirmation"],
+                "updated_at": now,
+                "revision": operation.revision + 1,
+            }
+        )
+        self.operation_repo.save_brain_dump_operation(reviewed)
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=reviewed.id,
+            response=reviewed,
+        )
+        return reviewed
+
     def upload_brain_dump_audio_chunk(
         self,
         operation_id: str,
@@ -2129,8 +2191,10 @@ class VoiceBrainDumpService:
         # every pre-migration in-flight operation is permanently stuck.
         # This bypasses only the "was this reconciled" gates below, never
         # the conflict gate, which still protects open user decisions.
-        is_legacy_provisional = operation.legacy_import == "legacy_preview_only"
-        if not is_legacy_provisional and not self._has_frozen_reconciled_batch(
+        is_provisional_review = (
+            operation.legacy_import == "legacy_preview_only" or operation.manual_review
+        )
+        if not is_provisional_review and not self._has_frozen_reconciled_batch(
             operation
         ):
             raise ValidationFailure(
@@ -2148,7 +2212,7 @@ class VoiceBrainDumpService:
                 "Brain dump conflicts must be reviewed before save.",
                 {"proposal_ids": conflicted},
             )
-        if not is_legacy_provisional:
+        if not is_provisional_review:
             unreconciled = [
                 proposal.id
                 for proposal in operation.proposals
