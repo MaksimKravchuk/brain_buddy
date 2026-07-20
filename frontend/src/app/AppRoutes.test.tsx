@@ -976,6 +976,156 @@ describe("AppRoutes", () => {
     expect(screen.queryByRole("button", { name: "Group by project" })).not.toBeInTheDocument();
   });
 
+  it("reports the complete drained count on a direct grouped Tag route instead of the disabled first-page total", async () => {
+    const firstTagTask = { ...taskFixture("tag-group-1", "Draft outreach email", "next"), project_id: "project-launch", tag_ids: ["tag-deep-work"] };
+    const secondTagTask = { ...taskFixture("tag-group-2", "Second page outreach task", "next"), project_id: "project-onboarding", tag_ids: ["tag-deep-work"] };
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/tasks?") && url.includes("tag_id=tag-deep-work") && url.includes("cursor=tag-next-page")) {
+        return Promise.resolve(jsonResponse({
+          items: [secondTagTask],
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 0, next: 2, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/tasks?") && url.includes("tag_id=tag-deep-work")) {
+        return Promise.resolve(jsonResponse({
+          items: [firstTagTask],
+          next_cursor: "tag-next-page",
+          has_more: true,
+          counts_by_state: { inbox: 0, next: 2, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse(taskResponse));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tags/tag-deep-work?group=project");
+
+    const groupedList = await screen.findByTestId("grouped-task-list");
+    expect(await within(groupedList).findByText("Second page outreach task")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(expect.stringContaining("cursor=tag-next-page"), expect.anything());
+    });
+    expect(await screen.findByText("2 tasks")).toBeInTheDocument();
+    expect(screen.queryByText("0 tasks")).not.toBeInTheDocument();
+  });
+
+  it("reports the complete drained count on a direct grouped date-view route instead of the disabled first-page total", async () => {
+    const firstOverdueTask = { ...taskFixture("overdue-group-1", "Chase overdue invoice", "next"), project_id: "project-launch", due_date: "2026-01-01" };
+    const secondOverdueTask = { ...taskFixture("overdue-group-2", "Second page overdue task", "next"), project_id: "project-onboarding", due_date: "2026-01-02" };
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/tasks?") && url.includes("due_before=") && url.includes("cursor=overdue-next-page")) {
+        return Promise.resolve(jsonResponse({
+          items: [secondOverdueTask],
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 0, next: 2, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/tasks?") && url.includes("due_before=")) {
+        return Promise.resolve(jsonResponse({
+          items: [firstOverdueTask],
+          next_cursor: "overdue-next-page",
+          has_more: true,
+          counts_by_state: { inbox: 0, next: 2, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse(taskResponse));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/overdue?group=project");
+
+    const groupedList = await screen.findByTestId("grouped-task-list");
+    expect(await within(groupedList).findByText("Second page overdue task")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(expect.stringContaining("cursor=overdue-next-page"), expect.anything());
+    });
+    expect(await screen.findByText("2 tasks")).toBeInTheDocument();
+    expect(screen.queryByText("0 tasks")).not.toBeInTheDocument();
+  });
+
+  it("replaces the stale flat first-page subtitle count with the complete grouped total after toggling Group by project on a Tag route", async () => {
+    const user = userEvent.setup();
+    const flatFirstPageTask = { ...taskFixture("tag-toggle-1", "Flat page task", "next"), tag_ids: ["tag-deep-work"] };
+    const groupedFirstTask = { ...taskFixture("tag-toggle-1", "Flat page task", "next"), project_id: "project-launch", tag_ids: ["tag-deep-work"] };
+    const groupedSecondTask = { ...taskFixture("tag-toggle-2", "Second grouped tag task", "next"), project_id: "project-onboarding", tag_ids: ["tag-deep-work"] };
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/tasks?") && url.includes("tag_id=tag-deep-work") && url.includes("limit=200") && url.includes("cursor=tag-toggle-next")) {
+        return Promise.resolve(jsonResponse({
+          items: [groupedSecondTask],
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 0, next: 2, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/tasks?") && url.includes("tag_id=tag-deep-work") && url.includes("limit=200")) {
+        return Promise.resolve(jsonResponse({
+          items: [groupedFirstTask],
+          next_cursor: "tag-toggle-next",
+          has_more: true,
+          counts_by_state: { inbox: 0, next: 2, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/tasks?") && url.includes("tag_id=tag-deep-work")) {
+        return Promise.resolve(jsonResponse({
+          items: [flatFirstPageTask],
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 0, next: 2, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse(taskResponse));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tags/tag-deep-work");
+
+    expect(await screen.findByText("Flat page task")).toBeInTheDocument();
+    expect(await screen.findByText("1 task")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Group by project" }));
+
+    const groupedList = await screen.findByTestId("grouped-task-list");
+    expect(await within(groupedList).findByText("Second grouped tag task")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(expect.stringContaining("cursor=tag-toggle-next"), expect.anything());
+    });
+    expect(await screen.findByText("2 tasks")).toBeInTheDocument();
+    expect(screen.queryByText("1 task")).not.toBeInTheDocument();
+  });
+
   it("shows an aggregate error with retry when draining pages for Group by project fails", async () => {
     const user = userEvent.setup();
     let groupedAttempts = 0;
