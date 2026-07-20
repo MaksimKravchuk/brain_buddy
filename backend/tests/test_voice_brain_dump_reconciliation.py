@@ -1852,6 +1852,126 @@ def test_openai_reconciler_rejects_unentailed_actions_in_every_title_patch_shape
         )
 
 
+@pytest.mark.parametrize(
+    ("source_title", "invented_title"),
+    [
+        ("Do not burn contract", "Burn contract"),
+        ("Не сжигать договор", "Сжигать договор"),
+        ("Do not удалить задачу купить молоко", "Удалить задачу купить молоко"),
+        ("Please email Alice about the fire drill", "Please fire Alice"),
+        ("Fire Bob, email Alice", "Fire Alice"),
+        ("Заблокировать Бориса, написать Алису", "Заблокировать Алису"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("operation", "predecessor_ids"),
+    [
+        ("add", []),
+        ("update", []),
+        ("split", ["proposal_existing"]),
+        ("merge", ["proposal_existing", "proposal_other"]),
+        ("supersede", ["proposal_existing"]),
+    ],
+)
+def test_openai_reconciler_binds_affirmative_action_to_its_cited_target(
+    source_title: str,
+    invented_title: str,
+    operation: str,
+    predecessor_ids: list[str],
+) -> None:
+    """A shared target or filler cannot detach a proposed action from polarity
+    or from the source predicate that actually governs that target."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text=source_title,
+        stability="stable",
+        provider_role="accurate",
+    )
+    existing = ReconciledProposal(
+        id="proposal_existing",
+        title=source_title,
+        source_segment_ids=[segment.id],
+        status="provisional",
+        title_revision=1,
+    )
+    other = ReconciledProposal(
+        id="proposal_other",
+        title=source_title,
+        source_segment_ids=[segment.id],
+        status="provisional",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": operation,
+                    "proposal_id": (
+                        "proposal_existing" if operation == "update" else None
+                    ),
+                    "title": invented_title,
+                    "source_segment_ids": [segment.id],
+                    "predecessor_ids": predecessor_ids,
+                    "base_revision": 1 if operation == "update" else None,
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(ValidationFailure, match="one cited transcript clause"):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id=f"operation_bound_action_{operation}",
+                transcript_segments=[segment],
+                active_proposals=[existing, other],
+                user_locks={},
+            )
+        )
+
+
+def test_openai_reconciler_accepts_an_affirmative_action_after_polite_filler() -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text="Please email Alice",
+        stability="stable",
+        provider_role="accurate",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": "add",
+                    "title": "Please email Alice",
+                    "source_segment_ids": [segment.id],
+                }
+            ]
+        },
+    )
+
+    result = reconciler.reconcile(
+        ReconcileTextRequest(
+            operation_id="operation_affirmative_filler",
+            transcript_segments=[segment],
+            active_proposals=[],
+            user_locks={},
+        )
+    )
+
+    assert result.patches[0].title == "Please email Alice"
+
+
 def test_openai_reconciler_rejects_a_positive_removal_without_destructive_language() -> (
     None
 ):

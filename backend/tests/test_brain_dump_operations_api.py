@@ -326,7 +326,7 @@ def test_retention_sweep_never_purges_a_retryable_error_operation(api_client) ->
             ProviderTerminalError("provider rejected"),
             "terminal_error",
             "PROVIDER_ERROR_UNSPECIFIED",
-            ["cancel"],
+            ["review_provisional", "cancel"],
         ),
         (
             ValidationFailure("invalid model output"),
@@ -350,6 +350,22 @@ def test_seal_persists_semantic_reconciler_failures_for_recovery(
         key=f"start-semantic-failure-{type(provider_error).__name__}",
         external_processing_allowed=True,
     )
+    preview = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/transcript",
+        headers={
+            "Idempotency-Key": f"preview-semantic-failure-{type(provider_error).__name__}"
+        },
+        json={
+            "segments": [
+                {
+                    "sequence": 1,
+                    "text": "Review provider failure recovery",
+                    "stability": "stable",
+                }
+            ]
+        },
+    )
+    assert preview.status_code == 200, preview.text
 
     def fail(_payload: dict[str, object]) -> dict[str, object]:
         raise provider_error
@@ -369,6 +385,54 @@ def test_seal_persists_semantic_reconciler_failures_for_recovery(
     assert persisted_run["error_code"] == expected_code
     assert sealed.json()["available_recovery_actions"] == expected_actions
     assert str(provider_error) not in sealed.text
+
+
+def test_terminal_accurate_stt_failure_allows_explicit_provisional_review(
+    api_client,
+) -> None:
+    operation = _start_operation(
+        api_client,
+        key="start-terminal-stt-provisional-review",
+        external_processing_allowed=True,
+    )
+    preview = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/transcript",
+        headers={"Idempotency-Key": "preview-terminal-stt-provisional-review"},
+        json={
+            "segments": [
+                {
+                    "sequence": 1,
+                    "text": "Call the dentist",
+                    "stability": "stable",
+                }
+            ]
+        },
+    )
+    assert preview.status_code == 200, preview.text
+    api_client.app.state.container.voice_brain_dump_service.accurate_stt = _real_adapter(
+        httpx.MockTransport(lambda _request: httpx.Response(400))
+    )
+
+    failed = _upload_and_seal(
+        api_client,
+        operation,
+        b"Call the dentist",
+        "seal-terminal-stt-provisional-review",
+    )
+    body = failed.json()
+    assert body["status"] == "terminal_error"
+    assert body["provider_runs"][-1]["role"] == "accurate_stt"
+    assert body["available_recovery_actions"] == ["review_provisional", "cancel"]
+
+    reviewed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/review_provisional",
+        headers={"Idempotency-Key": "review-terminal-stt-provisional"},
+        json={"expected_revision": body["revision"]},
+    )
+
+    assert reviewed.status_code == 200, reviewed.text
+    assert reviewed.json()["status"] == "awaiting_confirmation"
+    assert reviewed.json()["reconciliation_quality"] == "provisional_only"
 
 
 def test_accurate_stt_failure_records_a_conservative_cost_estimate(api_client) -> None:
@@ -3227,6 +3291,20 @@ def test_validation_failure_uses_bounded_retry_then_preserves_proposals_terminal
     service.text_reconciler = OpenAITextReconciler(
         api_key="test-key", complete=always_invalid
     )
+    preview = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/transcript",
+        headers={"Idempotency-Key": "preview-validation-failure-budget"},
+        json={
+            "segments": [
+                {
+                    "sequence": 1,
+                    "text": "Buy milk",
+                    "stability": "stable",
+                }
+            ]
+        },
+    )
+    assert preview.status_code == 200, preview.text
     sealed = _upload_and_seal(
         api_client, operation, b"Buy milk.", "seal-validation-failure-budget"
     )

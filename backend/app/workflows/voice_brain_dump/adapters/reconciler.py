@@ -480,6 +480,59 @@ class OpenAITextReconciler:
         }
     )
 
+    # Grammatical/discourse prefixes only, not an action vocabulary. Unknown
+    # lexical predicates remain action claims and need exact cited support.
+    _ACTION_PREFIX_TERMS = frozenset(
+        {
+            "please",
+            "kindly",
+            "just",
+            "do",
+            "does",
+            "did",
+            "can",
+            "could",
+            "would",
+            "will",
+            "should",
+            "must",
+            "may",
+            "might",
+            "you",
+            "i",
+            "we",
+            "need",
+            "needs",
+            "needed",
+            "want",
+            "wants",
+            "wanted",
+            "to",
+            "let",
+            "lets",
+            "have",
+            "has",
+            "had",
+            "t",
+            "пожалуйста",
+            "надо",
+            "нужно",
+            "нужен",
+            "нужна",
+            "хочу",
+            "хотим",
+            "можно",
+            "можешь",
+            "можете",
+            "давай",
+            "давайте",
+            "я",
+            "мы",
+            "мне",
+            "нам",
+        }
+    )
+
     # Action changes are material intent changes. The reconciler may normalize
     # only an explicitly listed equivalent, never infer that matching objects
     # make arbitrary verbs interchangeable. Action recognition itself must not
@@ -492,6 +545,20 @@ class OpenAITextReconciler:
         return proposed == source or frozenset({proposed, source}) in (
             OpenAITextReconciler._ACTION_NORMALIZATION_PAIRS
         )
+
+    @staticmethod
+    def _action_predicate(tokens: list[str]) -> tuple[str | None, bool, int | None]:
+        """Return the first lexical predicate, its polarity, and token index."""
+
+        negated = False
+        for index, token in enumerate(tokens):
+            if token in OpenAITextReconciler._NEGATION_MARKERS:
+                negated = True
+                continue
+            if token in OpenAITextReconciler._ACTION_PREFIX_TERMS:
+                continue
+            return token, negated, index
+        return None, negated, None
 
     @staticmethod
     def _has_destructive_support(source_text: str) -> bool:
@@ -547,10 +614,17 @@ class OpenAITextReconciler:
         separating ``schedule meeting and call dentist``.
         """
 
+        # Keep Oxford-comma action/object lists together ("split, merge, and
+        # remove tasks" and shopping lists). Other commas remain hard command
+        # boundaries so an action bound to Bob cannot be rebound to Alice.
+        serial_list = bool(
+            re.search(r",\s*(?:and|и)\b", text, flags=re.IGNORECASE | re.UNICODE)
+        )
+        sentence_boundaries = ".!?;" if serial_list else ".!?;,"
         sentences: list[str] = []
         start = 0
         for index, character in enumerate(text):
-            if character in ".!?;":
+            if character in sentence_boundaries:
                 if text[start:index].strip():
                     sentences.append(text[start:index].strip())
                 start = index + 1
@@ -623,9 +697,10 @@ class OpenAITextReconciler:
             for token in re.findall(r"[^\W\d_]+", text.casefold(), flags=re.UNICODE)
             if len(token) >= 3
         ]
-        if len(tokens) <= 1:
+        _, _, action_index = OpenAITextReconciler._action_predicate(tokens)
+        if action_index is None or action_index >= len(tokens) - 1:
             return set()
-        return set(tokens[1:])
+        return set(tokens[action_index + 1 :])
 
     @staticmethod
     def _assert_semantic_support(
@@ -684,7 +759,9 @@ class OpenAITextReconciler:
 
         clauses = OpenAITextReconciler._source_clauses(source_text)
         title_tokens = re.findall(r"[^\W\d_]+", title.casefold(), flags=re.UNICODE)
-        title_action = title_tokens[0] if title_tokens else None
+        title_action, title_negated, _ = OpenAITextReconciler._action_predicate(
+            title_tokens
+        )
         clause_supports_title = []
         for clause in clauses:
             clause_entities = OpenAITextReconciler._named_entities(
@@ -694,22 +771,40 @@ class OpenAITextReconciler:
                 clause_supports_title.append(clause)
 
         action_supported = not enforce_action or destructive or any(
-            OpenAITextReconciler._actions_are_equivalent(title_action, source_token)
+            title_action is not None
+            and source_action is not None
+            and title_negated == source_negated
+            and (
+                OpenAITextReconciler._actions_are_equivalent(
+                    title_action, source_action
+                )
+                or any(
+                    clause_tokens[index : index + len(title_tokens)] == title_tokens
+                    for index in range(len(clause_tokens) - len(title_tokens) + 1)
+                )
+                or (
+                    bool(
+                        re.search(
+                            r",\s*(?:and|и)\b",
+                            clause,
+                            flags=re.IGNORECASE | re.UNICODE,
+                        )
+                    )
+                    and any(
+                        OpenAITextReconciler._actions_are_equivalent(
+                            title_action, token
+                        )
+                        for token in clause_tokens
+                    )
+                )
+            )
             for clause in clause_supports_title
             for clause_tokens in [
                 re.findall(r"[^\W\d_]+", clause.casefold(), flags=re.UNICODE)
             ]
-            for anchor_indexes in [
-                [
-                    index
-                    for index, token in enumerate(clause_tokens)
-                    if token in title_entities
-                ]
+            for source_action, source_negated, _ in [
+                OpenAITextReconciler._action_predicate(clause_tokens)
             ]
-            for source_token in clause_tokens[
-                : min(anchor_indexes) if anchor_indexes else len(clause_tokens)
-            ]
-            if title_action is not None
         )
         if not clause_supports_title or not action_supported:
             raise ValidationFailure(

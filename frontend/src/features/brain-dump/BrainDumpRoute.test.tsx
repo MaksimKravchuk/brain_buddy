@@ -1496,6 +1496,40 @@ describe("BrainDumpRoute", () => {
     );
   });
 
+  it("labels a reconciler retry with the stage that will actually run", async () => {
+    const retryable = operation({
+      id: "brain_dump_reconciler_retryable",
+      status: "retryable_error",
+      revision: 7,
+      proposals: [proposal("proposal_1", 1, "Renew car insurance")],
+      available_recovery_actions: ["retry", "cancel"],
+      provider_runs: [
+        {
+          id: "provider_run_reconciler_retryable",
+          role: "reconciler",
+          status: "retryable_error",
+          checkpoint: "accurate_transcribed",
+          attempt: 1,
+          recovery_count: 0
+        }
+      ]
+    });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_reconciler_retryable") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(retryable);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_reconciler_retryable/review");
+
+    expect(await screen.findByText("Task reconciliation paused")).toBeInTheDocument();
+    expect(screen.getByText("The task reconciler can be retried from the accurate transcript.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry task reconciliation" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Retry accurate transcription" })).not.toBeInTheDocument();
+  });
+
   it("shows terminal recovery choices instead of a recording surface", async () => {
     const terminal = operation({
       id: "brain_dump_terminal",
@@ -1798,7 +1832,7 @@ describe("BrainDumpRoute", () => {
 
     renderBrainDump("/brain-dump/brain_dump_retryable_fallback/review");
 
-    expect(await screen.findByText("The provider can be retried from the sealed recording.")).toBeInTheDocument();
+    expect(await screen.findByText("The transcription provider can be retried from the sealed recording.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry accurate transcription" })).toBeEnabled();
   });
 
