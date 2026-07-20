@@ -205,6 +205,89 @@ def test_openai_reconciler_rejects_invalid_or_untrusted_operations(
         )
 
 
+@pytest.mark.parametrize(
+    "operation",
+    [
+        {
+            "operation": "add",
+            "title": "Reboot production database",
+            "source_segment_ids": ["segment_accurate"],
+        },
+        {
+            "operation": "update",
+            "proposal_id": "proposal_existing",
+            "title": "Reboot production database",
+            "source_segment_ids": ["segment_accurate"],
+            "base_revision": 1,
+        },
+        {
+            "operation": "split",
+            "title": "Reboot production database",
+            "source_segment_ids": ["segment_accurate"],
+            "predecessor_ids": ["proposal_existing"],
+        },
+        {
+            "operation": "merge",
+            "title": "Reboot production database",
+            "source_segment_ids": ["segment_accurate"],
+            "predecessor_ids": ["proposal_existing", "proposal_other"],
+        },
+        {
+            "operation": "supersede",
+            "title": "Reboot production database",
+            "source_segment_ids": ["segment_accurate"],
+            "predecessor_ids": ["proposal_existing"],
+        },
+    ],
+)
+def test_openai_reconciler_rejects_zero_lexical_overlap_invention_in_every_shape(
+    operation: dict[str, object],
+) -> None:
+    """A title with zero lexical overlap with its cited transcript segment is
+    an invented task in every patch shape, not only the shared-action/novel-
+    object pattern; the runtime guard must fail closed regardless of prompt
+    wording (ADR-0002 2026-07-19 amendment, zero-invented-tasks target)."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {"operations": [operation]},
+    )
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text="Buy milk on the way home",
+        stability="stable",
+        provider_role="accurate",
+    )
+    existing = ReconciledProposal(
+        id="proposal_existing",
+        title="Existing task",
+        source_segment_ids=["segment_fast"],
+        status="provisional",
+        title_revision=1,
+    )
+    other = ReconciledProposal(
+        id="proposal_other",
+        title="Other task",
+        source_segment_ids=["segment_fast"],
+        status="provisional",
+    )
+
+    with pytest.raises(ValidationFailure, match="not grounded"):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id="operation_zero_overlap",
+                transcript_segments=[segment],
+                active_proposals=[existing, other],
+                user_locks={},
+            )
+        )
+
+
 def test_openai_reconciler_materializes_structural_and_remove_operations() -> None:
     from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
 
@@ -356,7 +439,7 @@ def test_openai_reconciler_reallocates_a_colliding_server_id(
             "operations": [
                 {
                     "operation": "add",
-                    "title": "Generated",
+                    "title": "Another task",
                     "source_segment_ids": [segment.id],
                 }
             ]
@@ -731,6 +814,57 @@ def test_openai_reconciler_reserves_budget_for_every_bounded_retry() -> None:
         reconciler.reconcile(_minimal_reconcile_request())
 
     assert calls == 0
+
+
+def test_openai_reconciler_records_its_estimated_cost_on_success() -> None:
+    """Item 6 (F3): a successful reconciler run must record its own cost
+    estimate so the operation-wide cumulative cost cap actually sees
+    reconciler spend, not only accurate-STT spend."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        max_retries=1,
+        estimated_cost_usd_per_megabyte=1.0,
+        complete=lambda _payload: {"operations": []},
+    )
+
+    result = reconciler.reconcile(_minimal_reconcile_request())
+
+    assert result.estimated_cost_usd > 0
+
+
+def test_openai_reconciler_tags_a_retryable_failure_with_its_estimated_cost() -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        max_retries=0,
+        retry_backoff_seconds=(),
+        estimated_cost_usd_per_megabyte=1.0,
+        transport=httpx.MockTransport(lambda _request: httpx.Response(503)),
+    )
+
+    with pytest.raises(ProviderRetryableError) as caught:
+        reconciler.reconcile(_minimal_reconcile_request())
+
+    assert caught.value.estimated_cost_usd > 0
+
+
+def test_openai_reconciler_tags_an_invalid_envelope_failure_with_its_estimated_cost() -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        estimated_cost_usd_per_megabyte=1.0,
+        complete=lambda _payload: {"operations": [{"secret": "raw-model-output"}]},
+    )
+
+    with pytest.raises(ValidationFailure) as caught:
+        reconciler.reconcile(_minimal_reconcile_request())
+
+    assert caught.value.estimated_cost_usd > 0
 
 
 def test_dual_stt_roles_keep_accurate_audio_input_separate_from_fast_text() -> None:

@@ -131,7 +131,7 @@ def test_seal_uses_semantic_reconciler_when_external_processing_is_allowed(
                 {
                     "operation": "add",
                     "proposal_id": None,
-                    "title": "Заказать новый загранпаспорт",
+                    "title": "Разобраться с документами для поездки",
                     "source_segment_ids": [segment_id],
                     "predecessor_ids": [],
                     "base_revision": None,
@@ -152,7 +152,7 @@ def test_seal_uses_semantic_reconciler_when_external_processing_is_allowed(
     assert sealed.status_code == 200, sealed.text
     assert sealed.json()["status"] == "awaiting_confirmation"
     assert [proposal["title"] for proposal in sealed.json()["proposals"]] == [
-        "Заказать новый загранпаспорт"
+        "Разобраться с документами для поездки"
     ]
 
 
@@ -251,6 +251,141 @@ def test_seal_persists_semantic_reconciler_failures_for_recovery(
     assert sealed.json()["status"] == expected_status
     assert sealed.json()["provider_runs"][-1]["role"] == "reconciler"
     assert sealed.json()["provider_runs"][-1]["status"] == expected_status
+
+
+def test_accurate_stt_failure_records_a_conservative_cost_estimate(api_client) -> None:
+    """Item 6 (F3): a failed accurate-STT attempt still made a real, billable
+    call; the persisted run must record that spend so the cumulative
+    operation-wide cost cap sees it, rather than silently recording zero for
+    every failed attempt."""
+
+    api_client.app.state.container.task_service.accurate_stt = _real_adapter(
+        httpx.MockTransport(lambda _request: httpx.Response(503))
+    )
+    operation = _start_operation(
+        api_client, key="start-stt-failure-cost", external_processing_allowed=True
+    )
+    sealed = _upload_and_seal(
+        api_client, operation, b"\x1aE\xdf\xa3failing-webm", "seal-stt-failure-cost"
+    )
+
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["status"] == "retryable_error"
+    accurate_run = next(
+        run for run in sealed.json()["provider_runs"] if run["role"] == "accurate_stt"
+    )
+    assert accurate_run["estimated_cost_usd"] > 0
+
+
+def test_reconciler_success_records_its_estimated_cost_in_the_operation(
+    api_client,
+) -> None:
+    """Item 6 (F3): reconciler success must record a cost estimate so the
+    cumulative cap can see reconciler spend, not just accurate-STT spend."""
+
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    operation = _start_operation(
+        api_client, key="start-reconciler-cost", external_processing_allowed=True
+    )
+    api_client.app.state.container.task_service.text_reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        estimated_cost_usd_per_megabyte=1.0,
+        complete=lambda _payload: {"operations": []},
+    )
+    sealed = _upload_and_seal(
+        api_client, operation, b"Buy milk", "seal-reconciler-cost"
+    )
+
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["status"] == "awaiting_confirmation"
+    reconciler_run = next(
+        run for run in sealed.json()["provider_runs"] if run["role"] == "reconciler"
+    )
+    assert reconciler_run["estimated_cost_usd"] > 0
+
+
+def test_operation_admission_rejects_next_call_when_worst_case_would_exceed_cap(
+    api_client,
+) -> None:
+    """Item 6 (F3): admission must reject the next external call when already
+    spent/reserved cost plus the worst-case cost of that next call would
+    exceed the operation cap -- not only once spend already reached the cap
+    outright. The provider must never be called once admission fails."""
+
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"text": "must not be called"})
+
+    task_service = api_client.app.state.container.task_service
+    task_service.max_cumulative_cost_usd_per_operation = 1.0
+    task_service.accurate_stt = OpenAiAccurateStt(
+        api_key="test-key",
+        max_retries=0,
+        retry_backoff_seconds=(),
+        max_cost_usd_per_operation=0.6,
+        estimated_cost_usd_per_megabyte=0.0000001,
+        transport=httpx.MockTransport(handler),
+    )
+    operation = _start_operation(
+        api_client, key="start-worst-case-admission", external_processing_allowed=True
+    )
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    container = api_client.app.state.container
+    persisted = container.task_service.get_brain_dump_operation(
+        operation["id"], owner_id=owner_id
+    )
+    from app.modules.tasks.domain import BrainDumpProviderRunDocument
+    from app.utils.time import utcnow
+
+    now = utcnow()
+    already_spent = persisted.model_copy(
+        update={
+            "provider_runs": [
+                BrainDumpProviderRunDocument(
+                    id="provider_run_prior_spend",
+                    role="accurate_stt",
+                    status="retryable_error",
+                    input_hash="0" * 64,
+                    checkpoint="sealed",
+                    attempt=1,
+                    recovery_count=0,
+                    estimated_cost_usd=0.5,
+                    created_at=now,
+                    updated_at=now,
+                )
+            ],
+            "revision": persisted.revision + 1,
+        }
+    )
+    container.task_repo.save_brain_dump_operation(already_spent)
+
+    audio = b"\x1aE\xdf\xa3worst-case-webm"
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    sealed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers={"Idempotency-Key": "seal-worst-case-admission"},
+        json={
+            "expected_revision": uploaded.json()["revision"],
+            "expected_chunks": 1,
+            "manifest_hash": _manifest_hash(audio),
+        },
+    )
+
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["status"] == "terminal_error"
+    assert sealed.json()["provider_runs"][-1]["error_code"] == (
+        "OPERATION_COST_BUDGET_EXCEEDED"
+    )
+    assert calls == 0
 
 
 def test_retryable_reconciler_failure_resumes_without_rerunning_accurate_stt(
@@ -1257,6 +1392,96 @@ def test_commit_rejects_a_finished_operation_that_was_never_sealed_or_reconciled
     assert inbox["counts_by_state"]["inbox"] == 0
 
 
+def test_commit_rejects_an_untouched_fast_proposal_after_a_successful_reconcile(
+    api_client,
+) -> None:
+    """A successful operation-level reconciler run must not make an untouched
+    browser-preview/fast proposal canonical. Only proposals the reconciler (or
+    the user) actually affirmed may become tasks; a sibling proposal the
+    reconciler never touched stays fast-only and blocks commit until the user
+    resolves it, even though the operation as a whole did reconcile."""
+
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    operation = _start_operation(
+        api_client, key="start-untouched-fast-sibling", external_processing_allowed=True
+    )
+    preview = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/transcript",
+        headers={"Idempotency-Key": "append-untouched-fast-sibling"},
+        json={
+            "segments": [
+                {
+                    "sequence": 1,
+                    "text": "Buy milk. Call dentist.",
+                    "stability": "stable",
+                }
+            ]
+        },
+    ).json()
+    milk_id = preview["proposals"][0]["id"]
+    dentist_id = preview["proposals"][1]["id"]
+    assert preview["proposals"][1]["title"] == "Call dentist"
+
+    def complete(payload: dict[str, object]) -> dict[str, object]:
+        context = json.loads(payload["messages"][1]["content"])  # type: ignore[index]
+        segment_id = context["transcript_segments"][0]["id"]
+        return {
+            "operations": [
+                {
+                    "operation": "update",
+                    "proposal_id": milk_id,
+                    "title": "Buy milk",
+                    "source_segment_ids": [segment_id],
+                    "predecessor_ids": [],
+                    "base_revision": None,
+                }
+            ]
+        }
+
+    api_client.app.state.container.task_service.text_reconciler = OpenAITextReconciler(
+        api_key="test-key", complete=complete
+    )
+    sealed = _upload_and_seal(
+        api_client, operation, b"Buy milk", "seal-untouched-fast-sibling"
+    )
+    assert sealed.status_code == 200, sealed.text
+    body = sealed.json()
+    assert body["status"] == "awaiting_confirmation"
+    by_id = {proposal["id"]: proposal for proposal in body["proposals"]}
+    assert by_id[milk_id]["status"] == "reconciled"
+    assert by_id[dentist_id]["status"] == "provisional"
+
+    rejected = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/commit",
+        headers={"Idempotency-Key": "commit-untouched-fast-sibling"},
+        json={"expected_revision": body["revision"]},
+    )
+    assert rejected.status_code == 400, rejected.text
+    assert "BRAIN_DUMP_PROPOSAL_NOT_RECONCILED" in rejected.text
+    assert dentist_id in rejected.text
+
+    inbox = api_client.get("/api/tasks", params={"state": "inbox"}).json()
+    assert inbox["counts_by_state"]["inbox"] == 0
+
+    deleted = api_client.patch(
+        f"/api/brain-dump-operations/{operation['id']}/proposals/{dentist_id}",
+        headers={"Idempotency-Key": "delete-untouched-fast-sibling"},
+        json={"deleted": True, "expected_revision": body["revision"]},
+    )
+    assert deleted.status_code == 200, deleted.text
+
+    committed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/commit",
+        headers={"Idempotency-Key": "commit-after-deleting-untouched-sibling"},
+        json={"expected_revision": deleted.json()["revision"]},
+    )
+    assert committed.status_code == 200, committed.text
+    assert committed.json()["committed_task_ids"]
+    inbox = api_client.get("/api/tasks", params={"state": "inbox"}).json()
+    assert [item["title"] for item in inbox["items"]] == ["Buy milk"]
+
+
 def test_withdraw_consent_stops_future_processing_and_purges_raw_audio(
     api_client,
 ) -> None:
@@ -2143,8 +2368,11 @@ def test_raw_audio_retention_sweep_covers_an_abandoned_awaiting_confirmation_ope
     persisted = container.task_service.get_brain_dump_operation(
         operation["id"], owner_id=owner_id
     )
+    assert persisted.raw_audio_expires_at is not None
     expired = persisted.model_copy(
-        update={"updated_at": persisted.updated_at - timedelta(days=2)}
+        update={
+            "raw_audio_expires_at": persisted.raw_audio_expires_at - timedelta(days=2)
+        }
     )
     container.task_repo.save_brain_dump_operation(expired)
 
@@ -2161,6 +2389,58 @@ def test_raw_audio_retention_sweep_covers_an_abandoned_awaiting_confirmation_ope
     )
     assert committed.status_code == 200, committed.text
     assert committed.json()["committed_task_ids"]
+
+
+def test_raw_audio_expiry_is_not_extended_by_a_later_proposal_edit(api_client) -> None:
+    """F4: raw audio's expiry is anchored at successful reconciliation and
+    must not be pushed out by a later mutation. A proposal edit made well
+    after reconciliation bumps ``updated_at`` to something very recent; the
+    sweep must still purge on schedule from the original reconciliation
+    anchor rather than restarting the retention window from that edit."""
+
+    operation = _start_operation(
+        api_client,
+        key="start-raw-audio-not-extended",
+        external_processing_allowed=True,
+    )
+    sealed = _upload_and_seal(
+        api_client, operation, b"Buy milk.", "seal-raw-audio-not-extended"
+    ).json()
+    assert sealed["status"] == "awaiting_confirmation"
+    proposal_id = sealed["proposals"][0]["id"]
+
+    container = api_client.app.state.container
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    persisted = container.task_service.get_brain_dump_operation(
+        operation["id"], owner_id=owner_id
+    )
+    assert persisted.raw_audio_expires_at is not None
+    original_anchor = persisted.raw_audio_expires_at
+
+    # Simulate a proposal edit made just before the sweep runs: it bumps
+    # ``updated_at`` to "now" (very recent) but must not touch the raw-audio
+    # anchor, which stays exactly where reconciliation left it.
+    edited = api_client.patch(
+        f"/api/brain-dump-operations/{operation['id']}/proposals/{proposal_id}",
+        headers={"Idempotency-Key": "edit-before-sweep"},
+        json={"title": "Buy oat milk", "expected_revision": sealed["revision"]},
+    )
+    assert edited.status_code == 200, edited.text
+    reloaded = container.task_service.get_brain_dump_operation(
+        operation["id"], owner_id=owner_id
+    )
+    assert reloaded.raw_audio_expires_at == original_anchor
+    assert reloaded.updated_at > persisted.updated_at
+
+    # A sweep timestamp just past the original anchor purges the audio even
+    # though ``updated_at`` looks freshly touched.
+    purged = container.task_service.purge_expired_raw_audio(
+        now=original_anchor + timedelta(seconds=1)
+    )
+    assert purged == 1
+    swept = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
+    assert swept["audio_chunks"] == []
+    assert swept["media_ref"] is None
 
 
 def test_working_artifact_retention_sweep_clears_uncommitted_data_but_not_committed(

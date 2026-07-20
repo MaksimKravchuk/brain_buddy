@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 from app.ai.providers import MockValidationProvider, OpenAIValidationProvider
-from app.core.config import AppConfig, AppEnvironment
+from app.core.config import AppConfig, AppEnvironment, VoiceProviderSettings
 from app.modules.tasks import TaskRepository, TaskService
 from app.repositories import (
     IndexRepository,
@@ -87,6 +87,39 @@ def _build_accurate_stt(config: AppConfig) -> AccurateSttPort:
     return DisabledAccurateStt("STT_PROVIDER_UNSUPPORTED")
 
 
+def _worst_case_provider_seconds(settings: VoiceProviderSettings) -> float:
+    """Worst-case wall-clock time one logical call may occupy a lease.
+
+    ``max_retries + 1`` attempts, each up to ``timeout_seconds``, plus every
+    backoff wait between them (the schedule repeats its last value past its
+    own length, matching the adapters' own ``_backoff`` behavior).
+    """
+
+    attempts = settings.max_retries + 1
+    backoff_total = sum(
+        settings.retry_backoff_seconds[
+            min(index, len(settings.retry_backoff_seconds) - 1)
+        ]
+        for index in range(settings.max_retries)
+    )
+    return attempts * settings.timeout_seconds + backoff_total
+
+
+def _provider_run_lease_seconds(config: AppConfig) -> float:
+    """Persisted recovery lease duration for one accurate-STT/reconciler run.
+
+    Must cover the configured provider timeout, its bounded retry/backoff
+    schedule, and a safe margin for both roles (whichever is larger) so a
+    still-valid ongoing call is never recovered/retried early.
+    """
+
+    worst_case = max(
+        _worst_case_provider_seconds(config.voice.accurate_stt),
+        _worst_case_provider_seconds(config.voice.reconciler),
+    )
+    return worst_case + config.voice.lease_recovery_margin_seconds
+
+
 def _build_text_reconciler(config: AppConfig) -> TextReconcilerPort:
     settings = config.voice.reconciler
     if config.environment is AppEnvironment.TEST:
@@ -146,6 +179,7 @@ def build_container(config: AppConfig) -> Container:
         max_cumulative_cost_usd_per_operation=(
             config.voice.max_cumulative_cost_usd_per_operation
         ),
+        provider_run_lease_seconds=_provider_run_lease_seconds(config),
     )
     auth_service = AuthService(
         user_repo=user_repo,

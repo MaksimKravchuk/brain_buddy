@@ -292,6 +292,73 @@ def test_openai_adapter_exhausts_retryable_http_status_without_backoff() -> None
         provider.transcribe_sealed_audio(_request())
 
 
+def test_openai_adapter_tags_retryable_failure_with_conservative_estimated_cost() -> None:
+    """A transport-retryable failure still made real, billable attempts; the
+    operation-wide cost cap must see that spend, not silently record zero
+    just because the call ultimately failed. The estimate is conservatively
+    scaled by the adapter's own bounded retry budget, since a single logical
+    call may itself cost the provider once per internal attempt."""
+
+    audio = _request().sealed_audio
+    provider = OpenAiAccurateStt(
+        api_key="secret-test-key",
+        max_retries=2,
+        retry_backoff_seconds=(0.0, 0.0),
+        estimated_cost_usd_per_megabyte=1.0,
+        transport=httpx.MockTransport(lambda _request: httpx.Response(503)),
+        sleep=lambda _delay: None,
+    )
+
+    with pytest.raises(ProviderRetryableError) as caught:
+        provider.transcribe_sealed_audio(_request(audio))
+
+    expected = (len(audio) / 1_000_000) * 1.0 * (2 + 1)
+    assert caught.value.estimated_cost_usd == pytest.approx(expected)
+    assert caught.value.estimated_cost_usd > 0
+
+
+def test_openai_adapter_tags_terminal_failure_with_estimated_cost_after_a_real_call() -> None:
+    provider = OpenAiAccurateStt(
+        api_key="secret-test-key",
+        max_retries=0,
+        estimated_cost_usd_per_megabyte=1.0,
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(401, content=b"{}")
+        ),
+    )
+
+    with pytest.raises(ProviderTerminalError) as caught:
+        provider.transcribe_sealed_audio(_request())
+
+    assert caught.value.estimated_cost_usd > 0
+
+
+def test_openai_adapter_never_tags_cost_when_admission_refuses_the_call() -> None:
+    """The pre-flight cost-cap rejection never places a network call, so it
+    must not report any spend either — there is nothing to conservatively
+    account for yet."""
+
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"text": "must not be called"})
+
+    provider = OpenAiAccurateStt(
+        api_key="secret-test-key",
+        max_cost_usd_per_operation=0.001,
+        estimated_cost_usd_per_megabyte=1.0,
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(ProviderTerminalError) as caught:
+        provider.transcribe_sealed_audio(_request(b"x" * 2_000))
+
+    assert calls == 0
+    assert getattr(caught.value, "estimated_cost_usd", 0.0) == 0.0
+
+
 def test_openai_adapter_omits_optional_hint_fields_when_they_are_empty() -> None:
     captured_body = b""
 

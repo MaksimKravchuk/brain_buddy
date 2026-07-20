@@ -127,6 +127,7 @@ class VoiceSettings(BaseModel):
     retention: VoiceRetentionSettings = Field(default_factory=VoiceRetentionSettings)
     max_operation_recoveries: int = Field(default=2, ge=0, le=5)
     max_cumulative_cost_usd_per_operation: float = Field(default=1.00, gt=0, le=200)
+    lease_recovery_margin_seconds: float = Field(default=30.0, ge=0, le=600)
 
 
 class AppConfig(BaseModel):
@@ -284,6 +285,9 @@ def _build_config() -> AppConfig:
         ),
         max_cumulative_cost_usd_per_operation=float(
             os.getenv("BRAIN_BUDDY_VOICE_MAX_CUMULATIVE_COST_USD", "1.00")
+        ),
+        lease_recovery_margin_seconds=float(
+            os.getenv("BRAIN_BUDDY_VOICE_LEASE_RECOVERY_MARGIN_SECONDS", "30")
         ),
     )
 

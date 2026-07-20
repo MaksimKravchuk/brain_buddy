@@ -880,13 +880,21 @@ def test_brain_dump_commit_replay_invalid_state_and_deleted_proposals(
         action="finish",
     )
     # Commit requires a frozen, reconciled batch (see
-    # ``TaskService._has_frozen_reconciled_batch``); this unit test exercises
-    # commit replay/idempotency directly against the repository rather than
-    # through a real sealed-audio pipeline, so record the checkpoint that a
-    # successful seal+accurate-STT+reconciler run would have left behind.
+    # ``TaskService._has_frozen_reconciled_batch``) AND every surviving
+    # proposal to actually carry reconciler/user affirmation (see the
+    # ``BRAIN_DUMP_PROPOSAL_NOT_RECONCILED`` gate in
+    # ``commit_brain_dump_operation``); this unit test exercises commit
+    # replay/idempotency directly against the repository rather than through
+    # a real sealed-audio pipeline, so record the checkpoint and per-proposal
+    # status that a successful seal+accurate-STT+reconciler run would have
+    # left behind.
     finished = finished.model_copy(
         update={
             "sealed_manifest_hash": "0" * 64,
+            "proposals": [
+                proposal.model_copy(update={"status": "reconciled"})
+                for proposal in finished.proposals
+            ],
             "provider_runs": [
                 BrainDumpProviderRunDocument(
                     id="provider_run_test_reconciled",

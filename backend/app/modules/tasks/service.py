@@ -123,6 +123,7 @@ class TaskService:
         working_artifacts_retention: timedelta = timedelta(days=7),
         max_operation_recoveries: int = 2,
         max_cumulative_cost_usd_per_operation: float = 1.00,
+        provider_run_lease_seconds: float = 30.0,
     ) -> None:
         self.task_repo = task_repo
         self.accurate_stt = accurate_stt or DisabledAccurateStt()
@@ -133,17 +134,30 @@ class TaskService:
         self.max_cumulative_cost_usd_per_operation = (
             max_cumulative_cost_usd_per_operation
         )
+        self.provider_run_lease_seconds = provider_run_lease_seconds
 
     def purge_expired_raw_audio(self, *, now: datetime | None = None) -> int:
-        """Purge raw audio from terminal operations past the configured retention."""
+        """Purge raw audio from terminal operations past the configured retention.
+
+        The clock is ``raw_audio_expires_at`` — stamped once, at successful
+        reconciliation, to ``reconciled_at + raw_audio_retention`` — never a
+        later ``updated_at``. A proposal edit, consent withdrawal, or any
+        other post-reconciliation mutation must not push this deadline out.
+        An operation that never reconciled has no such anchor; it falls back
+        to ``updated_at + raw_audio_retention`` so abandoned raw audio from a
+        recording that was never sealed/reconciled still ages out.
+        """
 
         current_time = now or utcnow()
-        cutoff = current_time - self.raw_audio_retention
         purged = 0
-        for candidate in self.task_repo.list_expired_raw_audio_operations(before=cutoff):
+        for candidate in self.task_repo.list_expired_raw_audio_operations():
             with self.task_repo.command_lock(candidate.owner_id):
                 operation = self.get_brain_dump_operation(
                     candidate.id, owner_id=candidate.owner_id
+                )
+                expires_at = (
+                    operation.raw_audio_expires_at
+                    or operation.updated_at + self.raw_audio_retention
                 )
                 if (
                     operation.status
@@ -153,7 +167,7 @@ class TaskService:
                         "terminal_error",
                         "awaiting_confirmation",
                     }
-                    or operation.updated_at >= cutoff
+                    or current_time < expires_at
                     or not operation.audio_chunks
                 ):
                     continue
@@ -708,7 +722,8 @@ class TaskService:
                             attempt=1,
                             recovery_count=0,
                             lease_owner=generate_id("runner"),
-                            lease_expires_at=now + timedelta(seconds=30),
+                            lease_expires_at=now
+                            + timedelta(seconds=self.provider_run_lease_seconds),
                             created_at=now,
                             updated_at=now,
                         ),
@@ -833,6 +848,9 @@ class TaskService:
             attempt=attempt,
             recovery_count=recovery_count,
             now=now,
+            worst_case_next_usd=getattr(
+                self.accurate_stt, "max_cost_usd_per_operation", 0.0
+            ),
         )
         if budget_exceeded is not None:
             return operation.model_copy(
@@ -900,6 +918,7 @@ class TaskService:
                             error=str(exc)[:1000],
                             error_code=str(exc)[:100],
                             provider=self.accurate_stt.provider_name,
+                            estimated_cost_usd=getattr(exc, "estimated_cost_usd", 0.0),
                             created_at=now,
                             updated_at=now,
                         ),
@@ -971,7 +990,11 @@ class TaskService:
         recovery_count: int,
     ) -> BrainDumpOperationDocument:
         cumulative_spent = sum(run.estimated_cost_usd for run in checkpoint_runs)
-        if cumulative_spent >= self.max_cumulative_cost_usd_per_operation:
+        worst_case_next = getattr(
+            self.text_reconciler, "max_cost_usd_per_operation", 0.0
+        )
+        cap = self.max_cumulative_cost_usd_per_operation
+        if cumulative_spent >= cap or cumulative_spent + worst_case_next > cap:
             return self._reconciler_failure(
                 operation,
                 checkpoint_segments=checkpoint_segments,
@@ -1030,6 +1053,7 @@ class TaskService:
             reconciler_input_hash = hashlib.sha256(
                 accurate_hypothesis.text.encode("utf-8")
             ).hexdigest()
+            reconciler_cost = fixture_result.estimated_cost_usd
         else:
             reconciler_request = ReconcileTextRequest(
                 operation_id=operation.id,
@@ -1064,12 +1088,14 @@ class TaskService:
                     retryable=isinstance(exc, ProviderRetryableError),
                     attempt=attempt,
                     recovery_count=recovery_count,
+                    estimated_cost_usd=getattr(exc, "estimated_cost_usd", 0.0),
                 )
             proposals = self._apply_reconciler_patches(
                 operation.proposals, reconcile_result.patches, now=now
             )
             patch_drafts = reconcile_result.patches
             reconciler_input_hash = reconcile_result.input_hash
+            reconciler_cost = reconcile_result.estimated_cost_usd
         proposal_patches = self._append_proposal_patch_documents(
             operation_id=operation.id,
             existing=operation.proposal_patches,
@@ -1098,10 +1124,17 @@ class TaskService:
                         attempt=attempt,
                         recovery_count=recovery_count,
                         provider=self.text_reconciler.provider_id,
+                        estimated_cost_usd=reconciler_cost,
                         created_at=now,
                         updated_at=now,
                     ),
                 ],
+                # Stamped once, at the first successful reconciliation, and
+                # never recomputed afterward — see ``purge_expired_raw_audio``.
+                "raw_audio_expires_at": (
+                    operation.raw_audio_expires_at
+                    or now + self.raw_audio_retention
+                ),
                 "updated_at": now,
                 "revision": operation.revision + 1,
             }
@@ -1246,7 +1279,8 @@ class TaskService:
                             attempt=attempt,
                             recovery_count=recovery_count,
                             lease_owner=generate_id("runner"),
-                            lease_expires_at=now + timedelta(seconds=30),
+                            lease_expires_at=now
+                            + timedelta(seconds=self.provider_run_lease_seconds),
                             created_at=now,
                             updated_at=now,
                         ),
@@ -1760,19 +1794,24 @@ class TaskService:
         attempt: int,
         recovery_count: int,
         now: datetime,
+        worst_case_next_usd: float = 0.0,
     ) -> BrainDumpProviderRunDocument | None:
         """Enforce one operation-wide cumulative cost cap across every STT and
         reconciler attempt, transport retry, and recovery — never per-attempt
         only. Each adapter already refuses a single call whose own estimate
         exceeds its role's ceiling; this additionally sums every previously
         *persisted* ``estimated_cost_usd`` on the operation (across both
-        roles and all retries/recoveries) and refuses the next attempt before
-        it would push cumulative spend past the configured operation limit,
-        with a redacted, non-retryable error code and no silent fallback.
+        roles and all retries/recoveries), adds the worst-case cost of the
+        call about to be admitted (``worst_case_next_usd``, the adapter's own
+        per-operation ceiling when known), and refuses the next attempt
+        before it would push cumulative spend to or past the configured
+        operation limit, with a redacted, non-retryable error code and no
+        silent fallback. The provider is never called once this rejects.
         """
 
         cumulative_spent = sum(run.estimated_cost_usd for run in prior_runs)
-        if cumulative_spent < self.max_cumulative_cost_usd_per_operation:
+        cap = self.max_cumulative_cost_usd_per_operation
+        if cumulative_spent < cap and cumulative_spent + worst_case_next_usd <= cap:
             return None
         return BrainDumpProviderRunDocument(
             id=claimed_run_id or generate_id("provider_run"),
@@ -1873,6 +1912,19 @@ class TaskService:
             raise ValidationFailure(
                 "Brain dump conflicts must be reviewed before save.",
                 {"proposal_ids": conflicted},
+            )
+        unreconciled = [
+            proposal.id
+            for proposal in operation.proposals
+            if not proposal.deleted
+            and proposal.status not in {"reconciled", "user_edited"}
+        ]
+        if unreconciled:
+            raise ValidationFailure(
+                "BRAIN_DUMP_PROPOSAL_NOT_RECONCILED: an operation-level "
+                "reconciler success cannot make an untouched browser-preview/"
+                "fast proposal canonical; edit or delete it before save.",
+                {"proposal_ids": unreconciled},
             )
         now = utcnow()
         committed_task_ids: list[str] = []
@@ -3352,6 +3404,7 @@ class TaskService:
         attempt: int = 1,
         recovery_count: int = 0,
         error_code: str | None = None,
+        estimated_cost_usd: float = 0.0,
     ) -> BrainDumpOperationDocument:
         status: Literal["retryable_error", "terminal_error"] = (
             "retryable_error"
@@ -3378,6 +3431,7 @@ class TaskService:
                         attempt=attempt,
                         recovery_count=recovery_count,
                         error=error,
+                        estimated_cost_usd=estimated_cost_usd,
                         error_code=(error_code if error_code is not None else error)[
                             :100
                         ],

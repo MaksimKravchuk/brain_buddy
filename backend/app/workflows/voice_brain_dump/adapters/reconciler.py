@@ -141,19 +141,27 @@ class OpenAITextReconciler:
 
     def reconcile(self, request: ReconcileTextRequest) -> ReconcileResult:
         payload = self._payload(request)
+        # Conservatively scaled by the bounded retry budget: a single logical
+        # call may itself cost the provider once per internal transport
+        # attempt, so the admission check and any recorded spend (success or
+        # failure alike) must assume the worst case.
         estimated_cost = (
             len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) / 1_000_000
         ) * self.estimated_cost_usd_per_megabyte * (self.max_retries + 1)
         if estimated_cost > self.max_cost_usd_per_operation:
             raise ProviderTerminalError("RECONCILER_COST_LIMIT_EXCEEDED")
-        raw = self.complete(payload) if self.complete is not None else self._call(payload)
         try:
-            envelope = _ReconcileEnvelope.model_validate(raw)
-        except ValidationError:
-            raise ValidationFailure(
-                "Reconciler returned an invalid operation envelope."
-            ) from None
-        patches = self._materialize(request, envelope.operations)
+            raw = self.complete(payload) if self.complete is not None else self._call(payload)
+            try:
+                envelope = _ReconcileEnvelope.model_validate(raw)
+            except ValidationError:
+                raise ValidationFailure(
+                    "Reconciler returned an invalid operation envelope."
+                ) from None
+            patches = self._materialize(request, envelope.operations)
+        except (ProviderRetryableError, ProviderTerminalError, ValidationFailure) as exc:
+            exc.estimated_cost_usd = estimated_cost
+            raise
         return ReconcileResult(
             input_hash=hashlib.sha256(
                 json.dumps(payload["messages"], sort_keys=True).encode("utf-8")
@@ -164,6 +172,7 @@ class OpenAITextReconciler:
                 for patch, draft in zip(patches, envelope.operations, strict=True)
                 if draft.confidence is not None
             },
+            estimated_cost_usd=estimated_cost,
         )
 
     def _payload(self, request: ReconcileTextRequest) -> dict[str, object]:
@@ -385,20 +394,22 @@ class OpenAITextReconciler:
 
     @staticmethod
     def _assert_transcript_supported_identity(title: str, source_text: str) -> None:
-        """Reject a newly introduced object when the action is otherwise copied.
+        """Reject a title carrying any content word absent from its cited source.
 
-        This deliberately stays conservative: semantic paraphrases and translations
-        have no lexical overlap and are left to the structured-model contract, while
-        a shared action paired with a novel concrete object is an actionable sign of
-        hallucination that can be rejected deterministically at the trust boundary.
+        Every non-action word in the title must trace back to the cited
+        transcript text. A shared action plus a novel concrete object (for
+        example "Buy" plus "yacht" against a "buy milk" transcript) is one
+        rejected shape, but a title with zero lexical overlap at all — the
+        model inventing an entirely unrelated task from thin air — is exactly
+        as unsafe and must fail closed the same way (ADR-0002 2026-07-19
+        amendment: zero invented tasks is a release gate, not a best effort).
         """
 
         title_terms = set(re.findall(r"\w+", title.casefold()))
         source_terms = set(re.findall(r"\w+", source_text.casefold()))
-        shared_terms = title_terms & source_terms
         action_words = {"add", "buy", "call", "create", "fix", "make", "pay", "send", "write"}
         novel_object_terms = title_terms - source_terms - action_words
-        if shared_terms and novel_object_terms:
+        if novel_object_terms:
             raise ValidationFailure(
                 "unsupported task identity is not grounded in the cited transcript."
             )

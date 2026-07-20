@@ -61,20 +61,34 @@ class OpenAiAccurateStt:
     def transcribe_sealed_audio(self, request: AccurateSttRequest) -> SttResult:
         if not request.sealed_audio:
             raise ProviderTerminalError("STT_AUDIO_MISSING")
+        # Conservatively scaled by the adapter's own bounded retry budget: a
+        # single logical call may itself cost the provider once per internal
+        # transport attempt, so both the admission check and any recorded
+        # spend (success or failure) must assume the worst case, not just the
+        # first attempt.
         estimated_cost = (
-            len(request.sealed_audio) / 1_000_000
-        ) * self.estimated_cost_usd_per_megabyte
+            (len(request.sealed_audio) / 1_000_000)
+            * self.estimated_cost_usd_per_megabyte
+            * (self.max_retries + 1)
+        )
         if estimated_cost > self.max_cost_usd_per_operation:
             raise ProviderTerminalError("STT_COST_LIMIT_EXCEEDED")
 
-        response = self._post_with_retries(request)
         try:
+            response = self._post_with_retries(request)
             payload = response.json()
+        except (ProviderRetryableError, ProviderTerminalError) as exc:
+            exc.estimated_cost_usd = estimated_cost
+            raise
         except ValueError as exc:
-            raise ProviderTerminalError("STT_PROVIDER_INVALID_RESPONSE") from exc
+            wrapped = ProviderTerminalError("STT_PROVIDER_INVALID_RESPONSE")
+            wrapped.estimated_cost_usd = estimated_cost
+            raise wrapped from exc
         text = payload.get("text") if isinstance(payload, dict) else None
         if not isinstance(text, str) or not text.strip():
-            raise ProviderTerminalError("STT_PROVIDER_INVALID_RESPONSE")
+            wrapped = ProviderTerminalError("STT_PROVIDER_INVALID_RESPONSE")
+            wrapped.estimated_cost_usd = estimated_cost
+            raise wrapped
         normalized_text = " ".join(text.split())
         language = ",".join(request.language_hints) or None
         segment = TranscriptHypothesis(
