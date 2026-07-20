@@ -189,7 +189,7 @@ async function sealWithDeterministicAudio(
   const digest = sha256Hex(audio);
   const uploadResponse = await page.request.put(`/api/brain-dump-operations/${operationId}/audio/0`, {
     data: audio,
-    headers: { "X-Content-SHA256": digest, "Content-Type": "application/octet-stream" }
+    headers: { "X-Content-SHA256": digest, "Content-Type": "audio/x-brain-buddy-test-text" }
   });
   await expectOk(uploadResponse, `PUT audio/0 for ${operationId}`);
   const uploaded = (await uploadResponse.json()) as BrainDumpOperation;
@@ -295,7 +295,9 @@ async function installDeterministicSealedAudioBoundary(page: Page, sealedText: s
       }
       stop(): void {
         this.state = "inactive";
-        this.ondataavailable?.({ data: new Blob([audioText], { type: "audio/webm" }) });
+        this.ondataavailable?.({
+          data: new Blob([audioText], { type: "audio/x-brain-buddy-test-text" })
+        });
         this.onstop?.(new Event("stop"));
       }
     }
