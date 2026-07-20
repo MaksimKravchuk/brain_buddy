@@ -234,6 +234,11 @@ test("clicking a task expands inline task detail in place", async ({ page }) => 
   await expect(page.getByLabel("New subtask title")).toBeVisible();
   await expect(page.getByLabel("New comment")).toBeVisible();
 
+  await test.step("keep the canonical task-row link addressable while the mobile-only title stays hidden", async () => {
+    await expect(page.getByRole("link", { name: "Fix onboarding drop-off" })).toBeVisible();
+    await expect(page.locator("p", { hasText: "Fix onboarding drop-off" })).toBeHidden();
+  });
+
   await page.getByRole("button", { name: "Close" }).click();
   await expect(page.getByRole("heading", { name: "Task detail" })).toHaveCount(0);
 });
