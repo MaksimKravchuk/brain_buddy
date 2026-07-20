@@ -238,6 +238,26 @@ test("clicking a task expands inline task detail in place", async ({ page }) => 
   await expect(page.getByRole("heading", { name: "Task detail" })).toHaveCount(0);
 });
 
+test("mobile task detail pushes the list pane and browser back restores it", async ({ page }) => {
+  await page.setViewportSize({ width: 402, height: 874 });
+  await page.goto("/tasks/next");
+
+  await page.getByRole("link", { name: "Fix onboarding drop-off" }).click();
+  await expect(page.getByRole("button", { name: "Back to list" })).toBeVisible();
+  await expect(page.getByText("Fix onboarding drop-off", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Next actions" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Agent" })).toBeVisible();
+  await expect(page.getByText("Coming soon")).toBeVisible();
+  await expect(page.locator("body")).toHaveScreenshot("claude-design-task-detail-mobile-402x874.png", {
+    animations: "disabled",
+    maxDiffPixelRatio: 0.08
+  });
+
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Back to list" })).toHaveCount(0);
+});
+
 test.describe("mobile task shell at the canonical 375x812 viewport", () => {
   test.use({ viewport: { width: 375, height: 812 } });
 

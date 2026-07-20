@@ -1,14 +1,14 @@
 /* istanbul ignore file -- task shell rendering is covered by route tests and Playwright snapshots. */
-import { AlertTriangle, Check, Edit3, Plus, RotateCcw, X } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import { AlertTriangle, ArrowLeft, Check, Edit3, Plus, RotateCcw, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode, RefObject } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { apiClient } from "../../api/client";
 import { parseOpenTaskState, parseTaskDateView, useProjects, useTags, useTaskDetail, useTaskList } from "../../api/taskHooks";
 import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts, TaskPriority, TaskResponse, TaskSort, TaskSubtaskResponse, TaskUpdateRequest } from "../../api/taskTypes";
-import { AppShell } from "../../components/shell/AppShell";
+import { AppShell, SoonChip } from "../../components/shell/AppShell";
 import { getErrorMessage } from "../../utils/error";
 import { applySmartAddSuggestion, parseSmartAdd, smartAddChips, smartAddSuggestions } from "./smartAdd";
 import type { SmartAddDraft, SmartAddSuggestion } from "./smartAdd";
@@ -36,6 +36,30 @@ function idempotencyKey(action: string): string {
   return `task-shell-${action}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+const desktopMediaQuery = "(min-width: 1024px)";
+
+function useIsDesktop(): boolean {
+  const [isDesktop, setIsDesktop] = useState(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return true;
+    }
+    return window.matchMedia(desktopMediaQuery).matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+    const mediaQueryList = window.matchMedia(desktopMediaQuery);
+    const onChange = () => setIsDesktop(mediaQueryList.matches);
+    onChange();
+    mediaQueryList.addEventListener("change", onChange);
+    return () => mediaQueryList.removeEventListener("change", onChange);
+  }, []);
+
+  return isDesktop;
+}
+
 export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): JSX.Element {
   const params = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -46,12 +70,38 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const taskId = params.taskId;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const isDesktop = useIsDesktop();
   const [newTitle, setNewTitle] = useState("");
   const [newWaitingFor, setNewWaitingFor] = useState("");
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [showCompleted, setShowCompleted] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const rowLinkRefs = useRef<Map<string, HTMLAnchorElement>>(new Map());
+  const detailHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const listHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const previousTaskIdRef = useRef<string | undefined>(undefined);
+  const registerRowLink = (rowTaskId: string, el: HTMLAnchorElement | null) => {
+    if (el) {
+      rowLinkRefs.current.set(rowTaskId, el);
+    } else {
+      rowLinkRefs.current.delete(rowTaskId);
+    }
+  };
+
+  useEffect(() => {
+    if (taskId) {
+      detailHeadingRef.current?.focus();
+    } else if (previousTaskIdRef.current) {
+      const originLink = rowLinkRefs.current.get(previousTaskIdRef.current);
+      if (originLink && document.contains(originLink)) {
+        originLink.focus();
+      } else {
+        listHeadingRef.current?.focus();
+      }
+    }
+    previousTaskIdRef.current = taskId;
+  }, [taskId]);
 
   const sort = parseTaskSort(searchParams.get("sort"));
   const searchQuery = searchParams.get("q") ?? "";
@@ -87,6 +137,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     : tagId
       ? `/tags/${tagId}`
       : `/tasks/${params.state ?? "next"}`;
+  const closeTarget = { pathname: listPath, search: searchParams.toString() };
 
   const createMutation = useMutation({
     mutationFn: (draft: SmartAddDraft) => {
@@ -289,9 +340,10 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       onRenameTag={(tag, name) => tagMutation.mutate({ action: "rename", tag, name })}
       onDeleteTag={(tag) => tagMutation.mutate({ action: "delete", tag })}
     >
-      <section aria-labelledby="task-list-title" className="mx-auto max-w-5xl">
-        <div className="mb-4 flex flex-wrap items-baseline gap-3">
-          <h1 id="task-list-title" className="m-0 text-title font-semibold text-slate-900">
+      <section aria-labelledby="task-list-title" className="mx-auto max-w-[760px]">
+        {isDesktop || !taskId ? (
+          <div className="mb-4 flex flex-wrap items-baseline gap-3">
+          <h1 id="task-list-title" ref={listHeadingRef} tabIndex={-1} className="m-0 text-title font-semibold text-slate-900 outline-none">
             {title}
           </h1>
           <span className="text-xs text-slate-600">{subtitle}</span>
@@ -318,68 +370,74 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
               <option value="title">Title</option>
             </select>
           </label>
-        </div>
+          </div>
+        ) : null}
 
         {mutationError ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{mutationError}</div> : null}
 
-        {hasFrameError ? (
-          <ErrorState
-            message={getErrorMessage(taskQuery.error ?? projectsQuery.error ?? tagsQuery.error)}
-            onRetry={() => {
-              void taskQuery.refetch();
-              void projectsQuery.refetch();
-              void tagsQuery.refetch();
-            }}
-          />
-        ) : taskQuery.isLoading || projectsQuery.isLoading || tagsQuery.isLoading ? (
-          <LoadingState label={title} />
-        ) : tasks.length ? (
-          <TaskList
-            tasks={tasks}
-            projects={projects}
-            tags={tags}
-            taskPathBase={listPath}
-            editingTaskId={editingTaskId}
-            editingTitle={editingTitle}
-            onBeginEdit={(task) => {
-              setEditingTaskId(task.id);
-              setEditingTitle(task.title);
-            }}
-            onCancelEdit={() => {
-              setEditingTaskId(null);
-              setEditingTitle("");
-            }}
-            onComplete={(task) => transitionMutation.mutate({ task, action: "complete" })}
-            onEditTitle={(title) => setEditingTitle(title)}
-            onMoveToNext={(task) => transitionMutation.mutate({ task, action: "move", toState: "next" })}
-            onSaveEdit={(task) => updateMutation.mutate({ task, payload: { title: editingTitle.trim() } })}
-            expandedTaskId={taskId}
-            onCollapse={() => navigate(listPath)}
-            detailTask={detailQuery.data}
-            detailIsLoading={detailQuery.isLoading}
-            detailError={detailQuery.error}
-            onSaveDetail={(task, payload) => detailUpdateMutation.mutate({ task, payload })}
-            onTransitionDetail={(task, action, toState, waitingFor) =>
-              detailTransitionMutation.mutate({ task, action, toState, waitingFor })
-            }
-            onCreateSubtask={(task, title) => subtaskCreateMutation.mutate({ task, title })}
-            onTransitionSubtask={(task, subtask, action) =>
-              subtaskTransitionMutation.mutate({ task, subtask, action })
-            }
-            onCreateComment={(task, body) => commentCreateMutation.mutate({ task, body })}
-          />
-        ) : (
-          <EmptyState state={state} />
-        )}
+        {isDesktop || !taskId ? (
+          hasFrameError ? (
+            <ErrorState
+              message={getErrorMessage(taskQuery.error ?? projectsQuery.error ?? tagsQuery.error)}
+              onRetry={() => {
+                void taskQuery.refetch();
+                void projectsQuery.refetch();
+                void tagsQuery.refetch();
+              }}
+            />
+          ) : taskQuery.isLoading || projectsQuery.isLoading || tagsQuery.isLoading ? (
+            <LoadingState label={title} />
+          ) : tasks.length ? (
+            <TaskList
+              tasks={tasks}
+              projects={projects}
+              tags={tags}
+              taskPathBase={listPath}
+              editingTaskId={editingTaskId}
+              editingTitle={editingTitle}
+              registerRowLink={registerRowLink}
+              onBeginEdit={(task) => {
+                setEditingTaskId(task.id);
+                setEditingTitle(task.title);
+              }}
+              onCancelEdit={() => {
+                setEditingTaskId(null);
+                setEditingTitle("");
+              }}
+              onComplete={(task) => transitionMutation.mutate({ task, action: "complete" })}
+              onEditTitle={(title) => setEditingTitle(title)}
+              onMoveToNext={(task) => transitionMutation.mutate({ task, action: "move", toState: "next" })}
+              onSaveEdit={(task) => updateMutation.mutate({ task, payload: { title: editingTitle.trim() } })}
+              expandedTaskId={taskId}
+              onCollapse={() => navigate(closeTarget)}
+              detailHeadingRef={detailHeadingRef}
+              detailTask={detailQuery.data}
+              detailIsLoading={detailQuery.isLoading}
+              detailError={detailQuery.error}
+              onSaveDetail={(task, payload) => detailUpdateMutation.mutate({ task, payload })}
+              onTransitionDetail={(task, action, toState, waitingFor) =>
+                detailTransitionMutation.mutate({ task, action, toState, waitingFor })
+              }
+              onCreateSubtask={(task, title) => subtaskCreateMutation.mutate({ task, title })}
+              onTransitionSubtask={(task, subtask, action) =>
+                subtaskTransitionMutation.mutate({ task, subtask, action })
+              }
+              onCreateComment={(task, body) => commentCreateMutation.mutate({ task, body })}
+            />
+          ) : (
+            <EmptyState state={state} />
+          )
+        ) : null}
 
-        {taskId && !detailIsInProjection ? (
+        {taskId && (!isDesktop || !detailIsInProjection) ? (
           <TaskDetailPanel
             task={detailQuery.data}
             projects={projects}
             tags={tags}
             isLoading={detailQuery.isLoading}
             error={detailQuery.error}
-            onClose={() => navigate(listPath)}
+            headingRef={detailHeadingRef}
+            onClose={() => navigate(closeTarget)}
             onSave={(task, payload) => detailUpdateMutation.mutate({ task, payload })}
             onTransition={(task, action, toState, waitingFor) =>
               detailTransitionMutation.mutate({ task, action, toState, waitingFor })
@@ -392,7 +450,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
           />
         ) : null}
 
-        {taskQuery.hasNextPage ? (
+        {(isDesktop || !taskId) && taskQuery.hasNextPage ? (
           <div className="mt-3 flex justify-center">
             <button
               type="button"
@@ -405,7 +463,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
           </div>
         ) : null}
 
-        {dateView ? (
+        {!(isDesktop || !taskId) ? null : dateView ? (
           <DateViewCaptureHint />
         ) : (
           <TaskCreator
@@ -452,6 +510,7 @@ function TaskList({
   taskPathBase,
   editingTaskId,
   editingTitle,
+  registerRowLink,
   onBeginEdit,
   onCancelEdit,
   onComplete,
@@ -460,6 +519,7 @@ function TaskList({
   onSaveEdit,
   expandedTaskId,
   onCollapse,
+  detailHeadingRef,
   detailTask,
   detailIsLoading,
   detailError,
@@ -475,6 +535,7 @@ function TaskList({
   taskPathBase: string;
   editingTaskId: string | null;
   editingTitle: string;
+  registerRowLink: (taskId: string, el: HTMLAnchorElement | null) => void;
   onBeginEdit: (task: TaskResponse) => void;
   onCancelEdit: () => void;
   onComplete: (task: TaskResponse) => void;
@@ -483,6 +544,7 @@ function TaskList({
   onSaveEdit: (task: TaskResponse) => void;
   expandedTaskId?: string;
   onCollapse: () => void;
+  detailHeadingRef: RefObject<HTMLHeadingElement>;
   detailTask?: TaskResponse;
   detailIsLoading: boolean;
   detailError: unknown;
@@ -510,6 +572,7 @@ function TaskList({
             detailPath={`${taskPathBase}/${task.id}`}
             isEditing={editingTaskId === task.id}
             editingTitle={editingTitle}
+            registerRowLink={registerRowLink}
             onBeginEdit={onBeginEdit}
             onCancelEdit={onCancelEdit}
             onComplete={onComplete}
@@ -525,6 +588,7 @@ function TaskList({
                 tags={tags}
                 isLoading={detailIsLoading}
                 error={detailError}
+                headingRef={detailHeadingRef}
                 onClose={onCollapse}
                 onSave={onSaveDetail}
                 onTransition={onTransitionDetail}
@@ -547,6 +611,7 @@ function TaskRow({
   detailPath,
   isEditing,
   editingTitle,
+  registerRowLink,
   onBeginEdit,
   onCancelEdit,
   onComplete,
@@ -562,6 +627,7 @@ function TaskRow({
   detailPath: string;
   isEditing: boolean;
   editingTitle: string;
+  registerRowLink: (taskId: string, el: HTMLAnchorElement | null) => void;
   onBeginEdit: (task: TaskResponse) => void;
   onCancelEdit: () => void;
   onComplete: (task: TaskResponse) => void;
@@ -572,13 +638,21 @@ function TaskRow({
   children?: ReactNode;
 }): JSX.Element {
   const isTerminal = task.state === "completed" || task.state === "cancelled";
+  const navigate = useNavigate();
 
   return (
     <article
-      className={`group flex flex-col gap-2 rounded-xl border px-4 py-3 shadow-soft transition hover:shadow-raised ${
+      className={`group flex flex-col gap-2 rounded-[12px] border px-3 py-4 shadow-soft transition hover:shadow-raised ${
         isTerminal ? "border-emerald-100 bg-emerald-50/50" : isExpanded ? "border-slate-200 bg-white shadow-raised" : "border-slate-200 bg-white"
       }`}
       role="listitem"
+      onClick={(event) => {
+        const target = event.target as HTMLElement;
+        if (target.closest("a, button, input, textarea, select, label")) {
+          return;
+        }
+        navigate(detailPath);
+      }}
     >
       <div className="flex min-h-[32px] flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
         {isTerminal ? (
@@ -588,7 +662,7 @@ function TaskRow({
         ) : (
           <button
             type="button"
-            className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border border-[1.5px] border-slate-300 bg-white text-white hover:border-emerald-400 hover:bg-emerald-500"
+            className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border border-[1.5px] border-slate-300 bg-white text-white hover:border-sky-400 hover:bg-sky-500"
             aria-label={`Complete ${task.title}`}
             onClick={() => onComplete(task)}
           >
@@ -617,7 +691,11 @@ function TaskRow({
             <button type="button" className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-600" onClick={onCancelEdit}>Cancel</button>
           </form>
         ) : (
-          <Link to={detailPath} className={`min-w-0 flex-1 truncate text-sm font-medium text-slate-900 hover:text-brand-primary ${isTerminal ? "line-through decoration-emerald-500/70" : ""}`}>
+          <Link
+            ref={(el) => registerRowLink(task.id, el)}
+            to={detailPath}
+            className={`min-w-0 flex-1 truncate text-sm font-medium text-slate-900 hover:text-brand-primary ${isTerminal ? "line-through decoration-emerald-500/70" : ""}`}
+          >
             {task.title}
           </Link>
         )}
@@ -648,7 +726,7 @@ function TaskRow({
           <Chip key={tag.id} variant="neutral">{tagLabel(tag)}</Chip>
         ))}
         {project ? (
-          <span className="shrink-0 truncate text-[11px] text-slate-500 sm:ml-auto">@{project.name.replace(/^@/, "")}</span>
+          <span className="shrink-0 truncate text-[11px] text-slate-500 sm:ml-auto lg:max-w-[160px]">{project.name}</span>
         ) : null}
       </div>
       {children}
@@ -656,12 +734,16 @@ function TaskRow({
   );
 }
 
+const detailFieldClass =
+  "min-h-10 rounded-lg border border-slate-200 px-3 text-sm text-slate-900 outline-none focus:border-brand-primary focus:shadow-ring-focus";
+
 function TaskDetailPanel({
   task,
   projects,
   tags,
   isLoading,
   error,
+  headingRef,
   onClose,
   onSave,
   onTransition,
@@ -674,6 +756,7 @@ function TaskDetailPanel({
   tags: TagResponse[];
   isLoading: boolean;
   error: unknown;
+  headingRef: RefObject<HTMLHeadingElement>;
   onClose: () => void;
   onSave: (task: TaskResponse, payload: Parameters<typeof apiClient.updateTask>[1]) => void;
   onTransition: (task: TaskResponse, action: "move" | "complete" | "reopen" | "cancel", toState?: OpenTaskState, waitingFor?: string) => void;
@@ -682,12 +765,35 @@ function TaskDetailPanel({
   onCreateComment: (task: TaskResponse, body: string) => void;
 }): JSX.Element {
   return (
-    <aside className="mt-3 flex flex-col gap-4 border-t border-slate-200 pt-3" aria-labelledby="task-detail-title">
+    <aside
+      className="-mx-4 -my-5 flex min-h-[calc(100vh-56px)] flex-col gap-[18px] bg-surface-base px-4 py-5 sm:-mx-6 sm:px-6 motion-safe:lg:animate-detail-enter lg:m-0 lg:min-h-0 lg:bg-transparent lg:p-0 lg:pt-3.5 lg:border-t lg:border-slate-200"
+      aria-labelledby="task-detail-title"
+    >
       <div className="flex items-center gap-3">
-        <h2 id="task-detail-title" className="m-0 flex-1 text-sm font-semibold uppercase tracking-wide text-slate-500">
+        <button
+          type="button"
+          aria-label="Back to list"
+          className="-ml-1 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 lg:hidden"
+          onClick={onClose}
+        >
+          <ArrowLeft className="h-5 w-5" aria-hidden />
+        </button>
+        <h2
+          id="task-detail-title"
+          ref={headingRef}
+          tabIndex={-1}
+          className="sr-only m-0 flex-1 text-sm font-semibold uppercase tracking-wide text-slate-500 outline-none lg:not-sr-only"
+        >
           Task detail
         </h2>
-        <button type="button" className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 px-2 text-xs text-slate-600" onClick={onClose}>
+        <p className="m-0 min-w-0 flex-1 truncate text-[20px] font-semibold leading-[1.3] tracking-[-0.015em] text-slate-900 lg:hidden">
+          {task?.title ?? "Task"}
+        </p>
+        <button
+          type="button"
+          className="hidden h-8 items-center gap-1 rounded-lg border border-slate-200 px-2 text-xs text-slate-600 lg:inline-flex"
+          onClick={onClose}
+        >
           <X className="h-3.5 w-3.5" aria-hidden />
           Close
         </button>
@@ -696,9 +802,9 @@ function TaskDetailPanel({
       {isLoading ? <p className="text-sm text-slate-600">Loading task detail…</p> : null}
       {error ? <p role="alert" className="text-sm text-rose-700">{getErrorMessage(error)}</p> : null}
       {task ? (
-        <div className="space-y-5">
+        <div className="flex flex-col gap-[18px]">
           <form
-            className="grid gap-3 md:grid-cols-2"
+            className="grid gap-3 lg:grid-cols-2"
             key={`${task.id}-${task.revision}`}
             onSubmit={(event) => {
               event.preventDefault();
@@ -722,28 +828,28 @@ function TaskDetailPanel({
           >
             <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
               Title
-              <input name="title" aria-label="Title" defaultValue={task.title} className="min-h-10 rounded-lg border border-slate-200 px-3 text-sm text-slate-900" />
+              <input name="title" aria-label="Title" defaultValue={task.title} className={detailFieldClass} />
             </label>
             <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
               Project
-              <select name="project_id" aria-label="Project" defaultValue={task.project_id ?? ""} className="min-h-10 rounded-lg border border-slate-200 px-3 text-sm text-slate-900">
+              <select name="project_id" aria-label="Project" defaultValue={task.project_id ?? ""} className={detailFieldClass}>
                 <option value="">No project</option>
                 {projects.map((project) => (
                   <option key={project.id} value={project.id}>{project.name}</option>
                 ))}
               </select>
             </label>
-            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600 md:col-span-2">
+            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600 lg:col-span-2">
               Details
-              <textarea name="details" aria-label="Details" defaultValue={task.details ?? ""} rows={3} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900" />
+              <textarea name="details" aria-label="Details" defaultValue={task.details ?? ""} rows={3} className={`${detailFieldClass} py-2`} />
             </label>
             <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
               Due date
-              <input name="due_date" aria-label="Due date" type="date" defaultValue={task.due_date ?? ""} className="min-h-10 rounded-lg border border-slate-200 px-3 text-sm text-slate-900" />
+              <input name="due_date" aria-label="Due date" type="date" defaultValue={task.due_date ?? ""} className={detailFieldClass} />
             </label>
             <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
               Priority
-              <select name="priority" aria-label="Priority" defaultValue={task.priority} className="min-h-10 rounded-lg border border-slate-200 px-3 text-sm text-slate-900">
+              <select name="priority" aria-label="Priority" defaultValue={task.priority} className={detailFieldClass}>
                 <option value="none">None</option>
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
@@ -752,7 +858,7 @@ function TaskDetailPanel({
             </label>
             <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
               Waiting for
-              <input name="waiting_for" aria-label="Waiting for" defaultValue={task.waiting_for ?? ""} className="min-h-10 rounded-lg border border-slate-200 px-3 text-sm text-slate-900" />
+              <input name="waiting_for" aria-label="Waiting for" defaultValue={task.waiting_for ?? ""} className={detailFieldClass} />
               <span className="text-[11px] font-normal text-slate-500">Required when moving or reopening to Waiting.</span>
             </label>
             <fieldset className="flex flex-wrap gap-2 text-xs font-medium text-slate-600">
@@ -764,7 +870,7 @@ function TaskDetailPanel({
                 </label>
               ))}
             </fieldset>
-            <div className="flex flex-wrap items-end gap-2 md:col-span-2">
+            <div className="flex flex-wrap items-end gap-2 lg:col-span-2">
               <button type="submit" className="h-10 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white">Save task detail</button>
               {task.state !== "completed" && task.state !== "cancelled" ? (
                 <>
@@ -796,66 +902,80 @@ function TaskDetailPanel({
             </div>
           </form>
 
-          <form
-            className="flex gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const form = new FormData(event.currentTarget);
-              const title = String(form.get("subtask_title") ?? "").trim();
-              if (title) {
-                onCreateSubtask(task, title);
-                event.currentTarget.reset();
-              }
-            }}
-          >
-            <input name="subtask_title" aria-label="New subtask title" className="min-h-10 flex-1 rounded-lg border border-slate-200 px-3 text-sm" placeholder="Add a subtask" />
-            <button type="submit" className="h-10 rounded-lg border border-slate-200 px-3 text-sm">Add subtask</button>
-          </form>
-          <div className="flex flex-col gap-1.5" aria-label="Subtasks">
-            {(task.subtasks ?? []).map((subtask) => {
-              const done = subtask.state !== "open";
-              return (
-                <div key={subtask.id} className="flex items-center gap-2 text-sm">
-                  <button
-                    type="button"
-                    className={`flex h-[14px] w-[14px] shrink-0 items-center justify-center rounded-full border border-[1.5px] ${
-                      done ? "border-brand-primary bg-brand-primary text-white" : "border-slate-300 bg-white text-white"
-                    }`}
-                    aria-label={done ? `Reopen ${subtask.title}` : `Complete ${subtask.title}`}
-                    onClick={() => onTransitionSubtask(task, subtask, done ? "reopen" : "complete")}
-                  >
-                    <Check className="h-2.5 w-2.5" aria-hidden />
-                  </button>
-                  <span className={done ? "text-slate-500 line-through" : "text-slate-800"}>{subtask.title}</span>
-                </div>
-              );
-            })}
+          <div className="flex flex-col gap-2">
+            <h3 className="m-0 text-xs font-semibold uppercase tracking-wide text-slate-500">Subtasks</h3>
+            <div className="flex flex-col gap-1.5" aria-label="Subtasks">
+              {(task.subtasks ?? []).map((subtask) => {
+                const done = subtask.state !== "open";
+                return (
+                  <div key={subtask.id} className="flex items-center gap-2 text-sm">
+                    <button
+                      type="button"
+                      className={`flex h-[14px] w-[14px] shrink-0 items-center justify-center rounded-full border border-[1.5px] ${
+                        done ? "border-brand-primary bg-brand-primary text-white" : "border-slate-300 bg-white text-white"
+                      }`}
+                      aria-label={done ? `Reopen ${subtask.title}` : `Complete ${subtask.title}`}
+                      onClick={() => onTransitionSubtask(task, subtask, done ? "reopen" : "complete")}
+                    >
+                      <Check className="h-2.5 w-2.5" aria-hidden />
+                    </button>
+                    <span className={done ? "text-slate-500 line-through" : "text-slate-800"}>{subtask.title}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <form
+              className="flex w-full gap-2 rounded-lg border border-dashed border-slate-200 bg-slate-50/70 p-2 lg:max-w-[380px]"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const form = new FormData(event.currentTarget);
+                const title = String(form.get("subtask_title") ?? "").trim();
+                if (title) {
+                  onCreateSubtask(task, title);
+                  event.currentTarget.reset();
+                }
+              }}
+            >
+              <input name="subtask_title" aria-label="New subtask title" className="min-h-10 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm" placeholder="Add a subtask" />
+              <button type="submit" className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm">Add subtask</button>
+            </form>
           </div>
 
-          <form
-            className="flex gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const form = new FormData(event.currentTarget);
-              const body = String(form.get("comment_body") ?? "").trim();
-              if (body) {
-                onCreateComment(task, body);
-                event.currentTarget.reset();
-              }
-            }}
-          >
-            <input name="comment_body" aria-label="New comment" className="min-h-10 flex-1 rounded-lg border border-slate-200 px-3 text-sm" placeholder="Add a comment" />
-            <button type="submit" className="h-10 rounded-lg border border-slate-200 px-3 text-sm">Add comment</button>
-          </form>
-          <div className="flex flex-col gap-2" aria-label="Comments">
-            {(task.comments ?? []).map((comment) => (
-              <div key={comment.id} className="flex items-start gap-2">
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-sky-100 text-[10px] font-semibold text-sky-700">
-                  {comment.actor_id.slice(0, 2).toUpperCase()}
-                </span>
-                <p className="m-0 min-w-0 flex-1 text-sm text-slate-700">{comment.body}</p>
-              </div>
-            ))}
+          <div className="flex flex-col gap-2" data-testid="task-detail-agent">
+            <h3 className="m-0 text-xs font-semibold uppercase tracking-wide text-slate-500">Agent</h3>
+            <div className="flex items-center gap-2">
+              <SoonChip />
+              <span className="sr-only">Coming soon</span>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <h3 className="m-0 text-xs font-semibold uppercase tracking-wide text-slate-500">Comments</h3>
+            <div className="flex flex-col gap-2" aria-label="Comments">
+              {(task.comments ?? []).map((comment) => (
+                <div key={comment.id} className="flex items-start gap-2">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-sky-100 text-[10px] font-semibold text-sky-700">
+                    {comment.actor_id.slice(0, 2).toUpperCase()}
+                  </span>
+                  <p className="m-0 min-w-0 flex-1 text-sm text-slate-700">{comment.body}</p>
+                </div>
+              ))}
+            </div>
+            <form
+              className="flex w-full gap-2 rounded-lg border border-dashed border-slate-200 bg-slate-50/70 p-2 lg:max-w-[380px]"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const form = new FormData(event.currentTarget);
+                const body = String(form.get("comment_body") ?? "").trim();
+                if (body) {
+                  onCreateComment(task, body);
+                  event.currentTarget.reset();
+                }
+              }}
+            >
+              <input name="comment_body" aria-label="New comment" className="min-h-10 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm" placeholder="Add a comment" />
+              <button type="submit" className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm">Add comment</button>
+            </form>
           </div>
         </div>
       ) : null}
