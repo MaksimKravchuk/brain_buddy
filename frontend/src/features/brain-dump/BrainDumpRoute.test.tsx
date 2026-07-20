@@ -1460,6 +1460,7 @@ describe("BrainDumpRoute", () => {
       status: "retryable_error",
       revision: 7,
       proposals: [proposal("proposal_1", 1, "Renew car insurance")],
+      available_recovery_actions: ["retry", "cancel"],
       provider_runs: [
         {
           id: "provider_run_1",
@@ -1512,14 +1513,15 @@ describe("BrainDumpRoute", () => {
       provider_runs: [
         {
           id: "provider_run_terminal",
-          role: "accurate_stt",
+          role: "reconciler",
           status: "terminal_error",
           checkpoint: "sealed",
           attempt: 3,
           recovery_count: 2,
-          error: "audio could not be transcribed"
+          error: "proposals could not be reconciled"
         }
-      ]
+      ],
+      available_recovery_actions: ["review_provisional", "cancel"]
     });
     const provisionalReview = operation({
       ...terminal,
@@ -1540,8 +1542,8 @@ describe("BrainDumpRoute", () => {
 
     renderBrainDump("/brain-dump/brain_dump_terminal/review");
 
-    expect(await screen.findByText("Accurate transcription failed")).toBeInTheDocument();
-    expect(screen.getByText("audio could not be transcribed")).toBeInTheDocument();
+    expect(await screen.findByText("Task reconciliation failed")).toBeInTheDocument();
+    expect(screen.getByText("proposals could not be reconciled")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delete recording" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Review provisional tasks" })).toBeEnabled();
     await userEvent.click(screen.getByRole("button", { name: "Review provisional tasks" }));
@@ -1551,6 +1553,33 @@ describe("BrainDumpRoute", () => {
       expect.stringContaining("/brain_dump_terminal/review_provisional"),
       expect.objectContaining({ method: "POST" })
     );
+  });
+
+  it("hides provisional review when the backend does not authorize it", async () => {
+    const terminal = operation({
+      id: "brain_dump_terminal_stt",
+      status: "terminal_error",
+      proposals: [proposal("proposal_preview", 1, "Call the dentist")],
+      available_recovery_actions: ["cancel"],
+      provider_runs: [
+        {
+          id: "provider_run_terminal_stt",
+          role: "accurate_stt",
+          status: "terminal_error",
+          checkpoint: "sealed",
+          attempt: 1,
+          recovery_count: 0,
+          error: "audio could not be transcribed"
+        }
+      ]
+    });
+    fetchMock.mockImplementation(() => jsonResponse(terminal));
+
+    renderBrainDump("/brain-dump/brain_dump_terminal_stt/review");
+
+    expect(await screen.findByText("Accurate transcription failed")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Review provisional tasks" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete recording" })).toBeEnabled();
   });
 
   it("shows fallback terminal copy and preserves the recovery surface when deletion fails", async () => {
@@ -1756,6 +1785,7 @@ describe("BrainDumpRoute", () => {
       id: "brain_dump_retryable_fallback",
       status: "retryable_error",
       revision: 7,
+      available_recovery_actions: ["retry", "cancel"],
       provider_runs: undefined
     });
     fetchMock.mockImplementation((input, init) => {

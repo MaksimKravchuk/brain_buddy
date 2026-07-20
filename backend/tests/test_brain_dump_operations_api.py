@@ -314,27 +314,34 @@ def test_retention_sweep_never_purges_a_retryable_error_operation(api_client) ->
 
 
 @pytest.mark.parametrize(
-    ("provider_error", "expected_status", "expected_code"),
+    ("provider_error", "expected_status", "expected_code", "expected_actions"),
     [
         (
             ProviderRetryableError("temporary outage"),
             "retryable_error",
             "PROVIDER_ERROR_UNSPECIFIED",
+            ["retry", "cancel"],
         ),
         (
             ProviderTerminalError("provider rejected"),
             "terminal_error",
             "PROVIDER_ERROR_UNSPECIFIED",
+            ["cancel"],
         ),
         (
             ValidationFailure("invalid model output"),
             "retryable_error",
             "RECONCILER_VALIDATION_REJECTED",
+            ["retry", "cancel"],
         ),
     ],
 )
 def test_seal_persists_semantic_reconciler_failures_for_recovery(
-    api_client, provider_error: Exception, expected_status: str, expected_code: str
+    api_client,
+    provider_error: Exception,
+    expected_status: str,
+    expected_code: str,
+    expected_actions: list[str],
 ) -> None:
     from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
 
@@ -360,6 +367,7 @@ def test_seal_persists_semantic_reconciler_failures_for_recovery(
     assert persisted_run["status"] == expected_status
     assert persisted_run["error"] == expected_code
     assert persisted_run["error_code"] == expected_code
+    assert sealed.json()["available_recovery_actions"] == expected_actions
     assert str(provider_error) not in sealed.text
 
 
@@ -3266,6 +3274,10 @@ def test_validation_failure_uses_bounded_retry_then_preserves_proposals_terminal
     assert fetched_after_terminal.status_code == 200
     assert fetched_after_terminal.json()["status"] == "terminal_error"
     assert fetched_after_terminal.json()["segments"] == final_body["segments"]
+    assert fetched_after_terminal.json()["available_recovery_actions"] == [
+        "review_provisional",
+        "cancel",
+    ]
 
     reviewed = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/review_provisional",

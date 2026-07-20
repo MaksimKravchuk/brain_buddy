@@ -410,6 +410,9 @@ class BrainDumpOperationResponse(StrictBaseModel):
         "none", "provisional_only", "accurate", "conflicted"
     ] = "none"
     committable: bool = False
+    available_recovery_actions: list[
+        Literal["retry", "review_provisional", "cancel"]
+    ] = Field(default_factory=list)
     provider_runs: list[BrainDumpProviderRunResponse] = Field(default_factory=list)
     proposal_patches: list[BrainDumpProposalPatchResponse] = Field(default_factory=list)
     action_receipts: list[BrainDumpActionReceiptResponse] = Field(default_factory=list)

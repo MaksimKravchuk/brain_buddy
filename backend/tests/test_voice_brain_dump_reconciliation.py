@@ -1774,6 +1774,84 @@ def test_openai_reconciler_preserves_verb_normalization_when_concrete_identity_m
     assert result.patches[0].title == "Phone Alice"
 
 
+@pytest.mark.parametrize(
+    ("operation", "source_title", "invented_title", "predecessor_ids"),
+    [
+        ("add", "Email Alice", "Fire Alice", []),
+        ("update", "Email Alice", "Fire Alice", []),
+        ("split", "Buy milk", "Transfer milk", ["proposal_existing"]),
+        (
+            "merge",
+            "Купить молоко",
+            "Украсть молоко",
+            ["proposal_existing", "proposal_other"],
+        ),
+        ("supersede", "Написать Alice", "Заблокировать Alice", ["proposal_existing"]),
+    ],
+)
+def test_openai_reconciler_rejects_unentailed_actions_in_every_title_patch_shape(
+    operation: str,
+    source_title: str,
+    invented_title: str,
+    predecessor_ids: list[str],
+) -> None:
+    """Unknown EN/RU/mixed verbs and structural patch shapes must not bypass
+    same-clause action entailment. An uncertain action stays a conflict for
+    explicit user editing instead of becoming a committable invented task."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text=source_title,
+        stability="stable",
+        provider_role="accurate",
+    )
+    existing = ReconciledProposal(
+        id="proposal_existing",
+        title=source_title,
+        source_segment_ids=[segment.id],
+        status="provisional",
+        title_revision=1,
+    )
+    other = ReconciledProposal(
+        id="proposal_other",
+        title=source_title,
+        source_segment_ids=[segment.id],
+        status="provisional",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": operation,
+                    "proposal_id": (
+                        "proposal_existing" if operation == "update" else None
+                    ),
+                    "title": invented_title,
+                    "source_segment_ids": [segment.id],
+                    "predecessor_ids": predecessor_ids,
+                    "base_revision": 1 if operation == "update" else None,
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(ValidationFailure, match="one cited transcript clause"):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id=f"operation_unentailed_{operation}",
+                transcript_segments=[segment],
+                active_proposals=[existing, other],
+                user_locks={},
+            )
+        )
+
+
 def test_openai_reconciler_rejects_a_positive_removal_without_destructive_language() -> (
     None
 ):
@@ -1893,6 +1971,9 @@ def test_openai_reconciler_accepts_a_removal_with_explicit_destructive_language(
         "Do not delete Buy milk",
         "Don't delete Buy milk",
         "Не удаляй Купить молоко",
+        "Не надо редактировать задачу купить молоко",
+        "Не нужно менять задачу купить молоко",
+        "Не надо edit задачу купить молоко",
     ],
 )
 def test_openai_reconciler_rejects_a_negated_destructive_removal(source_text: str) -> None:

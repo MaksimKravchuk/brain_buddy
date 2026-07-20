@@ -394,7 +394,7 @@ class OpenAITextReconciler:
         OpenAITextReconciler._assert_semantic_support(
             draft.title,
             source_text,
-            enforce_action=draft.operation in {"add", "update"},
+            enforce_action=True,
         )
         if draft.operation == "split" and len(draft.predecessor_ids) != 1:
             raise ValidationFailure("Split requires exactly one predecessor.")
@@ -451,6 +451,9 @@ class OpenAITextReconciler:
             ("не", "требуется"),
         }
     )
+    _TASK_REFERENCE_TERMS = frozenset(
+        {"task", "tasks", "задача", "задачи", "задачу", "задачей"}
+    )
     # A negation marker scopes over only the destructive term(s) it directly
     # precedes: "Do not delete Buy milk" must never authorize removing "Buy
     # milk" just because "delete" appears somewhere in the sentence. This is
@@ -479,41 +482,10 @@ class OpenAITextReconciler:
 
     # Action changes are material intent changes. The reconciler may normalize
     # only an explicitly listed equivalent, never infer that matching objects
-    # make arbitrary verbs interchangeable.
+    # make arbitrary verbs interchangeable. Action recognition itself must not
+    # use a finite vocabulary: an unknown verb is still an action claim and may
+    # be accepted only when the same cited clause contains that exact token.
     _ACTION_NORMALIZATION_PAIRS = frozenset({frozenset({"call", "phone"})})
-    _MATERIAL_ACTION_TERMS = frozenset(
-        {
-            "add",
-            "buy",
-            "call",
-            "delete",
-            "merge",
-            "pay",
-            "phone",
-            "remove",
-            "replace",
-            "save",
-            "schedule",
-            "split",
-            "transfer",
-            "write",
-            "купить",
-            "украсть",
-            "удалить",
-            "удалять",
-        }
-    )
-
-    @staticmethod
-    def _first_material_action(tokens: list[str]) -> str | None:
-        return next(
-            (
-                token
-                for token in tokens
-                if token in OpenAITextReconciler._MATERIAL_ACTION_TERMS
-            ),
-            None,
-        )
 
     @staticmethod
     def _actions_are_equivalent(proposed: str, source: str) -> bool:
@@ -550,6 +522,15 @@ class OpenAITextReconciler:
             ):
                 return True
         if saw_destructive_term:
+            return False
+        # Bare "not needed" / "не надо" may describe the item itself, but it
+        # may also negate an instruction about the item ("не надо менять
+        # задачу" = do not edit the task). A task-reference noun makes that
+        # scope ambiguous, so it cannot authorize removal without an explicit
+        # affirmative destructive term.
+        if any(
+            token in OpenAITextReconciler._TASK_REFERENCE_TERMS for token in tokens
+        ):
             return False
         return any(
             pair in OpenAITextReconciler._DESTRUCTIVE_NEGATION_PAIRS
@@ -703,7 +684,7 @@ class OpenAITextReconciler:
 
         clauses = OpenAITextReconciler._source_clauses(source_text)
         title_tokens = re.findall(r"[^\W\d_]+", title.casefold(), flags=re.UNICODE)
-        title_action = OpenAITextReconciler._first_material_action(title_tokens)
+        title_action = title_tokens[0] if title_tokens else None
         clause_supports_title = []
         for clause in clauses:
             clause_entities = OpenAITextReconciler._named_entities(
@@ -712,20 +693,23 @@ class OpenAITextReconciler:
             if title_entities <= clause_entities:
                 clause_supports_title.append(clause)
 
-        action_supported = not enforce_action or destructive or title_action is None or any(
-            source_action is not None
-            and OpenAITextReconciler._actions_are_equivalent(title_action, source_action)
+        action_supported = not enforce_action or destructive or any(
+            OpenAITextReconciler._actions_are_equivalent(title_action, source_token)
             for clause in clause_supports_title
-            if (
-                clause_tokens := re.findall(
-                    r"[^\W\d_]+", clause.casefold(), flags=re.UNICODE
-                )
-            )
-            if (
-                source_action := OpenAITextReconciler._first_material_action(
-                    clause_tokens
-                )
-            )
+            for clause_tokens in [
+                re.findall(r"[^\W\d_]+", clause.casefold(), flags=re.UNICODE)
+            ]
+            for anchor_indexes in [
+                [
+                    index
+                    for index, token in enumerate(clause_tokens)
+                    if token in title_entities
+                ]
+            ]
+            for source_token in clause_tokens[
+                : min(anchor_indexes) if anchor_indexes else len(clause_tokens)
+            ]
+            if title_action is not None
         )
         if not clause_supports_title or not action_supported:
             raise ValidationFailure(

@@ -226,6 +226,7 @@ export interface BrainDumpOperationResponse {
   working_artifacts_expires_at?: string | null;
   reconciliation_quality?: "none" | "provisional_only" | "accurate" | "conflicted";
   committable?: boolean;
+  available_recovery_actions?: Array<"retry" | "review_provisional" | "cancel">;
   provider_runs?: Array<{
     id: string;
     role: "accurate_stt" | "reconciler";

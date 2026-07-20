@@ -642,19 +642,23 @@ function RecoverySurface({
   onReview: () => void;
   onRetry: () => void;
 }): JSX.Element {
-  const retryable = operation.status === "retryable_error";
+  const availableActions = new Set(operation.available_recovery_actions ?? []);
+  const retryable = availableActions.has("retry");
+  const providerRuns = operation.provider_runs ?? [];
+  const providerRole = providerRuns[providerRuns.length - 1]?.role;
+  const stageName = providerRole === "reconciler" ? "Task reconciliation" : "Accurate transcription";
   return (
     <div className="flex min-h-screen items-center justify-center bg-surface-base px-4 text-slate-900">
       <section role="alert" className="w-full max-w-md rounded-2xl border border-amber-200 bg-white p-6 shadow-floating">
         <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-amber-700">Voice brain dump</p>
-        <h1 className="mt-2 text-xl font-semibold">{retryable ? "Accurate transcription paused" : "Accurate transcription failed"}</h1>
+        <h1 className="mt-2 text-xl font-semibold">{`${stageName} ${retryable ? "paused" : "failed"}`}</h1>
         <p className="mt-2 text-sm text-slate-600">
           {providerError ?? (retryable ? "The provider can be retried from the sealed recording." : "The recording could not be processed accurately.")}
         </p>
         {error ? <p className="mt-3 text-sm text-rose-700">{error}</p> : null}
         <div className="mt-5 flex flex-col gap-2">
           {retryable ? <button type="button" className="h-11 rounded-xl bg-brand-primary px-4 text-sm font-semibold text-white" onClick={onRetry}>Retry accurate transcription</button> : null}
-          {operation.proposals.some((proposal) => !proposal.deleted) ? <button type="button" className="h-11 rounded-xl border border-slate-200 px-4 text-sm font-medium text-slate-700" onClick={onReview}>Review provisional tasks</button> : null}
+          {availableActions.has("review_provisional") ? <button type="button" className="h-11 rounded-xl border border-slate-200 px-4 text-sm font-medium text-slate-700" onClick={onReview}>Review provisional tasks</button> : null}
           <button type="button" className="h-11 rounded-xl border border-rose-200 px-4 text-sm font-medium text-rose-700" onClick={onDelete}>Delete recording</button>
         </div>
       </section>
