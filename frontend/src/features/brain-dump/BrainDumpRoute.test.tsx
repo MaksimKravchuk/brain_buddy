@@ -417,7 +417,8 @@ describe("BrainDumpRoute", () => {
           this.ondataavailable?.({
             data: {
               size: 14,
-              arrayBuffer: async () => new TextEncoder().encode("original audio").buffer
+              type: "audio/webm",
+              arrayBuffer: async () => new ArrayBuffer(14)
             } as Blob
           });
           this.onstop?.(new Event("stop"));
@@ -431,7 +432,9 @@ describe("BrainDumpRoute", () => {
         return jsonResponse(consentedOperation(), 201);
       }
       if (url.endsWith("/brain_dump_1/audio/0")) {
-        uploadedHash = new Headers(init?.headers).get("X-Content-SHA256") ?? "";
+        const headers = new Headers(init?.headers);
+        uploadedHash = headers.get("X-Content-SHA256") ?? "";
+        expect(headers.get("Content-Type")).toBe("audio/webm");
         return jsonResponse(consentedOperation({ revision: 2, audio_chunks: [{ chunk_number: 0, sha256: uploadedHash, size_bytes: 14 }] }));
       }
       if (url.endsWith("/brain_dump_1/seal")) {

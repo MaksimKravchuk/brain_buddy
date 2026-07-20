@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from app.core.config import VoiceAudioLimits
 from app.exceptions import ConflictError, NotFoundError, ValidationFailure
 from app.modules.tasks import TaskRepository, TaskService
 from app.modules.tasks.domain import (
@@ -65,6 +66,9 @@ def _voice_service(data_dir: Path, **kwargs: object) -> VoiceBrainDumpService:
     task_service = TaskService(TaskRepository(data_dir))
     return VoiceBrainDumpService(
         OperationRepository(data_dir),
+        audio_limits=VoiceAudioLimits(
+            allowed_mime_types=frozenset({"audio/x-brain-buddy-test-text"})
+        ),
         task_port=InProcessTaskPort(task_service.create_native_inbox_task),
         **kwargs,
     )
@@ -1556,6 +1560,7 @@ def _start_and_upload(
         b"audio",
         owner_id=OWNER,
         content_sha256=hashlib.sha256(b"audio").hexdigest(),
+        content_type="audio/x-brain-buddy-test-text",
     )
 
 

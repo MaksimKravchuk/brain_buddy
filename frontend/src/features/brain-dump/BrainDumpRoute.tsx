@@ -78,7 +78,6 @@ export function BrainDumpRoute(): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [lastTranscript, setLastTranscript] = useState("");
   const [savedCount, setSavedCount] = useState<number | null>(null);
-  const [showProvisionalReview, setShowProvisionalReview] = useState(false);
   const [consentWithdrawnMidCapture, setConsentWithdrawnMidCapture] = useState(false);
   const [languageMode, setLanguageMode] = useState<LanguageMode>("ru-en");
   const [externalProcessingAllowed, setExternalProcessingAllowed] = useState(false);
@@ -264,7 +263,8 @@ export function BrainDumpRoute(): JSX.Element {
           started.id,
           chunkNumber,
           bytes,
-          await sha256(bytes)
+          await sha256(bytes),
+          event.data.type || recorder.mimeType
         );
         applyOperation(updated);
       });
@@ -563,7 +563,7 @@ export function BrainDumpRoute(): JSX.Element {
     return <ProcessingSurface error={error} operation={operation} proposals={activeProposals} />;
   }
 
-  if (operation && (operation.status === "retryable_error" || operation.status === "terminal_error") && !showProvisionalReview) {
+  if (operation && (operation.status === "retryable_error" || operation.status === "terminal_error")) {
     const providerRuns = operation.provider_runs ?? [];
     const providerError = providerRuns[providerRuns.length - 1]?.error ?? null;
     return (

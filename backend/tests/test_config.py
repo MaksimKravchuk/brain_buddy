@@ -62,6 +62,7 @@ def test_get_config_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     assert config.environment.value == "development"
     assert config.data_dir == tmp_path.resolve()
     assert config.data.schema_version == DEFAULT_SCHEMA_VERSION
+    assert "audio/x-brain-buddy-test-text" not in config.voice.audio_limits.allowed_mime_types
 
 
 def test_voice_stt_configuration_is_bounded_and_resolves_credentials(

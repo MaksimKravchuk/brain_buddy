@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from pathlib import Path
+from typing import Any
 
 import allure
 import pytest
@@ -23,6 +24,17 @@ TEST_USER_EMAIL = "primary@example.com"
 TEST_USER_PASSWORD = "correct-horse-battery-staple"
 SECOND_USER_EMAIL = "secondary@example.com"
 SECOND_USER_PASSWORD = "another-horse-battery-staple"
+
+
+class BrainBuddyTestClient(TestClient):
+    """Declare the deterministic text-audio fixture MIME on test uploads."""
+
+    def put(self, url: str, **kwargs: Any):  # type: ignore[no-untyped-def, override]
+        if "/brain-dump-operations/" in url and "/audio/" in url:
+            headers = dict(kwargs.get("headers") or {})
+            headers.setdefault("Content-Type", "audio/x-brain-buddy-test-text")
+            kwargs["headers"] = headers
+        return super().put(url, **kwargs)
 
 
 @pytest.fixture(autouse=True)
@@ -173,7 +185,7 @@ def _build_authenticated_client(
     invite_code = f"invite_{subdir}"
     container.invite_repo.create(Invite(code=invite_code, created_at=utcnow()))
 
-    client = TestClient(app)
+    client = BrainBuddyTestClient(app)
     resp = client.post(
         "/api/auth/signup",
         json={
@@ -227,7 +239,7 @@ def second_api_client(
     container.invite_repo.create(Invite(code=first_code, created_at=utcnow()))
     container.invite_repo.create(Invite(code=second_code, created_at=utcnow()))
 
-    client_a = TestClient(app)
+    client_a = BrainBuddyTestClient(app)
     resp_a = client_a.post(
         "/api/auth/signup",
         json={
@@ -238,7 +250,7 @@ def second_api_client(
     )
     assert resp_a.status_code == 201, resp_a.text
 
-    client_b = TestClient(app)
+    client_b = BrainBuddyTestClient(app)
     resp_b = client_b.post(
         "/api/auth/signup",
         json={
@@ -268,7 +280,7 @@ def anonymous_api_client(
     monkeypatch.setenv("BRAIN_BUDDY_ENV", "test")
     get_config.cache_clear()
     app = create_app()
-    client = TestClient(app)
+    client = BrainBuddyTestClient(app)
     yield client
     client.close()
     get_config.cache_clear()

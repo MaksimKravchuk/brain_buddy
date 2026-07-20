@@ -35,6 +35,7 @@ from app.schemas.tasks import (
 from app.utils.identifiers import generate_id
 from app.utils.time import utcnow
 
+from .audio_media import canonical_audio_mime_type, inspect_audio
 from .confirmation import confirm_native_inbox_actions
 from .domain import (
     BrainDumpActionReceiptDocument,
@@ -541,6 +542,7 @@ class VoiceBrainDumpService:
         *,
         owner_id: str,
         content_sha256: str,
+        content_type: str,
     ) -> BrainDumpOperationDocument:
         # Defense in depth: the API layer already enforces MIME type,
         # declared Content-Length, and a bounded stream read before this is
@@ -550,6 +552,15 @@ class VoiceBrainDumpService:
             raise ValidationFailure(
                 "AUDIO_CHUNK_TOO_LARGE: audio chunk exceeds the configured "
                 "per-chunk byte limit."
+            )
+        normalized_content_type = canonical_audio_mime_type(content_type)
+        if normalized_content_type not in {
+            canonical_audio_mime_type(value)
+            for value in self.audio_limits.allowed_mime_types
+        }:
+            raise ValidationFailure(
+                "AUDIO_CHUNK_MIME_TYPE_UNSUPPORTED: audio chunk content type is "
+                "not an allowed audio MIME type."
             )
         actual_sha256 = hashlib.sha256(content).hexdigest()
         if actual_sha256 != content_sha256:
@@ -571,7 +582,7 @@ class VoiceBrainDumpService:
             if existing is not None:
                 if existing.sha256 != actual_sha256 or existing.size_bytes != len(
                     content
-                ):
+                ) or existing.mime_type != normalized_content_type:
                     raise ConflictError(
                         "Brain dump audio chunk",
                         str(chunk_number),
@@ -602,10 +613,32 @@ class VoiceBrainDumpService:
                     "AUDIO_TOTAL_BYTES_EXCEEDED: operation audio would exceed "
                     "the configured total-byte limit."
                 )
-            estimated_duration_seconds = (
-                len(operation.audio_chunks) + 1
-            ) * self.audio_limits.assumed_chunk_duration_seconds
-            if estimated_duration_seconds > self.audio_limits.max_duration_seconds:
+            if chunk_number != len(operation.audio_chunks):
+                raise ValidationFailure(
+                    "AUDIO_CHUNK_SEQUENCE_INVALID: audio chunks must be uploaded in order."
+                )
+            fixture_audio = normalized_content_type == "audio/x-brain-buddy-test-text"
+            if fixture_audio:
+                duration_seconds = (
+                    len(operation.audio_chunks) + 1
+                ) * self.audio_limits.assumed_chunk_duration_seconds
+            else:
+                existing_audio = self.operation_repo.load_brain_dump_audio_chunks(
+                    owner_id=owner_id,
+                    operation_id=operation_id,
+                    chunks=[
+                        (chunk.chunk_number, chunk.sha256)
+                        for chunk in sorted(
+                            operation.audio_chunks, key=lambda item: item.chunk_number
+                        )
+                    ],
+                )
+                inspected = inspect_audio(
+                    existing_audio + content,
+                    declared_mime_type=normalized_content_type,
+                )
+                duration_seconds = inspected.duration_seconds
+            if duration_seconds > self.audio_limits.max_duration_seconds:
                 raise ValidationFailure(
                     "AUDIO_DURATION_LIMIT_EXCEEDED: operation audio would "
                     "exceed the configured maximum recording duration."
@@ -617,6 +650,8 @@ class VoiceBrainDumpService:
                     chunk_number=chunk_number,
                     sha256=actual_sha256,
                     size_bytes=len(content),
+                    mime_type=normalized_content_type,
+                    cumulative_duration_seconds=duration_seconds,
                     received_at=now,
                 ),
             ]
@@ -709,9 +744,35 @@ class VoiceBrainDumpService:
                     "AUDIO_TOTAL_BYTES_EXCEEDED: sealed manifest exceeds the "
                     "configured total-byte limit."
                 )
-            sealed_duration_seconds = (
-                len(consumed_chunks) * self.audio_limits.assumed_chunk_duration_seconds
+            fixture_audio = all(
+                chunk.mime_type == "audio/x-brain-buddy-test-text"
+                for chunk in consumed_chunks
             )
+            if fixture_audio:
+                sealed_duration_seconds = (
+                    len(consumed_chunks)
+                    * self.audio_limits.assumed_chunk_duration_seconds
+                )
+            else:
+                mime_types = {chunk.mime_type for chunk in consumed_chunks}
+                if None in mime_types or len(mime_types) != 1:
+                    raise ValidationFailure(
+                        "AUDIO_CHUNK_FORMAT_MISMATCH: sealed chunks do not share one verified MIME type."
+                    )
+                sealed_audio = self.operation_repo.load_brain_dump_audio_chunks(
+                    owner_id=owner_id,
+                    operation_id=operation.id,
+                    chunks=[
+                        (chunk.chunk_number, chunk.sha256)
+                        for chunk in sorted(
+                            consumed_chunks, key=lambda item: item.chunk_number
+                        )
+                    ],
+                )
+                sealed_duration_seconds = inspect_audio(
+                    sealed_audio,
+                    declared_mime_type=cast(str, next(iter(mime_types))),
+                ).duration_seconds
             if sealed_duration_seconds > self.audio_limits.max_duration_seconds:
                 raise ValidationFailure(
                     "AUDIO_DURATION_LIMIT_EXCEEDED: sealed manifest exceeds "
