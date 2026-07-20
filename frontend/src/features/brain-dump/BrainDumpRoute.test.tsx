@@ -1235,6 +1235,41 @@ describe("BrainDumpRoute", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "Delete audio now" })).not.toBeInTheDocument());
   });
 
+  it("enables Save for an explicitly reviewed provisional operation", async () => {
+    const reviewed = consentedOperation({
+      id: "brain_dump_reviewed_provisional",
+      status: "awaiting_confirmation",
+      revision: 5,
+      committable: true,
+      reconciliation_quality: "provisional_only",
+      proposals: [proposal("proposal_reviewed", 1, "Call the dentist")]
+    });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_reviewed_provisional") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(reviewed);
+      }
+      if (url.endsWith("/brain_dump_reviewed_provisional/commit")) {
+        expect(init?.method).toBe("POST");
+        expect(JSON.parse(String(init?.body))).toEqual({ expected_revision: 5 });
+        return jsonResponse(operation({
+          ...reviewed,
+          status: "completed",
+          revision: 6,
+          committed_task_ids: ["task_reviewed"]
+        }));
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_reviewed_provisional/review");
+
+    const save = await screen.findByRole("button", { name: "Save 1 to inbox" });
+    expect(save).toBeEnabled();
+    await userEvent.click(save);
+    expect(await screen.findByText("Saved 1 task to Inbox")).toBeInTheDocument();
+  });
+
   it("shows schema-v2 processing stages before editable review", async () => {
     const improving = operation({
       id: "brain_dump_processing",

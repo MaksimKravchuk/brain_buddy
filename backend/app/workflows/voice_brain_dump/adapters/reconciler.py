@@ -550,10 +550,15 @@ class OpenAITextReconciler:
     def _action_predicate(tokens: list[str]) -> tuple[str | None, bool, int | None]:
         """Return the first lexical predicate, its polarity, and token index."""
 
-        negated = False
+        # Polarity can be preposed (``do not delete``) or postposed in natural
+        # speech (``удалять не надо``, ``delete never``). Clauses are split
+        # conservatively before this helper is called, so any local marker
+        # governs this predicate group.
+        negated = any(
+            token in OpenAITextReconciler._NEGATION_MARKERS for token in tokens
+        )
         for index, token in enumerate(tokens):
             if token in OpenAITextReconciler._NEGATION_MARKERS:
-                negated = True
                 continue
             if token in OpenAITextReconciler._ACTION_PREFIX_TERMS:
                 continue
@@ -579,14 +584,14 @@ class OpenAITextReconciler:
             for token in re.findall(r"[^\W\d_]+", source_text, flags=re.UNICODE)
         ]
         saw_destructive_term = False
-        for index, token in enumerate(tokens):
+        clause_is_negated = any(
+            token in OpenAITextReconciler._NEGATION_MARKERS for token in tokens
+        )
+        for token in tokens:
             if token not in OpenAITextReconciler._DESTRUCTIVE_SINGLE_TERMS:
                 continue
             saw_destructive_term = True
-            if not any(
-                preceding in OpenAITextReconciler._NEGATION_MARKERS
-                for preceding in tokens[:index]
-            ):
+            if not clause_is_negated:
                 return True
         if saw_destructive_term:
             return False
@@ -614,8 +619,9 @@ class OpenAITextReconciler:
         separating ``schedule meeting and call dentist``. Oxford-comma spans
         are expanded only when their local shape unambiguously shares one
         predicate (``buy milk, bread, and eggs``) or one target (``split,
-        merge, and remove tasks``). Multiword members remain separate command
-        groups, so their predicates and targets cannot be recombined.
+        merge, and remove tasks``). A multiword target is expanded only in the
+        conservative shared-predicate shape documented below; ambiguous members
+        remain separate command groups so predicates and targets cannot rebind.
         """
 
         sentences: list[str] = []
@@ -630,6 +636,22 @@ class OpenAITextReconciler:
 
         def words(value: str) -> list[str]:
             return re.findall(r"[^\W\d_]+", value, flags=re.UNICODE)
+
+        conjunction = re.compile(
+            r"\b(?:and|then|but|и|затем|но)\b(?=\s+[^\W\d_]+\s+[^\W\d_]+)",
+            flags=re.IGNORECASE | re.UNICODE,
+        )
+
+        def split_compound(value: str) -> list[str]:
+            clauses: list[str] = []
+            clause_start = 0
+            for match in conjunction.finditer(value):
+                if value[clause_start : match.start()].strip():
+                    clauses.append(value[clause_start : match.start()].strip())
+                clause_start = match.end()
+            if value[clause_start:].strip():
+                clauses.append(value[clause_start:].strip())
+            return clauses
 
         comma_groups: list[str] = []
         for sentence in sentences:
@@ -647,31 +669,48 @@ class OpenAITextReconciler:
                 count=1,
                 flags=re.IGNORECASE | re.UNICODE,
             )
+            # Split an earlier independent command before expanding the local
+            # Oxford list. The list in ``email team and fire Bob, Alice, and
+            # Carol`` is anchored to ``fire Bob``, never to ``email team``.
+            compound_prefix = split_compound(parts[0])
+            if len(compound_prefix) > 1:
+                parts = [compound_prefix[-1], *parts[1:]]
+                comma_groups.extend(compound_prefix[:-1])
             token_groups = [words(part) for part in parts]
 
-            # Local target list: one complete command followed by at least two
-            # one-token targets. Preserve any earlier comma-separated commands.
-            trailing_targets = 0
-            for tokens in reversed(token_groups):
-                if len(tokens) != 1:
-                    break
-                trailing_targets += 1
-            target_anchor = len(parts) - trailing_targets - 1
-            if trailing_targets >= 2 and len(token_groups[target_anchor]) >= 2:
-                comma_groups.extend(parts[:target_anchor])
-                anchor = parts[target_anchor]
-                anchor_tokens = [token.casefold() for token in token_groups[target_anchor]]
+            # Multiword target members are accepted only when the list also
+            # contains a one-word target and no multiword member carries a
+            # proper-name predicate/object signal. This admits ``buy milk,
+            # orange juice, and eggs`` without reopening ``fire Bob, email
+            # Alice, and schedule Carol`` cross-predicate rebinding.
+            trailing_groups = token_groups[1:]
+            target_list = (
+                len(trailing_groups) >= 2
+                and len(trailing_groups[-1]) == 1
+                and all(
+                    tokens
+                    and (
+                        len(tokens) == 1
+                        or not OpenAITextReconciler._named_entities(part)
+                    )
+                    for part, tokens in zip(parts[1:], trailing_groups, strict=True)
+                )
+                and len(token_groups[0]) >= 2
+            )
+            if target_list:
+                anchor = parts[0]
+                anchor_tokens = [token.casefold() for token in token_groups[0]]
                 action, action_negated, _ = OpenAITextReconciler._action_predicate(
                     anchor_tokens
                 )
                 comma_groups.append(anchor)
-                if action is not None and not action_negated:
+                if action is not None:
+                    synthetic_action = f"not {action}" if action_negated else action
                     comma_groups.extend(
-                        f"{action} {target}"
-                        for target in parts[target_anchor + 1 :]
+                        f"{synthetic_action} {target}" for target in parts[1:]
                     )
                 else:
-                    comma_groups.extend(parts[target_anchor + 1 :])
+                    comma_groups.extend(parts[1:])
                 continue
 
             # Local action list: at least two one-token predicates followed by
@@ -684,16 +723,30 @@ class OpenAITextReconciler:
             _, final_action_negated, final_action_index = (
                 OpenAITextReconciler._action_predicate(final_tokens)
             )
+            prefix_parts = parts[:action_start]
+            action_parts = parts[action_start:-1]
+            shared_negated = final_action_negated
+            if prefix_parts:
+                prefix_tokens = [token.casefold() for token in words(prefix_parts[-1])]
+                prefix_action, prefix_negated, prefix_action_index = (
+                    OpenAITextReconciler._action_predicate(prefix_tokens)
+                )
+                if (
+                    prefix_action is not None
+                    and prefix_negated
+                    and prefix_action_index == len(prefix_tokens) - 1
+                ):
+                    action_parts = [prefix_parts[-1], *action_parts]
+                    prefix_parts = prefix_parts[:-1]
+                    action_count += 1
+                    shared_negated = True
             if (
                 action_count >= 2
                 and final_action_index is not None
-                and not final_action_negated
                 and final_action_index < len(final_tokens) - 1
             ):
                 shared_target = " ".join(final_tokens[final_action_index + 1 :])
                 scoped_target: str | None = None
-                action_parts = parts[action_start:-1]
-                prefix_parts = parts[:action_start]
                 if prefix_parts:
                     scoped = re.match(r"^(.*?):\s*([^:]+)$", prefix_parts[-1])
                     if scoped and len(words(scoped.group(2))) == 1:
@@ -701,17 +754,25 @@ class OpenAITextReconciler:
                         action_parts = [scoped.group(2).strip(), *action_parts]
                         prefix_parts = prefix_parts[:-1]
                 comma_groups.extend(prefix_parts)
-                comma_groups.extend(
-                    f"{part} {shared_target}" for part in action_parts
-                )
-                comma_groups.append(parts[-1])
-                if scoped_target:
-                    action_terms = [
-                        *action_parts,
-                        final_tokens[final_action_index],
+                action_terms = [
+                    action
+                    for part in action_parts
+                    for part_tokens in [[token.casefold() for token in words(part)]]
+                    for action, _, _ in [
+                        OpenAITextReconciler._action_predicate(part_tokens)
                     ]
+                    if action is not None
+                ]
+                all_actions = [*action_terms, final_tokens[final_action_index]]
+                polarity_prefix = "not " if shared_negated else ""
+                comma_groups.extend(
+                    f"{polarity_prefix}{action} {shared_target}"
+                    for action in all_actions
+                )
+                if scoped_target:
                     comma_groups.extend(
-                        f"{action} {scoped_target}" for action in action_terms
+                        f"{polarity_prefix}{action} {scoped_target}"
+                        for action in all_actions
                     )
                 continue
 
@@ -720,18 +781,8 @@ class OpenAITextReconciler:
             comma_groups.extend(parts)
 
         clauses: list[str] = []
-        conjunction = re.compile(
-            r"\b(?:and|then|but|и|затем|но)\b(?=\s+[^\W\d_]+\s+[^\W\d_]+)",
-            flags=re.IGNORECASE | re.UNICODE,
-        )
         for sentence in comma_groups:
-            clause_start = 0
-            for match in conjunction.finditer(sentence):
-                if sentence[clause_start : match.start()].strip():
-                    clauses.append(sentence[clause_start : match.start()].strip())
-                clause_start = match.end()
-            if sentence[clause_start:].strip():
-                clauses.append(sentence[clause_start:].strip())
+            clauses.extend(split_compound(sentence))
         return clauses
 
     @staticmethod

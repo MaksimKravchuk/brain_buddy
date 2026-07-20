@@ -402,7 +402,7 @@ def test_terminal_accurate_stt_failure_allows_explicit_provisional_review(
             "segments": [
                 {
                     "sequence": 1,
-                    "text": "Call the dentist",
+                    "text": "Call the dentist. Buy milk.",
                     "stability": "stable",
                 }
             ]
@@ -431,8 +431,30 @@ def test_terminal_accurate_stt_failure_allows_explicit_provisional_review(
     )
 
     assert reviewed.status_code == 200, reviewed.text
-    assert reviewed.json()["status"] == "awaiting_confirmation"
-    assert reviewed.json()["reconciliation_quality"] == "provisional_only"
+    reviewed_body = reviewed.json()
+    assert reviewed_body["status"] == "awaiting_confirmation"
+    assert reviewed_body["reconciliation_quality"] == "provisional_only"
+    assert reviewed_body["committable"] is True
+    assert len(reviewed_body["proposals"]) == 2
+
+    discarded = api_client.patch(
+        f"/api/brain-dump-operations/{operation['id']}/proposals/{reviewed_body['proposals'][1]['id']}",
+        headers={"Idempotency-Key": "discard-reviewed-provisional-sibling"},
+        json={"deleted": True, "expected_revision": reviewed_body["revision"]},
+    )
+    assert discarded.status_code == 200, discarded.text
+    assert discarded.json()["committable"] is True
+
+    committed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/commit",
+        headers={"Idempotency-Key": "commit-reviewed-terminal-stt-provisional"},
+        json={"expected_revision": discarded.json()["revision"]},
+    )
+    assert committed.status_code == 200, committed.text
+    assert len(committed.json()["committed_task_ids"]) == 1
+
+    inbox = api_client.get("/api/tasks", params={"state": "inbox"}).json()
+    assert [item["title"] for item in inbox["items"]] == ["Call the dentist"]
 
 
 def test_accurate_stt_failure_records_a_conservative_cost_estimate(api_client) -> None:
@@ -3248,6 +3270,7 @@ def test_active_legacy_preview_only_operation_can_be_committed_provisionally(
     assert fetched.status_code == 200, fetched.text
     fetched_body = fetched.json()
     assert fetched_body["reconciliation_quality"] == "provisional_only"
+    assert fetched_body["committable"] is True
 
     committed = api_client.post(
         f"/api/brain-dump-operations/{operation_id}/commit",
