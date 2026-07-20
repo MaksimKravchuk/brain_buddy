@@ -263,6 +263,17 @@ def test_cumulative_cost_budget_blocks_the_next_attempt_without_calling_the_prov
     assert cast(DeterministicAccurateStt, service.accurate_stt).calls == []
 
 
+def test_due_provider_lease_sweep_honors_a_zero_claim_limit(data_dir: Path) -> None:
+    """A periodic sweep with no claim budget must stop before it can inspect
+    or retry an in-flight operation, preserving bounded background work."""
+
+    service = _service(data_dir)
+    operation, _ = _seal(service)
+    service.task_repo.list_in_flight_provider_run_operations = lambda: [operation]
+
+    assert service.recover_due_provider_leases(limit=0) == 0
+
+
 def test_existing_chunk_upload_repairs_a_missing_atomic_file(data_dir: Path) -> None:
     service = _service(data_dir)
     operation, _ = _seal(service)
