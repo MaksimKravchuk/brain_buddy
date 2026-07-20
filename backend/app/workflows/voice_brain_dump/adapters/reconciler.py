@@ -611,38 +611,122 @@ class OpenAITextReconciler:
         Punctuation always separates commands. A coordinating conjunction only
         separates when at least a verb/object-sized two-token phrase follows it;
         this keeps simple objects such as ``milk and bread`` together while
-        separating ``schedule meeting and call dentist``.
+        separating ``schedule meeting and call dentist``. Oxford-comma spans
+        are expanded only when their local shape unambiguously shares one
+        predicate (``buy milk, bread, and eggs``) or one target (``split,
+        merge, and remove tasks``). Multiword members remain separate command
+        groups, so their predicates and targets cannot be recombined.
         """
 
-        # Keep Oxford-comma action/object lists together ("split, merge, and
-        # remove tasks" and shopping lists). Other commas remain hard command
-        # boundaries so an action bound to Bob cannot be rebound to Alice.
-        serial_list = bool(
-            re.search(r",\s*(?:and|и)\b", text, flags=re.IGNORECASE | re.UNICODE)
-        )
-        sentence_boundaries = ".!?;" if serial_list else ".!?;,"
         sentences: list[str] = []
         start = 0
         for index, character in enumerate(text):
-            if character in sentence_boundaries:
+            if character in ".!?;":
                 if text[start:index].strip():
                     sentences.append(text[start:index].strip())
                 start = index + 1
         if text[start:].strip():
             sentences.append(text[start:].strip())
 
+        def words(value: str) -> list[str]:
+            return re.findall(r"[^\W\d_]+", value, flags=re.UNICODE)
+
+        comma_groups: list[str] = []
+        for sentence in sentences:
+            parts = [part.strip() for part in sentence.split(",") if part.strip()]
+            if len(parts) < 3 or not re.match(
+                r"^(?:and|и)\b", parts[-1], flags=re.IGNORECASE | re.UNICODE
+            ):
+                comma_groups.extend(parts)
+                continue
+
+            parts[-1] = re.sub(
+                r"^(?:and|и)\b\s*",
+                "",
+                parts[-1],
+                count=1,
+                flags=re.IGNORECASE | re.UNICODE,
+            )
+            token_groups = [words(part) for part in parts]
+
+            # Local target list: one complete command followed by at least two
+            # one-token targets. Preserve any earlier comma-separated commands.
+            trailing_targets = 0
+            for tokens in reversed(token_groups):
+                if len(tokens) != 1:
+                    break
+                trailing_targets += 1
+            target_anchor = len(parts) - trailing_targets - 1
+            if trailing_targets >= 2 and len(token_groups[target_anchor]) >= 2:
+                comma_groups.extend(parts[:target_anchor])
+                anchor = parts[target_anchor]
+                anchor_tokens = [token.casefold() for token in token_groups[target_anchor]]
+                action, action_negated, _ = OpenAITextReconciler._action_predicate(
+                    anchor_tokens
+                )
+                comma_groups.append(anchor)
+                if action is not None and not action_negated:
+                    comma_groups.extend(
+                        f"{action} {target}"
+                        for target in parts[target_anchor + 1 :]
+                    )
+                else:
+                    comma_groups.extend(parts[target_anchor + 1 :])
+                continue
+
+            # Local action list: at least two one-token predicates followed by
+            # one complete predicate-target command.
+            action_start = len(parts) - 1
+            while action_start > 0 and len(token_groups[action_start - 1]) == 1:
+                action_start -= 1
+            action_count = len(parts) - 1 - action_start
+            final_tokens = [token.casefold() for token in token_groups[-1]]
+            _, final_action_negated, final_action_index = (
+                OpenAITextReconciler._action_predicate(final_tokens)
+            )
+            if (
+                action_count >= 2
+                and final_action_index is not None
+                and not final_action_negated
+                and final_action_index < len(final_tokens) - 1
+            ):
+                shared_target = " ".join(final_tokens[final_action_index + 1 :])
+                scoped_target: str | None = None
+                action_parts = parts[action_start:-1]
+                prefix_parts = parts[:action_start]
+                if prefix_parts:
+                    scoped = re.match(r"^(.*?):\s*([^:]+)$", prefix_parts[-1])
+                    if scoped and len(words(scoped.group(2))) == 1:
+                        scoped_target = scoped.group(1).strip()
+                        action_parts = [scoped.group(2).strip(), *action_parts]
+                        prefix_parts = prefix_parts[:-1]
+                comma_groups.extend(prefix_parts)
+                comma_groups.extend(
+                    f"{part} {shared_target}" for part in action_parts
+                )
+                comma_groups.append(parts[-1])
+                if scoped_target:
+                    action_terms = [
+                        *action_parts,
+                        final_tokens[final_action_index],
+                    ]
+                    comma_groups.extend(
+                        f"{action} {scoped_target}" for action in action_terms
+                    )
+                continue
+
+            # Ambiguous serial shape: fail closed by preserving each member as
+            # its own command group rather than aggregating identities/actions.
+            comma_groups.extend(parts)
+
         clauses: list[str] = []
         conjunction = re.compile(
             r"\b(?:and|then|but|и|затем|но)\b(?=\s+[^\W\d_]+\s+[^\W\d_]+)",
             flags=re.IGNORECASE | re.UNICODE,
         )
-        for sentence in sentences:
+        for sentence in comma_groups:
             clause_start = 0
             for match in conjunction.finditer(sentence):
-                # A serial-list comma ("split, merge, and remove tasks") is
-                # one command description, not a boundary between commands.
-                if sentence[: match.start()].rstrip().endswith(","):
-                    continue
                 if sentence[clause_start : match.start()].strip():
                     clauses.append(sentence[clause_start : match.start()].strip())
                 clause_start = match.end()
@@ -781,21 +865,6 @@ class OpenAITextReconciler:
                 or any(
                     clause_tokens[index : index + len(title_tokens)] == title_tokens
                     for index in range(len(clause_tokens) - len(title_tokens) + 1)
-                )
-                or (
-                    bool(
-                        re.search(
-                            r",\s*(?:and|и)\b",
-                            clause,
-                            flags=re.IGNORECASE | re.UNICODE,
-                        )
-                    )
-                    and any(
-                        OpenAITextReconciler._actions_are_equivalent(
-                            title_action, token
-                        )
-                        for token in clause_tokens
-                    )
                 )
             )
             for clause in clause_supports_title
