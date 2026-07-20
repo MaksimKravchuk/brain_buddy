@@ -92,7 +92,7 @@ const brainDumpRecordingResponse = {
   owner_id: "user-1",
   kind: "voice_brain_dump",
   status: "recording",
-  consent: { microphone: true, external_processing_allowed: false, provider: null, recorded_at: "2026-07-15T10:00:00Z" },
+  consent: { microphone: true, external_processing_allowed: true, provider: "openai", recorded_at: "2026-07-15T10:00:00Z" },
   segments: [],
   proposals: [],
   committed_task_ids: [],
@@ -104,6 +104,8 @@ const brainDumpRecordingResponse = {
 const brainDumpReviewResponse = {
   ...brainDumpRecordingResponse,
   status: "awaiting_confirmation",
+  committable: true,
+  reconciliation_quality: "accurate",
   proposals: brainDumpProposals,
   revision: 2
 };
@@ -370,6 +372,9 @@ test.describe("mobile task shell at the canonical 375x812 viewport", () => {
   });
 });
 
+test.describe("Brain Dump mobile design surface", () => {
+  test.use({ viewport: { width: 402, height: 874 } });
+
 test("Brain Dump recording and review surfaces use source-derived mobile geometry", async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "mediaDevices", {
@@ -396,10 +401,18 @@ test("Brain Dump recording and review surfaces use source-derived mobile geometr
     writableWindow.SpeechRecognition = FakeSpeechRecognition;
     writableWindow.webkitSpeechRecognition = FakeSpeechRecognition;
   });
-  await page.setViewportSize({ width: 402, height: 874 });
   await page.goto("/brain-dump/new");
 
+  await test.step("Verify the Brain Dump mobile viewport", async () => {
+    const viewport = page.viewportSize();
+    await attachment("Brain Dump viewport", JSON.stringify(viewport), ContentType.JSON);
+    if (viewport?.width !== 402 || viewport.height !== 874) {
+      throw new Error(`Expected 402x874 viewport, received ${viewport?.width ?? "unknown"}x${viewport?.height ?? "unknown"}`);
+    }
+  });
+
   await expect(page.getByRole("dialog", { name: "Brain dump" })).toBeVisible();
+  await page.getByRole("checkbox", { name: "Allow secure cloud transcription" }).check();
   await page.getByRole("button", { name: "Record" }).click();
   await expect(page.getByText("Recording")).toBeVisible();
   await expect(page.getByText("Nothing is saved until review")).toBeVisible();
@@ -415,4 +428,5 @@ test("Brain Dump recording and review surfaces use source-derived mobile geometr
     animations: "disabled",
     maxDiffPixelRatio: 0.08
   });
+});
 });

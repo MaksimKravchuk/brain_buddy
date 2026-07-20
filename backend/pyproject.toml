@@ -12,6 +12,7 @@ authors = [
   { name = "Brain Buddy Team" }
 ]
 dependencies = [
+  "av>=12,<17",
   "fastapi>=0.110,<1.0",
   "uvicorn[standard]>=0.27,<0.28",
   "pydantic>=2.6,<3.0",

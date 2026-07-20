@@ -386,11 +386,12 @@ export const apiClient = {
     operationId: string,
     chunkNumber: number,
     content: ArrayBuffer,
-    sha256: string
+    sha256: string,
+    mimeType: string
   ) {
     return request<BrainDumpOperationResponse>(`/brain-dump-operations/${operationId}/audio/${chunkNumber}`, {
       method: "PUT",
-      headers: { "X-Content-SHA256": sha256 },
+      headers: { "Content-Type": mimeType, "X-Content-SHA256": sha256 },
       body: content
     });
   },
@@ -410,7 +411,7 @@ export const apiClient = {
   updateBrainDumpProposal(
     operationId: string,
     proposalId: string,
-    payload: { title?: string; deleted?: boolean; expected_revision: number },
+    payload: { title?: string; deleted?: boolean; conflict_resolution?: "keep" | "accept"; expected_revision: number },
     idempotencyKey: string
   ) {
     return request<BrainDumpOperationResponse>(`/brain-dump-operations/${operationId}/proposals/${proposalId}`, {
@@ -420,7 +421,7 @@ export const apiClient = {
     });
   },
 
-  commandBrainDump(operationId: string, action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry", expectedRevision: number, idempotencyKey: string) {
+  commandBrainDump(operationId: string, action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry" | "review_provisional" | "withdraw_consent" | "delete_raw_audio", expectedRevision: number, idempotencyKey: string) {
     return request<BrainDumpOperationResponse>(`/brain-dump-operations/${operationId}/${action}`, {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },

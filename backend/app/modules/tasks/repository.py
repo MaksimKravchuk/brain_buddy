@@ -25,7 +25,6 @@ from app.repositories.base import BaseRepository
 from app.utils.time import utcnow
 
 from .domain import (
-    BrainDumpOperationDocument,
     IdempotencyRecord,
     ProjectDocument,
     TagDocument,
@@ -207,14 +206,6 @@ class TaskRepository(BaseRepository):
                         REFERENCES tasks(owner_id, id)
                         ON DELETE CASCADE
                 );
-                CREATE TABLE IF NOT EXISTS brain_dump_operations (
-                    owner_id TEXT NOT NULL,
-                    id TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    payload TEXT NOT NULL,
-                    PRIMARY KEY (owner_id, id)
-                );
                 CREATE TABLE IF NOT EXISTS idempotency_records (
                     owner_id TEXT NOT NULL,
                     key_hash TEXT NOT NULL,
@@ -235,8 +226,6 @@ class TaskRepository(BaseRepository):
                     ON tasks(owner_id, state, order_key, created_at, id);
                 CREATE INDEX IF NOT EXISTS idx_task_tags_owner_tag
                     ON task_tags(owner_id, tag_id, task_id);
-                CREATE INDEX IF NOT EXISTS idx_brain_dump_operations_owner_status
-                    ON brain_dump_operations(owner_id, status, updated_at, id);
                 CREATE INDEX IF NOT EXISTS idx_idempotency_owner_created
                     ON idempotency_records(owner_id, created_at);
                 """
@@ -251,7 +240,7 @@ class TaskRepository(BaseRepository):
                 return
             conn.execute("BEGIN IMMEDIATE")
             try:
-                counts = {"projects": 0, "tags": 0, "tasks": 0, "brain_dump_operations": 0}
+                counts = {"projects": 0, "tags": 0, "tasks": 0}
                 for path in self.resolve("projects").glob("*/*.json"):
                     project = self.load_model(path, ProjectDocument)
                     project = project.model_copy(
@@ -280,10 +269,6 @@ class TaskRepository(BaseRepository):
                     task = task.model_copy(update={"tag_ids": task.tag_ids})
                     self._upsert_task(conn, task)
                     counts["tasks"] += 1
-                for path in self.resolve("brain-dump-operations").glob("*/*.json"):
-                    operation = self.load_model(path, BrainDumpOperationDocument)
-                    self._upsert_brain_dump_operation(conn, operation)
-                    counts["brain_dump_operations"] += 1
                 conn.execute(
                     "INSERT INTO migration_ledger (id, migrated_at, payload) VALUES (?, ?, ?)",
                     (
@@ -303,16 +288,6 @@ class TaskRepository(BaseRepository):
 
     def comment_path(self, owner_id: str, task_id: str, comment_id: str) -> Path:
         return self.resolve("task-comments", owner_id, task_id, f"{comment_id}.json")
-
-    def brain_dump_operation_path(self, owner_id: str, operation_id: str) -> Path:
-        return self.resolve("brain-dump-operations", owner_id, f"{operation_id}.json")
-
-    def brain_dump_audio_chunk_path(
-        self, owner_id: str, operation_id: str, chunk_number: int, sha256: str
-    ) -> Path:
-        return self.resolve(
-            "brain-dump-media", owner_id, operation_id, f"{chunk_number:06d}-{sha256}.bin"
-        )
 
     def project_path(self, owner_id: str, project_id: str) -> Path:
         return self.resolve("projects", owner_id, f"{project_id}.json")
@@ -402,31 +377,6 @@ class TaskRepository(BaseRepository):
         )
         BaseRepository.dump_model(self.task_path(task.owner_id, task.id), task)
 
-    def _upsert_brain_dump_operation(
-        self, conn: sqlite3.Connection, operation: BrainDumpOperationDocument
-    ) -> None:
-        conn.execute(
-            """
-            INSERT INTO brain_dump_operations
-                (owner_id, id, status, updated_at, payload)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(owner_id, id) DO UPDATE SET
-                status = excluded.status,
-                updated_at = excluded.updated_at,
-                payload = excluded.payload
-            """,
-            (
-                operation.owner_id,
-                operation.id,
-                operation.status,
-                operation.updated_at.isoformat(),
-                self._payload(operation),
-            ),
-        )
-        BaseRepository.dump_model(
-            self.brain_dump_operation_path(operation.owner_id, operation.id), operation
-        )
-
     def create_project(self, project: ProjectDocument) -> None:
         with self._connection() as conn, _sqlite_guard("Project", project.id):
             if self._exists(conn, "projects", project.owner_id, project.id):
@@ -476,70 +426,6 @@ class TaskRepository(BaseRepository):
 
     def list_for_owner(self, *, owner_id: str) -> list[TaskDocument]:
         return self._list("tasks", TaskDocument, owner_id=owner_id)
-
-    def save_brain_dump_operation(self, operation: BrainDumpOperationDocument) -> None:
-        with (
-            self._connection() as conn,
-            _sqlite_guard("Brain dump operation", operation.id),
-        ):
-            self._upsert_brain_dump_operation(conn, operation)
-
-    def save_brain_dump_audio_chunk(
-        self, *, owner_id: str, operation_id: str, chunk_number: int, sha256: str, content: bytes
-    ) -> None:
-        path = self.brain_dump_audio_chunk_path(owner_id, operation_id, chunk_number, sha256)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(content)
-
-    def load_brain_dump_audio_chunks(
-        self, *, owner_id: str, operation_id: str, chunks: list[tuple[int, str]]
-    ) -> bytes:
-        parts: list[bytes] = []
-        for chunk_number, sha256 in sorted(chunks):
-            path = self.brain_dump_audio_chunk_path(owner_id, operation_id, chunk_number, sha256)
-            if not path.exists():
-                raise NotFoundError("Brain dump audio chunk", f"{operation_id}:{chunk_number}")
-            parts.append(path.read_bytes())
-        return b"".join(parts)
-
-    def get_brain_dump_operation_for_owner(
-        self, operation_id: str, *, owner_id: str
-    ) -> BrainDumpOperationDocument:
-        operation = self._load_brain_dump_operation(operation_id, owner_id=owner_id)
-        if operation is not None:
-            return operation
-
-        path = self.brain_dump_operation_path(owner_id, operation_id)
-        if not path.exists():
-            raise NotFoundError("Brain dump operation", operation_id)
-        legacy = self.load_model(path, BrainDumpOperationDocument)
-        if getattr(self._thread_state, "conn", None) is not None:
-            # Already inside this thread's serialized command transaction.
-            self.save_brain_dump_operation(legacy)
-            return legacy
-        with self.command_lock(owner_id):
-            # Re-check under the lock so a concurrent write is never clobbered
-            # by the stale legacy JSON snapshot.
-            current = self._load_brain_dump_operation(operation_id, owner_id=owner_id)
-            if current is not None:
-                return current
-            self.save_brain_dump_operation(legacy)
-            return legacy
-
-    def _load_brain_dump_operation(
-        self, operation_id: str, *, owner_id: str
-    ) -> BrainDumpOperationDocument | None:
-        with self._connection() as conn:
-            row = conn.execute(
-                """
-                SELECT payload FROM brain_dump_operations
-                WHERE owner_id = ? AND id = ?
-                """,
-                (owner_id, operation_id),
-            ).fetchone()
-        if row is None:
-            return None
-        return BrainDumpOperationDocument.model_validate(json.loads(row["payload"]))
 
     def create_subtask(self, subtask: TaskSubtaskDocument) -> None:
         with self._connection() as conn, _sqlite_guard("Task subtask", subtask.id):

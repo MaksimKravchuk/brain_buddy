@@ -20,7 +20,12 @@ from app.api.errors import register_exception_handlers
 from app.api.middleware import CORRELATION_HEADER, CorrelationIdMiddleware
 from app.core.rate_limit import InMemoryRateLimiter
 from app.exceptions import ConflictError, NotFoundError, ValidationFailure
-from app.main import _maybe_seed_admin
+from app.main import (
+    _maybe_seed_admin,
+    _run_voice_sweep,
+    _start_voice_sweep_thread,
+    create_app,
+)
 from app.repositories.index import IndexRepository
 from app.repositories.tree import TreeRepository
 from app.repositories.version import VersionRepository
@@ -338,3 +343,175 @@ def test_index_missing_delete_and_configured_admin_seed(
     monkeypatch.setenv("BRAIN_BUDDY_ADMIN_PASSWORD", "correct-horse-battery-staple")
     _maybe_seed_admin(container)
     assert container.user_repo.get_by_email("admin@example.com") is not None
+
+
+def test_voice_sweep_iteration_runs_all_three_duties_and_survives_a_failure(
+    container,
+) -> None:
+    """``_run_voice_sweep`` is the body of both the startup scan and the
+    periodic thread; one bad pass (e.g. a transient repository error) must
+    log and return rather than propagate and kill the caller/loop."""
+
+    calls: list[str] = []
+    real_recover = container.voice_brain_dump_service.recover_due_provider_leases
+    real_purge_raw = container.voice_brain_dump_service.purge_expired_raw_audio
+
+    def recover_due_provider_leases(**kwargs: object) -> int:
+        calls.append("recover")
+        return real_recover(**kwargs)
+
+    def purge_expired_raw_audio(**kwargs: object) -> int:
+        calls.append("raw_audio")
+        return real_purge_raw(**kwargs)
+
+    def purge_expired_working_artifacts(**kwargs: object) -> int:
+        calls.append("working_artifacts")
+        raise RuntimeError("transient repository error")
+
+    container.voice_brain_dump_service.recover_due_provider_leases = recover_due_provider_leases
+    container.voice_brain_dump_service.purge_expired_raw_audio = purge_expired_raw_audio
+    container.voice_brain_dump_service.purge_expired_working_artifacts = (
+        purge_expired_working_artifacts
+    )
+
+    # Must not raise even though the third duty fails.
+    _run_voice_sweep(container)
+
+    assert calls == ["recover", "raw_audio", "working_artifacts"]
+
+
+def test_voice_sweep_thread_wakes_immediately_and_stops_cleanly(container) -> None:
+    """The periodic sweep runs on a thread that is referenced (not an
+    untracked fire-and-forget task) and stops promptly once signalled."""
+
+    import threading
+    import time
+
+    iterations = threading.Event()
+    original_recover = container.voice_brain_dump_service.recover_due_provider_leases
+
+    def recover_due_provider_leases(**kwargs: object) -> int:
+        iterations.set()
+        return original_recover(**kwargs)
+
+    container.voice_brain_dump_service.recover_due_provider_leases = recover_due_provider_leases
+
+    stop_event = threading.Event()
+    wake_event = threading.Event()
+    from app import main as main_module
+
+    original_interval = main_module._VOICE_SWEEP_INTERVAL_SECONDS
+    main_module._VOICE_SWEEP_INTERVAL_SECONDS = 60
+    try:
+        thread = _start_voice_sweep_thread(container, stop_event, wake_event)
+        assert thread.is_alive()
+        wake_event.set()
+        assert iterations.wait(timeout=2), "durable runner wake never ran an iteration"
+        stop_event.set()
+        thread.join(timeout=2)
+        assert not thread.is_alive()
+    finally:
+        main_module._VOICE_SWEEP_INTERVAL_SECONDS = original_interval
+        time.sleep(0)
+
+
+def test_voice_sweep_logs_completed_recovery_and_retention_work(
+    container, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A completed sweep reports non-zero recovery and retention work without
+    exposing any operation content in its observability message."""
+
+    import logging
+
+    caplog.set_level(logging.INFO, logger="app.main")
+    container.voice_brain_dump_service.recover_due_provider_leases = lambda: 1
+    container.voice_brain_dump_service.purge_expired_raw_audio = lambda: 2
+    container.voice_brain_dump_service.purge_expired_working_artifacts = lambda: 3
+
+    _run_voice_sweep(container)
+
+    assert (
+        "Voice sweep: recovered 1 lease(s), purged 2 raw-audio, 3 working-artifact"
+        in (caplog.text)
+    )
+
+
+def test_development_app_tracks_and_stops_the_periodic_voice_sweep(
+    data_dir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A non-test app owns its periodic sweep thread and signals then joins it
+    during shutdown, rather than leaking an untracked background worker."""
+
+    from app import main as main_module
+    from app.core import get_config
+
+    class SweepThread:
+        def __init__(self) -> None:
+            self.join_timeouts: list[float | None] = []
+
+        def join(self, timeout: float | None = None) -> None:
+            self.join_timeouts.append(timeout)
+
+    sweep_thread = SweepThread()
+    seen_stop_events = []
+
+    def start_sweep(_container, stop_event, _wake_event):
+        seen_stop_events.append(stop_event)
+        return sweep_thread
+
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "development")
+    monkeypatch.setattr(main_module, "_start_voice_sweep_thread", start_sweep)
+    get_config.cache_clear()
+    try:
+        app = create_app()
+        with TestClient(app):
+            assert app.state.voice_sweep_thread is sweep_thread
+
+        assert seen_stop_events[0].is_set()
+        assert sweep_thread.join_timeouts == [5]
+
+        # Shutdown must also remain safe if startup did not retain a thread
+        # reference (for example, after a failed worker handoff).
+        app_without_sweep_thread = create_app()
+        app_without_sweep_thread.state.voice_sweep_thread = None
+        with TestClient(app_without_sweep_thread):
+            pass
+
+        assert sweep_thread.join_timeouts == [5]
+    finally:
+        get_config.cache_clear()
+
+
+def test_compose_e2e_can_opt_in_to_the_periodic_voice_sweep(
+    data_dir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The isolated Compose E2E service can exercise persisted provider runs.
+
+    Unit tests remain thread-free in the ``test`` environment unless this
+    explicit opt-in is set.
+    """
+
+    from app import main as main_module
+    from app.core import get_config
+
+    class SweepThread:
+        def join(self, timeout: float | None = None) -> None:
+            assert timeout == 5
+
+    sweep_thread = SweepThread()
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "test")
+    monkeypatch.setenv("BRAIN_BUDDY_ENABLE_VOICE_SWEEP_IN_TEST", "1")
+    monkeypatch.setattr(
+        main_module,
+        "_start_voice_sweep_thread",
+        lambda _container, _stop, _wake: sweep_thread,
+    )
+    get_config.cache_clear()
+    try:
+        app = create_app()
+        with TestClient(app):
+            assert app.state.voice_sweep_thread is sweep_thread
+    finally:
+        get_config.cache_clear()

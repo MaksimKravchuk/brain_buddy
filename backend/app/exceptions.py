@@ -41,17 +41,32 @@ class StorageUnavailableError(RepositoryError):
 class ValidationFailure(BrainBuddyError):
     """Raised when requested operation fails domain validation checks."""
 
-    def __init__(self, message: str, detail: Any | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        detail: Any | None = None,
+        *,
+        estimated_cost_usd: float = 0.0,
+    ) -> None:
         super().__init__(message)
         self.detail = detail
+        self.estimated_cost_usd = estimated_cost_usd
 
 
 class ProviderRetryableError(BrainBuddyError):
     """Raised by a provider port when a call fails but a retry may succeed."""
 
+    def __init__(self, message: str, *, estimated_cost_usd: float = 0.0) -> None:
+        super().__init__(message)
+        self.estimated_cost_usd = estimated_cost_usd
+
 
 class ProviderTerminalError(BrainBuddyError):
     """Raised by a provider port when a call fails in a way retries cannot fix."""
+
+    def __init__(self, message: str, *, estimated_cost_usd: float = 0.0) -> None:
+        super().__init__(message)
+        self.estimated_cost_usd = estimated_cost_usd
 
 
 __all__ = [
