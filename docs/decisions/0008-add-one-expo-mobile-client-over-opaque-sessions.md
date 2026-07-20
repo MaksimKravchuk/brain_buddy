@@ -3,6 +3,7 @@
 Date: 2026-07-20
 Status: Proposed
 Decision owner: BrainBuddy
+Last amended: 2026-07-20 (canonical confirmation, consent recovery, and audio retention)
 Related: ADR-0001, ADR-0002, ADR-0006, `docs/auth.md`,
 `docs/api-compatibility.md`, `docs/vnext-cloud-design-build-contract.md` §3.3,
 `specs/004-expo-mobile-first-slice/`
@@ -86,7 +87,7 @@ refresh token, JWT, owner claim, scopes, provider secret, or device fingerprint.
 Native protected requests send:
 
 ```text
-Authorization: Bearer <opaque session token>
+Authorization: Bearer OPAQUE_SESSION_TOKEN
 ```
 
 “Bearer” describes possession semantics in the HTTP header; the value is not a JWT and has
@@ -133,6 +134,12 @@ client method signatures into `mobile/src/api/generated/`; do not hand-copy back
 models into a “shared” package. Mobile-owned view models map generated DTOs to UI state but
 may not add domain states or infer server authority.
 
+The pinned snapshot may still describe deprecated web-compatibility aliases during their
+bounded overlap window, but mobile generation uses an explicit operation allowlist. Direct
+proposal `PATCH`, `/finish`, and `/commit` are marked deprecated and excluded from the mobile
+adapter. Their removal is not a mobile breaking change because no released mobile contract
+may consume them.
+
 Do not introduce a root JavaScript workspace or runtime `packages/` layer in the first
 slice. Extract a package later only after two real consumers need the same platform-neutral
 code. Such a package may contain generated DTOs, pure parsing/formatting, or token constants;
@@ -142,10 +149,27 @@ Design values remain governed by `.claude/skills/brain-buddy-design/`; mobile mi
 required values in a native token module with drift/adherence tests rather than importing
 CSS.
 
+### ADR precedence and scoped mobile refinement
+
+ADR-0002 remains authoritative for the shared operation state machine, append-only proposal
+patches, persisted `ProposalBatch`, freeze/invalidation/confirmation, deterministic action
+keys, consent, retention, owner scope, and the long-term live-proposal product target. This
+ADR refines only the first Expo client's capture timing: M-05 records durably in the
+foreground and uploads after Stop because the accepted Expo primitive does not expose a
+proven safe encoded-chunk stream while recording.
+
+For this first mobile slice, this ADR therefore controls the mobile capture UI and transport
+timing where ADR-0002 rejects batch-only-after-recording as the general primary UX. It does
+not supersede ADR-0002 for the backend, web/live clients, confirmation authority, or future
+mobile slices. Post-stop upload is a bounded fallback with an explicit native-escape trigger,
+not a new canonical operation model; any broader or permanent change requires amending both
+records.
+
 ### Task and Voice Brain Dump integration
 
-Mobile calls the existing owner-scoped Task, Project, Tag, and operation endpoints. It
-preserves server pagination, expected revisions, `Idempotency-Key`, correlation IDs,
+Mobile calls the owner-scoped Task, Project, Tag, and canonical operation endpoints. The
+confirmation/consent/retention prerequisites below are additive backend work, not a mobile
+BFF. It preserves server pagination, expected revisions, `Idempotency-Key`, correlation IDs,
 wrong-owner `404`, stale `409`, and the accepted Task transition matrix. Task writes are not
 queued as an offline second store; the app requires a server result before reporting
 success.
@@ -168,7 +192,8 @@ Task sync are non-goals.
 For the bounded voice path:
 
 1. request microphone permission;
-2. record external-processing consent separately;
+2. fetch the non-secret processing policy and record external-processing consent separately,
+   bound to its policy version, required provider categories, decision time, and expiry;
 3. atomically initialize an owner-bound local recovery manifest and persist the operation-
    start idempotency key;
 4. create the owner-scoped operation as soon as the network permits and record in the
@@ -177,10 +202,24 @@ For the bounded voice path:
 5. after Stop, split/read the completed file into bounded numbered chunks, hash locally,
    upload idempotently, and seal only after every chunk is acknowledged;
 6. poll the persisted operation projection through processing/retry states;
-7. edit/remove proposals using expected revisions and durable command keys;
-8. explicitly confirm selected title-only Inbox actions;
-9. delete local audio/recovery files when policy and successful reconciliation permit, or
-   retain them only for a visible bounded recovery path.
+7. append user edit/remove proposal patches using expected operation/proposal revisions and
+   durable command keys; any accepted patch supersedes a previously frozen batch;
+8. freeze the selected active proposals into a persisted immutable `ProposalBatch` and then
+   explicitly confirm that exact batch; the server derives one action key as
+   `H(operation_id, batch_id, action_id)` and persists the action receipt with its Task;
+9. show the server's raw-audio deletion state and `retained_until`, allow delete-now after
+   processing, and delete the local audio as soon as upload recovery no longer needs it while
+   retaining only the non-content command/recovery pointer still needed for confirmation.
+
+The server exposes the current policy version and required provider-category identifiers
+without vendor credentials. A consent grant is current only while unexpired, not withdrawn,
+and valid for that exact policy/category set. Recovery after restart must refetch the owner-
+scoped operation/policy and compare those fields before upload, seal, retry, or provider work.
+A category-set/policy change fails closed and requires a new visible grant. Withdrawal immediately
+stops local upload attempts, appends an idempotent server decision when reachable, prevents
+new provider claims, and schedules uncommitted server audio/working transcripts plus the
+local recording for deletion. Offline withdrawal is shown as remotely pending rather than
+claiming a provider was stopped.
 
 An involuntary `401` clears the credential and in-memory owner projections but quarantines
 an unconfirmed recording. It becomes visible again only when the same opaque owner ID
@@ -192,7 +231,7 @@ No live transcript or proposal is promised while speaking in this slice. The UI 
 recording is local and unconfirmed, then shows upload/processing before Review. This is more
 honest than simulating live extraction. A later native streaming recorder may satisfy the
 full simultaneous record/upload target without changing operation, chunk, seal, proposal,
-or confirmation contracts.
+batch, confirmation, consent, or retention contracts.
 
 ### Expo and native escape boundary
 
@@ -336,6 +375,11 @@ Future agents must preserve:
 - backend OpenAPI/Pydantic as the transport source of truth;
 - SecureStore-only session token handling and privacy-safe evidence;
 - explicit confirmation before title-only Inbox Task creation;
+- canonical proposal-patch → frozen-batch → confirm sequencing, immutable frozen snapshots,
+  and deterministic action receipts; deprecated direct PATCH and `/commit` aliases are not a
+  mobile contract;
+- current provider-category-bound consent across restart/configuration change, fail-closed
+  withdrawal, visible raw-audio retention, and user-triggered delete-now after processing;
 - honest bounded recording/upload states and no invented live proposals;
 - M-09 Weekly Review, Execution, CRT/Think, Subtasks/Comments, metadata inference, and other
   first-slice non-goals until separately accepted;
@@ -347,9 +391,21 @@ Future agents must preserve:
 1. Add API semantic-version ownership while retaining storage version in health output.
 2. Add the mobile session endpoint and dual-source resolver additively; all existing cookie
    routes/tests remain unchanged.
-3. Generate/pin the v1 contract, then build mobile session and read-only Task projections.
-4. Add idempotent Task actions, then the bounded voice operation.
-5. Release internal builds only after both platform gates pass.
+3. Before generating the mobile voice adapter, add canonical proposal-patch, freeze, confirm,
+   consent-decision, retention projection, and raw-audio delete commands. Existing operation
+   payloads missing these additive fields load with empty batches/receipts and derive their
+   initial proposal revision deterministically; completed/cancelled operations remain
+   immutable.
+4. During the existing web overlap window, direct proposal `PATCH` and `/commit` delegate to
+   the same patch/freeze/confirm service and persisted records. A legacy `/commit` with no
+   batch atomically freezes the current conflict-free active proposals before confirm. Mixed
+   canonical/alias retries and races share action receipts and can create at most one Task per
+   action. Mark aliases deprecated, exclude them from mobile generation, migrate web, and
+   remove them only after no deployed client or active stored operation depends on them.
+5. Generate/pin the v1 contract and mobile operation allowlist, then build mobile session and
+   read-only Task projections.
+6. Add idempotent Task actions, then the bounded canonical voice operation.
+7. Release internal builds only after both platform gates pass.
 
 Rollback can remove or disable the mobile session endpoint and stop distributing native
 builds. Existing browser cookies, users, Tasks, and operations remain valid. Revoking all
@@ -379,12 +435,17 @@ Conformance requires:
    client, including stale revisions and idempotent retries;
 5. device/simulator tests for permission denial, audio-route interruption, durable document
    recording, low storage, process kill, resumable chunk upload, hash conflict, seal,
-   processing retry, proposal edits/removal, confirmation timeout, and exact-once Tasks;
-6. a privacy scan of logs, Allure, screenshots, crash artifacts, bundles, source maps, and
+   processing retry, provider-category/policy change, consent expiry/withdrawal, proposal
+   edits/removal, frozen-batch invalidation, canonical confirmation timeout, retained-until,
+   raw-audio delete-now, and exact-once Tasks;
+6. backend migration/overlap tests proving legacy payload defaults, alias delegation,
+   canonical/alias races, process restart, immutable completed operations, and deterministic
+   `H(operation_id,batch_id,action_id)` action receipts;
+7. a privacy scan of logs, Allure, screenshots, crash artifacts, bundles, source maps, and
    build output for credentials, emails, audio/transcript/task content, paths, and hashes;
-7. `expo-doctor`, lint, typecheck, unit/component suites, deterministic native config
+8. `expo-doctor`, lint, typecheck, unit/component suites, deterministic native config
    generation, Android and iOS internal builds, and one real-device smoke per platform;
-8. an inventory proving every enabled control maps to an accepted command/client action and
+9. an inventory proving every enabled control maps to an accepted command/client action and
    every deferred design affordance is absent or explicitly non-interactive.
 
 ## Related files

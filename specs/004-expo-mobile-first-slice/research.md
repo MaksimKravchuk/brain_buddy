@@ -26,7 +26,8 @@ not a second domain or a rewrite of browser presentation.
 
 **Decision**: Add `POST /api/auth/mobile/sessions` returning the existing raw opaque Session
 credential once in a non-cacheable response. Store it only in Expo SecureStore and send it
-as `Authorization: Bearer <opaque>`. Protected routes accept either the existing cookie or
+as `Authorization: Bearer OPAQUE_SESSION_TOKEN`. Protected routes accept either the existing
+cookie or
 the header, never both. No refresh token or JWT is added.
 
 **Rationale**: `AuthService` already generates high-entropy tokens, persists only SHA-256
@@ -93,13 +94,14 @@ evidence for SecureStore/device audio behavior.
 **Decision**: Use `expo-audio` foreground recording with the document directory, not cache.
 After Stop, read/split the completed file into bounded numbered chunks, hash and upload them
 idempotently, then seal the complete manifest. Persist a minimal local recovery manifest.
-Do not promise live transcript/proposals while speaking.
+Do not promise live transcript/proposals while speaking in this first mobile slice.
 
 **Rationale**: Expo Audio documents that recordings otherwise default to cache and can be
 stored in the document directory. Its supported recording contract yields the completed URI;
 it does not establish safe encoded chunks during an active recording. The bounded path
 still exercises local durability, interruption recovery, upload, processing, review, and
-explicit confirmation through existing backend endpoints.
+explicit confirmation. This is a scoped capture-timing refinement/fallback only: ADR-0002
+continues to govern the shared backend and long-term live-proposal primary UX.
 
 **Alternatives considered**:
 
@@ -180,6 +182,34 @@ EAS access, signing ownership, and store publication as distinct boundaries.
 - `https://docs.expo.dev/app-signing/existing-credentials`
 
 (accessed 2026-07-20).
+
+## Decision 9: Close canonical confirmation, consent, and retention gaps before mobile Voice
+
+**Decision**: Implement and consume ADR-0002's canonical append-only proposal patches,
+persisted frozen `ProposalBatch`, invalidation, and `/confirm` command before generating the
+mobile Voice adapter. Derive every action key as `H(operation_id,batch_id,action_id)`. Keep
+direct proposal `PATCH` and `/commit` only as deprecated web-overlap adapters to the same
+service/records, excluded from the mobile generation allowlist.
+
+Expose a non-secret processing policy. Persist consent policy version, allowed provider
+categories, decision time, server expiry/withdrawal state, and revalidate on restart or
+configuration change; withdrawal stops future work and schedules uncommitted cleanup. Expose
+raw-audio deletion state and `retained_until`, plus an idempotent delete-now command after
+processing.
+
+**Rationale**: A frozen immutable batch is the authority boundary that makes user review and
+deterministic child idempotency true after edits, partial failure, restart, or old/new-client
+overlap. A local boolean cannot prove current consent after restart or provider change. Hidden
+retention cannot support ADR-0002's user deletion guarantee.
+
+**Alternatives considered**:
+
+- Pin direct `PATCH` and `/commit` into OpenAPI v1: rejected because transitional aliases
+  would become a released mobile contract and could not be removed safely.
+- Treat consent as valid forever until local deletion: rejected because it is neither
+  time-bounded nor bound to current processing categories and cannot represent withdrawal.
+- Delete local audio and imply server deletion: rejected because local and server retention
+  are separate authorities; pending remote cleanup must remain visible.
 
 ## Native escape criteria
 
