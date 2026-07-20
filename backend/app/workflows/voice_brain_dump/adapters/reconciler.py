@@ -438,7 +438,6 @@ class OpenAITextReconciler:
             ("no", "longer"),
             ("not", "needed"),
             ("not", "necessary"),
-            ("do", "not"),
             ("не", "нужно"),
             ("не", "надо"),
             ("не", "актуально"),
@@ -447,25 +446,60 @@ class OpenAITextReconciler:
             ("не", "требуется"),
         }
     )
+    # A negation marker scopes over only the destructive term(s) it directly
+    # precedes: "Do not delete Buy milk" must never authorize removing "Buy
+    # milk" just because "delete" appears somewhere in the sentence. This is
+    # distinct from ``_DESTRUCTIVE_NEGATION_PAIRS`` above, whose pairs (e.g.
+    # "no longer", "не нужно") are themselves the destructive signal ("this
+    # is obsolete"), not a negation of one.
+    _NEGATION_MARKERS = frozenset(
+        {
+            "not",
+            "never",
+            "don",
+            "doesn",
+            "didn",
+            "won",
+            "isn",
+            "wasn",
+            "aren",
+            "shouldn",
+            "wouldn",
+            "couldn",
+            "не",
+            "нет",
+            "нельзя",
+        }
+    )
+    _NEGATION_SCOPE_WINDOW = 2
 
     @staticmethod
     def _has_destructive_support(source_text: str) -> bool:
-        """Explicit destructive/negating vocabulary, not mere identity overlap.
+        """Explicit, unnegated destructive/negating vocabulary is required.
 
         A removal must be justified by language that actually asks for
         something to go away (or says it is no longer needed) -- positive,
         constructive text about the same subject (e.g. "Buy milk") must
         never be read as authorization to delete an existing proposal.
+        Scoped/negated destructive phrasing ("Do not delete Buy milk") must
+        not launder a removal either: a nearby negation marker cancels the
+        destructive term it precedes, so only an unambiguous affirmative
+        destructive action counts as support.
         """
 
         tokens = [
             token.casefold()
             for token in re.findall(r"[^\W\d_]+", source_text, flags=re.UNICODE)
         ]
-        if any(
-            token in OpenAITextReconciler._DESTRUCTIVE_SINGLE_TERMS for token in tokens
-        ):
-            return True
+        for index, token in enumerate(tokens):
+            if token not in OpenAITextReconciler._DESTRUCTIVE_SINGLE_TERMS:
+                continue
+            window_start = max(0, index - OpenAITextReconciler._NEGATION_SCOPE_WINDOW)
+            if not any(
+                preceding in OpenAITextReconciler._NEGATION_MARKERS
+                for preceding in tokens[window_start:index]
+            ):
+                return True
         return any(
             pair in OpenAITextReconciler._DESTRUCTIVE_NEGATION_PAIRS
             for pair in zip(tokens, tokens[1:], strict=False)
@@ -494,6 +528,33 @@ class OpenAITextReconciler:
             if token[:1].isupper() and len(token) >= 2:
                 entities.add(token.casefold())
         return entities
+
+    @staticmethod
+    def _identity_anchor_terms(text: str) -> set[str]:
+        """Case-insensitive, position-based concrete-object anchor.
+
+        ``_named_entities`` only fires when the transcript happens to be
+        capitalized, but real STT output -- especially Cyrillic -- is
+        routinely all lowercase, which silently disables that guard. Both
+        English imperative phrasing ("Schedule dentist") and Russian
+        infinitive/imperative task phrasing ("позвонить Ивану", "надо
+        написать Ивану") put the action word first and the concrete
+        object/target after it, regardless of case. Treating every token
+        after the first as an identity anchor -- with a lower length floor
+        than the base grounding check so short names ("Bob") still count --
+        catches an object swap even when nothing is capitalized and even
+        when the swapped object is a common noun rather than a proper name.
+        This augments, never replaces, the capitalization-based signal.
+        """
+
+        tokens = [
+            token
+            for token in re.findall(r"[^\W\d_]+", text.casefold(), flags=re.UNICODE)
+            if len(token) >= 3
+        ]
+        if len(tokens) <= 1:
+            return set()
+        return set(tokens[1:])
 
     @staticmethod
     def _assert_semantic_support(
@@ -534,8 +595,12 @@ class OpenAITextReconciler:
                 f"unsupported {operation} is not grounded in cited transcript evidence."
             )
 
-        title_entities = OpenAITextReconciler._named_entities(title)
-        source_entities = OpenAITextReconciler._named_entities(source_text)
+        title_entities = OpenAITextReconciler._named_entities(
+            title
+        ) | OpenAITextReconciler._identity_anchor_terms(title)
+        source_entities = OpenAITextReconciler._named_entities(
+            source_text
+        ) | OpenAITextReconciler._identity_anchor_terms(source_text)
         if (title_entities - source_entities) and (source_entities - title_entities):
             raise ValidationFailure(
                 f"unsupported {operation} names a different concrete identity than "

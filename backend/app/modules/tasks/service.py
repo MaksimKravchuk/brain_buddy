@@ -9,7 +9,7 @@ import re
 import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime, timedelta
-from typing import Concatenate, Literal, ParamSpec, Protocol, TypeVar, cast
+from typing import Concatenate, Literal, ParamSpec, TypeVar, cast
 
 from pydantic import BaseModel
 
@@ -58,6 +58,7 @@ from app.workflows.voice_brain_dump.providers import (
     ReconcileTextRequest,
     TextReconcilerPort,
 )
+from app.workflows.voice_brain_dump.task_port import InProcessTaskPort, TaskPort
 
 from .domain import (
     BrainDumpActionReceiptDocument,
@@ -91,19 +92,6 @@ _PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2, "none": 3}
 
 _P = ParamSpec("_P")
 _Result = TypeVar("_Result")
-
-
-class TaskPort(Protocol):
-    """Application boundary for confirmed voice actions creating Tasks records."""
-
-    def create_native_inbox_task(
-        self,
-        *,
-        owner_id: str,
-        title: str,
-        source_capture_ids: list[str],
-        idempotency_key: str,
-    ) -> TaskDocument: ...
 
 
 def _serialized_write(
@@ -152,9 +140,14 @@ class TaskService:
         )
         self.provider_run_lease_seconds = provider_run_lease_seconds
         # Voice confirmation crosses the Tasks boundary through this narrow
-        # application port. The in-process Tasks service is the MVP adapter;
-        # callers can inject another conforming application adapter in tests.
-        self.task_port: TaskPort = task_port or self
+        # application-workflow port (ADR-0001), never by treating this Tasks
+        # service as its own adapter. The default binds only the one
+        # canonical Tasks command the port needs; the production container
+        # wires the same adapter explicitly, and callers may inject another
+        # conforming adapter in tests.
+        self.task_port: TaskPort = task_port or InProcessTaskPort(
+            self.create_native_inbox_task
+        )
         # Consent identifies a configured provider category before bytes can
         # leave the device. The production container supplies this from
         # configuration; the default keeps isolated deterministic tests honest
@@ -181,6 +174,67 @@ class TaskService:
                 "may leave the device."
             )
 
+    # Only a terminal operation's raw audio/working artifacts are ever
+    # eligible for retention-window purge. Every other status -- including
+    # the full active pipeline and a still-retryable failure -- must never
+    # be purged out from under it, no matter how old it looks: purging an
+    # in-progress or recoverable operation would destroy data a resume/retry
+    # still needs, not merely "abandoned" work.
+    _TERMINAL_PURGE_ELIGIBLE_STATUSES = frozenset({"completed", "cancelled", "terminal_error"})
+
+    # Every fixed, safe code an adapter/port or this service ever raises as
+    # a ``ProviderRetryableError``/``ProviderTerminalError``/
+    # ``ValidationFailure`` message. Only a code in this set may ever reach
+    # a persisted ``ProviderRun``/API response; anything else -- a
+    # third-party exception's text, an interpolated dynamic value (e.g. a
+    # deterministic test adapter embedding a media reference), or any other
+    # provider/model message -- is replaced by a generic fallback code
+    # rather than stored or returned verbatim.
+    _ALLOWLISTED_PROVIDER_ERROR_CODES = frozenset(
+        {
+            "STT_AUDIO_FORMAT_UNSUPPORTED",
+            "STT_AUDIO_MISSING",
+            "STT_COST_LIMIT_EXCEEDED",
+            "STT_PROVIDER_UNAVAILABLE",
+            "STT_PROVIDER_AUTHENTICATION_FAILED",
+            "STT_AUDIO_TOO_LARGE",
+            "STT_PROVIDER_REJECTED_REQUEST",
+            "STT_PROVIDER_DISABLED",
+            "STT_PROVIDER_CREDENTIALS_MISSING",
+            "STT_DETERMINISTIC_PROVIDER_TEST_ONLY",
+            "STT_PROVIDER_UNSUPPORTED",
+            "STT_EXTERNAL_PROCESSING_CONSENT_REQUIRED",
+            "STT_CONSENT_PROVIDER_MISMATCH",
+            "DETERMINISTIC_STT_FIXTURE_MISSING",
+            "RECONCILER_PROVIDER_DISABLED",
+            "RECONCILER_COST_LIMIT_EXCEEDED",
+            "RECONCILER_INVALID_RESPONSE",
+            "RECONCILER_PROVIDER_RETRYABLE",
+            "RECONCILER_PROVIDER_REJECTED",
+            "RECONCILER_CONSENT_REQUIRED",
+            "RECONCILER_CONSENT_PROVIDER_MISMATCH",
+            "OPERATION_COST_BUDGET_EXCEEDED",
+            "OPERATION_RECOVERY_BUDGET_EXHAUSTED",
+            "CONSENT_WITHDRAWN",
+        }
+    )
+    _PROVIDER_ERROR_FALLBACK_CODE = "PROVIDER_ERROR_UNSPECIFIED"
+
+    @classmethod
+    def _redact_provider_error(cls, raw: str) -> str:
+        """Map a raw provider/exception message to a safe, allowlisted code.
+
+        ``raw`` is only ever persisted/returned as-is when it is *exactly*
+        one of the fixed codes this codebase raises; anything else falls
+        back to a generic code rather than leaking arbitrary text.
+        """
+
+        return (
+            raw
+            if raw in cls._ALLOWLISTED_PROVIDER_ERROR_CODES
+            else cls._PROVIDER_ERROR_FALLBACK_CODE
+        )
+
     def purge_expired_raw_audio(self, *, now: datetime | None = None) -> int:
         """Purge raw audio from terminal operations past the configured retention.
 
@@ -189,8 +243,12 @@ class TaskService:
         later ``updated_at``. A proposal edit, consent withdrawal, or any
         other post-reconciliation mutation must not push this deadline out.
         An operation that never reconciled has no such anchor; it falls back
-        to ``updated_at + raw_audio_retention`` so abandoned raw audio from a
-        recording that was never sealed/reconciled still ages out.
+        to ``updated_at + raw_audio_retention``. Either way, this only ever
+        fires for a terminal operation (``completed``/``cancelled``/
+        ``terminal_error``); every active status -- recording, paused,
+        sealing, fast_processing, accurate_transcribing, reconciling,
+        awaiting_confirmation, committing -- and the recoverable
+        ``retryable_error`` status are never purged, regardless of age.
         """
 
         current_time = now or utcnow()
@@ -200,6 +258,11 @@ class TaskService:
                 operation = self.get_brain_dump_operation(
                     candidate.id, owner_id=candidate.owner_id
                 )
+                if (
+                    operation.status
+                    not in self._TERMINAL_PURGE_ELIGIBLE_STATUSES
+                ):
+                    continue
                 expires_at = (
                     operation.raw_audio_expires_at
                     or operation.updated_at + self.raw_audio_retention
@@ -240,9 +303,16 @@ class TaskService:
     def purge_expired_working_artifacts(self, *, now: datetime | None = None) -> int:
         """Purge uncommitted transcript/proposal working data past retention.
 
-        A completed/cancelled operation's committed transcript/proposal
-        provenance (referenced by each committed ``TaskDocument`` via its
-        deterministic child provenance keys) stays available for the full
+        This only ever fires for a terminal operation (``completed``/
+        ``cancelled``/``terminal_error``); every active status -- recording,
+        paused, sealing, fast_processing, accurate_transcribing,
+        reconciling, awaiting_confirmation, committing -- and the
+        recoverable ``retryable_error`` status are never purged, regardless
+        of age: purging an in-progress or still-retryable operation would
+        destroy data a resume/retry still needs.
+
+        A completed/cancelled/terminal-error operation's raw
+        transcript/proposal working data stays available for the full
         configured retention window counted from *that* terminal
         transition, not from when the operation was first created --
         otherwise a batch that took a long time to review and confirm could
@@ -251,15 +321,10 @@ class TaskService:
         Nothing mutates a terminal operation afterward, so its own
         ``updated_at`` reliably marks that completion/cancellation instant.
 
-        An operation that never reached a terminal status keeps the
-        existing creation-anchored deadline: this intentionally treats a
-        stuck ``recording``/``paused``/``awaiting_confirmation`` operation
-        nobody ever finished, retried, or discarded as abandoned once its
-        artifacts are older than the retention window. But an operation
-        whose latest provider run is still ``pending``/``running`` is
-        actively being processed, not abandoned, and must never be purged
-        out from under that in-flight work -- mirroring the same guard
-        ``purge_expired_raw_audio`` already applies.
+        Purging never removes ``action_receipts`` or ``committed_task_ids``:
+        those are the compact, immutable, ID-only audit provenance a
+        completed operation keeps forever and must not depend on the raw
+        ``segments``/``proposals``/``proposal_patches`` this purge clears.
         """
 
         current_time = now or utcnow()
@@ -271,20 +336,14 @@ class TaskService:
                 operation = self.get_brain_dump_operation(
                     candidate.id, owner_id=candidate.owner_id
                 )
-                expires_at = (
-                    operation.updated_at + self.working_artifacts_retention
-                    if operation.status in {"completed", "cancelled"}
-                    else operation.working_artifacts_expires_at
-                    or operation.created_at + self.working_artifacts_retention
-                )
-                provider_run_is_in_flight = bool(
-                    operation.provider_runs
-                    and operation.provider_runs[-1].status in {"pending", "running"}
-                )
+                if (
+                    operation.status
+                    not in self._TERMINAL_PURGE_ELIGIBLE_STATUSES
+                ):
+                    continue
+                expires_at = operation.updated_at + self.working_artifacts_retention
                 if (
                     current_time < expires_at
-                    or operation.status == "completed"
-                    or provider_run_is_in_flight
                     or (
                         not operation.segments
                         and not operation.proposals
@@ -1101,8 +1160,8 @@ class TaskService:
                             checkpoint="sealed",
                             attempt=attempt,
                             recovery_count=recovery_count,
-                            error=str(exc)[:1000],
-                            error_code=str(exc)[:100],
+                            error=self._redact_provider_error(str(exc)),
+                            error_code=self._redact_provider_error(str(exc)),
                             provider=self.accurate_stt.provider_name,
                             estimated_cost_usd=exc.estimated_cost_usd,
                             created_at=now,
@@ -1305,8 +1364,8 @@ class TaskService:
                     checkpoint_segments=checkpoint_segments,
                     checkpoint_runs=checkpoint_runs,
                     input_hash=input_hash,
-                    error=str(exc)[:1000],
-                    error_code=str(exc)[:100],
+                    error=self._redact_provider_error(str(exc)),
+                    error_code=self._redact_provider_error(str(exc)),
                     now=now,
                     retryable=isinstance(exc, ProviderRetryableError),
                     attempt=attempt,
@@ -1695,6 +1754,43 @@ class TaskService:
                 "revision": proposal.revision + 1,
             }
             if payload.conflict_resolution is not None:
+                removal_conflicts = [
+                    conflict
+                    for conflict in proposal.conflicts
+                    if conflict.field == "removal"
+                ]
+                if removal_conflicts:
+                    if payload.conflict_resolution == "accept":
+                        update.update(
+                            {
+                                "deleted": True,
+                                "conflicts": [
+                                    conflict
+                                    for conflict in proposal.conflicts
+                                    if conflict.field != "removal"
+                                ],
+                            }
+                        )
+                        patch_drafts.append(
+                            ProposalPatch.remove(
+                                proposal_id=proposal.id, producer="user"
+                            )
+                        )
+                    else:
+                        update.update(
+                            {
+                                "status": "user_edited",
+                                "user_edited": True,
+                                "conflicts": [
+                                    conflict
+                                    for conflict in proposal.conflicts
+                                    if conflict.field != "removal"
+                                ],
+                            }
+                        )
+                    proposals.append(proposal.model_copy(update=update))
+                    changed = True
+                    continue
                 title_conflicts = [
                     conflict
                     for conflict in proposal.conflicts
@@ -1702,7 +1798,7 @@ class TaskService:
                 ]
                 if not title_conflicts:
                     raise ValidationFailure(
-                        "Proposal has no title conflict to resolve."
+                        "Proposal has no conflict to resolve."
                     )
                 conflict = title_conflicts[-1]
                 resolved_title = proposal.title

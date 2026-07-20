@@ -228,10 +228,76 @@ def test_semantic_reconciler_updates_and_removes_existing_proposals(
     )
 
     assert sealed.status_code == 200, sealed.text
-    by_id = {proposal["id"]: proposal for proposal in sealed.json()["proposals"]}
+    body = sealed.json()
+    by_id = {proposal["id"]: proposal for proposal in body["proposals"]}
     assert by_id[first["id"]]["title"] == "Починить BrainBuddy"
     assert by_id[first["id"]]["status"] == "reconciled"
-    assert by_id[second["id"]]["deleted"] is True
+    # A provider-driven destructive removal must stay visible and individually
+    # confirmed rather than silently disappearing (exact-head review item 1):
+    # it surfaces as an open conflict, not an immediate tombstone.
+    removed_candidate = by_id[second["id"]]
+    assert removed_candidate["deleted"] is False
+    assert removed_candidate["conflicts"][0]["field"] == "removal"
+    assert removed_candidate["conflicts"][0]["suggested_value"] == "removed"
+
+    confirmed = api_client.patch(
+        f"/api/brain-dump-operations/{operation['id']}/proposals/{second['id']}",
+        headers={"Idempotency-Key": "confirm-model-removal"},
+        json={"conflict_resolution": "accept", "expected_revision": body["revision"]},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    confirmed_by_id = {
+        proposal["id"]: proposal for proposal in confirmed.json()["proposals"]
+    }
+    assert confirmed_by_id[second["id"]]["deleted"] is True
+    assert confirmed_by_id[second["id"]]["conflicts"] == []
+
+
+def test_retention_sweep_never_purges_a_retryable_error_operation(api_client) -> None:
+    """Exact-head review item 3: ``retryable_error`` is recoverable, not
+    terminal -- retention purge is enforced ``only`` for completed/
+    cancelled/terminal_error, so a still-retryable operation must keep its
+    raw audio and working artifacts no matter how old it looks, since a
+    retry still needs that data."""
+
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    operation = _start_operation(
+        api_client,
+        key="start-retryable-retention-guard",
+        external_processing_allowed=True,
+    )
+
+    def fail(_payload: dict[str, object]) -> dict[str, object]:
+        raise ProviderRetryableError("temporary outage")
+
+    service = api_client.app.state.container.task_service
+    service.text_reconciler = OpenAITextReconciler(api_key="test-key", complete=fail)
+    sealed = _upload_and_seal(
+        api_client, operation, b"retryable retention guard", "seal-retryable-retention"
+    )
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["status"] == "retryable_error"
+
+    container = api_client.app.state.container
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    persisted = container.task_service.get_brain_dump_operation(
+        operation["id"], owner_id=owner_id
+    )
+    aged = persisted.model_copy(
+        update={
+            "updated_at": persisted.updated_at - timedelta(days=30),
+            "raw_audio_expires_at": persisted.created_at - timedelta(days=30),
+        }
+    )
+    container.task_repo.save_brain_dump_operation(aged)
+
+    assert container.task_service.purge_expired_raw_audio() == 0
+    assert container.task_service.purge_expired_working_artifacts() == 0
+    swept = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
+    assert swept["status"] == "retryable_error"
+    assert swept["audio_chunks"] != []
+    assert swept["segments"] != []
 
 
 @pytest.mark.parametrize(
@@ -509,7 +575,7 @@ def test_schema_v2_conflict_resolution_requires_a_visible_title_conflict(
     )
 
     assert response.status_code == 400
-    assert "no title conflict to resolve" in response.text
+    assert "no conflict to resolve" in response.text
 
 
 def test_seal_rejects_external_reconciliation_without_explicit_consent(
@@ -1114,20 +1180,34 @@ def test_accurate_reconciliation_preserves_unmatched_locked_and_deleted_proposal
     active_titles = [
         proposal["title"] for proposal in proposals if not proposal["deleted"]
     ]
+    # The stale preview proposal ("Починить brain body") is superseded by a
+    # freshly reconciled "Починить BrainBuddy" but a provider-driven removal
+    # must stay visible and individually confirmed rather than silently
+    # disappearing (exact-head review item 1): it remains present as an open
+    # "removal" conflict instead of being tombstoned outright.
     assert active_titles == [
         "Сделать production smoke",
         "Написать Наташе",
         edited_title,
+        "Починить brain body",
         "Починить BrainBuddy",
     ]
     edited_after = next(proposal for proposal in proposals if proposal["id"] == bread["id"])
     deleted_after = next(
         proposal for proposal in proposals if proposal["id"] == disposable["id"]
     )
+    stale_preview_after = next(
+        proposal
+        for proposal in proposals
+        if proposal["title"] == "Починить brain body"
+    )
     assert edited_after["title"] == edited_title
     assert edited_after["locked_fields"] == ["title"]
     assert edited_after["user_edited"] is True
     assert deleted_after["deleted"] is True
+    assert stale_preview_after["deleted"] is False
+    assert stale_preview_after["conflicts"][0]["field"] == "removal"
+    assert stale_preview_after["conflicts"][0]["suggested_value"] == "removed"
 
 
 def test_brain_dump_cumulative_final_replaces_interim_words(api_client) -> None:
@@ -2557,12 +2637,14 @@ def test_raw_audio_retention_sweep_deletes_expired_terminal_media(api_client) ->
     assert swept["media_ref"] is None
 
 
-def test_raw_audio_retention_sweep_covers_an_abandoned_awaiting_confirmation_operation(
+def test_raw_audio_retention_sweep_never_purges_an_awaiting_confirmation_operation(
     api_client,
 ) -> None:
-    """Raw audio's retention clock starts at successful reconciliation, not
-    only at cancel/complete/terminal-error — an operation reconciled and then
-    simply never committed must still have its audio purged on schedule."""
+    """Raw audio must never be purged while status is awaiting_confirmation
+    (exact-head review item 3): an operation reconciled and then simply
+    never committed keeps its audio until it reaches a terminal status
+    (completed/cancelled/terminal_error), even past what would otherwise be
+    an expired anchor."""
 
     operation = _start_operation(
         api_client,
@@ -2591,12 +2673,12 @@ def test_raw_audio_retention_sweep_covers_an_abandoned_awaiting_confirmation_ope
     )
     container.task_repo.save_brain_dump_operation(expired)
 
-    assert container.task_service.purge_expired_raw_audio() == 1
+    assert container.task_service.purge_expired_raw_audio() == 0
     swept = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
     assert swept["status"] == "awaiting_confirmation"
-    assert swept["audio_chunks"] == []
-    assert swept["sealed_manifest_hash"] is None
-    # The reconciled batch stays committable even with raw audio purged.
+    assert swept["audio_chunks"] != []
+    assert swept["sealed_manifest_hash"] is not None
+    # The reconciled batch stays committable, audio untouched.
     committed = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/commit",
         headers={"Idempotency-Key": "commit-after-retention-sweep"},
@@ -2605,13 +2687,28 @@ def test_raw_audio_retention_sweep_covers_an_abandoned_awaiting_confirmation_ope
     assert committed.status_code == 200, committed.text
     assert committed.json()["committed_task_ids"]
 
+    # Only after the operation reaches a terminal status does the same
+    # expired anchor become eligible for the retention sweep.
+    completed_owner_id = api_client.get("/api/auth/me").json()["id"]
+    completed_operation = container.task_service.get_brain_dump_operation(
+        operation["id"], owner_id=completed_owner_id
+    )
+    assert completed_operation.status == "completed"
+    assert container.task_service.purge_expired_raw_audio() == 1
+    final = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
+    assert final["audio_chunks"] == []
+
 
 def test_raw_audio_expiry_is_not_extended_by_a_later_proposal_edit(api_client) -> None:
     """F4: raw audio's expiry is anchored at successful reconciliation and
     must not be pushed out by a later mutation. A proposal edit made well
     after reconciliation bumps ``updated_at`` to something very recent; the
     sweep must still purge on schedule from the original reconciliation
-    anchor rather than restarting the retention window from that edit."""
+    anchor rather than restarting the retention window from that edit. The
+    edit happens while ``awaiting_confirmation`` (never purged, exact-head
+    review item 3); the operation is then committed so the sweep -- which
+    only ever fires for a terminal operation -- has something eligible to
+    purge from."""
 
     operation = _start_operation(
         api_client,
@@ -2632,7 +2729,7 @@ def test_raw_audio_expiry_is_not_extended_by_a_later_proposal_edit(api_client) -
     assert persisted.raw_audio_expires_at is not None
     original_anchor = persisted.raw_audio_expires_at
 
-    # Simulate a proposal edit made just before the sweep runs: it bumps
+    # Simulate a proposal edit made just before commit: it bumps
     # ``updated_at`` to "now" (very recent) but must not touch the raw-audio
     # anchor, which stays exactly where reconciliation left it.
     edited = api_client.patch(
@@ -2647,8 +2744,16 @@ def test_raw_audio_expiry_is_not_extended_by_a_later_proposal_edit(api_client) -
     assert reloaded.raw_audio_expires_at == original_anchor
     assert reloaded.updated_at > persisted.updated_at
 
+    committed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/commit",
+        headers={"Idempotency-Key": "commit-raw-audio-not-extended"},
+        json={"expected_revision": edited.json()["revision"]},
+    )
+    assert committed.status_code == 200, committed.text
+    assert committed.json()["status"] == "completed"
+
     # A sweep timestamp just past the original anchor purges the audio even
-    # though ``updated_at`` looks freshly touched.
+    # though ``updated_at`` looks freshly touched by the edit and commit.
     purged = container.task_service.purge_expired_raw_audio(
         now=original_anchor + timedelta(seconds=1)
     )
@@ -2661,6 +2766,16 @@ def test_raw_audio_expiry_is_not_extended_by_a_later_proposal_edit(api_client) -
 def test_working_artifact_retention_sweep_clears_uncommitted_data_but_not_committed(
     api_client,
 ) -> None:
+    """Exact-head review item 3: working artifacts are only ever eligible
+    for retention purge once an operation reaches a terminal status
+    (completed/cancelled/terminal_error). An abandoned operation still
+    sitting in an active status (here: ``recording``) must never be
+    purged no matter how old it looks -- only cancelling it makes its
+    uncommitted data eligible. A committed (``completed``) operation's raw
+    segments/proposals/patches are purged too, but its compact immutable
+    receipts and committed task IDs are not disposable working data and
+    must survive the purge."""
+
     abandoned = _start_operation(api_client, key="start-working-artifact-abandoned")
     appended = api_client.post(
         f"/api/brain-dump-operations/{abandoned['id']}/transcript",
@@ -2699,32 +2814,108 @@ def test_working_artifact_retention_sweep_clears_uncommitted_data_but_not_commit
             operation_id, owner_id=owner_id
         )
         expired = persisted.model_copy(
-            update={
-                "updated_at": persisted.updated_at - timedelta(days=8),
-                "working_artifacts_expires_at": persisted.created_at
-                - timedelta(days=1),
-            }
+            update={"updated_at": persisted.updated_at - timedelta(days=8)}
         )
         container.task_repo.save_brain_dump_operation(expired)
 
+    # The abandoned operation is still "recording" (an active status): even
+    # though it looks ancient, it must never be purged.
+    still_recording = container.task_service.get_brain_dump_operation(
+        abandoned["id"], owner_id=owner_id
+    )
+    assert still_recording.status == "recording"
     assert container.task_service.purge_expired_working_artifacts() == 1
 
     swept_abandoned = api_client.get(
         f"/api/brain-dump-operations/{abandoned['id']}"
     ).json()
-    assert swept_abandoned["segments"] == []
-    assert swept_abandoned["proposals"] == []
-    assert swept_abandoned["proposal_patches"] == []
+    assert swept_abandoned["segments"] != []
 
     swept_committed = api_client.get(
         f"/api/brain-dump-operations/{committed_source['id']}"
     ).json()
     assert swept_committed["status"] == "completed"
-    # Confirmation receipts and their proposal/source/patch evidence are
-    # immutable audit provenance, not disposable working artifacts.
-    assert swept_committed["proposals"]
+    assert swept_committed["segments"] == []
+    assert swept_committed["proposals"] == []
+    assert swept_committed["proposal_patches"] == []
+    # Confirmation receipts and committed task IDs are compact, immutable,
+    # ID-only audit provenance -- not disposable working artifacts.
     assert swept_committed["action_receipts"]
     assert swept_committed["committed_task_ids"]
+
+    # Cancelling the abandoned operation makes its uncommitted data eligible
+    # for the same sweep once its own terminal retention window elapses.
+    cancelled = api_client.post(
+        f"/api/brain-dump-operations/{abandoned['id']}/cancel",
+        headers={"Idempotency-Key": "cancel-working-artifact-abandoned"},
+        json={"expected_revision": swept_abandoned["revision"]},
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    persisted_cancelled = container.task_service.get_brain_dump_operation(
+        abandoned["id"], owner_id=owner_id
+    )
+    aged_cancelled = persisted_cancelled.model_copy(
+        update={"updated_at": persisted_cancelled.updated_at - timedelta(days=8)}
+    )
+    container.task_repo.save_brain_dump_operation(aged_cancelled)
+
+    assert container.task_service.purge_expired_working_artifacts() == 1
+    swept_cancelled = api_client.get(
+        f"/api/brain-dump-operations/{abandoned['id']}"
+    ).json()
+    assert swept_cancelled["status"] == "cancelled"
+    assert swept_cancelled["segments"] == []
+    assert swept_cancelled["proposals"] == []
+    assert swept_cancelled["proposal_patches"] == []
+
+
+def test_task_port_is_a_real_adapter_not_the_service_self_adapting(api_client) -> None:
+    """ADR-0001 module boundary (exact-head review item 4): the voice
+    operation's confirmation command must cross into Tasks through an
+    explicit, container-wired TaskPort adapter -- never by the Tasks
+    service treating itself as its own port (``task_port or self``)."""
+
+    from app.workflows.voice_brain_dump.task_port import InProcessTaskPort
+
+    container = api_client.app.state.container
+    task_service = container.task_service
+
+    assert isinstance(task_service.task_port, InProcessTaskPort)
+    assert task_service.task_port is not task_service
+
+    # The adapter still delegates to the one canonical Tasks command, so a
+    # real confirmation flow keeps working end-to-end through the port.
+    operation = _start_operation(api_client, key="start-task-port-boundary")
+    sealed = _upload_and_seal(
+        api_client, operation, b"Buy milk.", "seal-task-port-boundary"
+    )
+    assert sealed.status_code == 200, sealed.text
+    committed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/commit",
+        headers={"Idempotency-Key": "commit-task-port-boundary"},
+        json={"expected_revision": sealed.json()["revision"]},
+    )
+    assert committed.status_code == 200, committed.text
+    assert committed.json()["committed_task_ids"]
+
+
+def test_task_service_defaults_to_a_real_adapter_when_constructed_without_a_port() -> (
+    None
+):
+    """Even outside container wiring, the default must not fall back to
+    ``self`` -- callers that construct ``TaskService`` directly (as most
+    unit tests do) still get a real, narrow adapter object."""
+
+    import tempfile
+    from pathlib import Path
+
+    from app.modules.tasks import TaskRepository, TaskService
+    from app.workflows.voice_brain_dump.task_port import InProcessTaskPort
+
+    with tempfile.TemporaryDirectory() as data_dir:
+        service = TaskService(TaskRepository(Path(data_dir)))
+        assert isinstance(service.task_port, InProcessTaskPort)
+        assert service.task_port is not service
 
 
 def test_recover_due_provider_leases_resumes_an_expired_in_flight_lease(
