@@ -456,7 +456,12 @@ test("Voice Brain Dump records provisional cards, reviews edits/deletes and save
     await expect(page.getByRole("article", { name: "Draft task 1: Buy oat milk" })).toBeVisible();
     await expect(page.getByRole("article", { name: "Draft task 2: Call dentist" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Stop & review" })).toBeVisible();
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    const overflow = await page.evaluate(async () => {
+      // Preserve this browser-side measurement as a real Allure step rather
+      // than a zero-duration reporter placeholder rejected by CI taxonomy.
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+      return document.documentElement.scrollWidth - document.documentElement.clientWidth;
+    });
     assertCondition(overflow <= 0, `mobile viewport should not horizontally overflow; overflow=${overflow}`);
   });
 
@@ -545,7 +550,16 @@ test("Voice Brain Dump grows a mixed-language preview and preserves user choices
 
   await test.step("accurate reconciliation keeps the locked proposal and deletion while correcting other tasks", async () => {
     await page.getByRole("button", { name: "Stop & review" }).click();
-    await expect(page.getByRole("heading", { name: "Review 4 tasks" })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("heading", { name: "Review 6 tasks" })).toBeVisible({ timeout: 15_000 });
+    // Accurate STT wants to remove two browser-only proposals. Removal is a
+    // destructive change to user-visible state, so reconciliation must expose
+    // conflicts rather than silently accepting the provider output.
+    const useSuggestionButtons = page.getByRole("button", { name: "Use suggestion" });
+    await expect(useSuggestionButtons).toHaveCount(2);
+    await useSuggestionButtons.first().click();
+    await expect(useSuggestionButtons).toHaveCount(1);
+    await useSuggestionButtons.first().click();
+    await expect(page.getByRole("heading", { name: "Review 4 tasks" })).toBeVisible();
     const reconciled = await apiGet<BrainDumpOperation>(page, `/api/brain-dump-operations/${operationId}`);
     const activeTitles = reconciled.proposals
       .filter((proposal) => !proposal.deleted)
