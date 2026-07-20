@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import date
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, Query, Request, status
 
@@ -798,6 +799,7 @@ def _to_brain_dump_response(
             operation.status == "awaiting_confirmation"
             and _brain_dump_committable(operation)
         ),
+        available_recovery_actions=_brain_dump_available_recovery_actions(operation),
         provider_runs=[
             BrainDumpProviderRunResponse(
                 id=run.id,
@@ -864,6 +866,26 @@ def _to_brain_dump_response(
         updated_at=operation.updated_at,
         revision=operation.revision,
     )
+
+
+def _brain_dump_available_recovery_actions(
+    operation: BrainDumpOperationDocument,
+) -> list[Literal["retry", "review_provisional", "cancel"]]:
+    """Project only recovery commands the service will authorize for this state."""
+
+    actions: list[Literal["retry", "review_provisional", "cancel"]] = []
+    if operation.status == "retryable_error":
+        actions.append("retry")
+    if (
+        operation.status == "terminal_error"
+        and operation.provider_runs
+        and operation.provider_runs[-1].error_code
+        in {"RECONCILER_VALIDATION_REJECTED", "OPERATION_RECOVERY_BUDGET_EXHAUSTED"}
+    ):
+        actions.append("review_provisional")
+    if operation.status in {"retryable_error", "terminal_error"}:
+        actions.append("cancel")
+    return actions
 
 
 def _brain_dump_committable(operation: BrainDumpOperationDocument) -> bool:
