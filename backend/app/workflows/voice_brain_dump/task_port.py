@@ -12,7 +12,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Protocol
 
-from app.modules.tasks.domain import TaskDocument
+
+class CreatedTask(Protocol):
+    """Minimal canonical-task result exposed back to the workflow."""
+
+    id: str
 
 
 class TaskPort(Protocol):
@@ -25,10 +29,10 @@ class TaskPort(Protocol):
         title: str,
         source_capture_ids: list[str],
         idempotency_key: str,
-    ) -> TaskDocument: ...
+    ) -> CreatedTask: ...
 
 
-CreateNativeInboxTask = Callable[..., TaskDocument]
+CreateNativeInboxTask = Callable[..., CreatedTask]
 
 
 class InProcessTaskPort:
@@ -50,7 +54,7 @@ class InProcessTaskPort:
         title: str,
         source_capture_ids: list[str],
         idempotency_key: str,
-    ) -> TaskDocument:
+    ) -> CreatedTask:
         return self._create_native_inbox_task(
             owner_id=owner_id,
             title=title,

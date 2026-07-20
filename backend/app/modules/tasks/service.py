@@ -43,6 +43,7 @@ from app.schemas.tasks import (
 )
 from app.utils.identifiers import generate_id
 from app.utils.time import utcnow
+from app.workflows.voice_brain_dump.confirmation import confirm_native_inbox_actions
 from app.workflows.voice_brain_dump.domain import (
     ProposalConflict,
     ProposalPatch,
@@ -341,7 +342,10 @@ class TaskService:
                     not in self._TERMINAL_PURGE_ELIGIBLE_STATUSES
                 ):
                     continue
-                expires_at = operation.updated_at + self.working_artifacts_retention
+                expires_at = (
+                    operation.working_artifacts_expires_at
+                    or operation.updated_at + self.working_artifacts_retention
+                )
                 if (
                     current_time < expires_at
                     or (
@@ -995,6 +999,15 @@ class TaskService:
                     continue
                 self.task_repo.save_brain_dump_operation(updated)
                 advanced += 1
+        # Accurate STT success durably queues a distinct reconciler run. Re-scan
+        # immediately within the caller's original bound so that dependent work
+        # does not wait for the next periodic sweep (60 seconds by default).
+        # Persistence still separates the checkpoints, preserving crash safety;
+        # the recursive pass only claims newly due rows and terminates once a
+        # pass makes no progress or the shared stage budget is exhausted.
+        remaining = limit - advanced
+        if advanced and remaining > 0:
+            advanced += self.run_due_brain_dump_provider_runs(limit=remaining)
         return advanced
 
 
@@ -1974,6 +1987,11 @@ class TaskService:
                 "sealed_manifest_hash": (
                     None if clear_raw_audio else operation.sealed_manifest_hash
                 ),
+                "working_artifacts_expires_at": (
+                    now + self.working_artifacts_retention
+                    if action == "cancel"
+                    else operation.working_artifacts_expires_at
+                ),
                 "updated_at": now,
                 "revision": operation.revision + 1,
             }
@@ -2320,33 +2338,59 @@ class TaskService:
                 {"proposal_ids": unreconciled},
             )
         now = utcnow()
-        committed_task_ids: list[str] = []
+        confirmed_actions = confirm_native_inbox_actions(
+            operation_id=operation.id,
+            owner_id=owner_id,
+            proposals=operation.proposals,
+            task_port=self.task_port,
+            confirmed_at=now,
+        )
+        committed_task_ids = [action.task_id for action in confirmed_actions]
+        proposal_by_id = {proposal.id: proposal for proposal in operation.proposals}
+        reconciler_run = next(
+            (
+                run
+                for run in reversed(operation.provider_runs)
+                if run.role == "reconciler"
+                and run.status == "succeeded"
+                and run.checkpoint == "reconciled"
+            ),
+            None,
+        )
         action_receipts: list[BrainDumpActionReceiptDocument] = []
-        for proposal in operation.proposals:
-            if proposal.deleted:
-                continue
-            child_key = f"brain_dump_action:{operation.id}:{proposal.id}"
-            source_ref = f"brain_dump:{operation.id}:{proposal.id}"
-            task = self.task_port.create_native_inbox_task(
-                owner_id=owner_id,
-                title=proposal.title,
-                source_capture_ids=[source_ref],
-                idempotency_key=child_key,
-            )
-            committed_task_ids.append(task.id)
+        for action in confirmed_actions:
+            proposal = proposal_by_id[action.proposal_id]
             action_receipts.append(
                 BrainDumpActionReceiptDocument(
-                    id=f"receipt:{operation.id}:{proposal.id}",
-                    proposal_id=proposal.id,
-                    task_id=task.id,
-                    child_idempotency_key=child_key,
-                    source_segment_ids=list(proposal.source_segment_ids),
+                    id=f"receipt:{operation.id}:{action.proposal_id}",
+                    proposal_id=action.proposal_id,
+                    task_id=action.task_id,
+                    child_idempotency_key=action.child_idempotency_key,
+                    source_segment_ids=list(action.source_segment_ids),
                     proposal_patch_ids=[
                         patch.id
                         for patch in operation.proposal_patches
-                        if patch.proposal_id == proposal.id
+                        if patch.proposal_id == action.proposal_id
                     ],
-                    confirmed_at=now,
+                    source_operation_id=operation.id,
+                    source_manifest_hash=operation.sealed_manifest_hash,
+                    reconciliation_run_id=reconciler_run.id if reconciler_run else None,
+                    reconciliation_provider=(
+                        reconciler_run.provider if reconciler_run else None
+                    ),
+                    reconciliation_model=reconciler_run.model if reconciler_run else None,
+                    reconciliation_template_version=(
+                        reconciler_run.template_version if reconciler_run else None
+                    ),
+                    reconciliation_quality=operation.reconciliation_quality,
+                    confirmed_title_sha256=hashlib.sha256(
+                        proposal.title.encode("utf-8")
+                    ).hexdigest(),
+                    proposal_revision=proposal.revision,
+                    user_edited=proposal.user_edited,
+                    confidence="unknown",
+                    confirmed_by_actor_id=owner_id,
+                    confirmed_at=action.confirmed_at,
                 )
             )
         updated = operation.model_copy(
@@ -2357,6 +2401,7 @@ class TaskService:
                 # point at data erased by the confirmation itself.
                 "action_receipts": [*operation.action_receipts, *action_receipts],
                 "committed_task_ids": committed_task_ids,
+                "raw_audio_expires_at": now + self.raw_audio_retention,
                 "working_artifacts_expires_at": now + self.working_artifacts_retention,
                 "updated_at": now,
                 "revision": operation.revision + 1,

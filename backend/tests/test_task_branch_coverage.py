@@ -1704,9 +1704,11 @@ def test_run_due_provider_runs_claims_a_fresh_lease_per_candidate(
 
     advanced = service.run_due_brain_dump_provider_runs(limit=50)
 
-    assert advanced == 2
-    assert len(claim_snapshots["owner_lease_a"]) == 1
-    assert len(claim_snapshots["owner_lease_b"]) == 1
+    # Both accurate-STT claims and their immediately queued dependent
+    # reconciler claims are advanced within the same bounded invocation.
+    assert advanced == 4
+    assert len(claim_snapshots["owner_lease_a"]) == 2
+    assert len(claim_snapshots["owner_lease_b"]) == 2
 
     claim_a = claim_snapshots["owner_lease_a"][0]
     claim_b = claim_snapshots["owner_lease_b"][0]
