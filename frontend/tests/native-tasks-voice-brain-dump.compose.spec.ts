@@ -434,7 +434,7 @@ test("minimal task management creates, edits, moves, completes, reopens and pers
 
   await test.step("reload and relogin prove the reopened Next task persisted", async () => {
     await page.reload();
-    await expect(page.getByText("Book dentist checkup")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Book dentist checkup" })).toBeVisible();
     await relogin(page, account.email);
     await page.goto("/tasks/next");
     await expect(page.getByText("Book dentist checkup")).toBeVisible();

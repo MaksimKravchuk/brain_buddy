@@ -29,7 +29,7 @@ test.describe("task revision acceptance", () => {
         throw new Error(`stale update overwrote persisted title with ${JSON.stringify(persisted.title)}`);
       }
       await page.goto(`/tasks/next/${task.id}`);
-      await expect(page.getByText("Accepted title")).toBeVisible();
+      await expect(page.getByRole("link", { name: "Accepted title" })).toBeVisible();
       await expect(page.getByText("Stale overwrite")).toHaveCount(0);
     });
   });

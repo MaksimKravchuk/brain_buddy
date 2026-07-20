@@ -179,8 +179,7 @@ describe("AppRoutes", () => {
     expect(await within(sidebar).findByRole("link", { name: "@calls" })).toBeInTheDocument();
 
     expect(screen.getByText("Fix onboarding drop-off")).toBeInTheDocument();
-    expect(screen.getAllByText("Onboarding drop-off").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("@Onboarding drop-off")).toBeInTheDocument();
+    expect(screen.getAllByText("Onboarding drop-off").length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText(/#deep-work/).length).toBeGreaterThanOrEqual(2);
   });
 
@@ -687,5 +686,97 @@ describe("AppRoutes", () => {
         })
       );
     });
+  });
+
+  it("opens task detail from a click on the noninteractive card body but not from interactive descendants", async () => {
+    const user = userEvent.setup();
+    renderRoutes("/tasks/next");
+
+    const row = (await screen.findByRole("link", { name: "Fix onboarding drop-off" })).closest('[role="listitem"]');
+    expect(row).not.toBeNull();
+    expect(screen.queryByRole("heading", { name: "Task detail" })).not.toBeInTheDocument();
+
+    await user.click(within(row as HTMLElement).getByRole("button", { name: "Complete Fix onboarding drop-off" }));
+    expect(screen.queryByRole("heading", { name: "Task detail" })).not.toBeInTheDocument();
+
+    await user.click(row as HTMLElement);
+    expect(await screen.findByRole("heading", { name: "Task detail" })).toBeInTheDocument();
+  });
+
+  it("preserves filtered task routes while focusing detail and restoring the originating row link", async () => {
+    const user = userEvent.setup();
+    renderRoutes("/tasks/next?sort=priority&q=Persisted");
+
+    const rowLink = await screen.findByRole("link", { name: "Fix onboarding drop-off" });
+    expect(rowLink).toHaveAttribute("href", "/tasks/next/task-1?sort=priority&q=Persisted");
+    await user.click(rowLink);
+
+    const heading = await screen.findByRole("heading", { name: "Task detail" });
+    await waitFor(() => expect(heading).toHaveFocus());
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Task detail" })).not.toBeInTheDocument());
+    expect(screen.getByRole("searchbox", { name: "Search tasks" })).toHaveValue("Persisted");
+    expect(screen.getByLabelText("Sort tasks")).toHaveValue("priority");
+    expect(screen.getByRole("link", { name: "Fix onboarding drop-off" })).toHaveFocus();
+  });
+
+  it("focuses the Task detail heading immediately on a direct task detail URL and preserves query params on close", async () => {
+    const user = userEvent.setup();
+    renderRoutes("/tasks/next/task-1?sort=due");
+
+    const heading = await screen.findByRole("heading", { name: "Task detail" });
+    await waitFor(() => expect(heading).toHaveFocus());
+    expect(screen.getByLabelText("Sort tasks")).toHaveValue("due");
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Task detail" })).not.toBeInTheDocument());
+    expect(screen.getByLabelText("Sort tasks")).toHaveValue("due");
+  });
+
+  it("restores focus to the list heading when the originating row is absent on close", async () => {
+    const user = userEvent.setup();
+    const directTask = taskFixture("task-direct", "Shared task outside Next", "waiting");
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/tasks/task-direct")) {
+        return Promise.resolve(jsonResponse(directTask));
+      }
+      if (url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse({
+          items: [],
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 0, next: 0, waiting: 1, someday: 0 }
+        }));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/next/task-direct");
+    await screen.findByRole("heading", { name: "Task detail" });
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Task detail" })).not.toBeInTheDocument());
+    expect(screen.getByRole("heading", { name: "Next actions" })).toHaveFocus();
+  });
+
+  it("shows an honest, noninteractive Agent placeholder in task detail", async () => {
+    renderRoutes("/tasks/next/task-1");
+    await screen.findByRole("heading", { name: "Task detail" });
+
+    const agentZone = await screen.findByTestId("task-detail-agent");
+    expect(within(agentZone).getByRole("heading", { name: "Agent" })).toBeInTheDocument();
+    const soon = within(agentZone).getByText("Soon");
+    expect(soon).toHaveAttribute("aria-hidden", "true");
+    expect(within(agentZone).getByText("Coming soon")).toBeInTheDocument();
+    expect(within(agentZone).queryByRole("button")).not.toBeInTheDocument();
+    expect(within(agentZone).queryByRole("link")).not.toBeInTheDocument();
   });
 });
