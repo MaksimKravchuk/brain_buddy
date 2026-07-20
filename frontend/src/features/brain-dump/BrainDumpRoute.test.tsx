@@ -400,6 +400,7 @@ describe("BrainDumpRoute", () => {
     function ChunkingMediaRecorder() {
       return {
         state: "inactive",
+        mimeType: "audio/webm",
         ondataavailable: null as ((event: { data: Blob }) => void) | null,
         onstop: null as ((event: Event) => void) | null,
         start(this: { state: string }) {

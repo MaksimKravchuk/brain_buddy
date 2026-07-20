@@ -264,7 +264,7 @@ export function BrainDumpRoute(): JSX.Element {
           chunkNumber,
           bytes,
           await sha256(bytes),
-          event.data.type || recorder.mimeType
+          recorder.mimeType
         );
         applyOperation(updated);
       });
