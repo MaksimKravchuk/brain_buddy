@@ -287,6 +287,58 @@ test("mobile task detail pushes the list pane and browser back restores it", asy
   await expect(page.getByRole("button", { name: "Back to list" })).toHaveCount(0);
 });
 
+test("mobile task detail focuses the announced heading on open, restores origin link focus via Back to list, and avoids a Back/Close history ping-pong", async ({ page }) => {
+  await page.setViewportSize({ width: 402, height: 874 });
+  await page.goto("/tasks/waiting");
+  await expect(page.getByRole("heading", { name: "Waiting for" })).toBeVisible();
+
+  await test.step("navigate to Next actions via the drawer, establishing the list history entry detail is opened from", async () => {
+    await page.getByRole("button", { name: "Open task navigation" }).click();
+    await page.getByRole("dialog", { name: "Task navigation" }).getByRole("link", { name: "Next actions" }).click();
+    await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
+  });
+
+  const originLink = page.getByRole("link", { name: "Fix onboarding drop-off" });
+  await originLink.click();
+
+  const detailHeading = page.getByRole("heading", { name: "Task detail" });
+  await test.step("opening task detail at a narrow width focuses the announced (visually hidden) heading", async () => {
+    await expect(detailHeading).toBeFocused();
+    await expect(page.getByRole("heading", { name: "Next actions" })).toHaveCount(0);
+  });
+
+  await test.step("visible Back to list returns to the prior list history entry and restores focus to the origin link", async () => {
+    await page.getByRole("button", { name: "Back to list" }).click();
+    await expect(page).toHaveURL(/\/tasks\/next$/);
+    await expect(detailHeading).toHaveCount(0);
+    await expect(originLink).toBeFocused();
+  });
+
+  await test.step("the next browser Back reaches the pre-list history entry, not a resurrected detail", async () => {
+    await page.goBack();
+    await expect(page.getByRole("heading", { name: "Waiting for" })).toBeVisible();
+    await expect(detailHeading).toHaveCount(0);
+  });
+});
+
+test.describe("desktop deep-linked task detail at 1240x800", () => {
+  test.use({ viewport: { width: 1240, height: 800 } });
+
+  test("a direct deep link to task detail focuses the heading and Close falls back to a history replace, preserving query/group state and not reviving detail on Back", async ({ page }) => {
+    await page.goto("/tasks/next/task-2?sort=priority&q=Persisted&group=project");
+
+    const detailHeading = page.getByRole("heading", { name: "Task detail" });
+    await expect(detailHeading).toBeFocused();
+
+    await page.getByRole("button", { name: "Close" }).click();
+    await expect(page).toHaveURL(/\/tasks\/next\?sort=priority&q=Persisted&group=project$/);
+    await expect(detailHeading).toHaveCount(0);
+
+    await page.goBack();
+    await expect(detailHeading).toHaveCount(0);
+  });
+});
+
 test("mobile task detail wraps a long task title without horizontal overflow", async ({ page }) => {
   const longTitle = "Prepare a comprehensive accessibility and route-history regression evidence package for the task-detail workflow";
   await page.route("**/api/tasks/task-2", async (route) => {

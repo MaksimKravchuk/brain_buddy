@@ -2,7 +2,7 @@
 import { AlertTriangle, ArrowLeft, ArrowUpDown, Check, Edit3, Layers, Plus, RotateCcw, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { apiClient } from "../../api/client";
@@ -38,6 +38,10 @@ function idempotencyKey(action: string): string {
 
 const desktopMediaQuery = "(min-width: 1024px)";
 
+interface TaskDetailLocationState {
+  fromList?: boolean;
+}
+
 function useIsDesktop(): boolean {
   const [isDesktop, setIsDesktop] = useState(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
@@ -69,6 +73,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const tagId = mode === "tag" ? params.tagId : undefined;
   const taskId = params.taskId;
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const isDesktop = useIsDesktop();
   const [newTitle, setNewTitle] = useState("");
@@ -116,9 +121,9 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const tagsQuery = useTags();
 
   useEffect(() => {
-    if (taskId && isDesktop) {
+    if (taskId) {
       detailHeadingRef.current?.focus();
-    } else if (!taskId && isDesktop && previousTaskIdRef.current) {
+    } else if (previousTaskIdRef.current) {
       const originLink = rowLinkRefs.current.get(previousTaskIdRef.current);
       if (originLink && document.contains(originLink)) {
         originLink.focus();
@@ -127,7 +132,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       }
     }
     previousTaskIdRef.current = taskId;
-  }, [detailQuery.data, isDesktop, taskId]);
+  }, [detailQuery.data, taskId]);
 
   const projects = projectsQuery.data ?? emptyProjects;
   const tags = tagsQuery.data ?? emptyTags;
@@ -145,6 +150,14 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       ? `/tags/${tagId}`
       : `/tasks/${params.state ?? "next"}`;
   const closeTarget = { pathname: listPath, search: searchParams.toString() };
+  const openedFromList = Boolean((location.state as TaskDetailLocationState | null)?.fromList);
+  const closeDetail = () => {
+    if (openedFromList) {
+      navigate(-1);
+    } else {
+      navigate(closeTarget, { replace: true });
+    }
+  };
 
   const createMutation = useMutation({
     mutationFn: (draft: SmartAddDraft) => {
@@ -370,7 +383,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     onMoveToNext: (task: TaskResponse) => transitionMutation.mutate({ task, action: "move", toState: "next" }),
     onSaveEdit: (task: TaskResponse) => updateMutation.mutate({ task, payload: { title: editingTitle.trim() } }),
     expandedTaskId: taskId,
-    onCollapse: () => navigate(closeTarget),
+    onCollapse: closeDetail,
     detailHeadingRef,
     detailTask: detailQuery.data,
     detailIsLoading: detailQuery.isLoading,
@@ -523,7 +536,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             isLoading={detailQuery.isLoading}
             error={detailQuery.error}
             headingRef={detailHeadingRef}
-            onClose={() => navigate(closeTarget)}
+            onClose={closeDetail}
             onSave={(task, payload) => detailUpdateMutation.mutate({ task, payload })}
             onTransition={(task, action, toState, waitingFor) =>
               detailTransitionMutation.mutate({ task, action, toState, waitingFor })
@@ -750,7 +763,7 @@ function TaskRow({
         if (target.closest("a, button, input, textarea, select, label")) {
           return;
         }
-        navigate(detailPath);
+        navigate(detailPath, { state: { fromList: true } });
       }}
     >
       <div className="flex items-start gap-3 sm:items-center">
@@ -796,6 +809,7 @@ function TaskRow({
           <Link
             ref={(el) => registerRowLink(task.id, el)}
             to={detailPath}
+            state={{ fromList: true }}
             className={`min-w-0 flex-1 break-words text-sm font-medium leading-snug text-slate-900 hover:text-brand-primary ${isTerminal ? "line-through decoration-emerald-500/70" : ""}`}
           >
             {task.title}

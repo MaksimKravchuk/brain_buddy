@@ -18,7 +18,7 @@ import {
   X
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { ComponentType, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
+import type { ComponentType, KeyboardEvent as ReactKeyboardEvent, ReactNode, RefObject } from "react";
 import { Link, NavLink, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts } from "../../api/taskTypes";
@@ -60,6 +60,9 @@ const dateItems: Array<{ path: string; label: string; icon: ComponentType<{ clas
 
 const fallbackProjectColors = ["#0ea5e9", "#6366f1", "#94a3b8", "#10b981"];
 
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 const navRowClass = (active: boolean): string =>
   `flex h-[34px] w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium transition-colors ${
     active ? "bg-white text-slate-900 shadow-soft" : "text-slate-600 hover:bg-surface-sunken hover:text-slate-900"
@@ -82,6 +85,7 @@ export function AppShell(props: AppShellProps): JSX.Element {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [weeklyReviewOpen, setWeeklyReviewOpen] = useState(false);
   const location = useLocation();
+  const drawerTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     setWeeklyReviewOpen(false);
@@ -95,7 +99,7 @@ export function AppShell(props: AppShellProps): JSX.Element {
 
   return (
     <div className="min-h-screen bg-surface-base text-slate-900">
-      <TopBar onOpenDrawer={() => setIsDrawerOpen(true)} />
+      <TopBar onOpenDrawer={() => setIsDrawerOpen(true)} drawerTriggerRef={drawerTriggerRef} />
       <div className="flex h-[calc(100vh-56px)] min-h-0 overflow-hidden">
         <aside className="hidden w-[248px] shrink-0 overflow-y-auto border-r border-slate-200 px-3 pb-6 pt-4 lg:block">
           <Sidebar {...sidebarProps} />
@@ -104,7 +108,12 @@ export function AppShell(props: AppShellProps): JSX.Element {
           {weeklyReviewOpen ? <WeeklyReviewPlaceholder /> : children}
         </main>
       </div>
-      <NavigationDrawer {...sidebarProps} open={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} />
+      <NavigationDrawer
+        {...sidebarProps}
+        open={isDrawerOpen}
+        onClose={() => setIsDrawerOpen(false)}
+        triggerRef={drawerTriggerRef}
+      />
     </div>
   );
 }
@@ -131,7 +140,13 @@ function WeeklyReviewPlaceholder(): JSX.Element {
   );
 }
 
-function TopBar({ onOpenDrawer }: { onOpenDrawer: () => void }): JSX.Element {
+function TopBar({
+  onOpenDrawer,
+  drawerTriggerRef
+}: {
+  onOpenDrawer: () => void;
+  drawerTriggerRef: RefObject<HTMLButtonElement>;
+}): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -155,6 +170,7 @@ function TopBar({ onOpenDrawer }: { onOpenDrawer: () => void }): JSX.Element {
       style={{ height: "56px" }}
     >
       <button
+        ref={drawerTriggerRef}
         type="button"
         className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 lg:hidden"
         aria-label="Open task navigation"
@@ -195,33 +211,80 @@ function TopBar({ onOpenDrawer }: { onOpenDrawer: () => void }): JSX.Element {
   );
 }
 
-type NavigationDrawerProps = SidebarProps & { open: boolean; onClose: () => void };
+type NavigationDrawerProps = SidebarProps & {
+  open: boolean;
+  onClose: () => void;
+  triggerRef: RefObject<HTMLButtonElement>;
+};
 
-function NavigationDrawer({ open, onClose, ...props }: NavigationDrawerProps): JSX.Element | null {
+function NavigationDrawer({ open, onClose, triggerRef, ...props }: NavigationDrawerProps): JSX.Element | null {
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!open) {
       return;
     }
     closeButtonRef.current?.focus();
+    const closeAndRestoreFocus = () => {
+      onClose();
+      triggerRef.current?.focus();
+    };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        onClose();
+        closeAndRestoreFocus();
+        return;
+      }
+      if (event.key !== "Tab") {
+        return;
+      }
+      const panel = panelRef.current;
+      if (!panel) {
+        return;
+      }
+      const focusable = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+      if (focusable.length === 0) {
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey) {
+        if (active === first || !panel.contains(active)) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !panel.contains(active)) {
+        event.preventDefault();
+        first.focus();
       }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
+  }, [open, onClose, triggerRef]);
 
   if (!open) {
     return null;
   }
 
+  const closeAndRestoreFocus = () => {
+    onClose();
+    triggerRef.current?.focus();
+  };
+
   return (
     <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Task navigation">
-      <button type="button" className="absolute inset-0 bg-slate-900/30" aria-label="Close task navigation" onClick={onClose} />
-      <div className="absolute inset-y-0 left-0 flex w-[min(320px,calc(100vw-32px))] flex-col bg-surface-base px-3 pb-6 pt-3 shadow-floating">
+      <button
+        type="button"
+        className="absolute inset-0 bg-slate-900/30"
+        aria-label="Close task navigation"
+        onClick={closeAndRestoreFocus}
+      />
+      <div
+        ref={panelRef}
+        data-testid="task-navigation-panel"
+        className="absolute inset-y-0 left-0 flex w-[min(320px,calc(100vw-32px))] flex-col bg-surface-base px-3 pb-6 pt-3 shadow-floating"
+      >
         <div className="mb-2 flex h-11 items-center justify-between px-2">
           <span className="text-sm font-semibold text-slate-900">Navigation</span>
           <button
@@ -229,7 +292,7 @@ function NavigationDrawer({ open, onClose, ...props }: NavigationDrawerProps): J
             type="button"
             className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-slate-600 hover:bg-white"
             aria-label="Close task navigation"
-            onClick={onClose}
+            onClick={closeAndRestoreFocus}
           >
             <X className="h-5 w-5" />
           </button>
