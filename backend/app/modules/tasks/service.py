@@ -120,13 +120,19 @@ class TaskService:
         accurate_stt: AccurateSttPort | None = None,
         text_reconciler: TextReconcilerPort | None = None,
         raw_audio_retention: timedelta = timedelta(days=1),
+        working_artifacts_retention: timedelta = timedelta(days=7),
         max_operation_recoveries: int = 2,
+        max_cumulative_cost_usd_per_operation: float = 1.00,
     ) -> None:
         self.task_repo = task_repo
         self.accurate_stt = accurate_stt or DisabledAccurateStt()
         self.text_reconciler = text_reconciler or DeterministicTextReconciler()
         self.raw_audio_retention = raw_audio_retention
+        self.working_artifacts_retention = working_artifacts_retention
         self.max_operation_recoveries = max_operation_recoveries
+        self.max_cumulative_cost_usd_per_operation = (
+            max_cumulative_cost_usd_per_operation
+        )
 
     def purge_expired_raw_audio(self, *, now: datetime | None = None) -> int:
         """Purge raw audio from terminal operations past the configured retention."""
@@ -140,7 +146,13 @@ class TaskService:
                     candidate.id, owner_id=candidate.owner_id
                 )
                 if (
-                    operation.status not in {"cancelled", "completed", "terminal_error"}
+                    operation.status
+                    not in {
+                        "cancelled",
+                        "completed",
+                        "terminal_error",
+                        "awaiting_confirmation",
+                    }
                     or operation.updated_at >= cutoff
                     or not operation.audio_chunks
                 ):
@@ -166,6 +178,96 @@ class TaskService:
                 )
                 purged += 1
         return purged
+
+    def purge_expired_working_artifacts(self, *, now: datetime | None = None) -> int:
+        """Purge uncommitted transcript/proposal working data past retention.
+
+        Only operations that never reached ``completed`` are eligible, so a
+        committed batch's transcript/proposal provenance (referenced by each
+        committed ``TaskDocument.source_capture_ids``) is never deleted here.
+        This intentionally also covers operations abandoned mid-flight —
+        stuck ``recording``/``paused``/``awaiting_confirmation`` states that
+        nobody ever finished, retried, or discarded.
+        """
+
+        current_time = now or utcnow()
+        cutoff = current_time - self.working_artifacts_retention
+        purged = 0
+        for candidate in self.task_repo.list_expired_working_artifact_operations(
+            before=cutoff
+        ):
+            with self.task_repo.command_lock(candidate.owner_id):
+                operation = self.get_brain_dump_operation(
+                    candidate.id, owner_id=candidate.owner_id
+                )
+                if (
+                    operation.status == "completed"
+                    or operation.updated_at >= cutoff
+                    or (
+                        not operation.segments
+                        and not operation.proposals
+                        and not operation.proposal_patches
+                    )
+                ):
+                    continue
+                self.task_repo.save_brain_dump_operation(
+                    operation.model_copy(
+                        update={
+                            "segments": [],
+                            "proposals": [],
+                            "proposal_patches": [],
+                            "updated_at": current_time,
+                            "revision": operation.revision + 1,
+                        }
+                    )
+                )
+                purged += 1
+        return purged
+
+    def recover_due_provider_leases(
+        self, *, now: datetime | None = None, limit: int = 50
+    ) -> int:
+        """Reclaim operations stuck on an expired provider-run lease.
+
+        This is the periodic half of the persisted runner: a due/expired
+        lease is recovered through the exact same owner-serialized,
+        compare-and-set, finite-recovery-budget path a client-initiated
+        retry uses (``retry_brain_dump_operation``'s ``recoverable_claim``
+        branch) — so recovery here can never duplicate an accepted result or
+        bypass the recovery budget; it only decides *when* to call retry
+        instead of waiting for the owner to notice and click Retry.
+        """
+
+        current_time = now or utcnow()
+        recovered = 0
+        for candidate in self.task_repo.list_in_flight_provider_run_operations():
+            if recovered >= limit:
+                break
+            last_run = candidate.provider_runs[-1] if candidate.provider_runs else None
+            if (
+                last_run is None
+                or last_run.status != "running"
+                or last_run.lease_expires_at is None
+                or last_run.lease_expires_at > current_time
+            ):
+                continue
+            try:
+                self.retry_brain_dump_operation(
+                    candidate.id,
+                    ExpectedRevisionRequest(expected_revision=candidate.revision),
+                    owner_id=candidate.owner_id,
+                    idempotency_key=(
+                        f"lease_recovery:{candidate.id}:{candidate.revision}"
+                    ),
+                )
+                recovered += 1
+            except (ValidationFailure, ConflictError, NotFoundError):
+                # Lost the compare-and-set race to a concurrent manual retry,
+                # cancel, or another sweep pass; the expected-revision check
+                # inside retry_brain_dump_operation is authoritative, so
+                # losing here is an expected, safe no-op, not an error.
+                continue
+        return recovered
 
     @_serialized_write
     def create_project(
@@ -721,6 +823,28 @@ class TaskService:
         prior_runs = (
             operation.provider_runs[:-1] if replaces_claim else operation.provider_runs
         )
+        budget_exceeded = self._operation_cost_budget_exceeded(
+            prior_runs,
+            role="accurate_stt",
+            checkpoint="sealed",
+            input_hash=input_hash,
+            provider=self.accurate_stt.provider_name,
+            claimed_run_id=claimed_run.id if replaces_claim and claimed_run else None,
+            attempt=attempt,
+            recovery_count=recovery_count,
+            now=now,
+        )
+        if budget_exceeded is not None:
+            return operation.model_copy(
+                update={
+                    "status": "terminal_error",
+                    "status_history": [*operation.status_history, "terminal_error"],
+                    "sealed_manifest_hash": operation.sealed_manifest_hash,
+                    "provider_runs": [*prior_runs, budget_exceeded],
+                    "updated_at": now,
+                    "revision": operation.revision + 1,
+                }
+            )
         try:
             if (
                 self.accurate_stt.requires_external_processing
@@ -846,6 +970,20 @@ class TaskService:
         attempt: int,
         recovery_count: int,
     ) -> BrainDumpOperationDocument:
+        cumulative_spent = sum(run.estimated_cost_usd for run in checkpoint_runs)
+        if cumulative_spent >= self.max_cumulative_cost_usd_per_operation:
+            return self._reconciler_failure(
+                operation,
+                checkpoint_segments=checkpoint_segments,
+                checkpoint_runs=checkpoint_runs,
+                input_hash=input_hash,
+                error="OPERATION_COST_BUDGET_EXCEEDED",
+                error_code="OPERATION_COST_BUDGET_EXCEEDED",
+                now=now,
+                retryable=False,
+                attempt=attempt,
+                recovery_count=recovery_count,
+            )
         if self.text_reconciler.requires_external_processing:
             if not operation.consent.external_processing_allowed:
                 return self._reconciler_failure(
@@ -1499,6 +1637,188 @@ class TaskService:
         return updated
 
     @_serialized_write
+    def withdraw_brain_dump_consent(
+        self,
+        operation_id: str,
+        payload: ExpectedRevisionRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> BrainDumpOperationDocument:
+        """Atomically revoke external-processing consent for one operation.
+
+        This is a distinct, owner-scoped, idempotent, expected-revision
+        checked command — never conflated with ``cancel``. It:
+          * flips ``consent.external_processing_allowed`` false in the same
+            write as every other effect below (no partial state is visible);
+          * blocks all future upload/provider calls, which already fail
+            closed on ``consent.external_processing_allowed`` at every call
+            site (``upload_brain_dump_audio_chunk``,
+            ``append_brain_dump_transcript``, ``_run_accurate_stt_and_reconcile``,
+            ``_reconcile_accurate_checkpoint``);
+          * invalidates a due/leased in-flight provider run immediately
+            (rather than waiting for lease expiry) by marking it
+            terminal and clearing its lease, and moves the operation to the
+            explicit ``terminal_error`` recovery state so the UI never shows
+            a phantom "still processing" surface for a run that can no
+            longer complete;
+          * removes raw audio promptly, leaving any already-reconciled
+            transcript/proposal provenance intact and still committable
+            (``_has_frozen_reconciled_batch`` never depends on raw audio
+            still being present);
+          * leaves uncommitted transcript/proposal working data in place for
+            the standard working-artifact retention sweep to delete, rather
+            than destroying it synchronously and losing the user's in-review
+            edits.
+        """
+
+        command = f"brain_dump_withdraw_consent:{operation_id}"
+        request_hash = self._request_hash(command, payload)
+        record = self._idempotency_record(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+        )
+        if record is not None:
+            return self._brain_dump_operation_result(record, owner_id=owner_id)
+        operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
+        if operation.status in {"completed", "cancelled"}:
+            raise ValidationFailure(
+                "Consent cannot be withdrawn from a completed or cancelled "
+                "brain dump; there is no future processing left to stop."
+            )
+        self._assert_revision(
+            "Brain dump operation",
+            operation.id,
+            operation.revision,
+            payload.expected_revision,
+        )
+        now = utcnow()
+        in_flight = operation.status in {"accurate_transcribing", "reconciling"}
+        next_status = "terminal_error" if in_flight else operation.status
+        provider_runs = operation.provider_runs
+        if in_flight and provider_runs and provider_runs[-1].status == "running":
+            invalidated_run = provider_runs[-1].model_copy(
+                update={
+                    "status": "terminal_error",
+                    "error": "CONSENT_WITHDRAWN",
+                    "error_code": "CONSENT_WITHDRAWN",
+                    "lease_owner": None,
+                    "lease_expires_at": None,
+                    "updated_at": now,
+                }
+            )
+            provider_runs = [*provider_runs[:-1], invalidated_run]
+        self.task_repo.delete_brain_dump_audio_chunks(
+            owner_id=owner_id,
+            operation_id=operation.id,
+            chunks=[
+                (chunk.chunk_number, chunk.sha256)
+                for chunk in operation.audio_chunks
+            ],
+        )
+        updated = operation.model_copy(
+            update={
+                "consent": operation.consent.model_copy(
+                    update={"external_processing_allowed": False}
+                ),
+                "status": next_status,
+                "status_history": (
+                    [*operation.status_history, next_status]
+                    if next_status != operation.status
+                    else operation.status_history
+                ),
+                "provider_runs": provider_runs,
+                "audio_chunks": [],
+                "media_ref": None,
+                "sealed_manifest_hash": None,
+                "updated_at": now,
+                "revision": operation.revision + 1,
+            }
+        )
+        self.task_repo.save_brain_dump_operation(updated)
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=updated.id,
+            response=updated,
+        )
+        return updated
+
+    def _operation_cost_budget_exceeded(
+        self,
+        prior_runs: list[BrainDumpProviderRunDocument],
+        *,
+        role: Literal["accurate_stt", "reconciler"],
+        checkpoint: Literal["sealed", "accurate_transcribed", "reconciled"],
+        input_hash: str,
+        provider: str | None,
+        claimed_run_id: str | None,
+        attempt: int,
+        recovery_count: int,
+        now: datetime,
+    ) -> BrainDumpProviderRunDocument | None:
+        """Enforce one operation-wide cumulative cost cap across every STT and
+        reconciler attempt, transport retry, and recovery — never per-attempt
+        only. Each adapter already refuses a single call whose own estimate
+        exceeds its role's ceiling; this additionally sums every previously
+        *persisted* ``estimated_cost_usd`` on the operation (across both
+        roles and all retries/recoveries) and refuses the next attempt before
+        it would push cumulative spend past the configured operation limit,
+        with a redacted, non-retryable error code and no silent fallback.
+        """
+
+        cumulative_spent = sum(run.estimated_cost_usd for run in prior_runs)
+        if cumulative_spent < self.max_cumulative_cost_usd_per_operation:
+            return None
+        return BrainDumpProviderRunDocument(
+            id=claimed_run_id or generate_id("provider_run"),
+            role=role,
+            status="terminal_error",
+            input_hash=input_hash,
+            checkpoint=checkpoint,
+            attempt=attempt,
+            recovery_count=recovery_count,
+            error="OPERATION_COST_BUDGET_EXCEEDED",
+            error_code="OPERATION_COST_BUDGET_EXCEEDED",
+            provider=provider,
+            created_at=now,
+            updated_at=now,
+        )
+
+    @staticmethod
+    def _has_frozen_reconciled_batch(operation: BrainDumpOperationDocument) -> bool:
+        """A batch is commit-eligible only once sealed audio has been through
+        accurate STT and the reconciler has durably succeeded.
+
+        ``finish``/``transition_brain_dump_operation`` can move an operation to
+        ``awaiting_confirmation`` directly from ``recording``/``paused`` (e.g.
+        when external-processing consent was never granted, so nothing could
+        be sealed or reconciled). That path only ever carries "fast" preview
+        proposals from the live heuristic extractor and must never be
+        committable as canonical tasks — it is provisional-only and review is
+        limited to editing/discarding, per ADR-0002's model-output-as-proposals
+        invariant.
+
+        This deliberately does not require ``sealed_manifest_hash`` to still be
+        set: raw audio may be deleted promptly after a successful reconciliation
+        (immediately on request, or by consent withdrawal, or by retention) while
+        the reconciled transcript/proposal provenance remains valid and stays
+        committable — only the *provider run history* is the source of truth for
+        "was this batch actually reconciled."
+        """
+
+        return any(
+            run.role == "reconciler"
+            and run.status == "succeeded"
+            and run.checkpoint == "reconciled"
+            for run in operation.provider_runs
+        )
+
+    @_serialized_write
     def commit_brain_dump_operation(
         self,
         operation_id: str,
@@ -1537,6 +1857,12 @@ class TaskService:
         if operation.status != "awaiting_confirmation":
             raise ValidationFailure(
                 "Brain dump must be awaiting confirmation before save."
+            )
+        if not self._has_frozen_reconciled_batch(operation):
+            raise ValidationFailure(
+                "BRAIN_DUMP_NOT_RECONCILED: canonical tasks require a sealed "
+                "audio checkpoint that completed accurate STT and reconciler "
+                "review; a provisional-only recording cannot be committed."
             )
         conflicted = [
             proposal.id
@@ -3217,28 +3543,20 @@ class TaskService:
 
     @staticmethod
     def _extract_task_titles(text: str) -> list[str]:
+        """Heuristically split live browser-preview text into draft titles.
+
+        This feeds only the local, non-committable "fast" preview proposals
+        shown while the user is still talking (see ``append_brain_dump_transcript``).
+        It must never gain fixture-specific literal branches: those belong to
+        test-only deterministic providers, not this always-on production path.
+        Canonical tasks may only be created from a sealed, reconciled batch —
+        enforced separately in ``commit_brain_dump_operation`` — so this
+        heuristic's imprecision cannot itself produce an invented task.
+        """
+
         normalized = re.sub(r"\s+", " ", text).strip()
         if not normalized:
             return []
-        lower = normalized.casefold()
-        if "brainbuddy" in lower and "production smoke" in lower and "наташ" in lower:
-            return [
-                "Починить BrainBuddy",
-                "Сделать production smoke",
-                "Написать Наташе",
-            ]
-        if ("brainbuddy" in lower or "brain body" in lower) and not re.search(
-            r"[.;\n]|\bthen\b|\bпотом\b", normalized, flags=re.IGNORECASE
-        ):
-            return [
-                (
-                    "Починить BrainBuddy"
-                    if "brainbuddy" in lower
-                    else "Починить brain body"
-                )
-            ]
-        if lower == "купить хлеб и молоко":
-            return ["Купить хлеб и молоко"]
         rough_parts = re.split(
             r"(?:\s*\d+[.)]\s+|[.;\n]+|\bthen\b|\bпотом\b)",
             normalized,

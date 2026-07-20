@@ -16,12 +16,16 @@ import pytest
 
 from app.exceptions import ValidationFailure
 from app.modules.tasks import TaskRepository, TaskService
-from app.modules.tasks.domain import BrainDumpOperationDocument
+from app.modules.tasks.domain import (
+    BrainDumpOperationDocument,
+    BrainDumpProviderRunDocument,
+)
 from app.schemas.tasks import (
     BrainDumpOperationStartRequest,
     BrainDumpSealRequest,
     ExpectedRevisionRequest,
 )
+from app.utils.time import utcnow
 from app.workflows.voice_brain_dump.domain import (
     ProposalPatch,
     ReconciledProposal,
@@ -73,6 +77,7 @@ def _service(
     *,
     fail_plan: dict[str, list[str]] | None = None,
     max_operation_recoveries: int = 2,
+    max_cumulative_cost_usd_per_operation: float = 1.00,
 ) -> TaskService:
     repository = TaskRepository(data_dir)
     accurate_stt = DeterministicAccurateStt(
@@ -84,6 +89,7 @@ def _service(
         repository,
         accurate_stt=accurate_stt,
         max_operation_recoveries=max_operation_recoveries,
+        max_cumulative_cost_usd_per_operation=max_cumulative_cost_usd_per_operation,
     )
 
 
@@ -203,6 +209,58 @@ def test_operation_recovery_budget_terminally_exhausts_before_a_new_provider_cal
     assert exhausted.status == "terminal_error"
     assert exhausted.provider_runs[-1].error_code == "OPERATION_RECOVERY_BUDGET_EXHAUSTED"
     assert exhausted.provider_runs[-1].recovery_count == 1
+
+
+def test_cumulative_cost_budget_blocks_the_next_attempt_without_calling_the_provider(
+    data_dir: Path,
+) -> None:
+    """Item 6: cost admission is cumulative across retries/recovery attempts,
+    not just per-call. Once prior persisted ``estimated_cost_usd`` already
+    meets the operation-wide cap, the next accurate-STT attempt must be
+    refused before the provider is ever invoked — no silent fallback."""
+
+    service = _service(data_dir, max_cumulative_cost_usd_per_operation=1.0)
+    operation, _ = _seal(service)
+    operation = service.task_repo.get_brain_dump_operation_for_owner(
+        operation.id, owner_id=OWNER
+    )
+    now = utcnow()
+    costly_prior_run = BrainDumpProviderRunDocument(
+        id="provider_run_costly",
+        role="accurate_stt",
+        status="retryable_error",
+        input_hash=hashlib.sha256(b"audio bytes").hexdigest(),
+        checkpoint="sealed",
+        attempt=1,
+        recovery_count=0,
+        estimated_cost_usd=1.0,
+        created_at=now,
+        updated_at=now,
+    )
+    seeded = operation.model_copy(
+        update={
+            "status": "retryable_error",
+            "media_ref": "media_recovery",
+            "sealed_manifest_hash": _manifest_hash(b"audio bytes"),
+            "provider_runs": [costly_prior_run],
+            "revision": operation.revision + 1,
+        }
+    )
+    service.task_repo.save_brain_dump_operation(seeded)
+
+    blocked = service.retry_brain_dump_operation(
+        seeded.id,
+        ExpectedRevisionRequest(expected_revision=seeded.revision),
+        owner_id=OWNER,
+        idempotency_key="cost-budget-retry",
+    )
+
+    assert blocked.status == "terminal_error"
+    assert blocked.provider_runs[-1].error_code == "OPERATION_COST_BUDGET_EXCEEDED"
+    assert blocked.committed_task_ids == []
+    # The provider port itself was never called: the budget is admitted
+    # before any network attempt, not merely reported after a wasted call.
+    assert cast(DeterministicAccurateStt, service.accurate_stt).calls == []
 
 
 def test_existing_chunk_upload_repairs_a_missing_atomic_file(data_dir: Path) -> None:

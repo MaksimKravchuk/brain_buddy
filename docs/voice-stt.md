@@ -13,7 +13,7 @@ Set these in the runtime environment (see `.env.example`):
 
 Timeout, retry backoff, per-operation estimated-cost ceiling, and retention settings are independently bounded. Missing credentials resolve to the explicit `disabled` provider. No-consent, disabled, authentication, cost-limit, oversized-audio, retry-exhaustion, and invalid-response failures use redacted error codes; provider response bodies, transcripts, vocabulary, audio, credentials, and paths are not copied into errors or logs.
 
-`deterministic` accurate STT is selected automatically only in the test environment. Production refuses that provider unless `BRAINBUDDY_ALLOW_DETERMINISTIC_STT=1` is deliberately set.
+`deterministic` accurate STT is test-only. Production refuses that provider unconditionally.
 
 ## Language and keyterm hints
 

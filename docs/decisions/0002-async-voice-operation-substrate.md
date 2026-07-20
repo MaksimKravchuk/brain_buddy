@@ -19,10 +19,8 @@ propagation.
 The real-provider amendment adds these invariants without altering the
 operation/patch/confirmation substrate:
 
-- Production MUST NOT instantiate `DeterministicAccurateStt` silently. An
-  explicit env escape hatch (`BRAINBUDDY_ALLOW_DETERMINISTIC_STT=1`) is
-  allowed for local dev and logged as a warning; production startup refuses
-  it otherwise.
+- Production MUST NOT instantiate `DeterministicAccurateStt`. It is test-only
+  and production startup refuses that provider unconditionally.
 - The production accurate-STT adapter MUST consume sealed original audio bytes
   as audio (e.g. multipart upload). Binary audio MUST NEVER be decoded as
   UTF-8 text in the production decision path.

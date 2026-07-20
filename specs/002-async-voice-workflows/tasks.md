@@ -200,8 +200,7 @@ adapters behind the same ports. They are the core of the 2026-07-19 amendment.
   corpus evidence justifies it.
 - [ ] T045 [US5] Wire real adapters vs deterministic fakes by config + consent
   in `backend/app/container.py`; refuse
-  `DeterministicAccurateStt` at production startup unless
-  `BRAINBUDDY_ALLOW_DETERMINISTIC_STT=1` env var is set; missing
+  `DeterministicAccurateStt` at production startup unconditionally; missing
   credentials/consent surface as `provider: "disabled"`.
 - [ ] T046 [US5] Remove `DeterministicAccurateStt` default from
   `backend/app/modules/tasks/service.py:116`; the container injects the

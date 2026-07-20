@@ -198,7 +198,7 @@ def test_semantic_reconciler_updates_and_removes_existing_proposals(
                     "operation": "remove",
                     "proposal_id": second["id"],
                     "title": None,
-                    "source_segment_ids": [],
+                    "source_segment_ids": [segment_id],
                     "predecessor_ids": [],
                     "base_revision": second["revision"],
                 },
@@ -1142,18 +1142,19 @@ def test_user_edits_survive_later_transcript_reconciliation_and_delete_before_sa
         for proposal in later.json()["proposals"]
     )
 
-    finish = api_client.post(
-        f"/api/brain-dump-operations/{operation['id']}/finish",
-        headers={"Idempotency-Key": "finish-edit-operation"},
-        json={"expected_revision": later.json()["revision"]},
+    sealed = _upload_and_seal(
+        api_client,
+        operation,
+        b"Draft launch post",
+        "seal-edit-operation",
     )
-    assert finish.status_code == 200, finish.text
-    assert finish.json()["status"] == "awaiting_confirmation"
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["status"] == "awaiting_confirmation"
 
     commit = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/commit",
         headers={"Idempotency-Key": "commit-edit-operation"},
-        json={"expected_revision": finish.json()["revision"]},
+        json={"expected_revision": sealed.json()["revision"]},
     )
     assert commit.status_code == 200, commit.text
     committed = commit.json()
@@ -1169,7 +1170,7 @@ def test_user_edits_survive_later_transcript_reconciliation_and_delete_before_sa
 
 def test_brain_dump_commit_is_atomic_and_idempotent_on_retry(api_client) -> None:
     operation = _start_operation(api_client, key="start-idempotent-operation")
-    appended = api_client.post(
+    api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/transcript",
         headers={"Idempotency-Key": "append-idempotent-segment"},
         json={
@@ -1178,11 +1179,14 @@ def test_brain_dump_commit_is_atomic_and_idempotent_on_retry(api_client) -> None
             ]
         },
     ).json()
-    finished = api_client.post(
-        f"/api/brain-dump-operations/{operation['id']}/finish",
-        headers={"Idempotency-Key": "finish-idempotent-operation"},
-        json={"expected_revision": appended["revision"]},
-    ).json()
+    sealed = _upload_and_seal(
+        api_client,
+        operation,
+        b"Pay VAT. Send invoice.",
+        "seal-idempotent-operation",
+    )
+    assert sealed.status_code == 200, sealed.text
+    finished = sealed.json()
 
     headers = {"Idempotency-Key": "commit-idempotent-operation"}
     first = api_client.post(
@@ -1212,6 +1216,210 @@ def test_brain_dump_commit_is_atomic_and_idempotent_on_retry(api_client) -> None
     inbox = api_client.get("/api/tasks", params={"state": "inbox"}).json()
     assert inbox["counts_by_state"]["inbox"] == 2
     assert [item["title"] for item in inbox["items"]] == ["Pay VAT", "Send invoice"]
+
+
+def test_commit_rejects_a_finished_operation_that_was_never_sealed_or_reconciled(
+    api_client,
+) -> None:
+    """``finish`` alone (no seal/accurate-STT/reconciler checkpoint) must never
+    let ``commit`` create canonical tasks from bare fast-preview proposals.
+
+    This reproduces the exact-head bypass: append -> finish -> commit with no
+    sealed audio and no successful reconciler provider run in between.
+    """
+
+    operation = _start_operation(api_client, key="start-unreconciled-finish")
+    appended = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/transcript",
+        headers={"Idempotency-Key": "append-unreconciled-finish"},
+        json={
+            "segments": [
+                {"sequence": 1, "text": "Buy milk.", "stability": "stable"}
+            ]
+        },
+    ).json()
+    finished = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/finish",
+        headers={"Idempotency-Key": "finish-unreconciled-finish"},
+        json={"expected_revision": appended["revision"]},
+    ).json()
+    assert finished["status"] == "awaiting_confirmation"
+
+    rejected = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/commit",
+        headers={"Idempotency-Key": "commit-unreconciled-finish"},
+        json={"expected_revision": finished["revision"]},
+    )
+    assert rejected.status_code == 400, rejected.text
+    assert "BRAIN_DUMP_NOT_RECONCILED" in rejected.text
+
+    inbox = api_client.get("/api/tasks", params={"state": "inbox"}).json()
+    assert inbox["counts_by_state"]["inbox"] == 0
+
+
+def test_withdraw_consent_stops_future_processing_and_purges_raw_audio(
+    api_client,
+) -> None:
+    operation = _start_operation(api_client, key="start-withdraw-consent")
+    audio = b"partial-chunk"
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+
+    withdrawn = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/withdraw_consent",
+        headers={"Idempotency-Key": "withdraw-consent-mid-recording"},
+        json={"expected_revision": uploaded.json()["revision"]},
+    )
+    assert withdrawn.status_code == 200, withdrawn.text
+    body = withdrawn.json()
+    assert body["consent"]["external_processing_allowed"] is False
+    assert body["status"] == "recording"
+    assert body["audio_chunks"] == []
+    assert body["media_ref"] is None
+
+    # Replay with the same idempotency key returns the identical result.
+    replayed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/withdraw_consent",
+        headers={"Idempotency-Key": "withdraw-consent-mid-recording"},
+        json={"expected_revision": uploaded.json()["revision"]},
+    )
+    assert replayed.status_code == 200, replayed.text
+    assert replayed.json() == body
+
+    # A stale expected_revision now conflicts.
+    stale = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/withdraw_consent",
+        headers={"Idempotency-Key": "withdraw-consent-stale"},
+        json={"expected_revision": uploaded.json()["revision"]},
+    )
+    assert stale.status_code == 409, stale.text
+
+    # Every provider check honors mutable current consent: uploads and
+    # transcript appends now fail closed even though the operation is still
+    # "recording".
+    blocked_upload = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/1",
+        content=b"more-audio",
+        headers={"X-Content-SHA256": hashlib.sha256(b"more-audio").hexdigest()},
+    )
+    assert blocked_upload.status_code == 400, blocked_upload.text
+    assert "CONSENT_REQUIRED" in blocked_upload.text
+
+
+def test_withdraw_consent_is_not_cancel_and_does_not_discard_a_reconciled_batch(
+    api_client,
+) -> None:
+    """Withdrawal must never be conflated with cancel: an already-reconciled
+    batch stays committable even after raw audio is purged by withdrawal."""
+
+    operation = _start_operation(
+        api_client, key="start-withdraw-after-reconcile", external_processing_allowed=True
+    )
+    sealed = _upload_and_seal(
+        api_client, operation, b"Buy milk.", "seal-withdraw-after-reconcile"
+    )
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["status"] == "awaiting_confirmation"
+
+    withdrawn = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/withdraw_consent",
+        headers={"Idempotency-Key": "withdraw-after-reconcile"},
+        json={"expected_revision": sealed.json()["revision"]},
+    )
+    assert withdrawn.status_code == 200, withdrawn.text
+    withdrawn_body = withdrawn.json()
+    assert withdrawn_body["status"] == "awaiting_confirmation"
+    assert withdrawn_body["audio_chunks"] == []
+    assert withdrawn_body["sealed_manifest_hash"] is None
+
+    committed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/commit",
+        headers={"Idempotency-Key": "commit-after-withdraw"},
+        json={"expected_revision": withdrawn_body["revision"]},
+    )
+    assert committed.status_code == 200, committed.text
+    assert committed.json()["committed_task_ids"]
+
+
+def test_withdraw_consent_invalidates_an_in_flight_leased_provider_run(
+    api_client,
+) -> None:
+    """Withdrawing consent while a provider run is durably leased must
+    invalidate that lease immediately and land in a coherent recovery state,
+    rather than silently leaving a phantom "still processing" checkpoint."""
+
+    operation = _start_operation(
+        api_client, key="start-withdraw-in-flight", external_processing_allowed=True
+    )
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    container = api_client.app.state.container
+    persisted = container.task_service.get_brain_dump_operation(
+        operation["id"], owner_id=owner_id
+    )
+    from datetime import timedelta
+
+    from app.modules.tasks.domain import BrainDumpProviderRunDocument
+    from app.utils.time import utcnow
+
+    now = utcnow()
+    leased = persisted.model_copy(
+        update={
+            "status": "accurate_transcribing",
+            "sealed_manifest_hash": "0" * 64,
+            "provider_runs": [
+                BrainDumpProviderRunDocument(
+                    id="provider_run_in_flight",
+                    role="accurate_stt",
+                    status="running",
+                    input_hash="0" * 64,
+                    checkpoint="sealed",
+                    attempt=1,
+                    recovery_count=0,
+                    lease_owner="runner_in_flight",
+                    lease_expires_at=now + timedelta(seconds=30),
+                    created_at=now,
+                    updated_at=now,
+                )
+            ],
+            "revision": persisted.revision + 1,
+        }
+    )
+    container.task_repo.save_brain_dump_operation(leased)
+
+    withdrawn = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/withdraw_consent",
+        headers={"Idempotency-Key": "withdraw-in-flight"},
+        json={"expected_revision": leased.revision},
+    )
+    assert withdrawn.status_code == 200, withdrawn.text
+    body = withdrawn.json()
+    assert body["status"] == "terminal_error"
+    invalidated_run = body["provider_runs"][-1]
+    assert invalidated_run["status"] == "terminal_error"
+    assert invalidated_run["error_code"] == "CONSENT_WITHDRAWN"
+
+
+def test_withdraw_consent_rejects_completed_and_cancelled_operations(
+    api_client,
+) -> None:
+    operation = _start_operation(api_client, key="start-withdraw-terminal")
+    cancelled = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/cancel",
+        headers={"Idempotency-Key": "cancel-before-withdraw"},
+        json={"expected_revision": operation["revision"]},
+    )
+    assert cancelled.status_code == 200, cancelled.text
+
+    rejected = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/withdraw_consent",
+        headers={"Idempotency-Key": "withdraw-after-cancel"},
+        json={"expected_revision": cancelled.json()["revision"]},
+    )
+    assert rejected.status_code == 400, rejected.text
 
 
 def test_brain_dump_pause_resume_cancel_and_owner_scope(
@@ -1907,3 +2115,175 @@ def test_raw_audio_retention_sweep_deletes_expired_terminal_media(api_client) ->
     swept = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
     assert swept["audio_chunks"] == []
     assert swept["media_ref"] is None
+
+
+def test_raw_audio_retention_sweep_covers_an_abandoned_awaiting_confirmation_operation(
+    api_client,
+) -> None:
+    """Raw audio's retention clock starts at successful reconciliation, not
+    only at cancel/complete/terminal-error — an operation reconciled and then
+    simply never committed must still have its audio purged on schedule."""
+
+    operation = _start_operation(
+        api_client,
+        key="start-retention-awaiting-confirmation",
+        external_processing_allowed=True,
+    )
+    sealed = _upload_and_seal(
+        api_client,
+        operation,
+        b"Buy milk.",
+        "seal-retention-awaiting-confirmation",
+    )
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["status"] == "awaiting_confirmation"
+
+    container = api_client.app.state.container
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    persisted = container.task_service.get_brain_dump_operation(
+        operation["id"], owner_id=owner_id
+    )
+    expired = persisted.model_copy(
+        update={"updated_at": persisted.updated_at - timedelta(days=2)}
+    )
+    container.task_repo.save_brain_dump_operation(expired)
+
+    assert container.task_service.purge_expired_raw_audio() == 1
+    swept = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
+    assert swept["status"] == "awaiting_confirmation"
+    assert swept["audio_chunks"] == []
+    assert swept["sealed_manifest_hash"] is None
+    # The reconciled batch stays committable even with raw audio purged.
+    committed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/commit",
+        headers={"Idempotency-Key": "commit-after-retention-sweep"},
+        json={"expected_revision": swept["revision"]},
+    )
+    assert committed.status_code == 200, committed.text
+    assert committed.json()["committed_task_ids"]
+
+
+def test_working_artifact_retention_sweep_clears_uncommitted_data_but_not_committed(
+    api_client,
+) -> None:
+    abandoned = _start_operation(api_client, key="start-working-artifact-abandoned")
+    appended = api_client.post(
+        f"/api/brain-dump-operations/{abandoned['id']}/transcript",
+        headers={"Idempotency-Key": "append-working-artifact-abandoned"},
+        json={
+            "segments": [
+                {"sequence": 1, "text": "Buy milk.", "stability": "stable"}
+            ]
+        },
+    )
+    assert appended.status_code == 200, appended.text
+
+    committed_source = _start_operation(
+        api_client,
+        key="start-working-artifact-committed",
+        external_processing_allowed=True,
+    )
+    sealed = _upload_and_seal(
+        api_client,
+        committed_source,
+        b"Buy milk.",
+        "seal-working-artifact-committed",
+    )
+    assert sealed.status_code == 200, sealed.text
+    committed = api_client.post(
+        f"/api/brain-dump-operations/{committed_source['id']}/commit",
+        headers={"Idempotency-Key": "commit-working-artifact-committed"},
+        json={"expected_revision": sealed.json()["revision"]},
+    )
+    assert committed.status_code == 200, committed.text
+
+    container = api_client.app.state.container
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    for operation_id in (abandoned["id"], committed_source["id"]):
+        persisted = container.task_service.get_brain_dump_operation(
+            operation_id, owner_id=owner_id
+        )
+        expired = persisted.model_copy(
+            update={"updated_at": persisted.updated_at - timedelta(days=8)}
+        )
+        container.task_repo.save_brain_dump_operation(expired)
+
+    assert container.task_service.purge_expired_working_artifacts() == 1
+
+    swept_abandoned = api_client.get(
+        f"/api/brain-dump-operations/{abandoned['id']}"
+    ).json()
+    assert swept_abandoned["segments"] == []
+    assert swept_abandoned["proposals"] == []
+    assert swept_abandoned["proposal_patches"] == []
+
+    swept_committed = api_client.get(
+        f"/api/brain-dump-operations/{committed_source['id']}"
+    ).json()
+    assert swept_committed["status"] == "completed"
+    assert swept_committed["proposals"], "committed provenance must not be purged"
+
+
+def test_recover_due_provider_leases_resumes_an_expired_in_flight_lease(
+    api_client,
+) -> None:
+    """Item 4: the periodic runner recovers a due/expired lease through the
+    same compare-and-set, budget-bounded path a manual retry uses."""
+
+    operation = _start_operation(
+        api_client, key="start-lease-sweep", external_processing_allowed=True
+    )
+    audio = b"Buy milk."
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+
+    container = api_client.app.state.container
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    persisted = container.task_service.get_brain_dump_operation(
+        operation["id"], owner_id=owner_id
+    )
+    from app.modules.tasks.domain import BrainDumpProviderRunDocument
+    from app.utils.time import utcnow
+
+    now = utcnow()
+    leased = persisted.model_copy(
+        update={
+            "status": "accurate_transcribing",
+            "media_ref": f"media_{operation['id']}",
+            "sealed_manifest_hash": _manifest_hash(audio),
+            "provider_runs": [
+                BrainDumpProviderRunDocument(
+                    id="provider_run_expired_lease",
+                    role="accurate_stt",
+                    status="running",
+                    input_hash=hashlib.sha256(audio).hexdigest(),
+                    checkpoint="sealed",
+                    attempt=1,
+                    recovery_count=0,
+                    lease_owner="runner_gone",
+                    lease_expires_at=now - timedelta(seconds=5),
+                    created_at=now - timedelta(seconds=35),
+                    updated_at=now - timedelta(seconds=35),
+                )
+            ],
+            "revision": persisted.revision + 1,
+        }
+    )
+    container.task_repo.save_brain_dump_operation(leased)
+
+    assert container.task_service.recover_due_provider_leases() == 1
+
+    recovered = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
+    assert recovered["status"] == "awaiting_confirmation"
+    resumed_run = next(
+        run for run in reversed(recovered["provider_runs"]) if run["role"] == "accurate_stt"
+    )
+    assert resumed_run["status"] == "succeeded"
+    assert resumed_run["recovery_count"] == 1
+
+    # A second sweep pass with nothing due recovers nothing.
+    assert container.task_service.recover_due_provider_leases() == 0

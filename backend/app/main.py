@@ -2,6 +2,7 @@
 
 import logging
 import os
+import threading
 
 from fastapi import FastAPI
 
@@ -11,8 +12,59 @@ from app.api.errors import register_exception_handlers
 from app.api.middleware import CorrelationIdMiddleware
 from app.container import Container, build_container
 from app.core import configure_logging, get_config
+from app.core.config import AppEnvironment
 
 logger = logging.getLogger(__name__)
+
+_VOICE_SWEEP_INTERVAL_SECONDS = float(
+    os.getenv("BRAIN_BUDDY_VOICE_SWEEP_INTERVAL_SECONDS", "60")
+)
+
+
+def _run_voice_sweep(container: Container) -> None:
+    """One pass of the persisted voice-operation runner's periodic duties.
+
+    Recovers due/expired provider-run leases, then purges raw audio and
+    uncommitted working artifacts past their configured retention. A single
+    bad pass must never kill the loop that calls this.
+    """
+
+    try:
+        recovered_leases = container.task_service.recover_due_provider_leases()
+        purged_raw_audio = container.task_service.purge_expired_raw_audio()
+        purged_working_artifacts = (
+            container.task_service.purge_expired_working_artifacts()
+        )
+    except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
+        logger.exception("Voice operation sweep iteration failed")
+        return
+    if recovered_leases or purged_raw_audio or purged_working_artifacts:
+        logger.info(
+            "Voice sweep: recovered %s lease(s), purged %s raw-audio, "
+            "%s working-artifact operation(s)",
+            recovered_leases,
+            purged_raw_audio,
+            purged_working_artifacts,
+        )
+
+
+def _start_voice_sweep_thread(
+    container: Container, stop_event: threading.Event
+) -> threading.Thread:
+    """Start a tracked, stoppable daemon thread running the periodic sweep.
+
+    Not an untracked ``asyncio.create_task`` fire-and-forget: the thread and
+    its stop signal live on ``app.state`` so shutdown can join it, and
+    ``daemon=True`` is defense in depth if shutdown is skipped.
+    """
+
+    def _loop() -> None:
+        while not stop_event.wait(_VOICE_SWEEP_INTERVAL_SECONDS):
+            _run_voice_sweep(container)
+
+    thread = threading.Thread(target=_loop, name="voice-operation-sweep", daemon=True)
+    thread.start()
+    return thread
 
 
 def _maybe_seed_admin(container: Container) -> None:
@@ -46,8 +98,29 @@ def create_app() -> FastAPI:
     app.state.config = config
     app.state.container = build_container(config)
     _maybe_seed_admin(app.state.container)
-    purged_raw_audio = app.state.container.task_service.purge_expired_raw_audio()
-    logger.info("Purged %s expired voice raw-audio operation(s)", purged_raw_audio)
+    # Retry-safe startup scan: recover any provider lease that expired while
+    # no process was running, then purge whatever raw audio/working
+    # artifacts are already due. This must run unconditionally (including in
+    # tests) since it is a one-shot, synchronous, already-tested code path.
+    _run_voice_sweep(app.state.container)
+
+    app.state.voice_sweep_stop_event = threading.Event()
+    app.state.voice_sweep_thread = None
+    if config.environment is not AppEnvironment.TEST and _VOICE_SWEEP_INTERVAL_SECONDS > 0:
+        # A real periodic sweep thread is only started outside tests: the
+        # test suite builds many short-lived apps/repositories per process,
+        # and TaskRepository.command_lock is a process-wide class lock, so a
+        # long-lived background thread left running past its own test's
+        # temp-dir teardown would race and deadlock unrelated tests.
+        app.state.voice_sweep_thread = _start_voice_sweep_thread(
+            app.state.container, app.state.voice_sweep_stop_event
+        )
+
+        @app.on_event("shutdown")
+        def _stop_voice_sweep() -> None:
+            app.state.voice_sweep_stop_event.set()
+            if app.state.voice_sweep_thread is not None:
+                app.state.voice_sweep_thread.join(timeout=5)
 
     app.add_middleware(CorrelationIdMiddleware)
     register_exception_handlers(app)

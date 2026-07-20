@@ -229,6 +229,11 @@ export interface BrainDumpOperationResponse {
     attempt: number;
     recovery_count: number;
     error: string | null;
+    error_code: string | null;
+    provider: string | null;
+    model: string | null;
+    template_version: string | null;
+    estimated_cost_usd: number;
   }>;
   status_history?: BrainDumpStatus[];
   committed_task_ids: string[];

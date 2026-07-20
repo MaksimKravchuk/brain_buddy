@@ -139,7 +139,13 @@ def build_container(config: AppConfig) -> Container:
         accurate_stt=_build_accurate_stt(config),
         text_reconciler=_build_text_reconciler(config),
         raw_audio_retention=timedelta(seconds=config.voice.retention.raw_audio_seconds),
+        working_artifacts_retention=timedelta(
+            seconds=config.voice.retention.working_artifacts_seconds
+        ),
         max_operation_recoveries=config.voice.max_operation_recoveries,
+        max_cumulative_cost_usd_per_operation=(
+            config.voice.max_cumulative_cost_usd_per_operation
+        ),
     )
     auth_service = AuthService(
         user_repo=user_repo,

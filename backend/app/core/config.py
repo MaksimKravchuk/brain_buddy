@@ -126,6 +126,7 @@ class VoiceSettings(BaseModel):
     reconciler: VoiceProviderSettings = Field(default_factory=VoiceProviderSettings)
     retention: VoiceRetentionSettings = Field(default_factory=VoiceRetentionSettings)
     max_operation_recoveries: int = Field(default=2, ge=0, le=5)
+    max_cumulative_cost_usd_per_operation: float = Field(default=1.00, gt=0, le=200)
 
 
 class AppConfig(BaseModel):
@@ -280,6 +281,9 @@ def _build_config() -> AppConfig:
         ),
         max_operation_recoveries=int(
             os.getenv("BRAIN_BUDDY_VOICE_MAX_OPERATION_RECOVERIES", "2")
+        ),
+        max_cumulative_cost_usd_per_operation=float(
+            os.getenv("BRAIN_BUDDY_VOICE_MAX_CUMULATIVE_COST_USD", "1.00")
         ),
     )
 

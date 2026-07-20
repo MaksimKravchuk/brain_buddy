@@ -524,14 +524,70 @@ class TaskRepository(BaseRepository):
     def list_expired_raw_audio_operations(
         self, *, before: datetime
     ) -> list[BrainDumpOperationDocument]:
-        terminal_statuses = ("cancelled", "completed", "terminal_error")
+        # "awaiting_confirmation" is included alongside the terminal statuses
+        # because raw audio's retention clock starts at successful
+        # reconciliation, not only at operation completion/cancellation/
+        # failure — an operation left awaiting confirmation and never
+        # committed must still have its raw audio purged on schedule.
+        eligible_statuses = (
+            "cancelled",
+            "completed",
+            "terminal_error",
+            "awaiting_confirmation",
+        )
         with self._connection() as conn:
             rows = conn.execute(
                 """
                 SELECT payload FROM brain_dump_operations
-                WHERE status IN (?, ?, ?) AND updated_at < ?
+                WHERE status IN (?, ?, ?, ?) AND updated_at < ?
                 """,
-                (*terminal_statuses, before.isoformat()),
+                (*eligible_statuses, before.isoformat()),
+            ).fetchall()
+        return [
+            BrainDumpOperationDocument.model_validate(json.loads(row["payload"]))
+            for row in rows
+        ]
+
+    def list_in_flight_provider_run_operations(
+        self,
+    ) -> list[BrainDumpOperationDocument]:
+        """Operations whose latest provider run may hold a due/expired lease.
+
+        No SQL column tracks ``lease_expires_at`` directly (it lives inside
+        the JSON payload), so this returns every ``accurate_transcribing``/
+        ``reconciling`` operation across all owners; the caller inspects each
+        document's last provider run to decide whether its lease is actually
+        due before claiming it.
+        """
+
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT payload FROM brain_dump_operations
+                WHERE status IN ('accurate_transcribing', 'reconciling')
+                """
+            ).fetchall()
+        return [
+            BrainDumpOperationDocument.model_validate(json.loads(row["payload"]))
+            for row in rows
+        ]
+
+    def list_expired_working_artifact_operations(
+        self, *, before: datetime
+    ) -> list[BrainDumpOperationDocument]:
+        """Operations whose uncommitted transcript/proposal working data may
+        be purged: anything that never reached ``completed`` (so committed
+        provenance behind an already-created ``TaskDocument`` is never
+        touched), including abandoned ``recording``/``awaiting_confirmation``
+        operations no one ever finished or discarded."""
+
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT payload FROM brain_dump_operations
+                WHERE status != 'completed' AND updated_at < ?
+                """,
+                (before.isoformat(),),
             ).fetchall()
         return [
             BrainDumpOperationDocument.model_validate(json.loads(row["payload"]))
