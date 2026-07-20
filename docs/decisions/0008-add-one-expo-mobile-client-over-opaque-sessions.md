@@ -3,7 +3,7 @@
 Date: 2026-07-20
 Status: Proposed
 Decision owner: BrainBuddy
-Last amended: 2026-07-20 (canonical confirmation, consent recovery, and audio retention)
+Last amended: 2026-07-20 (canonical confirmation/legacy import, consent recovery, and audio retention)
 Related: ADR-0001, ADR-0002, ADR-0006, `docs/auth.md`,
 `docs/api-compatibility.md`, `docs/vnext-cloud-design-build-contract.md` §3.3,
 `specs/004-expo-mobile-first-slice/`
@@ -376,8 +376,8 @@ Future agents must preserve:
 - SecureStore-only session token handling and privacy-safe evidence;
 - explicit confirmation before title-only Inbox Task creation;
 - canonical proposal-patch → frozen-batch → confirm sequencing, immutable frozen snapshots,
-  and deterministic action receipts; deprecated direct PATCH and `/commit` aliases are not a
-  mobile contract;
+  complete action review fields, receipt-derived execution results, and deterministic action
+  receipts; deprecated direct PATCH and `/commit` aliases are not a mobile contract;
 - current provider-category-bound consent across restart/configuration change, fail-closed
   withdrawal, visible raw-audio retention, and user-triggered delete-now after processing;
 - honest bounded recording/upload states and no invented live proposals;
@@ -393,12 +393,16 @@ Future agents must preserve:
    routes/tests remain unchanged.
 3. Before generating the mobile voice adapter, add canonical proposal-patch, freeze, confirm,
    consent-decision, retention projection, and raw-audio delete commands. Existing operation
-   payloads missing these additive fields load with empty batches/receipts and derive their
-   initial proposal revision deterministically; completed/cancelled operations remain
-   immutable.
+   payloads missing these additive fields do not receive fabricated accurate state.
+   Completed/cancelled v1 operations remain immutable and are never replayed. Each active v1
+   operation imports once under owner serialization as `legacy_preview_only`: preserve
+   operation/segment/proposal IDs, title locks, and remove tombstones through deterministic
+   synthetic patches; expose `provisional_only`; disable accurate reconciliation/retry; and
+   require explicit provisional review before separate freeze/confirmation.
 4. During the existing web overlap window, direct proposal `PATCH` and `/commit` delegate to
    the same patch/freeze/confirm service and persisted records. A legacy `/commit` with no
-   batch atomically freezes the current conflict-free active proposals before confirm. Mixed
+   batch may atomically freeze the current conflict-free active proposals before confirm only
+   after the provisional-review gate is satisfied. Mixed
    canonical/alias retries and races share action receipts and can create at most one Task per
    action. Mark aliases deprecated, exclude them from mobile generation, migrate web, and
    remove them only after no deployed client or active stored operation depends on them.

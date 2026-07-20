@@ -26,7 +26,7 @@
 
 - [x] Opaque-session ownership and device-protected credential requirements are explicit
 - [x] Consent, local audio durability, upload identity, confirmation authority, and privacy evidence are explicit
-- [x] Canonical proposal patch/freeze/confirm, deterministic child receipts, legacy overlap/migration, and frozen-batch invalidation are explicit
+- [x] Canonical proposal patch/freeze/confirm, complete immutable action review snapshots, receipt-derived results, one-time provisional-only legacy import/review, deterministic child receipts, alias overlap, and frozen-batch invalidation are explicit
 - [x] Recovered consent freshness/provider-category binding/withdrawal and visible raw-audio retained-until/delete-now behavior are explicit
 - [x] API compatibility and storage-schema version separation are required before a second client ships
 - [x] Correlation, actionable error, idempotency, stale-revision, retry, and revocation behavior are covered

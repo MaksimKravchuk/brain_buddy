@@ -191,6 +191,14 @@ mobile Voice adapter. Derive every action key as `H(operation_id,batch_id,action
 direct proposal `PATCH` and `/commit` only as deprecated web-overlap adapters to the same
 service/records, excluded from the mobile generation allowlist.
 
+Each frozen action is a complete immutable review snapshot: target, before/after summaries,
+source cue, confidence/warnings, and destination. It never stores result status or Task ID.
+Execution writes append-only immutable receipts, and the API folds them into a separate batch
+and per-action result projection. Active v1 operations import once as `legacy_preview_only`
+with IDs, title locks, and remove tombstones preserved through deterministic synthetic patches.
+With no original audio they remain visibly `provisional_only`, cannot claim accurate
+reconciliation, and require explicit provisional review before separate freeze/confirmation.
+
 Expose a non-secret processing policy. Persist consent policy version, allowed provider
 categories, decision time, server expiry/withdrawal state, and revalidate on restart or
 configuration change; withdrawal stops future work and schedules uncommitted cleanup. Expose
@@ -199,11 +207,19 @@ processing.
 
 **Rationale**: A frozen immutable batch is the authority boundary that makes user review and
 deterministic child idempotency true after edits, partial failure, restart, or old/new-client
-overlap. A local boolean cannot prove current consent after restart or provider change. Hidden
+overlap. Keeping outcomes in receipts prevents execution from rewriting what the user
+reviewed. Marking legacy previews explicitly prevents synthesized lineage from being mistaken
+for accurate reconciliation while still allowing deliberate salvage. A local boolean cannot
+prove current consent after restart or provider change. Hidden
 retention cannot support ADR-0002's user deletion guarantee.
 
 **Alternatives considered**:
 
+- Store `result_status`/`result_task_id` on each frozen action: rejected because partial
+  execution would rewrite the exact evidence the user confirmed. Append-only receipts provide
+  recovery and results without mutating review authority.
+- Treat deterministic v1 synthetic patches as reconciled output: rejected because v1 retained
+  no original audio against which accurate transcription or reconciliation can be proven.
 - Pin direct `PATCH` and `/commit` into OpenAPI v1: rejected because transitional aliases
   would become a released mobile contract and could not be removed safely.
 - Treat consent as valid forever until local deletion: rejected because it is neither

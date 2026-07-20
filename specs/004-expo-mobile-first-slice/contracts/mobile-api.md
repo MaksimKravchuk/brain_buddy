@@ -219,13 +219,21 @@ The projection includes:
 
 ```text
 proposal_revision: integer
-active_proposal_batch?: ProposalBatch
-committed_proposal_batch?: ProposalBatch
+active_proposal_batch?: ProposalBatchProjection
+committed_proposal_batch?: ProposalBatchProjection
+import_mode: native_v2 | legacy_preview_only
+accurate_reconciliation_available: boolean
+operation_warning_codes[]
+provisional_review_accepted_at?: UTC datetime
 consent: {status, external_processing_allowed, consent_policy_version,
           allowed_provider_categories[], recorded_at, valid_until?, withdrawn_at?}
 raw_audio: {state: not_received|retained|deletion_pending|deleted,
             retained_until?, delete_now_available, deleted_at?}
 ```
+
+Each `ProposalBatchProjection` contains the immutable `snapshot` plus derived `status`,
+`committed_at`, and ordered `{action_id, status, result_task_id?}` results folded from receipts.
+The result objects are never serialized back into `snapshot.ordered_actions`.
 
 ### Audio chunks
 
@@ -331,9 +339,18 @@ The response replaces the mobile projection.
 The server validates that selected IDs are owner-scoped, active, title-only additions at the
 current proposal revision, excludes tombstoned/superseded proposals, rejects open conflicts,
 and persists an immutable `ProposalBatch` in `frozen` state. It allocates stable ordered
-`action_id` values and returns each action's proposal ID, title, source cue, warning/confidence,
-destination `native_inbox`, and before/after summary. Only one frozen batch is active; a new
-freeze supersedes the prior one. A frozen batch never changes in place.
+`action_id` values and returns each action's proposal ID, title, typed target, source cue,
+warning/confidence, destination `native_inbox`, and before/after summary. Those fields are the
+persisted action snapshot. It contains no result status or Task ID. Only one frozen batch is
+active; a new freeze supersedes the prior one. A frozen batch never changes in place.
+
+For a one-time imported `legacy_preview_only` operation, the projection must visibly carry
+`provisional_only`, preserve imported segment/proposal IDs, title locks, and remove
+tombstones, and report `accurate_reconciliation_available=false`. Freeze returns `409` until
+the user has explicitly accepted the provisional review through the canonical
+`review-provisional` command. The warning is copied into every selected action snapshot and
+remains visible through confirmation; neither retry nor an alias may describe the import as
+accurately reconciled.
 
 ### Confirm the frozen batch
 
@@ -348,9 +365,12 @@ freeze supersedes the prior one. A frozen batch never changes in place.
 ```
 
 The server accepts only the current `frozen` batch whose proposal revision still matches.
-For every action it derives `H(operation_id, batch_id, action_id)`, persists an immutable
-action receipt with the title-only Inbox Task, and returns per-action status/result IDs in
-batch order. The client label is `Confirm N additions`, never “send” or “save” before confirm.
+For every action it derives `H(operation_id, batch_id, action_id)`, persists the title-only
+Inbox Task and append-only immutable action receipts, and folds those receipts to return
+per-action status/result IDs in batch order. Results are a projection beside the frozen action,
+never fields written back into it. The client label is `Confirm N additions`, never “send” or
+“save” before confirm. A `legacy_preview_only` batch additionally keeps the visible
+`provisional_only` warning before this separate confirmation.
 A timeout retry reuses the exact same key and body; reopening first GETs the projection.
 Parent-key conflicts return `409 IDEMPOTENCY_CONFLICT`, while deterministic child receipts
 prevent duplicate Tasks after process restart, partial failure, a mixed legacy/canonical

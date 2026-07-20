@@ -78,42 +78,64 @@ confirmation, consent, and retention fields:
 ```text
 BrainDumpOperation:
   ...existing workflow fields...
+  schema_version: 2
   proposal_revision: integer >= 0
   confirmation_contract_version: 2
   proposal_batches: ProposalBatch[]
   action_receipts: OperationActionReceipt[]
   active_proposal_batch_id?: string
   committed_proposal_batch_id?: string
+  import_mode: native_v2 | legacy_preview_only
+  legacy_imported_at?: UTC datetime
+  accurate_reconciliation_available: boolean
+  provisional_review_accepted_at?: UTC datetime
+  operation_warning_codes: string[]
   consent_decisions: ExternalProcessingConsentDecision[]
   raw_audio: RawAudioRetention
 
 ProposalBatch:
   id: opaque string
   based_on_proposal_revision: integer
-  status: frozen | committing | committed | superseded | failed
   ordered_actions[]:
     id: opaque string
     operation: create_native_inbox_task
     proposal_id: opaque string
     title: string
+    target:
+      kind: new_native_inbox_task
+    before_summary: string
+    after_summary: string
+    source_cue:
+      transcript_segment_ids: opaque string[]
+      display_summary: string
+    confidence?: number in [0, 1]
     destination: native_inbox
     warning_codes: string[]
-    result_status: pending | succeeded | failed | skipped
-    result_task_id?: opaque string
   created_at: UTC datetime
   frozen_at: UTC datetime
-  committed_at?: UTC datetime
-  revision: integer
+  snapshot_revision: 1
 
 OperationActionReceipt:
+  id: opaque string
   action_key: H(operation_id, batch_id, action_id)
   operation_id: opaque string
   batch_id: opaque string
   action_id: opaque string
   request_hash: string
-  status: pending | succeeded | failed_retryable | failed_terminal
+  receipt_sequence: monotonically increasing integer per action_key
+  attempt: integer >= 1
+  outcome: started | succeeded | failed_retryable | failed_terminal | skipped_dependency
   result_task_id?: opaque string
-  created_at: UTC datetime
+  recorded_at: UTC datetime
+
+ProposalBatchProjection (derived, not persisted into ProposalBatch):
+  snapshot: ProposalBatch
+  status: frozen | committing | committed | superseded | failed
+  committed_at?: UTC datetime
+  action_results[]:
+    action_id: opaque string
+    status: pending | succeeded | failed | skipped
+    result_task_id?: opaque string
 
 ExternalProcessingConsentDecision:
   id: opaque string
@@ -133,18 +155,46 @@ RawAudioRetention:
   deleted_at?: server UTC datetime
 ```
 
-Frozen batch action title/source/target data is an immutable confirmation snapshot; it does
-not follow later proposal edits. Any accepted proposal patch or reconciliation that increments
-`proposal_revision` supersedes the active frozen batch. Confirm accepts only that exact
-current batch. Every child action is deduplicated by its deterministic action receipt even
-when the outer request key changes after timeout or an alias/canonical race.
+`ProposalBatch` is the persisted immutable confirmation snapshot. Its ordered action preserves
+the complete review evidence from ADR-0002: target, before/after summaries, source cue,
+confidence and warnings, and destination. Neither the batch nor an action contains execution
+status or a result Task ID, and later proposal edits cannot change the snapshot. Any accepted
+proposal patch or reconciliation that increments `proposal_revision` supersedes the active
+batch and requires a new snapshot.
 
-Existing operation payloads without these fields load with deterministic defaults. Active
-legacy payloads derive the initial `proposal_revision` from their accepted proposal patch
-history (falling back to the existing operation revision only when no patch history exists)
-and migrate on first canonical mutation/freeze. Completed/cancelled payloads remain readable
-and immutable. Deprecated direct proposal `PATCH` and `/commit` adapters write these same
-records during the bounded web overlap; mobile does not generate or call them.
+`OperationActionReceipt` is an append-only immutable execution event, not a mutable field on
+the frozen action. The server folds receipts in `receipt_sequence` order to project batch
+`frozen | committing | committed | superseded | failed` state and each action's
+`pending | succeeded | failed | skipped` result. A successful receipt and its Task ID are
+terminal for an action key; later attempts cannot create another Task. Retryable failures may
+be followed by a higher-sequence attempt with the same request hash. Reusing an action key
+with another request hash conflicts. `committed_at`, when projected, is derived from terminal
+receipt times. Creation of a native Inbox Task and its `succeeded` receipt is atomic under the
+child action key. This split preserves an immutable review snapshot while allowing truthful
+partial-result and restart recovery.
+
+Existing payload migration follows ADR-0002 rather than treating legacy previews as accurate
+input. Completed/cancelled v1 payloads remain readable and immutable and are never replayed.
+Under the existing owner-serialized write boundary, the first v2 load of each active v1
+payload atomically persists `schema_version=2`, `import_mode=legacy_preview_only`, and
+`legacy_imported_at`; that marker makes the import one-time and retry-safe. The operation ID,
+old segment IDs, proposal IDs, title locks (`user_edited=true`), and remove tombstones
+(`deleted=true`) are preserved. Every old segment becomes a `browser_preview` version with an
+unknown/coarse span. Synthetic patch IDs derive from
+`H(operation_id,"legacy-import",proposal_id,operation)`; proposals retain stored order with ID
+as the tie-break, and an optional `remove` follows its `add`. Repeating import therefore
+reconstructs the same projection without duplicate patches or a claim of accurate
+reconciliation.
+
+An imported operation always has `accurate_reconciliation_available=false` and exposes
+`provisional_only` in `operation_warning_codes`, proposal review, every frozen action, and the
+batch/result projection. Accurate retry is unavailable because no original audio exists.
+Freeze is rejected until the user explicitly accepts provisional review through the canonical
+`review-provisional` command; confirmation remains a separate explicit command against the
+resulting immutable batch. Cancellation remains available. Deprecated direct proposal
+`PATCH` and `/commit` adapters use these same records during the bounded web overlap but may
+not bypass the visible warning or provisional-review gate; mobile does not generate or call
+those aliases.
 
 The mobile app consumes the backend projection and commands. Canonical fields remain
 backend-owned. Mobile never persists a second proposal, batch, action receipt, or operation
