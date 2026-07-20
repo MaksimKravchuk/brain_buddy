@@ -258,9 +258,31 @@ def apply_proposal_patches(
             raise ValidationFailure(f"Unknown proposal ID '{patch.proposal_id}'.")
 
         if patch.operation == "remove":
-            updated = _replace(
-                current, tombstoned=True, revision=current.revision + 1
-            )
+            if patch.producer == "user":
+                # An explicit user delete is already confirmed -- apply it now.
+                updated = _replace(
+                    current, tombstoned=True, revision=current.revision + 1
+                )
+            else:
+                # A provider-driven destructive removal must stay visible and
+                # individually confirmed rather than silently disappearing:
+                # surface it as an open conflict (blocking freeze/confirm)
+                # instead of tombstoning the proposal outright.
+                updated = _replace(
+                    current,
+                    status="conflicted",
+                    conflicts=[
+                        *current.conflicts,
+                        ProposalConflict(
+                            field="removal",
+                            current_value="active",
+                            suggested_value="removed",
+                            producer=patch.producer,
+                            source_segment_ids=patch.source_segment_ids,
+                        ),
+                    ],
+                    revision=current.revision + 1,
+                )
             by_id[current.id] = updated
             history[current.id] = updated
             continue

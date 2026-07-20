@@ -20,6 +20,7 @@ from .providers import (
     ReconcileTextRequest,
     TextReconcilerPort,
 )
+from .task_port import InProcessTaskPort, TaskPort
 
 __all__ = [
     "AccurateSttPort",
@@ -29,11 +30,13 @@ __all__ = [
     "DeterministicTextReconciler",
     "FastSttPort",
     "FastSttRequest",
+    "InProcessTaskPort",
     "ProposalConflict",
     "ProposalPatch",
     "ProposalProjection",
     "ReconcileTextRequest",
     "ReconciledProposal",
+    "TaskPort",
     "TextReconcilerPort",
     "TranscriptHypothesis",
     "active_transcript_hypotheses",

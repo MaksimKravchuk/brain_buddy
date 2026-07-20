@@ -39,6 +39,7 @@ from app.workflows.voice_brain_dump.providers import (
     DisabledTextReconciler,
     TextReconcilerPort,
 )
+from app.workflows.voice_brain_dump.task_port import InProcessTaskPort
 
 
 @dataclass(slots=True)
@@ -189,6 +190,12 @@ def build_container(config: AppConfig) -> Container:
             if provider not in {"disabled", "deterministic"}
         ),
     )
+    # ADR-0001: the voice-operation confirmation workflow crosses the Tasks
+    # module boundary through an explicit TaskPort adapter, never by treating
+    # the Tasks service as its own port. Wire the real in-process adapter
+    # here, at the application boundary, rather than letting TaskService
+    # self-adapt.
+    task_service.task_port = InProcessTaskPort(task_service.create_native_inbox_task)
     auth_service = AuthService(
         user_repo=user_repo,
         session_repo=session_repo,

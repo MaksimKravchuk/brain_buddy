@@ -1283,6 +1283,40 @@ describe("BrainDumpRoute", () => {
     expect(screen.getByRole("button", { name: "Save 1 to inbox" })).toBeDisabled();
   });
 
+  it("keeps a provider-driven removal visible and individually confirmable instead of hiding it", async () => {
+    // A reconciler-proposed removal must never silently vanish from Review;
+    // it stays visible (not filtered out with `deleted`) as an open conflict
+    // requiring the same explicit Keep/Accept confirmation as any other
+    // conflict (exact-head review item 1).
+    const proposedRemoval = operation({
+      id: "brain_dump_model_removal",
+      status: "awaiting_confirmation",
+      revision: 6,
+      proposals: [
+        proposal("proposal_stale", 1, "Reply to Anna", {
+          status: "conflicted",
+          deleted: false,
+          conflicts: [conflict("removal", "active", "removed")]
+        })
+      ]
+    });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_model_removal") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(proposedRemoval);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_model_removal/review");
+
+    expect(await screen.findByText("Conflict: removal")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Reply to Anna")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save 1 to inbox" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Keep mine" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Use suggestion" })).toBeInTheDocument();
+  });
+
   it("does not replace a named recording route when starting after load fails", async () => {
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);

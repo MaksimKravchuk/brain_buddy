@@ -1603,6 +1603,133 @@ def test_openai_reconciler_rejects_concrete_identity_mismatch_in_mixed_ru_en() -
         )
 
 
+def test_openai_reconciler_rejects_lowercase_generic_object_swap() -> None:
+    """A shared generic action word ("schedule") must not launder an object
+    swap when neither side is capitalized and the differing word is a
+    common noun rather than a proper name: "Schedule meeting" cited as
+    grounding for "Schedule dentist" is an invented concrete target, not a
+    wording normalization (exact-head review item 1)."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text="Schedule meeting with the team",
+        stability="stable",
+        provider_role="accurate",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": "add",
+                    "title": "Schedule dentist",
+                    "source_segment_ids": [segment.id],
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(ValidationFailure, match="different concrete identity"):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id="operation_identity_mismatch_lowercase_object",
+                transcript_segments=[segment],
+                active_proposals=[],
+                user_locks={},
+            )
+        )
+
+
+def test_openai_reconciler_rejects_concrete_identity_mismatch_in_lowercase_russian() -> (
+    None
+):
+    """Real STT output is routinely all-lowercase, especially Cyrillic; the
+    concrete-identity guard must not silently disable itself just because
+    capitalization gives no signal (exact-head review item 1)."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text="надо позвонить ивану",
+        stability="stable",
+        provider_role="accurate",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": "add",
+                    "title": "позвонить петру",
+                    "source_segment_ids": [segment.id],
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(ValidationFailure, match="different concrete identity"):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id="operation_identity_mismatch_lowercase_ru",
+                transcript_segments=[segment],
+                active_proposals=[],
+                user_locks={},
+            )
+        )
+
+
+def test_openai_reconciler_rejects_concrete_identity_mismatch_in_lowercase_mixed_ru_en() -> (
+    None
+):
+    """Mixed-language, all-lowercase, short-name transcripts must still be
+    caught: "bob" is short enough to be filtered from the base grounding
+    overlap check, so the dedicated identity-anchor guard must catch it
+    independently (exact-head review item 1)."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text="надо написать alice про отчет",
+        stability="stable",
+        provider_role="accurate",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": "add",
+                    "title": "написать bob про отчет",
+                    "source_segment_ids": [segment.id],
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(ValidationFailure, match="different concrete identity"):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id="operation_identity_mismatch_lowercase_mixed",
+                transcript_segments=[segment],
+                active_proposals=[],
+                user_locks={},
+            )
+        )
+
+
 def test_openai_reconciler_preserves_verb_normalization_when_concrete_identity_matches() -> (
     None
 ):
@@ -1758,3 +1885,62 @@ def test_openai_reconciler_accepts_a_removal_with_explicit_destructive_language(
 
     assert result.patches[0].operation == "remove"
     assert result.patches[0].proposal_id == "proposal_existing"
+
+
+@pytest.mark.parametrize(
+    "source_text",
+    [
+        "Do not delete Buy milk",
+        "Don't delete Buy milk",
+        "Не удаляй Купить молоко",
+    ],
+)
+def test_openai_reconciler_rejects_a_negated_destructive_removal(source_text: str) -> None:
+    """'Do not delete Buy milk' must never authorize removing 'Buy milk':
+    a negation marker scopes over the destructive term it precedes, so a
+    negated/scoped destructive phrase must fail closed exactly like
+    positive, non-destructive text (exact-head review item 2)."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    title = "Buy milk" if "milk" in source_text.casefold() else "Купить молоко"
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text=source_text,
+        stability="stable",
+        provider_role="accurate",
+    )
+    existing = ReconciledProposal(
+        id="proposal_existing",
+        title=title,
+        source_segment_ids=[segment.id],
+        status="provisional",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": "remove",
+                    "proposal_id": "proposal_existing",
+                    "title": None,
+                    "source_segment_ids": [segment.id],
+                    "predecessor_ids": [],
+                    "base_revision": None,
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(ValidationFailure, match="no explicit destructive or"):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id="operation_negated_removal",
+                transcript_segments=[segment],
+                active_proposals=[existing],
+                user_locks={},
+            )
+        )
