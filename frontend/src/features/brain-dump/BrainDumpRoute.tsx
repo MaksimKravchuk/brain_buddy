@@ -361,17 +361,11 @@ export function BrainDumpRoute(): JSX.Element {
     }
   }
 
-  async function command(action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry" | "review_provisional" | "withdraw_consent" | "delete_raw_audio") {
+  async function command(action: "pause" | "resume" | "cancel" | "retry" | "review-provisional" | "withdraw_consent" | "delete_raw_audio") {
     if (!operationRef.current) {
       return;
     }
     setError(null);
-    if (action === "commit") {
-      if (isSaving) {
-        return;
-      }
-      setIsSaving(true);
-    }
     if (action === "withdraw_consent") {
       // Fail-closed: release the microphone, recognizer, and any future
       // transcript/audio uploads locally before the server round-trip. A
@@ -405,48 +399,20 @@ export function BrainDumpRoute(): JSX.Element {
       if (!current) {
         return;
       }
-      if (action === "finish") {
-        stopRecognition();
-        await stopMediaRecorder();
-        await audioUploadQueueRef.current;
-        const sealedInput = operationRef.current;
-        if (!sealedInput) {
-          return;
-        }
-        if (!sealedInput.consent.external_processing_allowed) {
-          // Without external-processing consent no audio was ever uploaded, so
-          // there is nothing to seal. Still record the "finish" transition
-          // server-side before routing to review: the server must never be
-          // left thinking the operation is still recording/paused while the
-          // UI shows Review. The operation lands in the same
-          // "awaiting_confirmation" status finish always produces, but with
-          // no sealed/reconciled checkpoint, so the backend's commit gate
-          // keeps it provisional-only (review/discard, never save-as-tasks).
-          const finished = await apiClient.commandBrainDump(
-            sealedInput.id,
-            "finish",
-            sealedInput.revision,
-            idempotencyKey("finish")
-          );
-          applyOperation(finished);
-          navigate(`/brain-dump/${finished.id}/review`, { replace: true });
-          return;
-        }
-        const expectedChunks = audioChunkNumberRef.current;
-        const sealed = await apiClient.sealBrainDump(
-          sealedInput.id,
-          {
-            expected_revision: sealedInput.revision,
-            expected_chunks: expectedChunks,
-            manifest_hash: await manifestHash(sealedInput, expectedChunks)
-          },
-          idempotencyKey("seal")
-        );
-        applyOperation(sealed);
-        navigate(`/brain-dump/${sealed.id}/review`, { replace: true });
-        return;
-      }
-      const updated = await apiClient.commandBrainDump(current.id, action, current.revision, idempotencyKey(action));
+      const updated =
+        action === "withdraw_consent"
+          ? await apiClient.recordBrainDumpConsentDecision(
+              current.id,
+              { decision: "withdraw", expected_operation_revision: current.revision },
+              idempotencyKey(action)
+            )
+          : action === "delete_raw_audio"
+            ? await apiClient.deleteBrainDumpRawAudio(
+                current.id,
+                { expected_operation_revision: current.revision },
+                idempotencyKey(action)
+              )
+            : await apiClient.commandBrainDump(current.id, action, current.revision, idempotencyKey(action));
       applyOperation(updated);
       if (action === "pause" || action === "cancel" || action === "withdraw_consent") {
         stopRecognition();
@@ -477,23 +443,119 @@ export function BrainDumpRoute(): JSX.Element {
         setLastTranscript("");
         navigate("/brain-dump/new", { replace: true });
       }
-      if (action === "commit") {
-        setSavedCount(updated.committed_task_ids.length);
-        void queryClient.invalidateQueries({ queryKey: taskKeys.all });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Brain dump command failed.");
+    }
+  }
+
+  async function finishRecording() {
+    setError(null);
+    stopRecognition();
+    await stopMediaRecorder();
+    await audioUploadQueueRef.current;
+    const sealedInput = operationRef.current;
+    if (!sealedInput) {
+      return;
+    }
+    try {
+      // Canonical seal call in both branches (ADR-0002: `/finish` is only a
+      // deprecated alias for seal). Without external-processing consent no
+      // audio was ever accepted server-side, so sealing with an explicit
+      // empty manifest (0 expected chunks) is the exact server-side state --
+      // never the deprecated `/finish` transition shortcut. The operation
+      // lands in the same "awaiting_confirmation" status either way, but
+      // with no sealed/reconciled checkpoint, so the backend's commit gate
+      // keeps an unconsented capture provisional-only (review/discard,
+      // never save-as-tasks).
+      const expectedChunks = sealedInput.consent.external_processing_allowed ? audioChunkNumberRef.current : 0;
+      const sealed = await apiClient.sealBrainDump(
+        sealedInput.id,
+        {
+          expected_revision: sealedInput.revision,
+          expected_chunks: expectedChunks,
+          manifest_hash: await manifestHash(sealedInput, expectedChunks)
+        },
+        idempotencyKey("seal")
+      );
+      applyOperation(sealed);
+      navigate(`/brain-dump/${sealed.id}/review`, { replace: true });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Brain dump command failed.");
+    }
+  }
+
+  async function confirmBrainDump() {
+    if (!operationRef.current || isSaving) {
+      return;
+    }
+    setError(null);
+    setIsSaving(true);
+    try {
+      // Let in-flight proposal edits settle so freeze reads the freshest revision.
+      await proposalMutationQueueRef.current;
+      let current = operationRef.current;
+      if (!current) {
+        return;
       }
+      if (current.import_mode === "legacy_preview_only" && !current.provisional_review_accepted_at) {
+        // Canonical explicit provisional-review gate (mobile-api.md
+        // `.../commands/review-provisional`) -- required before a legacy
+        // import may be frozen, never bypassed by freeze/confirm directly.
+        current = await apiClient.commandBrainDump(
+          current.id,
+          "review-provisional",
+          current.revision,
+          idempotencyKey("review-provisional")
+        );
+        applyOperation(current);
+      }
+      const selectedProposalIds = (current.proposals ?? [])
+        .filter((candidate) => !candidate.deleted)
+        .map((candidate) => candidate.id);
+      let activeBatch = current.active_proposal_batch;
+      if (
+        !activeBatch ||
+        activeBatch.status !== "frozen" ||
+        activeBatch.based_on_proposal_revision !== current.proposal_revision
+      ) {
+        current = await apiClient.freezeBrainDumpProposalBatch(
+          current.id,
+          {
+            based_on_proposal_revision: current.proposal_revision,
+            expected_operation_revision: current.revision,
+            selected_proposal_ids: selectedProposalIds
+          },
+          idempotencyKey("freeze")
+        );
+        applyOperation(current);
+        activeBatch = current.active_proposal_batch;
+      }
+      if (!activeBatch) {
+        throw new Error("Could not freeze the proposals for confirmation.");
+      }
+      const confirmed = await apiClient.confirmBrainDumpProposalBatch(
+        current.id,
+        {
+          proposal_batch_id: activeBatch.id,
+          expected_batch_revision: activeBatch.revision,
+          expected_operation_revision: current.revision
+        },
+        idempotencyKey("confirm")
+      );
+      applyOperation(confirmed);
+      setSavedCount(confirmed.committed_task_ids.length);
+      void queryClient.invalidateQueries({ queryKey: taskKeys.all });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Brain dump command failed.");
     } finally {
-      if (action === "commit") {
-        setIsSaving(false);
-      }
+      setIsSaving(false);
     }
   }
 
   async function patchProposal(
     proposal: BrainDumpProposal,
-    payload: { title?: string; deleted?: boolean; conflict_resolution?: "keep" | "accept" },
-    kind: "edit" | "delete" | "resolve"
+    payload: { operation: "update" | "remove"; title?: string },
+    kind: "edit" | "delete"
   ) {
     const current = operationRef.current;
     if (!current) {
@@ -501,26 +563,47 @@ export function BrainDumpRoute(): JSX.Element {
     }
     setError(null);
     try {
-      const updated = await apiClient.updateBrainDumpProposal(
+      const updated = await apiClient.submitBrainDumpProposalPatch(
         current.id,
         proposal.id,
-        { ...payload, expected_revision: current.revision },
+        {
+          ...payload,
+          base_proposal_revision: proposal.revision,
+          expected_operation_revision: current.revision
+        },
         idempotencyKey(`${kind}-${proposal.id}`)
       );
       applyOperation(updated);
     } catch (caught) {
-      const fallback =
-        kind === "edit"
-          ? "Could not update the task title."
-          : kind === "resolve"
-            ? "Could not resolve the conflict."
-            : "Could not delete the task.";
+      const fallback = kind === "edit" ? "Could not update the task title." : "Could not delete the task.";
       setError(caught instanceof Error ? caught.message : fallback);
     }
   }
 
+  async function resolveProposalConflict(proposal: BrainDumpProposal, resolution: "keep" | "accept") {
+    // Conflict resolution is an explicit canonical command. Proposal edits
+    // and removals use `.../patches`; resolving a model/user disagreement
+    // uses the dedicated route rather than the deprecated direct PATCH.
+    const current = operationRef.current;
+    if (!current) {
+      return;
+    }
+    setError(null);
+    try {
+      const updated = await apiClient.resolveBrainDumpProposalConflict(
+        current.id,
+        proposal.id,
+        { resolution, expected_operation_revision: current.revision },
+        idempotencyKey(`resolve-${proposal.id}`)
+      );
+      applyOperation(updated);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not resolve the conflict.");
+    }
+  }
+
   function queueProposalMutation(mutate: () => Promise<void>) {
-    // Serialize proposal edits so each PATCH reads the revision produced by the previous one.
+    // Serialize proposal edits so each patch reads the revision produced by the previous one.
     const chained = proposalMutationQueueRef.current.then(mutate);
     proposalMutationQueueRef.current = chained;
     return chained;
@@ -530,15 +613,15 @@ export function BrainDumpRoute(): JSX.Element {
     if (!title.trim() || title === proposal.title) {
       return;
     }
-    void queueProposalMutation(() => patchProposal(proposal, { title: title.trim() }, "edit"));
+    void queueProposalMutation(() => patchProposal(proposal, { operation: "update", title: title.trim() }, "edit"));
   }
 
   function deleteProposal(proposal: BrainDumpProposal) {
-    void queueProposalMutation(() => patchProposal(proposal, { deleted: true }, "delete"));
+    void queueProposalMutation(() => patchProposal(proposal, { operation: "remove" }, "delete"));
   }
 
   function resolveConflict(proposal: BrainDumpProposal, resolution: "keep" | "accept") {
-    void queueProposalMutation(() => patchProposal(proposal, { conflict_resolution: resolution }, "resolve"));
+    void queueProposalMutation(() => resolveProposalConflict(proposal, resolution));
   }
 
   if (savedCount !== null) {
@@ -574,13 +657,14 @@ export function BrainDumpRoute(): JSX.Element {
         operation={operation}
         providerError={providerError}
         onDelete={() => void command("cancel")}
-        onReview={() => void command("review_provisional")}
+        onReview={() => void command("review-provisional")}
         onRetry={() => void command("retry")}
       />
     );
   }
 
   if (isReviewPath || operation?.status === "awaiting_confirmation") {
+    const provisionalOnly = Boolean(operation?.operation_warning_codes?.includes("provisional_only"));
     return (
       <ReviewSurface
         error={error}
@@ -588,6 +672,8 @@ export function BrainDumpRoute(): JSX.Element {
         isSaving={isSaving}
         committable={operation?.committable ?? false}
         proposals={activeProposals}
+        provisionalOnly={provisionalOnly}
+        provisionalReviewAccepted={Boolean(operation?.provisional_review_accepted_at)}
         reconciliationQuality={operation?.reconciliation_quality ?? "none"}
         rawAudioExpiresAt={operation?.raw_audio_expires_at}
         rawAudioPresent={operation?.raw_audio_present ?? false}
@@ -595,8 +681,9 @@ export function BrainDumpRoute(): JSX.Element {
         onDelete={deleteProposal}
         onDeleteRawAudio={() => void command("delete_raw_audio")}
         onDiscard={() => void command("cancel")}
+        onAcceptProvisionalReview={() => void command("review-provisional")}
         onResolveConflict={resolveConflict}
-        onSave={() => void command("commit")}
+        onSave={() => void confirmBrainDump()}
         onUpdateTitle={updateProposal}
       />
     );
@@ -615,7 +702,7 @@ export function BrainDumpRoute(): JSX.Element {
       proposals={activeProposals}
       onCancel={() => void command("cancel")}
       onExternalProcessingAllowedChange={setExternalProcessingAllowed}
-      onFinish={() => void command("finish")}
+      onFinish={() => void finishRecording()}
       onLanguageModeChange={setLanguageMode}
       onPause={() => void command("pause")}
       onResume={() => void command("resume")}
@@ -864,10 +951,13 @@ function ReviewSurface({
   error,
   hasUnresolvedConflicts,
   isSaving,
+  provisionalOnly,
+  provisionalReviewAccepted,
   rawAudioExpiresAt,
   rawAudioPresent,
   proposals,
   reconciliationQuality,
+  onAcceptProvisionalReview,
   onBack,
   onDelete,
   onDeleteRawAudio,
@@ -880,10 +970,13 @@ function ReviewSurface({
   error: string | null;
   hasUnresolvedConflicts: boolean;
   isSaving: boolean;
+  provisionalOnly: boolean;
+  provisionalReviewAccepted: boolean;
   rawAudioExpiresAt?: string | null;
   rawAudioPresent: boolean;
   proposals: BrainDumpProposal[];
   reconciliationQuality: "none" | "provisional_only" | "accurate" | "conflicted";
+  onAcceptProvisionalReview: () => void;
   onBack: () => void;
   onDelete: (proposal: BrainDumpProposal) => void;
   onDeleteRawAudio: () => void;
@@ -906,7 +999,16 @@ function ReviewSurface({
 
       <main aria-label="Review brain dump proposals" className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {error ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
-        {!committable ? (
+        {provisionalOnly ? (
+          <div role="status" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <p>This is an imported recording that was never accurately reconciled. It can only be saved as provisional, unverified drafts.</p>
+            {!provisionalReviewAccepted ? (
+              <button type="button" className="mt-2 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900" onClick={onAcceptProvisionalReview}>
+                Review as provisional
+              </button>
+            ) : null}
+          </div>
+        ) : !committable ? (
           <div role="status" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
             These are {reconciliationQuality === "provisional_only" ? "provisional" : "not yet reconciled"} drafts. They can be edited or discarded, but cannot be saved to Inbox until the server confirms reconciliation.
           </div>

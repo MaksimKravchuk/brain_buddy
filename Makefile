@@ -1,4 +1,4 @@
-.PHONY: install-backend install-frontend dev-backend dev-frontend lint-backend lint-frontend test-backend ci-backend test-frontend test-e2e build-frontend ci-frontend validate-ci check-specs
+.PHONY: install-backend install-frontend dev-backend dev-frontend lint-backend lint-frontend test-backend ci-backend test-frontend test-e2e build-frontend ci-frontend validate-ci check-specs generate-openapi check-api-contract generate-mobile-api
 
 install-backend:
 	cd backend && python -m pip install -e .[dev]
@@ -51,3 +51,12 @@ validate-ci:
 check-specs:
 	python3 -m unittest scripts/test_check_spec_kit_specs.py -v
 	python3 scripts/check_spec_kit_specs.py
+
+generate-openapi:
+	cd backend && uv run python3 ../scripts/generate_openapi.py
+
+check-api-contract:
+	cd backend && uv run python3 ../scripts/generate_openapi.py --check
+
+generate-mobile-api:
+	bash mobile/scripts/generate-api.sh

@@ -239,6 +239,80 @@ def test_same_key_replay_and_mismatch_semantics_survive(service: TaskService) ->
         _make_task(service, key="replay-contract", title="Different payload")
 
 
+def test_native_inbox_task_creation_survives_generic_idempotency_expiry(
+    service: TaskService,
+) -> None:
+    """A Voice confirm retry's deterministic ``H(operation,batch,action)``
+    child key must resolve to the exact same Task even after the generic,
+    time-bounded ``IdempotencyRecord`` for that key has expired and been
+    purged. The permanent ``native_inbox_task_sources`` row -- not the 24h
+    generic record -- is what makes ``create_native_inbox_task`` exact-once
+    across a crash-then-late-retry window (ADR-0002 confirmation contract)."""
+
+    repo = service.task_repo
+    key = "brain_dump_action_child_key"
+    created = service.create_native_inbox_task(
+        owner_id=OWNER,
+        title="Call the dentist",
+        source_capture_ids=["brain_dump:op_x:proposal_y"],
+        idempotency_key=key,
+    )
+
+    stale_record = repo.get_idempotency(owner_id=OWNER, key=key)
+    assert stale_record is not None
+    repo.save_idempotency(
+        owner_id=OWNER,
+        record=stale_record.model_copy(
+            update={
+                "created_at": utcnow() - IDEMPOTENCY_RETENTION - timedelta(minutes=1)
+            }
+        ),
+    )
+    repo.purge_expired_idempotency(owner_id=OWNER, now=utcnow())
+    assert repo.get_idempotency(owner_id=OWNER, key=key) is None
+
+    retried = service.create_native_inbox_task(
+        owner_id=OWNER,
+        title="Call the dentist",
+        source_capture_ids=["brain_dump:op_x:proposal_y"],
+        idempotency_key=key,
+    )
+
+    assert retried.id == created.id
+    assert len(repo.list_for_owner(owner_id=OWNER)) == 1
+    assert (
+        repo.get_native_inbox_task_source(owner_id=OWNER, source_key=key)
+        == created.id
+    )
+
+
+def test_native_inbox_task_source_conflict_maps_to_domain_error(
+    service: TaskService,
+) -> None:
+    """A concurrent duplicate insert into the permanent source table (a
+    genuine race between two confirm retries) surfaces as ``ConflictError``,
+    never a silently-overwritten task pointer."""
+
+    repo = service.task_repo
+    created = service.create_native_inbox_task(
+        owner_id=OWNER,
+        title="Buy milk",
+        source_capture_ids=["brain_dump:op_x:proposal_z"],
+        idempotency_key="race-key",
+    )
+    with pytest.raises(ConflictError):
+        repo.save_native_inbox_task_source(
+            owner_id=OWNER,
+            source_key="race-key",
+            task_id="task_other",
+            created_at=utcnow(),
+        )
+    assert (
+        repo.get_native_inbox_task_source(owner_id=OWNER, source_key="race-key")
+        == created.id
+    )
+
+
 # --- finding 2: sqlite3 errors map to domain exceptions ---------------------
 
 

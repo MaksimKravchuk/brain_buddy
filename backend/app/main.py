@@ -36,17 +36,28 @@ def _run_voice_sweep(container: Container) -> None:
         purged_working_artifacts = (
             container.voice_brain_dump_service.purge_expired_working_artifacts()
         )
+        drained_audio_deletions = (
+            container.voice_brain_dump_service.drain_pending_raw_audio_deletions()
+        )
     except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
         logger.exception("Voice operation sweep iteration failed")
         return
-    if recovered_leases or advanced_runs or purged_raw_audio or purged_working_artifacts:
+    if (
+        recovered_leases
+        or advanced_runs
+        or purged_raw_audio
+        or purged_working_artifacts
+        or drained_audio_deletions
+    ):
         logger.info(
             "Voice sweep: recovered %s lease(s), purged %s raw-audio, %s "
-            "working-artifact operation(s), advanced %s provider run(s)",
+            "working-artifact operation(s), advanced %s provider run(s), "
+            "drained %s pending raw-audio deletion(s)",
             recovered_leases,
             purged_raw_audio,
             purged_working_artifacts,
             advanced_runs,
+            drained_audio_deletions,
         )
 
 

@@ -408,21 +408,123 @@ export const apiClient = {
     });
   },
 
-  updateBrainDumpProposal(
+  /** Canonical user conflict resolution; direct proposal PATCH stays server-only compatibility. */
+  resolveBrainDumpProposalConflict(
     operationId: string,
     proposalId: string,
-    payload: { title?: string; deleted?: boolean; conflict_resolution?: "keep" | "accept"; expected_revision: number },
+    payload: {
+      resolution: "keep" | "accept";
+      expected_operation_revision: number;
+    },
     idempotencyKey: string
   ) {
-    return request<BrainDumpOperationResponse>(`/brain-dump-operations/${operationId}/proposals/${proposalId}`, {
-      method: "PATCH",
+    return request<BrainDumpOperationResponse>(`/brain-dump-operations/${operationId}/proposals/${proposalId}/conflicts/resolve`, {
+      method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },
       body: payload
     });
   },
 
-  commandBrainDump(operationId: string, action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry" | "review_provisional" | "withdraw_consent" | "delete_raw_audio", expectedRevision: number, idempotencyKey: string) {
-    return request<BrainDumpOperationResponse>(`/brain-dump-operations/${operationId}/${action}`, {
+  /** Canonical user proposal edit/remove (mobile-api.md `.../patches`). */
+  submitBrainDumpProposalPatch(
+    operationId: string,
+    proposalId: string,
+    payload: {
+      operation: "update" | "remove";
+      title?: string;
+      base_proposal_revision: number;
+      expected_operation_revision: number;
+    },
+    idempotencyKey: string
+  ) {
+    return request<BrainDumpOperationResponse>(
+      `/brain-dump-operations/${operationId}/proposals/${proposalId}/patches`,
+      {
+        method: "POST",
+        headers: { "Idempotency-Key": idempotencyKey },
+        body: payload
+      }
+    );
+  },
+
+  /** Freeze the active, conflict-free proposal revision into an immutable batch. */
+  freezeBrainDumpProposalBatch(
+    operationId: string,
+    payload: {
+      based_on_proposal_revision: number;
+      expected_operation_revision: number;
+      selected_proposal_ids: string[];
+    },
+    idempotencyKey: string
+  ) {
+    return request<BrainDumpOperationResponse>(`/brain-dump-operations/${operationId}/proposal-batches`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  /** Confirm the current frozen batch; no Task exists before this call. */
+  confirmBrainDumpProposalBatch(
+    operationId: string,
+    payload: {
+      proposal_batch_id: string;
+      expected_batch_revision: number;
+      expected_operation_revision: number;
+    },
+    idempotencyKey: string
+  ) {
+    return request<BrainDumpOperationResponse>(`/brain-dump-operations/${operationId}/confirm`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  /** Canonical append-only external-processing consent grant/withdraw. */
+  recordBrainDumpConsentDecision(
+    operationId: string,
+    payload: {
+      decision: "grant" | "withdraw";
+      consent_policy_version?: string;
+      allowed_provider_categories?: string[];
+      decision_recorded_at?: string;
+      expected_operation_revision: number;
+    },
+    idempotencyKey: string
+  ) {
+    return request<BrainDumpOperationResponse>(`/brain-dump-operations/${operationId}/consent-decisions`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  /** Canonical, idempotent, restart-safe raw-audio deletion. */
+  deleteBrainDumpRawAudio(
+    operationId: string,
+    payload: { expected_operation_revision: number },
+    idempotencyKey: string
+  ) {
+    return request<BrainDumpOperationResponse>(`/brain-dump-operations/${operationId}/audio/delete`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  /**
+   * Canonical, typed recovery/lifecycle command path (ADR-0002
+   * `.../commands/{pause|resume|cancel|retry|review-provisional}`) --
+   * never the deprecated, untyped `.../{action}` bare dispatcher.
+   */
+  commandBrainDump(
+    operationId: string,
+    action: "pause" | "resume" | "cancel" | "retry" | "review-provisional",
+    expectedRevision: number,
+    idempotencyKey: string
+  ) {
+    return request<BrainDumpOperationResponse>(`/brain-dump-operations/${operationId}/commands/${action}`, {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },
       body: { expected_revision: expectedRevision }

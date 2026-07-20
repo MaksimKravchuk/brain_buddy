@@ -39,6 +39,13 @@ export const mobileAllure = {
     title,
     steps: ["Render canonical server task data"],
   }),
+  contract: (title: string) => taxonomy({
+    epic: "Mobile foundation",
+    feature: "Generated API contract",
+    story: "Explicit operation allowlist",
+    title,
+    steps: ["Filter the pinned OpenAPI snapshot to the mobile allowlist"],
+  }),
 };
 
 export async function withAllure<T>(

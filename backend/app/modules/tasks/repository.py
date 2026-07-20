@@ -217,6 +217,13 @@ class TaskRepository(BaseRepository):
                     created_at TEXT NOT NULL,
                     PRIMARY KEY (owner_id, key_hash)
                 );
+                CREATE TABLE IF NOT EXISTS native_inbox_task_sources (
+                    owner_id TEXT NOT NULL,
+                    source_key TEXT NOT NULL,
+                    task_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (owner_id, source_key)
+                );
                 CREATE TABLE IF NOT EXISTS migration_ledger (
                     id TEXT PRIMARY KEY,
                     migrated_at TEXT NOT NULL,
@@ -566,6 +573,51 @@ class TaskRepository(BaseRepository):
                 ),
             )
         BaseRepository.dump_model(self.idempotency_path(owner_id, record.key), record)
+
+    def get_native_inbox_task_source(
+        self, *, owner_id: str, source_key: str
+    ) -> str | None:
+        """Look up the Task a deterministic source key already created.
+
+        Permanent -- never purged by ``purge_expired_idempotency`` -- so a
+        confirm retry that arrives after the generic, time-bounded
+        ``IdempotencyRecord`` for this key has expired (or been purged by an
+        unrelated command for the same owner) still resolves to the exact
+        Task this key already created instead of creating a duplicate.
+        """
+
+        with self._connection() as conn:
+            row = conn.execute(
+                """
+                SELECT task_id FROM native_inbox_task_sources
+                WHERE owner_id = ? AND source_key = ?
+                """,
+                (owner_id, source_key),
+            ).fetchone()
+        return row["task_id"] if row is not None else None
+
+    def save_native_inbox_task_source(
+        self, *, owner_id: str, source_key: str, task_id: str, created_at: datetime
+    ) -> None:
+        """Permanently record the one Task a deterministic source key created.
+
+        Called once, in the same command-locked transaction as the Task's
+        own creation. The table's ``(owner_id, source_key)`` primary key
+        rejects a concurrent duplicate insert with ``ConflictError`` rather
+        than silently overwriting a different Task ID.
+        """
+
+        with self._connection() as conn, _sqlite_guard(
+            "Native inbox task source", source_key
+        ):
+            conn.execute(
+                """
+                INSERT INTO native_inbox_task_sources
+                    (owner_id, source_key, task_id, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (owner_id, source_key, task_id, created_at.isoformat()),
+            )
 
     def purge_expired_idempotency(self, *, owner_id: str, now: datetime) -> int:
         """Drop idempotency records past retention so history stays bounded."""

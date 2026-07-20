@@ -191,6 +191,44 @@ export interface BrainDumpProposal {
   revision: number;
 }
 
+export interface BrainDumpProposalBatchAction {
+  action_id: string;
+  proposal_id: string;
+  title: string;
+  target: "native_inbox";
+  before_summary: string;
+  after_summary: string;
+  source_cue: string | null;
+  confidence: "unknown";
+  warnings: string[];
+  destination: "native_inbox";
+}
+
+export interface BrainDumpProposalBatchActionResult {
+  action_id: string;
+  status: "pending" | "succeeded" | "failed" | "skipped";
+  result_task_id: string | null;
+}
+
+export interface BrainDumpProposalBatchResponse {
+  id: string;
+  based_on_proposal_revision: number;
+  status: "frozen" | "committed" | "superseded";
+  snapshot: BrainDumpProposalBatchAction[];
+  warnings: string[];
+  created_at: string;
+  committed_at: string | null;
+  revision: number;
+  results: BrainDumpProposalBatchActionResult[];
+}
+
+export interface BrainDumpRawAudio {
+  state: "not_received" | "retained" | "deletion_pending" | "deleted";
+  retained_until: string | null;
+  delete_now_available: boolean;
+  deleted_at: string | null;
+}
+
 export interface BrainDumpOperationResponse {
   id: string;
   owner_id: string;
@@ -248,6 +286,14 @@ export interface BrainDumpOperationResponse {
   created_at: string;
   updated_at: string;
   revision: number;
+  proposal_revision: number;
+  active_proposal_batch: BrainDumpProposalBatchResponse | null;
+  committed_proposal_batch: BrainDumpProposalBatchResponse | null;
+  import_mode: "native_v2" | "legacy_preview_only";
+  accurate_reconciliation_available: boolean;
+  operation_warning_codes: string[];
+  provisional_review_accepted_at: string | null;
+  raw_audio: BrainDumpRawAudio;
 }
 
 export interface BrainDumpStartRequest {

@@ -80,6 +80,15 @@ function proposal(id: string, ordinal: number, title: string, extras: Record<str
   };
 }
 
+function frozenProposalBatch(id = "proposal_batch_1", revision = 1) {
+  return {
+    id,
+    status: "frozen",
+    revision,
+    based_on_proposal_revision: 1
+  };
+}
+
 function conflict(field: string, currentValue: string, suggestedValue: string) {
   return {
     field,
@@ -201,10 +210,10 @@ describe("BrainDumpRoute", () => {
           })
         );
       }
-      if (url.endsWith("/brain_dump_1/pause")) {
+      if (url.endsWith("/brain_dump_1/commands/pause")) {
         return jsonResponse(operation({ status: "paused", revision: 3 }));
       }
-      if (url.endsWith("/brain_dump_1/resume")) {
+      if (url.endsWith("/brain_dump_1/commands/resume")) {
         return jsonResponse(operation({ status: "recording", revision: 4 }));
       }
       throw new Error(`unexpected fetch ${url}`);
@@ -282,7 +291,7 @@ describe("BrainDumpRoute", () => {
           resolveTranscript = resolve;
         });
       }
-      if (url.endsWith("/brain_dump_1/pause")) {
+      if (url.endsWith("/brain_dump_1/commands/pause")) {
         return jsonResponse(operation({ status: "paused", revision: 3, proposals: [proposal("proposal_1", 1, "Renew car insurance")] }));
       }
       throw new Error(`unexpected fetch ${url}`);
@@ -495,7 +504,7 @@ describe("BrainDumpRoute", () => {
     expect(calledUrls.some((calledUrl) => calledUrl.includes("/seal"))).toBe(false);
   });
 
-  it("records a no-consent finish before opening its provisional-only review", async () => {
+  it("seals a no-consent capture before opening its provisional-only review", async () => {
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith("/brain-dump-operations/brain_dump_legacy")) {
@@ -512,7 +521,7 @@ describe("BrainDumpRoute", () => {
           })
         );
       }
-      if (url.endsWith("/brain_dump_legacy/finish") && init?.method === "POST") {
+      if (url.endsWith("/brain_dump_legacy/seal") && init?.method === "POST") {
         return jsonResponse(
           operation({
             id: "brain_dump_legacy",
@@ -535,10 +544,10 @@ describe("BrainDumpRoute", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Stop & review" }));
 
     expect(await screen.findByRole("main", { name: "Review brain dump proposals" })).toBeInTheDocument();
-    expect(fetchMock.mock.calls.map(([input]) => String(input)).some((url) => url.includes("/seal"))).toBe(false);
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain(
-      "/api/brain-dump-operations/brain_dump_legacy/finish"
+      "/api/brain-dump-operations/brain_dump_legacy/seal"
     );
+    expect(fetchMock.mock.calls.map(([input]) => String(input)).some((url) => url.includes("/finish"))).toBe(false);
   });
 
   it("does not create a backend operation when microphone permission fails", async () => {
@@ -596,7 +605,7 @@ describe("BrainDumpRoute", () => {
       if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
         return jsonResponse(operation(), 201);
       }
-      if (url.endsWith("/brain_dump_1/cancel")) {
+      if (url.endsWith("/brain_dump_1/commands/cancel")) {
         return jsonResponse(operation({ status: "cancelled", revision: 2 }));
       }
       throw new Error(`unexpected fetch ${url}`);
@@ -617,7 +626,7 @@ describe("BrainDumpRoute", () => {
       if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
         return jsonResponse(operation(), 201);
       }
-      if (url.endsWith("/brain_dump_1/cancel")) {
+      if (url.endsWith("/brain_dump_1/commands/cancel")) {
         return Promise.reject(new Error("cancel failed"));
       }
       if (url.endsWith("/brain_dump_1/transcript")) {
@@ -731,7 +740,7 @@ describe("BrainDumpRoute", () => {
       if (url.endsWith("/brain_dump_existing") && (!init?.method || init.method === "GET")) {
         return jsonResponse(paused);
       }
-      if (url.endsWith("/brain_dump_existing/resume")) {
+      if (url.endsWith("/brain_dump_existing/commands/resume")) {
         return jsonResponse(operation({ ...paused, status: "recording", revision: 8 }));
       }
       if (url.endsWith("/brain_dump_existing/transcript")) {
@@ -797,7 +806,7 @@ describe("BrainDumpRoute", () => {
       if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
         return jsonResponse(operation(), 201);
       }
-      if (url.endsWith("/brain_dump_1/pause")) {
+      if (url.endsWith("/brain_dump_1/commands/pause")) {
         return Promise.reject(new Error("pause failed"));
       }
       if (url.endsWith("/brain_dump_1/transcript")) {
@@ -826,7 +835,7 @@ describe("BrainDumpRoute", () => {
       if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
         return jsonResponse(operation(), 201);
       }
-      if (url.endsWith("/brain_dump_1/pause")) {
+      if (url.endsWith("/brain_dump_1/commands/pause")) {
         return Promise.reject("pause failed");
       }
       throw new Error(`unexpected fetch ${url}`);
@@ -905,7 +914,7 @@ describe("BrainDumpRoute", () => {
       if (url.endsWith("/brain_dump_existing") && (!init?.method || init.method === "GET")) {
         return jsonResponse(captured);
       }
-      if (url.endsWith("/brain_dump_existing/cancel")) {
+      if (url.endsWith("/brain_dump_existing/commands/cancel")) {
         return jsonResponse(operation({ ...captured, status: "cancelled", revision: 5 }));
       }
       throw new Error(`unexpected fetch ${url}`);
@@ -914,7 +923,7 @@ describe("BrainDumpRoute", () => {
     renderBrainDump("/brain-dump/brain_dump_existing/review");
     await userEvent.click(await screen.findByRole("button", { name: "Discard" }));
 
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/brain_dump_existing/cancel"), expect.anything());
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/brain_dump_existing/commands/cancel"), expect.anything());
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/commit"), expect.anything());
   });
 
@@ -935,8 +944,13 @@ describe("BrainDumpRoute", () => {
       if (url.endsWith("/brain_dump_1/seal")) {
         return jsonResponse(consentedOperation({ ...captured, status: "awaiting_confirmation", revision: 3 }));
       }
-      if (url.endsWith("/brain_dump_1/commit")) {
-        return jsonResponse(consentedOperation({ ...captured, status: "completed", revision: 4, committed_task_ids: ["task_1", "task_2"] }));
+      if (url.endsWith("/brain_dump_1/proposal-batches")) {
+        return jsonResponse(
+          consentedOperation({ ...captured, revision: 4, active_proposal_batch: frozenProposalBatch() })
+        );
+      }
+      if (url.endsWith("/brain_dump_1/confirm")) {
+        return jsonResponse(consentedOperation({ ...captured, status: "completed", revision: 5, committed_task_ids: ["task_1", "task_2"] }));
       }
       throw new Error(`unexpected fetch ${url}`);
     });
@@ -984,11 +998,20 @@ describe("BrainDumpRoute", () => {
           })
         );
       }
-      if (url.endsWith("/brain_dump_1/commit")) {
+      if (url.endsWith("/brain_dump_1/proposal-batches")) {
+        return jsonResponse(
+          consentedOperation({
+            revision: 6,
+            active_proposal_batch: frozenProposalBatch(),
+            proposals: [proposal("proposal_1", 1, "Renew car insurance before Friday", { status: "user_edited", user_edited: true }), proposal("proposal_2", 2, "Reply to Anna", { deleted: true })]
+          })
+        );
+      }
+      if (url.endsWith("/brain_dump_1/confirm")) {
         return jsonResponse(
           consentedOperation({
             status: "completed",
-            revision: 6,
+            revision: 7,
             committed_task_ids: ["task_1"],
             proposals: [proposal("proposal_1", 1, "Renew car insurance before Friday", { status: "user_edited", user_edited: true }), proposal("proposal_2", 2, "Reply to Anna", { deleted: true })]
           })
@@ -1015,7 +1038,8 @@ describe("BrainDumpRoute", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Save 1 to inbox" }));
     expect(await screen.findByText("Saved 1 task to Inbox")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/brain_dump_1/commit"), expect.anything());
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/brain_dump_1/proposal-batches"), expect.anything());
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/brain_dump_1/confirm"), expect.anything());
   });
 
   it("ignores discard clicks before a brain dump operation exists", async () => {
@@ -1120,11 +1144,11 @@ describe("BrainDumpRoute", () => {
         return jsonResponse(captured);
       }
       if (url.includes("/proposals/proposal_1")) {
-        sentRevisions.push(JSON.parse(String(init?.body)).expected_revision);
+        sentRevisions.push(JSON.parse(String(init?.body)).expected_operation_revision);
         return jsonResponse(operation({ ...captured, revision: 5, proposals: [renamed, proposal("proposal_2", 2, "Reply to Anna")] }));
       }
       if (url.includes("/proposals/proposal_2")) {
-        sentRevisions.push(JSON.parse(String(init?.body)).expected_revision);
+        sentRevisions.push(JSON.parse(String(init?.body)).expected_operation_revision);
         return jsonResponse(operation({ ...captured, revision: 6, proposals: [renamed, proposal("proposal_2", 2, "Reply to Anna", { deleted: true })] }));
       }
       throw new Error(`unexpected fetch ${url}`);
@@ -1145,7 +1169,7 @@ describe("BrainDumpRoute", () => {
     expect(screen.queryByText("Reply to Anna")).not.toBeInTheDocument();
   });
 
-  it("refreshes cached task queries after committing a brain dump", async () => {
+  it("refreshes cached task queries after confirming a frozen brain dump batch", async () => {
     const captured = consentedOperation({
       id: "brain_dump_existing",
       status: "awaiting_confirmation",
@@ -1157,8 +1181,11 @@ describe("BrainDumpRoute", () => {
       if (url.endsWith("/brain_dump_existing") && (!init?.method || init.method === "GET")) {
         return jsonResponse(captured);
       }
-      if (url.endsWith("/brain_dump_existing/commit")) {
-        return jsonResponse(operation({ ...captured, status: "completed", revision: 5, committed_task_ids: ["task_1"] }));
+      if (url.endsWith("/brain_dump_existing/proposal-batches")) {
+        return jsonResponse(operation({ ...captured, revision: 5, active_proposal_batch: frozenProposalBatch() }));
+      }
+      if (url.endsWith("/brain_dump_existing/confirm")) {
+        return jsonResponse(operation({ ...captured, status: "completed", revision: 6, committed_task_ids: ["task_1"] }));
       }
       throw new Error(`unexpected fetch ${url}`);
     });
@@ -1184,7 +1211,14 @@ describe("BrainDumpRoute", () => {
       if (url.endsWith("/brain_dump_existing") && (!init?.method || init.method === "GET")) {
         return jsonResponse(captured);
       }
-      if (url.endsWith("/brain_dump_existing/commit")) {
+      if (url.endsWith("/brain_dump_existing/proposal-batches")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse(
+          operation({ ...captured, revision: 5, active_proposal_batch: frozenProposalBatch() })
+        );
+      }
+      if (url.endsWith("/brain_dump_existing/confirm")) {
+        expect(init?.method).toBe("POST");
         return jsonResponse(operation({ ...captured, status: "completed", revision: 5, committed_task_ids: ["task_1"] }));
       }
       throw new Error(`unexpected fetch ${url}`);
@@ -1213,9 +1247,9 @@ describe("BrainDumpRoute", () => {
       if (url.endsWith("/brain_dump_provisional_audio") && (!init?.method || init.method === "GET")) {
         return jsonResponse(captured);
       }
-      if (url.endsWith("/brain_dump_provisional_audio/delete_raw_audio")) {
+      if (url.endsWith("/brain_dump_provisional_audio/audio/delete")) {
         expect(init?.method).toBe("POST");
-        expect(JSON.parse(String(init?.body))).toEqual({ expected_revision: 4 });
+        expect(JSON.parse(String(init?.body))).toEqual({ expected_operation_revision: 4 });
         return jsonResponse({
           ...captured,
           revision: 5,
@@ -1249,13 +1283,18 @@ describe("BrainDumpRoute", () => {
       if (url.endsWith("/brain_dump_reviewed_provisional") && (!init?.method || init.method === "GET")) {
         return jsonResponse(reviewed);
       }
-      if (url.endsWith("/brain_dump_reviewed_provisional/commit")) {
+      if (url.endsWith("/brain_dump_reviewed_provisional/proposal-batches")) {
         expect(init?.method).toBe("POST");
-        expect(JSON.parse(String(init?.body))).toEqual({ expected_revision: 5 });
+        return jsonResponse(
+          operation({ ...reviewed, revision: 6, active_proposal_batch: frozenProposalBatch() })
+        );
+      }
+      if (url.endsWith("/brain_dump_reviewed_provisional/confirm")) {
+        expect(init?.method).toBe("POST");
         return jsonResponse(operation({
           ...reviewed,
           status: "completed",
-          revision: 6,
+          revision: 7,
           committed_task_ids: ["task_reviewed"]
         }));
       }
@@ -1513,7 +1552,7 @@ describe("BrainDumpRoute", () => {
       if (url.endsWith("/brain_dump_retryable") && (!init?.method || init.method === "GET")) {
         return jsonResponse(retryable);
       }
-      if (url.endsWith("/brain_dump_retryable/retry") && init?.method === "POST") {
+      if (url.endsWith("/brain_dump_retryable/commands/retry") && init?.method === "POST") {
         return jsonResponse(operation({ ...retryable, status: "awaiting_confirmation", revision: 8 }));
       }
       throw new Error(`unexpected fetch ${url}`);
@@ -1526,7 +1565,7 @@ describe("BrainDumpRoute", () => {
 
     expect(await screen.findByText("Review 1 task")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("/brain_dump_retryable/retry"),
+      expect.stringContaining("/brain_dump_retryable/commands/retry"),
       expect.objectContaining({ method: "POST" })
     );
   });
@@ -1603,7 +1642,7 @@ describe("BrainDumpRoute", () => {
       if (url.endsWith("/brain_dump_terminal") && (!init?.method || init.method === "GET")) {
         return jsonResponse(terminal);
       }
-      if (url.endsWith("/brain_dump_terminal/review_provisional") && init?.method === "POST") {
+      if (url.endsWith("/brain_dump_terminal/commands/review-provisional") && init?.method === "POST") {
         return jsonResponse(provisionalReview);
       }
       throw new Error(`unexpected fetch ${url}`);
@@ -1619,7 +1658,7 @@ describe("BrainDumpRoute", () => {
     expect(screen.getByText("Merged from 2 tasks")).toBeInTheDocument();
     expect(screen.getByText("Split from an earlier task")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("/brain_dump_terminal/review_provisional"),
+      expect.stringContaining("/brain_dump_terminal/commands/review-provisional"),
       expect.objectContaining({ method: "POST" })
     );
   });
@@ -1664,7 +1703,7 @@ describe("BrainDumpRoute", () => {
       if (url.endsWith("/brain_dump_terminal_fallback") && (!init?.method || init.method === "GET")) {
         return jsonResponse(terminal);
       }
-      if (url.endsWith("/brain_dump_terminal_fallback/cancel") && init?.method === "POST") {
+      if (url.endsWith("/brain_dump_terminal_fallback/commands/cancel") && init?.method === "POST") {
         return Promise.reject(new Error("delete failed"));
       }
       throw new Error(`unexpected fetch ${url}`);
@@ -1731,7 +1770,7 @@ describe("BrainDumpRoute", () => {
       if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
         return jsonResponse(consentedOperation(), 201);
       }
-      if (url.endsWith("/brain_dump_1/withdraw_consent")) {
+      if (url.endsWith("/brain_dump_1/consent-decisions")) {
         return new Promise<Response>((resolve) => {
           resolveWithdraw = resolve;
         });
@@ -1762,7 +1801,7 @@ describe("BrainDumpRoute", () => {
       if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
         return jsonResponse(consentedOperation(), 201);
       }
-      if (url.endsWith("/brain_dump_1/withdraw_consent")) {
+      if (url.endsWith("/brain_dump_1/consent-decisions")) {
         withdrawAttempts += 1;
         return withdrawAttempts === 1
           ? Promise.reject(new Error("withdraw_consent failed"))
@@ -1888,7 +1927,7 @@ describe("BrainDumpRoute", () => {
       if (url.endsWith("/brain_dump_conflict_resolution") && (!init?.method || init.method === "GET")) {
         return jsonResponse(conflicted);
       }
-      if (url.includes("/proposals/proposal_locked")) {
+      if (url.endsWith("/proposals/proposal_locked/conflicts/resolve")) {
         return Promise.reject("resolution rejected");
       }
       throw new Error(`unexpected fetch ${url}`);
