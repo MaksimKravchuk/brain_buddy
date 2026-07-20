@@ -33,6 +33,7 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
         ("/api/auth/login", "post"): {"401", "422", "429"},
         ("/api/auth/logout", "post"): set(),
         ("/api/auth/me", "get"): {"401"},
+        ("/api/auth/mobile/sessions", "post"): {"401", "422", "429"},
         ("/api/auth/signup", "post"): {"400", "409", "422"},
         ("/api/brain-dump-operations", "post"): {"400", "401", "409", "422"},
         ("/api/brain-dump-operations/{operation_id}", "get"): {"401", "404", "422"},

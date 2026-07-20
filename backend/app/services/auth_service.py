@@ -120,6 +120,9 @@ class AuthService:
         session = self.session_repo.get(token_hash)
         if session is None:
             return None
+        if session.expires_at <= utcnow():
+            self.session_repo.delete(token_hash)
+            return None
         return self.user_repo.get_by_id(session.user_id)
 
     def logout(self, raw_token: str | None) -> None:
@@ -186,7 +189,7 @@ class AuthService:
         raw_token, _ = self._create_session(user_id)
         return user, raw_token
 
-    def login(self, *, email: str, password: str) -> tuple[User, str]:
+    def login_with_session(self, *, email: str, password: str) -> tuple[User, str, Session]:
         """Authenticate and return `(user, raw_session_token)`.
 
         Always raises `InvalidCredentialsError` on failure — the caller
@@ -205,7 +208,13 @@ class AuthService:
         if not self._verify_password(password, user.password_hash):
             raise InvalidCredentialsError()
 
-        raw_token, _ = self._create_session(user.id)
+        raw_token, session = self._create_session(user.id)
+        return user, raw_token, session
+
+    def login(self, *, email: str, password: str) -> tuple[User, str]:
+        """Authenticate for the browser flow without exposing Session metadata."""
+
+        user, raw_token, _ = self.login_with_session(email=email, password=password)
         return user, raw_token
 
     # ------------------------------------------------------------------

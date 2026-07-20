@@ -13,6 +13,7 @@ _ERROR_DESCRIPTIONS = {
     409: "The request conflicts with the current resource state.",
     422: "The request path, query, or body does not match the API schema.",
     429: "Too many requests were made within the configured limit.",
+    503: "The persistence layer is temporarily unavailable.",
 }
 
 

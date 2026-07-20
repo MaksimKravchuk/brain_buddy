@@ -1,0 +1,19 @@
+{
+  "cli": { "version": ">= 16.0.0" },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": { "EXPO_PUBLIC_API_ORIGIN": "http://10.0.2.2:8000/api" }
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": { "EXPO_PUBLIC_API_ORIGIN": "https://preview.invalid/api" }
+    },
+    "production": {
+      "autoIncrement": false,
+      "env": { "EXPO_PUBLIC_API_ORIGIN": "https://api.brainbuddy.app/api" }
+    }
+  },
+  "submit": { "production": {} }
+}
