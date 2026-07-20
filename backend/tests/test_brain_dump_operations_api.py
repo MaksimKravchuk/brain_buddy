@@ -3270,12 +3270,25 @@ def test_active_legacy_preview_only_operation_can_be_committed_provisionally(
     assert fetched.status_code == 200, fetched.text
     fetched_body = fetched.json()
     assert fetched_body["reconciliation_quality"] == "provisional_only"
-    assert fetched_body["committable"] is True
+    # T057: an active legacy import is never implicitly bypass-committable --
+    # it must go through the explicit review-provisional gate first, exactly
+    # like a terminal-failure provisional review.
+    assert fetched_body["committable"] is False
+    assert "review_provisional" in fetched_body["available_recovery_actions"]
+
+    reviewed = api_client.post(
+        f"/api/brain-dump-operations/{operation_id}/review_provisional",
+        headers={"Idempotency-Key": "review-legacy-active"},
+        json={"expected_revision": fetched_body["revision"]},
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    reviewed_body = reviewed.json()
+    assert reviewed_body["committable"] is True
 
     committed = api_client.post(
         f"/api/brain-dump-operations/{operation_id}/commit",
         headers={"Idempotency-Key": "commit-legacy-active"},
-        json={"expected_revision": fetched_body["revision"]},
+        json={"expected_revision": reviewed_body["revision"]},
     )
     assert committed.status_code == 200, committed.text
     assert committed.json()["committed_task_ids"]

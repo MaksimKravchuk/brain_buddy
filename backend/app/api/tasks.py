@@ -6,14 +6,16 @@ from collections.abc import Sequence
 from datetime import date
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Header, Query, Request, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 
 from app.api.contracts import error_responses
 from app.api.dependencies import (
+    get_config_dep,
     get_current_user,
     get_task_service,
     get_voice_brain_dump_service,
 )
+from app.core.config import AppConfig
 from app.exceptions import ValidationFailure
 from app.modules.tasks import TaskService
 from app.modules.tasks.domain import (
@@ -28,14 +30,24 @@ from app.schemas.auth import User
 from app.schemas.tasks import (
     BrainDumpActionReceiptResponse,
     BrainDumpAudioChunkResponse,
+    BrainDumpAudioDeleteRequest,
+    BrainDumpConfirmRequest,
+    BrainDumpConsentDecisionRequest,
     BrainDumpConsentResponse,
     BrainDumpOperationResponse,
     BrainDumpOperationStartRequest,
+    BrainDumpProcessingPolicyResponse,
+    BrainDumpProposalBatchActionResponse,
+    BrainDumpProposalBatchActionResultResponse,
+    BrainDumpProposalBatchFreezeRequest,
+    BrainDumpProposalBatchResponse,
     BrainDumpProposalConflictResponse,
+    BrainDumpProposalPatchRequest,
     BrainDumpProposalPatchResponse,
     BrainDumpProposalResponse,
     BrainDumpProposalUpdateRequest,
     BrainDumpProviderRunResponse,
+    BrainDumpRawAudioResponse,
     BrainDumpSealRequest,
     BrainDumpTranscriptAppendRequest,
     BrainDumpTranscriptSegmentResponse,
@@ -69,8 +81,15 @@ from app.schemas.tasks import (
 from app.workflows.voice_brain_dump.audio_media import canonical_audio_mime_type
 from app.workflows.voice_brain_dump.domain import (
     BrainDumpOperationDocument,
+    BrainDumpProposalBatchDocument,
     BrainDumpProposalDocument,
     BrainDumpTranscriptSegmentDocument,
+    active_proposal_batch,
+    committed_proposal_batch,
+    operation_warning_codes,
+)
+from app.workflows.voice_brain_dump.domain import (
+    import_mode as brain_dump_import_mode,
 )
 from app.workflows.voice_brain_dump.service import (
     VoiceBrainDumpService,
@@ -85,6 +104,32 @@ def _require_idempotency_key(idempotency_key: str | None) -> str:
     if not idempotency_key:
         raise ValidationFailure("Idempotency-Key header is required.")
     return idempotency_key
+
+
+@router.get(
+    "/brain-dump-processing-policy",
+    response_model=BrainDumpProcessingPolicyResponse,
+    responses=error_responses(401),
+)
+def get_brain_dump_processing_policy(
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
+    config: AppConfig = Depends(get_config_dep),
+) -> BrainDumpProcessingPolicyResponse:
+    del current_user  # authentication required; payload is not owner-scoped
+    response.headers["Cache-Control"] = "no-store"
+    policy = BrainDumpProcessingPolicyResponse(
+        consent_policy_version=voice_brain_dump_service.consent_policy_version,
+        required_provider_categories=sorted(
+            voice_brain_dump_service.required_consent_categories
+        ),
+        consent_valid_for_seconds=voice_brain_dump_service.consent_valid_for_seconds,
+        max_chunk_size_bytes=voice_brain_dump_service.audio_limits.max_chunk_bytes,
+        max_operation_size_bytes=voice_brain_dump_service.audio_limits.max_total_bytes,
+        accepted_audio_formats=list(config.voice.consent.accepted_audio_formats),
+    )
+    return policy
 
 
 @router.post(
@@ -236,6 +281,7 @@ def seal_brain_dump_operation(
     "/brain-dump-operations/{operation_id}/proposals/{proposal_id}",
     response_model=BrainDumpOperationResponse,
     responses=error_responses(400, 401, 404, 409, 422),
+    deprecated=True,
 )
 def update_brain_dump_proposal(
     operation_id: str,
@@ -245,6 +291,16 @@ def update_brain_dump_proposal(
     current_user: User = Depends(get_current_user),
     voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
+    """Deprecated web-compatibility adapter.
+
+    Delegates to the same canonical proposal-projection write path
+    (``update_brain_dump_proposal`` appends the identical append-only
+    ``BrainDumpProposalPatchDocument`` records and supersedes any active
+    frozen batch) as ``POST .../proposals/{proposal_id}/patches``. Excluded
+    from the mobile operation allowlist; kept for the bounded web overlap
+    window (ADR-0002).
+    """
+
     return _to_brain_dump_response(
         voice_brain_dump_service.update_brain_dump_proposal(
             operation_id,
@@ -252,6 +308,199 @@ def update_brain_dump_proposal(
             payload,
             owner_id=current_user.id,
             idempotency_key=_require_idempotency_key(idempotency_key),
+        )
+    )
+
+
+@router.post(
+    "/brain-dump-operations/{operation_id}/consent-decisions",
+    response_model=BrainDumpOperationResponse,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
+def record_brain_dump_consent_decision(
+    operation_id: str,
+    payload: BrainDumpConsentDecisionRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
+) -> BrainDumpOperationResponse:
+    """Canonical append-only external-processing consent grant/withdraw."""
+
+    return _to_brain_dump_response(
+        voice_brain_dump_service.record_brain_dump_consent_decision(
+            operation_id,
+            payload,
+            owner_id=current_user.id,
+            idempotency_key=_require_idempotency_key(idempotency_key),
+        )
+    )
+
+
+@router.post(
+    "/brain-dump-operations/{operation_id}/proposals/{proposal_id}/patches",
+    response_model=BrainDumpOperationResponse,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
+def submit_brain_dump_proposal_patch(
+    operation_id: str,
+    proposal_id: str,
+    payload: BrainDumpProposalPatchRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
+) -> BrainDumpOperationResponse:
+    """Canonical user proposal edit/remove (mobile-api.md ``.../patches``)."""
+
+    return _to_brain_dump_response(
+        voice_brain_dump_service.submit_brain_dump_proposal_patch(
+            operation_id,
+            proposal_id,
+            payload,
+            owner_id=current_user.id,
+            idempotency_key=_require_idempotency_key(idempotency_key),
+        )
+    )
+
+
+@router.post(
+    "/brain-dump-operations/{operation_id}/proposal-batches",
+    response_model=BrainDumpOperationResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
+def freeze_brain_dump_proposal_batch(
+    operation_id: str,
+    payload: BrainDumpProposalBatchFreezeRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
+) -> BrainDumpOperationResponse:
+    """Freeze the current conflict-free active proposals into an immutable
+    ``ProposalBatch`` snapshot."""
+
+    return _to_brain_dump_response(
+        voice_brain_dump_service.freeze_brain_dump_proposal_batch(
+            operation_id,
+            payload,
+            owner_id=current_user.id,
+            idempotency_key=_require_idempotency_key(idempotency_key),
+        )
+    )
+
+
+@router.post(
+    "/brain-dump-operations/{operation_id}/confirm",
+    response_model=BrainDumpOperationResponse,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
+def confirm_brain_dump_proposal_batch(
+    operation_id: str,
+    payload: BrainDumpConfirmRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
+) -> BrainDumpOperationResponse:
+    """Canonical idempotent confirmation of the current frozen batch. No
+    Task exists before this command."""
+
+    return _to_brain_dump_response(
+        voice_brain_dump_service.confirm_brain_dump_proposal_batch(
+            operation_id,
+            payload,
+            owner_id=current_user.id,
+            idempotency_key=_require_idempotency_key(idempotency_key),
+        )
+    )
+
+
+@router.post(
+    "/brain-dump-operations/{operation_id}/audio/delete",
+    response_model=BrainDumpOperationResponse,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
+def delete_brain_dump_raw_audio_canonical(
+    operation_id: str,
+    payload: BrainDumpAudioDeleteRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
+) -> BrainDumpOperationResponse:
+    """Canonical, idempotent, restart-safe raw-audio deletion after
+    processing reaches review or a terminal/cancelled state."""
+
+    return _to_brain_dump_response(
+        voice_brain_dump_service.delete_brain_dump_raw_audio(
+            operation_id,
+            ExpectedRevisionRequest(
+                expected_revision=payload.expected_operation_revision
+            ),
+            owner_id=current_user.id,
+            idempotency_key=_require_idempotency_key(idempotency_key),
+        )
+    )
+
+
+@router.post(
+    "/brain-dump-operations/{operation_id}/commit",
+    response_model=BrainDumpOperationResponse,
+    responses=error_responses(400, 401, 404, 409, 422),
+    deprecated=True,
+)
+def commit_brain_dump_operation_deprecated(
+    operation_id: str,
+    payload: ExpectedRevisionRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
+) -> BrainDumpOperationResponse:
+    """Deprecated web-compatibility adapter for ``commit``.
+
+    Per ADR-0002's migration section, a legacy ``/commit`` with no explicit
+    batch atomically freezes the current conflict-free active proposals
+    before confirming -- ``commit_brain_dump_operation`` persists the
+    identical canonical ``ProposalBatch``/action-receipt records the
+    two-step ``proposal-batches`` + ``confirm`` route produces, and applies
+    the same provisional-review gate (no bypass). Excluded from the mobile
+    operation allowlist; kept for the bounded web overlap window.
+    """
+
+    return _to_brain_dump_response(
+        voice_brain_dump_service.commit_brain_dump_operation(
+            operation_id,
+            payload,
+            owner_id=current_user.id,
+            idempotency_key=_require_idempotency_key(idempotency_key),
+        )
+    )
+
+
+@router.post(
+    "/brain-dump-operations/{operation_id}/finish",
+    response_model=BrainDumpOperationResponse,
+    responses=error_responses(400, 401, 404, 409, 422),
+    deprecated=True,
+)
+def finish_brain_dump_operation_deprecated(
+    operation_id: str,
+    payload: ExpectedRevisionRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
+) -> BrainDumpOperationResponse:
+    """Deprecated web-compatibility alias for seal/transition-to-review.
+
+    Excluded from the mobile operation allowlist; kept for the bounded web
+    overlap window (ADR-0002: ``/transcript``, ``/finish``, ``/commit``, and
+    direct proposal ``PATCH`` remain aliases for v1-aware clients).
+    """
+
+    return _to_brain_dump_response(
+        voice_brain_dump_service.transition_brain_dump_operation(
+            operation_id,
+            payload,
+            owner_id=current_user.id,
+            idempotency_key=_require_idempotency_key(idempotency_key),
+            action="finish",
         )
     )
 
@@ -269,12 +518,15 @@ def command_brain_dump_operation(
     current_user: User = Depends(get_current_user),
     voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
+    """Canonical recovery/lifecycle command dispatcher.
+
+    ``commit`` and ``finish`` are intentionally not reachable here -- they
+    have their own dedicated, explicitly deprecated routes above, which
+    Starlette matches before this generic ``{action}`` path.
+    """
+
     idempotency = _require_idempotency_key(idempotency_key)
-    if action == "commit":
-        operation = voice_brain_dump_service.commit_brain_dump_operation(
-            operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
-        )
-    elif action == "retry":
+    if action == "retry":
         operation = voice_brain_dump_service.retry_brain_dump_operation(
             operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
         )
@@ -290,7 +542,7 @@ def command_brain_dump_operation(
         operation = voice_brain_dump_service.delete_brain_dump_raw_audio(
             operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
         )
-    elif action in {"pause", "resume", "finish", "cancel"}:
+    elif action in {"pause", "resume", "cancel"}:
         operation = voice_brain_dump_service.transition_brain_dump_operation(
             operation_id,
             payload,
@@ -766,6 +1018,9 @@ def list_tasks(
 def _to_brain_dump_response(
     operation: BrainDumpOperationDocument,
 ) -> BrainDumpOperationResponse:
+    active_batch = active_proposal_batch(operation)
+    committed_batch = committed_proposal_batch(operation)
+    is_legacy_import = operation.legacy_import == "legacy_preview_only"
     return BrainDumpOperationResponse(
         id=operation.id,
         owner_id=operation.owner_id,
@@ -778,6 +1033,11 @@ def _to_brain_dump_response(
             language_hints=operation.consent.language_hints,
             vocabulary=operation.consent.vocabulary,
             recorded_at=operation.consent.recorded_at,
+            status=operation.consent.status,
+            consent_policy_version=operation.consent.consent_policy_version,
+            allowed_provider_categories=operation.consent.allowed_provider_categories,
+            valid_until=operation.consent.valid_until,
+            withdrawn_at=operation.consent.withdrawn_at,
         ),
         segments=[
             _to_brain_dump_segment_response(segment) for segment in operation.segments
@@ -858,6 +1118,9 @@ def _to_brain_dump_response(
                 confirmed_by_actor_id=receipt.confirmed_by_actor_id,
                 decision=receipt.decision,
                 confirmed_at=receipt.confirmed_at,
+                batch_id=receipt.batch_id,
+                action_id=receipt.action_id,
+                outcome=receipt.outcome,
             )
             for receipt in operation.action_receipts
         ],
@@ -866,6 +1129,92 @@ def _to_brain_dump_response(
         created_at=operation.created_at,
         updated_at=operation.updated_at,
         revision=operation.revision,
+        proposal_revision=operation.proposal_revision,
+        active_proposal_batch=(
+            _to_brain_dump_batch_response(active_batch, operation)
+            if active_batch is not None
+            else None
+        ),
+        committed_proposal_batch=(
+            _to_brain_dump_batch_response(committed_batch, operation)
+            if committed_batch is not None
+            else None
+        ),
+        import_mode=brain_dump_import_mode(operation),
+        accurate_reconciliation_available=not is_legacy_import,
+        operation_warning_codes=operation_warning_codes(operation),
+        provisional_review_accepted_at=operation.provisional_review_accepted_at,
+        raw_audio=BrainDumpRawAudioResponse(
+            state=operation.raw_audio_state,
+            retained_until=operation.raw_audio_expires_at,
+            delete_now_available=(
+                operation.raw_audio_state == "retained"
+                and operation.status
+                in {
+                    "awaiting_confirmation",
+                    "committing",
+                    "completed",
+                    "cancelled",
+                    "terminal_error",
+                    "retryable_error",
+                }
+            ),
+            deleted_at=operation.raw_audio_deleted_at,
+        ),
+    )
+
+
+def _to_brain_dump_batch_response(
+    batch: BrainDumpProposalBatchDocument, operation: BrainDumpOperationDocument
+) -> BrainDumpProposalBatchResponse:
+    receipts_by_action = {
+        receipt.action_id: receipt
+        for receipt in operation.action_receipts
+        if receipt.batch_id == batch.id
+    }
+    results: list[BrainDumpProposalBatchActionResultResponse] = []
+    for action in batch.actions:
+        receipt = receipts_by_action.get(action.action_id)
+        if receipt is None:
+            results.append(
+                BrainDumpProposalBatchActionResultResponse(
+                    action_id=action.action_id,
+                    status="pending",
+                    result_task_id=None,
+                )
+            )
+        else:
+            results.append(
+                BrainDumpProposalBatchActionResultResponse(
+                    action_id=action.action_id,
+                    status=receipt.outcome,
+                    result_task_id=receipt.task_id,
+                )
+            )
+    return BrainDumpProposalBatchResponse(
+        id=batch.id,
+        based_on_proposal_revision=batch.based_on_proposal_revision,
+        status=batch.status,
+        snapshot=[
+            BrainDumpProposalBatchActionResponse(
+                action_id=action.action_id,
+                proposal_id=action.proposal_id,
+                title=action.title,
+                target=action.target,
+                before_summary=action.before_summary,
+                after_summary=action.after_summary,
+                source_cue=action.source_cue,
+                confidence=action.confidence,
+                warnings=action.warnings,
+                destination=action.destination,
+            )
+            for action in batch.actions
+        ],
+        warnings=batch.warnings,
+        created_at=batch.created_at,
+        committed_at=batch.committed_at,
+        revision=batch.revision,
+        results=results,
     )
 
 

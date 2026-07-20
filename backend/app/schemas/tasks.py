@@ -257,6 +257,13 @@ class BrainDumpConsentRequest(StrictBaseModel):
     provider: str | None = Field(default=None, max_length=100)
     language_hints: list[str] = Field(default_factory=list, max_length=10)
     vocabulary: list[str] = Field(default_factory=list, max_length=200)
+    # Canonical, additive consent fields (mobile-api.md). Optional so
+    # existing web/legacy callers that only ever set ``provider`` keep
+    # working unchanged; when present the service records and later
+    # enforces them as the current-consent source of truth.
+    consent_policy_version: str | None = Field(default=None, max_length=100)
+    allowed_provider_categories: list[str] = Field(default_factory=list, max_length=20)
+    decision_recorded_at: datetime | None = None
 
 
 class BrainDumpOperationStartRequest(StrictBaseModel):
@@ -282,6 +289,56 @@ class BrainDumpProposalUpdateRequest(StrictBaseModel):
     expected_revision: int = Field(ge=1)
 
 
+class BrainDumpProposalPatchRequest(StrictBaseModel):
+    """Canonical user proposal edit/remove (mobile-api.md ``.../patches``)."""
+
+    operation: Literal["update", "remove"]
+    title: str | None = Field(default=None, min_length=1, max_length=500)
+    base_proposal_revision: int = Field(ge=1)
+    expected_operation_revision: int = Field(ge=1)
+
+
+class BrainDumpConsentDecisionRequest(StrictBaseModel):
+    """Canonical append-only consent grant/withdraw decision."""
+
+    decision: Literal["grant", "withdraw"]
+    consent_policy_version: str | None = Field(default=None, max_length=100)
+    allowed_provider_categories: list[str] = Field(default_factory=list, max_length=20)
+    decision_recorded_at: datetime | None = None
+    expected_operation_revision: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def require_grant_fields(self) -> BrainDumpConsentDecisionRequest:
+        if self.decision == "grant" and not self.consent_policy_version:
+            raise PydanticCustomError(
+                "consent_decision_grant_requires_policy_version",
+                "A consent grant decision requires consent_policy_version.",
+            )
+        return self
+
+
+class BrainDumpProposalBatchFreezeRequest(StrictBaseModel):
+    """Canonical freeze request (mobile-api.md ``.../proposal-batches``)."""
+
+    based_on_proposal_revision: int = Field(ge=1)
+    expected_operation_revision: int = Field(ge=1)
+    selected_proposal_ids: list[str] = Field(min_length=1, max_length=200)
+
+
+class BrainDumpConfirmRequest(StrictBaseModel):
+    """Canonical confirm request (mobile-api.md ``.../confirm``)."""
+
+    proposal_batch_id: str = Field(min_length=1, max_length=200)
+    expected_batch_revision: int = Field(ge=1)
+    expected_operation_revision: int = Field(ge=1)
+
+
+class BrainDumpAudioDeleteRequest(StrictBaseModel):
+    """Canonical raw-audio delete request (mobile-api.md ``.../audio/delete``)."""
+
+    expected_operation_revision: int = Field(ge=1)
+
+
 class BrainDumpConsentResponse(StrictBaseModel):
     microphone: bool
     external_processing_allowed: bool
@@ -289,6 +346,30 @@ class BrainDumpConsentResponse(StrictBaseModel):
     language_hints: list[str] = Field(default_factory=list)
     vocabulary: list[str] = Field(default_factory=list)
     recorded_at: datetime
+    # Canonical additive projection (mobile-api.md consent contract).
+    status: Literal["granted", "withdrawn"] | None = None
+    consent_policy_version: str | None = None
+    allowed_provider_categories: list[str] = Field(default_factory=list)
+    valid_until: datetime | None = None
+    withdrawn_at: datetime | None = None
+
+
+class BrainDumpProcessingPolicyResponse(StrictBaseModel):
+    """Non-secret current consent/upload policy (``GET .../processing-policy``)."""
+
+    consent_policy_version: str
+    required_provider_categories: list[str]
+    consent_valid_for_seconds: int = Field(ge=1)
+    max_chunk_size_bytes: int = Field(ge=1)
+    max_operation_size_bytes: int = Field(ge=1)
+    accepted_audio_formats: list[str]
+
+
+class BrainDumpRawAudioResponse(StrictBaseModel):
+    state: Literal["not_received", "retained", "deletion_pending", "deleted"]
+    retained_until: datetime | None = None
+    delete_now_available: bool = False
+    deleted_at: datetime | None = None
 
 
 class BrainDumpTranscriptSegmentResponse(StrictBaseModel):
@@ -390,6 +471,46 @@ class BrainDumpActionReceiptResponse(StrictBaseModel):
     confirmed_by_actor_id: str | None = None
     decision: Literal["create_native_inbox_task"] = "create_native_inbox_task"
     confirmed_at: datetime
+    batch_id: str | None = None
+    action_id: str | None = None
+    outcome: Literal["succeeded", "failed", "skipped"] = "succeeded"
+
+
+class BrainDumpProposalBatchActionResponse(StrictBaseModel):
+    """Immutable per-action review snapshot; never carries a result field."""
+
+    action_id: str
+    proposal_id: str
+    title: str
+    target: Literal["native_inbox"] = "native_inbox"
+    before_summary: str
+    after_summary: str
+    source_cue: str | None = None
+    confidence: Literal["unknown"] = "unknown"
+    warnings: list[str] = Field(default_factory=list)
+    destination: Literal["native_inbox"] = "native_inbox"
+
+
+class BrainDumpProposalBatchActionResultResponse(StrictBaseModel):
+    """Receipt-derived result folded beside (never into) the action snapshot."""
+
+    action_id: str
+    status: Literal["pending", "succeeded", "failed", "skipped"]
+    result_task_id: str | None = None
+
+
+class BrainDumpProposalBatchResponse(StrictBaseModel):
+    id: str
+    based_on_proposal_revision: int
+    status: Literal["frozen", "committed", "superseded"]
+    snapshot: list[BrainDumpProposalBatchActionResponse] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    created_at: datetime
+    committed_at: datetime | None = None
+    revision: int
+    results: list[BrainDumpProposalBatchActionResultResponse] = Field(
+        default_factory=list
+    )
 
 
 class BrainDumpOperationResponse(StrictBaseModel):
@@ -421,3 +542,14 @@ class BrainDumpOperationResponse(StrictBaseModel):
     created_at: datetime
     updated_at: datetime
     revision: int
+    # Canonical additive projection fields (ADR-0002/ADR-0008 mobile contract).
+    proposal_revision: int = 1
+    active_proposal_batch: BrainDumpProposalBatchResponse | None = None
+    committed_proposal_batch: BrainDumpProposalBatchResponse | None = None
+    import_mode: Literal["native_v2", "legacy_preview_only"] = "native_v2"
+    accurate_reconciliation_available: bool = True
+    operation_warning_codes: list[str] = Field(default_factory=list)
+    provisional_review_accepted_at: datetime | None = None
+    raw_audio: BrainDumpRawAudioResponse = Field(
+        default_factory=lambda: BrainDumpRawAudioResponse(state="not_received")
+    )

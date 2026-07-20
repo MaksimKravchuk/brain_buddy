@@ -37,6 +37,10 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
+# Generation-only mobile operation allowlist output (derived from the
+# committed api/openapi.json; never itself the source of truth).
+api/openapi.mobile.json
+
 example
 
 # generated native folders

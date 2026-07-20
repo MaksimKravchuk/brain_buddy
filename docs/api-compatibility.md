@@ -50,3 +50,64 @@ non-`ErrorResponse` errors, and unhandled `5xx` responses as contract failures.
 Allure results attach fuzzed response artifacts under the `Quality spine` / `API
 contract` labels so CI keeps contract evidence alongside the normal backend test
 artifacts.
+
+## Voice Brain Dump: canonical routes and the mobile operation allowlist
+
+ADR-0002 and ADR-0008 require a canonical proposal-patch → frozen-batch →
+confirm sequence with current consent and visible raw-audio retention, plus a
+bounded web-compatibility overlap that a second (mobile) client must never
+depend on. The canonical routes under `/api/brain-dump-operations/{operation_id}`:
+
+| Method/path | Purpose |
+|---|---|
+| `GET /brain-dump-processing-policy` | Non-secret, `Cache-Control: no-store` current consent policy version, required provider categories, chunk/operation size limits, and accepted audio formats. |
+| `POST .../consent-decisions` | Append-only owner-scoped `grant`/`withdraw` consent decision, bound to an exact policy-version/category-set match and an expiry (`valid_until`). |
+| `POST .../proposals/{proposal_id}/patches` | Canonical user proposal `update`/`remove`, checked against the proposal's own `base_proposal_revision` (never silently overwritten) and the operation's `expected_operation_revision`. Supersedes any currently frozen batch. |
+| `POST .../proposal-batches` | Freezes the current conflict-free active proposals into an immutable `ProposalBatch` snapshot (target, before/after summary, source cue, confidence/warnings, destination — never a result field). |
+| `POST .../confirm` | Idempotently confirms the current frozen batch. Each action derives `H(operation_id, batch_id, action_id)`, persists an append-only immutable receipt, and folds receipts into a separate per-action result projection. No Task exists before this command. |
+| `POST .../audio/delete` | Idempotent, restart-safe raw-audio deletion (`deletion_pending` → `deleted`) after processing reaches review or a terminal/cancelled state. Preserves confirmed Tasks, action receipts, and the committed batch snapshot. |
+
+`GET /brain-dump-operations/{operation_id}` additionally projects
+`proposal_revision`, `active_proposal_batch`/`committed_proposal_batch`,
+`import_mode` (`native_v2` | `legacy_preview_only`),
+`accurate_reconciliation_available`, `operation_warning_codes` (for example
+`provisional_only`), `provisional_review_accepted_at`, an extended `consent`
+object (`status`, `consent_policy_version`, `allowed_provider_categories`,
+`valid_until`, `withdrawn_at`), and a `raw_audio` object (`state`,
+`retained_until`, `delete_now_available`, `deleted_at`).
+
+### Deprecated web-compatibility aliases
+
+Three routes remain in the full OpenAPI document, `deprecated: true`, and
+delegate to the same canonical persisted records above with no bypass of the
+provisional-review or freeze/confirm gates:
+
+- `PATCH /brain-dump-operations/{operation_id}/proposals/{proposal_id}` — direct
+  proposal edit; use `POST .../proposals/{proposal_id}/patches`.
+- `POST /brain-dump-operations/{operation_id}/finish` — transitions to review
+  without a canonical seal; use `POST .../seal`.
+- `POST /brain-dump-operations/{operation_id}/commit` — atomically freezes the
+  current conflict-free active proposals and confirms them in one step (still
+  gated by the same explicit `review-provisional` requirement for a
+  `legacy_preview_only` import); use `POST .../proposal-batches` then
+  `POST .../confirm`.
+
+An active schema-v1 operation is imported once as `legacy_preview_only`
+(preserved operation/segment/proposal IDs, `title` locks, and `remove`
+tombstones via deterministic synthetic patches). It cannot claim accurate
+reconciliation and must go through the explicit `review_provisional` command
+before either the canonical `proposal-batches` route or the deprecated
+`commit` alias will freeze/confirm it — `manual_review`/
+`provisional_review_accepted_at` gates both paths identically. Completed and
+cancelled v1 operations are read-only and are never migrated or replayed.
+
+### Mobile operation allowlist
+
+`mobile/scripts/generate-api.sh` fetches the full OpenAPI document to
+`mobile/api/openapi.json` (the committed audit/drift copy), then
+`mobile/scripts/filter-mobile-openapi.mjs` derives a generation-only
+allowlisted subset by dropping every operation the backend marks
+`deprecated: true` before `openapi-typescript` ever sees it. This keeps the
+mobile client generation allowlist a direct, low-maintenance function of the
+same `deprecated` flag used above, rather than a hand-maintained duplicate
+list that can drift from the backend's actual routes.

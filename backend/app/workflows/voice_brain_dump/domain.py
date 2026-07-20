@@ -425,6 +425,30 @@ class BrainDumpConsent(StorageBaseModel):
     provider: str | None = None
     language_hints: list[str] = Field(default_factory=list, max_length=10)
     vocabulary: list[str] = Field(default_factory=list, max_length=200)
+    # Canonical, additive external-processing consent fields (ADR-0002/0008
+    # mobile contract). ``consent_policy_version`` is only ever set once a
+    # caller has recorded a decision through the new canonical
+    # ``consent-decisions`` command; a ``None`` value means this operation
+    # predates that contract and every current-consent check below falls
+    # back to the legacy ``provider`` membership check instead.
+    consent_policy_version: str | None = None
+    allowed_provider_categories: list[str] = Field(default_factory=list, max_length=20)
+    decision_recorded_at: datetime | None = None
+    valid_until: datetime | None = None
+    withdrawn_at: datetime | None = None
+    status: Literal["granted", "withdrawn"] | None = None
+
+
+class BrainDumpConsentDecisionDocument(StorageBaseModel):
+    """Append-only owner-scoped external-processing consent decision."""
+
+    id: str
+    decision: Literal["grant", "withdraw"]
+    consent_policy_version: str | None = None
+    allowed_provider_categories: list[str] = Field(default_factory=list, max_length=20)
+    decision_recorded_at: datetime | None = None
+    valid_until: datetime | None = None
+    recorded_at: datetime
 
 
 class BrainDumpTranscriptSegmentDocument(StorageBaseModel):
@@ -549,6 +573,46 @@ class BrainDumpActionReceiptDocument(StorageBaseModel):
     confirmed_by_actor_id: str | None = None
     decision: Literal["create_native_inbox_task"] = "create_native_inbox_task"
     confirmed_at: datetime
+    # Canonical batch/action linkage (ADR-0002 "H(operation_id, batch_id,
+    # action_id)"). ``None`` on receipts created by the legacy proposal-keyed
+    # commit path that predates ``ProposalBatch``.
+    batch_id: str | None = None
+    action_id: str | None = None
+    outcome: Literal["succeeded", "failed", "skipped"] = "succeeded"
+
+
+class BrainDumpProposalBatchActionDocument(StorageBaseModel):
+    """Immutable per-action review snapshot frozen at batch creation.
+
+    Never carries a result/status field: results are a separate projection
+    folded from :class:`BrainDumpActionReceiptDocument` rows, exactly as the
+    mobile API contract requires ("action snapshot"/"result" separation).
+    """
+
+    action_id: str
+    proposal_id: str
+    title: str = Field(min_length=1, max_length=500)
+    target: Literal["native_inbox"] = "native_inbox"
+    before_summary: str = Field(min_length=1, max_length=1000)
+    after_summary: str = Field(min_length=1, max_length=1000)
+    source_cue: str | None = Field(default=None, max_length=200)
+    confidence: Literal["unknown"] = "unknown"
+    warnings: list[str] = Field(default_factory=list, max_length=20)
+    destination: Literal["native_inbox"] = "native_inbox"
+
+
+class BrainDumpProposalBatchDocument(StorageBaseModel):
+    """Immutable frozen review snapshot; only ``status``/``committed_at``/
+    ``revision`` change after creation. ``actions`` is byte-stable forever."""
+
+    id: str
+    based_on_proposal_revision: int = Field(ge=1)
+    status: Literal["frozen", "committed", "superseded"] = "frozen"
+    actions: list[BrainDumpProposalBatchActionDocument] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list, max_length=20)
+    created_at: datetime
+    committed_at: datetime | None = None
+    revision: int = Field(default=1, ge=1)
 
 
 class BrainDumpOperationDocument(StorageBaseModel):
@@ -584,8 +648,56 @@ class BrainDumpOperationDocument(StorageBaseModel):
     legacy_import: Literal["legacy_preview_only"] | None = None
     """One-time marker for an active schema-v1 workspace projected into v2."""
     manual_review: bool = False
-    """Explicit owner-selected provisional review after validation retries exhaust."""
+    """Explicit owner-selected provisional review after validation retries
+    exhaust, or after an active ``legacy_preview_only`` import -- both cases
+    require the same explicit ``review-provisional`` gate before a batch may
+    be frozen/committed provisionally."""
+    provisional_review_accepted_at: datetime | None = None
+    """Set by ``review_brain_dump_provisionally``; exposed for audit/UI."""
+    proposal_revision: int = Field(default=1, ge=1)
+    """Operation-level counter bumped by any accepted proposal patch; a
+    ``ProposalBatch`` freezes against this value and any later change
+    supersedes it (ADR-0002 "freeze/confirm, patch, and conflicts")."""
+    consent_decisions: list[BrainDumpConsentDecisionDocument] = Field(default_factory=list)
+    proposal_batches: list[BrainDumpProposalBatchDocument] = Field(default_factory=list)
+    raw_audio_state: Literal[
+        "not_received", "retained", "deletion_pending", "deleted"
+    ] = "not_received"
+    raw_audio_deleted_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
     schema_version: int = Field(default=2, ge=1)
     revision: int = Field(default=1, ge=1)
+
+
+def active_proposal_batch(
+    operation: BrainDumpOperationDocument,
+) -> BrainDumpProposalBatchDocument | None:
+    """The one currently frozen (not yet committed/superseded) batch, if any."""
+
+    for batch in reversed(operation.proposal_batches):
+        if batch.status == "frozen":
+            return batch
+    return None
+
+
+def committed_proposal_batch(
+    operation: BrainDumpOperationDocument,
+) -> BrainDumpProposalBatchDocument | None:
+    """The most recently committed batch, if any."""
+
+    for batch in reversed(operation.proposal_batches):
+        if batch.status == "committed":
+            return batch
+    return None
+
+
+def import_mode(operation: BrainDumpOperationDocument) -> Literal["native_v2", "legacy_preview_only"]:
+    return "legacy_preview_only" if operation.legacy_import == "legacy_preview_only" else "native_v2"
+
+
+def operation_warning_codes(operation: BrainDumpOperationDocument) -> list[str]:
+    codes: list[str] = []
+    if operation.legacy_import == "legacy_preview_only":
+        codes.append("provisional_only")
+    return codes
