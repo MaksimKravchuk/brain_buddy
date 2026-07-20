@@ -281,6 +281,7 @@ async function installDeterministicSealedAudioBoundary(page: Page, sealedText: s
 
     class FakeMediaRecorder {
       state: RecordingState = "inactive";
+      mimeType = "audio/x-brain-buddy-test-text";
       ondataavailable: ((event: { data: Blob }) => void) | null = null;
       onstop: ((event: Event) => void) | null = null;
       constructor(public stream: MediaStream) {}
