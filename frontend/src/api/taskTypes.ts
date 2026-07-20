@@ -221,6 +221,11 @@ export interface BrainDumpOperationResponse {
   media_ref?: string | null;
   audio_chunks?: Array<{ chunk_number: number; sha256: string; size_bytes: number }>;
   sealed_manifest_hash?: string | null;
+  raw_audio_expires_at?: string | null;
+  raw_audio_present?: boolean;
+  working_artifacts_expires_at?: string | null;
+  reconciliation_quality?: "none" | "provisional_only" | "accurate" | "conflicted";
+  committable?: boolean;
   provider_runs?: Array<{
     id: string;
     role: "accurate_stt" | "reconciler";
@@ -234,6 +239,8 @@ export interface BrainDumpOperationResponse {
     model: string | null;
     template_version: string | null;
     estimated_cost_usd: number;
+    reserved_cost_usd?: number;
+    consumed_cost_usd?: number;
   }>;
   status_history?: BrainDumpStatus[];
   committed_task_ids: string[];

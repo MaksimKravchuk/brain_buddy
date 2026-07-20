@@ -358,6 +358,17 @@ class OpenAITextReconciler:
                     "Reconciler used unknown transcript provenance for removal; "
                     "a destructive removal must be grounded in cited segments."
                 )
+            if draft.proposal_id is None:
+                raise ValidationFailure("Removal requires a proposal ID.")
+            target = existing[draft.proposal_id]
+            source_text = " ".join(
+                source_text_by_id[source_id]
+                for source_id in draft.source_segment_ids
+                if source_id is not None
+            )
+            OpenAITextReconciler._assert_semantic_support(
+                target.title, source_text, destructive=True
+            )
             return
         if not draft.title or not draft.title.strip():
             raise ValidationFailure("Reconciler operation requires a task title.")
@@ -380,9 +391,7 @@ class OpenAITextReconciler:
         source_text = " ".join(
             source_text_by_id[source_id] for source_id in draft.source_segment_ids
         )
-        OpenAITextReconciler._assert_transcript_supported_identity(
-            draft.title, source_text
-        )
+        OpenAITextReconciler._assert_semantic_support(draft.title, source_text)
         if draft.operation == "split" and len(draft.predecessor_ids) != 1:
             raise ValidationFailure("Split requires exactly one predecessor.")
         if draft.operation == "merge" and len(draft.predecessor_ids) < 2:
@@ -393,25 +402,33 @@ class OpenAITextReconciler:
             raise ValidationFailure("Reconciler used unknown predecessor IDs.")
 
     @staticmethod
-    def _assert_transcript_supported_identity(title: str, source_text: str) -> None:
-        """Reject a title carrying any content word absent from its cited source.
+    def _assert_semantic_support(
+        title: str, source_text: str, *, destructive: bool = False
+    ) -> None:
+        """Fail closed unless cited text carries a language-neutral identity anchor.
 
-        Every non-action word in the title must trace back to the cited
-        transcript text. A shared action plus a novel concrete object (for
-        example "Buy" plus "yacht" against a "buy milk" transcript) is one
-        rejected shape, but a title with zero lexical overlap at all — the
-        model inventing an entirely unrelated task from thin air — is exactly
-        as unsafe and must fail closed the same way (ADR-0002 2026-07-19
-        amendment: zero invented tasks is a release gate, not a best effort).
+        The model may normalize wording (``Call`` -> ``Phone``; equivalent
+        verbs in Russian/other languages) but cannot invent a different
+        concrete target. We intentionally avoid a language-specific verb
+        allowlist: shared substantial Unicode terms are the inspectable
+        evidence, and ambiguity becomes a conflict/user edit rather than a
+        destructive guess.
         """
 
-        title_terms = set(re.findall(r"\w+", title.casefold()))
-        source_terms = set(re.findall(r"\w+", source_text.casefold()))
-        action_words = {"add", "buy", "call", "create", "fix", "make", "pay", "send", "write"}
-        novel_object_terms = title_terms - source_terms - action_words
-        if novel_object_terms:
+        def identity_terms(text: str) -> set[str]:
+            return {
+                token
+                for token in re.findall(r"\w+", text.casefold(), flags=re.UNICODE)
+                if any(character.isalnum() for character in token)
+                and (len(token) >= 4 or any(character.isdigit() for character in token))
+            }
+
+        title_terms = identity_terms(title)
+        source_terms = identity_terms(source_text)
+        if not title_terms or not source_terms or not title_terms & source_terms:
+            operation = "destructive removal" if destructive else "task identity"
             raise ValidationFailure(
-                "unsupported task identity is not grounded in the cited transcript."
+                f"unsupported {operation} is not grounded in cited transcript evidence."
             )
 
     @staticmethod

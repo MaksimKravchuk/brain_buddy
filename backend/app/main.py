@@ -31,6 +31,7 @@ def _run_voice_sweep(container: Container) -> None:
 
     try:
         recovered_leases = container.task_service.recover_due_provider_leases()
+        advanced_runs = container.task_service.run_due_brain_dump_provider_runs()
         purged_raw_audio = container.task_service.purge_expired_raw_audio()
         purged_working_artifacts = (
             container.task_service.purge_expired_working_artifacts()
@@ -38,13 +39,14 @@ def _run_voice_sweep(container: Container) -> None:
     except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
         logger.exception("Voice operation sweep iteration failed")
         return
-    if recovered_leases or purged_raw_audio or purged_working_artifacts:
+    if recovered_leases or advanced_runs or purged_raw_audio or purged_working_artifacts:
         logger.info(
-            "Voice sweep: recovered %s lease(s), purged %s raw-audio, "
-            "%s working-artifact operation(s)",
+            "Voice sweep: recovered %s lease(s), purged %s raw-audio, %s "
+            "working-artifact operation(s), advanced %s provider run(s)",
             recovered_leases,
             purged_raw_audio,
             purged_working_artifacts,
+            advanced_runs,
         )
 
 
@@ -106,12 +108,18 @@ def create_app() -> FastAPI:
 
     app.state.voice_sweep_stop_event = threading.Event()
     app.state.voice_sweep_thread = None
-    if config.environment is not AppEnvironment.TEST and _VOICE_SWEEP_INTERVAL_SECONDS > 0:
+    enable_test_voice_sweep = (
+        os.getenv("BRAIN_BUDDY_ENABLE_VOICE_SWEEP_IN_TEST", "").strip() == "1"
+    )
+    if _VOICE_SWEEP_INTERVAL_SECONDS > 0 and (
+        config.environment is not AppEnvironment.TEST or enable_test_voice_sweep
+    ):
         # A real periodic sweep thread is only started outside tests: the
         # test suite builds many short-lived apps/repositories per process,
         # and TaskRepository.command_lock is a process-wide class lock, so a
         # long-lived background thread left running past its own test's
-        # temp-dir teardown would race and deadlock unrelated tests.
+        # temp-dir teardown would race and deadlock unrelated tests. The
+        # Compose E2E runner is a separate process and opts in explicitly.
         app.state.voice_sweep_thread = _start_voice_sweep_thread(
             app.state.container, app.state.voice_sweep_stop_event
         )

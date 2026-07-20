@@ -230,6 +230,10 @@ class BrainDumpProviderRunDocument(StorageBaseModel):
     model: str | None = Field(default=None, max_length=100)
     template_version: str | None = Field(default=None, max_length=100)
     estimated_cost_usd: float = Field(default=0.0, ge=0)
+    reserved_cost_usd: float = Field(default=0.0, ge=0)
+    """Worst-case admission reservation persisted before provider I/O."""
+    consumed_cost_usd: float = Field(default=0.0, ge=0)
+    """Accepted/actual spend reconciled after the provider attempt completes."""
     output_segment_ids: list[str] = Field(default_factory=list)
     lease_owner: str | None = None
     lease_expires_at: datetime | None = None
@@ -275,6 +279,10 @@ class BrainDumpOperationDocument(StorageBaseModel):
     raw-audio retention just because someone touched it after reconciling.
     """
     sealed_manifest_hash: str | None = Field(default=None, min_length=64, max_length=64)
+    working_artifacts_expires_at: datetime | None = None
+    reconciliation_quality: Literal[
+        "none", "provisional_only", "accurate", "conflicted"
+    ] = "none"
     provider_runs: list[BrainDumpProviderRunDocument] = Field(default_factory=list)
     proposal_patches: list[BrainDumpProposalPatchDocument] = Field(default_factory=list)
     status_history: list[BrainDumpStatus] = Field(default_factory=list)
