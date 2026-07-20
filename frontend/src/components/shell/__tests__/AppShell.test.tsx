@@ -143,4 +143,56 @@ describe("AppShell canonical sidebar", () => {
     await user.click(within(reopened).getByRole("link", { name: "Overdue" }));
     expect(screen.queryByRole("dialog", { name: "Task navigation" })).not.toBeInTheDocument();
   });
+
+  it("restores focus to the Open task navigation trigger after Escape, overlay click, and explicit close", async () => {
+    const user = userEvent.setup();
+    renderShell();
+    const trigger = screen.getByRole("button", { name: "Open task navigation" });
+
+    await user.click(trigger);
+    let drawer = screen.getByRole("dialog", { name: "Task navigation" });
+    const [, explicitCloseButton] = within(drawer).getAllByRole("button", { name: "Close task navigation" });
+    expect(explicitCloseButton).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Task navigation" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+
+    await user.click(trigger);
+    drawer = screen.getByRole("dialog", { name: "Task navigation" });
+    const [overlayCloseButton] = within(drawer).getAllByRole("button", { name: "Close task navigation" });
+    await user.click(overlayCloseButton);
+    expect(screen.queryByRole("dialog", { name: "Task navigation" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+
+    await user.click(trigger);
+    drawer = screen.getByRole("dialog", { name: "Task navigation" });
+    const [, reopenedExplicitCloseButton] = within(drawer).getAllByRole("button", { name: "Close task navigation" });
+    await user.click(reopenedExplicitCloseButton);
+    expect(screen.queryByRole("dialog", { name: "Task navigation" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("traps Tab and Shift+Tab focus inside the actual drawer panel instead of escaping to the overlay or controls behind it", async () => {
+    const user = userEvent.setup();
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Open task navigation" }));
+    const drawer = screen.getByRole("dialog", { name: "Task navigation" });
+    const panel = within(drawer).getByTestId("task-navigation-panel");
+    const [overlayCloseButton, explicitCloseButton] = within(drawer).getAllByRole("button", { name: "Close task navigation" });
+    expect(explicitCloseButton).toHaveFocus();
+
+    await user.tab({ shift: true });
+    expect(panel.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).not.toBe(overlayCloseButton);
+    expect(document.activeElement).not.toBe(explicitCloseButton);
+    const lastFocusable = document.activeElement;
+
+    await user.tab();
+    expect(document.activeElement).toBe(explicitCloseButton);
+
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(lastFocusable);
+  });
 });
