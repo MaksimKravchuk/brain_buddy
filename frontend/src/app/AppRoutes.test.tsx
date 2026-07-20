@@ -779,4 +779,265 @@ describe("AppRoutes", () => {
     expect(within(agentZone).queryByRole("button")).not.toBeInTheDocument();
     expect(within(agentZone).queryByRole("link")).not.toBeInTheDocument();
   });
+
+  it("groups tasks by project through a URL-backed toggle, draining every cursor page before rendering complete groups", async () => {
+    const user = userEvent.setup();
+    const launchTask = { ...taskFixture("group-1", "Ship v2 changelog", "next"), project_id: "project-launch" };
+    const onboardingTask = { ...taskFixture("group-2", "Audit onboarding funnel", "next"), project_id: "project-onboarding" };
+    const unassignedTask = taskFixture("group-3", "Read industry report", "next");
+    const secondPageTask = { ...taskFixture("group-4", "Second page launch task", "next"), project_id: "project-launch" };
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/tasks?") && url.includes("cursor=group-next-page")) {
+        return Promise.resolve(jsonResponse({
+          items: [secondPageTask],
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 0, next: 4, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse({
+          items: [launchTask, onboardingTask, unassignedTask],
+          next_cursor: "group-next-page",
+          has_more: true,
+          counts_by_state: { inbox: 0, next: 4, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/next");
+
+    expect(await screen.findByText("Ship v2 changelog")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Load more tasks" })).toBeInTheDocument();
+    expect(screen.queryByTestId("grouped-task-list")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Group by project" }));
+    expect(screen.getByRole("button", { name: "Group by project" })).toHaveAttribute("aria-pressed", "true");
+
+    const groupedList = await screen.findByTestId("grouped-task-list");
+    expect(await within(groupedList).findByText("Second page launch task")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(expect.stringContaining("cursor=group-next-page"), expect.anything());
+    });
+
+    const headings = within(groupedList).getAllByRole("heading", { level: 2 });
+    expect(headings.map((heading) => heading.textContent)).toEqual([
+      expect.stringContaining("Launch v2"),
+      expect.stringContaining("Onboarding drop-off"),
+      expect.stringContaining("No project")
+    ]);
+
+    expect(screen.queryByRole("button", { name: "Load more tasks" })).not.toBeInTheDocument();
+
+    const launchGroup = within(groupedList).getByRole("heading", { name: /Launch v2/ }).closest("section") as HTMLElement;
+    expect(within(launchGroup).getAllByText("Launch v2")).toHaveLength(1);
+    const rowLink = within(launchGroup).getByRole("link", { name: "Ship v2 changelog" });
+    expect(rowLink.getAttribute("href")).toContain("group=project");
+
+    await user.click(screen.getByRole("button", { name: "Group by project" }));
+    expect(screen.queryByTestId("grouped-task-list")).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Load more tasks" })).toBeInTheDocument();
+  });
+
+  it("opens exactly one detail surface for a grouped task delivered on a later cursor page", async () => {
+    const launchTask = { ...taskFixture("group-1", "Ship v2 changelog", "next"), project_id: "project-launch" };
+    const secondPageTask = { ...taskFixture("group-4", "Second page launch task", "next"), project_id: "project-launch" };
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/tasks/group-4")) {
+        return Promise.resolve(jsonResponse(secondPageTask));
+      }
+      if (url.includes("/tasks?") && url.includes("cursor=group-next-page")) {
+        return Promise.resolve(jsonResponse({
+          items: [secondPageTask],
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 0, next: 2, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse({
+          items: [launchTask],
+          next_cursor: "group-next-page",
+          has_more: true,
+          counts_by_state: { inbox: 0, next: 2, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/next/group-4?group=project");
+
+    const groupedList = await screen.findByTestId("grouped-task-list");
+    expect(await within(groupedList).findByRole("link", { name: "Second page launch task" })).toBeInTheDocument();
+
+    const detailHeadings = await screen.findAllByRole("heading", { name: "Task detail" });
+    expect(detailHeadings).toHaveLength(1);
+    expect(screen.getAllByLabelText("Title")).toHaveLength(1);
+  });
+
+  it("issues only the all-pages request for a direct grouped URL load, without a redundant ordinary list query", async () => {
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse(taskResponse));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/next?group=project");
+
+    expect(await screen.findByTestId("grouped-task-list")).toBeInTheDocument();
+
+    const taskListCalls = vi
+      .mocked(fetch)
+      .mock.calls.map(([input]) => String(input))
+      .filter((url) => url.includes("/tasks?") && url.includes("state=next"));
+    expect(taskListCalls.length).toBeGreaterThan(0);
+    expect(taskListCalls.every((url) => url.includes("limit=200"))).toBe(true);
+  });
+
+  it("gives each grouped task list a project-specific accessible name instead of a generic 'Tasks' label", async () => {
+    const launchTask = { ...taskFixture("group-1", "Ship v2 changelog", "next"), project_id: "project-launch" };
+    const unassignedTask = taskFixture("group-3", "Read industry report", "next");
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse({
+          items: [launchTask, unassignedTask],
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 0, next: 2, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/next?group=project");
+
+    const groupedList = await screen.findByTestId("grouped-task-list");
+    await within(groupedList).findByText("Ship v2 changelog");
+    expect(within(groupedList).getByRole("list", { name: "Tasks in Launch v2" })).toBeInTheDocument();
+    expect(within(groupedList).getByRole("list", { name: /no project/i })).toBeInTheDocument();
+    expect(within(groupedList).queryByRole("list", { name: "Tasks" })).not.toBeInTheDocument();
+  });
+
+  it("reads Group by project from the URL on load and hides the control on Project pages", async () => {
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse(taskResponse));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    const groupedView = renderRoutes("/tasks/next?group=project");
+    expect(await screen.findByTestId("grouped-task-list")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Group by project" })).toHaveAttribute("aria-pressed", "true");
+
+    groupedView.unmount();
+    renderRoutes("/projects/project-onboarding");
+    await screen.findByRole("heading", { name: "Onboarding drop-off" });
+    expect(screen.queryByRole("button", { name: "Group by project" })).not.toBeInTheDocument();
+  });
+
+  it("shows an aggregate error with retry when draining pages for Group by project fails", async () => {
+    const user = userEvent.setup();
+    let groupedAttempts = 0;
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/tasks?") && url.includes("limit=200")) {
+        groupedAttempts += 1;
+        if (groupedAttempts === 1) {
+          return Promise.reject(new Error("network down"));
+        }
+        return Promise.resolve(jsonResponse(taskResponse));
+      }
+      if (url.endsWith("/tasks") || url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse(taskResponse));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/next");
+    await user.click(await screen.findByRole("button", { name: "Group by project" }));
+
+    expect(await screen.findByText(/We couldn't load tasks/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByTestId("grouped-task-list")).toBeInTheDocument();
+  });
+
+  it("renders real Waiting metadata on Waiting rows instead of a fabricated status", async () => {
+    const waitingTask = {
+      ...taskFixture("waiting-1", "Confirm vendor contract", "waiting"),
+      waiting_for: "Legal sign-off from Dana",
+      waiting_since: "2026-07-10T09:00:00Z"
+    };
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse({
+          items: [waitingTask],
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 0, next: 0, waiting: 1, someday: 0 }
+        }));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/waiting");
+
+    expect(await screen.findByText("Confirm vendor contract")).toBeInTheDocument();
+    expect(screen.getByText(/Waiting on Legal sign-off from Dana/)).toBeInTheDocument();
+    expect(screen.getByText(/since Jul 10/)).toBeInTheDocument();
+  });
 });
