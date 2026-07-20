@@ -682,8 +682,21 @@ class OpenAITextReconciler:
             # contains a one-word target and no multiword member carries a
             # proper-name predicate/object signal. This admits ``buy milk,
             # orange juice, and eggs`` without reopening ``fire Bob, email
-            # Alice, and schedule Carol`` cross-predicate rebinding.
+            # Alice, and schedule Carol`` cross-predicate rebinding. The anchor
+            # must also prove the local one-predicate shape structurally: after
+            # optional prefix/negation terms, exactly one lexical target follows
+            # its predicate. This proof does not depend on enumerating every
+            # natural-language coordinator; an unsplit ``email team plus fire
+            # Bob`` anchor therefore remains ambiguous and is preserved below.
             trailing_groups = token_groups[1:]
+            anchor_tokens = [token.casefold() for token in token_groups[0]]
+            anchor_action, anchor_negated, anchor_action_index = (
+                OpenAITextReconciler._action_predicate(anchor_tokens)
+            )
+            single_predicate_anchor = (
+                anchor_action_index is not None
+                and len(anchor_tokens) - anchor_action_index == 2
+            )
             target_list = (
                 len(trailing_groups) >= 2
                 and len(trailing_groups[-1]) == 1
@@ -695,17 +708,15 @@ class OpenAITextReconciler:
                     )
                     for part, tokens in zip(parts[1:], trailing_groups, strict=True)
                 )
-                and len(token_groups[0]) >= 2
+                and single_predicate_anchor
             )
             if target_list:
                 anchor = parts[0]
-                anchor_tokens = [token.casefold() for token in token_groups[0]]
-                action, action_negated, _ = OpenAITextReconciler._action_predicate(
-                    anchor_tokens
-                )
                 comma_groups.append(anchor)
-                if action is not None:
-                    synthetic_action = f"not {action}" if action_negated else action
+                if anchor_action is not None:
+                    synthetic_action = (
+                        f"not {anchor_action}" if anchor_negated else anchor_action
+                    )
                     comma_groups.extend(
                         f"{synthetic_action} {target}" for target in parts[1:]
                     )

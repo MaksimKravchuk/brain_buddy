@@ -1946,6 +1946,24 @@ def test_openai_reconciler_binds_affirmative_action_to_its_cited_target(
         ("Block Bob, написать Alice, and file report", "Block Alice"),
         ("Do not fire Bob, Alice, and Carol", "Fire Alice"),
         ("Не надо блокировать Бориса, Алису, и Карла", "Блокировать Алису"),
+        ("Email team plus fire Bob, Alice, and Carol", "Email Alice"),
+        (
+            "Написать команде а заблокировать Бориса, Алису, и Карла",
+            "Написать Алису",
+        ),
+        (
+            "Email team плюс заблокировать Bob, Alice, and Carol",
+            "Email Alice",
+        ),
+        ("Email team while fire Bob, Alice, and Carol", "Email Alice"),
+        (
+            "Написать команде однако заблокировать Бориса, Алису, и Карла",
+            "Написать Алису",
+        ),
+        (
+            "Email team also заблокировать Bob, Alice, and Carol",
+            "Email Alice",
+        ),
     ],
 )
 @pytest.mark.parametrize(
@@ -2342,6 +2360,18 @@ def test_openai_reconciler_preserves_coordinated_and_postposed_negation(
         (
             "Plan chores, split, merge, and remove tasks",
             ["Plan chores", "split tasks", "merge tasks", "remove tasks"],
+        ),
+        (
+            "Email team plus fire Bob, Alice, and Carol",
+            ["Email team plus fire Bob", "Alice", "Carol"],
+        ),
+        (
+            "Написать команде а заблокировать Бориса, Алису, и Карла",
+            ["Написать команде а заблокировать Бориса", "Алису", "Карла"],
+        ),
+        (
+            "Email team плюс заблокировать Bob, Alice, and Carol",
+            ["Email team плюс заблокировать Bob", "Alice", "Carol"],
         ),
     ],
 )
