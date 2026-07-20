@@ -32,6 +32,7 @@ from app.schemas.tasks import (
     BrainDumpAudioChunkResponse,
     BrainDumpAudioDeleteRequest,
     BrainDumpConfirmRequest,
+    BrainDumpConflictResolutionRequest,
     BrainDumpConsentDecisionRequest,
     BrainDumpConsentResponse,
     BrainDumpOperationResponse,
@@ -363,6 +364,35 @@ def submit_brain_dump_proposal_patch(
 
 
 @router.post(
+    "/brain-dump-operations/{operation_id}/proposals/{proposal_id}/conflicts/resolve",
+    response_model=BrainDumpOperationResponse,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
+def resolve_brain_dump_proposal_conflict(
+    operation_id: str,
+    proposal_id: str,
+    payload: BrainDumpConflictResolutionRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
+) -> BrainDumpOperationResponse:
+    """Canonical conflict resolution (mobile-api.md/ADR-0002
+    ``.../conflicts/resolve``): "Keep mine" or "Use suggestion" -- replaces
+    the deprecated direct PATCH's ``conflict_resolution`` field for
+    canonical/mobile clients."""
+
+    return _to_brain_dump_response(
+        voice_brain_dump_service.resolve_brain_dump_proposal_conflict(
+            operation_id,
+            proposal_id,
+            payload,
+            owner_id=current_user.id,
+            idempotency_key=_require_idempotency_key(idempotency_key),
+        )
+    )
+
+
+@router.post(
     "/brain-dump-operations/{operation_id}/proposal-batches",
     response_model=BrainDumpOperationResponse,
     status_code=status.HTTP_201_CREATED,
@@ -505,10 +535,91 @@ def finish_brain_dump_operation_deprecated(
     )
 
 
+def _dispatch_brain_dump_command(
+    operation_id: str,
+    action: str,
+    payload: ExpectedRevisionRequest,
+    *,
+    idempotency: str,
+    owner_id: str,
+    voice_brain_dump_service: VoiceBrainDumpService,
+) -> BrainDumpOperationResponse:
+    """Shared recovery/lifecycle command dispatch for both the canonical
+    ``.../commands/{action}`` route and its deprecated bare-path predecessor.
+
+    ``commit`` and ``finish`` are intentionally not reachable here -- they
+    have their own dedicated, explicitly deprecated routes, which Starlette
+    matches before either of these paths.
+    """
+
+    if action == "retry":
+        operation = voice_brain_dump_service.retry_brain_dump_operation(
+            operation_id, payload, owner_id=owner_id, idempotency_key=idempotency
+        )
+    elif action == "review_provisional":
+        operation = voice_brain_dump_service.review_brain_dump_provisionally(
+            operation_id, payload, owner_id=owner_id, idempotency_key=idempotency
+        )
+    elif action == "withdraw_consent":
+        operation = voice_brain_dump_service.withdraw_brain_dump_consent(
+            operation_id, payload, owner_id=owner_id, idempotency_key=idempotency
+        )
+    elif action == "delete_raw_audio":
+        operation = voice_brain_dump_service.delete_brain_dump_raw_audio(
+            operation_id, payload, owner_id=owner_id, idempotency_key=idempotency
+        )
+    elif action in {"pause", "resume", "cancel"}:
+        operation = voice_brain_dump_service.transition_brain_dump_operation(
+            operation_id,
+            payload,
+            owner_id=owner_id,
+            idempotency_key=idempotency,
+            action=action,
+        )
+    else:
+        raise ValidationFailure("Unsupported brain dump operation command.")
+    return _to_brain_dump_response(operation)
+
+
+BrainDumpCanonicalCommand = Literal[
+    "pause", "resume", "cancel", "retry", "review-provisional"
+]
+
+
+@router.post(
+    "/brain-dump-operations/{operation_id}/commands/{action}",
+    response_model=BrainDumpOperationResponse,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
+def command_brain_dump_operation_canonical(
+    operation_id: str,
+    action: BrainDumpCanonicalCommand,
+    payload: ExpectedRevisionRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
+) -> BrainDumpOperationResponse:
+    """Canonical, typed command path (ADR-0002 ``.../commands/{pause|resume|
+    cancel|retry|review-provisional}``). Unlike the deprecated bare-path
+    dispatcher below, ``action`` is an OpenAPI enum, not an arbitrary string
+    -- this is the operation the mobile client generation allowlist may
+    consume for these commands."""
+
+    return _dispatch_brain_dump_command(
+        operation_id,
+        action.replace("-", "_"),
+        payload,
+        idempotency=_require_idempotency_key(idempotency_key),
+        owner_id=current_user.id,
+        voice_brain_dump_service=voice_brain_dump_service,
+    )
+
+
 @router.post(
     "/brain-dump-operations/{operation_id}/{action}",
     response_model=BrainDumpOperationResponse,
     responses=error_responses(400, 401, 404, 409, 422),
+    deprecated=True,
 )
 def command_brain_dump_operation(
     operation_id: str,
@@ -518,41 +629,20 @@ def command_brain_dump_operation(
     current_user: User = Depends(get_current_user),
     voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
-    """Canonical recovery/lifecycle command dispatcher.
+    """Deprecated web-compatibility adapter: an arbitrary, untyped ``action``
+    path segment. Delegates to the same canonical service commands as
+    ``.../commands/{action}`` above -- no bypass, no separate semantics.
+    Excluded from the mobile operation allowlist; kept for the bounded web
+    overlap window (ADR-0002)."""
 
-    ``commit`` and ``finish`` are intentionally not reachable here -- they
-    have their own dedicated, explicitly deprecated routes above, which
-    Starlette matches before this generic ``{action}`` path.
-    """
-
-    idempotency = _require_idempotency_key(idempotency_key)
-    if action == "retry":
-        operation = voice_brain_dump_service.retry_brain_dump_operation(
-            operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
-        )
-    elif action == "review_provisional":
-        operation = voice_brain_dump_service.review_brain_dump_provisionally(
-            operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
-        )
-    elif action == "withdraw_consent":
-        operation = voice_brain_dump_service.withdraw_brain_dump_consent(
-            operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
-        )
-    elif action == "delete_raw_audio":
-        operation = voice_brain_dump_service.delete_brain_dump_raw_audio(
-            operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
-        )
-    elif action in {"pause", "resume", "cancel"}:
-        operation = voice_brain_dump_service.transition_brain_dump_operation(
-            operation_id,
-            payload,
-            owner_id=current_user.id,
-            idempotency_key=idempotency,
-            action=action,
-        )
-    else:
-        raise ValidationFailure("Unsupported brain dump operation command.")
-    return _to_brain_dump_response(operation)
+    return _dispatch_brain_dump_command(
+        operation_id,
+        action,
+        payload,
+        idempotency=_require_idempotency_key(idempotency_key),
+        owner_id=current_user.id,
+        voice_brain_dump_service=voice_brain_dump_service,
+    )
 
 
 @router.post(
@@ -1141,7 +1231,15 @@ def _to_brain_dump_response(
             else None
         ),
         import_mode=brain_dump_import_mode(operation),
-        accurate_reconciliation_available=not is_legacy_import,
+        # Truthful capability projection (ADR-0008): a legacy import can
+        # never earn an accurate reconciliation, and once raw audio is
+        # pending deletion or gone, a retry can no longer read the sealed
+        # original audio accurate STT requires -- both cases must report
+        # `false`, never only the legacy-import case.
+        accurate_reconciliation_available=(
+            not is_legacy_import
+            and operation.raw_audio_state not in {"deletion_pending", "deleted"}
+        ),
         operation_warning_codes=operation_warning_codes(operation),
         provisional_review_accepted_at=operation.provisional_review_accepted_at,
         raw_audio=BrainDumpRawAudioResponse(

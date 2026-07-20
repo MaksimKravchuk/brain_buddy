@@ -81,6 +81,13 @@ jobs:
         run: |
           pytest --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results
 
+      - name: Check pinned OpenAPI contract for drift
+        run: python3 ../scripts/generate_openapi.py --check
+
+      - name: Test OpenAPI generation script
+        working-directory: .
+        run: python3 -m unittest scripts/test_generate_openapi.py -v
+
       - name: Enforce backend line and branch coverage
         run: python3 ../scripts/validate_backend_coverage.py coverage.xml
 

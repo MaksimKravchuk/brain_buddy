@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from app.utils.time import utcnow
-from tests.test_brain_dump_operations_api import _start_operation
+from tests.test_brain_dump_operations_api import _manifest_hash, _start_operation
 
 
 def _policy(api_client) -> dict[str, object]:
@@ -193,6 +193,64 @@ def test_expired_canonical_consent_fails_closed_before_seal(api_client) -> None:
     )
     assert sealed.status_code == 400, sealed.text
     assert "CONSENT_EXPIRED" in sealed.text
+
+
+def test_claimed_provider_lease_revalidates_consent_and_fails_closed(
+    api_client,
+) -> None:
+    """A grant current when the operation sealed can expire before the
+    persisted runner actually claims the accurate-STT lease. The claim must
+    revalidate canonical consent under the owner lock and fail the
+    operation closed without ever invoking the provider -- proven here by
+    the fact no accurate transcript segment is ever appended."""
+
+    operation = _start_operation(api_client, key="start-consent-claim-time")
+    _grant(api_client, operation, key="grant-consent-claim-time")
+
+    audio = b"Buy milk."
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": __import__("hashlib").sha256(audio).hexdigest()},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+
+    sealed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers={"Idempotency-Key": "seal-consent-claim-time"},
+        json={
+            "expected_revision": uploaded.json()["revision"],
+            "expected_chunks": 1,
+            "manifest_hash": _manifest_hash(audio),
+        },
+    )
+    assert sealed.status_code == 200, sealed.text
+
+    # The grant was current at seal time; expire it now, before the
+    # persisted runner actually claims the accurate-STT lease.
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    container = api_client.app.state.container
+    repo = container.voice_operation_repo
+    stored = repo.get_brain_dump_operation_for_owner(operation["id"], owner_id=owner_id)
+    expired = stored.model_copy(
+        update={
+            "consent": stored.consent.model_copy(
+                update={"valid_until": utcnow() - timedelta(seconds=1)}
+            ),
+        }
+    )
+    repo.save_brain_dump_operation(expired)
+
+    service = container.voice_brain_dump_service
+    service.run_due_brain_dump_provider_runs()
+
+    final = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
+    assert final["status"] == "terminal_error"
+    latest_run = final["provider_runs"][-1]
+    assert latest_run["error_code"] == "CONSENT_EXPIRED"
+    assert not any(
+        segment.get("provider_role") == "accurate" for segment in final["segments"]
+    )
 
 
 def test_consent_decision_is_owner_scoped(second_api_client) -> None:

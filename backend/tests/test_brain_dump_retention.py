@@ -155,3 +155,53 @@ def test_delete_now_preserves_tasks_receipts_and_non_audio_provenance(
 
     inbox = api_client.get("/api/tasks", params={"state": "inbox"}).json()
     assert [item["title"] for item in inbox["items"]] == ["Buy milk"]
+
+
+def test_accurate_reconciliation_unavailable_once_raw_audio_is_gone(
+    api_client,
+) -> None:
+    """Once raw audio is pending deletion or deleted, a retry can no longer
+    read the sealed original audio accurate STT requires -- the projection
+    must say so even though this operation was never a legacy import."""
+
+    operation = _reconciled_operation(api_client, "retention-availability", b"Buy milk.")
+    assert operation["accurate_reconciliation_available"] is True
+
+    deleted = _delete_now(api_client, operation, "delete-availability")
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["accurate_reconciliation_available"] is False
+
+
+def test_startup_sweep_drains_operation_stranded_in_deletion_pending(
+    api_client,
+) -> None:
+    """A crash between the two persisted phases of raw-audio deletion (state
+    written as ``deletion_pending``, physical cleanup/terminal ``deleted``
+    never persisted) must not require a fresh user ``audio/delete`` call --
+    the same sweep that recovers provider leases drains it to ``deleted``."""
+
+    operation = _reconciled_operation(api_client, "retention-drain", b"Buy milk.")
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    container = api_client.app.state.container
+    voice_service = container.voice_brain_dump_service
+
+    stranded = voice_service.get_brain_dump_operation(operation["id"], owner_id=owner_id)
+    pending = stranded.model_copy(
+        update={"raw_audio_state": "deletion_pending", "revision": stranded.revision + 1}
+    )
+    container.voice_operation_repo.save_brain_dump_operation(pending)
+    chunk_path = container.voice_operation_repo.brain_dump_audio_chunk_path(
+        owner_id, operation["id"], 0, hashlib.sha256(b"Buy milk.").hexdigest()
+    )
+    assert chunk_path.exists()
+
+    drained = voice_service.drain_pending_raw_audio_deletions()
+    assert drained == 1
+    assert not chunk_path.exists()
+
+    recovered = voice_service.get_brain_dump_operation(operation["id"], owner_id=owner_id)
+    assert recovered.raw_audio_state == "deleted"
+    assert recovered.raw_audio_deleted_at is not None
+
+    # Idempotent: nothing left to drain on a second pass.
+    assert voice_service.drain_pending_raw_audio_deletions() == 0

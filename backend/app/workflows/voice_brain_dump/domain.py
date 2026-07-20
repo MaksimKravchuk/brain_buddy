@@ -581,6 +581,43 @@ class BrainDumpActionReceiptDocument(StorageBaseModel):
     outcome: Literal["succeeded", "failed", "skipped"] = "succeeded"
 
 
+class BrainDumpActionReceiptAttemptDocument(StorageBaseModel):
+    """Append-only, never-mutated attempt log for one confirm-time action.
+
+    Persisted in its own committed transaction *before* the action's
+    ``TaskPort`` call (``started``) and again in a separate committed
+    transaction after it resolves (``succeeded``/``failed_retryable``/
+    ``failed_terminal``/``skipped_dependency``). Together with the
+    permanent, owner-scoped ``native_inbox_task_sources`` uniqueness the
+    Tasks module enforces for the same ``H(operation_id, batch_id,
+    action_id)`` key, this is what makes a crash between Task creation and
+    this operation's terminal write recoverable rather than silently
+    untraceable: the next attempt at this action always finds either its
+    own prior ``started`` row or the permanent Task-side source key, never
+    a blank slate that would risk a duplicate Task. ``BrainDumpActionReceiptDocument``
+    remains the single folded/terminal projection derived from these rows.
+    """
+
+    id: str
+    batch_id: str
+    action_id: str
+    sequence: int = Field(ge=1)
+    """Append order across the whole operation, not per-action order."""
+    attempt: int = Field(ge=1)
+    """Retry counter for this exact action -- 1 on the first attempt."""
+    request_hash: str = Field(min_length=1, max_length=128)
+    status: Literal[
+        "started",
+        "succeeded",
+        "failed_retryable",
+        "failed_terminal",
+        "skipped_dependency",
+    ]
+    task_id: str | None = None
+    error_code: str | None = Field(default=None, max_length=100)
+    created_at: datetime
+
+
 class BrainDumpProposalBatchActionDocument(StorageBaseModel):
     """Immutable per-action review snapshot frozen at batch creation.
 
@@ -643,6 +680,11 @@ class BrainDumpOperationDocument(StorageBaseModel):
     provider_runs: list[BrainDumpProviderRunDocument] = Field(default_factory=list)
     proposal_patches: list[BrainDumpProposalPatchDocument] = Field(default_factory=list)
     action_receipts: list[BrainDumpActionReceiptDocument] = Field(default_factory=list)
+    action_receipt_attempts: list[BrainDumpActionReceiptAttemptDocument] = Field(
+        default_factory=list
+    )
+    """Append-only attempt log behind ``action_receipts`` -- see
+    :class:`BrainDumpActionReceiptAttemptDocument`. Never replayed/removed."""
     status_history: list[BrainDumpStatus] = Field(default_factory=list)
     committed_task_ids: list[str] = Field(default_factory=list)
     legacy_import: Literal["legacy_preview_only"] | None = None

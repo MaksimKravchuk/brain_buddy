@@ -1906,6 +1906,75 @@ def test_withdraw_consent_rejects_completed_and_cancelled_operations(
     assert rejected.status_code == 400, rejected.text
 
 
+def test_canonical_commands_route_dispatches_pause_resume_cancel_and_review_provisional(
+    api_client,
+) -> None:
+    """ADR-0002's typed ``.../commands/{pause|resume|cancel|retry|
+    review-provisional}`` path must reach the exact same service commands as
+    the deprecated arbitrary-action path, including translating the wire
+    kebab-case ``review-provisional`` into the internal action name."""
+
+    operation = _start_operation(api_client, key="start-canonical-commands")
+    paused = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/commands/pause",
+        headers={"Idempotency-Key": "canonical-pause"},
+        json={"expected_revision": operation["revision"]},
+    )
+    assert paused.status_code == 200, paused.text
+    assert paused.json()["status"] == "paused"
+
+    resumed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/commands/resume",
+        headers={"Idempotency-Key": "canonical-resume"},
+        json={"expected_revision": paused.json()["revision"]},
+    )
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["status"] == "recording"
+
+    rejected = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/commands/not-a-real-action",
+        headers={"Idempotency-Key": "canonical-invalid"},
+        json={"expected_revision": resumed.json()["revision"]},
+    )
+    assert rejected.status_code == 422, rejected.text
+
+    cancelled = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/commands/cancel",
+        headers={"Idempotency-Key": "canonical-cancel"},
+        json={"expected_revision": resumed.json()["revision"]},
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["status"] == "cancelled"
+
+
+def test_deprecated_bare_action_path_is_excluded_from_openapi_while_canonical_stays(
+    api_client,
+) -> None:
+    """The mobile operation allowlist keeps every non-``deprecated`` OpenAPI
+    operation and drops the rest (``mobile/scripts/filter-mobile-openapi.mjs``);
+    the untyped bare-action path must be marked ``deprecated`` so mobile
+    generation never sees it, while the new typed ``.../commands/{action}``
+    path must not be."""
+
+    schema = api_client.get("/api/openapi.json").json()
+    bare_action = schema["paths"]["/api/brain-dump-operations/{operation_id}/{action}"]["post"]
+    assert bare_action.get("deprecated") is True
+
+    canonical_commands = schema["paths"][
+        "/api/brain-dump-operations/{operation_id}/commands/{action}"
+    ]["post"]
+    assert canonical_commands.get("deprecated") is not True
+    action_schema = canonical_commands["parameters"]
+    action_param = next(param for param in action_schema if param["name"] == "action")
+    assert set(action_param["schema"]["enum"]) == {
+        "pause",
+        "resume",
+        "cancel",
+        "retry",
+        "review-provisional",
+    }
+
+
 def test_brain_dump_pause_resume_cancel_and_owner_scope(
     api_client, second_api_client
 ) -> None:

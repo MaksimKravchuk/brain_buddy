@@ -298,6 +298,14 @@ class BrainDumpProposalPatchRequest(StrictBaseModel):
     expected_operation_revision: int = Field(ge=1)
 
 
+class BrainDumpConflictResolutionRequest(StrictBaseModel):
+    """Canonical conflict resolution (mobile-api.md/ADR-0002
+    ``.../conflicts/resolve``): "Keep mine" or "Use suggestion"."""
+
+    resolution: Literal["keep", "accept"]
+    expected_operation_revision: int = Field(ge=1)
+
+
 class BrainDumpConsentDecisionRequest(StrictBaseModel):
     """Canonical append-only consent grant/withdraw decision."""
 

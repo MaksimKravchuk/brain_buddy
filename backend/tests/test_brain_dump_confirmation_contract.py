@@ -227,6 +227,87 @@ def test_confirm_survives_partial_recovery_without_duplicate_tasks(api_client) -
     assert len(inbox["items"]) == len(active_batch["snapshot"])
 
 
+def test_confirm_appends_started_and_succeeded_attempts_for_every_action(
+    api_client,
+) -> None:
+    """Each action's confirmation durably records an append-only ``started``
+    attempt before its ``TaskPort`` call and a ``succeeded`` attempt after,
+    in addition to the folded terminal receipt -- never only the folded
+    projection."""
+
+    operation = _reconciled_operation(api_client, "confirm-attempts", b"Buy milk.")
+    frozen = _freeze(api_client, operation, "freeze-attempts")
+    active_batch = frozen["active_proposal_batch"]
+
+    confirmed = _confirm(api_client, operation, frozen, "confirm-attempts-key")
+    assert confirmed.status_code == 200, confirmed.text
+
+    container = api_client.app.state.container
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    stored = container.voice_operation_repo.get_brain_dump_operation_for_owner(
+        operation["id"], owner_id=owner_id
+    )
+    attempts = [
+        attempt
+        for attempt in stored.action_receipt_attempts
+        if attempt.batch_id == active_batch["id"]
+    ]
+    for action in active_batch["snapshot"]:
+        action_attempts = sorted(
+            (a for a in attempts if a.action_id == action["action_id"]),
+            key=lambda a: a.sequence,
+        )
+        assert [a.status for a in action_attempts] == ["started", "succeeded"]
+        assert action_attempts[0].task_id is None
+        assert action_attempts[1].task_id is not None
+        assert all(a.attempt == 1 for a in action_attempts)
+        assert action_attempts[0].sequence < action_attempts[1].sequence
+
+
+def test_confirm_reuses_task_created_before_crash_with_no_local_trace(
+    api_client,
+) -> None:
+    """Model a total crash before any Voice-DB write for one action landed
+    (no ``started`` attempt, no receipt) but *after* its ``TaskPort`` call
+    durably created the Task under the deterministic child key. The retry
+    must still resolve to that exact Task -- the permanent, owner-scoped
+    ``H(operation,batch,action)`` uniqueness the Tasks module enforces is
+    the backstop even when this operation's own append-only trail is
+    entirely missing for that action."""
+
+    operation = _reconciled_operation(api_client, "confirm-precreated", b"Buy milk.")
+    frozen = _freeze(api_client, operation, "freeze-precreated")
+    active_batch = frozen["active_proposal_batch"]
+    action = active_batch["snapshot"][0]
+
+    import hashlib
+
+    child_key = hashlib.sha256(
+        f"{operation['id']}:{active_batch['id']}:{action['action_id']}".encode()
+    ).hexdigest()
+    container = api_client.app.state.container
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    pre_created_task = container.task_service.create_native_inbox_task(
+        owner_id=owner_id,
+        title=action["title"],
+        source_capture_ids=[f"brain_dump:{operation['id']}:{action['proposal_id']}"],
+        idempotency_key=child_key,
+    )
+    # No receipt and no attempt row was ever written for this action --
+    # confirm still has to derive the exact same child key and reuse the
+    # Task rather than creating a duplicate.
+
+    confirmed = _confirm(api_client, operation, frozen, "confirm-precreated-key")
+    assert confirmed.status_code == 200, confirmed.text
+    body = confirmed.json()
+    assert body["committed_task_ids"].count(pre_created_task.id) == 1
+    assert len(body["committed_task_ids"]) == len(active_batch["snapshot"])
+
+    inbox = api_client.get("/api/tasks", params={"state": "inbox"}).json()
+    matching = [item for item in inbox["items"] if item["id"] == pre_created_task.id]
+    assert len(matching) == 1
+
+
 def test_owner_cannot_freeze_or_confirm_another_owners_operation(
     second_api_client,
 ) -> None:

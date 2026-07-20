@@ -393,6 +393,20 @@ class OperationRepository(BaseRepository):
             for row in rows
         ]
 
+    def list_deletion_pending_raw_audio_operations(
+        self,
+    ) -> list[BrainDumpOperationDocument]:
+        """Operations that may be stranded in ``deletion_pending`` by a crash
+        between the two phases of raw-audio deletion (pending persisted,
+        physical cleanup/terminal ``deleted`` not yet persisted). No SQL
+        column tracks ``raw_audio_state`` directly (it lives inside the JSON
+        payload, like ``lease_expires_at``/``raw_audio_expires_at`` above),
+        so this returns every operation and the caller filters by its own
+        decoded ``raw_audio_state``; the startup/periodic sweep drains real
+        matches without waiting for a fresh user ``audio/delete`` call."""
+
+        return self.list_brain_dump_operations()
+
     def list_in_flight_provider_run_operations(
         self,
     ) -> list[BrainDumpOperationDocument]:

@@ -233,46 +233,74 @@ class TaskService:
         source_capture_ids: list[str],
         idempotency_key: str,
     ) -> TaskDocument:
-        """In-process ``TaskPort`` adapter for a confirmed Brain Dump action."""
+        """In-process ``TaskPort`` adapter for a confirmed Brain Dump action.
+
+        ``idempotency_key`` is the caller's permanent, deterministic
+        ``H(operation_id, batch_id, action_id)`` child key. Uniqueness is
+        enforced by the permanent ``native_inbox_task_sources`` row this
+        command inserts in the same locked transaction as the Task itself,
+        never only by the generic, time-bounded ``IdempotencyRecord`` --
+        Voice's confirm command may retry this call long after that generic
+        record's 24h retention window has elapsed (or after an unrelated
+        Tasks command purges it for the same owner); the permanent row
+        guarantees that retry still resolves to the exact same Task instead
+        of creating a duplicate.
+        """
 
         command = "create_native_inbox_task"
         payload = TaskCreateRequest(title=title, source_capture_ids=source_capture_ids)
         request_hash = self._request_hash(command, payload)
-        record = self._idempotency_record(
-            owner_id=owner_id,
-            key=idempotency_key,
-            command=command,
-            request_hash=request_hash,
-        )
-        if record is not None:
-            return self._task_result(record, owner_id=owner_id)
-        now = utcnow()
-        task = TaskDocument(
-            id=generate_id("task"),
-            owner_id=owner_id,
-            title=title,
-            details=None,
-            state="inbox",
-            project_id=None,
-            tag_ids=[],
-            order_key=self.task_repo.next_order_key(owner_id=owner_id, state="inbox"),
-            # This port receives a workflow-owned immutable action receipt,
-            # not a user-supplied Capture ID; the operation/receipt owner was
-            # checked by the enclosing confirmation command.
-            source_capture_ids=list(source_capture_ids),
-            created_at=now,
-            updated_at=now,
-        )
-        self._store_idempotency(
-            owner_id=owner_id,
-            key=idempotency_key,
-            command=command,
-            request_hash=request_hash,
-            resource_id=task.id,
-            response=task,
-        )
-        self.task_repo.create(task)
-        return task
+        with self.task_repo.command_lock(owner_id):
+            existing_task_id = self.task_repo.get_native_inbox_task_source(
+                owner_id=owner_id, source_key=idempotency_key
+            )
+            if existing_task_id is not None:
+                return self.task_repo.get_for_owner(
+                    existing_task_id, owner_id=owner_id
+                )
+            record = self._idempotency_record(
+                owner_id=owner_id,
+                key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+            )
+            if record is not None:
+                return self._task_result(record, owner_id=owner_id)
+            now = utcnow()
+            task = TaskDocument(
+                id=generate_id("task"),
+                owner_id=owner_id,
+                title=title,
+                details=None,
+                state="inbox",
+                project_id=None,
+                tag_ids=[],
+                order_key=self.task_repo.next_order_key(
+                    owner_id=owner_id, state="inbox"
+                ),
+                # This port receives a workflow-owned immutable action receipt,
+                # not a user-supplied Capture ID; the operation/receipt owner
+                # was checked by the enclosing confirmation command.
+                source_capture_ids=list(source_capture_ids),
+                created_at=now,
+                updated_at=now,
+            )
+            self.task_repo.create(task)
+            self.task_repo.save_native_inbox_task_source(
+                owner_id=owner_id,
+                source_key=idempotency_key,
+                task_id=task.id,
+                created_at=now,
+            )
+            self._store_idempotency(
+                owner_id=owner_id,
+                key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+                resource_id=task.id,
+                response=task,
+            )
+            return task
 
     @_serialized_write
     def smart_add_task(
