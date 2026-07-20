@@ -72,7 +72,10 @@ from app.workflows.voice_brain_dump.domain import (
     BrainDumpProposalDocument,
     BrainDumpTranscriptSegmentDocument,
 )
-from app.workflows.voice_brain_dump.service import VoiceBrainDumpService
+from app.workflows.voice_brain_dump.service import (
+    VoiceBrainDumpService,
+    can_review_brain_dump_provisionally,
+)
 
 router = APIRouter(tags=["tasks"])
 
@@ -876,12 +879,7 @@ def _brain_dump_available_recovery_actions(
     actions: list[Literal["retry", "review_provisional", "cancel"]] = []
     if operation.status == "retryable_error":
         actions.append("retry")
-    if (
-        operation.status == "terminal_error"
-        and operation.provider_runs
-        and operation.provider_runs[-1].error_code
-        in {"RECONCILER_VALIDATION_REJECTED", "OPERATION_RECOVERY_BUDGET_EXHAUSTED"}
-    ):
+    if can_review_brain_dump_provisionally(operation):
         actions.append("review_provisional")
     if operation.status in {"retryable_error", "terminal_error"}:
         actions.append("cancel")

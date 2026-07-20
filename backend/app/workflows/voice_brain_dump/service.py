@@ -90,6 +90,20 @@ def _serialized_write(
     return wrapped
 
 
+def can_review_brain_dump_provisionally(
+    operation: BrainDumpOperationDocument,
+) -> bool:
+    """Whether an explicit owner action may review preserved provisional work."""
+
+    return (
+        operation.status == "terminal_error"
+        and bool(operation.provider_runs)
+        and operation.provider_runs[-1].status == "terminal_error"
+        and operation.provider_runs[-1].role in {"accurate_stt", "reconciler"}
+        and any(not proposal.deleted for proposal in operation.proposals)
+    )
+
+
 class VoiceBrainDumpService:
     """Owns the AsyncOperation substrate for native voice Brain Dump capture."""
 
@@ -500,17 +514,10 @@ class VoiceBrainDumpService:
             operation.revision,
             payload.expected_revision,
         )
-        if (
-            operation.status != "terminal_error"
-            or not operation.provider_runs
-            or operation.provider_runs[-1].error_code
-            not in {
-                "RECONCILER_VALIDATION_REJECTED",
-                "OPERATION_RECOVERY_BUDGET_EXHAUSTED",
-            }
-        ):
+        if not can_review_brain_dump_provisionally(operation):
             raise ValidationFailure(
-                "Only an exhausted reconciler validation failure can enter provisional review."
+                "Only a terminal transcription or reconciliation failure with "
+                "reviewable provisional tasks can enter provisional review."
             )
         now = utcnow()
         reviewed = operation.model_copy(
