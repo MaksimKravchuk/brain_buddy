@@ -73,6 +73,36 @@ Expected:
 - The committed v1 snapshot and `mobile/src/api/generated/` are unchanged after regeneration.
 - No persisted JSON/storage model is used as client-generation input.
 - Tokens, account values, and real content are absent from the snapshot.
+- The generated mobile operation allowlist contains canonical proposal patch, batch freeze,
+  confirm, consent decision, policy, retention, and audio-delete operations and excludes
+  deprecated direct proposal `PATCH`, `/finish`, and `/commit` aliases.
+
+## 3a. Canonical Voice backend prerequisite
+
+Before mobile Voice generation/implementation:
+
+```bash
+cd backend
+uv run pytest tests/test_brain_dump_confirmation_contract.py \
+  tests/test_brain_dump_operation_migration.py \
+  tests/test_brain_dump_consent.py \
+  tests/test_brain_dump_retention.py -q
+```
+
+Required evidence:
+
+1. append-only user patches invalidate frozen batches; conflicts/stale revisions cannot freeze;
+2. freeze persists one immutable selected proposal revision and stable ordered action IDs;
+3. confirm uses deterministic `H(operation_id,batch_id,action_id)` receipts and process death,
+   partial failure, replay, or a new outer key cannot duplicate a Task;
+4. legacy stored payloads migrate deterministically, terminal payloads remain immutable, and
+   deprecated direct `PATCH`/`commit` adapters delegate to the same records during overlap;
+5. canonical/alias races create exactly one Task per action and aliases are excluded from the
+   generated mobile adapter;
+6. restart, consent expiry/withdrawal/regrant, policy/provider-category change, and upload/
+   seal/retry/provider checks fail closed and schedule uncommitted cleanup;
+7. projection exposes raw-audio state/`retained_until`, and idempotent delete-now survives
+   restart/owner checks while preserving Tasks, receipts, and non-audio provenance.
 
 ## 4. Mobile static gates
 
@@ -113,13 +143,16 @@ Required scenarios:
   and parity after web reload;
 - pagination beyond 50 rows with truthful counts;
 - Project and Tag task projections without management controls;
-- permission/consent denial creates no operation/upload;
+- permission/consent denial or stale/expired/policy-category-mismatched consent creates no
+  upload/provider call; restart revalidates and withdrawal schedules cleanup;
 - deterministic local fixture → numbered chunk upload → seal → processing → proposal
-  edit/remove → explicit confirm → exact one Task per selected proposal;
+  patch edit/remove → freeze selected revision → explicit confirm → exact one Task per action;
 - app restart after recorded, midway upload, sealed, processing, awaiting confirmation, and
-  confirmation timeout resumes from the durable checkpoint;
-- chunk conflict, provider exhaustion, cancellation, partial commit, and logout cleanup never
-  create an unconfirmed Task.
+  frozen/confirmation timeout resumes from the durable checkpoint;
+- retained-until appears after processing; local audio cleanup is distinct from idempotent
+  server delete-now and remote pending survives restart;
+- chunk conflict, provider exhaustion, consent withdrawal, stale batch, cancellation, partial
+  confirm, and logout cleanup never create an unconfirmed or duplicate Task.
 
 ## 6. Native configuration and local builds
 
@@ -173,9 +206,12 @@ Run once on one supported iOS device and one supported Android device:
 3. Deny then grant microphone permission.
 4. Record a synthetic phrase; interrupt once by audio-route change/incoming-call simulation or
    background transition; verify explicit recovery.
-5. Stop, disable/re-enable network during upload, resume, review, edit/remove, and confirm.
+5. Stop, disable/re-enable network during upload, resume, review, edit/remove, freeze, and
+   confirm; change/expire the synthetic consent policy once and prove re-consent blocks upload.
 6. Verify exactly the confirmed title-only Inbox Tasks in web.
-7. Sign out offline, verify local content/credential disappears, restore network, and verify
+7. Inspect raw-audio `retained_until`, request delete-now once offline and again online, and
+   verify pending/deleted state without losing confirmed Tasks.
+8. Sign out offline, verify local content/credential disappears, restore network, and verify
    the remote revocation warning/retry path is honest.
 
 Do not attach raw recordings, transcripts, account email, tokens, hashes, or local paths.
@@ -215,6 +251,8 @@ The slice is ready for release review only when:
 
 - backend, generated-contract, mobile static, integration, both-platform build, simulator,
   real-device, privacy, and control-inventory evidence are green;
+- canonical batch/migration/alias-overlap, current-consent/withdrawal, and retained-until/
+  delete-now backend gates are green before the mobile Voice adapter is generated;
 - ADR-0008 and the mobile-boundary checklist are reviewed;
 - every design frame has the exact Build/Bounded/Deferred disposition in the spec;
 - no code or copy claims live proposals, background recording, Weekly Review, Execution,

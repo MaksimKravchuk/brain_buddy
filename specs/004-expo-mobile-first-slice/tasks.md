@@ -124,66 +124,91 @@ testable with voice disabled.
 
 ---
 
-## Phase 5: User Story 3 — Foreground Voice Brain Dump (Priority: P1)
+## Phase 5: Canonical Voice backend prerequisite
 
-**Goal**: Durable foreground recording, post-stop resumable upload, persisted processing,
-proposal review, and exact-once confirmation survive mobile interruptions without creating a
-Task early.
+**Purpose**: Close the ADR-0002 confirmation, current-consent, retention, and compatibility
+gaps before any released mobile Voice adapter can depend on them.
 
-**Independent Test**: Deterministic device audio → interrupt at each local/server checkpoint →
-resume → edit/remove → confirm → exact selected title-only Inbox Tasks after timeout replay.
+- [ ] T056 [P] Add failing canonical proposal-patch/freeze/supersede/confirm tests for owner scope, conflict/stale rejection, immutable selected actions, parent-key conflicts, deterministic `H(operation_id,batch_id,action_id)` receipts, partial failure, and process restart in `backend/tests/test_brain_dump_confirmation_contract.py`.
+- [ ] T057 [P] Add failing stored-payload migration and deprecated-alias overlap tests for deterministic proposal-revision defaults, immutable completed/cancelled records, direct `PATCH`/`commit` delegation, canonical/alias races, and exact-one Tasks in `backend/tests/test_brain_dump_operation_migration.py`.
+- [ ] T058 [P] Add failing consent tests for policy/category/decision-time/expiry validation, restart, regrant, withdrawal (including offline acknowledgement), configuration change, upload/seal/retry/provider fail-closed checks, and uncommitted cleanup in `backend/tests/test_brain_dump_consent.py`.
+- [ ] T059 [P] Add failing raw-audio tests for projection state/`retained_until`, delete-now eligibility, idempotency, owner scope, process restart, physical media cleanup, disabled accurate retry, and preserved Tasks/receipts/non-audio provenance in `backend/tests/test_brain_dump_retention.py`.
+- [ ] T060 Add additive `ProposalBatch`, ordered action, action receipt, consent-decision, raw-audio retention, proposal revision, and compatibility-default models/DTOs in `backend/app/modules/tasks/domain.py` and `backend/app/schemas/tasks.py`.
+- [ ] T061 Implement persisted proposal revision, freeze invalidation, immutable batch creation, canonical confirm, deterministic child receipts, and partial-result recovery in `backend/app/modules/tasks/service.py` and `backend/app/modules/tasks/repository.py`.
+- [ ] T062 Implement canonical `POST .../proposals/{proposal_id}/patches`, `POST .../proposal-batches`, and `POST .../confirm` routes/projections in `backend/app/api/tasks.py`; no canonical Task may exist before confirm.
+- [ ] T063 Implement deprecated direct proposal `PATCH` and `/commit` strictly as adapters to the canonical service/records, mark them deprecated/excluded from the mobile operation allowlist, and migrate `frontend/src/features/brain-dump/BrainDumpRoute.tsx` plus `BrainDumpRoute.test.tsx` to proposal-patch/freeze/confirm without extending the compatibility window.
+- [ ] T064 Implement authenticated non-secret processing-policy projection plus append-only grant/withdraw decisions and enforce current consent before upload persistence, seal, retry, and provider claim in `backend/app/core/config.py`, `backend/app/schemas/tasks.py`, `backend/app/api/tasks.py`, and `backend/app/modules/tasks/service.py`.
+- [ ] T065 Implement configuration-backed raw-audio retention, persisted deletion-pending/deleted state, media cleanup, and idempotent `POST .../audio/delete` after processing in `backend/app/modules/tasks/repository.py`, `backend/app/modules/tasks/service.py`, and `backend/app/api/tasks.py`.
+- [ ] T066 Update `docs/api-compatibility.md`, `docs/auth.md`, and generated-operation policy for canonical Voice routes, alias overlap/removal, consent categories/withdrawal, and retention/delete-now without exposing vendor credentials.
+- [ ] T067 Run T056–T059 plus existing Brain Dump recovery/reconciliation/API suites, regenerate OpenAPI, and prove deprecated aliases are absent from the mobile operation allowlist before unblocking mobile Voice work.
 
-### Tests for User Story 3
-
-- [ ] T056 [P] [US3] Add failing AudioRecorderPort contract tests for permission, document-directory recording, pause/stop, duration, URI, audio-route interruption, and no background claim in `mobile/__tests__/brainDump/AudioRecorderPort.test.ts`.
-- [ ] T057 [P] [US3] Add failing atomic recovery-manifest tests for every local state, owner binding, offline start-key replay, persisted-before-send keys, corrupt/401 quarantine, explicit logout discard, and no transcript/proposal/task content in `mobile/__tests__/brainDump/recoveryManifest.test.ts`.
-- [ ] T058 [P] [US3] Add failing chunk-boundary/hash/manifest/ack replay/conflict/missing-chunk/off-UI-thread tests in `mobile/__tests__/brainDump/chunkUploader.test.ts`.
-- [ ] T059 [P] [US3] Add failing generated operation adapter tests for start/get/upload/seal/pause/resume/cancel/retry/edit/remove/commit with revisions, keys, correlation, and redaction in `mobile/__tests__/api/brainDump.test.ts`.
-- [ ] T060 [P] [US3] Add failing reducer tests for every backend Brain Dump status, projection replacement, retry/cancel/partial-result behavior, and unknown-enum rejection in `mobile/__tests__/brainDump/operationReducer.test.ts`.
-- [ ] T061 [P] [US3] Add failing recording-screen tests for permission versus consent, local-only copy, waveform/duration, interruption salvage, Stop & review, reduced motion, and no fake live proposals in `mobile/__tests__/brainDump/RecordingScreen.test.tsx`.
-- [ ] T062 [P] [US3] Add failing upload/processing-screen tests for acknowledged progress, truthful stage text, no fake percentage, polling/reconnect, retry/cancel, and correlation in `mobile/__tests__/brainDump/ProcessingScreen.test.tsx`.
-- [ ] T063 [P] [US3] Add failing review-screen tests for reconciled/provisional/conflicted states, edit/remove persistence, conflict gate, discard, `Confirm N additions`, no Add date/inference, and timeout replay in `mobile/__tests__/brainDump/ReviewScreen.test.tsx`.
-- [ ] T064 [P] [US3] Add failing temporary-backend checkpoint integration tests for recorded/upload/sealed/processing/review/commit timeout, chunk conflict, provider exhaustion, cancellation, partial commit, and exact-one Tasks in `mobile/__tests__/integration/brainDump.integration.test.ts`.
-- [ ] T065 [P] [US3] Add backend regression assertions for mobile Bearer access to every consumed Brain Dump route and unchanged owner/idempotency/confirmation behavior in `backend/tests/test_mobile_brain_dump_api.py`.
-
-### Implementation for User Story 3
-
-- [ ] T066 [US3] Define the platform-neutral recorder interface and deterministic fixture fake in `mobile/src/features/brainDump/AudioRecorderPort.ts` and `mobile/src/features/brainDump/FakeAudioRecorder.ts`.
-- [ ] T067 [US3] Implement foreground `expo-audio` document-directory recording and interruption signals in `mobile/src/features/brainDump/ExpoAudioRecorder.ts`; keep background recording disabled.
-- [ ] T068 [US3] Implement the versioned one-active-operation local manifest and cleanup/quarantine rules in `mobile/src/features/brainDump/recoveryManifest.ts`.
-- [ ] T069 [US3] Inspect backend/config limits, then implement bounded file chunking, SHA-256 identity, resume, conflict stop, and complete-manifest seal prerequisites in `mobile/src/features/brainDump/chunkUploader.ts`.
-- [ ] T070 [US3] Implement generated operation calls and command-key ownership in `mobile/src/api/brainDump.ts`.
-- [ ] T071 [US3] Implement strict server-projection state reduction and unknown-state failure in `mobile/src/features/brainDump/operationReducer.ts`.
-- [ ] T072 [US3] Implement foreground recording and salvage UI in `mobile/src/features/brainDump/RecordingScreen.tsx` and `mobile/app/(app)/brain-dump/new.tsx`.
-- [ ] T073 [US3] Implement post-stop upload/seal/poll/retry/cancel UI in `mobile/src/features/brainDump/ProcessingScreen.tsx` and `mobile/app/(app)/brain-dump/[operationId]/index.tsx`.
-- [ ] T074 [US3] Implement proposal edit/remove/conflict/confirm/discard UI in `mobile/src/features/brainDump/ReviewScreen.tsx` and `mobile/app/(app)/brain-dump/[operationId]/review.tsx`.
-- [ ] T075 [US3] Implement app-start/focus/network reconciliation between SecureStore owner state, recovery manifest, and owner-scoped operation GET in `mobile/src/features/brainDump/recoverOperation.ts` and `mobile/src/auth/AuthProvider.tsx`.
-- [ ] T076 [US3] Complete deterministic Maestro Voice Brain Dump flow in `mobile/e2e/maestro/brain-dump.yaml` with fixture injection and privacy-safe evidence.
-
-**Checkpoint**: User Story 3 proves the bounded mobile-first capture/review/confirm value loop;
-no task exists before confirmation and every retry is exact-once.
+**Checkpoint**: Canonical patch/freeze/confirm, current consent, and retained-until/delete-now
+are persisted and migration/alias overlap cannot duplicate or prematurely create Tasks.
 
 ---
 
-## Phase 6: Cross-cutting resilience, builds, and release evidence
+## Phase 6: User Story 3 — Foreground Voice Brain Dump (Priority: P1)
+
+**Goal**: Durable foreground recording, post-stop resumable upload, persisted processing,
+canonical proposal review/freeze/confirmation, current consent, and visible audio retention
+survive mobile interruptions without creating a Task early.
+
+**Independent Test**: Deterministic device audio → interrupt/restart/consent-policy change at
+each checkpoint → patch/freeze/confirm → delete retained audio → exact selected title-only
+Inbox Tasks after timeout replay.
+
+### Tests for User Story 3
+
+- [ ] T068 [P] [US3] Add failing AudioRecorderPort contract tests for permission, document-directory recording, pause/stop, duration, URI, audio-route interruption, and no background claim in `mobile/__tests__/brainDump/AudioRecorderPort.test.ts`.
+- [ ] T069 [P] [US3] Add failing atomic recovery-manifest tests for every local state, owner binding, offline start-key replay, persisted-before-send keys, consent policy/category/time/expiry and withdrawal-pending fields, batch/delete pointers, corrupt/401 quarantine, explicit logout discard, and no transcript/proposal/action/task content in `mobile/__tests__/brainDump/recoveryManifest.test.ts`.
+- [ ] T070 [P] [US3] Add failing chunk-boundary/hash/manifest/ack replay/conflict/missing-chunk/off-UI-thread tests in `mobile/__tests__/brainDump/chunkUploader.test.ts`.
+- [ ] T071 [P] [US3] Add failing generated operation adapter tests for policy/start/get/upload/seal/pause/resume/cancel/retry/consent-decision/proposal-patch/freeze/confirm/audio-delete with revisions, keys, correlation, redaction, and no deprecated direct `PATCH`/`commit` methods in `mobile/__tests__/api/brainDump.test.ts`.
+- [ ] T072 [P] [US3] Add failing reducer tests for every backend Brain Dump, consent-required, batch, per-action, and raw-audio state; projection replacement; retry/cancel/partial-result behavior; and unknown-enum rejection in `mobile/__tests__/brainDump/operationReducer.test.ts`.
+- [ ] T073 [P] [US3] Add failing recording-screen tests for permission versus current category-bound consent, local-only copy, waveform/duration, interruption salvage, Stop & review, withdrawal cleanup, reduced motion, and no fake live proposals in `mobile/__tests__/brainDump/RecordingScreen.test.tsx`.
+- [ ] T074 [P] [US3] Add failing upload/processing-screen tests for consent revalidation/config change, acknowledged progress, truthful stage text, no fake percentage, polling/reconnect, retry/cancel, withdrawal pending, and correlation in `mobile/__tests__/brainDump/ProcessingScreen.test.tsx`.
+- [ ] T075 [P] [US3] Add failing review-screen tests for reconciled/provisional/conflicted states, canonical patch persistence, freeze invalidation/refreeze, immutable selected actions, conflict gate, discard, `Confirm N additions`, per-action results, retained-until/delete-now/pending, no Add date/inference, and timeout replay in `mobile/__tests__/brainDump/ReviewScreen.test.tsx`.
+- [ ] T076 [P] [US3] Add failing temporary-backend checkpoint integration tests for recorded/upload/sealed/processing/review/frozen/confirm-timeout/audio-delete-pending restart, provider-category change, consent expiry/withdrawal, legacy overlap, chunk conflict, provider exhaustion, cancellation, partial confirm, and exact-one Tasks in `mobile/__tests__/integration/brainDump.integration.test.ts`.
+- [ ] T077 [P] [US3] Add backend regression assertions for mobile Bearer access to every canonical consumed Brain Dump route and unchanged owner/idempotency/consent/retention/confirmation behavior in `backend/tests/test_mobile_brain_dump_api.py`.
+
+### Implementation for User Story 3
+
+- [ ] T078 [US3] Define the platform-neutral recorder interface and deterministic fixture fake in `mobile/src/features/brainDump/AudioRecorderPort.ts` and `mobile/src/features/brainDump/FakeAudioRecorder.ts`.
+- [ ] T079 [US3] Implement foreground `expo-audio` document-directory recording and interruption signals in `mobile/src/features/brainDump/ExpoAudioRecorder.ts`; keep background recording disabled.
+- [ ] T080 [US3] Implement the versioned one-active-operation local manifest, current-consent/batch/delete pointers, and honest local/remote cleanup/quarantine rules in `mobile/src/features/brainDump/recoveryManifest.ts`.
+- [ ] T081 [US3] Inspect backend/config limits, then implement bounded file chunking, SHA-256 identity, resume, conflict stop, and complete-manifest seal prerequisites in `mobile/src/features/brainDump/chunkUploader.ts`.
+- [ ] T082 [US3] Implement only generated canonical processing-policy, operation, consent-decision, proposal-patch, freeze, confirm, and audio-delete calls plus persisted command-key ownership in `mobile/src/api/brainDump.ts`.
+- [ ] T083 [US3] Implement strict server-projection state reduction and unknown-state failure in `mobile/src/features/brainDump/operationReducer.ts`.
+- [ ] T084 [US3] Implement foreground recording, policy/category consent, withdrawal, and salvage UI in `mobile/src/features/brainDump/RecordingScreen.tsx` and `mobile/app/(app)/brain-dump/new.tsx`.
+- [ ] T085 [US3] Implement post-stop consent revalidation, upload/seal/poll/retry/cancel/withdrawal UI in `mobile/src/features/brainDump/ProcessingScreen.tsx` and `mobile/app/(app)/brain-dump/[operationId]/index.tsx`.
+- [ ] T086 [US3] Implement canonical proposal patch/freeze/refreeze/confirm/per-action-result plus retained-until/delete-now UI in `mobile/src/features/brainDump/ReviewScreen.tsx` and `mobile/app/(app)/brain-dump/[operationId]/review.tsx`.
+- [ ] T087 [US3] Implement app-start/focus/network reconciliation between SecureStore owner state, recovery manifest, fresh processing policy, and owner-scoped operation GET in `mobile/src/features/brainDump/recoverOperation.ts` and `mobile/src/auth/AuthProvider.tsx`.
+- [ ] T088 [US3] Complete deterministic Maestro Voice Brain Dump flow in `mobile/e2e/maestro/brain-dump.yaml` with restart/re-consent/freeze/confirm/delete-now fixtures and privacy-safe evidence.
+
+**Checkpoint**: User Story 3 proves the bounded mobile-first capture/review/freeze/confirm value
+loop; no Task exists before canonical confirmation, no stale consent invokes processing, and
+every Task/audio-deletion retry is exact-once and truthfully projected.
+
+---
+
+## Phase 7: Cross-cutting resilience, builds, and release evidence
 
 **Purpose**: Prove both-platform safety and prevent planning/design claims from exceeding the
 implemented bounded slice.
 
-- [ ] T077 [P] Add deterministic canary privacy-scan tests covering token/password/email/audio/transcript/task/path/hash leakage in `scripts/test_scan_mobile_evidence.py`.
-- [ ] T078 Implement source/log/Allure/screenshot/bundle/source-map/generated-native/build-output scanning in `scripts/scan_mobile_evidence.py` and wire `make scan-mobile-evidence`.
-- [ ] T079 [P] Add a control-inventory test mapping every enabled mobile control to the M-01..M-09 classification and accepted command in `mobile/__tests__/design/controlInventory.test.tsx`.
-- [ ] T080 [P] Add native config-generation assertions for microphone permission, background-recording absence, SecureStore backup exclusion, export compliance, identifiers, and no secrets in `mobile/__tests__/config/appConfig.test.ts`.
-- [ ] T081 Run `npx expo prebuild --clean --no-install` and `expo-doctor`; inspect deterministic generated iOS/Android configuration without committing native directories.
-- [ ] T082 Run focused backend auth/contract/Schemathesis suites and full `make test-backend`; record exact pass/fail counts without attaching secrets/content.
-- [ ] T083 Run mobile lint/typecheck/Jest/Allure/API-drift/integration/privacy gates and existing `make test-frontend`; fix only in-scope regressions.
-- [ ] T084 Build and exercise an Android development/internal build on emulator and one real device; record redacted SecureStore/microphone/interruption/network-resume evidence in `specs/004-expo-mobile-first-slice/evidence/android-device.md`.
-- [ ] T085 Build and exercise an iOS development/internal build on simulator and one real device; record redacted Keychain/reinstall/microphone/interruption/network-resume evidence in `specs/004-expo-mobile-first-slice/evidence/ios-device.md`.
-- [ ] T086 Verify preview EAS builds use least-privilege project access and no production auto-submit; record only build IDs/URLs in `specs/004-expo-mobile-first-slice/evidence/eas-preview.md` through the normal PR evidence channel.
-- [ ] T087 Update `docs/e2e-acceptance-charter.md` with native session/task/voice journeys, deterministic fixtures, device matrix, Allure evidence, and privacy constraints.
-- [ ] T088 Update `.env.example` and `docs/mobile-development.md` with public API-origin/profile values only; do not add provider, session, EAS, signing, or store secrets.
-- [ ] T089 Run `python3 scripts/check_spec_kit_specs.py`, Spec Kit unit checks, Markdown/link scans, and exact task-format validation for `specs/004-expo-mobile-first-slice/`.
-- [ ] T090 Inspect final changed-file scope against ADR-0008, record review evidence in `specs/004-expo-mobile-first-slice/checklists/mobile-boundaries.md`, request independent architecture/security and QA reviews, then deliver through PR → CI without store submission or deploy authority.
+- [ ] T089 [P] Add deterministic canary privacy-scan tests covering token/password/email/audio/transcript/task/path/hash leakage in `scripts/test_scan_mobile_evidence.py`.
+- [ ] T090 Implement source/log/Allure/screenshot/bundle/source-map/generated-native/build-output scanning in `scripts/scan_mobile_evidence.py` and wire `make scan-mobile-evidence`.
+- [ ] T091 [P] Add a control-inventory test mapping every enabled mobile control to the M-01..M-09 classification and accepted command in `mobile/__tests__/design/controlInventory.test.tsx`.
+- [ ] T092 [P] Add native config-generation assertions for microphone permission, background-recording absence, SecureStore backup exclusion, export compliance, identifiers, and no secrets in `mobile/__tests__/config/appConfig.test.ts`.
+- [ ] T093 Run `npx expo prebuild --clean --no-install` and `expo-doctor`; inspect deterministic generated iOS/Android configuration without committing native directories.
+- [ ] T094 Run focused backend auth/contract/Schemathesis plus canonical Voice confirmation/migration/consent/retention suites and full `make test-backend`; record exact pass/fail counts without attaching secrets/content.
+- [ ] T095 Run mobile lint/typecheck/Jest/Allure/API-drift/integration/privacy gates and existing `make test-frontend`; fix only in-scope regressions.
+- [ ] T096 Build and exercise an Android development/internal build on emulator and one real device; record redacted SecureStore/microphone/interruption/network-resume/consent/delete-now evidence in `specs/004-expo-mobile-first-slice/evidence/android-device.md`.
+- [ ] T097 Build and exercise an iOS development/internal build on simulator and one real device; record redacted Keychain/reinstall/microphone/interruption/network-resume/consent/delete-now evidence in `specs/004-expo-mobile-first-slice/evidence/ios-device.md`.
+- [ ] T098 Verify preview EAS builds use least-privilege project access and no production auto-submit; record only build IDs/URLs in `specs/004-expo-mobile-first-slice/evidence/eas-preview.md` through the normal PR evidence channel.
+- [ ] T099 Update `docs/e2e-acceptance-charter.md` with native session/task/voice journeys, canonical batch/consent/retention fixtures, device matrix, Allure evidence, and privacy constraints.
+- [ ] T100 Update `.env.example` and `docs/mobile-development.md` with public API-origin/profile/policy-category values only; do not add provider, session, EAS, signing, or store secrets.
+- [ ] T101 Run `python3 scripts/check_spec_kit_specs.py`, Spec Kit unit checks, Markdown/link scans, and exact task-format validation for `specs/004-expo-mobile-first-slice/`.
+- [ ] T102 Inspect final changed-file scope against ADR-0008/ADR-0002, record review evidence in `specs/004-expo-mobile-first-slice/checklists/mobile-boundaries.md`, request independent architecture/security and QA reviews, then deliver through PR → CI without store submission or deploy authority.
 
 ## Dependencies and execution order
 
@@ -192,9 +217,11 @@ implemented bounded slice.
 - Phase 1 has no product dependency.
 - Phase 2 depends on the mobile package/test spine from Phase 1 and blocks all stories.
 - US1 depends on Phase 2 and blocks authenticated US2/US3 device integration.
-- US2 and US3 can proceed in parallel after US1 plus generated-client foundation; their
-  feature files are separate.
-- Phase 6 depends on all selected user stories and is the release-review gate.
+- US2 may proceed after US1 plus the generated-client foundation. Phase 5 then closes the
+  canonical Voice backend; US3 mobile work starts only after T067, independently of US2 UI.
+- Phase 5 depends on US1 authentication/contract foundations and blocks mobile Voice adapter generation.
+- Phase 6 depends on Phase 5 plus US1; it does not depend on US2 UI.
+- Phase 7 depends on all selected user stories and is the release-review gate.
 
 ### User story dependencies
 
@@ -208,6 +235,8 @@ implemented bounded slice.
 - Backend T021–T023 and mobile T024–T027 can run in parallel after Phase 2.
 - US2 tests/implementation and US3 tests/implementation can be separate Kanban workstreams
   after US1 contract lands.
+- Phase 5 failing backend tests T056–T059 can be authored in parallel, but their implementation
+  must land and pass together before T069/T071 generated mobile recovery/API contracts.
 - Pure recorder, manifest, uploader, reducer, and screen tests are parallel until their
   integration tasks.
 - Privacy, control inventory, and config assertions can begin before both device builds.
@@ -217,10 +246,11 @@ implemented bounded slice.
 ## Suggested Kanban handoff slices
 
 1. **Backend/API coder**: T009–T014 and T021–T033; independent security/API review required.
-2. **Mobile foundation/auth coder**: T001–T008, T015–T020, T024–T027, T034–T040.
-3. **Mobile Tasks coder**: T041–T055 after US1 contract.
-4. **Mobile Voice coder**: T056–T076 after US1 contract; native escape is not authorized.
-5. **QA**: T077–T090 plus independent verification of each story checkpoint.
+2. **Backend Voice coder**: T056–T067 after US1 contract; canonical migration/overlap/privacy review required before mobile Voice.
+3. **Mobile foundation/auth coder**: T001–T008, T015–T020, T024–T027, T034–T040.
+4. **Mobile Tasks coder**: T041–T055 after US1 contract.
+5. **Mobile Voice coder**: T068–T088 after T067; native escape and deprecated alias consumption are not authorized.
+6. **QA**: T089–T102 plus independent verification of each story checkpoint.
 
 Do not turn these suggestions into overlapping shared-worktree cards. Each implementation
 card must name this spec/plan/ADR, use an isolated worktree, preserve failing-first evidence,
@@ -238,8 +268,8 @@ and block for review before merge.
 ### Product first slice
 
 1. Add US2 task capture/complete/reopen and prove web parity.
-2. Add US3 bounded foreground recording through exact-once confirmation.
-3. Complete Phase 6 evidence.
+2. Add Phase 5 canonical Voice backend prerequisites, then US3 bounded foreground recording through exact-once frozen-batch confirmation and delete-now.
+3. Complete Phase 7 evidence.
 4. Release only to approved internal testers; production store release is a separate decision.
 
 ## Implementation guardrails
@@ -249,6 +279,11 @@ and block for review before merge.
   evidence.
 - Do not add a mobile BFF, root JS workspace, shared domain/UI package, or Expo web rewrite.
 - Do not parse Smart Add or infer Task metadata in mobile/manual/voice capture.
+- Do not generate or call deprecated direct proposal `PATCH`, `/finish`, or `/commit` from
+  mobile; use canonical patch/freeze/confirm and preserve immutable batches/action receipts.
+- Do not resume upload/provider-triggering work from a consent boolean or stale policy;
+  revalidate version/categories/expiry/withdrawal against fresh server state.
+- Do not equate local audio cleanup with server deletion or hide `retained_until`/pending state.
 - Do not show live transcript/proposals while speaking unless the spec/ADR is amended after a
   native capability spike.
 - Do not enable background recording or commit generated native projects.

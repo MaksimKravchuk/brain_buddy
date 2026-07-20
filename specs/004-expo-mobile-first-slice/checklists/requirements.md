@@ -26,6 +26,8 @@
 
 - [x] Opaque-session ownership and device-protected credential requirements are explicit
 - [x] Consent, local audio durability, upload identity, confirmation authority, and privacy evidence are explicit
+- [x] Canonical proposal patch/freeze/confirm, deterministic child receipts, legacy overlap/migration, and frozen-batch invalidation are explicit
+- [x] Recovered consent freshness/provider-category binding/withdrawal and visible raw-audio retained-until/delete-now behavior are explicit
 - [x] API compatibility and storage-schema version separation are required before a second client ships
 - [x] Correlation, actionable error, idempotency, stale-revision, retry, and revocation behavior are covered
 - [x] No canonical Task can be created before explicit confirmation

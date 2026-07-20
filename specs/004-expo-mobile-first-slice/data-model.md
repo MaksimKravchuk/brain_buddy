@@ -70,11 +70,85 @@ First-slice mobile writes:
 - expected revision is sent for transitions/updates;
 - server response replaces optimistic local projection.
 
-### BrainDumpOperation (existing workflow record)
+### BrainDumpOperation and canonical confirmation records (workflow-owned)
 
-The mobile app consumes the existing `BrainDumpOperationResponse` and commands. Canonical
-fields remain backend-owned. Mobile never persists a second proposal or operation domain
-model; it caches a replaceable projection and stores only the recovery pointer below.
+Before mobile Voice implementation, the existing operation payload gains additive ADR-0002
+confirmation, consent, and retention fields:
+
+```text
+BrainDumpOperation:
+  ...existing workflow fields...
+  proposal_revision: integer >= 0
+  confirmation_contract_version: 2
+  proposal_batches: ProposalBatch[]
+  action_receipts: OperationActionReceipt[]
+  active_proposal_batch_id?: string
+  committed_proposal_batch_id?: string
+  consent_decisions: ExternalProcessingConsentDecision[]
+  raw_audio: RawAudioRetention
+
+ProposalBatch:
+  id: opaque string
+  based_on_proposal_revision: integer
+  status: frozen | committing | committed | superseded | failed
+  ordered_actions[]:
+    id: opaque string
+    operation: create_native_inbox_task
+    proposal_id: opaque string
+    title: string
+    destination: native_inbox
+    warning_codes: string[]
+    result_status: pending | succeeded | failed | skipped
+    result_task_id?: opaque string
+  created_at: UTC datetime
+  frozen_at: UTC datetime
+  committed_at?: UTC datetime
+  revision: integer
+
+OperationActionReceipt:
+  action_key: H(operation_id, batch_id, action_id)
+  operation_id: opaque string
+  batch_id: opaque string
+  action_id: opaque string
+  request_hash: string
+  status: pending | succeeded | failed_retryable | failed_terminal
+  result_task_id?: opaque string
+  created_at: UTC datetime
+
+ExternalProcessingConsentDecision:
+  id: opaque string
+  decision: grant | withdraw
+  external_processing_allowed: boolean
+  consent_policy_version?: string
+  allowed_provider_categories: string[]
+  decision_recorded_at: UTC datetime
+  recorded_at: server UTC datetime
+  valid_until?: server UTC datetime
+  withdrawn_at?: server UTC datetime
+
+RawAudioRetention:
+  state: not_received | retained | deletion_pending | deleted
+  retained_until?: server UTC datetime
+  delete_now_available: boolean
+  deleted_at?: server UTC datetime
+```
+
+Frozen batch action title/source/target data is an immutable confirmation snapshot; it does
+not follow later proposal edits. Any accepted proposal patch or reconciliation that increments
+`proposal_revision` supersedes the active frozen batch. Confirm accepts only that exact
+current batch. Every child action is deduplicated by its deterministic action receipt even
+when the outer request key changes after timeout or an alias/canonical race.
+
+Existing operation payloads without these fields load with deterministic defaults. Active
+legacy payloads derive the initial `proposal_revision` from their accepted proposal patch
+history (falling back to the existing operation revision only when no patch history exists)
+and migrate on first canonical mutation/freeze. Completed/cancelled payloads remain readable
+and immutable. Deprecated direct proposal `PATCH` and `/commit` adapters write these same
+records during the bounded web overlap; mobile does not generate or call them.
+
+The mobile app consumes the backend projection and commands. Canonical fields remain
+backend-owned. Mobile never persists a second proposal, batch, action receipt, or operation
+domain model; it caches a replaceable projection and stores only the recovery pointer below.
 
 ## Mobile-owned local records
 
@@ -126,17 +200,24 @@ One active manifest is allowed in the first slice.
 
 ```text
 VoiceRecoveryManifest:
-  schema_version: 1
+  schema_version: 2
   local_manifest_id: UUID
   owner_id: opaque server User ID
   start_idempotency_key: UUID
   server_operation_id?: string
   operation_revision?: integer
-  audio_uri: app-document URI
+  audio_uri?: app-document URI
   audio_format: string
   audio_size_bytes?: integer
   duration_ms?: integer
-  consent_recorded: boolean
+  consent:
+    decision: grant | withdraw
+    consent_policy_version?: string
+    allowed_provider_categories: string[]
+    decision_recorded_at: UTC datetime
+    valid_until?: UTC datetime
+    remote_status: unsubmitted | current | revalidation_required |
+                   withdrawal_pending | withdrawn
   chunk_size_bytes: integer
   chunks[]:
     number: integer >= 0
@@ -147,19 +228,26 @@ VoiceRecoveryManifest:
   expected_chunks?: integer
   manifest_hash?: 64 lowercase hex
   seal_idempotency_key?: UUID
-  proposal_command_keys: map<proposal_id, UUID>
+  consent_decision_idempotency_key?: UUID
+  proposal_patch_keys: map<proposal_id, UUID>
+  freeze_idempotency_key?: UUID
+  frozen_batch_id?: string
+  frozen_batch_revision?: integer
   confirm_idempotency_key?: UUID
+  confirm_request_operation_revision?: integer
+  raw_audio_delete_idempotency_key?: UUID
   local_status:
     recording | recorded | preparing_chunks | uploading |
     ready_to_seal | sealed | processing | awaiting_confirmation |
-    committing | cleanup_pending | recoverable_error
+    batch_frozen | committing | consent_required | withdrawal_pending |
+    remote_audio_delete_pending | cleanup_pending | recoverable_error
   last_error_code?: enum
   created_at: UTC datetime
   updated_at: UTC datetime
 ```
 
-Do not persist the raw session token, email, transcript text, proposal titles, task titles,
-or provider response in this manifest. `owner_id` is the opaque server ID returned by `/me`;
+Do not persist the raw session token, email, transcript text, proposal titles, frozen action
+titles, task titles, or provider response in this manifest. `owner_id` is the opaque server ID returned by `/me`;
 it is not client-supplied authority. It prevents a prior owner's recovery record from being
 shown after an account switch and permits an involuntarily signed-out user to recover after
 the same owner reauthenticates. A mismatched owner may see only that quarantined recovery
@@ -174,7 +262,16 @@ Atomicity:
 - persist the operation-start and every later command/idempotency key before first network
   attempt;
 - never regenerate a key for a retry of the same user intent;
-- delete manifest and audio only after server state and retention policy permit cleanup;
+- on restart/reconnect, compare consent policy version/categories/expiry and the server's
+  current/withdrawn state before any upload, seal, retry, or provider-triggering command;
+- persist withdrawal/delete-now intent before deleting the local audio; keep a non-content
+  pending command pointer until remote acknowledgement, and never claim remote deletion from
+  local cleanup alone;
+- delete local audio once the sealed server copy is durable and local upload recovery no
+  longer needs bytes; the manifest may remain without `audio_uri` while confirmation or a
+  remote deletion command is pending;
+- delete the manifest only after all pending commands have a server result or the user accepts
+  an explicit local-only discard with honest remote-state warning;
 - on parse/schema failure, preserve audio, quarantine the manifest, and offer explicit
   salvage/discard rather than silently deleting the recording.
 
@@ -185,8 +282,12 @@ recording -> recorded -> preparing_chunks -> uploading
 uploading -> uploading | ready_to_seal | recoverable_error
 ready_to_seal -> sealed -> processing
 processing -> processing | awaiting_confirmation | recoverable_error
-awaiting_confirmation -> committing | cleanup_pending
+awaiting_confirmation -> batch_frozen | consent_required | cleanup_pending
+batch_frozen -> awaiting_confirmation | committing | cleanup_pending
 committing -> awaiting_confirmation | cleanup_pending | recoverable_error
+consent_required -> last durable pre-provider state | withdrawal_pending | cleanup_pending
+withdrawal_pending -> cleanup_pending | recoverable_error
+remote_audio_delete_pending -> cleanup_pending | recoverable_error
 recoverable_error -> last durable state | cleanup_pending
 any pre-commit state -> cleanup_pending (explicit discard/cancel)
 cleanup_pending -> deleted
@@ -237,14 +338,26 @@ or crash snapshots. Reopen refetches by owner-scoped operation ID from
 7. Involuntary authentication loss clears visible owner projections and quarantines recovery
    until the same `owner_id` reauthenticates. Voluntary logout requires explicit discard of
    active recovery; a different owner can never inspect it.
+8. A persisted consent decision is not sufficient by itself. Resume requires a fresh server
+   projection/policy comparison; expiry, withdrawal, or any required category/policy change
+   moves local state to `consent_required` before bytes or provider-triggering commands leave.
+9. A frozen batch ID/revision is only a retry pointer. The server snapshot and deterministic
+   action receipts are authoritative; mobile never rebuilds or edits a frozen batch locally.
 
 ## Retention and deletion
 
 - Session token: until logout, server expiry/revocation, unreadable SecureStore, or first-
   install cleanup.
 - Query/proposal projections: memory only; clear on logout and process termination.
-- Local audio/manifest: retain only while recording/upload/recovery/confirmation requires
-  them; delete after successful reconciliation/commit or explicit discard under the
-  accepted operation retention policy.
-- Server audio/transcript/operation artifacts: unchanged ADR-0002/backend policy; mobile
-  cannot shorten server retention by deleting its local copy.
+- Local audio: retain only while recording/upload recovery requires bytes. Delete after the
+  complete sealed server copy is durable, or immediately after withdrawal/explicit discard;
+  keep only a non-content manifest when confirmation or remote cleanup remains pending.
+- Local manifest: retain while recovery or an idempotent command result is unresolved, then
+  delete. Its deletion never claims server cancellation/audio deletion.
+- Server raw audio: projection exposes `retained_until`, deletion state, and delete-now after
+  processing. Default successful-reconciliation retention is 24 hours under ADR-0002/config;
+  withdrawal schedules uncommitted media cleanup. Delete-now removes raw media but preserves
+  required non-audio provenance, action receipts, and confirmed Tasks.
+- Server working transcripts/operation artifacts: seven-day default after completion/
+  cancellation under ADR-0002/config, with privacy erasure handled separately from raw-audio
+  delete-now.

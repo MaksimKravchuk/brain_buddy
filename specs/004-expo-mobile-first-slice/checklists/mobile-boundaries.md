@@ -39,7 +39,6 @@ resilience, Expo/native boundaries, build/signing, design classification, and ev
 - [x] CHK021 Are proposal edit/remove/lineage/conflict requirements consistent with explicit confirmation and deterministic child idempotency? [Consistency, Spec §FR-019/FR-020, ADR-0002]
 - [x] CHK022 Is every failure/cancel/partial-commit requirement honest about actual results and prohibited from promising atomic rollback? [Coverage, Spec US3.9, Contract §Cancellation]
 - [x] CHK023 Is title-only Inbox creation explicit, with due date/Project/Tag/Priority inference and pre-confirmation Task creation prohibited? [Clarity, Spec §FR-020, Contract §Confirmation]
-
 ## Expo and native escape boundary
 
 - [x] CHK024 Are the SDK, development-build, CNG, generated-native-project, and Expo Go boundaries explicit enough to prevent accidental bare/ejected ownership? [Completeness, Plan §Expo/native escape]
@@ -77,10 +76,15 @@ resilience, Expo/native boundaries, build/signing, design classification, and ev
 - [x] CHK044 Does the privacy gate cover source, logs, Allure, screenshots/video, crashes, bundle/source maps, generated native config, and build output with canary values? [Completeness, Quickstart §10]
 - [x] CHK045 Is Allure taxonomy required centrally for backend, mobile unit/component, and black-box product tests? [Consistency, Spec §FR-024, Plan §Test Strategy]
 - [x] CHK046 Are both-platform internal builds, deterministic fixture integration, control inventory, and independent QA/review included before release approval? [Completeness, Spec §SC-007/SC-008, Plan §Release Gates]
+- [x] CHK047 Does mobile consume canonical append-only proposal patch → immutable freeze → confirm routes while deprecated direct `PATCH`/`commit` aliases remain excluded from its generated operation allowlist? [Consistency, Contract §§Canonical proposal/Freeze/Confirm, ADR-0002]
+- [x] CHK048 Are frozen-batch invalidation, deterministic child receipts, legacy payload migration, alias delegation/overlap, process restart, and partial failure covered before mobile Voice implementation? [Coverage, Plan §Canonical Voice backend prerequisite]
+- [x] CHK049 Is recovered consent time-bounded and bound to fresh server policy/provider categories, with restart/configuration revalidation and fail-closed withdrawal/cleanup semantics? [Coverage, Spec §FR-014, Data model §VoiceRecoveryManifest]
+- [x] CHK050 Are raw-audio deletion state, `retained_until`, delete-now eligibility, local-versus-server cleanup, and preserved confirmed provenance explicit and testable? [Completeness, Spec §FR-026, Contract §Raw-audio retention]
+- [x] CHK051 Does ADR-0008 explicitly refine only first-mobile capture timing while ADR-0002 remains authoritative for shared contracts and the long-term live-primary UX? [Precedence, ADR-0008 §ADR precedence]
 
 ## Notes
 
-- All 46 requirement-quality checks pass against the current spec, plan, contract, data model,
+- All 51 requirement-quality checks pass against the current spec, plan, contract, data model,
   research, quickstart, and ADR-0008.
 - This checklist validates that requirements are complete and coherent; it does not claim
   product code exists or replace failing-first implementation tests, review, CI, or device

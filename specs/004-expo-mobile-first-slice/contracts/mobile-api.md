@@ -11,7 +11,7 @@ subset consumed by the first slice.
 - Production requests use HTTPS only.
 - Every response includes `X-Correlation-ID`; errors use the existing `ErrorResponse` and
   return the same value as `reference_id`.
-- Mobile protected requests use exactly one `Authorization: Bearer <opaque-session-token>`.
+- Mobile protected requests use exactly one `Authorization: Bearer OPAQUE_SESSION_TOKEN`.
   The value is an opaque random Session credential, not a JWT.
 - Browser requests continue using the HTTP-only `brainbuddy_session` cookie.
 - If both cookie and Bearer credential are present, return `400` with an actionable
@@ -39,6 +39,9 @@ Compatibility policy:
 - breaking mobile changes require a versioned contract/route and overlap for the current and
   immediately previous released mobile contract until the documented support window ends;
 - CI fails when generated mobile DTOs differ from the pinned OpenAPI snapshot;
+- mobile generation uses an operation allowlist and excludes deprecated direct proposal
+  `PATCH`, `/finish`, and `/commit` compatibility aliases even while the full OpenAPI snapshot
+  still documents them for the bounded web overlap window;
 - mobile must ignore unknown response object fields but reject unknown state/command enums
   rather than treating them as current values.
 
@@ -139,23 +142,90 @@ Task mutation retry sequence:
 
 ## Voice Brain Dump subset
 
-### Start
+ADR-0002 owns these operation semantics. The first mobile client narrows only capture timing
+to post-stop upload; it consumes canonical proposal-patch, frozen-batch, confirm, consent, and
+retention contracts and never calls the temporary direct proposal `PATCH` or `/commit` aliases.
 
-`POST /brain-dump-operations` with `Idempotency-Key` and existing
-`BrainDumpOperationStartRequest`.
+### Processing policy and current consent
 
-The client requests microphone permission and records external-processing consent before
-creating this operation. It persists the start idempotency key before first attempt and
-sends no provider secret. If permission is denied, no operation is created. If external
-processing is not allowed and no local provider is configured, no audio upload/provider call
-occurs. Recording may be captured locally while offline; the start request then occurs after
-reconnect and MUST succeed before the first chunk upload.
+Authenticated `GET /brain-dump-processing-policy` returns a current, `Cache-Control: no-store`
+non-secret configuration required before a grant or upload:
+
+```json
+{
+  "consent_policy_version": "voice-external-v1",
+  "required_provider_categories": [
+    "brainbuddy_cloud_storage",
+    "cloud_stt",
+    "cloud_text_reconciler"
+  ],
+  "consent_valid_for_seconds": 604800,
+  "max_chunk_size_bytes": 1048576,
+  "max_operation_size_bytes": 26214400,
+  "accepted_audio_formats": ["audio/m4a"]
+}
+```
+
+Category identifiers are stable data-processing classes with human-readable app copy, not
+vendor names or credentials. A grant is current only when it is allowed, unexpired, not
+withdrawn, uses the current policy version, and its category set exactly equals the current
+required category set.
+The server is authoritative for policy/version/time checks.
+
+`POST /brain-dump-operations` uses `Idempotency-Key` and:
+
+```json
+{
+  "consent": {
+    "microphone": true,
+    "external_processing_allowed": true,
+    "consent_policy_version": "voice-external-v1",
+    "allowed_provider_categories": [
+      "brainbuddy_cloud_storage",
+      "cloud_stt",
+      "cloud_text_reconciler"
+    ],
+    "decision_recorded_at": "2026-07-20T12:00:00Z"
+  }
+}
+```
+
+The response records server-validated `recorded_at`, `valid_until`, policy version, categories,
+and `status: granted`. The client persists its start key and non-secret decision fields before
+first attempt and sends no provider secret. If permission is denied, no operation is created.
+Recording may be captured locally while offline, but a missing, expired, withdrawn, or
+policy/category-mismatched grant requires a visible new decision after reconnect and before
+the first chunk upload.
+
+`POST /brain-dump-operations/{operation_id}/consent-decisions` appends an owner-scoped
+`grant` or `withdraw` decision with `Idempotency-Key` and `expected_operation_revision`.
+A grant repeats the policy/category/decision-time fields above. Withdrawal has no provider
+fields, stops local attempts immediately, prevents new server upload/seal/retry/provider
+work after acceptance, cancels not-yet-started provider runs, and schedules uncommitted raw
+audio and working transcripts for deletion. An offline withdrawal remains visibly
+`remote_withdrawal_pending` locally until acknowledged; the client must not claim that
+already-running remote work stopped.
 
 ### Get/resume
 
 `GET /brain-dump-operations/{operation_id}` returns the current owner-scoped projection.
 Mobile polling is the correctness fallback. Reopen starts with GET and reconciles local
-chunk/checkpoint state against the response.
+chunk/checkpoint state against the response. Before any resumed upload/seal/retry, mobile also
+refetches the processing policy and compares policy version, categories, expiry, and
+withdrawal state. A mismatch enters `consent_required`; it never falls back to a persisted
+boolean.
+
+The projection includes:
+
+```text
+proposal_revision: integer
+active_proposal_batch?: ProposalBatch
+committed_proposal_batch?: ProposalBatch
+consent: {status, external_processing_allowed, consent_policy_version,
+          allowed_provider_categories[], recorded_at, valid_until?, withdrawn_at?}
+raw_audio: {state: not_received|retained|deletion_pending|deleted,
+            retained_until?, delete_now_available, deleted_at?}
+```
 
 ### Audio chunks
 
@@ -164,7 +234,7 @@ chunk/checkpoint state against the response.
 Headers:
 
 ```text
-Authorization: Bearer <opaque>
+Authorization: Bearer OPAQUE_SESSION_TOKEN
 X-Content-SHA256: <64 lowercase hex>
 Content-Type: application/octet-stream
 ```
@@ -177,6 +247,8 @@ Rules:
 - same operation/number/hash/content retry returns success and no duplicate;
 - same operation/number with different content returns `409 CHUNK_CONFLICT`;
 - the client marks `acknowledged=true` only after success;
+- mobile checks current policy/operation consent immediately before sending; the server rejects
+  a stale grant without persisting bytes or starting provider work;
 - the client never logs or attaches the hash or bytes.
 
 The implementation plan MUST read the backend's configured per-chunk/operation size and
@@ -214,29 +286,95 @@ It renders stage text/indeterminate progress, not a fake percentage. Existing
 `retryable_error`, `terminal_error`, cancel, and retry commands remain authoritative.
 Closing the app does not call cancel.
 
-### Proposal edit/remove
+### Canonical proposal edit/remove
 
-`PATCH /brain-dump-operations/{operation_id}/proposals/{proposal_id}` with
-`Idempotency-Key` and expected proposal revision.
+`POST /brain-dump-operations/{operation_id}/proposals/{proposal_id}/patches` uses
+`Idempotency-Key` and exactly one first-slice operation:
 
-The first slice may edit `title` or set `deleted=true`. It does not infer due date, Project,
-Tag, Priority, route, or CRT destination. Server response replaces the projection. Stale
-revisions return `409`; open conflicts remain visible and confirmation is unavailable.
-
-### Confirmation
-
-Existing command route:
-
-```text
-POST /brain-dump-operations/{operation_id}/commit
-Idempotency-Key: <persisted confirm key>
-{ "expected_revision": N }
+```json
+{
+  "operation": "update",
+  "title": "Call the dentist",
+  "base_proposal_revision": 7,
+  "expected_operation_revision": 12
+}
 ```
 
-The client label is `Confirm N additions`, never “send” or “save” before commit. The server
-creates only active selected title-only Inbox actions. Timeout retry reuses the same key.
-Success returns committed Task IDs; partial/retryable results remain visible through the
-operation projection. No Task exists before this command.
+or:
+
+```json
+{
+  "operation": "remove",
+  "base_proposal_revision": 7,
+  "expected_operation_revision": 12
+}
+```
+
+The server appends a user `ProposalPatch`; it never erases proposal history. The first slice
+does not infer due date, Project, Tag, Priority, route, or CRT destination. Stale/overlapping
+revisions return `409`; open conflicts remain visible. Any accepted patch or reconciliation
+that changes `proposal_revision` atomically marks an existing frozen batch `superseded`.
+The response replaces the mobile projection.
+
+### Freeze a proposal batch
+
+`POST /brain-dump-operations/{operation_id}/proposal-batches` uses a persisted freeze key:
+
+```json
+{
+  "based_on_proposal_revision": 8,
+  "expected_operation_revision": 13,
+  "selected_proposal_ids": ["proposal_a", "proposal_b"]
+}
+```
+
+The server validates that selected IDs are owner-scoped, active, title-only additions at the
+current proposal revision, excludes tombstoned/superseded proposals, rejects open conflicts,
+and persists an immutable `ProposalBatch` in `frozen` state. It allocates stable ordered
+`action_id` values and returns each action's proposal ID, title, source cue, warning/confidence,
+destination `native_inbox`, and before/after summary. Only one frozen batch is active; a new
+freeze supersedes the prior one. A frozen batch never changes in place.
+
+### Confirm the frozen batch
+
+`POST /brain-dump-operations/{operation_id}/confirm` uses the persisted confirm key:
+
+```json
+{
+  "proposal_batch_id": "batch_opaque",
+  "expected_batch_revision": 1,
+  "expected_operation_revision": 14
+}
+```
+
+The server accepts only the current `frozen` batch whose proposal revision still matches.
+For every action it derives `H(operation_id, batch_id, action_id)`, persists an immutable
+action receipt with the title-only Inbox Task, and returns per-action status/result IDs in
+batch order. The client label is `Confirm N additions`, never “send” or “save” before confirm.
+A timeout retry reuses the exact same key and body; reopening first GETs the projection.
+Parent-key conflicts return `409 IDEMPOTENCY_CONFLICT`, while deterministic child receipts
+prevent duplicate Tasks after process restart, partial failure, a mixed legacy/canonical
+retry, or a later outer request. No Task exists before this command.
+
+### Raw-audio retention and delete now
+
+After successful reconciliation, `raw_audio.retained_until` defaults to 24 hours under
+server configuration and `delete_now_available=true`. Terminal/cancelled operations expose
+their applicable configured state rather than inventing successful cleanup.
+
+`POST /brain-dump-operations/{operation_id}/audio/delete` uses a persisted key and:
+
+```json
+{ "expected_operation_revision": 15 }
+```
+
+It is available after processing reaches Review or a terminal/cancelled state. Before that,
+the user cancels/discards the operation instead. The command is owner-scoped and idempotent,
+sets `deletion_pending` before physical cleanup, survives restart, and eventually returns
+`deleted`/`deleted_at`; repeated calls return the same result. It removes raw server chunks
+and disables future accurate-audio retry but never deletes confirmed Tasks, immutable action
+receipts, or required non-audio provenance. Mobile distinguishes local audio deletion from
+server deletion and keeps a non-content pending command pointer until acknowledged.
 
 ### Cancellation/discard
 
@@ -244,6 +382,8 @@ operation projection. No Task exists before this command.
 - server operation exists: issue existing cancel command idempotently, then follow server
   state and retention rules;
 - cancellation during commit does not compensate already committed actions;
+- consent withdrawal and delete-now persist their keys before local cleanup and never claim
+  remote deletion until the server projection reports it;
 - local cleanup never claims remote cancellation succeeded.
 
 ## Error-to-UX mapping

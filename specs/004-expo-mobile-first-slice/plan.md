@@ -43,8 +43,9 @@ supports them
 
 **Constraints**: no JWT or client-owned owner ID; HTTPS production API; exactly one credential
 source; no token/password/content in logs or ordinary storage; explicit confirmation before
-Task creation; API v1 compatibility; 44-point touch targets; reduced motion; no background
-recording/live proposals/general offline task queue
+Task creation through canonical frozen batches; current provider-category-bound consent and
+visible raw-audio retention/delete-now; API v1 compatibility; 44-point touch targets; reduced
+motion; no background recording/live proposals/general offline task queue
 
 **Scale/Scope**: one active local Voice Brain Dump recovery manifest; existing server limits
 for task pages/audio/chunks/operation recovery; M-01/M-02/M-03/M-06 Build,
@@ -59,8 +60,10 @@ M-04/M-05/M-07/M-08 Bounded, M-09 Deferred
   Implementation remains blocked until these artifacts and ADR-0008 are reviewed.
 - **Consent & Safety**: microphone permission and external processing consent remain separate.
   The session token uses SecureStore only. Audio starts in app-document storage and leaves
-  the device only after consent. No raw credential/content/path/hash enters logs, fixtures,
-  PR evidence, or generic persistence.
+  the device only after an unexpired grant matches the server policy/provider categories.
+  Restart/config change revalidates; withdrawal stops future attempts and schedules cleanup.
+  Raw-audio `retained_until` and delete-now remain visible. No raw credential/content/path/hash
+  enters logs, fixtures, PR evidence, or generic persistence.
 - **Tested Delivery**: backend mobile-auth tests, OpenAPI/Schemathesis, generated-client drift,
   mobile unit/component/integration, simulator/device, interruption/idempotency/privacy, and
   two-platform build evidence are failing-first gates. All mobile tests emit Allure taxonomy.
@@ -112,15 +115,29 @@ backend/app/
 ├── core/config.py                 # ApiSettings.semantic_version
 ├── main.py                        # OpenAPI API version, storage version remains health data
 ├── schemas/auth.py                # SessionCredentialResponse
+├── schemas/tasks.py               # canonical batch/consent/retention transport DTOs
 ├── services/auth_service.py       # shared verified login returning raw token + Session
 ├── api/auth.py                    # POST /auth/mobile/sessions; header-aware logout
-└── api/dependencies.py            # one-source cookie/Bearer resolver
+├── api/dependencies.py            # one-source cookie/Bearer resolver
+├── api/tasks.py                   # canonical Voice routes + deprecated alias adapters
+└── modules/tasks/
+    ├── domain.py                  # ProposalBatch/receipts/consent/raw-audio state
+    ├── repository.py              # additive payload migration + media deletion
+    └── service.py                 # patch/freeze/confirm/consent/retention authority
 
 backend/tests/
 ├── test_mobile_session_api.py     # new auth/transport/ownership tests
 ├── test_auth_routes.py            # browser cookie regression
 ├── test_api_contract.py           # precise statuses/version/error envelopes
-└── test_schemathesis_contract.py  # header/mobile-auth contract coverage
+├── test_schemathesis_contract.py  # header/mobile-auth contract coverage
+├── test_brain_dump_confirmation_contract.py
+├── test_brain_dump_operation_migration.py
+├── test_brain_dump_consent.py
+└── test_brain_dump_retention.py
+
+frontend/src/features/brain-dump/
+├── BrainDumpRoute.tsx             # migrate web review to patch/freeze/confirm
+└── BrainDumpRoute.test.tsx        # canonical path + alias-overlap regression
 
 docs/
 ├── auth.md
@@ -242,7 +259,7 @@ a wrapper; do not duplicate credential verification or session generation.
 Create one credential parser returning a raw token plus source enum. It accepts:
 
 - cookie only → browser;
-- `Authorization: Bearer <opaque>` only → mobile;
+- `Authorization: Bearer OPAQUE_SESSION_TOKEN` only → mobile;
 - neither → absent;
 - both → `400` ambiguity;
 - malformed scheme/value → `401`.
@@ -317,7 +334,48 @@ First-slice task actions:
 Do not expose metadata edit, Smart Add, Subtask, Comment, Project/Tag mutation, or agent/Think
 controls even though some backend endpoints exist.
 
-### 5. Voice local durability and server sequence
+### 5. Canonical Voice backend prerequisite
+
+ADR-0002 remains the server authority. Before generating or implementing the mobile Voice
+adapter, extend the existing operation payload/service with:
+
+- monotonic `proposal_revision`, persisted immutable `ProposalBatch` records, deterministic
+  action IDs/receipts, and active/committed batch pointers;
+- canonical `POST .../proposals/{proposal_id}/patches`, `POST .../proposal-batches`, and
+  `POST .../confirm` routes;
+- current consent policy query and append-only grant/withdraw decisions bound to policy
+  version, required provider categories, decision time, and server expiry;
+- raw-audio state, `retained_until`, and idempotent `POST .../audio/delete` after processing.
+
+An accepted proposal patch/reconciliation increments `proposal_revision` and atomically
+supersedes a frozen batch. Freeze snapshots selected active conflict-free title-only actions.
+Confirm rejects stale/superseded batches and persists each Inbox Task with the child receipt
+`H(operation_id,batch_id,action_id)`. The outer request key remains conflict-checked, but
+child receipts are the exact-once boundary across restart, partial failure, or a new outer
+request after status reconciliation.
+
+Stored payload migration is additive. Payloads missing canonical fields derive a stable
+initial proposal revision from accepted patch history, default empty batch/receipt lists, and
+migrate on first canonical mutation/freeze; completed/cancelled records remain immutable.
+During one bounded web overlap, direct proposal `PATCH` delegates to the same patch service and
+legacy `/commit` atomically freezes the current conflict-free projection before delegating to
+confirm. Mark both deprecated and exclude their operation IDs from mobile generation. Test
+canonical/alias races and remove aliases only after the web client and active stored operations
+no longer depend on them.
+
+Consent currentness is checked by the mobile client before sending and by the server before
+persisting upload, seal, retry, or provider work. Any expiry, withdrawal, policy-version
+change, or any required category-set difference fails closed with `consent_required`. Withdrawal prevents
+new provider claims, cancels not-yet-started runs, and schedules uncommitted server media/
+working transcripts for deletion. Offline mobile withdrawal stops local attempts immediately
+but remains remotely pending until acknowledged.
+
+After successful reconciliation, the server publishes the configured raw-audio deadline
+(ADR-0002 default 24 hours). Delete-now moves through `deletion_pending` to `deleted`, survives
+restart, and removes raw media without deleting action receipts, confirmed Tasks, or required
+non-audio provenance. Accurate retry is unavailable after deletion.
+
+### 6. Voice local durability and server sequence
 
 Define `AudioRecorderPort` before Expo implementation so unit/device tests can inject a
 deterministic file. `ExpoAudioRecorder` uses `expo-audio` foreground recording configured to
@@ -325,34 +383,45 @@ write to documents. It exposes permission, record/pause/stop, URI, duration, and
 signals; it does not promise encoded chunks while recording.
 
 `recoveryManifest.ts` implements the schema in `data-model.md` using `atomicJson.ts`. One
-active manifest only, bound to the opaque `/me` owner ID. Persist the operation-start key and
-every later idempotency key before its request, plus every acknowledged chunk after response.
-Never write transcript/proposal text to this file.
+active manifest only, bound to the opaque `/me` owner ID. Persist the operation-start key,
+non-secret consent policy/category/time/expiry, canonical patch/freeze/confirm/delete keys,
+batch pointer, and every acknowledged chunk after response. Never write transcript, proposal,
+frozen action, or Task text to this file.
 
 After Stop:
 
-1. if no server operation exists, create it with the persisted start key after reconnect;
-2. stat and validate the durable file against server-configured admission limits;
-3. choose bounded chunk size from the backend contract/configuration, not an invented
+1. fetch current processing policy; require/re-record consent if version/categories/expiry do
+   not match the local decision; if no server operation exists, create it with the persisted
+   start key after reconnect;
+2. if an operation exists, GET its owner-scoped projection and compare consent withdrawal/
+   currentness before any upload, seal, retry, or provider-triggering command;
+3. stat and validate the durable file against server-configured admission limits;
+4. choose bounded chunk size from the backend contract/configuration, not an invented
    constant; read/hash chunks off the UI thread where the runtime permits;
-4. PUT missing chunks; same hash retries are success, conflict stops automatic retry;
-5. persist expected count/manifest hash and seal with expected operation revision/key;
-6. poll GET with focus/reconnect backoff through processing;
-7. replace memory projection from each response;
-8. edit/remove proposals with stable keys and expected revisions;
-9. commit with persisted key and exact accepted revision;
-10. reconcile returned committed IDs before cleanup.
+5. PUT missing chunks; same hash retries are success, conflict stops automatic retry;
+6. persist expected count/manifest hash and seal with expected operation revision/key;
+7. poll GET with focus/reconnect backoff through processing and replace memory projection;
+8. after the sealed server copy is durable, delete local audio when no retry requires bytes,
+   retaining only the non-content manifest;
+9. append canonical edit/remove proposal patches with stable keys and operation/proposal
+   revisions;
+10. freeze selected active proposals with a persisted key and exact proposal revision;
+11. confirm the returned immutable batch with the persisted key and exact batch/operation
+    revisions, then reconcile per-action receipts/Task IDs before manifest cleanup;
+12. show server raw-audio state/deadline and persist delete-now intent before local/remote
+    cleanup; retain an honest remote-pending pointer across offline/restart.
 
 App background/close stops relying on active JS work. The manifest and server projection are
 recovery authority. Foreground recording may be interrupted by the OS; show salvage/discard
 for the durable file. Closing UI never invokes cancel or commit. Consent withdrawal stops
-future uploads/provider calls and invokes accepted cancel/cleanup policy.
+future uploads/provider calls, deletes local audio, and invokes the persisted remote cleanup
+decision without claiming offline remote success.
 
 M-05 copy is honest: local recording, Stop & review, then upload/processing. It does not show
 fake transcript or proposal cards while speaking. M-06 uses `Review N additions` and
 `Confirm N additions`; Add date is absent and no metadata is inferred.
 
-### 6. Expo/native escape and build boundary
+### 7. Expo/native escape and build boundary
 
 Use SDK 57 with exact compatible dependencies committed by lockfile. `app.config.ts` owns
 bundle/package IDs, permissions, plugins, public API origin, build/runtime version, and
@@ -402,7 +471,15 @@ Failing-first pytest/TestClient coverage:
 - malformed/dual credentials, expiry, logout/revocation, wrong owner;
 - unchanged browser cookie attributes/logout;
 - OpenAPI semantic version, exact intentional statuses/error envelopes/correlation;
-- Schemathesis with an ephemeral bearer session as a second auth mode.
+- Schemathesis with an ephemeral bearer session as a second auth mode;
+- canonical proposal-patch/freeze/supersede/confirm owner scope, revisions, parent-key
+  conflicts, deterministic child receipts, partial failure, and process restart;
+- additive stored-payload migration plus deprecated alias delegation/overlap/races without
+  duplicate Tasks or mutation of completed/cancelled records;
+- consent expiry, restart, regrant, withdrawal, policy/provider-category change, upload/
+  seal/retry/provider fail-closed behavior, and cleanup scheduling;
+- raw-audio retained-until projection, delete-now eligibility/idempotency/restart/owner scope,
+  physical cleanup, and preserved non-audio provenance/Tasks.
 
 ### Mobile unit/component
 
@@ -413,18 +490,21 @@ Jest/RNTL with central Allure helper:
 - redacted API error and no request/response content logging;
 - list query/filter/cursor/count behavior and task action keys/revisions;
 - drawer/frame control inventory and accessibility/reduced motion;
-- atomic manifest recovery/quarantine/cleanup;
+- atomic manifest recovery/quarantine/cleanup plus versioned/category-bound consent,
+  withdrawal pending, frozen-batch pointers, and remote-audio-delete pending;
 - chunk boundaries/hashes/ack replay/conflict/seal prerequisites;
 - operation reducer for every backend state and interruption checkpoint;
-- proposal edit/remove/conflict/confirm exact-once behavior.
+- canonical proposal patch/freeze/invalidate/confirm exact-once behavior and visible retention.
 
 ### Integration/E2E/device
 
 - deterministic fake audio/provider end-to-end against temporary backend;
 - >50 task pagination and web/mobile parity;
-- process restart at recorded/upload/sealed/processing/review/commit-timeout checkpoints;
-- permission, consent, network, storage, audio-route, provider, stale, cancellation, partial
-  commit, and logout failure paths;
+- process restart at recorded/upload/sealed/processing/review/frozen/confirm-timeout/
+  audio-deletion-pending checkpoints;
+- permission, consent expiry/withdrawal/policy-category change, network, storage, audio-route,
+  provider, stale batch, cancellation, partial confirm, retained-until/delete-now, and logout
+  failure paths;
 - Android/iOS development and preview builds;
 - one real-device smoke each for Keychain/Keystore, microphone, interruption, network resume;
 - privacy canary scanner over logs, Allure, screenshots/video, bundle/source map, generated
@@ -443,9 +523,12 @@ step for pytest, mobile Jest, and black-box device tests.
 3. Scaffold mobile/CNG/static gates and generated client.
 4. Deliver secure auth plus read-only Next/Inbox as the first internal checkpoint.
 5. Add list continuation/basic Task actions and bounded detail/Project/Tag projections.
-6. Add foreground local recording and recovery manifest.
-7. Add upload/seal/poll/review/confirm exact-once path.
-8. Produce both-platform internal/device/privacy evidence before release review.
+6. Land canonical proposal-batch/confirm, consent policy/decisions, retention/delete-now, and
+   legacy overlap/migration behind failing backend tests; migrate web off deprecated aliases.
+7. Regenerate the mobile operation allowlist/client without deprecated aliases.
+8. Add foreground local recording and versioned recovery manifest.
+9. Add upload/seal/poll/patch/freeze/confirm/delete-now exact-once path.
+10. Produce both-platform internal/device/privacy evidence before release review.
 
 No persisted Session migration is required. Existing API/storage records are additive and
 mobile uses the same canonical records. If selective mobile-session revocation becomes a
@@ -458,14 +541,21 @@ default before public rollout; do not infer channel from token shape.
 - revoke affected Sessions (global reset if no channel exists) and clear app SecureStore/
   recovery data;
 - prior browser sessions/Tasks/operations remain structurally valid;
+- never downgrade or replay migrated proposal batches/action receipts. If mobile Voice has
+  consumed canonical routes, keep them through the published support window; before release,
+  disabling the client leaves canonical backend records readable and resumable;
+- deprecated aliases may remain only for the documented web/active-operation overlap and
+  still delegate to canonical records; rollback must not restore a parallel direct-write path;
 - never delete already confirmed Tasks automatically;
-- unconfirmed local/server operation artifacts follow explicit discard/retention cleanup;
+- accepted withdrawal and raw-audio deletion commands continue draining after client rollback;
+  unconfirmed local/server artifacts follow explicit discard/retention cleanup;
 - CNG allows reverting app/config/plugin sources without repairing committed native projects.
 
 ## Release Gates
 
 1. Spec check and ADR/mobile-boundary review.
-2. Backend auth/contract/Schemathesis green.
+2. Backend auth/contract/Schemathesis plus canonical Voice confirmation/migration/consent/
+   retention and alias-overlap races green.
 3. Generated OpenAPI/client drift clean.
 4. Expo Doctor, lint, typecheck, Jest/Allure green.
 5. Deterministic integration and privacy scan green.
@@ -484,6 +574,8 @@ No constitution violation is accepted. The only new cross-cutting mechanisms are
 | Additive mobile session transport | Native app must protect/reuse a revocable credential outside browser cookies | Cookie jars do not provide the explicit SecureStore contract; JWT adds more ownership complexity |
 | Atomic local voice recovery manifest | Native interruptions must not silently lose a recording or regenerate command keys | Memory/query cache disappears on process death and cannot resume upload/commit safely |
 | Generated OpenAPI snapshot/client | A second long-lived client creates compatibility obligations | Hand-copied TypeScript models drift and a handwritten shared domain package duplicates authority |
+| Persisted proposal batches/action receipts | Review authority and child exact-once behavior must survive edits, restart, and alias overlap | Direct mutable proposals plus one outer commit key cannot freeze user intent or deduplicate partial child writes |
+| Versioned consent and visible raw-audio retention | Restart/provider change/withdrawal/delete-now must fail closed and remain honest | A local boolean and hidden server cleanup cannot prove current consent or user-controlled deletion |
 
 These mechanisms remain inside the existing Identity/API/mobile boundaries and introduce no
 new canonical store, service, broker, or deployment control plane.
