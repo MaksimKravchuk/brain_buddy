@@ -54,6 +54,25 @@ describe("apiClient", () => {
     expect(new Headers(formInit.headers).has("Content-Type")).toBe(false);
   });
 
+  it("declares the recorded media MIME type on audio uploads", async () => {
+    fetchMock.mockResolvedValue(response({ id: "brain-dump-1" }));
+    const audio = new Uint8Array([1, 2, 3]).buffer;
+
+    await apiClient.uploadBrainDumpAudio(
+      "brain-dump-1",
+      0,
+      audio,
+      "fixture-sha",
+      "audio/webm;codecs=opus"
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = new Headers(init.headers);
+    expect(headers.get("Content-Type")).toBe("audio/webm;codecs=opus");
+    expect(headers.get("X-Content-SHA256")).toBe("fixture-sha");
+    expect(init.body).toBe(audio);
+  });
+
   it("normalizes relation aliases before submitting a relation", async () => {
     fetchMock.mockResolvedValue(response({ id: "relation-1" }));
 

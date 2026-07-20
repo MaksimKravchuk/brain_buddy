@@ -255,6 +255,8 @@ class BrainDumpConsentRequest(StrictBaseModel):
     microphone: bool
     external_processing_allowed: bool = False
     provider: str | None = Field(default=None, max_length=100)
+    language_hints: list[str] = Field(default_factory=list, max_length=10)
+    vocabulary: list[str] = Field(default_factory=list, max_length=200)
 
 
 class BrainDumpOperationStartRequest(StrictBaseModel):
@@ -276,6 +278,7 @@ class BrainDumpTranscriptAppendRequest(StrictBaseModel):
 class BrainDumpProposalUpdateRequest(StrictBaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=500)
     deleted: bool | None = None
+    conflict_resolution: Literal["keep", "accept"] | None = None
     expected_revision: int = Field(ge=1)
 
 
@@ -283,6 +286,8 @@ class BrainDumpConsentResponse(StrictBaseModel):
     microphone: bool
     external_processing_allowed: bool
     provider: str | None = None
+    language_hints: list[str] = Field(default_factory=list)
+    vocabulary: list[str] = Field(default_factory=list)
     recorded_at: datetime
 
 
@@ -339,6 +344,13 @@ class BrainDumpProviderRunResponse(StrictBaseModel):
     attempt: int
     recovery_count: int
     error: str | None = None
+    error_code: str | None = None
+    provider: str | None = None
+    model: str | None = None
+    template_version: str | None = None
+    estimated_cost_usd: float = 0.0
+    reserved_cost_usd: float = 0.0
+    consumed_cost_usd: float = 0.0
 
 
 class BrainDumpProposalPatchResponse(StrictBaseModel):
@@ -355,6 +367,31 @@ class BrainDumpProposalPatchResponse(StrictBaseModel):
     base_revision: int | None = None
 
 
+class BrainDumpActionReceiptResponse(StrictBaseModel):
+    id: str
+    proposal_id: str
+    task_id: str
+    child_idempotency_key: str
+    source_segment_ids: list[str] = Field(default_factory=list)
+    proposal_patch_ids: list[str] = Field(default_factory=list)
+    source_operation_id: str | None = None
+    source_manifest_hash: str | None = None
+    reconciliation_run_id: str | None = None
+    reconciliation_provider: str | None = None
+    reconciliation_model: str | None = None
+    reconciliation_template_version: str | None = None
+    reconciliation_quality: Literal[
+        "none", "provisional_only", "accurate", "conflicted"
+    ] = "none"
+    confirmed_title_sha256: str | None = None
+    proposal_revision: int | None = None
+    user_edited: bool = False
+    confidence: Literal["unknown"] = "unknown"
+    confirmed_by_actor_id: str | None = None
+    decision: Literal["create_native_inbox_task"] = "create_native_inbox_task"
+    confirmed_at: datetime
+
+
 class BrainDumpOperationResponse(StrictBaseModel):
     id: str
     owner_id: str
@@ -366,8 +403,19 @@ class BrainDumpOperationResponse(StrictBaseModel):
     media_ref: str | None = None
     audio_chunks: list[BrainDumpAudioChunkResponse] = Field(default_factory=list)
     sealed_manifest_hash: str | None = None
+    raw_audio_expires_at: datetime | None = None
+    raw_audio_present: bool = False
+    working_artifacts_expires_at: datetime | None = None
+    reconciliation_quality: Literal[
+        "none", "provisional_only", "accurate", "conflicted"
+    ] = "none"
+    committable: bool = False
+    available_recovery_actions: list[
+        Literal["retry", "review_provisional", "cancel"]
+    ] = Field(default_factory=list)
     provider_runs: list[BrainDumpProviderRunResponse] = Field(default_factory=list)
     proposal_patches: list[BrainDumpProposalPatchResponse] = Field(default_factory=list)
+    action_receipts: list[BrainDumpActionReceiptResponse] = Field(default_factory=list)
     status_history: list[BrainDumpStatus] = Field(default_factory=list)
     committed_task_ids: list[str] = Field(default_factory=list)
     created_at: datetime

@@ -4,17 +4,19 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import date
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, Query, Request, status
 
 from app.api.contracts import error_responses
-from app.api.dependencies import get_current_user, get_task_service
+from app.api.dependencies import (
+    get_current_user,
+    get_task_service,
+    get_voice_brain_dump_service,
+)
 from app.exceptions import ValidationFailure
 from app.modules.tasks import TaskService
 from app.modules.tasks.domain import (
-    BrainDumpOperationDocument,
-    BrainDumpProposalDocument,
-    BrainDumpTranscriptSegmentDocument,
     ProjectDocument,
     SmartAddTaskResultDocument,
     TagDocument,
@@ -24,6 +26,7 @@ from app.modules.tasks.domain import (
 )
 from app.schemas.auth import User
 from app.schemas.tasks import (
+    BrainDumpActionReceiptResponse,
     BrainDumpAudioChunkResponse,
     BrainDumpConsentResponse,
     BrainDumpOperationResponse,
@@ -63,6 +66,17 @@ from app.schemas.tasks import (
     TaskTransitionRequest,
     TaskUpdateRequest,
 )
+from app.workflows.voice_brain_dump.audio_media import canonical_audio_mime_type
+from app.workflows.voice_brain_dump.domain import (
+    BrainDumpOperationDocument,
+    BrainDumpProposalDocument,
+    BrainDumpTranscriptSegmentDocument,
+)
+from app.workflows.voice_brain_dump.service import (
+    VoiceBrainDumpService,
+    brain_dump_operation_is_committable,
+    can_review_brain_dump_provisionally,
+)
 
 router = APIRouter(tags=["tasks"])
 
@@ -83,10 +97,10 @@ def start_brain_dump_operation(
     payload: BrainDumpOperationStartRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
-    task_service: TaskService = Depends(get_task_service),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     return _to_brain_dump_response(
-        task_service.start_brain_dump_operation(
+        voice_brain_dump_service.start_brain_dump_operation(
             payload,
             owner_id=current_user.id,
             idempotency_key=_require_idempotency_key(idempotency_key),
@@ -102,10 +116,10 @@ def start_brain_dump_operation(
 def get_brain_dump_operation(
     operation_id: str,
     current_user: User = Depends(get_current_user),
-    task_service: TaskService = Depends(get_task_service),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     return _to_brain_dump_response(
-        task_service.get_brain_dump_operation(operation_id, owner_id=current_user.id)
+        voice_brain_dump_service.get_brain_dump_operation(operation_id, owner_id=current_user.id)
     )
 
 
@@ -119,10 +133,10 @@ def append_brain_dump_transcript(
     payload: BrainDumpTranscriptAppendRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
-    task_service: TaskService = Depends(get_task_service),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     return _to_brain_dump_response(
-        task_service.append_brain_dump_transcript(
+        voice_brain_dump_service.append_brain_dump_transcript(
             operation_id,
             payload,
             owner_id=current_user.id,
@@ -142,18 +156,56 @@ async def upload_brain_dump_audio_chunk(
     request: Request,
     x_content_sha256: str | None = Header(default=None, alias="X-Content-SHA256"),
     current_user: User = Depends(get_current_user),
-    task_service: TaskService = Depends(get_task_service),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     if not x_content_sha256:
         raise ValidationFailure("X-Content-SHA256 header is required.")
-    content = await request.body()
+    limits = voice_brain_dump_service.audio_limits
+    content_type = canonical_audio_mime_type(request.headers.get("content-type") or "")
+    if not content_type:
+        raise ValidationFailure(
+            "AUDIO_CHUNK_MIME_TYPE_REQUIRED: Content-Type is required for audio uploads."
+        )
+    if content_type not in {
+        canonical_audio_mime_type(value) for value in limits.allowed_mime_types
+    }:
+        raise ValidationFailure(
+            "AUDIO_CHUNK_MIME_TYPE_UNSUPPORTED: audio chunk content type is not "
+            "an allowed audio MIME type."
+        )
+    declared_length = request.headers.get("content-length")
+    if declared_length is not None:
+        try:
+            declared_bytes = int(declared_length)
+        except ValueError as exc:
+            raise ValidationFailure(
+                "Content-Length header must be an integer."
+            ) from exc
+        if declared_bytes > limits.max_chunk_bytes:
+            raise ValidationFailure(
+                "AUDIO_CHUNK_TOO_LARGE: declared Content-Length exceeds the "
+                "configured per-chunk limit."
+            )
+    # Read via a bounded stream rather than ``request.body()`` so an
+    # attacker who omits/understates Content-Length cannot force the whole
+    # unbounded body into memory before this limit is enforced.
+    buffer = bytearray()
+    async for piece in request.stream():
+        buffer.extend(piece)
+        if len(buffer) > limits.max_chunk_bytes:
+            raise ValidationFailure(
+                "AUDIO_CHUNK_TOO_LARGE: audio chunk exceeds the configured "
+                "per-chunk byte limit."
+            )
+    content = bytes(buffer)
     return _to_brain_dump_response(
-        task_service.upload_brain_dump_audio_chunk(
+        voice_brain_dump_service.upload_brain_dump_audio_chunk(
             operation_id,
             chunk_number,
             content,
             owner_id=current_user.id,
             content_sha256=x_content_sha256,
+            content_type=content_type,
         )
     )
 
@@ -168,10 +220,10 @@ def seal_brain_dump_operation(
     payload: BrainDumpSealRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
-    task_service: TaskService = Depends(get_task_service),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     return _to_brain_dump_response(
-        task_service.seal_brain_dump_operation(
+        voice_brain_dump_service.seal_brain_dump_operation(
             operation_id,
             payload,
             owner_id=current_user.id,
@@ -191,10 +243,10 @@ def update_brain_dump_proposal(
     payload: BrainDumpProposalUpdateRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
-    task_service: TaskService = Depends(get_task_service),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     return _to_brain_dump_response(
-        task_service.update_brain_dump_proposal(
+        voice_brain_dump_service.update_brain_dump_proposal(
             operation_id,
             proposal_id,
             payload,
@@ -215,19 +267,31 @@ def command_brain_dump_operation(
     payload: ExpectedRevisionRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
-    task_service: TaskService = Depends(get_task_service),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     idempotency = _require_idempotency_key(idempotency_key)
     if action == "commit":
-        operation = task_service.commit_brain_dump_operation(
+        operation = voice_brain_dump_service.commit_brain_dump_operation(
             operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
         )
     elif action == "retry":
-        operation = task_service.retry_brain_dump_operation(
+        operation = voice_brain_dump_service.retry_brain_dump_operation(
+            operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
+        )
+    elif action == "review_provisional":
+        operation = voice_brain_dump_service.review_brain_dump_provisionally(
+            operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
+        )
+    elif action == "withdraw_consent":
+        operation = voice_brain_dump_service.withdraw_brain_dump_consent(
+            operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
+        )
+    elif action == "delete_raw_audio":
+        operation = voice_brain_dump_service.delete_brain_dump_raw_audio(
             operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
         )
     elif action in {"pause", "resume", "finish", "cancel"}:
-        operation = task_service.transition_brain_dump_operation(
+        operation = voice_brain_dump_service.transition_brain_dump_operation(
             operation_id,
             payload,
             owner_id=current_user.id,
@@ -711,6 +775,8 @@ def _to_brain_dump_response(
             microphone=operation.consent.microphone,
             external_processing_allowed=operation.consent.external_processing_allowed,
             provider=operation.consent.provider,
+            language_hints=operation.consent.language_hints,
+            vocabulary=operation.consent.vocabulary,
             recorded_at=operation.consent.recorded_at,
         ),
         segments=[
@@ -729,6 +795,12 @@ def _to_brain_dump_response(
             for chunk in operation.audio_chunks
         ],
         sealed_manifest_hash=operation.sealed_manifest_hash,
+        raw_audio_expires_at=operation.raw_audio_expires_at,
+        raw_audio_present=bool(operation.audio_chunks),
+        working_artifacts_expires_at=operation.working_artifacts_expires_at,
+        reconciliation_quality=operation.reconciliation_quality,
+        committable=brain_dump_operation_is_committable(operation),
+        available_recovery_actions=_brain_dump_available_recovery_actions(operation),
         provider_runs=[
             BrainDumpProviderRunResponse(
                 id=run.id,
@@ -738,6 +810,13 @@ def _to_brain_dump_response(
                 attempt=run.attempt,
                 recovery_count=run.recovery_count,
                 error=run.error,
+                error_code=run.error_code,
+                provider=run.provider,
+                model=run.model,
+                template_version=run.template_version,
+                estimated_cost_usd=run.estimated_cost_usd,
+                reserved_cost_usd=run.reserved_cost_usd,
+                consumed_cost_usd=run.consumed_cost_usd,
             )
             for run in operation.provider_runs
         ],
@@ -757,12 +836,53 @@ def _to_brain_dump_response(
             )
             for patch in operation.proposal_patches
         ],
+        action_receipts=[
+            BrainDumpActionReceiptResponse(
+                id=receipt.id,
+                proposal_id=receipt.proposal_id,
+                task_id=receipt.task_id,
+                child_idempotency_key=receipt.child_idempotency_key,
+                source_segment_ids=receipt.source_segment_ids,
+                proposal_patch_ids=receipt.proposal_patch_ids,
+                source_operation_id=receipt.source_operation_id,
+                source_manifest_hash=receipt.source_manifest_hash,
+                reconciliation_run_id=receipt.reconciliation_run_id,
+                reconciliation_provider=receipt.reconciliation_provider,
+                reconciliation_model=receipt.reconciliation_model,
+                reconciliation_template_version=receipt.reconciliation_template_version,
+                reconciliation_quality=receipt.reconciliation_quality,
+                confirmed_title_sha256=receipt.confirmed_title_sha256,
+                proposal_revision=receipt.proposal_revision,
+                user_edited=receipt.user_edited,
+                confidence=receipt.confidence,
+                confirmed_by_actor_id=receipt.confirmed_by_actor_id,
+                decision=receipt.decision,
+                confirmed_at=receipt.confirmed_at,
+            )
+            for receipt in operation.action_receipts
+        ],
         status_history=operation.status_history,
         committed_task_ids=operation.committed_task_ids,
         created_at=operation.created_at,
         updated_at=operation.updated_at,
         revision=operation.revision,
     )
+
+
+def _brain_dump_available_recovery_actions(
+    operation: BrainDumpOperationDocument,
+) -> list[Literal["retry", "review_provisional", "cancel"]]:
+    """Project only recovery commands the service will authorize for this state."""
+
+    actions: list[Literal["retry", "review_provisional", "cancel"]] = []
+    if operation.status == "retryable_error":
+        actions.append("retry")
+    if can_review_brain_dump_provisionally(operation):
+        actions.append("review_provisional")
+    if operation.status in {"retryable_error", "terminal_error"}:
+        actions.append("cancel")
+    return actions
+
 
 
 def _to_brain_dump_segment_response(

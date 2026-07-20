@@ -9,11 +9,13 @@ provenance rejection, and the active-reference validation paths.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
+from app.core.config import VoiceAudioLimits
 from app.exceptions import ConflictError, NotFoundError, ValidationFailure
 from app.modules.tasks import TaskRepository, TaskService
 from app.modules.tasks.domain import (
@@ -38,6 +40,13 @@ from app.schemas.tasks import (
     TaskUpdateRequest,
 )
 from app.utils.time import utcnow
+from app.workflows.voice_brain_dump.domain import (
+    BrainDumpProviderRunDocument,
+    BrainDumpTranscriptSegmentDocument,
+)
+from app.workflows.voice_brain_dump.repository import OperationRepository
+from app.workflows.voice_brain_dump.service import VoiceBrainDumpService
+from app.workflows.voice_brain_dump.task_port import InProcessTaskPort
 
 OWNER = "user_branch_owner"
 
@@ -46,6 +55,23 @@ OWNER = "user_branch_owner"
 def service(data_dir: Path) -> TaskService:
     repository = TaskRepository(data_dir)
     return TaskService(repository)
+
+
+@pytest.fixture()
+def voice_service(data_dir: Path) -> VoiceBrainDumpService:
+    return _voice_service(data_dir)
+
+
+def _voice_service(data_dir: Path, **kwargs: object) -> VoiceBrainDumpService:
+    task_service = TaskService(TaskRepository(data_dir))
+    return VoiceBrainDumpService(
+        OperationRepository(data_dir),
+        audio_limits=VoiceAudioLimits(
+            allowed_mime_types=frozenset({"audio/x-brain-buddy-test-text"})
+        ),
+        task_port=InProcessTaskPort(task_service.create_native_inbox_task),
+        **kwargs,
+    )
 
 
 def _make_project(
@@ -537,32 +563,32 @@ def test_reconcile_restores_pending_create_results(service: TaskService) -> None
 def test_brain_dump_operation_uses_sqlite_canonical_when_json_mirror_is_missing(
     data_dir: Path,
 ) -> None:
-    service = TaskService(TaskRepository(data_dir))
-    operation = service.start_brain_dump_operation(
+    voice_service = _voice_service(data_dir)
+    operation = voice_service.start_brain_dump_operation(
         BrainDumpOperationStartRequest.model_validate(
             {"consent": {"microphone": True, "external_processing_allowed": False}}
         ),
         owner_id=OWNER,
         idempotency_key="sqlite-canonical-brain-dump",
     )
-    service.task_repo.brain_dump_operation_path(OWNER, operation.id).unlink()
+    voice_service.operation_repo.brain_dump_operation_path(OWNER, operation.id).unlink()
 
-    reloaded = TaskService(TaskRepository(data_dir))
+    reloaded = _voice_service(data_dir)
 
     assert reloaded.get_brain_dump_operation(operation.id, owner_id=OWNER) == operation
 
 
 def test_brain_dump_append_retry_after_idempotency_crash_does_not_advance_revision(
-    monkeypatch: pytest.MonkeyPatch, service: TaskService
+    monkeypatch: pytest.MonkeyPatch, voice_service: VoiceBrainDumpService
 ) -> None:
-    operation = service.start_brain_dump_operation(
+    operation = voice_service.start_brain_dump_operation(
         BrainDumpOperationStartRequest.model_validate(
-            {"consent": {"microphone": True, "external_processing_allowed": False}}
+            {"consent": {"microphone": True, "external_processing_allowed": True}}
         ),
         owner_id=OWNER,
         idempotency_key="crash-start-brain-dump",
     )
-    original_store_idempotency = service._store_idempotency
+    original_store_idempotency = voice_service._store_idempotency
     calls = 0
 
     def fail_once_after_operation_write(**kwargs: object) -> None:
@@ -572,20 +598,20 @@ def test_brain_dump_append_retry_after_idempotency_crash_does_not_advance_revisi
             raise RuntimeError("simulated crash after brain dump write")
         original_store_idempotency(**kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(service, "_store_idempotency", fail_once_after_operation_write)
+    monkeypatch.setattr(voice_service, "_store_idempotency", fail_once_after_operation_write)
     payload = BrainDumpTranscriptAppendRequest.model_validate(
         {"segments": [{"sequence": 1, "text": "Pay VAT.", "stability": "stable"}]}
     )
     with pytest.raises(RuntimeError, match="simulated crash"):
-        service.append_brain_dump_transcript(
+        voice_service.append_brain_dump_transcript(
             operation.id,
             payload,
             owner_id=OWNER,
             idempotency_key="crash-append-brain-dump",
         )
 
-    monkeypatch.setattr(service, "_store_idempotency", original_store_idempotency)
-    replayed = service.append_brain_dump_transcript(
+    monkeypatch.setattr(voice_service, "_store_idempotency", original_store_idempotency)
+    replayed = voice_service.append_brain_dump_transcript(
         operation.id,
         payload,
         owner_id=OWNER,
@@ -596,17 +622,19 @@ def test_brain_dump_append_retry_after_idempotency_crash_does_not_advance_revisi
     assert [segment.sequence for segment in replayed.segments] == [1]
 
 
-def test_brain_dump_start_replay_and_consent_validation(service: TaskService) -> None:
+def test_brain_dump_start_replay_and_consent_validation(
+    voice_service: VoiceBrainDumpService,
+) -> None:
     payload = BrainDumpOperationStartRequest.model_validate(
         {"consent": {"microphone": True, "external_processing_allowed": False}}
     )
 
-    started = service.start_brain_dump_operation(
+    started = voice_service.start_brain_dump_operation(
         payload,
         owner_id=OWNER,
         idempotency_key="brain-dump-start-replay",
     )
-    replayed = service.start_brain_dump_operation(
+    replayed = voice_service.start_brain_dump_operation(
         payload,
         owner_id=OWNER,
         idempotency_key="brain-dump-start-replay",
@@ -615,7 +643,7 @@ def test_brain_dump_start_replay_and_consent_validation(service: TaskService) ->
     assert replayed == started
 
     with pytest.raises(ValidationFailure, match="Microphone consent"):
-        service.start_brain_dump_operation(
+        voice_service.start_brain_dump_operation(
             BrainDumpOperationStartRequest.model_validate(
                 {"consent": {"microphone": False, "external_processing_allowed": False}}
             ),
@@ -625,27 +653,27 @@ def test_brain_dump_start_replay_and_consent_validation(service: TaskService) ->
 
 
 def test_brain_dump_append_replay_state_and_duplicate_segment_branches(
-    service: TaskService,
+    voice_service: VoiceBrainDumpService,
 ) -> None:
     start_payload = BrainDumpOperationStartRequest.model_validate(
-        {"consent": {"microphone": True, "external_processing_allowed": False}}
+        {"consent": {"microphone": True, "external_processing_allowed": True}}
     )
     append_payload = BrainDumpTranscriptAppendRequest.model_validate(
         {"segments": [{"sequence": 1, "text": "Pay VAT.", "stability": "stable"}]}
     )
-    operation = service.start_brain_dump_operation(
+    operation = voice_service.start_brain_dump_operation(
         start_payload,
         owner_id=OWNER,
         idempotency_key="brain-dump-append-branches-start",
     )
 
-    appended = service.append_brain_dump_transcript(
+    appended = voice_service.append_brain_dump_transcript(
         operation.id,
         append_payload,
         owner_id=OWNER,
         idempotency_key="brain-dump-append-replay",
     )
-    replayed = service.append_brain_dump_transcript(
+    replayed = voice_service.append_brain_dump_transcript(
         operation.id,
         append_payload,
         owner_id=OWNER,
@@ -654,7 +682,7 @@ def test_brain_dump_append_replay_state_and_duplicate_segment_branches(
 
     assert replayed == appended
 
-    duplicate = service.append_brain_dump_transcript(
+    duplicate = voice_service.append_brain_dump_transcript(
         operation.id,
         append_payload,
         owner_id=OWNER,
@@ -663,7 +691,7 @@ def test_brain_dump_append_replay_state_and_duplicate_segment_branches(
     assert duplicate.segments == appended.segments
 
     with pytest.raises(ConflictError, match="Brain dump segment"):
-        service.append_brain_dump_transcript(
+        voice_service.append_brain_dump_transcript(
             operation.id,
             BrainDumpTranscriptAppendRequest.model_validate(
                 {"segments": [{"sequence": 1, "text": "Pay taxes.", "stability": "stable"}]}
@@ -672,7 +700,7 @@ def test_brain_dump_append_replay_state_and_duplicate_segment_branches(
             idempotency_key="brain-dump-append-duplicate-conflict",
         )
 
-    cancelled = service.transition_brain_dump_operation(
+    cancelled = voice_service.transition_brain_dump_operation(
         operation.id,
         ExpectedRevisionRequest(expected_revision=duplicate.revision),
         owner_id=OWNER,
@@ -680,7 +708,7 @@ def test_brain_dump_append_replay_state_and_duplicate_segment_branches(
         action="cancel",
     )
     with pytest.raises(ValidationFailure, match="Transcript can only"):
-        service.append_brain_dump_transcript(
+        voice_service.append_brain_dump_transcript(
             cancelled.id,
             BrainDumpTranscriptAppendRequest.model_validate(
                 {"segments": [{"sequence": 2, "text": "Call bank.", "stability": "stable"}]}
@@ -691,16 +719,16 @@ def test_brain_dump_append_replay_state_and_duplicate_segment_branches(
 
 
 def test_brain_dump_proposal_update_replay_not_found_and_invalid_state(
-    service: TaskService,
+    voice_service: VoiceBrainDumpService,
 ) -> None:
-    operation = service.start_brain_dump_operation(
+    operation = voice_service.start_brain_dump_operation(
         BrainDumpOperationStartRequest.model_validate(
-            {"consent": {"microphone": True, "external_processing_allowed": False}}
+            {"consent": {"microphone": True, "external_processing_allowed": True}}
         ),
         owner_id=OWNER,
         idempotency_key="brain-dump-proposal-start",
     )
-    operation = service.append_brain_dump_transcript(
+    operation = voice_service.append_brain_dump_transcript(
         operation.id,
         BrainDumpTranscriptAppendRequest.model_validate(
             {"segments": [{"sequence": 1, "text": "Email broker.", "stability": "stable"}]}
@@ -711,14 +739,14 @@ def test_brain_dump_proposal_update_replay_not_found_and_invalid_state(
     proposal_id = operation.proposals[0].id
     payload = BrainDumpProposalUpdateRequest(title="Email mortgage broker", expected_revision=operation.revision)
 
-    updated = service.update_brain_dump_proposal(
+    updated = voice_service.update_brain_dump_proposal(
         operation.id,
         proposal_id,
         payload,
         owner_id=OWNER,
         idempotency_key="brain-dump-proposal-update-replay",
     )
-    replayed = service.update_brain_dump_proposal(
+    replayed = voice_service.update_brain_dump_proposal(
         operation.id,
         proposal_id,
         payload,
@@ -728,7 +756,7 @@ def test_brain_dump_proposal_update_replay_not_found_and_invalid_state(
     assert replayed == updated
 
     with pytest.raises(NotFoundError, match="Brain dump proposal"):
-        service.update_brain_dump_proposal(
+        voice_service.update_brain_dump_proposal(
             operation.id,
             "missing-proposal",
             BrainDumpProposalUpdateRequest(deleted=True, expected_revision=updated.revision),
@@ -736,7 +764,7 @@ def test_brain_dump_proposal_update_replay_not_found_and_invalid_state(
             idempotency_key="brain-dump-proposal-missing",
         )
 
-    cancelled = service.transition_brain_dump_operation(
+    cancelled = voice_service.transition_brain_dump_operation(
         operation.id,
         ExpectedRevisionRequest(expected_revision=updated.revision),
         owner_id=OWNER,
@@ -744,7 +772,7 @@ def test_brain_dump_proposal_update_replay_not_found_and_invalid_state(
         action="cancel",
     )
     with pytest.raises(ValidationFailure, match="Proposal cannot"):
-        service.update_brain_dump_proposal(
+        voice_service.update_brain_dump_proposal(
             cancelled.id,
             proposal_id,
             BrainDumpProposalUpdateRequest(title="Ignored", expected_revision=cancelled.revision),
@@ -753,24 +781,26 @@ def test_brain_dump_proposal_update_replay_not_found_and_invalid_state(
         )
 
 
-def test_brain_dump_transition_validation_and_replay_branches(service: TaskService) -> None:
+def test_brain_dump_transition_validation_and_replay_branches(
+    voice_service: VoiceBrainDumpService,
+) -> None:
     start_payload = BrainDumpOperationStartRequest.model_validate(
         {"consent": {"microphone": True, "external_processing_allowed": False}}
     )
-    operation = service.start_brain_dump_operation(
+    operation = voice_service.start_brain_dump_operation(
         start_payload,
         owner_id=OWNER,
         idempotency_key="brain-dump-transition-start",
     )
 
-    paused = service.transition_brain_dump_operation(
+    paused = voice_service.transition_brain_dump_operation(
         operation.id,
         ExpectedRevisionRequest(expected_revision=operation.revision),
         owner_id=OWNER,
         idempotency_key="brain-dump-pause-replay",
         action="pause",
     )
-    replayed = service.transition_brain_dump_operation(
+    replayed = voice_service.transition_brain_dump_operation(
         operation.id,
         ExpectedRevisionRequest(expected_revision=operation.revision),
         owner_id=OWNER,
@@ -780,7 +810,7 @@ def test_brain_dump_transition_validation_and_replay_branches(service: TaskServi
     assert replayed == paused
 
     with pytest.raises(ValidationFailure, match="Unsupported"):
-        service.transition_brain_dump_operation(
+        voice_service.transition_brain_dump_operation(
             operation.id,
             ExpectedRevisionRequest(expected_revision=paused.revision),
             owner_id=OWNER,
@@ -788,7 +818,7 @@ def test_brain_dump_transition_validation_and_replay_branches(service: TaskServi
             action="archive",
         )
     with pytest.raises(ValidationFailure, match="Only a recording"):
-        service.transition_brain_dump_operation(
+        voice_service.transition_brain_dump_operation(
             operation.id,
             ExpectedRevisionRequest(expected_revision=paused.revision),
             owner_id=OWNER,
@@ -796,7 +826,7 @@ def test_brain_dump_transition_validation_and_replay_branches(service: TaskServi
             action="pause",
         )
 
-    resumed = service.transition_brain_dump_operation(
+    resumed = voice_service.transition_brain_dump_operation(
         operation.id,
         ExpectedRevisionRequest(expected_revision=paused.revision),
         owner_id=OWNER,
@@ -804,7 +834,7 @@ def test_brain_dump_transition_validation_and_replay_branches(service: TaskServi
         action="resume",
     )
     with pytest.raises(ValidationFailure, match="Only a paused"):
-        service.transition_brain_dump_operation(
+        voice_service.transition_brain_dump_operation(
             operation.id,
             ExpectedRevisionRequest(expected_revision=resumed.revision),
             owner_id=OWNER,
@@ -812,14 +842,14 @@ def test_brain_dump_transition_validation_and_replay_branches(service: TaskServi
             action="resume",
         )
 
-    cancelled = service.transition_brain_dump_operation(
+    cancelled = voice_service.transition_brain_dump_operation(
         operation.id,
         ExpectedRevisionRequest(expected_revision=resumed.revision),
         owner_id=OWNER,
         idempotency_key="brain-dump-cancel-once",
         action="cancel",
     )
-    cancelled_again = service.transition_brain_dump_operation(
+    cancelled_again = voice_service.transition_brain_dump_operation(
         operation.id,
         ExpectedRevisionRequest(expected_revision=cancelled.revision),
         owner_id=OWNER,
@@ -829,7 +859,7 @@ def test_brain_dump_transition_validation_and_replay_branches(service: TaskServi
     assert cancelled_again.status == "cancelled"
 
     with pytest.raises(ValidationFailure, match="Only an active"):
-        service.transition_brain_dump_operation(
+        voice_service.transition_brain_dump_operation(
             operation.id,
             ExpectedRevisionRequest(expected_revision=cancelled_again.revision),
             owner_id=OWNER,
@@ -839,24 +869,24 @@ def test_brain_dump_transition_validation_and_replay_branches(service: TaskServi
 
 
 def test_brain_dump_commit_replay_invalid_state_and_deleted_proposals(
-    service: TaskService,
+    voice_service: VoiceBrainDumpService,
 ) -> None:
-    operation = service.start_brain_dump_operation(
+    operation = voice_service.start_brain_dump_operation(
         BrainDumpOperationStartRequest.model_validate(
-            {"consent": {"microphone": True, "external_processing_allowed": False}}
+            {"consent": {"microphone": True, "external_processing_allowed": True}}
         ),
         owner_id=OWNER,
         idempotency_key="brain-dump-commit-start",
     )
     with pytest.raises(ValidationFailure, match="awaiting confirmation"):
-        service.commit_brain_dump_operation(
+        voice_service.commit_brain_dump_operation(
             operation.id,
             ExpectedRevisionRequest(expected_revision=operation.revision),
             owner_id=OWNER,
             idempotency_key="brain-dump-commit-too-soon",
         )
 
-    operation = service.append_brain_dump_transcript(
+    operation = voice_service.append_brain_dump_transcript(
         operation.id,
         BrainDumpTranscriptAppendRequest.model_validate(
             {"segments": [{"sequence": 1, "text": "Book dentist. Call bank.", "stability": "stable"}]}
@@ -864,27 +894,61 @@ def test_brain_dump_commit_replay_invalid_state_and_deleted_proposals(
         owner_id=OWNER,
         idempotency_key="brain-dump-commit-segments",
     )
-    deleted = service.update_brain_dump_proposal(
+    deleted = voice_service.update_brain_dump_proposal(
         operation.id,
         operation.proposals[0].id,
         BrainDumpProposalUpdateRequest(deleted=True, expected_revision=operation.revision),
         owner_id=OWNER,
         idempotency_key="brain-dump-delete-first-proposal",
     )
-    finished = service.transition_brain_dump_operation(
+    finished = voice_service.transition_brain_dump_operation(
         operation.id,
         ExpectedRevisionRequest(expected_revision=deleted.revision),
         owner_id=OWNER,
         idempotency_key="brain-dump-finish-before-commit",
         action="finish",
     )
-    committed = service.commit_brain_dump_operation(
+    # Commit requires a frozen, reconciled batch (see
+    # ``TaskService._has_frozen_reconciled_batch``) AND every surviving
+    # proposal to actually carry reconciler/user affirmation (see the
+    # ``BRAIN_DUMP_PROPOSAL_NOT_RECONCILED`` gate in
+    # ``commit_brain_dump_operation``); this unit test exercises commit
+    # replay/idempotency directly against the repository rather than through
+    # a real sealed-audio pipeline, so record the checkpoint and per-proposal
+    # status that a successful seal+accurate-STT+reconciler run would have
+    # left behind.
+    finished = finished.model_copy(
+        update={
+            "sealed_manifest_hash": "0" * 64,
+            "reconciliation_quality": "accurate",
+            "proposals": [
+                proposal.model_copy(update={"status": "reconciled"})
+                for proposal in finished.proposals
+            ],
+            "provider_runs": [
+                BrainDumpProviderRunDocument(
+                    id="provider_run_test_reconciled",
+                    role="reconciler",
+                    status="succeeded",
+                    input_hash="0" * 64,
+                    checkpoint="reconciled",
+                    attempt=1,
+                    recovery_count=0,
+                    created_at=finished.updated_at,
+                    updated_at=finished.updated_at,
+                )
+            ],
+            "revision": finished.revision + 1,
+        }
+    )
+    voice_service.operation_repo.save_brain_dump_operation(finished)
+    committed = voice_service.commit_brain_dump_operation(
         operation.id,
         ExpectedRevisionRequest(expected_revision=finished.revision),
         owner_id=OWNER,
         idempotency_key="brain-dump-commit-replay",
     )
-    replayed = service.commit_brain_dump_operation(
+    replayed = voice_service.commit_brain_dump_operation(
         operation.id,
         ExpectedRevisionRequest(expected_revision=finished.revision),
         owner_id=OWNER,
@@ -941,30 +1005,11 @@ def test_idempotent_result_replay_repairs_stale_canonical_records(
         owner_id=OWNER,
     ).revision == 2
 
-    operation = service.start_brain_dump_operation(
-        BrainDumpOperationStartRequest.model_validate(
-            {"consent": {"microphone": True, "external_processing_allowed": False}}
-        ),
-        owner_id=OWNER,
-        idempotency_key="replay-operation-old",
-    )
-    newer_operation = operation.model_copy(update={"status": "paused", "revision": 2})
-    assert service._brain_dump_operation_result(
-        IdempotencyRecord(
-            key="operation-replay-newer",
-            command="brain_dump_pause",
-            request_hash="hash",
-            resource_id=operation.id,
-            response_body=newer_operation.model_dump(mode="json"),
-            created_at=utcnow(),
-        ),
-        owner_id=OWNER,
-    ).revision == 2
-
-
 def test_brain_dump_title_extraction_ignores_blank_and_duplicate_items() -> None:
-    assert TaskService._extract_task_titles("   \n  ") == []
-    assert TaskService._extract_task_titles("call bank. Call bank.") == ["Call bank"]
+    assert VoiceBrainDumpService._extract_task_titles("   \n  ") == []
+    assert VoiceBrainDumpService._extract_task_titles("call bank. Call bank.") == [
+        "Call bank"
+    ]
 
 
 # --- transition branches ---------------------------------------------------
@@ -1489,3 +1534,332 @@ def test_next_order_key_increments_per_state(service: TaskService) -> None:
     assert second_inbox.order_key == 1
     first_next = _make_task(service, key="order-next-one", state="next")
     assert first_next.order_key == 0
+
+
+# --- allowed_external_provider_categories -----------------------------------
+
+
+def _start_and_upload(
+    voice_service: VoiceBrainDumpService, *, key_prefix: str, provider: str = "openai"
+) -> None:
+    operation = voice_service.start_brain_dump_operation(
+        BrainDumpOperationStartRequest.model_validate(
+            {
+                "consent": {
+                    "microphone": True,
+                    "external_processing_allowed": True,
+                    "provider": provider,
+                }
+            }
+        ),
+        owner_id=OWNER,
+        idempotency_key=f"{key_prefix}-start",
+    )
+    voice_service.upload_brain_dump_audio_chunk(
+        operation.id,
+        0,
+        b"audio",
+        owner_id=OWNER,
+        content_sha256=hashlib.sha256(b"audio").hexdigest(),
+        content_type="audio/x-brain-buddy-test-text",
+    )
+
+
+def test_unconfigured_allowlist_defaults_to_openai_for_unit_tests(
+    data_dir: Path,
+) -> None:
+    """An unconfigured workflow service keeps the test-only openai default."""
+
+    voice_service = _voice_service(data_dir)
+    assert voice_service.allowed_external_provider_categories == frozenset({"openai"})
+    _start_and_upload(voice_service, key_prefix="default-allowlist")
+
+
+def test_explicit_empty_allowlist_fails_closed_even_for_openai(
+    data_dir: Path,
+) -> None:
+    """An *explicitly* configured empty allowlist -- e.g. a deployment with
+    no external voice provider wired up -- must reject every provider name,
+    including "openai". This must not silently fall back to the unit-test
+    default the way a falsy-``or`` check would."""
+
+    voice_service = _voice_service(
+        data_dir, allowed_external_provider_categories=frozenset()
+    )
+    assert voice_service.allowed_external_provider_categories == frozenset()
+
+    with pytest.raises(ValidationFailure, match="AUDIO_UPLOAD_PROVIDER_CONSENT_REQUIRED"):
+        _start_and_upload(voice_service, key_prefix="empty-allowlist")
+
+
+# --- run_due_brain_dump_provider_runs lease claim time -----------------------
+
+
+def test_run_due_provider_runs_claims_a_fresh_lease_per_candidate(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Item 2 (runner lease): ``run_due_brain_dump_provider_runs`` visits up
+    to ``limit`` candidates in one call. The claim time for each candidate's
+    new lease must be read inside *that* candidate's own owner lock, not
+    once before the whole loop -- otherwise a slow earlier candidate lets
+    wall-clock time drift far past the loop-start timestamp, and every later
+    candidate's freshly claimed lease is stamped as though claimed long ago.
+
+    This seeds two owners' operations with a due ``accurate_stt`` run. The
+    first owner's provider call advances a controlled clock by 1000s to
+    simulate slow processing; the second owner's freshly claimed lease must
+    reflect that advanced clock, not the loop-start time.
+    """
+
+    from datetime import timedelta
+
+    from app.utils import time as time_module
+    from app.workflows.voice_brain_dump.domain import TranscriptHypothesis
+    from app.workflows.voice_brain_dump.providers import SttResult
+
+    start = time_module.utcnow()
+    clock = {"now": start}
+
+    def fake_utcnow() -> object:
+        return clock["now"]
+
+    monkeypatch.setattr("app.workflows.voice_brain_dump.service.utcnow", fake_utcnow)
+
+    class SlowFirstCallAccurateStt:
+        provider_name = "deterministic"
+        requires_external_processing = False
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def transcribe_sealed_audio(self, request):  # type: ignore[no-untyped-def]
+            self.calls += 1
+            if self.calls == 1:
+                # Simulate the first candidate's provider call taking a long
+                # time while it runs outside any owner lock.
+                clock["now"] = clock["now"] + timedelta(seconds=1000)
+            return SttResult(
+                role="accurate",
+                provider=self.provider_name,
+                input_hash="0" * 64,
+                segments=[
+                    TranscriptHypothesis(
+                        id=f"segment_{request.operation_id}_{self.calls}",
+                        sequence=1,
+                        start_ms=0,
+                        end_ms=500,
+                        text="Buy milk",
+                        stability="stable",
+                        provider_role="accurate",
+                    )
+                ],
+            )
+
+    repository = OperationRepository(data_dir)
+    task_service = TaskService(TaskRepository(data_dir))
+    lease_seconds = 30.0
+    voice_service = VoiceBrainDumpService(
+        repository,
+        task_port=InProcessTaskPort(task_service.create_native_inbox_task),
+        accurate_stt=SlowFirstCallAccurateStt(),
+        provider_run_lease_seconds=lease_seconds,
+    )
+
+    claim_snapshots: dict[str, list[BrainDumpProviderRunDocument]] = {
+        "owner_lease_a": [],
+        "owner_lease_b": [],
+    }
+    original_save = repository.save_brain_dump_operation
+
+    def spying_save(operation):  # type: ignore[no-untyped-def]
+        if operation.owner_id in claim_snapshots and operation.provider_runs:
+            last = operation.provider_runs[-1]
+            if last.status == "running":
+                claim_snapshots[operation.owner_id].append(last)
+        return original_save(operation)
+
+    monkeypatch.setattr(repository, "save_brain_dump_operation", spying_save)
+
+    def _seed_due_operation(owner_id: str) -> None:
+        operation = voice_service.start_brain_dump_operation(
+            BrainDumpOperationStartRequest.model_validate(
+                {"consent": {"microphone": True, "external_processing_allowed": False}}
+            ),
+            owner_id=owner_id,
+            idempotency_key=f"{owner_id}-start",
+        )
+        pending_run = BrainDumpProviderRunDocument(
+            id=f"{owner_id}-run",
+            role="accurate_stt",
+            status="pending",
+            input_hash="0" * 64,
+            checkpoint="sealed",
+            attempt=1,
+            recovery_count=0,
+            created_at=clock["now"],
+            updated_at=clock["now"],
+        )
+        seeded = operation.model_copy(
+            update={
+                "status": "accurate_transcribing",
+                "provider_runs": [pending_run],
+                "media_ref": f"media_{operation.id}",
+                "revision": operation.revision + 1,
+            }
+        )
+        repository.save_brain_dump_operation(seeded)
+
+    _seed_due_operation("owner_lease_a")
+    _seed_due_operation("owner_lease_b")
+
+    advanced = voice_service.run_due_brain_dump_provider_runs(limit=50)
+
+    # Both accurate-STT claims and their immediately queued dependent
+    # reconciler claims are advanced within the same bounded invocation.
+    assert advanced == 4
+    assert len(claim_snapshots["owner_lease_a"]) == 2
+    assert len(claim_snapshots["owner_lease_b"]) == 2
+
+    claim_a = claim_snapshots["owner_lease_a"][0]
+    claim_b = claim_snapshots["owner_lease_b"][0]
+
+    # The first candidate claims before the clock advances.
+    assert claim_a.lease_expires_at == start + timedelta(seconds=lease_seconds)
+
+    # The second candidate's lease must be stamped from the claim time taken
+    # inside ITS OWN lock -- after the first candidate's slow processing --
+    # not from the stale loop-start ``now``. A stale claim would wrongly
+    # produce ``start + lease_seconds`` here too, leaving the lease already
+    # expired (1000s in the past) the instant it is persisted.
+    assert claim_b.lease_expires_at == start + timedelta(seconds=1000 + lease_seconds)
+    assert claim_b.created_at == start + timedelta(seconds=1000)
+
+
+# --- reconciler cost admission ----------------------------------------------
+
+
+class _CountingReconciler:
+    provider_id = "deterministic"
+    requires_external_processing = False
+    max_cost_usd_per_operation = 0.5
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def reconcile(self, request):  # type: ignore[no-untyped-def]
+        from app.workflows.voice_brain_dump.providers import ReconcileResult
+
+        self.calls += 1
+        return ReconcileResult(input_hash="0" * 64, patches=[], estimated_cost_usd=0.1)
+
+
+def test_reconciler_admission_accounts_for_a_crashed_reconciler_reservation(
+    data_dir: Path,
+) -> None:
+    """Item 4 (costs): reconciler admission must include outstanding
+    unknown/crashed reserved provider costs -- e.g. a prior reconciler
+    attempt whose process died mid-call, leaving its reservation
+    unresolved -- exactly like accurate-STT admission already does.
+
+    Before this fix, ``_reconcile_accurate_checkpoint`` summed only
+    ``estimated``/``consumed`` cost across prior runs and silently dropped
+    any outstanding ``reserved_cost_usd`` still held by a "running" prior
+    run, letting a new reconciler attempt be wrongly admitted -- and the
+    provider wrongly called -- even though the operation's true committed
+    exposure (0.3 accurate spend + 0.5 crashed reservation + 0.5 worst-case
+    next call = 1.3) already exceeds its 1.0 cap.
+    """
+
+    repository = OperationRepository(data_dir)
+    task_service = TaskService(TaskRepository(data_dir))
+    reconciler = _CountingReconciler()
+    voice_service = VoiceBrainDumpService(
+        repository,
+        task_port=InProcessTaskPort(task_service.create_native_inbox_task),
+        text_reconciler=reconciler,
+        max_cumulative_cost_usd_per_operation=1.0,
+    )
+
+    operation = voice_service.start_brain_dump_operation(
+        BrainDumpOperationStartRequest.model_validate(
+            {"consent": {"microphone": True, "external_processing_allowed": False}}
+        ),
+        owner_id=OWNER,
+        idempotency_key="crashed-reservation-start",
+    )
+    now = utcnow()
+    accurate_segment = BrainDumpTranscriptSegmentDocument(
+        id="segment_accurate_crash",
+        sequence=1,
+        text="Buy milk",
+        stability="stable",
+        start_ms=0,
+        end_ms=500,
+        provider_role="accurate",
+        created_at=now,
+    )
+    accurate_run = BrainDumpProviderRunDocument(
+        id="run_accurate_succeeded",
+        role="accurate_stt",
+        status="succeeded",
+        input_hash="0" * 64,
+        checkpoint="accurate_transcribed",
+        attempt=1,
+        recovery_count=0,
+        estimated_cost_usd=0.3,
+        consumed_cost_usd=0.3,
+        reserved_cost_usd=0.0,
+        output_segment_ids=[accurate_segment.id],
+        created_at=now,
+        updated_at=now,
+    )
+    # A previous reconciler attempt that reserved budget and then never
+    # resolved -- e.g. the worker process died mid-call -- so it is still
+    # "running" with no estimated/consumed cost recorded.
+    crashed_reconciler_run = BrainDumpProviderRunDocument(
+        id="run_reconciler_crashed",
+        role="reconciler",
+        status="running",
+        input_hash="0" * 64,
+        checkpoint="accurate_transcribed",
+        attempt=1,
+        recovery_count=0,
+        estimated_cost_usd=0.0,
+        consumed_cost_usd=0.0,
+        reserved_cost_usd=0.5,
+        created_at=now,
+        updated_at=now,
+    )
+    pending_reconciler_run = BrainDumpProviderRunDocument(
+        id="run_reconciler_new",
+        role="reconciler",
+        status="pending",
+        input_hash="0" * 64,
+        checkpoint="accurate_transcribed",
+        attempt=1,
+        recovery_count=0,
+        reserved_cost_usd=0.5,
+        created_at=now,
+        updated_at=now,
+    )
+    seeded = operation.model_copy(
+        update={
+            "status": "reconciling",
+            "segments": [accurate_segment],
+            "provider_runs": [
+                accurate_run,
+                crashed_reconciler_run,
+                pending_reconciler_run,
+            ],
+            "revision": operation.revision + 1,
+        }
+    )
+    repository.save_brain_dump_operation(seeded)
+
+    advanced = voice_service.run_due_brain_dump_provider_runs(limit=50)
+
+    assert advanced == 1
+    assert reconciler.calls == 0, "provider must never be called once admission fails"
+    final = voice_service.get_brain_dump_operation(operation.id, owner_id=OWNER)
+    assert final.status == "terminal_error"
+    assert final.provider_runs[-1].error_code == "OPERATION_COST_BUDGET_EXCEEDED"
