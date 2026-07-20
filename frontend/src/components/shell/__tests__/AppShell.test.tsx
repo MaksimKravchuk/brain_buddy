@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ProjectResponse, TagResponse, TaskCounts } from "../../../api/taskTypes";
@@ -18,6 +18,12 @@ const tags: TagResponse[] = [
   { id: "tag-deep-work", name: "deep-work", state: "active", revision: 1, open_task_count: 1 }
 ];
 
+function RoutedTaskListContent() {
+  const { pathname } = useLocation();
+
+  return <div>{pathname === "/tasks/inbox" ? "Inbox task list content" : "Next task list content"}</div>;
+}
+
 function renderShell(overrides: Partial<Parameters<typeof AppShell>[0]> = {}) {
   const handlers = {
     onCreateProject: vi.fn(),
@@ -34,7 +40,7 @@ function renderShell(overrides: Partial<Parameters<typeof AppShell>[0]> = {}) {
           path="*"
           element={
             <AppShell counts={counts} projects={projects} tags={tags} activeState="next" {...handlers} {...overrides}>
-              <div>Task list content</div>
+              <RoutedTaskListContent />
             </AppShell>
           }
         />
@@ -57,20 +63,20 @@ describe("AppShell canonical sidebar", () => {
     expect(within(inbox).queryByText("0")).not.toBeInTheDocument();
   });
 
-  it("marks Weekly review and Think with CRT as Soon and swaps in the in-shell Weekly review placeholder", async () => {
+  it("returns to the Inbox route after Weekly review without retaining the in-shell placeholder", async () => {
     const user = userEvent.setup();
     renderShell();
 
     expect(screen.getByRole("button", { name: "Think with CRT — Coming soon" })).toBeDisabled();
-    expect(screen.getByText("Task list content")).toBeInTheDocument();
+    expect(screen.getByText("Next task list content")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Weekly review" }));
     expect(screen.getByRole("region", { name: "Weekly review placeholder" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Weekly review — coming soon" })).toBeInTheDocument();
-    expect(screen.queryByText("Task list content")).not.toBeInTheDocument();
+    expect(screen.queryByText("Next task list content")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("link", { name: "Inbox" }));
-    expect(screen.getByText("Task list content")).toBeInTheDocument();
+    expect(await screen.findByText("Inbox task list content")).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Weekly review placeholder" })).not.toBeInTheDocument();
   });
 

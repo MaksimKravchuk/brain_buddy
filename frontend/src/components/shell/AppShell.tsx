@@ -69,7 +69,7 @@ function SectionLabel({ children }: { children: ReactNode }): JSX.Element {
   return <div className="px-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">{children}</div>;
 }
 
-function SoonChip(): JSX.Element {
+export function SoonChip(): JSX.Element {
   return (
     <span aria-hidden className="rounded-full border border-slate-200 bg-surface-sunken px-[7px] py-[2px] text-[10px] font-semibold text-slate-600">
       Soon
