@@ -328,7 +328,9 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   }, [dateView, projectId, projects, state, tagId, tags]);
 
   const taskNoun = counts[state ?? "next"] === 1 ? "task" : "tasks";
-  const subtitle = state ? `${counts[state]} ${taskNoun}` : `${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`;
+  const subtitle = state
+    ? `${counts[state]} ${taskNoun}`
+    : `${activeProjectionTasks.length} ${activeProjectionTasks.length === 1 ? "task" : "tasks"}`;
 
   const hasFrameError = taskQuery.isError || projectsQuery.isError || tagsQuery.isError;
 
