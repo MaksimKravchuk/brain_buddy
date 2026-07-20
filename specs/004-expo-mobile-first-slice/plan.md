@@ -340,7 +340,9 @@ ADR-0002 remains the server authority. Before generating or implementing the mob
 adapter, extend the existing operation payload/service with:
 
 - monotonic `proposal_revision`, persisted immutable `ProposalBatch` records, deterministic
-  action IDs/receipts, and active/committed batch pointers;
+  action IDs, complete action review snapshots (target, before/after, source cue,
+  confidence/warnings, destination), append-only immutable execution receipts, and
+  active/committed batch pointers;
 - canonical `POST .../proposals/{proposal_id}/patches`, `POST .../proposal-batches`, and
   `POST .../confirm` routes;
 - current consent policy query and append-only grant/withdraw decisions bound to policy
@@ -352,14 +354,23 @@ supersedes a frozen batch. Freeze snapshots selected active conflict-free title-
 Confirm rejects stale/superseded batches and persists each Inbox Task with the child receipt
 `H(operation_id,batch_id,action_id)`. The outer request key remains conflict-checked, but
 child receipts are the exact-once boundary across restart, partial failure, or a new outer
-request after status reconciliation.
+request after status reconciliation. Frozen actions never acquire result fields; the response
+folds append-only receipts into a separate per-action result projection.
 
-Stored payload migration is additive. Payloads missing canonical fields derive a stable
-initial proposal revision from accepted patch history, default empty batch/receipt lists, and
-migrate on first canonical mutation/freeze; completed/cancelled records remain immutable.
+Stored payload migration is additive and follows ADR-0002's legacy safety contract.
+Completed/cancelled v1 records remain immutable and are never replayed. The first v2 load of an
+active v1 record imports it once as `legacy_preview_only`, preserving operation, segment, and
+proposal IDs, converting `user_edited=true` to title locks and `deleted=true` to remove
+tombstones, and creating deterministic synthetic patches. It persists the import marker under
+owner serialization, exposes `provisional_only`, and sets
+`accurate_reconciliation_available=false` because no original audio exists. The user must
+explicitly accept provisional review through the canonical `review-provisional` command before
+freeze and separately confirm the immutable batch; retry and aliases cannot claim an accurate
+transcript or bypass that gate.
 During one bounded web overlap, direct proposal `PATCH` delegates to the same patch service and
 legacy `/commit` atomically freezes the current conflict-free projection before delegating to
-confirm. Mark both deprecated and exclude their operation IDs from mobile generation. Test
+confirm only after the provisional-review gate is satisfied. Mark both deprecated and exclude
+their operation IDs from mobile generation. Test
 canonical/alias races and remove aliases only after the web client and active stored operations
 no longer depend on them.
 

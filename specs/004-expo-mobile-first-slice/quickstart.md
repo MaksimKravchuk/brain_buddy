@@ -95,13 +95,18 @@ Required evidence:
 2. freeze persists one immutable selected proposal revision and stable ordered action IDs;
 3. confirm uses deterministic `H(operation_id,batch_id,action_id)` receipts and process death,
    partial failure, replay, or a new outer key cannot duplicate a Task;
-4. legacy stored payloads migrate deterministically, terminal payloads remain immutable, and
-   deprecated direct `PATCH`/`commit` adapters delegate to the same records during overlap;
-5. canonical/alias races create exactly one Task per action and aliases are excluded from the
+4. completed/cancelled v1 payloads remain immutable, while an active v1 payload imports once
+   as `legacy_preview_only` with preserved IDs/locks/tombstones, deterministic synthetic
+   patches, unavailable accurate retry, and a visible `provisional_only` warning;
+5. freeze remains blocked until explicit provisional review, confirmation remains separate,
+   and the immutable action snapshot keeps all review fields while results come only from
+   append-only receipts;
+6. deprecated direct `PATCH`/`commit` adapters delegate without bypassing that gate,
+   canonical/alias races create exactly one Task per action, and aliases are excluded from the
    generated mobile adapter;
-6. restart, consent expiry/withdrawal/regrant, policy/provider-category change, and upload/
+7. restart, consent expiry/withdrawal/regrant, policy/provider-category change, and upload/
    seal/retry/provider checks fail closed and schedule uncommitted cleanup;
-7. projection exposes raw-audio state/`retained_until`, and idempotent delete-now survives
+8. projection exposes raw-audio state/`retained_until`, and idempotent delete-now survives
    restart/owner checks while preserving Tasks, receipts, and non-audio provenance.
 
 ## 4. Mobile static gates
