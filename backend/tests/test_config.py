@@ -164,6 +164,40 @@ def test_compose_e2e_runs_backend_in_test_environment() -> None:
     assert "BRAIN_BUDDY_ENV=test" in runner.read_text(encoding="utf-8")
 
 
+def test_compose_e2e_configures_a_genuinely_allowlisted_openai_category(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Compose Playwright harness names ``openai`` in its consent flows
+    (matching the frontend's only supported provider category). Reproduce the
+    Compose backend's configuration -- ``BRAIN_BUDDY_ENV=test`` plus the
+    reconciler provider the runner script sets -- and confirm the container
+    genuinely allowlists "openai" for consent while the reconciler adapter
+    stays the deterministic, no-network stand-in (never a real OpenAI call).
+    """
+
+    from app.container import build_container
+    from app.workflows.voice_brain_dump.providers import DeterministicTextReconciler
+
+    runner = Path(__file__).parents[2] / "scripts" / "run_playwright_e2e.sh"
+    assert "BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER=openai" in runner.read_text(
+        encoding="utf-8"
+    )
+
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "test")
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER", "openai")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    container = build_container(get_config())
+
+    assert container.task_service.allowed_external_provider_categories == frozenset(
+        {"openai"}
+    )
+    assert isinstance(
+        container.task_service.text_reconciler, DeterministicTextReconciler
+    )
+
+
 def test_build_container_uses_openai_reconciler_outside_test(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
