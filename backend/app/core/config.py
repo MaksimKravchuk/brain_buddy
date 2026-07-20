@@ -125,6 +125,7 @@ class VoiceSettings(BaseModel):
     fast_stt: VoiceProviderSettings = Field(default_factory=VoiceProviderSettings)
     reconciler: VoiceProviderSettings = Field(default_factory=VoiceProviderSettings)
     retention: VoiceRetentionSettings = Field(default_factory=VoiceRetentionSettings)
+    max_operation_recoveries: int = Field(default=2, ge=0, le=5)
 
 
 class AppConfig(BaseModel):
@@ -195,14 +196,9 @@ def _build_config() -> AppConfig:
             if os.getenv("OPENAI_API_KEY")
             else "disabled"
         )
-    if (
-        environment is AppEnvironment.PRODUCTION
-        and accurate_provider == "deterministic"
-        and os.getenv("BRAINBUDDY_ALLOW_DETERMINISTIC_STT") != "1"
-    ):
+    if environment is AppEnvironment.PRODUCTION and accurate_provider == "deterministic":
         raise ValueError(
-            "Production cannot use deterministic accurate STT without "
-            "BRAINBUDDY_ALLOW_DETERMINISTIC_STT=1."
+            "Production cannot use deterministic accurate STT."
         )
 
     retry_backoff = tuple(
@@ -281,6 +277,9 @@ def _build_config() -> AppConfig:
                     "BRAIN_BUDDY_VOICE_WORKING_ARTIFACT_RETENTION_SECONDS", "604800"
                 )
             ),
+        ),
+        max_operation_recoveries=int(
+            os.getenv("BRAIN_BUDDY_VOICE_MAX_OPERATION_RECOVERIES", "2")
         ),
     )
 

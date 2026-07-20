@@ -46,6 +46,9 @@ def create_app() -> FastAPI:
     app.state.config = config
     app.state.container = build_container(config)
     _maybe_seed_admin(app.state.container)
+    purged_raw_audio = app.state.container.task_service.purge_expired_raw_audio()
+    if purged_raw_audio:
+        logger.info("Purged %s expired voice raw-audio operation(s)", purged_raw_audio)
 
     app.add_middleware(CorrelationIdMiddleware)
     register_exception_handlers(app)

@@ -66,6 +66,8 @@ class Container:
 def _build_accurate_stt(config: AppConfig) -> AccurateSttPort:
     settings = config.voice.accurate_stt
     if settings.provider == "deterministic":
+        if config.environment is not AppEnvironment.TEST:
+            return DisabledAccurateStt("STT_DETERMINISTIC_PROVIDER_TEST_ONLY")
         return DeterministicAccurateStt(allow_text_fixture_audio=True)
     if settings.provider == "openai":
         api_key = os.getenv(settings.api_key_env)
@@ -137,6 +139,7 @@ def build_container(config: AppConfig) -> Container:
         accurate_stt=_build_accurate_stt(config),
         text_reconciler=_build_text_reconciler(config),
         raw_audio_retention=timedelta(seconds=config.voice.retention.raw_audio_seconds),
+        max_operation_recoveries=config.voice.max_operation_recoveries,
     )
     auth_service = AuthService(
         user_repo=user_repo,
