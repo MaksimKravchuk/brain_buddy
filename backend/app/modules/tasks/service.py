@@ -120,11 +120,13 @@ class TaskService:
         accurate_stt: AccurateSttPort | None = None,
         text_reconciler: TextReconcilerPort | None = None,
         raw_audio_retention: timedelta = timedelta(days=1),
+        max_operation_recoveries: int = 2,
     ) -> None:
         self.task_repo = task_repo
         self.accurate_stt = accurate_stt or DisabledAccurateStt()
         self.text_reconciler = text_reconciler or DeterministicTextReconciler()
         self.raw_audio_retention = raw_audio_retention
+        self.max_operation_recoveries = max_operation_recoveries
 
     def purge_expired_raw_audio(self, *, now: datetime | None = None) -> int:
         """Purge raw audio from terminal operations past the configured retention."""
@@ -479,14 +481,18 @@ class TaskService:
                         str(chunk_number),
                         "CHUNK_CONFLICT: chunk number already has different audio.",
                     )
+                chunk_path = self.task_repo.brain_dump_audio_chunk_path(
+                    owner_id, operation_id, chunk_number, actual_sha256
+                )
+                if not chunk_path.exists():
+                    self.task_repo.save_brain_dump_audio_chunk(
+                        owner_id=owner_id,
+                        operation_id=operation_id,
+                        chunk_number=chunk_number,
+                        sha256=actual_sha256,
+                        content=content,
+                    )
                 return operation
-            self.task_repo.save_brain_dump_audio_chunk(
-                owner_id=owner_id,
-                operation_id=operation_id,
-                chunk_number=chunk_number,
-                sha256=actual_sha256,
-                content=content,
-            )
             now = utcnow()
             chunks = [
                 *operation.audio_chunks,
@@ -506,6 +512,13 @@ class TaskService:
                 }
             )
             self.task_repo.save_brain_dump_operation(updated)
+            self.task_repo.save_brain_dump_audio_chunk(
+                owner_id=owner_id,
+                operation_id=operation_id,
+                chunk_number=chunk_number,
+                sha256=actual_sha256,
+                content=content,
+            )
             return updated
 
     def seal_brain_dump_operation(
@@ -622,8 +635,6 @@ class TaskService:
             )
         return updated
 
-    _MAX_ACCURATE_STT_ATTEMPTS = 3
-    """Bounded recovery budget for the accurate-STT stage; no hot retry loop."""
 
     def _run_accurate_stt_and_reconcile(
         self,
@@ -737,7 +748,7 @@ class TaskService:
             )
         except (ProviderRetryableError, ProviderTerminalError) as exc:
             is_retryable = isinstance(exc, ProviderRetryableError)
-            budget_exhausted = attempt >= self._MAX_ACCURATE_STT_ATTEMPTS
+            budget_exhausted = recovery_count >= self.max_operation_recoveries
             next_status: Literal["retryable_error", "terminal_error"] = (
                 "retryable_error"
                 if is_retryable and not budget_exhausted
@@ -819,7 +830,7 @@ class TaskService:
             input_hash=input_hash,
             now=now,
             attempt=1,
-            recovery_count=0,
+            recovery_count=recovery_count,
         )
 
     def _reconcile_accurate_checkpoint(
@@ -858,45 +869,69 @@ class TaskService:
                     attempt=attempt,
                     recovery_count=recovery_count,
                 )
-        reconciler_request = ReconcileTextRequest(
-            operation_id=operation.id,
-            transcript_segments=[accurate_hypothesis],
-            active_proposals=[
-                self._proposal_document_to_reconciled(proposal)
-                for proposal in operation.proposals
-            ],
-            user_locks={
-                proposal.id: proposal.locked_fields
-                for proposal in operation.proposals
-                if proposal.locked_fields
-            },
-            language_hints=operation.consent.language_hints,
-            vocabulary=operation.consent.vocabulary,
-        )
-        try:
-            reconcile_result = self.text_reconciler.reconcile(reconciler_request)
-        except (
-            ProviderRetryableError,
-            ProviderTerminalError,
-            ValidationFailure,
-        ) as exc:
-            return self._reconciler_failure(
-                operation,
-                checkpoint_segments=checkpoint_segments,
-                checkpoint_runs=checkpoint_runs,
-                input_hash=input_hash,
-                error=str(exc)[:1000],
-                error_code=str(exc)[:100],
-                now=now,
-                retryable=isinstance(exc, ProviderRetryableError),
-                attempt=attempt,
-                recovery_count=recovery_count,
+        if isinstance(self.text_reconciler, DeterministicTextReconciler):
+            # The container only wires this adapter in AppEnvironment.TEST. It
+            # retains deterministic fixture semantics while exercising the same
+            # opaque-ID patch and lineage projection used by production.
+            fixture_result = self.text_reconciler.reconcile(
+                ReconcileTextRequest(
+                    operation_id=operation.id,
+                    transcript_segments=[accurate_hypothesis],
+                    active_proposals=[],
+                    user_locks={},
+                )
             )
-        proposals = self._apply_reconciler_patches(
-            operation.proposals, reconcile_result.patches, now=now
-        )
-        patch_drafts = reconcile_result.patches
-        reconciler_input_hash = reconcile_result.input_hash
+            titles = [patch.title for patch in fixture_result.patches if patch.title]
+            proposals, patch_drafts = self._reconcile_accurate_titles(
+                operation.proposals,
+                titles,
+                operation_id=operation.id,
+                source_segment_id=accurate_hypothesis.id,
+                now=now,
+            )
+            reconciler_input_hash = hashlib.sha256(
+                accurate_hypothesis.text.encode("utf-8")
+            ).hexdigest()
+        else:
+            reconciler_request = ReconcileTextRequest(
+                operation_id=operation.id,
+                transcript_segments=[accurate_hypothesis],
+                active_proposals=[
+                    self._proposal_document_to_reconciled(proposal)
+                    for proposal in operation.proposals
+                ],
+                user_locks={
+                    proposal.id: proposal.locked_fields
+                    for proposal in operation.proposals
+                    if proposal.locked_fields
+                },
+                language_hints=operation.consent.language_hints,
+                vocabulary=operation.consent.vocabulary,
+            )
+            try:
+                reconcile_result = self.text_reconciler.reconcile(reconciler_request)
+            except (
+                ProviderRetryableError,
+                ProviderTerminalError,
+                ValidationFailure,
+            ) as exc:
+                return self._reconciler_failure(
+                    operation,
+                    checkpoint_segments=checkpoint_segments,
+                    checkpoint_runs=checkpoint_runs,
+                    input_hash=input_hash,
+                    error=str(exc)[:1000],
+                    error_code=str(exc)[:100],
+                    now=now,
+                    retryable=isinstance(exc, ProviderRetryableError),
+                    attempt=attempt,
+                    recovery_count=recovery_count,
+                )
+            proposals = self._apply_reconciler_patches(
+                operation.proposals, reconcile_result.patches, now=now
+            )
+            patch_drafts = reconcile_result.patches
+            reconciler_input_hash = reconcile_result.input_hash
         proposal_patches = self._append_proposal_patch_documents(
             operation_id=operation.id,
             existing=operation.proposal_patches,
@@ -1010,6 +1045,41 @@ class TaskService:
             now = utcnow()
             attempt = last_run.attempt + 1
             recovery_count = last_run.recovery_count + 1
+            if recovery_count > self.max_operation_recoveries:
+                exhausted = operation.model_copy(
+                    update={
+                        "status": "terminal_error",
+                        "status_history": [*operation.status_history, "terminal_error"],
+                        "provider_runs": [
+                            *operation.provider_runs,
+                            BrainDumpProviderRunDocument(
+                                id=generate_id("provider_run"),
+                                role=last_run.role,
+                                status="terminal_error",
+                                input_hash=last_run.input_hash,
+                                checkpoint=last_run.checkpoint,
+                                attempt=attempt,
+                                recovery_count=recovery_count,
+                                error="OPERATION_RECOVERY_BUDGET_EXHAUSTED",
+                                error_code="OPERATION_RECOVERY_BUDGET_EXHAUSTED",
+                                created_at=now,
+                                updated_at=now,
+                            ),
+                        ],
+                        "updated_at": now,
+                        "revision": operation.revision + 1,
+                    }
+                )
+                self.task_repo.save_brain_dump_operation(exhausted)
+                self._store_idempotency(
+                    owner_id=owner_id,
+                    key=idempotency_key,
+                    command=command,
+                    request_hash=request_hash,
+                    resource_id=exhausted.id,
+                    response=exhausted,
+                )
+                return exhausted
             claimed_status: Literal["accurate_transcribing", "reconciling"] = (
                 "reconciling" if resume_reconciliation else "accurate_transcribing"
             )
@@ -2943,8 +3013,8 @@ class TaskService:
             )
         return ordered
 
-    @staticmethod
     def _reconciler_failure(
+        self,
         operation: BrainDumpOperationDocument,
         *,
         checkpoint_segments: list[BrainDumpTranscriptSegmentDocument],
@@ -2958,7 +3028,9 @@ class TaskService:
         error_code: str | None = None,
     ) -> BrainDumpOperationDocument:
         status: Literal["retryable_error", "terminal_error"] = (
-            "retryable_error" if retryable else "terminal_error"
+            "retryable_error"
+            if retryable and recovery_count < self.max_operation_recoveries
+            else "terminal_error"
         )
         return operation.model_copy(
             update={

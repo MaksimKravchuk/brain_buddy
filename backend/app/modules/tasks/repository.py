@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import shutil
 import sqlite3
 import threading
 import unicodedata
@@ -12,6 +14,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import ClassVar, TypeVar
+from uuid import uuid4
 
 from pydantic import BaseModel
 
@@ -314,6 +317,9 @@ class TaskRepository(BaseRepository):
             "brain-dump-media", owner_id, operation_id, f"{chunk_number:06d}-{sha256}.bin"
         )
 
+    def brain_dump_audio_operation_path(self, owner_id: str, operation_id: str) -> Path:
+        return self.resolve("brain-dump-media", owner_id, operation_id)
+
     def project_path(self, owner_id: str, project_id: str) -> Path:
         return self.resolve("projects", owner_id, f"{project_id}.json")
 
@@ -489,7 +495,12 @@ class TaskRepository(BaseRepository):
     ) -> None:
         path = self.brain_dump_audio_chunk_path(owner_id, operation_id, chunk_number, sha256)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(content)
+        staging_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+        try:
+            staging_path.write_bytes(content)
+            os.replace(staging_path, path)
+        finally:
+            staging_path.unlink(missing_ok=True)
 
     def load_brain_dump_audio_chunks(
         self, *, owner_id: str, operation_id: str, chunks: list[tuple[int, str]]
@@ -505,10 +516,10 @@ class TaskRepository(BaseRepository):
     def delete_brain_dump_audio_chunks(
         self, *, owner_id: str, operation_id: str, chunks: list[tuple[int, str]]
     ) -> None:
-        for chunk_number, sha256 in chunks:
-            self.brain_dump_audio_chunk_path(
-                owner_id, operation_id, chunk_number, sha256
-            ).unlink(missing_ok=True)
+        del chunks
+        shutil.rmtree(
+            self.brain_dump_audio_operation_path(owner_id, operation_id), ignore_errors=True
+        )
 
     def list_expired_raw_audio_operations(
         self, *, before: datetime

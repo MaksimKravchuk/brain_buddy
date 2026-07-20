@@ -82,16 +82,26 @@ def test_voice_stt_configuration_is_bounded_and_resolves_credentials(
     assert "not-returned-from-config" not in config.model_dump_json()
 
 
-def test_production_rejects_deterministic_stt_without_explicit_escape_hatch(
+def test_production_rejects_deterministic_stt_even_with_legacy_escape_hatch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("BRAIN_BUDDY_ENV", "production")
     monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_PROVIDER", "deterministic")
-    monkeypatch.delenv("BRAINBUDDY_ALLOW_DETERMINISTIC_STT", raising=False)
+    monkeypatch.setenv("BRAINBUDDY_ALLOW_DETERMINISTIC_STT", "1")
 
     with pytest.raises(ValueError, match="deterministic accurate STT"):
         get_config()
+
+
+def test_voice_operation_recovery_budget_is_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "test")
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_MAX_OPERATION_RECOVERIES", "3")
+
+    assert get_config().voice.max_operation_recoveries == 3
 
 
 def test_test_environment_uses_explicit_ci_fake_while_production_defaults_disabled(
