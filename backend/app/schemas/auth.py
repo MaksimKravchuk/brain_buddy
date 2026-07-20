@@ -73,10 +73,20 @@ class MeResponse(StrictBaseModel):
     email: str = Field(description="Normalized email address.")
 
 
+class SessionCredentialResponse(StrictBaseModel):
+    """One-time mobile transport for an existing server-owned Session."""
+
+    session_token: str = Field(repr=False, description="Opaque session credential.")
+    token_type: str = Field(default="Bearer", pattern="^Bearer$")
+    expires_at: datetime
+    user: MeResponse
+
+
 __all__ = [
     "Invite",
     "LoginRequest",
     "MeResponse",
+    "SessionCredentialResponse",
     "Session",
     "SignupRequest",
     "User",

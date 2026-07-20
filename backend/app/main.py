@@ -96,7 +96,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="Brain Buddy API",
-        version=config.data.schema_version,
+        version=config.api.semantic_version,
         openapi_url=f"{config.api_prefix}/openapi.json",
         docs_url=f"{config.api_prefix}/docs",
         redoc_url=f"{config.api_prefix}/redoc",

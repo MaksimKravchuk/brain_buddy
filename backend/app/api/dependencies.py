@@ -75,6 +75,28 @@ def get_voice_brain_dump_service(
     return container.voice_brain_dump_service
 
 
+def get_session_token(request: Request, config: AppConfig) -> str | None:
+    """Return one unambiguous opaque Session credential from cookie or Bearer auth."""
+
+    cookie_token = request.cookies.get(config.session.cookie_name)
+    authorization = request.headers.get("Authorization")
+    if cookie_token and authorization:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide either a session cookie or Bearer credential, not both.",
+        )
+    if authorization is None:
+        return cookie_token
+
+    scheme, separator, token = authorization.partition(" ")
+    if scheme != "Bearer" or not separator or not token or token.strip() != token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required.",
+        )
+    return token
+
+
 def get_current_user(
     request: Request,
     auth_service: AuthService = Depends(get_auth_service),
@@ -85,7 +107,7 @@ def get_current_user(
     Raises 401 if the cookie is missing, unknown, or expired.
     """
 
-    raw_token = request.cookies.get(config.session.cookie_name)
+    raw_token = get_session_token(request, config)
     user = auth_service.get_user_for_token(raw_token)
     if user is None:
         raise HTTPException(

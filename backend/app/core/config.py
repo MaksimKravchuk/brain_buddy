@@ -86,6 +86,14 @@ class DataSettings(BaseModel):
         return self.root_dir / SCHEMA_VERSION_FILENAME
 
 
+class ApiSettings(BaseModel):
+    """Public HTTP API version, separate from persisted data schema version."""
+
+    semantic_version: str = Field(default="1.0.0")
+
+    model_config = ConfigDict(frozen=True)
+
+
 class VoiceProviderSettings(BaseModel):
     """Bounded configuration for one voice-processing provider role."""
 
@@ -154,14 +162,13 @@ class VoiceSettings(BaseModel):
     max_operation_recoveries: int = Field(default=2, ge=0, le=5)
     max_cumulative_cost_usd_per_operation: float = Field(default=1.00, gt=0, le=200)
     lease_recovery_margin_seconds: float = Field(default=30.0, ge=0, le=600)
-
-
 class AppConfig(BaseModel):
     """Top-level Brain Buddy application configuration."""
 
     environment: AppEnvironment = Field(default=AppEnvironment.DEVELOPMENT)
     api_prefix: str = Field(default="/api")
     data: DataSettings = Field(default_factory=DataSettings)
+    api: ApiSettings = Field(default_factory=ApiSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     session: SessionSettings = Field(default_factory=SessionSettings)
     password_policy: PasswordPolicy = Field(default_factory=PasswordPolicy)
@@ -211,6 +218,7 @@ def _build_config() -> AppConfig:
 
     logging_config = LoggingSettings(level=log_level)
     data_config = DataSettings(root_dir=data_dir, schema_version=schema_version)
+    api_config = ApiSettings()
     session_config = SessionSettings(
         secure=environment is AppEnvironment.PRODUCTION,
     )
@@ -354,6 +362,7 @@ def _build_config() -> AppConfig:
         environment=environment,
         api_prefix=api_prefix,
         data=data_config,
+        api=api_config,
         logging=logging_config,
         session=session_config,
         password_policy=password_policy,
@@ -370,6 +379,7 @@ def get_config() -> AppConfig:
 
 __all__ = [
     "AppConfig",
+    "ApiSettings",
     "AppEnvironment",
     "PasswordPolicy",
     "SessionSettings",

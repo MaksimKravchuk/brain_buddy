@@ -5,13 +5,19 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from app.api.contracts import error_responses
-from app.api.dependencies import get_auth_service, get_config_dep, get_current_user
+from app.api.dependencies import (
+    get_auth_service,
+    get_config_dep,
+    get_current_user,
+    get_session_token,
+)
 from app.core.config import AppConfig
 from app.core.rate_limit import login_rate_limiter
 from app.exceptions import ConflictError
 from app.schemas.auth import (
     LoginRequest,
     MeResponse,
+    SessionCredentialResponse,
     SignupRequest,
     User,
 )
@@ -107,13 +113,50 @@ def login(
     return MeResponse(id=user.id, email=user.email)
 
 
+@router.post(
+    "/mobile/sessions",
+    response_model=SessionCredentialResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses=error_responses(401, 422, 429, 503),
+)
+def create_mobile_session(
+    payload: LoginRequest,
+    request: Request,
+    response: Response,
+    auth_service: AuthService = Depends(get_auth_service),
+) -> SessionCredentialResponse:
+    """Issue the existing opaque server Session once for native secure storage."""
+
+    if not login_rate_limiter.check(_client_ip(request)):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts. Try again in a few minutes.",
+        )
+    try:
+        user, raw_token, session = auth_service.login_with_session(
+            email=payload.email, password=payload.password
+        )
+    except InvalidCredentialsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)
+        ) from exc
+
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return SessionCredentialResponse(
+        session_token=raw_token,
+        expires_at=session.expires_at,
+        user=MeResponse(id=user.id, email=user.email),
+    )
+
+
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(
     request: Request,
     auth_service: AuthService = Depends(get_auth_service),
     config: AppConfig = Depends(get_config_dep),
 ) -> Response:
-    raw_token = request.cookies.get(config.session.cookie_name)
+    raw_token = get_session_token(request, config)
     auth_service.logout(raw_token)
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     _clear_session_cookie(response, config)
