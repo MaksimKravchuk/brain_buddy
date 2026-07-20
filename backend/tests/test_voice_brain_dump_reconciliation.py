@@ -206,6 +206,82 @@ def test_openai_reconciler_rejects_invalid_or_untrusted_operations(
 
 
 @pytest.mark.parametrize(
+    ("operation", "message"),
+    [
+        (
+            {
+                "operation": "add",
+                "title": "Do a task",
+                "source_segment_ids": ["segment_accurate"],
+                "predecessor_ids": ["proposal_existing"],
+            },
+            "Add cannot carry predecessors",
+        ),
+        (
+            {
+                "operation": "split",
+                "title": "Do a task",
+                "source_segment_ids": ["segment_accurate"],
+            },
+            "Split requires exactly one predecessor",
+        ),
+        (
+            {
+                "operation": "merge",
+                "title": "Do a task",
+                "source_segment_ids": ["segment_accurate"],
+                "predecessor_ids": ["proposal_existing"],
+            },
+            "Merge requires at least two predecessors",
+        ),
+        (
+            {
+                "operation": "supersede",
+                "title": "Do a task",
+                "source_segment_ids": ["segment_accurate"],
+            },
+            "Supersede requires exactly one predecessor",
+        ),
+    ],
+)
+def test_openai_reconciler_rejects_structurally_invalid_grounded_transformations(
+    operation: dict[str, object], message: str
+) -> None:
+    """Grounded titles ensure each transformation check, not the invention guard, rejects."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    reconciler = OpenAITextReconciler(
+        api_key="test-key", complete=lambda _payload: {"operations": [operation]}
+    )
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text="Do a task",
+        stability="stable",
+        provider_role="accurate",
+    )
+    existing = ReconciledProposal(
+        id="proposal_existing",
+        title="Existing",
+        source_segment_ids=["segment_fast"],
+        status="provisional",
+    )
+
+    with pytest.raises(ValidationFailure, match=message):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id="operation_1",
+                transcript_segments=[segment],
+                active_proposals=[existing],
+                user_locks={},
+            )
+        )
+
+
+@pytest.mark.parametrize(
     "operation",
     [
         {

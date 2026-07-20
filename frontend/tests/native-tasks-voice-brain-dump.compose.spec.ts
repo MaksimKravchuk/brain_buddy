@@ -578,6 +578,12 @@ test("Voice Brain Dump resume and commit idempotency do not create duplicate Inb
     await expect(page.getByRole("heading", { name: "Review 2 tasks" })).toBeVisible();
     await page.getByRole("button", { name: "Delete Untranscribed sealed audio" }).click();
     await expect(page.getByRole("heading", { name: "Review 1 task" })).toBeVisible();
+    // The surviving browser preview was not reconciled from the separate
+    // sealed-audio fixture. A user edit is the explicit review that makes it
+    // eligible for canonical-task commit.
+    await page.getByLabel("Task title #1").fill("Write weekly update for the team");
+    await page.keyboard.press("Tab");
+    await expect(page.getByText("Edited")).toBeVisible();
     await page.getByRole("button", { name: "Save 1 to inbox" }).click();
     await expect(page.getByRole("heading", { name: "Saved 1 task to Inbox" })).toBeVisible();
     const completed = await apiGet<BrainDumpOperation>(page, `/api/brain-dump-operations/${operationId}`);
@@ -591,9 +597,13 @@ test("Voice Brain Dump resume and commit idempotency do not create duplicate Inb
     assertStringArrayEquals(retried.committed_task_ids, completed.committed_task_ids, "Idempotent commit task ids");
     await relogin(page, account.email);
     await page.goto("/tasks/inbox");
-    await expect(page.getByText("Write weekly update")).toBeVisible();
+    await expect(page.getByText("Write weekly update for the team")).toBeVisible();
     const inbox = await listInboxTasks(page);
-    assertStringArrayEquals(inbox.map((task) => task.title), ["Write weekly update"], "Recovered Inbox titles");
+    assertStringArrayEquals(
+      inbox.map((task) => task.title),
+      ["Write weekly update for the team"],
+      "Recovered Inbox titles"
+    );
   });
 });
 
@@ -717,6 +727,16 @@ test("owner isolation hides tasks, brain dump operations, drafts and committed l
     { expected_revision: sealed.revision },
     unique("owner-a-commit")
   );
+  assertCondition(
+    committed.committed_task_ids.length > 0,
+    "owner A commit must return at least one committed task ID"
+  );
+  const committedTaskId = committed.committed_task_ids[0];
+  const committedTask = await apiGet<Task>(page, `/api/tasks/${committedTaskId}`);
+  assertCondition(
+    committedTask.title.length > 0,
+    "owner A committed task must have a non-empty title"
+  );
 
   await test.step("second owner cannot fetch first owner's task or brain dump operation", async () => {
     const secondPage = await page.context().newPage();
@@ -725,14 +745,14 @@ test("owner isolation hides tasks, brain dump operations, drafts and committed l
     assertCondition(taskResponse.status() === 404, `second owner task fetch should 404, got ${taskResponse.status()}`);
     const operationResponse = await secondPage.request.get(`/api/brain-dump-operations/${operation.id}`);
     assertCondition(operationResponse.status() === 404, `second owner operation fetch should 404, got ${operationResponse.status()}`);
-    const committedTaskResponse = await secondPage.request.get(`/api/tasks/${committed.committed_task_ids[0]}`);
+    const committedTaskResponse = await secondPage.request.get(`/api/tasks/${committedTaskId}`);
     assertCondition(
       committedTaskResponse.status() === 404,
       `second owner committed task fetch should 404, got ${committedTaskResponse.status()}`
     );
     await secondPage.goto("/tasks/inbox");
     await expect(secondPage.getByText("Owner A private task")).toHaveCount(0);
-    await expect(secondPage.getByText("Owner a private draft")).toHaveCount(0);
+    await expect(secondPage.getByText(committedTask.title)).toHaveCount(0);
     await secondPage.close();
   });
 });

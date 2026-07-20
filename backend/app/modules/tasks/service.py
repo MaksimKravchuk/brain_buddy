@@ -918,7 +918,7 @@ class TaskService:
                             error=str(exc)[:1000],
                             error_code=str(exc)[:100],
                             provider=self.accurate_stt.provider_name,
-                            estimated_cost_usd=getattr(exc, "estimated_cost_usd", 0.0),
+                            estimated_cost_usd=exc.estimated_cost_usd,
                             created_at=now,
                             updated_at=now,
                         ),
@@ -1088,7 +1088,7 @@ class TaskService:
                     retryable=isinstance(exc, ProviderRetryableError),
                     attempt=attempt,
                     recovery_count=recovery_count,
-                    estimated_cost_usd=getattr(exc, "estimated_cost_usd", 0.0),
+                    estimated_cost_usd=exc.estimated_cost_usd,
                 )
             proposals = self._apply_reconciler_patches(
                 operation.proposals, reconcile_result.patches, now=now

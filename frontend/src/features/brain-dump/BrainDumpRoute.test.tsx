@@ -677,7 +677,7 @@ describe("BrainDumpRoute", () => {
   });
 
   it("does not resume a paused operation when browser speech recognition becomes unavailable", async () => {
-    const paused = operation({ id: "brain_dump_existing", status: "paused", revision: 3 });
+    const paused = consentedOperation({ id: "brain_dump_existing", status: "paused", revision: 3 });
     vi.stubGlobal("SpeechRecognition", undefined);
     vi.stubGlobal("webkitSpeechRecognition", undefined);
     fetchMock.mockImplementation((input, init) => {
@@ -696,7 +696,7 @@ describe("BrainDumpRoute", () => {
   });
 
   it("does not resume the backend when microphone permission is rejected", async () => {
-    const paused = operation({ id: "brain_dump_existing", status: "paused", revision: 3 });
+    const paused = consentedOperation({ id: "brain_dump_existing", status: "paused", revision: 3 });
     vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValueOnce(new Error("denied by browser"));
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
@@ -714,7 +714,7 @@ describe("BrainDumpRoute", () => {
   });
 
   it("resumes a fetched paused operation with a new recognizer and the next transcript sequence", async () => {
-    const paused = operation({
+    const paused = consentedOperation({
       id: "brain_dump_existing",
       status: "paused",
       revision: 7,
@@ -1303,7 +1303,7 @@ describe("BrainDumpRoute", () => {
   });
 
   it("shows the generic microphone denial when resume permission rejects with a non-error", async () => {
-    const paused = operation({ id: "brain_dump_existing", status: "paused", revision: 3 });
+    const paused = consentedOperation({ id: "brain_dump_existing", status: "paused", revision: 3 });
     vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValueOnce("denied");
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
@@ -1498,5 +1498,289 @@ describe("BrainDumpRoute", () => {
     expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
     expect(recognitions).toHaveLength(0);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("renders the stopped-capture UI for a persisted paused operation whose cloud consent is already revoked", async () => {
+    const withdrawnPaused = operation({ id: "brain_dump_existing", status: "paused", revision: 5 });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_existing") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(withdrawnPaused);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_existing");
+
+    expect((await screen.findAllByText("Cloud processing stopped")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/resume"), expect.anything());
+  });
+
+  it("renders the stopped-capture UI for a persisted recording operation whose cloud consent is already revoked", async () => {
+    const withdrawnRecording = operation({ id: "brain_dump_existing", status: "recording", revision: 5 });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_existing") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(withdrawnRecording);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_existing");
+
+    expect((await screen.findAllByText("Cloud processing stopped")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
+  });
+
+  it("stops local capture before awaiting a slow withdraw_consent server response", async () => {
+    let resolveWithdraw: ((response: Response) => void) | undefined;
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
+        return jsonResponse(consentedOperation(), 201);
+      }
+      if (url.endsWith("/brain_dump_1/withdraw_consent")) {
+        return new Promise<Response>((resolve) => {
+          resolveWithdraw = resolve;
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump();
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+    const activeRecognition = recognition;
+
+    await userEvent.click(screen.getByRole("button", { name: "Stop cloud processing" }));
+
+    expect((await screen.findAllByText("Cloud processing stopped")).length).toBeGreaterThan(0);
+    expect(activeRecognition?.stop).toHaveBeenCalledTimes(1);
+    expect(micTrackStop).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveWithdraw?.(await jsonResponse(operation({ status: "recording", revision: 2 })));
+    });
+  });
+
+  it("keeps capture stopped and offers a retry affordance when withdraw_consent is rejected by the server", async () => {
+    let withdrawAttempts = 0;
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
+        return jsonResponse(consentedOperation(), 201);
+      }
+      if (url.endsWith("/brain_dump_1/withdraw_consent")) {
+        withdrawAttempts += 1;
+        return withdrawAttempts === 1
+          ? Promise.reject(new Error("withdraw_consent failed"))
+          : jsonResponse(operation({ status: "recording", revision: 2 }));
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump();
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+    const activeRecognition = recognition;
+
+    await userEvent.click(screen.getByRole("button", { name: "Stop cloud processing" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("withdraw_consent failed");
+    expect(screen.getAllByText("Cloud processing stopped").length).toBeGreaterThan(0);
+    expect(activeRecognition?.stop).toHaveBeenCalledTimes(1);
+
+    const retryButton = screen.getByRole("button", { name: "Stop cloud processing" });
+    await userEvent.click(retryButton);
+
+    await waitFor(() => expect(withdrawAttempts).toBe(2));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop cloud processing" })).not.toBeInTheDocument();
+  });
+
+  it("stops every acquired microphone track when the operation cannot be created after permission is granted", async () => {
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
+        return Promise.reject(new Error("operation create failed"));
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump();
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("operation create failed");
+    expect(micTrackStop).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops every acquired microphone track when MediaRecorder construction fails", async () => {
+    vi.stubGlobal(
+      "MediaRecorder",
+      vi.fn(() => {
+        throw new Error("unsupported mime type");
+      })
+    );
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
+        return jsonResponse(consentedOperation(), 201);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump();
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("unsupported mime type");
+    expect(micTrackStop).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops every acquired microphone track when browser recognition startup fails", async () => {
+    vi.stubGlobal(
+      "SpeechRecognition",
+      vi.fn(() => {
+        throw new Error("recognition unavailable");
+      })
+    );
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
+        return jsonResponse(consentedOperation(), 201);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump();
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("recognition unavailable");
+    expect(micTrackStop).toHaveBeenCalled();
+  });
+
+  it("explains a retryable provider failure when the provider supplied no error detail", async () => {
+    const retryable = operation({
+      id: "brain_dump_retryable_fallback",
+      status: "retryable_error",
+      revision: 7,
+      provider_runs: undefined
+    });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_retryable_fallback") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(retryable);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_retryable_fallback/review");
+
+    expect(await screen.findByText("The provider can be retried from the sealed recording.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry accurate transcription" })).toBeEnabled();
+  });
+
+  it("surfaces a safe conflict-resolution fallback when the request rejects with a non-error", async () => {
+    const conflicted = operation({
+      id: "brain_dump_conflict_resolution",
+      status: "awaiting_confirmation",
+      revision: 6,
+      proposals: [
+        proposal("proposal_locked", 1, "Resolve a conflict", {
+          status: "conflicted",
+          conflicts: [conflict("title", "Resolve a conflict", "Resolve the conflict")]
+        })
+      ]
+    });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_conflict_resolution") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(conflicted);
+      }
+      if (url.includes("/proposals/proposal_locked")) {
+        return Promise.reject("resolution rejected");
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_conflict_resolution/review");
+    await userEvent.click(await screen.findByRole("button", { name: "Use suggestion" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not resolve the conflict.");
+  });
+
+  it("renders the Saving tasks processing surface and keeps polling a persisted committing operation", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let getCalls = 0;
+      fetchMock.mockImplementation((input, init) => {
+        const url = String(input);
+        if (url.endsWith("/brain_dump_committing") && (!init?.method || init.method === "GET")) {
+          getCalls += 1;
+          return jsonResponse(
+            operation({
+              id: "brain_dump_committing",
+              status: getCalls === 1 ? "committing" : "completed",
+              revision: getCalls === 1 ? 9 : 10,
+              committed_task_ids: getCalls === 1 ? [] : ["task_1"]
+            })
+          );
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      });
+
+      renderBrainDump("/brain-dump/brain_dump_committing/review");
+
+      expect(await screen.findByText("Saving tasks")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Save 1 to inbox" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Record" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+
+      expect(await screen.findByText("Saved 1 task to Inbox")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps polling after a transient processing refresh failure", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let getCalls = 0;
+      fetchMock.mockImplementation((input, init) => {
+        const url = String(input);
+        if (url.endsWith("/brain_dump_poll_retry") && (!init?.method || init.method === "GET")) {
+          getCalls += 1;
+          if (getCalls === 2) {
+            return Promise.reject(new Error("temporary refresh failure"));
+          }
+          return jsonResponse(
+            operation({
+              id: "brain_dump_poll_retry",
+              status: getCalls === 1 ? "sealing" : "completed",
+              revision: getCalls,
+              committed_task_ids: getCalls === 1 ? [] : ["task_1"]
+            })
+          );
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      });
+
+      renderBrainDump("/brain-dump/brain_dump_poll_retry");
+      expect(await screen.findByText("Sealing audio")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+
+      expect(await screen.findByText("Saved 1 task to Inbox")).toBeInTheDocument();
+      expect(getCalls).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
