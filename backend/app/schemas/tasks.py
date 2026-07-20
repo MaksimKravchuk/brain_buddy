@@ -349,6 +349,8 @@ class BrainDumpProviderRunResponse(StrictBaseModel):
     model: str | None = None
     template_version: str | None = None
     estimated_cost_usd: float = 0.0
+    reserved_cost_usd: float = 0.0
+    consumed_cost_usd: float = 0.0
 
 
 class BrainDumpProposalPatchResponse(StrictBaseModel):
@@ -376,6 +378,13 @@ class BrainDumpOperationResponse(StrictBaseModel):
     media_ref: str | None = None
     audio_chunks: list[BrainDumpAudioChunkResponse] = Field(default_factory=list)
     sealed_manifest_hash: str | None = None
+    raw_audio_expires_at: datetime | None = None
+    raw_audio_present: bool = False
+    working_artifacts_expires_at: datetime | None = None
+    reconciliation_quality: Literal[
+        "none", "provisional_only", "accurate", "conflicted"
+    ] = "none"
+    committable: bool = False
     provider_runs: list[BrainDumpProviderRunResponse] = Field(default_factory=list)
     proposal_patches: list[BrainDumpProposalPatchResponse] = Field(default_factory=list)
     status_history: list[BrainDumpStatus] = Field(default_factory=list)

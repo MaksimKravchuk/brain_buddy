@@ -420,7 +420,7 @@ export const apiClient = {
     });
   },
 
-  commandBrainDump(operationId: string, action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry" | "withdraw_consent", expectedRevision: number, idempotencyKey: string) {
+  commandBrainDump(operationId: string, action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry" | "withdraw_consent" | "delete_raw_audio", expectedRevision: number, idempotencyKey: string) {
     return request<BrainDumpOperationResponse>(`/brain-dump-operations/${operationId}/${action}`, {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },

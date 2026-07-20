@@ -479,3 +479,35 @@ def test_development_app_tracks_and_stops_the_periodic_voice_sweep(
         assert sweep_thread.join_timeouts == [5]
     finally:
         get_config.cache_clear()
+
+
+def test_compose_e2e_can_opt_in_to_the_periodic_voice_sweep(
+    data_dir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The isolated Compose E2E service can exercise persisted provider runs.
+
+    Unit tests remain thread-free in the ``test`` environment unless this
+    explicit opt-in is set.
+    """
+
+    from app import main as main_module
+    from app.core import get_config
+
+    class SweepThread:
+        def join(self, timeout: float | None = None) -> None:
+            assert timeout == 5
+
+    sweep_thread = SweepThread()
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "test")
+    monkeypatch.setenv("BRAIN_BUDDY_ENABLE_VOICE_SWEEP_IN_TEST", "1")
+    monkeypatch.setattr(
+        main_module, "_start_voice_sweep_thread", lambda _container, _stop: sweep_thread
+    )
+    get_config.cache_clear()
+    try:
+        app = create_app()
+        with TestClient(app):
+            assert app.state.voice_sweep_thread is sweep_thread
+    finally:
+        get_config.cache_clear()

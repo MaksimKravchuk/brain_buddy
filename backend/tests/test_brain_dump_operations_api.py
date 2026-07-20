@@ -89,6 +89,16 @@ def _withdraw_consent(api_client, operation_id: str) -> None:
     container.task_repo.save_brain_dump_operation(withdrawn)
 
 
+def _advance_persisted_provider_runs(api_client, operation_id: str):
+    """Drive the persisted in-process runner until this operation is idle in tests."""
+
+    service = api_client.app.state.container.task_service
+    for _ in range(3):
+        if service.run_due_brain_dump_provider_runs() == 0:
+            break
+    return api_client.get(f"/api/brain-dump-operations/{operation_id}")
+
+
 def _upload_and_seal(api_client, operation: dict[str, object], audio: bytes, key: str):
     digest = hashlib.sha256(audio).hexdigest()
     uploaded = api_client.put(
@@ -97,7 +107,7 @@ def _upload_and_seal(api_client, operation: dict[str, object], audio: bytes, key
         headers={"X-Content-SHA256": digest},
     )
     assert uploaded.status_code == 200, uploaded.text
-    return api_client.post(
+    sealed = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/seal",
         headers={"Idempotency-Key": key},
         json={
@@ -106,6 +116,8 @@ def _upload_and_seal(api_client, operation: dict[str, object], audio: bytes, key
             "manifest_hash": _manifest_hash(audio),
         },
     )
+    assert sealed.status_code == 200, sealed.text
+    return _advance_persisted_provider_runs(api_client, str(operation["id"]))
 
 
 def test_seal_uses_semantic_reconciler_when_external_processing_is_allowed(
@@ -209,7 +221,10 @@ def test_semantic_reconciler_updates_and_removes_existing_proposals(
         api_key="test-key", complete=complete
     )
     sealed = _upload_and_seal(
-        api_client, operation, "Починить BrainBuddy".encode(), "seal-update-remove"
+        api_client,
+        operation,
+        "Починить BrainBuddy. Удалить лишний черновик.".encode(),
+        "seal-update-remove",
     )
 
     assert sealed.status_code == 200, sealed.text
@@ -381,6 +396,8 @@ def test_operation_admission_rejects_next_call_when_worst_case_would_exceed_cap(
     )
 
     assert sealed.status_code == 200, sealed.text
+    task_service.run_due_brain_dump_provider_runs()
+    sealed = api_client.get(f"/api/brain-dump-operations/{operation['id']}")
     assert sealed.json()["status"] == "terminal_error"
     assert sealed.json()["provider_runs"][-1]["error_code"] == (
         "OPERATION_COST_BUDGET_EXCEEDED"
@@ -450,6 +467,7 @@ def test_retryable_reconciler_failure_resumes_without_rerunning_accurate_stt(
     )
 
     assert retried.status_code == 200, retried.text
+    retried = _advance_persisted_provider_runs(api_client, str(operation["id"]))
     body = retried.json()
     assert body["status"] == "awaiting_confirmation"
     assert stt_calls == 1
@@ -538,6 +556,7 @@ def test_seal_rejects_external_reconciliation_without_explicit_consent(
     )
 
     assert sealed.status_code == 200, sealed.text
+    sealed = _advance_persisted_provider_runs(api_client, str(operation["id"]))
     assert sealed.json()["status"] == "terminal_error"
     assert sealed.json()["provider_runs"][-1]["error"] == (
         "RECONCILER_CONSENT_REQUIRED"
@@ -730,6 +749,7 @@ def test_external_stt_is_not_called_without_operation_consent(api_client) -> Non
     )
 
     assert sealed.status_code == 200, sealed.text
+    sealed = _advance_persisted_provider_runs(api_client, str(operation["id"]))
     assert sealed.json()["status"] == "terminal_error"
     assert sealed.json()["provider_runs"][-1]["error_code"] == (
         "STT_EXTERNAL_PROCESSING_CONSENT_REQUIRED"
@@ -763,16 +783,16 @@ def test_external_stt_consent_is_bound_to_the_named_provider(api_client) -> None
     )
     assert response.status_code == 201
 
-    sealed = _upload_and_seal(
-        api_client, response.json(), b"audio", "seal-provider-mismatch"
+    operation = response.json()
+    rejected = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=b"audio",
+        headers={"X-Content-SHA256": hashlib.sha256(b"audio").hexdigest()},
     )
 
+    assert rejected.status_code == 400
+    assert "AUDIO_UPLOAD_PROVIDER_CONSENT_REQUIRED" in rejected.text
     assert calls == 0
-    assert sealed.json()["status"] == "terminal_error"
-    assert sealed.json()["provider_runs"][-1]["error_code"] == (
-        "STT_CONSENT_PROVIDER_MISMATCH"
-    )
-
 
 def test_reconciler_consent_is_bound_to_the_named_provider(api_client) -> None:
     from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
@@ -802,16 +822,16 @@ def test_reconciler_consent_is_bound_to_the_named_provider(api_client) -> None:
     )
     assert response.status_code == 201
 
-    sealed = _upload_and_seal(
-        api_client, response.json(), b"audio", "seal-reconciler-provider-mismatch"
+    operation = response.json()
+    rejected = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=b"audio",
+        headers={"X-Content-SHA256": hashlib.sha256(b"audio").hexdigest()},
     )
 
+    assert rejected.status_code == 400
+    assert "AUDIO_UPLOAD_PROVIDER_CONSENT_REQUIRED" in rejected.text
     assert calls == 0
-    assert sealed.json()["status"] == "terminal_error"
-    assert sealed.json()["provider_runs"][-1]["error_code"] == (
-        "RECONCILER_CONSENT_PROVIDER_MISMATCH"
-    )
-
 
 def test_audio_upload_fails_closed_and_persists_nothing_without_external_consent(
     api_client,
@@ -1054,6 +1074,7 @@ def test_accurate_reconciliation_preserves_unmatched_locked_and_deleted_proposal
     )
 
     assert sealed.status_code == 200, sealed.text
+    sealed = _advance_persisted_provider_runs(api_client, str(operation["id"]))
     proposals = sealed.json()["proposals"]
     active_titles = [
         proposal["title"] for proposal in proposals if not proposal["deleted"]
@@ -1729,15 +1750,15 @@ def test_schema_v2_upload_seal_runs_accurate_reconciliation_from_original_audio(
         },
     )
     assert sealed.status_code == 200, sealed.text
-    body = sealed.json()
+    assert sealed.json()["status"] == "accurate_transcribing"
+    assert sealed.json()["provider_runs"][-1]["status"] == "pending"
+    body = _advance_persisted_provider_runs(api_client, str(operation["id"])).json()
     assert body["status"] == "awaiting_confirmation"
-    assert body["status_history"][-5:] == [
-        "sealing",
-        "fast_processing",
-        "accurate_transcribing",
-        "reconciling",
-        "awaiting_confirmation",
-    ]
+    assert "fast_processing" in body["status_history"]
+    assert {"sealing", "accurate_transcribing", "reconciling", "awaiting_confirmation"} <= set(
+        body["status_history"]
+    )
+    assert body["status_history"][-2:] == ["reconciling", "awaiting_confirmation"]
     assert [proposal["title"] for proposal in body["proposals"]] == [
         "Починить BrainBuddy",
         "Сделать production smoke",
@@ -1803,6 +1824,7 @@ def test_schema_v2_accurate_correction_supersedes_fast_preview_without_canonical
         },
     )
     assert sealed.status_code == 200, sealed.text
+    sealed = _advance_persisted_provider_runs(api_client, str(operation["id"]))
 
     proposals = sealed.json()["proposals"]
     active = [proposal for proposal in proposals if not proposal["deleted"]]
@@ -1900,13 +1922,15 @@ def test_schema_v2_seal_rejects_missing_chunks_and_replays_success(api_client) -
     assert sealed.status_code == replay.status_code == 200
     assert replay.json()["id"] == sealed.json()["id"]
     assert replay.json()["revision"] == sealed.json()["revision"]
-    assert replay.json()["status"] == "awaiting_confirmation"
+    assert replay.json()["status"] == "accurate_transcribing"
+    completed = _advance_persisted_provider_runs(api_client, str(operation["id"])).json()
+    assert completed["status"] == "awaiting_confirmation"
 
     reseal_inactive = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/seal",
         headers={"Idempotency-Key": "seal-after-confirmation-started"},
         json={
-            "expected_revision": sealed.json()["revision"],
+            "expected_revision": completed["revision"],
             "expected_chunks": 1,
             "manifest_hash": _manifest_hash(audio),
         },
@@ -2055,6 +2079,7 @@ def test_schema_v2_user_title_lock_blocks_accurate_overwrite_with_visible_confli
     )
 
     assert sealed.status_code == 200, sealed.text
+    sealed = _advance_persisted_provider_runs(api_client, str(operation["id"]))
     proposal = sealed.json()["proposals"][0]
     assert proposal["id"] == proposal_id
     assert proposal["title"] == "Починить BrainBuddy MVP"
@@ -2108,6 +2133,7 @@ def test_schema_v2_retryable_provider_failure_recovers_via_retry_command(
         },
     )
     assert sealed.status_code == 200, sealed.text
+    sealed = _advance_persisted_provider_runs(api_client, str(operation["id"]))
     body = sealed.json()
     assert body["status"] == "retryable_error"
     assert body["provider_runs"][-1]["status"] == "retryable_error"
@@ -2120,6 +2146,8 @@ def test_schema_v2_retryable_provider_failure_recovers_via_retry_command(
         json={"expected_revision": body["revision"]},
     )
     assert retried.status_code == 200, retried.text
+    assert retried.json()["provider_runs"][-1]["status"] == "pending"
+    retried = _advance_persisted_provider_runs(api_client, str(operation["id"]))
     retried_body = retried.json()
     assert retried_body["status"] == "awaiting_confirmation"
     accurate_run = next(
@@ -2183,6 +2211,7 @@ def test_schema_v2_accurate_reconciliation_preserves_opaque_ids_when_order_chang
         },
     )
     assert sealed.status_code == 200, sealed.text
+    sealed = _advance_persisted_provider_runs(api_client, str(operation["id"]))
     reconciled_ids_by_title = {
         proposal["title"]: proposal["id"] for proposal in sealed.json()["proposals"]
     }
@@ -2237,6 +2266,7 @@ def test_schema_v2_accurate_reconciliation_persists_split_lineage(api_client) ->
     )
 
     assert sealed.status_code == 200, sealed.text
+    sealed = _advance_persisted_provider_runs(api_client, str(operation["id"]))
     proposals = sealed.json()["proposals"]
     old = next(item for item in proposals if item["id"] == predecessor["id"])
     children = [item for item in proposals if not item["deleted"]]
@@ -2308,6 +2338,156 @@ def test_cancel_deletes_stored_raw_audio_and_clears_media_references(api_client)
     assert cancelled.json()["audio_chunks"] == []
     assert cancelled.json()["media_ref"] is None
     assert not chunk_path.exists()
+
+
+def test_raw_audio_delete_rejects_an_in_flight_provider_run(api_client) -> None:
+    """Privacy deletion cannot race a persisted runner that still needs audio."""
+
+    operation = _start_operation(
+        api_client, key="start-in-flight-audio-delete", external_processing_allowed=True
+    )
+    audio = b"provider still needs this raw audio"
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    sealed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers={"Idempotency-Key": "seal-in-flight-audio-delete"},
+        json={
+            "expected_revision": uploaded.json()["revision"],
+            "expected_chunks": 1,
+            "manifest_hash": _manifest_hash(audio),
+        },
+    )
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["provider_runs"][-1]["status"] == "pending"
+
+    rejected = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/delete_raw_audio",
+        headers={"Idempotency-Key": "delete-in-flight-audio"},
+        json={"expected_revision": sealed.json()["revision"]},
+    )
+
+    assert rejected.status_code == 400, rejected.text
+    assert "in flight" in rejected.text
+    reloaded = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
+    assert reloaded["audio_chunks"]
+    assert reloaded["media_ref"]
+
+
+def test_owner_can_delete_reconciled_raw_audio_idempotently(api_client) -> None:
+    """The privacy command deletes review-stage audio without losing the batch."""
+
+    operation = _start_operation(
+        api_client, key="start-owner-audio-delete", external_processing_allowed=True
+    )
+    audio = b"owner-requested private audio deletion"
+    sealed = _upload_and_seal(
+        api_client, operation, audio, "seal-owner-audio-delete"
+    ).json()
+    assert sealed["status"] == "awaiting_confirmation"
+    assert sealed["raw_audio_present"] is True
+
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    repository = api_client.app.state.container.task_repo
+    chunk_path = repository.brain_dump_audio_chunk_path(
+        owner_id, operation["id"], 0, hashlib.sha256(audio).hexdigest()
+    )
+    assert chunk_path.exists()
+
+    deleted = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/delete_raw_audio",
+        headers={"Idempotency-Key": "owner-audio-delete"},
+        json={"expected_revision": sealed["revision"]},
+    )
+
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["status"] == "awaiting_confirmation"
+    assert deleted.json()["raw_audio_present"] is False
+    assert deleted.json()["audio_chunks"] == []
+    assert deleted.json()["media_ref"] is None
+    assert not chunk_path.exists()
+
+    replay = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/delete_raw_audio",
+        headers={"Idempotency-Key": "owner-audio-delete"},
+        json={"expected_revision": sealed["revision"]},
+    )
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["revision"] == deleted.json()["revision"]
+
+
+def test_raw_audio_sweep_defers_expired_pending_provider_work(api_client) -> None:
+    """Retention cannot remove audio that a persisted queued run still needs."""
+
+    operation = _start_operation(
+        api_client, key="start-pending-sweep-guard", external_processing_allowed=True
+    )
+    audio = b"queued provider still needs this audio"
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    sealed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers={"Idempotency-Key": "seal-pending-sweep-guard"},
+        json={
+            "expected_revision": uploaded.json()["revision"],
+            "expected_chunks": 1,
+            "manifest_hash": _manifest_hash(audio),
+        },
+    )
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["provider_runs"][-1]["status"] == "pending"
+
+    container = api_client.app.state.container
+    # Periodic workers honour their bounded batch size, and a queued run is
+    # not an expired lease eligible for recovery.
+    assert container.task_service.run_due_brain_dump_provider_runs(limit=0) == 0
+    assert container.task_service.recover_due_provider_leases(limit=0) == 0
+    assert container.task_service.recover_due_provider_leases() == 0
+
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    persisted = container.task_service.get_brain_dump_operation(
+        operation["id"], owner_id=owner_id
+    )
+    container.task_repo.save_brain_dump_operation(
+        persisted.model_copy(
+            update={"raw_audio_expires_at": persisted.created_at - timedelta(seconds=1)}
+        )
+    )
+
+    assert container.task_service.purge_expired_raw_audio() == 0
+    reloaded = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
+    assert reloaded["raw_audio_present"] is True
+    assert reloaded["provider_runs"][-1]["status"] == "pending"
+
+
+def test_proposal_helpers_keep_empty_preview_and_semantic_match_paths_explicit(
+    api_client,
+) -> None:
+    """Preview extraction and matching retain conservative no-op behavior."""
+
+    from app.modules.tasks.domain import BrainDumpProposalDocument
+
+    service = api_client.app.state.container.task_service
+    now = _start_operation(api_client, key="start-proposal-helper-coverage")["created_at"]
+    proposal = BrainDumpProposalDocument(
+        id="proposal_helper",
+        ordinal=1,
+        title="Buy oat milk",
+        created_at=now,
+        updated_at=now,
+    )
+
+    assert service._matching_proposal_index([proposal], "Buy oat milk") == 0
+    assert service._matching_proposal_index([proposal], "Call Mum") is None
+    assert service._proposals_from_segments([proposal], [], now=now) == [proposal]
 
 
 def test_raw_audio_retention_sweep_deletes_expired_terminal_media(api_client) -> None:
@@ -2484,7 +2664,11 @@ def test_working_artifact_retention_sweep_clears_uncommitted_data_but_not_commit
             operation_id, owner_id=owner_id
         )
         expired = persisted.model_copy(
-            update={"updated_at": persisted.updated_at - timedelta(days=8)}
+            update={
+                "updated_at": persisted.updated_at - timedelta(days=8),
+                "working_artifacts_expires_at": persisted.created_at
+                - timedelta(days=1),
+            }
         )
         container.task_repo.save_brain_dump_operation(expired)
 
@@ -2501,7 +2685,8 @@ def test_working_artifact_retention_sweep_clears_uncommitted_data_but_not_commit
         f"/api/brain-dump-operations/{committed_source['id']}"
     ).json()
     assert swept_committed["status"] == "completed"
-    assert swept_committed["proposals"], "committed provenance must not be purged"
+    assert swept_committed["proposals"] == []
+    assert swept_committed["committed_task_ids"]
 
 
 def test_recover_due_provider_leases_resumes_an_expired_in_flight_lease(
@@ -2556,6 +2741,8 @@ def test_recover_due_provider_leases_resumes_an_expired_in_flight_lease(
     container.task_repo.save_brain_dump_operation(leased)
 
     assert container.task_service.recover_due_provider_leases() == 1
+
+    _advance_persisted_provider_runs(api_client, str(operation["id"]))
 
     recovered = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
     assert recovered["status"] == "awaiting_confirmation"

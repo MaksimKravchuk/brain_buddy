@@ -372,7 +372,7 @@ def test_openai_reconciler_materializes_structural_and_remove_operations() -> No
         sequence=1,
         start_ms=0,
         end_ms=1000,
-        text="Split, merge, replace, and remove tasks",
+        text="First and Second: split, merge, replace, and remove tasks",
         stability="stable",
         provider_role="accurate",
     )

@@ -180,6 +180,14 @@ def build_container(config: AppConfig) -> Container:
             config.voice.max_cumulative_cost_usd_per_operation
         ),
         provider_run_lease_seconds=_provider_run_lease_seconds(config),
+        allowed_external_provider_categories=frozenset(
+            provider
+            for provider in (
+                config.voice.accurate_stt.provider,
+                config.voice.reconciler.provider,
+            )
+            if provider not in {"disabled", "deterministic"}
+        ),
     )
     auth_service = AuthService(
         user_repo=user_repo,

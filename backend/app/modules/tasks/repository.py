@@ -536,19 +536,11 @@ class TaskRepository(BaseRepository):
         # document's own anchor against the current time to decide whether
         # it is actually due, exactly like the provider-lease sweep does for
         # ``lease_expires_at``.
-        eligible_statuses = (
-            "cancelled",
-            "completed",
-            "terminal_error",
-            "awaiting_confirmation",
-        )
         with self._connection() as conn:
             rows = conn.execute(
                 """
                 SELECT payload FROM brain_dump_operations
-                WHERE status IN (?, ?, ?, ?)
-                """,
-                eligible_statuses,
+                """
             ).fetchall()
         return [
             BrainDumpOperationDocument.model_validate(json.loads(row["payload"]))
@@ -592,7 +584,7 @@ class TaskRepository(BaseRepository):
             rows = conn.execute(
                 """
                 SELECT payload FROM brain_dump_operations
-                WHERE status != 'completed' AND updated_at < ?
+                WHERE updated_at < ?
                 """,
                 (before.isoformat(),),
             ).fetchall()
@@ -600,6 +592,51 @@ class TaskRepository(BaseRepository):
             BrainDumpOperationDocument.model_validate(json.loads(row["payload"]))
             for row in rows
         ]
+
+    def list_brain_dump_operations(self) -> list[BrainDumpOperationDocument]:
+        with self._connection() as conn:
+            rows = conn.execute("SELECT payload FROM brain_dump_operations").fetchall()
+        return [
+            BrainDumpOperationDocument.model_validate(json.loads(row["payload"]))
+            for row in rows
+        ]
+
+    def purge_brain_dump_media_orphans(
+        self, operations: list[BrainDumpOperationDocument]
+    ) -> int:
+        """Remove untracked media and interrupted atomic-write temp files."""
+
+        expected = {
+            (operation.owner_id, operation.id): {
+                f"{chunk.chunk_number:06d}-{chunk.sha256}.bin"
+                for chunk in operation.audio_chunks
+            }
+            for operation in operations
+        }
+        root = self.resolve("brain-dump-media")
+        if not root.exists():
+            return 0
+        removed = 0
+        for owner_path in root.iterdir():
+            if not owner_path.is_dir():
+                owner_path.unlink(missing_ok=True)
+                removed += 1
+                continue
+            for operation_path in owner_path.iterdir():
+                if not operation_path.is_dir():
+                    operation_path.unlink(missing_ok=True)
+                    removed += 1
+                    continue
+                known = expected.get((owner_path.name, operation_path.name))
+                if known is None:
+                    shutil.rmtree(operation_path, ignore_errors=True)
+                    removed += 1
+                    continue
+                for media_path in operation_path.iterdir():
+                    if media_path.name not in known:
+                        media_path.unlink(missing_ok=True)
+                        removed += 1
+        return removed
 
     def get_brain_dump_operation_for_owner(
         self, operation_id: str, *, owner_id: str

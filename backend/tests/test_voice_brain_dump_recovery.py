@@ -96,6 +96,19 @@ def _service(
     )
 
 
+def _advance_persisted_provider_runs(
+    service: TaskService, operation_id: str
+) -> BrainDumpOperationDocument:
+    """Drive queued provider work explicitly; request commands never call providers."""
+
+    for _ in range(3):
+        if service.run_due_brain_dump_provider_runs() == 0:
+            break
+    return service.task_repo.get_brain_dump_operation_for_owner(
+        operation_id, owner_id=OWNER
+    )
+
+
 def _seal(
     service: TaskService, *, audio: bytes = b"audio bytes"
 ) -> tuple[BrainDumpOperationDocument, TaskService]:
@@ -146,6 +159,7 @@ def test_retryable_provider_failure_persists_checkpoint_and_retry_resumes_it(
         idempotency_key="recovery-seal-1",
     )
 
+    sealed = _advance_persisted_provider_runs(service, sealed.id)
     assert sealed.status == "retryable_error"
     assert sealed.status_history[-1] == "retryable_error"
     last_run = sealed.provider_runs[-1]
@@ -164,6 +178,7 @@ def test_retryable_provider_failure_persists_checkpoint_and_retry_resumes_it(
         idempotency_key="recovery-retry-1",
     )
 
+    retried = _advance_persisted_provider_runs(service, retried.id)
     assert retried.status == "awaiting_confirmation"
     resumed_run = next(
         run for run in reversed(retried.provider_runs) if run.role == "accurate_stt"
@@ -200,6 +215,7 @@ def test_operation_recovery_budget_terminally_exhausts_before_a_new_provider_cal
         owner_id=OWNER,
         idempotency_key="budget-seal",
     )
+    failed = _advance_persisted_provider_runs(service, failed.id)
     assert failed.status == "retryable_error"
 
     exhausted = service.retry_brain_dump_operation(
@@ -209,6 +225,7 @@ def test_operation_recovery_budget_terminally_exhausts_before_a_new_provider_cal
         idempotency_key="budget-retry",
     )
 
+    exhausted = _advance_persisted_provider_runs(service, exhausted.id)
     assert exhausted.status == "terminal_error"
     assert exhausted.provider_runs[-1].error_code == "OPERATION_RECOVERY_BUDGET_EXHAUSTED"
     assert exhausted.provider_runs[-1].recovery_count == 1
@@ -258,6 +275,7 @@ def test_cumulative_cost_budget_blocks_the_next_attempt_without_calling_the_prov
         idempotency_key="cost-budget-retry",
     )
 
+    blocked = _advance_persisted_provider_runs(service, blocked.id)
     assert blocked.status == "terminal_error"
     assert blocked.provider_runs[-1].error_code == "OPERATION_COST_BUDGET_EXCEEDED"
     assert blocked.committed_task_ids == []
@@ -304,7 +322,7 @@ def test_seal_claims_a_lease_covering_the_configured_provider_timing(
 
     service.accurate_stt.transcribe_sealed_audio = snapshot_claim_then_transcribe  # type: ignore[method-assign]
     operation, _ = _seal(service)
-    service.seal_brain_dump_operation(
+    queued = service.seal_brain_dump_operation(
         operation.id,
         BrainDumpSealRequest(
             expected_revision=operation.revision,
@@ -314,6 +332,7 @@ def test_seal_claims_a_lease_covering_the_configured_provider_timing(
         owner_id=OWNER,
         idempotency_key="slow-provider-seal",
     )
+    _advance_persisted_provider_runs(service, queued.id)
 
     assert captured["lease_duration"] == pytest.approx(slow_lease_seconds)
 
@@ -361,9 +380,7 @@ def test_expired_lease_still_recovers_through_the_bounded_retry_path(
     service.task_repo.save_brain_dump_operation(claimed)
 
     assert service.recover_due_provider_leases() == 1
-    recovered = service.task_repo.get_brain_dump_operation_for_owner(
-        operation.id, owner_id=OWNER
-    )
+    recovered = _advance_persisted_provider_runs(service, operation.id)
     assert recovered.status == "awaiting_confirmation"
     recovered_accurate = next(
         run for run in reversed(recovered.provider_runs) if run.role == "accurate_stt"
@@ -405,17 +422,19 @@ def test_process_death_during_provider_call_leaves_a_durable_claimed_checkpoint(
 
     service.accurate_stt.transcribe_sealed_audio = crash_after_claim  # type: ignore[method-assign]
 
+    queued = service.seal_brain_dump_operation(
+        operation.id,
+        BrainDumpSealRequest(
+            expected_revision=operation.revision,
+            expected_chunks=1,
+            manifest_hash=_manifest_hash(audio),
+        ),
+        owner_id=OWNER,
+        idempotency_key="crash-safe-seal",
+    )
+    assert queued.provider_runs[-1].status == "pending"
     with pytest.raises(SystemExit, match="simulated process death"):
-        service.seal_brain_dump_operation(
-            operation.id,
-            BrainDumpSealRequest(
-                expected_revision=operation.revision,
-                expected_chunks=1,
-                manifest_hash=_manifest_hash(audio),
-            ),
-            owner_id=OWNER,
-            idempotency_key="crash-safe-seal",
-        )
+        service.run_due_brain_dump_provider_runs()
 
     persisted = TaskRepository(data_dir).get_brain_dump_operation_for_owner(
         operation.id, owner_id=OWNER
@@ -442,6 +461,7 @@ def test_process_death_during_provider_call_leaves_a_durable_claimed_checkpoint(
         owner_id=OWNER,
         idempotency_key="recover-expired-provider-claim",
     )
+    recovered = _advance_persisted_provider_runs(recovered_service, recovered.id)
     assert recovered.status == "awaiting_confirmation"
     recovered_accurate = next(
         run for run in reversed(recovered.provider_runs) if run.role == "accurate_stt"
@@ -468,19 +488,22 @@ def test_process_death_during_retry_persists_the_new_attempt_claim(
         owner_id=OWNER,
         idempotency_key="retry-crash-safe-seal",
     )
+    retryable = _advance_persisted_provider_runs(service, retryable.id)
     assert retryable.status == "retryable_error"
 
     def crash_after_retry_claim(_request: object) -> object:
         raise SystemExit("simulated retry process death")
 
     service.accurate_stt.transcribe_sealed_audio = crash_after_retry_claim  # type: ignore[method-assign]
+    queued_retry = service.retry_brain_dump_operation(
+        operation.id,
+        ExpectedRevisionRequest(expected_revision=retryable.revision),
+        owner_id=OWNER,
+        idempotency_key="retry-crash-safe-attempt",
+    )
+    assert queued_retry.provider_runs[-1].status == "pending"
     with pytest.raises(SystemExit, match="simulated retry process death"):
-        service.retry_brain_dump_operation(
-            operation.id,
-            ExpectedRevisionRequest(expected_revision=retryable.revision),
-            owner_id=OWNER,
-            idempotency_key="retry-crash-safe-attempt",
-        )
+        service.run_due_brain_dump_provider_runs()
 
     persisted = TaskRepository(data_dir).get_brain_dump_operation_for_owner(
         operation.id, owner_id=OWNER
@@ -517,6 +540,7 @@ def test_recovery_budget_exhausts_into_terminal_error_without_hot_loop(
         owner_id=OWNER,
         idempotency_key="recovery-seal-budget",
     )
+    sealed = _advance_persisted_provider_runs(service, sealed.id)
     assert sealed.status == "retryable_error"
 
     first_retry = service.retry_brain_dump_operation(
@@ -525,6 +549,7 @@ def test_recovery_budget_exhausts_into_terminal_error_without_hot_loop(
         owner_id=OWNER,
         idempotency_key="recovery-retry-budget-1",
     )
+    first_retry = _advance_persisted_provider_runs(service, first_retry.id)
     assert first_retry.status == "retryable_error"
     assert first_retry.provider_runs[-1].attempt == 2
 
@@ -535,6 +560,7 @@ def test_recovery_budget_exhausts_into_terminal_error_without_hot_loop(
         idempotency_key="recovery-retry-budget-2",
     )
     # Attempt 3 hits the bounded recovery budget: terminal, not another retryable loop.
+    second_retry = _advance_persisted_provider_runs(service, second_retry.id)
     assert second_retry.status == "terminal_error"
     assert second_retry.provider_runs[-1].status == "terminal_error"
     assert second_retry.committed_task_ids == []
@@ -568,6 +594,7 @@ def test_terminal_provider_failure_skips_retryable_state(data_dir: Path) -> None
         idempotency_key="recovery-seal-terminal",
     )
 
+    sealed = _advance_persisted_provider_runs(service, sealed.id)
     assert sealed.status == "terminal_error"
     assert sealed.provider_runs[-1].status == "terminal_error"
     assert sealed.committed_task_ids == []
@@ -611,6 +638,7 @@ def test_retry_replays_cached_idempotent_response(data_dir: Path) -> None:
         owner_id=OWNER,
         idempotency_key="recovery-seal-replay",
     )
+    sealed = _advance_persisted_provider_runs(service, sealed.id)
     assert sealed.status == "retryable_error"
 
     first = service.retry_brain_dump_operation(
@@ -619,6 +647,7 @@ def test_retry_replays_cached_idempotent_response(data_dir: Path) -> None:
         owner_id=OWNER,
         idempotency_key="recovery-retry-replay",
     )
+    first = _advance_persisted_provider_runs(service, first.id)
     assert first.status == "awaiting_confirmation"
     accurate_stt = cast(DeterministicAccurateStt, service.accurate_stt)
     call_count_after_first = len(accurate_stt.calls)

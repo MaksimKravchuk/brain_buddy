@@ -230,6 +230,10 @@ def command_brain_dump_operation(
         operation = task_service.withdraw_brain_dump_consent(
             operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
         )
+    elif action == "delete_raw_audio":
+        operation = task_service.delete_brain_dump_raw_audio(
+            operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
+        )
     elif action in {"pause", "resume", "finish", "cancel"}:
         operation = task_service.transition_brain_dump_operation(
             operation_id,
@@ -735,6 +739,14 @@ def _to_brain_dump_response(
             for chunk in operation.audio_chunks
         ],
         sealed_manifest_hash=operation.sealed_manifest_hash,
+        raw_audio_expires_at=operation.raw_audio_expires_at,
+        raw_audio_present=bool(operation.audio_chunks),
+        working_artifacts_expires_at=operation.working_artifacts_expires_at,
+        reconciliation_quality=operation.reconciliation_quality,
+        committable=(
+            operation.status == "awaiting_confirmation"
+            and _brain_dump_committable(operation)
+        ),
         provider_runs=[
             BrainDumpProviderRunResponse(
                 id=run.id,
@@ -749,6 +761,8 @@ def _to_brain_dump_response(
                 model=run.model,
                 template_version=run.template_version,
                 estimated_cost_usd=run.estimated_cost_usd,
+                reserved_cost_usd=run.reserved_cost_usd,
+                consumed_cost_usd=run.consumed_cost_usd,
             )
             for run in operation.provider_runs
         ],
@@ -773,6 +787,28 @@ def _to_brain_dump_response(
         created_at=operation.created_at,
         updated_at=operation.updated_at,
         revision=operation.revision,
+    )
+
+
+def _brain_dump_committable(operation: BrainDumpOperationDocument) -> bool:
+    """Expose the exact server-side commit predicate to the review UI."""
+
+    return (
+        operation.reconciliation_quality == "accurate"
+        and any(
+            run.role == "reconciler"
+            and run.status == "succeeded"
+            and run.checkpoint == "reconciled"
+            for run in operation.provider_runs
+        )
+        and all(
+            proposal.deleted
+            or (
+                proposal.status in {"reconciled", "user_edited"}
+                and not proposal.conflicts
+            )
+            for proposal in operation.proposals
+        )
     )
 
 

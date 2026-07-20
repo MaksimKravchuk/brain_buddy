@@ -60,6 +60,8 @@ function consentedOperation(overrides: Record<string, unknown> = {}) {
       provider: "openai",
       recorded_at: "2026-07-16T00:00:00Z"
     },
+    committable: true,
+    reconciliation_quality: "accurate",
     ...overrides
   });
 }
@@ -1140,7 +1142,7 @@ describe("BrainDumpRoute", () => {
   });
 
   it("refreshes cached task queries after committing a brain dump", async () => {
-    const captured = operation({
+    const captured = consentedOperation({
       id: "brain_dump_existing",
       status: "awaiting_confirmation",
       revision: 4,
@@ -1167,7 +1169,7 @@ describe("BrainDumpRoute", () => {
   });
 
   it("navigates to the inbox from the saved confirmation", async () => {
-    const captured = operation({
+    const captured = consentedOperation({
       id: "brain_dump_existing",
       status: "awaiting_confirmation",
       revision: 4,
@@ -1189,6 +1191,44 @@ describe("BrainDumpRoute", () => {
     await userEvent.click(await screen.findByRole("button", { name: "View inbox" }));
 
     expect(await screen.findByText("Task list route: inbox")).toBeInTheDocument();
+  });
+
+  it("labels provisional review truthfully and lets its owner delete retained raw audio", async () => {
+    const captured = consentedOperation({
+      id: "brain_dump_provisional_audio",
+      status: "awaiting_confirmation",
+      revision: 4,
+      committable: false,
+      reconciliation_quality: "provisional_only",
+      raw_audio_present: true,
+      raw_audio_expires_at: "2026-07-17T00:00:00Z",
+      proposals: [proposal("proposal_1", 1, "Renew car insurance")]
+    });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_provisional_audio") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(captured);
+      }
+      if (url.endsWith("/brain_dump_provisional_audio/delete_raw_audio")) {
+        expect(init?.method).toBe("POST");
+        expect(JSON.parse(String(init?.body))).toEqual({ expected_revision: 4 });
+        return jsonResponse({
+          ...captured,
+          revision: 5,
+          raw_audio_present: false,
+          raw_audio_expires_at: "2026-07-16T00:00:00Z"
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_provisional_audio/review");
+
+    expect(await screen.findByText(/These are provisional drafts/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save 1 to inbox" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Delete audio now" }));
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Delete audio now" })).not.toBeInTheDocument());
   });
 
   it("shows schema-v2 processing stages before editable review", async () => {

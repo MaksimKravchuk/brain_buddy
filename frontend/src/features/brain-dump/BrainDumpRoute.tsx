@@ -359,7 +359,7 @@ export function BrainDumpRoute(): JSX.Element {
     }
   }
 
-  async function command(action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry" | "withdraw_consent") {
+  async function command(action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry" | "withdraw_consent" | "delete_raw_audio") {
     if (!operationRef.current) {
       return;
     }
@@ -584,9 +584,14 @@ export function BrainDumpRoute(): JSX.Element {
         error={error}
         hasUnresolvedConflicts={hasUnresolvedConflicts}
         isSaving={isSaving}
+        committable={operation?.committable ?? false}
         proposals={activeProposals}
+        reconciliationQuality={operation?.reconciliation_quality ?? "none"}
+        rawAudioExpiresAt={operation?.raw_audio_expires_at}
+        rawAudioPresent={operation?.raw_audio_present ?? false}
         onBack={() => navigate(`/brain-dump/${operation?.id ?? "new"}`, { replace: true })}
         onDelete={deleteProposal}
+        onDeleteRawAudio={() => void command("delete_raw_audio")}
         onDiscard={() => void command("cancel")}
         onResolveConflict={resolveConflict}
         onSave={() => void command("commit")}
@@ -844,23 +849,33 @@ function ProcessingSurface({
 }
 
 function ReviewSurface({
+  committable,
   error,
   hasUnresolvedConflicts,
   isSaving,
+  rawAudioExpiresAt,
+  rawAudioPresent,
   proposals,
+  reconciliationQuality,
   onBack,
   onDelete,
+  onDeleteRawAudio,
   onDiscard,
   onResolveConflict,
   onSave,
   onUpdateTitle
 }: {
+  committable: boolean;
   error: string | null;
   hasUnresolvedConflicts: boolean;
   isSaving: boolean;
+  rawAudioExpiresAt?: string | null;
+  rawAudioPresent: boolean;
   proposals: BrainDumpProposal[];
+  reconciliationQuality: "none" | "provisional_only" | "accurate" | "conflicted";
   onBack: () => void;
   onDelete: (proposal: BrainDumpProposal) => void;
+  onDeleteRawAudio: () => void;
   onDiscard: () => void;
   onResolveConflict: (proposal: BrainDumpProposal, resolution: "keep" | "accept") => void;
   onSave: () => void;
@@ -880,6 +895,17 @@ function ReviewSurface({
 
       <main aria-label="Review brain dump proposals" className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {error ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
+        {!committable ? (
+          <div role="status" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            These are {reconciliationQuality === "provisional_only" ? "provisional" : "not yet reconciled"} drafts. They can be edited or discarded, but cannot be saved to Inbox until the server confirms reconciliation.
+          </div>
+        ) : null}
+        {rawAudioPresent ? (
+          <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+            <span>Raw audio is retained until {rawAudioExpiresAt ? new Date(rawAudioExpiresAt).toLocaleString() : "its privacy expiry"}.</span>
+            <button type="button" className="shrink-0 font-semibold text-rose-700" onClick={onDeleteRawAudio}>Delete audio now</button>
+          </div>
+        ) : null}
         <div className="flex flex-col gap-2.5">
           {proposals.map((proposal) => (
             <article key={proposal.id} className="rounded-[14px] border border-slate-200 bg-white px-3.5 py-3 shadow-soft">
@@ -927,7 +953,7 @@ function ReviewSurface({
         <button type="button" className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600" onClick={onDiscard}>
           Discard
         </button>
-        <button type="button" className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-brand-primary text-[15px] font-semibold text-white shadow-glow disabled:cursor-not-allowed disabled:opacity-50" disabled={hasUnresolvedConflicts || isSaving} onClick={onSave}>
+        <button type="button" className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-brand-primary text-[15px] font-semibold text-white shadow-glow disabled:cursor-not-allowed disabled:opacity-50" disabled={!committable || hasUnresolvedConflicts || isSaving} onClick={onSave}>
           <Inbox className="h-4 w-4" aria-hidden />
           {isSaving ? "Saving…" : `Save ${proposals.length} to inbox`}
         </button>

@@ -124,6 +124,7 @@ class TaskService:
         max_operation_recoveries: int = 2,
         max_cumulative_cost_usd_per_operation: float = 1.00,
         provider_run_lease_seconds: float = 30.0,
+        allowed_external_provider_categories: frozenset[str] | None = None,
     ) -> None:
         self.task_repo = task_repo
         self.accurate_stt = accurate_stt or DisabledAccurateStt()
@@ -135,6 +136,29 @@ class TaskService:
             max_cumulative_cost_usd_per_operation
         )
         self.provider_run_lease_seconds = provider_run_lease_seconds
+        # Consent identifies a configured provider category before bytes can
+        # leave the device. The production container supplies this from
+        # configuration; the default keeps isolated deterministic tests honest
+        # without treating arbitrary caller text as a provider identity.
+        self.allowed_external_provider_categories = (
+            allowed_external_provider_categories or frozenset({"openai"})
+        )
+
+    def _assert_external_provider_consent(self, consent: BrainDumpConsent) -> None:
+        if not consent.external_processing_allowed:
+            raise ValidationFailure(
+                "AUDIO_UPLOAD_CONSENT_REQUIRED: external processing consent is "
+                "required before audio may leave the device."
+            )
+        if (
+            not consent.provider
+            or consent.provider not in self.allowed_external_provider_categories
+        ):
+            raise ValidationFailure(
+                "AUDIO_UPLOAD_PROVIDER_CONSENT_REQUIRED: external processing "
+                "consent must name a configured provider category before audio "
+                "may leave the device."
+            )
 
     def purge_expired_raw_audio(self, *, now: datetime | None = None) -> int:
         """Purge raw audio from terminal operations past the configured retention.
@@ -159,16 +183,14 @@ class TaskService:
                     operation.raw_audio_expires_at
                     or operation.updated_at + self.raw_audio_retention
                 )
+                provider_run_is_in_flight = bool(
+                    operation.provider_runs
+                    and operation.provider_runs[-1].status in {"pending", "running"}
+                )
                 if (
-                    operation.status
-                    not in {
-                        "cancelled",
-                        "completed",
-                        "terminal_error",
-                        "awaiting_confirmation",
-                    }
-                    or current_time < expires_at
+                    current_time < expires_at
                     or not operation.audio_chunks
+                    or provider_run_is_in_flight
                 ):
                     continue
                 self.task_repo.delete_brain_dump_audio_chunks(
@@ -191,6 +213,9 @@ class TaskService:
                     )
                 )
                 purged += 1
+        purged += self.task_repo.purge_brain_dump_media_orphans(
+            self.task_repo.list_brain_dump_operations()
+        )
         return purged
 
     def purge_expired_working_artifacts(self, *, now: datetime | None = None) -> int:
@@ -205,18 +230,20 @@ class TaskService:
         """
 
         current_time = now or utcnow()
-        cutoff = current_time - self.working_artifacts_retention
         purged = 0
         for candidate in self.task_repo.list_expired_working_artifact_operations(
-            before=cutoff
+            before=current_time
         ):
             with self.task_repo.command_lock(candidate.owner_id):
                 operation = self.get_brain_dump_operation(
                     candidate.id, owner_id=candidate.owner_id
                 )
+                expires_at = (
+                    operation.working_artifacts_expires_at
+                    or operation.created_at + self.working_artifacts_retention
+                )
                 if (
-                    operation.status == "completed"
-                    or operation.updated_at >= cutoff
+                    current_time < expires_at
                     or (
                         not operation.segments
                         and not operation.proposals
@@ -230,6 +257,7 @@ class TaskService:
                             "segments": [],
                             "proposals": [],
                             "proposal_patches": [],
+                            "working_artifacts_expires_at": expires_at,
                             "updated_at": current_time,
                             "revision": operation.revision + 1,
                         }
@@ -539,6 +567,7 @@ class TaskService:
             ),
             created_at=now,
             updated_at=now,
+            working_artifacts_expires_at=now + self.working_artifacts_retention,
         )
         self.task_repo.save_brain_dump_operation(operation)
         self._store_idempotency(
@@ -580,11 +609,7 @@ class TaskService:
                 raise ValidationFailure(
                     "Audio chunks can only be uploaded while recording or paused."
                 )
-            if not operation.consent.external_processing_allowed:
-                raise ValidationFailure(
-                    "AUDIO_UPLOAD_CONSENT_REQUIRED: external processing consent is "
-                    "required before audio may leave the device."
-                )
+            self._assert_external_provider_consent(operation.consent)
             existing = {
                 chunk.chunk_number: chunk for chunk in operation.audio_chunks
             }.get(chunk_number)
@@ -693,14 +718,10 @@ class TaskService:
                     operation.id,
                     "MANIFEST_CONFLICT: sealed manifest does not match uploaded audio chunks.",
                 )
-            audio = self.task_repo.load_brain_dump_audio_chunks(
-                owner_id=owner_id,
-                operation_id=operation.id,
-                chunks=[
-                    (chunk.chunk_number, chunk.sha256) for chunk in consumed_chunks
-                ],
-            )
             now = utcnow()
+            reservation = getattr(
+                self.accurate_stt, "max_cost_usd_per_operation", 0.0
+            )
             claimed = operation.model_copy(
                 update={
                     "status": "accurate_transcribing",
@@ -716,14 +737,12 @@ class TaskService:
                         BrainDumpProviderRunDocument(
                             id=generate_id("provider_run"),
                             role="accurate_stt",
-                            status="running",
-                            input_hash=hashlib.sha256(audio).hexdigest(),
+                            status="pending",
+                            input_hash=manifest_hash,
                             checkpoint="sealed",
                             attempt=1,
                             recovery_count=0,
-                            lease_owner=generate_id("runner"),
-                            lease_expires_at=now
-                            + timedelta(seconds=self.provider_run_lease_seconds),
+                            reserved_cost_usd=reservation,
                             created_at=now,
                             updated_at=now,
                         ),
@@ -733,24 +752,94 @@ class TaskService:
                 }
             )
             self.task_repo.save_brain_dump_operation(claimed)
-
-        updated = self._run_accurate_stt_and_reconcile(
-            claimed, audio=audio, attempt=1, recovery_count=0, now=utcnow()
-        )
-        with self.task_repo.command_lock(owner_id):
-            current = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
-            if current.revision != claimed.revision:
-                raise ConflictError("Brain dump operation", operation_id)
-            self.task_repo.save_brain_dump_operation(updated)
             self._store_idempotency(
                 owner_id=owner_id,
                 key=idempotency_key,
                 command=command,
                 request_hash=request_hash,
-                resource_id=updated.id,
-                response=updated,
+                resource_id=claimed.id,
+                response=claimed,
             )
-        return updated
+        return claimed
+
+    def run_due_brain_dump_provider_runs(self, *, limit: int = 50) -> int:
+        """Advance persisted provider work outside request handlers.
+
+        The operation row is first atomically changed from ``pending`` to a
+        leased ``running`` claim (with its cost reservation already durable),
+        then the provider is invoked without holding the owner lock. Accepted
+        accurate output is saved before a separate reconciler run is queued.
+        """
+
+        advanced = 0
+        now = utcnow()
+        for candidate in self.task_repo.list_in_flight_provider_run_operations():
+            if advanced >= limit:
+                break
+            with self.task_repo.command_lock(candidate.owner_id):
+                operation = self.get_brain_dump_operation(
+                    candidate.id, owner_id=candidate.owner_id
+                )
+                if not operation.provider_runs:
+                    continue
+                last_run = operation.provider_runs[-1]
+                expired = (
+                    last_run.status == "running"
+                    and last_run.lease_expires_at is not None
+                    and last_run.lease_expires_at <= now
+                )
+                if last_run.status != "pending" and not expired:
+                    continue
+                if last_run.role == "accurate_stt":
+                    audio = self.task_repo.load_brain_dump_audio_chunks(
+                        owner_id=operation.owner_id,
+                        operation_id=operation.id,
+                        chunks=[
+                            (chunk.chunk_number, chunk.sha256)
+                            for chunk in operation.audio_chunks
+                        ],
+                    )
+                    input_hash = hashlib.sha256(audio).hexdigest()
+                else:
+                    audio = b""
+                    input_hash = last_run.input_hash
+                run = last_run.model_copy(
+                    update={
+                        "status": "running",
+                        "input_hash": input_hash,
+                        "lease_owner": generate_id("runner"),
+                        "lease_expires_at": now
+                        + timedelta(seconds=self.provider_run_lease_seconds),
+                        # The lease is measured from its CAS claim, not the
+                        # earlier queue-enqueue timestamp.
+                        "created_at": now,
+                        "updated_at": now,
+                    }
+                )
+                claimed = operation.model_copy(
+                    update={
+                        "provider_runs": [*operation.provider_runs[:-1], run],
+                        "updated_at": now,
+                        "revision": operation.revision + 1,
+                    }
+                )
+                self.task_repo.save_brain_dump_operation(claimed)
+            updated = self._run_accurate_stt_and_reconcile(
+                claimed,
+                audio=audio,
+                attempt=run.attempt,
+                recovery_count=run.recovery_count,
+                now=utcnow(),
+            )
+            with self.task_repo.command_lock(claimed.owner_id):
+                current = self.get_brain_dump_operation(
+                    claimed.id, owner_id=claimed.owner_id
+                )
+                if current.revision != claimed.revision:
+                    continue
+                self.task_repo.save_brain_dump_operation(updated)
+                advanced += 1
+        return advanced
 
 
     def _run_accurate_stt_and_reconcile(
@@ -960,20 +1049,42 @@ class TaskService:
             provider=accurate_result.provider or self.accurate_stt.provider_name,
             model=accurate_hypothesis.model,
             estimated_cost_usd=accurate_result.estimated_cost_usd,
+            reserved_cost_usd=0.0,
+            consumed_cost_usd=accurate_result.estimated_cost_usd,
             output_segment_ids=[accurate_segment.id],
             created_at=now,
             updated_at=now,
         )
-        return self._reconcile_accurate_checkpoint(
-            operation,
-            accurate_hypothesis=accurate_hypothesis,
-            accurate_segment=accurate_segment,
-            checkpoint_runs=[*prior_runs, accurate_run],
-            checkpoint_segments=[*operation.segments, accurate_segment],
-            input_hash=input_hash,
-            now=now,
-            attempt=1,
-            recovery_count=recovery_count,
+        # Persist the accepted accurate transcript first. Reconciliation is a
+        # distinct queued run, so a crash here cannot repeat paid STT.
+        return operation.model_copy(
+            update={
+                "status": "reconciling",
+                "status_history": [*operation.status_history, "reconciling"],
+                "segments": [*operation.segments, accurate_segment],
+                "provider_runs": [
+                    *prior_runs,
+                    accurate_run,
+                    BrainDumpProviderRunDocument(
+                        id=generate_id("provider_run"),
+                        role="reconciler",
+                        status="pending",
+                        input_hash=hashlib.sha256(
+                            accurate_hypothesis.text.encode("utf-8")
+                        ).hexdigest(),
+                        checkpoint="accurate_transcribed",
+                        attempt=1,
+                        recovery_count=recovery_count,
+                        reserved_cost_usd=getattr(
+                            self.text_reconciler, "max_cost_usd_per_operation", 0.0
+                        ),
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                ],
+                "updated_at": now,
+                "revision": operation.revision + 1,
+            }
         )
 
     def _reconcile_accurate_checkpoint(
@@ -989,7 +1100,10 @@ class TaskService:
         attempt: int,
         recovery_count: int,
     ) -> BrainDumpOperationDocument:
-        cumulative_spent = sum(run.estimated_cost_usd for run in checkpoint_runs)
+        cumulative_spent = sum(
+            max(run.estimated_cost_usd, run.consumed_cost_usd)
+            for run in checkpoint_runs
+        )
         worst_case_next = getattr(
             self.text_reconciler, "max_cost_usd_per_operation", 0.0
         )
@@ -1102,6 +1216,7 @@ class TaskService:
             drafts=patch_drafts,
             now=now,
         )
+        active_reconciler_run = operation.provider_runs[-1]
         return operation.model_copy(
             update={
                 "status": "awaiting_confirmation",
@@ -1110,23 +1225,27 @@ class TaskService:
                     "reconciling",
                     "awaiting_confirmation",
                 ],
+                "reconciliation_quality": "accurate",
                 "segments": checkpoint_segments,
                 "proposals": proposals,
                 "proposal_patches": proposal_patches,
                 "provider_runs": [
                     *checkpoint_runs,
-                    BrainDumpProviderRunDocument(
-                        id=generate_id("provider_run"),
-                        role="reconciler",
-                        status="succeeded",
-                        input_hash=reconciler_input_hash,
-                        checkpoint="reconciled",
-                        attempt=attempt,
-                        recovery_count=recovery_count,
-                        provider=self.text_reconciler.provider_id,
-                        estimated_cost_usd=reconciler_cost,
-                        created_at=now,
-                        updated_at=now,
+                    active_reconciler_run.model_copy(
+                        update={
+                            "status": "succeeded",
+                            "input_hash": reconciler_input_hash,
+                            "checkpoint": "reconciled",
+                            "attempt": attempt,
+                            "recovery_count": recovery_count,
+                            "provider": self.text_reconciler.provider_id,
+                            "estimated_cost_usd": reconciler_cost,
+                            "reserved_cost_usd": 0.0,
+                            "consumed_cost_usd": reconciler_cost,
+                            "lease_owner": None,
+                            "lease_expires_at": None,
+                            "updated_at": now,
+                        }
                     ),
                 ],
                 # Stamped once, at the first successful reconciliation, and
@@ -1269,7 +1388,11 @@ class TaskService:
                         BrainDumpProviderRunDocument(
                             id=generate_id("provider_run"),
                             role=claimed_role,
-                            status="running",
+                            # Retry is a command that persists a new queue item;
+                            # it never performs provider I/O in the request
+                            # handler. The runner claims it in a separate CAS
+                            # transaction before calling the adapter.
+                            status="pending",
                             input_hash=(
                                 last_run.input_hash
                                 if resume_reconciliation
@@ -1278,9 +1401,13 @@ class TaskService:
                             checkpoint=claimed_checkpoint,
                             attempt=attempt,
                             recovery_count=recovery_count,
-                            lease_owner=generate_id("runner"),
-                            lease_expires_at=now
-                            + timedelta(seconds=self.provider_run_lease_seconds),
+                            reserved_cost_usd=getattr(
+                                self.text_reconciler
+                                if resume_reconciliation
+                                else self.accurate_stt,
+                                "max_cost_usd_per_operation",
+                                0.0,
+                            ),
                             created_at=now,
                             updated_at=now,
                         ),
@@ -1290,28 +1417,15 @@ class TaskService:
                 }
             )
             self.task_repo.save_brain_dump_operation(claimed)
-
-        updated = self._run_accurate_stt_and_reconcile(
-            claimed,
-            audio=audio,
-            attempt=attempt,
-            recovery_count=recovery_count,
-            now=utcnow(),
-        )
-        with self.task_repo.command_lock(owner_id):
-            current = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
-            if current.revision != claimed.revision:
-                raise ConflictError("Brain dump operation", operation_id)
-            self.task_repo.save_brain_dump_operation(updated)
             self._store_idempotency(
                 owner_id=owner_id,
                 key=idempotency_key,
                 command=command,
                 request_hash=request_hash,
-                resource_id=updated.id,
-                response=updated,
+                resource_id=claimed.id,
+                response=claimed,
             )
-        return updated
+        return claimed
 
     @_serialized_write
     def append_brain_dump_transcript(
@@ -1782,6 +1896,72 @@ class TaskService:
         )
         return updated
 
+    @_serialized_write
+    def delete_brain_dump_raw_audio(
+        self,
+        operation_id: str,
+        payload: ExpectedRevisionRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> BrainDumpOperationDocument:
+        """Let the owner remove raw audio without discarding review work."""
+
+        command = f"brain_dump_delete_raw_audio:{operation_id}"
+        request_hash = self._request_hash(command, payload)
+        record = self._idempotency_record(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+        )
+        if record is not None:
+            return self._brain_dump_operation_result(record, owner_id=owner_id)
+        operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
+        self._assert_revision(
+            "Brain dump operation",
+            operation.id,
+            operation.revision,
+            payload.expected_revision,
+        )
+        if (
+            operation.status in {"accurate_transcribing", "reconciling"}
+            and operation.provider_runs
+            and operation.provider_runs[-1].status in {"pending", "running"}
+        ):
+            raise ValidationFailure(
+                "Raw audio cannot be deleted while provider processing is in flight."
+            )
+        now = utcnow()
+        self.task_repo.delete_brain_dump_audio_chunks(
+            owner_id=owner_id,
+            operation_id=operation.id,
+            chunks=[
+                (chunk.chunk_number, chunk.sha256)
+                for chunk in operation.audio_chunks
+            ],
+        )
+        updated = operation.model_copy(
+            update={
+                "audio_chunks": [],
+                "media_ref": None,
+                "sealed_manifest_hash": None,
+                "raw_audio_expires_at": now,
+                "updated_at": now,
+                "revision": operation.revision + 1,
+            }
+        )
+        self.task_repo.save_brain_dump_operation(updated)
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=updated.id,
+            response=updated,
+        )
+        return updated
+
     def _operation_cost_budget_exceeded(
         self,
         prior_runs: list[BrainDumpProviderRunDocument],
@@ -1809,7 +1989,15 @@ class TaskService:
         silent fallback. The provider is never called once this rejects.
         """
 
-        cumulative_spent = sum(run.estimated_cost_usd for run in prior_runs)
+        cumulative_spent = sum(
+            max(run.estimated_cost_usd, run.consumed_cost_usd)
+            + (
+                run.reserved_cost_usd
+                if run.status in {"pending", "running"}
+                else 0.0
+            )
+            for run in prior_runs
+        )
         cap = self.max_cumulative_cost_usd_per_operation
         if cumulative_spent < cap and cumulative_spent + worst_case_next_usd <= cap:
             return None
@@ -1951,6 +2139,9 @@ class TaskService:
         updated = operation.model_copy(
             update={
                 "status": "completed",
+                "segments": [],
+                "proposals": [],
+                "proposal_patches": [],
                 "committed_task_ids": committed_task_ids,
                 "updated_at": now,
                 "revision": operation.revision + 1,
@@ -3411,6 +3602,7 @@ class TaskService:
             if retryable and recovery_count < self.max_operation_recoveries
             else "terminal_error"
         )
+        active_reconciler_run = operation.provider_runs[-1]
         return operation.model_copy(
             update={
                 "status": status,
@@ -3422,21 +3614,24 @@ class TaskService:
                 "segments": checkpoint_segments,
                 "provider_runs": [
                     *checkpoint_runs,
-                    BrainDumpProviderRunDocument(
-                        id=generate_id("provider_run"),
-                        role="reconciler",
-                        status=status,
-                        input_hash=input_hash,
-                        checkpoint="accurate_transcribed",
-                        attempt=attempt,
-                        recovery_count=recovery_count,
-                        error=error,
-                        estimated_cost_usd=estimated_cost_usd,
-                        error_code=(error_code if error_code is not None else error)[
-                            :100
-                        ],
-                        created_at=now,
-                        updated_at=now,
+                    active_reconciler_run.model_copy(
+                        update={
+                            "status": status,
+                            "input_hash": input_hash,
+                            "checkpoint": "accurate_transcribed",
+                            "attempt": attempt,
+                            "recovery_count": recovery_count,
+                            "error": error,
+                            "error_code": (
+                                error_code if error_code is not None else error
+                            )[:100],
+                            "estimated_cost_usd": estimated_cost_usd,
+                            "reserved_cost_usd": 0.0,
+                            "consumed_cost_usd": estimated_cost_usd,
+                            "lease_owner": None,
+                            "lease_expires_at": None,
+                            "updated_at": now,
+                        }
                     ),
                 ],
                 "updated_at": now,

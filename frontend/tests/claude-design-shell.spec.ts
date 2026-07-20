@@ -104,6 +104,8 @@ const brainDumpRecordingResponse = {
 const brainDumpReviewResponse = {
   ...brainDumpRecordingResponse,
   status: "awaiting_confirmation",
+  committable: true,
+  reconciliation_quality: "accurate",
   proposals: brainDumpProposals,
   revision: 2
 };
