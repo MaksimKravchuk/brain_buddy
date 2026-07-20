@@ -330,8 +330,12 @@ def test_seal_persists_semantic_reconciler_failures_for_recovery(
 
     assert sealed.status_code == 200, sealed.text
     assert sealed.json()["status"] == expected_status
-    assert sealed.json()["provider_runs"][-1]["role"] == "reconciler"
-    assert sealed.json()["provider_runs"][-1]["status"] == expected_status
+    persisted_run = sealed.json()["provider_runs"][-1]
+    assert persisted_run["role"] == "reconciler"
+    assert persisted_run["status"] == expected_status
+    assert persisted_run["error"] == "PROVIDER_ERROR_UNSPECIFIED"
+    assert persisted_run["error_code"] == "PROVIDER_ERROR_UNSPECIFIED"
+    assert str(provider_error) not in sealed.text
 
 
 def test_accurate_stt_failure_records_a_conservative_cost_estimate(api_client) -> None:
@@ -1867,7 +1871,12 @@ def test_schema_v2_upload_seal_runs_accurate_reconciliation_from_original_audio(
     assert sealed.status_code == 200, sealed.text
     assert sealed.json()["status"] == "accurate_transcribing"
     assert sealed.json()["provider_runs"][-1]["status"] == "pending"
-    body = _advance_persisted_provider_runs(api_client, str(operation["id"])).json()
+    # One bounded runner invocation must immediately re-drive the dependent
+    # reconciler stage queued by successful accurate STT. Waiting for the next
+    # 60-second sweep would violate the post-stop latency contract.
+    service = api_client.app.state.container.task_service
+    assert service.run_due_brain_dump_provider_runs() == 2
+    body = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
     assert body["status"] == "awaiting_confirmation"
     assert "fast_processing" in body["status_history"]
     assert {"sealing", "accurate_transcribing", "reconciling", "awaiting_confirmation"} <= set(
@@ -2687,28 +2696,34 @@ def test_raw_audio_retention_sweep_never_purges_an_awaiting_confirmation_operati
     assert committed.status_code == 200, committed.text
     assert committed.json()["committed_task_ids"]
 
-    # Only after the operation reaches a terminal status does the same
-    # expired anchor become eligible for the retention sweep.
+    # Reaching a terminal status starts a fresh configured retention window;
+    # time spent safely active in Review cannot consume terminal retention.
     completed_owner_id = api_client.get("/api/auth/me").json()["id"]
     completed_operation = container.task_service.get_brain_dump_operation(
         operation["id"], owner_id=completed_owner_id
     )
     assert completed_operation.status == "completed"
-    assert container.task_service.purge_expired_raw_audio() == 1
+    assert completed_operation.raw_audio_expires_at is not None
+    assert completed_operation.raw_audio_expires_at > expired.raw_audio_expires_at
+    assert container.task_service.purge_expired_raw_audio() == 0
+    assert (
+        container.task_service.purge_expired_raw_audio(
+            now=completed_operation.raw_audio_expires_at + timedelta(seconds=1)
+        )
+        == 1
+    )
     final = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
     assert final["audio_chunks"] == []
 
 
-def test_raw_audio_expiry_is_not_extended_by_a_later_proposal_edit(api_client) -> None:
-    """F4: raw audio's expiry is anchored at successful reconciliation and
-    must not be pushed out by a later mutation. A proposal edit made well
-    after reconciliation bumps ``updated_at`` to something very recent; the
-    sweep must still purge on schedule from the original reconciliation
-    anchor rather than restarting the retention window from that edit. The
-    edit happens while ``awaiting_confirmation`` (never purged, exact-head
-    review item 3); the operation is then committed so the sweep -- which
-    only ever fires for a terminal operation -- has something eligible to
-    purge from."""
+def test_raw_audio_expiry_starts_at_terminal_transition_not_a_review_edit(
+    api_client,
+) -> None:
+    """Active Review time never consumes terminal raw-audio retention.
+
+    A proposal edit cannot start the clock. Commit does, exactly once, so a
+    completed operation retains audio for the full configured terminal window.
+    """
 
     operation = _start_operation(
         api_client,
@@ -2729,9 +2744,7 @@ def test_raw_audio_expiry_is_not_extended_by_a_later_proposal_edit(api_client) -
     assert persisted.raw_audio_expires_at is not None
     original_anchor = persisted.raw_audio_expires_at
 
-    # Simulate a proposal edit made just before commit: it bumps
-    # ``updated_at`` to "now" (very recent) but must not touch the raw-audio
-    # anchor, which stays exactly where reconciliation left it.
+    # A Review edit must not change the provisional reconciliation timestamp.
     edited = api_client.patch(
         f"/api/brain-dump-operations/{operation['id']}/proposals/{proposal_id}",
         headers={"Idempotency-Key": "edit-before-sweep"},
@@ -2751,13 +2764,25 @@ def test_raw_audio_expiry_is_not_extended_by_a_later_proposal_edit(api_client) -
     )
     assert committed.status_code == 200, committed.text
     assert committed.json()["status"] == "completed"
+    terminal_anchor = committed.json()["raw_audio_expires_at"]
+    assert terminal_anchor != original_anchor.isoformat().replace("+00:00", "Z")
 
-    # A sweep timestamp just past the original anchor purges the audio even
-    # though ``updated_at`` looks freshly touched by the edit and commit.
+    # The old reconciliation timestamp is irrelevant while the terminal
+    # window remains open; only the commit-anchored deadline is enforceable.
     purged = container.task_service.purge_expired_raw_audio(
-        now=original_anchor + timedelta(seconds=1)
+        now=original_anchor
     )
-    assert purged == 1
+    assert purged == 0
+    completed_operation = container.task_service.get_brain_dump_operation(
+        operation["id"], owner_id=owner_id
+    )
+    assert completed_operation.raw_audio_expires_at is not None
+    assert (
+        container.task_service.purge_expired_raw_audio(
+            now=completed_operation.raw_audio_expires_at + timedelta(seconds=1)
+        )
+        == 1
+    )
     swept = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
     assert swept["audio_chunks"] == []
     assert swept["media_ref"] is None
@@ -2814,7 +2839,12 @@ def test_working_artifact_retention_sweep_clears_uncommitted_data_but_not_commit
             operation_id, owner_id=owner_id
         )
         expired = persisted.model_copy(
-            update={"updated_at": persisted.updated_at - timedelta(days=8)}
+            update={
+                "updated_at": persisted.updated_at - timedelta(days=8),
+                "working_artifacts_expires_at": (
+                    persisted.updated_at - timedelta(days=1)
+                ),
+            }
         )
         container.task_repo.save_brain_dump_operation(expired)
 
@@ -2839,9 +2869,23 @@ def test_working_artifact_retention_sweep_clears_uncommitted_data_but_not_commit
     assert swept_committed["proposals"] == []
     assert swept_committed["proposal_patches"] == []
     # Confirmation receipts and committed task IDs are compact, immutable,
-    # ID-only audit provenance -- not disposable working artifacts.
+    # non-text audit provenance -- not disposable working artifacts. It must
+    # remain independently meaningful after every segment/proposal/patch body
+    # it once referenced has been purged.
     assert swept_committed["action_receipts"]
     assert swept_committed["committed_task_ids"]
+    receipt = swept_committed["action_receipts"][0]
+    assert receipt["source_operation_id"] == committed_source["id"]
+    assert receipt["source_manifest_hash"] == sealed.json()["sealed_manifest_hash"]
+    assert receipt["reconciliation_provider"] == "deterministic"
+    assert receipt["reconciliation_run_id"]
+    assert receipt["reconciliation_quality"] == "accurate"
+    assert receipt["confirmed_title_sha256"] == hashlib.sha256(b"Buy milk").hexdigest()
+    assert receipt["proposal_revision"] >= 1
+    assert receipt["user_edited"] is False
+    assert receipt["confidence"] == "unknown"
+    assert receipt["confirmed_by_actor_id"] == owner_id
+    assert receipt["decision"] == "create_native_inbox_task"
 
     # Cancelling the abandoned operation makes its uncommitted data eligible
     # for the same sweep once its own terminal retention window elapses.
@@ -2855,7 +2899,12 @@ def test_working_artifact_retention_sweep_clears_uncommitted_data_but_not_commit
         abandoned["id"], owner_id=owner_id
     )
     aged_cancelled = persisted_cancelled.model_copy(
-        update={"updated_at": persisted_cancelled.updated_at - timedelta(days=8)}
+        update={
+            "updated_at": persisted_cancelled.updated_at - timedelta(days=8),
+            "working_artifacts_expires_at": (
+                persisted_cancelled.updated_at - timedelta(days=1)
+            ),
+        }
     )
     container.task_repo.save_brain_dump_operation(aged_cancelled)
 

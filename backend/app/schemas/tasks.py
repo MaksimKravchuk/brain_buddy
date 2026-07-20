@@ -374,6 +374,21 @@ class BrainDumpActionReceiptResponse(StrictBaseModel):
     child_idempotency_key: str
     source_segment_ids: list[str] = Field(default_factory=list)
     proposal_patch_ids: list[str] = Field(default_factory=list)
+    source_operation_id: str | None = None
+    source_manifest_hash: str | None = None
+    reconciliation_run_id: str | None = None
+    reconciliation_provider: str | None = None
+    reconciliation_model: str | None = None
+    reconciliation_template_version: str | None = None
+    reconciliation_quality: Literal[
+        "none", "provisional_only", "accurate", "conflicted"
+    ] = "none"
+    confirmed_title_sha256: str | None = None
+    proposal_revision: int | None = None
+    user_edited: bool = False
+    confidence: Literal["unknown"] = "unknown"
+    confirmed_by_actor_id: str | None = None
+    decision: Literal["create_native_inbox_task"] = "create_native_inbox_task"
     confirmed_at: datetime
 
 

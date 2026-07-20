@@ -7,6 +7,7 @@ repository construction, and the serialized legacy-JSON brain dump backfill.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -87,6 +88,86 @@ def _delete_brain_dump_row(repository: TaskRepository, operation_id: str) -> Non
         conn.commit()
     finally:
         conn.close()
+
+
+def _insert_brain_dump_payload(
+    repository: TaskRepository, payload: dict[str, object]
+) -> None:
+    conn = sqlite3.connect(repository.db_path)
+    try:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO brain_dump_operations
+                (owner_id, id, status, updated_at, payload)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                payload["owner_id"],
+                payload["id"],
+                payload["status"],
+                payload["updated_at"],
+                json.dumps(payload),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _legacy_brain_dump_payload(*, status: str) -> dict[str, object]:
+    now = utcnow().isoformat()
+    return {
+        "id": f"brain_dump_legacy_{status}",
+        "owner_id": OWNER,
+        "kind": "voice_brain_dump",
+        "status": status,
+        "consent": {
+            "microphone": True,
+            "external_processing_allowed": False,
+            "recorded_at": now,
+            "provider": None,
+        },
+        "segments": [
+            {
+                "id": "segment_legacy",
+                "sequence": 1,
+                "text": "Buy milk. Call Anna.",
+                "stability": "stable",
+                "created_at": now,
+            }
+        ],
+        "proposals": [
+            {
+                "id": "proposal_edited",
+                "ordinal": 1,
+                "title": "Buy oat milk",
+                "status": "user_edited",
+                "source_segment_ids": ["segment_legacy"],
+                "deleted": False,
+                "user_edited": True,
+                "created_at": now,
+                "updated_at": now,
+                "revision": 2,
+            },
+            {
+                "id": "proposal_deleted",
+                "ordinal": 2,
+                "title": "Call Anna",
+                "status": "provisional",
+                "source_segment_ids": ["segment_legacy"],
+                "deleted": True,
+                "user_edited": False,
+                "created_at": now,
+                "updated_at": now,
+                "revision": 2,
+            },
+        ],
+        "committed_task_ids": ["task_legacy"] if status == "completed" else [],
+        "created_at": now,
+        "updated_at": now,
+        "schema_version": 1,
+        "revision": 4,
+    }
 
 
 # --- finding 1: O(1) idempotency lookup + retention -------------------------
@@ -343,3 +424,106 @@ def test_brain_dump_backfill_does_not_clobber_concurrent_write(
     assert (
         repo.get_brain_dump_operation_for_owner(operation.id, owner_id=OWNER) == newer
     )
+
+
+def test_active_schema_v1_operation_is_imported_once_as_legacy_preview_only(
+    repository: TaskRepository,
+) -> None:
+    payload = _legacy_brain_dump_payload(status="awaiting_confirmation")
+    _insert_brain_dump_payload(repository, payload)
+
+    migrated = repository.get_brain_dump_operation_for_owner(
+        str(payload["id"]), owner_id=OWNER
+    )
+
+    assert migrated.schema_version == 2
+    assert migrated.legacy_import == "legacy_preview_only"
+    assert migrated.reconciliation_quality == "provisional_only"
+    assert [segment.provider_role for segment in migrated.segments] == [
+        "browser_preview"
+    ]
+    assert migrated.proposals[0].locked_fields == ["title"]
+    assert migrated.proposals[1].deleted is True
+    assert [patch.operation for patch in migrated.proposal_patches] == [
+        "add",
+        "add",
+        "remove",
+    ]
+    assert [patch.producer for patch in migrated.proposal_patches] == [
+        "user",
+        "user",
+        "user",
+    ]
+
+    first_patch_ids = [patch.id for patch in migrated.proposal_patches]
+    loaded_again = repository.get_brain_dump_operation_for_owner(
+        str(payload["id"]), owner_id=OWNER
+    )
+    assert [patch.id for patch in loaded_again.proposal_patches] == first_patch_ids
+
+    with sqlite3.connect(repository.db_path) as conn:
+        stored = json.loads(
+            conn.execute(
+                "SELECT payload FROM brain_dump_operations WHERE owner_id = ? AND id = ?",
+                (OWNER, payload["id"]),
+            ).fetchone()[0]
+        )
+    assert stored["schema_version"] == 2
+    assert stored["legacy_import"] == "legacy_preview_only"
+
+
+@pytest.mark.parametrize("status", ["completed", "cancelled"])
+def test_terminal_schema_v1_operation_remains_readable_and_immutable(
+    repository: TaskRepository, status: str
+) -> None:
+    payload = _legacy_brain_dump_payload(status=status)
+    _insert_brain_dump_payload(repository, payload)
+
+    loaded = repository.get_brain_dump_operation_for_owner(
+        str(payload["id"]), owner_id=OWNER
+    )
+
+    assert loaded.schema_version == 1
+    assert loaded.status == status
+    assert loaded.legacy_import is None
+    assert [proposal.id for proposal in loaded.proposals] == [
+        "proposal_edited",
+        "proposal_deleted",
+    ]
+    with sqlite3.connect(repository.db_path) as conn:
+        stored = json.loads(
+            conn.execute(
+                "SELECT payload FROM brain_dump_operations WHERE owner_id = ? AND id = ?",
+                (OWNER, payload["id"]),
+            ).fetchone()[0]
+        )
+    assert stored == payload
+
+
+def test_missing_schema_version_dispatches_as_legacy_v1(
+    repository: TaskRepository,
+) -> None:
+    payload = _legacy_brain_dump_payload(status="recording")
+    payload.pop("schema_version")
+    _insert_brain_dump_payload(repository, payload)
+
+    migrated = repository.get_brain_dump_operation_for_owner(
+        str(payload["id"]), owner_id=OWNER
+    )
+
+    assert migrated.schema_version == 2
+    assert migrated.legacy_import == "legacy_preview_only"
+    assert migrated.reconciliation_quality == "provisional_only"
+
+
+def test_unknown_brain_dump_schema_version_fails_closed(
+    repository: TaskRepository,
+) -> None:
+    payload = _legacy_brain_dump_payload(status="recording")
+    payload["schema_version"] = 99
+    _insert_brain_dump_payload(repository, payload)
+
+    with pytest.raises(RepositoryError, match="unsupported schema version 99"):
+        repository.get_brain_dump_operation_for_owner(
+            str(payload["id"]), owner_id=OWNER
+        )

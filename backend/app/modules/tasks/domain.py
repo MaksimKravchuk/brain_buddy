@@ -267,6 +267,21 @@ class BrainDumpActionReceiptDocument(StorageBaseModel):
     child_idempotency_key: str
     source_segment_ids: list[str] = Field(default_factory=list)
     proposal_patch_ids: list[str] = Field(default_factory=list)
+    source_operation_id: str | None = None
+    source_manifest_hash: str | None = Field(default=None, min_length=64, max_length=64)
+    reconciliation_run_id: str | None = None
+    reconciliation_provider: str | None = Field(default=None, max_length=100)
+    reconciliation_model: str | None = Field(default=None, max_length=100)
+    reconciliation_template_version: str | None = Field(default=None, max_length=100)
+    reconciliation_quality: Literal[
+        "none", "provisional_only", "accurate", "conflicted"
+    ] = "none"
+    confirmed_title_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    proposal_revision: int | None = Field(default=None, ge=1)
+    user_edited: bool = False
+    confidence: Literal["unknown"] = "unknown"
+    confirmed_by_actor_id: str | None = None
+    decision: Literal["create_native_inbox_task"] = "create_native_inbox_task"
     confirmed_at: datetime
 
 
@@ -300,6 +315,8 @@ class BrainDumpOperationDocument(StorageBaseModel):
     action_receipts: list[BrainDumpActionReceiptDocument] = Field(default_factory=list)
     status_history: list[BrainDumpStatus] = Field(default_factory=list)
     committed_task_ids: list[str] = Field(default_factory=list)
+    legacy_import: Literal["legacy_preview_only"] | None = None
+    """One-time marker for an active schema-v1 workspace projected into v2."""
     created_at: datetime
     updated_at: datetime
     schema_version: int = Field(default=2, ge=1)

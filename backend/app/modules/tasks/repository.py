@@ -29,6 +29,7 @@ from app.utils.time import utcnow
 
 from .domain import (
     BrainDumpOperationDocument,
+    BrainDumpProposalPatchDocument,
     IdempotencyRecord,
     ProjectDocument,
     TagDocument,
@@ -41,6 +42,9 @@ ModelT = TypeVar("ModelT", bound=BaseModel)
 
 IDEMPOTENCY_RETENTION = timedelta(hours=24)
 """How long replayed command results stay addressable by their key."""
+
+_BRAIN_DUMP_SCHEMA_VERSION = 2
+_LEGACY_TERMINAL_STATUSES = frozenset({"completed", "cancelled"})
 
 
 @contextmanager
@@ -284,7 +288,9 @@ class TaskRepository(BaseRepository):
                     self._upsert_task(conn, task)
                     counts["tasks"] += 1
                 for path in self.resolve("brain-dump-operations").glob("*/*.json"):
-                    operation = self.load_model(path, BrainDumpOperationDocument)
+                    operation, _ = self._decode_brain_dump_operation(
+                        json.loads(path.read_text(encoding="utf-8"))
+                    )
                     self._upsert_brain_dump_operation(conn, operation)
                     counts["brain_dump_operations"] += 1
                 conn.execute(
@@ -336,6 +342,99 @@ class TaskRepository(BaseRepository):
     @staticmethod
     def _payload(model: BaseModel) -> str:
         return json.dumps(model.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+
+    @staticmethod
+    def _legacy_patch_id(
+        operation_id: str, proposal_id: str, operation: str
+    ) -> str:
+        digest = hashlib.sha256(
+            f"{operation_id}:{proposal_id}:{operation}".encode()
+        ).hexdigest()[:24]
+        return f"proposal_patch_legacy_{digest}"
+
+    @classmethod
+    def _decode_brain_dump_operation(
+        cls, payload: dict[str, object]
+    ) -> tuple[BrainDumpOperationDocument, bool]:
+        """Dispatch persisted operation payloads by explicit schema version."""
+
+        raw_version = payload.get("schema_version", 1)
+        if not isinstance(raw_version, int) or isinstance(raw_version, bool):
+            raise RepositoryError("Brain dump operation schema version must be an integer.")
+        if raw_version not in {1, _BRAIN_DUMP_SCHEMA_VERSION}:
+            raise RepositoryError(
+                f"Brain dump operation has unsupported schema version {raw_version}."
+            )
+        if raw_version == _BRAIN_DUMP_SCHEMA_VERSION:
+            return BrainDumpOperationDocument.model_validate(payload), False
+
+        legacy = BrainDumpOperationDocument.model_validate(
+            {**payload, "schema_version": 1}
+        )
+        if legacy.status in _LEGACY_TERMINAL_STATUSES:
+            return legacy, False
+
+        proposals = []
+        patches: list[BrainDumpProposalPatchDocument] = []
+        sequence = 0
+        for proposal in legacy.proposals:
+            locked_fields = list(proposal.locked_fields)
+            if proposal.user_edited and "title" not in locked_fields:
+                locked_fields.append("title")
+            proposals.append(
+                proposal.model_copy(
+                    update={
+                        "locked_fields": locked_fields,
+                        "status": (
+                            "user_edited" if proposal.user_edited else "provisional"
+                        ),
+                    }
+                )
+            )
+            sequence += 1
+            patches.append(
+                BrainDumpProposalPatchDocument(
+                    id=cls._legacy_patch_id(legacy.id, proposal.id, "add"),
+                    sequence=sequence,
+                    operation="add",
+                    proposal_id=proposal.id,
+                    producer="user",
+                    title=proposal.title,
+                    source_segment_ids=proposal.source_segment_ids,
+                    locked_fields=locked_fields,
+                    created_at=legacy.updated_at,
+                )
+            )
+            if proposal.deleted:
+                sequence += 1
+                patches.append(
+                    BrainDumpProposalPatchDocument(
+                        id=cls._legacy_patch_id(legacy.id, proposal.id, "remove"),
+                        sequence=sequence,
+                        operation="remove",
+                        proposal_id=proposal.id,
+                        producer="user",
+                        source_segment_ids=proposal.source_segment_ids,
+                        created_at=legacy.updated_at,
+                    )
+                )
+
+        migrated = legacy.model_copy(
+            update={
+                "segments": [
+                    segment.model_copy(update={"provider_role": "browser_preview"})
+                    for segment in legacy.segments
+                ],
+                "proposals": proposals,
+                "provider_runs": [],
+                "proposal_patches": patches,
+                "reconciliation_quality": "provisional_only",
+                "legacy_import": "legacy_preview_only",
+                "schema_version": _BRAIN_DUMP_SCHEMA_VERSION,
+                "revision": legacy.revision + 1,
+            }
+        )
+        return migrated, True
 
     @staticmethod
     def _model(row: sqlite3.Row, model_cls: type[ModelT]) -> ModelT:
@@ -543,7 +642,7 @@ class TaskRepository(BaseRepository):
                 """
             ).fetchall()
         return [
-            BrainDumpOperationDocument.model_validate(json.loads(row["payload"]))
+            self._decode_brain_dump_operation(json.loads(row["payload"]))[0]
             for row in rows
         ]
 
@@ -567,7 +666,7 @@ class TaskRepository(BaseRepository):
                 """
             ).fetchall()
         return [
-            BrainDumpOperationDocument.model_validate(json.loads(row["payload"]))
+            self._decode_brain_dump_operation(json.loads(row["payload"]))[0]
             for row in rows
         ]
 
@@ -589,7 +688,7 @@ class TaskRepository(BaseRepository):
                 (before.isoformat(),),
             ).fetchall()
         return [
-            BrainDumpOperationDocument.model_validate(json.loads(row["payload"]))
+            self._decode_brain_dump_operation(json.loads(row["payload"]))[0]
             for row in rows
         ]
 
@@ -597,7 +696,7 @@ class TaskRepository(BaseRepository):
         with self._connection() as conn:
             rows = conn.execute("SELECT payload FROM brain_dump_operations").fetchall()
         return [
-            BrainDumpOperationDocument.model_validate(json.loads(row["payload"]))
+            self._decode_brain_dump_operation(json.loads(row["payload"]))[0]
             for row in rows
         ]
 
@@ -651,14 +750,31 @@ class TaskRepository(BaseRepository):
     def get_brain_dump_operation_for_owner(
         self, operation_id: str, *, owner_id: str
     ) -> BrainDumpOperationDocument:
-        operation = self._load_brain_dump_operation(operation_id, owner_id=owner_id)
-        if operation is not None:
-            return operation
+        loaded = self._load_brain_dump_operation(operation_id, owner_id=owner_id)
+        if loaded is not None:
+            operation, migrated = loaded
+            if not migrated:
+                return operation
+            if getattr(self._thread_state, "conn", None) is not None:
+                self.save_brain_dump_operation(operation)
+                return operation
+            with self.command_lock(owner_id):
+                current = self._load_brain_dump_operation(
+                    operation_id, owner_id=owner_id
+                )
+                if current is None:
+                    raise NotFoundError("Brain dump operation", operation_id)
+                current_operation, current_migrated = current
+                if current_migrated:
+                    self.save_brain_dump_operation(current_operation)
+                return current_operation
 
         path = self.brain_dump_operation_path(owner_id, operation_id)
         if not path.exists():
             raise NotFoundError("Brain dump operation", operation_id)
-        legacy = self.load_model(path, BrainDumpOperationDocument)
+        legacy, _ = self._decode_brain_dump_operation(
+            json.loads(path.read_text(encoding="utf-8"))
+        )
         if getattr(self._thread_state, "conn", None) is not None:
             # Already inside this thread's serialized command transaction.
             self.save_brain_dump_operation(legacy)
@@ -668,13 +784,13 @@ class TaskRepository(BaseRepository):
             # by the stale legacy JSON snapshot.
             current = self._load_brain_dump_operation(operation_id, owner_id=owner_id)
             if current is not None:
-                return current
+                return current[0]
             self.save_brain_dump_operation(legacy)
             return legacy
 
     def _load_brain_dump_operation(
         self, operation_id: str, *, owner_id: str
-    ) -> BrainDumpOperationDocument | None:
+    ) -> tuple[BrainDumpOperationDocument, bool] | None:
         with self._connection() as conn:
             row = conn.execute(
                 """
@@ -685,7 +801,7 @@ class TaskRepository(BaseRepository):
             ).fetchone()
         if row is None:
             return None
-        return BrainDumpOperationDocument.model_validate(json.loads(row["payload"]))
+        return self._decode_brain_dump_operation(json.loads(row["payload"]))
 
     def create_subtask(self, subtask: TaskSubtaskDocument) -> None:
         with self._connection() as conn, _sqlite_guard("Task subtask", subtask.id):
