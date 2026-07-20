@@ -1935,6 +1935,164 @@ def test_openai_reconciler_binds_affirmative_action_to_its_cited_target(
         )
 
 
+@pytest.mark.parametrize(
+    ("source_title", "rebound_title"),
+    [
+        ("Fire Bob, email Alice, and schedule Carol", "Fire Alice"),
+        (
+            "Заблокировать Бориса, проверить Алису, и позвать Карла",
+            "Заблокировать Алису",
+        ),
+        ("Block Bob, написать Alice, and file report", "Block Alice"),
+        ("Do not fire Bob, Alice, and Carol", "Fire Alice"),
+        ("Не надо блокировать Бориса, Алису, и Карла", "Блокировать Алису"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("operation", "predecessor_ids"),
+    [
+        ("add", []),
+        ("update", []),
+        ("split", ["proposal_existing"]),
+        ("merge", ["proposal_existing", "proposal_other"]),
+        ("supersede", ["proposal_existing"]),
+    ],
+)
+def test_openai_reconciler_rejects_serial_list_action_target_rebinding(
+    source_title: str,
+    rebound_title: str,
+    operation: str,
+    predecessor_ids: list[str],
+) -> None:
+    """An Oxford comma must not collapse distinct predicate-target groups."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text=source_title,
+        stability="stable",
+        provider_role="accurate",
+    )
+    existing = ReconciledProposal(
+        id="proposal_existing",
+        title=source_title,
+        source_segment_ids=[segment.id],
+        status="provisional",
+        title_revision=1,
+    )
+    other = ReconciledProposal(
+        id="proposal_other",
+        title=source_title,
+        source_segment_ids=[segment.id],
+        status="provisional",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": operation,
+                    "proposal_id": (
+                        "proposal_existing" if operation == "update" else None
+                    ),
+                    "title": rebound_title,
+                    "source_segment_ids": [segment.id],
+                    "predecessor_ids": predecessor_ids,
+                    "base_revision": 1 if operation == "update" else None,
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(ValidationFailure, match="one cited transcript clause"):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id=f"operation_serial_binding_{operation}",
+                transcript_segments=[segment],
+                active_proposals=[existing, other],
+                user_locks={},
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("source_title", "supported_title"),
+    [
+        ("Buy milk, bread, and eggs", "Buy bread"),
+        ("Split, merge, and remove tasks", "Merge tasks"),
+        ("Schedule meeting and call dentist", "Call dentist"),
+    ],
+)
+def test_openai_reconciler_preserves_safe_conjunction_and_serial_lists(
+    source_title: str,
+    supported_title: str,
+) -> None:
+    """Unambiguous shared-action/shared-target lists remain supported."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text=source_title,
+        stability="stable",
+        provider_role="accurate",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": "add",
+                    "title": supported_title,
+                    "source_segment_ids": [segment.id],
+                }
+            ]
+        },
+    )
+
+    result = reconciler.reconcile(
+        ReconcileTextRequest(
+            operation_id="operation_safe_serial_list",
+            transcript_segments=[segment],
+            active_proposals=[],
+            user_locks={},
+        )
+    )
+
+    assert result.patches[0].title == supported_title
+
+
+@pytest.mark.parametrize(
+    ("source_text", "expected_clauses"),
+    [
+        ("!. Buy milk, bread, and eggs", ["Buy milk", "buy bread", "buy eggs"]),
+        ("Please kindly, milk, and bread", ["Please kindly", "milk", "bread"]),
+        (
+            "Buy milk, orange juice, and eggs",
+            ["Buy milk", "orange juice", "eggs"],
+        ),
+        (
+            "Plan chores, split, merge, and remove tasks",
+            ["Plan chores", "split tasks", "merge tasks", "remove tasks"],
+        ),
+    ],
+)
+def test_openai_reconciler_source_clauses_distinguish_safe_and_ambiguous_serial_shapes(
+    source_text: str,
+    expected_clauses: list[str],
+) -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    assert OpenAITextReconciler._source_clauses(source_text) == expected_clauses
+
+
 def test_openai_reconciler_accepts_an_affirmative_action_after_polite_filler() -> None:
     from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
 
@@ -2094,6 +2252,8 @@ def test_openai_reconciler_accepts_a_removal_with_explicit_destructive_language(
         "Не надо редактировать задачу купить молоко",
         "Не нужно менять задачу купить молоко",
         "Не надо edit задачу купить молоко",
+        "Do not delete apples, milk, and eggs",
+        "Не надо удалять хлеб, молоко, и яйца",
     ],
 )
 def test_openai_reconciler_rejects_a_negated_destructive_removal(source_text: str) -> None:
@@ -2136,10 +2296,56 @@ def test_openai_reconciler_rejects_a_negated_destructive_removal(source_text: st
         },
     )
 
-    with pytest.raises(ValidationFailure, match="no explicit destructive or"):
+    with pytest.raises(
+        ValidationFailure,
+        match="one cited transcript clause|no explicit destructive or",
+    ):
         reconciler.reconcile(
             ReconcileTextRequest(
                 operation_id="operation_negated_removal",
+                transcript_segments=[segment],
+                active_proposals=[existing],
+                user_locks={},
+            )
+        )
+
+
+def test_openai_reconciler_rejects_negated_scoped_serial_removal() -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    source_text = "Project Alpha: archive, mute, purge, and do not remove tasks"
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text=source_text,
+        stability="stable",
+        provider_role="accurate",
+    )
+    existing = ReconciledProposal(
+        id="proposal_existing",
+        title="Project Alpha",
+        source_segment_ids=[segment.id],
+        status="provisional",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": "remove",
+                    "proposal_id": existing.id,
+                    "source_segment_ids": [segment.id],
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(ValidationFailure, match="no explicit destructive or"):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id="operation_negated_scoped_serial_removal",
                 transcript_segments=[segment],
                 active_proposals=[existing],
                 user_locks={},
