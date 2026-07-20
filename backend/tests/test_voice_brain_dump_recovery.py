@@ -69,7 +69,10 @@ def _manifest_hash(audio: bytes) -> str:
 
 
 def _service(
-    data_dir: Path, *, fail_plan: dict[str, list[str]] | None = None
+    data_dir: Path,
+    *,
+    fail_plan: dict[str, list[str]] | None = None,
+    max_operation_recoveries: int = 2,
 ) -> TaskService:
     repository = TaskRepository(data_dir)
     accurate_stt = DeterministicAccurateStt(
@@ -77,7 +80,11 @@ def _service(
         fail_plan=fail_plan,
         allow_text_fixture_audio=True,
     )
-    return TaskService(repository, accurate_stt=accurate_stt)
+    return TaskService(
+        repository,
+        accurate_stt=accurate_stt,
+        max_operation_recoveries=max_operation_recoveries,
+    )
 
 
 def _seal(
@@ -158,6 +165,66 @@ def test_retryable_provider_failure_persists_checkpoint_and_retry_resumes_it(
     # Same sealed manifest/checkpoint is reused; no re-upload or re-seal needed.
     assert retried.sealed_manifest_hash == sealed.sealed_manifest_hash
     assert any(proposal.title for proposal in retried.proposals)
+
+
+def test_operation_recovery_budget_terminally_exhausts_before_a_new_provider_call(
+    data_dir: Path,
+) -> None:
+    service = _service(
+        data_dir,
+        fail_plan={"media_recovery": ["retryable", "retryable"]},
+        max_operation_recoveries=1,
+    )
+    operation, _ = _seal(service)
+    operation = service.task_repo.get_brain_dump_operation_for_owner(
+        operation.id, owner_id=OWNER
+    ).model_copy(update={"media_ref": "media_recovery"})
+    service.task_repo.save_brain_dump_operation(operation)
+
+    failed = service.seal_brain_dump_operation(
+        operation.id,
+        BrainDumpSealRequest(
+            expected_revision=operation.revision,
+            expected_chunks=1,
+            manifest_hash=_manifest_hash(b"audio bytes"),
+        ),
+        owner_id=OWNER,
+        idempotency_key="budget-seal",
+    )
+    assert failed.status == "retryable_error"
+
+    exhausted = service.retry_brain_dump_operation(
+        operation.id,
+        ExpectedRevisionRequest(expected_revision=failed.revision),
+        owner_id=OWNER,
+        idempotency_key="budget-retry",
+    )
+
+    assert exhausted.status == "terminal_error"
+    assert exhausted.provider_runs[-1].error_code == "OPERATION_RECOVERY_BUDGET_EXHAUSTED"
+    assert exhausted.provider_runs[-1].recovery_count == 1
+
+
+def test_existing_chunk_upload_repairs_a_missing_atomic_file(data_dir: Path) -> None:
+    service = _service(data_dir)
+    operation, _ = _seal(service)
+    audio = b"audio bytes"
+    sha256 = hashlib.sha256(audio).hexdigest()
+    chunk_path = service.task_repo.brain_dump_audio_chunk_path(
+        OWNER, operation.id, 0, sha256
+    )
+    chunk_path.unlink()
+
+    repaired = service.upload_brain_dump_audio_chunk(
+        operation.id,
+        0,
+        audio,
+        owner_id=OWNER,
+        content_sha256=sha256,
+    )
+
+    assert repaired.id == operation.id
+    assert chunk_path.read_bytes() == audio
 
 
 def test_process_death_during_provider_call_leaves_a_durable_claimed_checkpoint(

@@ -1045,7 +1045,7 @@ class TaskService:
             now = utcnow()
             attempt = last_run.attempt + 1
             recovery_count = last_run.recovery_count + 1
-            if recovery_count > self.max_operation_recoveries:
+            if recovery_count >= self.max_operation_recoveries:
                 exhausted = operation.model_copy(
                     update={
                         "status": "terminal_error",

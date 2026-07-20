@@ -7,7 +7,14 @@ from pathlib import Path
 import pytest
 
 from app.container import _build_accurate_stt, _build_text_reconciler
-from app.core.config import DEFAULT_SCHEMA_VERSION, get_config
+from app.core.config import (
+    DEFAULT_SCHEMA_VERSION,
+    AppConfig,
+    AppEnvironment,
+    VoiceProviderSettings,
+    VoiceSettings,
+    get_config,
+)
 from app.workflows.voice_brain_dump.providers import (
     DisabledAccurateStt,
     DisabledTextReconciler,
@@ -92,6 +99,20 @@ def test_production_rejects_deterministic_stt_even_with_legacy_escape_hatch(
 
     with pytest.raises(ValueError, match="deterministic accurate STT"):
         get_config()
+
+
+def test_container_defensively_disables_deterministic_stt_outside_test() -> None:
+    config = AppConfig(
+        environment=AppEnvironment.DEVELOPMENT,
+        voice=VoiceSettings(
+            accurate_stt=VoiceProviderSettings(provider="deterministic")
+        ),
+    )
+
+    provider = _build_accurate_stt(config)
+
+    assert isinstance(provider, DisabledAccurateStt)
+    assert provider.reason == "STT_DETERMINISTIC_PROVIDER_TEST_ONLY"
 
 
 def test_voice_operation_recovery_budget_is_configured(
