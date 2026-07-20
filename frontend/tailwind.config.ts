@@ -136,6 +136,10 @@ const config: Config = {
         shimmer: {
           "0%": { backgroundPosition: "-200% 0" },
           "100%": { backgroundPosition: "200% 0" }
+        },
+        "detail-enter": {
+          "0%": { opacity: "0", transform: "translateY(-4px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" }
         }
       },
       animation: {
@@ -153,7 +157,8 @@ const config: Config = {
           "scale-fade-in 200ms cubic-bezier(0.22, 1, 0.36, 1)",
         "scale-fade-out":
           "scale-fade-out 180ms cubic-bezier(0.4, 0, 1, 1) forwards",
-        shimmer: "shimmer 1500ms linear infinite"
+        shimmer: "shimmer 1500ms linear infinite",
+        "detail-enter": "detail-enter 250ms cubic-bezier(0.22, 1, 0.36, 1)"
       }
     }
   },
