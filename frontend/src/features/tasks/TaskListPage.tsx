@@ -89,20 +89,6 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     }
   };
 
-  useEffect(() => {
-    if (taskId) {
-      detailHeadingRef.current?.focus();
-    } else if (previousTaskIdRef.current) {
-      const originLink = rowLinkRefs.current.get(previousTaskIdRef.current);
-      if (originLink && document.contains(originLink)) {
-        originLink.focus();
-      } else {
-        listHeadingRef.current?.focus();
-      }
-    }
-    previousTaskIdRef.current = taskId;
-  }, [taskId]);
-
   const sort = parseTaskSort(searchParams.get("sort"));
   const searchQuery = searchParams.get("q") ?? "";
   const today = localDateIso();
@@ -124,6 +110,20 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const detailQuery = useTaskDetail(taskId);
   const projectsQuery = useProjects();
   const tagsQuery = useTags();
+
+  useEffect(() => {
+    if (taskId && isDesktop) {
+      detailHeadingRef.current?.focus();
+    } else if (!taskId && isDesktop && previousTaskIdRef.current) {
+      const originLink = rowLinkRefs.current.get(previousTaskIdRef.current);
+      if (originLink && document.contains(originLink)) {
+        originLink.focus();
+      } else {
+        listHeadingRef.current?.focus();
+      }
+    }
+    previousTaskIdRef.current = taskId;
+  }, [detailQuery.data, isDesktop, taskId]);
 
   const projects = projectsQuery.data ?? emptyProjects;
   const tags = tagsQuery.data ?? emptyTags;
@@ -393,6 +393,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
               projects={projects}
               tags={tags}
               taskPathBase={listPath}
+              taskSearch={searchParams.toString()}
               editingTaskId={editingTaskId}
               editingTitle={editingTitle}
               registerRowLink={registerRowLink}
@@ -508,6 +509,7 @@ function TaskList({
   projects,
   tags,
   taskPathBase,
+  taskSearch,
   editingTaskId,
   editingTitle,
   registerRowLink,
@@ -533,6 +535,7 @@ function TaskList({
   projects: ProjectResponse[];
   tags: TagResponse[];
   taskPathBase: string;
+  taskSearch: string;
   editingTaskId: string | null;
   editingTitle: string;
   registerRowLink: (taskId: string, el: HTMLAnchorElement | null) => void;
@@ -569,7 +572,7 @@ function TaskList({
             task={task}
             project={project}
             tags={taskTags}
-            detailPath={`${taskPathBase}/${task.id}`}
+            detailPath={`${taskPathBase}/${task.id}${taskSearch ? `?${taskSearch}` : ""}`}
             isEditing={editingTaskId === task.id}
             editingTitle={editingTitle}
             registerRowLink={registerRowLink}
@@ -647,6 +650,9 @@ function TaskRow({
       }`}
       role="listitem"
       onClick={(event) => {
+        if (isExpanded) {
+          return;
+        }
         const target = event.target as HTMLElement;
         if (target.closest("a, button, input, textarea, select, label")) {
           return;
@@ -786,7 +792,7 @@ function TaskDetailPanel({
         >
           Task detail
         </h2>
-        <p className="m-0 min-w-0 flex-1 truncate text-[20px] font-semibold leading-[1.3] tracking-[-0.015em] text-slate-900 lg:hidden">
+        <p className="m-0 min-w-0 flex-1 break-words whitespace-normal text-[20px] font-semibold leading-[1.3] tracking-[-0.015em] text-slate-900 lg:hidden">
           {task?.title ?? "Task"}
         </p>
         <button
