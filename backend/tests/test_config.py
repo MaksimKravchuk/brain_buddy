@@ -241,6 +241,37 @@ def test_build_container_forwards_bounded_reconciler_settings_to_the_adapter(
     assert container.task_service.raw_audio_retention.total_seconds() == 123
 
 
+def test_build_container_derives_recovery_lease_from_worst_case_provider_timing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F5: the persisted recovery lease must cover the configured provider
+    timeout, its bounded retry/backoff schedule, and a safe margin -- not a
+    fixed 30 seconds -- so no valid ongoing call can be recovered early."""
+
+    from app.container import build_container
+
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "development")
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_PROVIDER", "openai")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_TIMEOUT_SECONDS", "10")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_MAX_RETRIES", "2")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_RETRY_BACKOFF_SECONDS", "1,2")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER", "openai")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_TIMEOUT_SECONDS", "5")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_MAX_RETRIES", "1")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_RETRY_BACKOFF_SECONDS", "3")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_LEASE_RECOVERY_MARGIN_SECONDS", "30")
+    get_config.cache_clear()  # type: ignore[attr-defined]
+
+    container = build_container(get_config())
+
+    # accurate_stt worst case: 3 attempts * 10s timeout + (1 + 2)s backoff = 33s
+    # reconciler worst case: 2 attempts * 5s timeout + 3s backoff = 13s
+    # lease = max(33, 13) + 30s margin = 63s
+    assert container.task_service.provider_run_lease_seconds == pytest.approx(63.0)
+
+
 def test_unsupported_reconciler_provider_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

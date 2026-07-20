@@ -47,6 +47,15 @@ const processingStatusLabels = new Map<string, string>([
   ["committing", "Saving tasks"]
 ]);
 
+// A background lease-recovery sweep or another process can advance one of
+// these statuses server-side without any client action; the poll keeps a
+// stale processing/recovery projection moving without a manual reload. It
+// stops the moment the operation reaches review (awaiting_confirmation),
+// completed/cancelled, or the genuinely terminal `terminal_error` state.
+const pollableStatuses = new Set<string>([...processingStatusLabels.keys(), "retryable_error"]);
+const POLL_INITIAL_MS = 1500;
+const POLL_MAX_MS = 8000;
+
 const languageOptions = {
   ru: { hints: ["ru"] },
   "ru-en": { hints: ["ru", "en"] },
@@ -70,6 +79,7 @@ export function BrainDumpRoute(): JSX.Element {
   const [lastTranscript, setLastTranscript] = useState("");
   const [savedCount, setSavedCount] = useState<number | null>(null);
   const [showProvisionalReview, setShowProvisionalReview] = useState(false);
+  const [consentWithdrawnMidCapture, setConsentWithdrawnMidCapture] = useState(false);
   const [languageMode, setLanguageMode] = useState<LanguageMode>("ru-en");
   const [externalProcessingAllowed, setExternalProcessingAllowed] = useState(false);
   const [vocabularyText, setVocabularyText] = useState("BrainBuddy, production smoke");
@@ -130,6 +140,50 @@ export function BrainDumpRoute(): JSX.Element {
     });
     return () => controller.abort();
   }, [applyOperation, operation?.id, params.operationId]);
+
+  useEffect(() => {
+    const operationId = operation?.id;
+    const operationStatus = operation?.status;
+    if (!operationId || !operationStatus || !pollableStatuses.has(operationStatus)) {
+      return;
+    }
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let stopped = false;
+    let delay = POLL_INITIAL_MS;
+
+    const poll = () => {
+      apiClient
+        .getBrainDump(operationId, controller.signal)
+        .then((next) => {
+          if (stopped) {
+            return;
+          }
+          applyOperation(next);
+          if (!pollableStatuses.has(next.status)) {
+            return;
+          }
+          delay = Math.min(delay * 2, POLL_MAX_MS);
+          timer = setTimeout(poll, delay);
+        })
+        .catch(() => {
+          if (stopped || controller.signal.aborted) {
+            return;
+          }
+          delay = Math.min(delay * 2, POLL_MAX_MS);
+          timer = setTimeout(poll, delay);
+        });
+    };
+    timer = setTimeout(poll, delay);
+
+    return () => {
+      stopped = true;
+      controller.abort();
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+  }, [applyOperation, operation?.id, operation?.status]);
 
   function speechRecognitionConstructor() {
     const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
@@ -224,30 +278,37 @@ export function BrainDumpRoute(): JSX.Element {
 
   async function stopMediaRecorder({ discardPendingAudio = false } = {}) {
     const recorder = mediaRecorderRef.current;
-    if (!recorder || recorder.state === "inactive") {
-      return;
+    try {
+      if (recorder && recorder.state !== "inactive") {
+        if (discardPendingAudio) {
+          // `stop()` may synchronously emit a final dataavailable event. Once the
+          // user discards capture or revokes cloud-processing consent that final
+          // blob must not enter the upload queue after the server has revoked it.
+          recorder.ondataavailable = null;
+        }
+        await new Promise<void>((resolve) => {
+          const previousStop = recorder.onstop;
+          recorder.onstop = (event) => {
+            previousStop?.call(recorder, event);
+            resolve();
+          };
+          recorder.stop();
+        });
+      }
+    } finally {
+      // Every live MediaStream track must be released even when there is no
+      // recorder at all, or it is already inactive (e.g. it stopped itself,
+      // or a previous cleanup already ran) -- otherwise the browser keeps the
+      // microphone indicator (and the underlying device) held open.
+      mediaRecorderRef.current = null;
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
     }
-    if (discardPendingAudio) {
-      // `stop()` may synchronously emit a final dataavailable event. Once the
-      // user discards capture or revokes cloud-processing consent that final
-      // blob must not enter the upload queue after the server has revoked it.
-      recorder.ondataavailable = null;
-    }
-    await new Promise<void>((resolve) => {
-      const previousStop = recorder.onstop;
-      recorder.onstop = (event) => {
-        previousStop?.call(recorder, event);
-        resolve();
-      };
-      recorder.stop();
-    });
-    mediaRecorderRef.current = null;
-    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
-    mediaStreamRef.current = null;
   }
 
   async function startRecording() {
     setError(null);
+    setConsentWithdrawnMidCapture(false);
     if (!externalProcessingAllowed) {
       setError("Secure cloud transcription consent is required before recording.");
       return;
@@ -372,6 +433,9 @@ export function BrainDumpRoute(): JSX.Element {
         // (and the underlying device) held open after the user cancels.
         await stopMediaRecorder({ discardPendingAudio: true });
       }
+      if (action === "withdraw_consent") {
+        setConsentWithdrawnMidCapture(true);
+      }
       if (action === "pause" && mediaRecorderRef.current?.state === "recording") {
         mediaRecorderRef.current.pause();
       }
@@ -383,6 +447,7 @@ export function BrainDumpRoute(): JSX.Element {
       }
       if (action === "cancel") {
         applyOperation(null);
+        setConsentWithdrawnMidCapture(false);
         setLastTranscript("");
         navigate("/brain-dump/new", { replace: true });
       }
@@ -418,7 +483,12 @@ export function BrainDumpRoute(): JSX.Element {
       );
       applyOperation(updated);
     } catch (caught) {
-      const fallback = kind === "edit" ? "Could not update the task title." : "Could not delete the task.";
+      const fallback =
+        kind === "edit"
+          ? "Could not update the task title."
+          : kind === "resolve"
+            ? "Could not resolve the conflict."
+            : "Could not delete the task.";
       setError(caught instanceof Error ? caught.message : fallback);
     }
   }
@@ -503,6 +573,7 @@ export function BrainDumpRoute(): JSX.Element {
 
   return (
     <RecordingSurface
+      consentWithdrawnMidCapture={consentWithdrawnMidCapture}
       externalProcessingAllowed={externalProcessingAllowed}
       error={error}
       isStarting={isStarting}
@@ -560,6 +631,7 @@ function RecoverySurface({
 }
 
 function RecordingSurface({
+  consentWithdrawnMidCapture,
   externalProcessingAllowed,
   error,
   isStarting,
@@ -578,6 +650,7 @@ function RecordingSurface({
   onVocabularyTextChange,
   vocabularyText
 }: {
+  consentWithdrawnMidCapture: boolean;
   externalProcessingAllowed: boolean;
   error: string | null;
   isStarting: boolean;
@@ -597,8 +670,12 @@ function RecordingSurface({
   vocabularyText: string;
 }): JSX.Element {
   const count = proposals.length;
-  const isPaused = operation?.status === "paused";
-  const isRecording = operation?.status === "recording";
+  // A stopped recorder must never keep showing Recording/Paused: consent
+  // withdrawal already stopped local capture (see `stopMediaRecorder` in
+  // `command()`), even though the server may leave `status` unchanged for a
+  // mid-recording withdrawal (see ADR-0002 -- withdrawal is not cancel).
+  const isPaused = operation?.status === "paused" && !consentWithdrawnMidCapture;
+  const isRecording = operation?.status === "recording" && !consentWithdrawnMidCapture;
   return (
     <div className="min-h-screen bg-surface-base text-slate-900" data-operation-id={operation?.id ?? "new"}>
       <div className="fixed inset-0 flex items-center justify-center bg-slate-50/80 p-0 backdrop-blur-sm sm:p-4">
@@ -609,7 +686,7 @@ function RecordingSurface({
             <span className="text-xs font-semibold text-slate-900">{count} {count === 1 ? "task" : "tasks"} captured</span>
             <span className={`ml-auto inline-flex items-center gap-1.5 text-xs font-medium ${isRecording ? "text-rose-600" : "text-slate-500"}`}>
               <span className={`h-1.5 w-1.5 rounded-full ${isRecording ? "bg-rose-600" : "bg-slate-400"}`} aria-hidden />
-              {isPaused ? "Paused" : isRecording ? "Recording" : "Ready"}
+              {consentWithdrawnMidCapture ? "Cloud processing stopped" : isPaused ? "Paused" : isRecording ? "Recording" : "Ready"}
             </span>
           </header>
 
@@ -643,14 +720,14 @@ function RecordingSurface({
           </div>
 
           <footer className="shrink-0 border-t border-slate-100 bg-slate-50/80 px-4 py-3 sm:px-5">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2 gap-y-2 sm:gap-3">
               <div className="relative h-10 w-10 shrink-0" aria-label="Voice level">
                 <span className={`absolute inset-0 rounded-full bg-sky-200/70 ${isRecording ? "animate-[bbPulse_1.8s_cubic-bezier(.22,1,.36,1)_infinite]" : ""}`} />
                 <div className="absolute inset-0 flex items-center justify-center rounded-full bg-brand-primary text-white">
                   <Mic className="h-4 w-4" aria-hidden />
                 </div>
               </div>
-              <details className="min-w-0 flex-1 text-[13px] leading-normal text-slate-500">
+              <details className="min-w-0 flex-1 basis-full text-[13px] leading-normal text-slate-500 sm:basis-auto">
                 <summary className="cursor-pointer list-none overflow-hidden text-ellipsis whitespace-nowrap">{lastTranscript || "Transcript stays collapsed while tasks remain primary"}</summary>
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">Browser preview · provisional</span>
                 <p className="mt-2 whitespace-pre-wrap rounded-lg bg-white p-2 text-xs text-slate-500">{lastTranscript || "No transcript yet."}</p>
@@ -660,6 +737,10 @@ function RecordingSurface({
                   <Mic className="h-4 w-4" aria-hidden />
                   Record
                 </button>
+              ) : consentWithdrawnMidCapture ? (
+                <span className="inline-flex h-10 items-center rounded-lg border border-amber-200 bg-amber-50 px-4 text-sm font-medium text-amber-800">
+                  Cloud processing stopped
+                </span>
               ) : isPaused ? (
                 <button type="button" className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white shadow-soft" onClick={onResume}>
                   <Play className="h-4 w-4" aria-hidden />
@@ -671,9 +752,9 @@ function RecordingSurface({
                   Pause
                 </button>
               )}
-              <button type="button" className="hidden h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 sm:inline-flex sm:items-center" onClick={onCancel}>Discard</button>
+              <button type="button" className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700" onClick={onCancel}>Discard</button>
               {operation?.consent.external_processing_allowed ? (
-                <button type="button" className="hidden h-10 rounded-lg border border-amber-200 bg-white px-4 text-sm font-medium text-amber-800 sm:inline-flex sm:items-center" onClick={onWithdrawConsent}>
+                <button type="button" className="inline-flex h-10 items-center rounded-lg border border-amber-200 bg-white px-4 text-sm font-medium text-amber-800" onClick={onWithdrawConsent}>
                   Stop cloud processing
                 </button>
               ) : null}

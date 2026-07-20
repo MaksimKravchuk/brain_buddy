@@ -85,6 +85,7 @@ class ReconcileResult:
     input_hash: str
     patches: list[ProposalPatch]
     confidences: dict[str, float] = field(default_factory=dict)
+    estimated_cost_usd: float = 0.0
 
 
 class FastSttPort(Protocol):

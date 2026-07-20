@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import timedelta
 from pathlib import Path
 from typing import cast
 
@@ -78,6 +79,7 @@ def _service(
     fail_plan: dict[str, list[str]] | None = None,
     max_operation_recoveries: int = 2,
     max_cumulative_cost_usd_per_operation: float = 1.00,
+    provider_run_lease_seconds: float = 30.0,
 ) -> TaskService:
     repository = TaskRepository(data_dir)
     accurate_stt = DeterministicAccurateStt(
@@ -90,6 +92,7 @@ def _service(
         accurate_stt=accurate_stt,
         max_operation_recoveries=max_operation_recoveries,
         max_cumulative_cost_usd_per_operation=max_cumulative_cost_usd_per_operation,
+        provider_run_lease_seconds=provider_run_lease_seconds,
     )
 
 
@@ -272,6 +275,100 @@ def test_due_provider_lease_sweep_honors_a_zero_claim_limit(data_dir: Path) -> N
     service.task_repo.list_in_flight_provider_run_operations = lambda: [operation]
 
     assert service.recover_due_provider_leases(limit=0) == 0
+
+
+def test_seal_claims_a_lease_covering_the_configured_provider_timing(
+    data_dir: Path,
+) -> None:
+    """F5: the persisted lease duration must come from the configured
+    provider timeout/retry/backoff/margin -- not a fixed 30 seconds. A
+    slow-provider configuration (long timeout, several retries) must claim a
+    correspondingly long lease so a still-working call is never recovered
+    early; a short configuration claims a short one."""
+
+    slow_lease_seconds = 245.0
+    service = _service(data_dir, provider_run_lease_seconds=slow_lease_seconds)
+
+    captured: dict[str, object] = {}
+    original_transcribe = service.accurate_stt.transcribe_sealed_audio
+
+    def snapshot_claim_then_transcribe(request):
+        persisted = service.task_repo.get_brain_dump_operation_for_owner(
+            request.operation_id, owner_id=OWNER
+        )
+        claimed_run = persisted.provider_runs[-1]
+        captured["lease_duration"] = (
+            claimed_run.lease_expires_at - claimed_run.created_at
+        ).total_seconds()
+        return original_transcribe(request)
+
+    service.accurate_stt.transcribe_sealed_audio = snapshot_claim_then_transcribe  # type: ignore[method-assign]
+    operation, _ = _seal(service)
+    service.seal_brain_dump_operation(
+        operation.id,
+        BrainDumpSealRequest(
+            expected_revision=operation.revision,
+            expected_chunks=1,
+            manifest_hash=_manifest_hash(b"audio bytes"),
+        ),
+        owner_id=OWNER,
+        idempotency_key="slow-provider-seal",
+    )
+
+    assert captured["lease_duration"] == pytest.approx(slow_lease_seconds)
+
+
+def test_expired_lease_still_recovers_through_the_bounded_retry_path(
+    data_dir: Path,
+) -> None:
+    """Once a configured (non-30s) lease genuinely expires, recovery still
+    proceeds through the same owner-serialized, compare-and-set, bounded
+    path -- the longer duration only changes *when* recovery is allowed, not
+    whether it eventually happens."""
+
+    service = _service(data_dir, provider_run_lease_seconds=245.0)
+    operation, _ = _seal(service)
+    operation = operation.model_copy(update={"media_ref": "media_recovery"})
+    service.task_repo.save_brain_dump_operation(operation)
+
+    now = utcnow()
+    claimed = operation.model_copy(
+        update={
+            "status": "accurate_transcribing",
+            "sealed_manifest_hash": _manifest_hash(b"audio bytes"),
+            "provider_runs": [
+                BrainDumpProviderRunDocument(
+                    id="provider_run_expired",
+                    role="accurate_stt",
+                    status="running",
+                    input_hash=hashlib.sha256(b"audio bytes").hexdigest(),
+                    checkpoint="sealed",
+                    attempt=1,
+                    recovery_count=0,
+                    lease_owner="runner_expired",
+                    # Already in the past relative to real wall-clock time,
+                    # exactly like the process-death fixtures above -- this
+                    # is what "genuinely expired" means for a persisted
+                    # lease, independent of its configured duration.
+                    lease_expires_at=now - timedelta(seconds=1),
+                    created_at=now - timedelta(seconds=246),
+                    updated_at=now - timedelta(seconds=246),
+                )
+            ],
+            "revision": operation.revision + 1,
+        }
+    )
+    service.task_repo.save_brain_dump_operation(claimed)
+
+    assert service.recover_due_provider_leases() == 1
+    recovered = service.task_repo.get_brain_dump_operation_for_owner(
+        operation.id, owner_id=OWNER
+    )
+    assert recovered.status == "awaiting_confirmation"
+    recovered_accurate = next(
+        run for run in reversed(recovered.provider_runs) if run.role == "accurate_stt"
+    )
+    assert recovered_accurate.recovery_count == 1
 
 
 def test_existing_chunk_upload_repairs_a_missing_atomic_file(data_dir: Path) -> None:

@@ -522,13 +522,20 @@ class TaskRepository(BaseRepository):
         )
 
     def list_expired_raw_audio_operations(
-        self, *, before: datetime
+        self,
     ) -> list[BrainDumpOperationDocument]:
         # "awaiting_confirmation" is included alongside the terminal statuses
         # because raw audio's retention clock starts at successful
         # reconciliation, not only at operation completion/cancellation/
         # failure — an operation left awaiting confirmation and never
         # committed must still have its raw audio purged on schedule.
+        #
+        # No SQL column tracks the artifact-specific ``raw_audio_expires_at``
+        # anchor (it lives inside the JSON payload), so this returns every
+        # candidate in an eligible status; the caller compares each
+        # document's own anchor against the current time to decide whether
+        # it is actually due, exactly like the provider-lease sweep does for
+        # ``lease_expires_at``.
         eligible_statuses = (
             "cancelled",
             "completed",
@@ -539,9 +546,9 @@ class TaskRepository(BaseRepository):
             rows = conn.execute(
                 """
                 SELECT payload FROM brain_dump_operations
-                WHERE status IN (?, ?, ?, ?) AND updated_at < ?
+                WHERE status IN (?, ?, ?, ?)
                 """,
-                (*eligible_statuses, before.isoformat()),
+                eligible_statuses,
             ).fetchall()
         return [
             BrainDumpOperationDocument.model_validate(json.loads(row["payload"]))

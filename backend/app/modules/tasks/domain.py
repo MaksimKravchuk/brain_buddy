@@ -266,6 +266,14 @@ class BrainDumpOperationDocument(StorageBaseModel):
     proposals: list[BrainDumpProposalDocument] = Field(default_factory=list)
     media_ref: str | None = None
     audio_chunks: list[BrainDumpAudioChunkDocument] = Field(default_factory=list)
+    raw_audio_expires_at: datetime | None = None
+    """Set once, at successful reconciliation, to ``reconciled_at + raw_audio_retention``.
+
+    This is the sole clock the raw-audio retention sweep uses. It is never
+    recomputed from a later ``updated_at`` mutation (a proposal edit, consent
+    withdrawal, etc.) so an operation cannot silently outlive its configured
+    raw-audio retention just because someone touched it after reconciling.
+    """
     sealed_manifest_hash: str | None = Field(default=None, min_length=64, max_length=64)
     provider_runs: list[BrainDumpProviderRunDocument] = Field(default_factory=list)
     proposal_patches: list[BrainDumpProposalPatchDocument] = Field(default_factory=list)

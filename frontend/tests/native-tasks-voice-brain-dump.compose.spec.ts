@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { allure } from "allure-playwright";
 
 type JsonRecord = Record<string, unknown>;
@@ -144,6 +145,41 @@ async function apiGet<T>(page: Page, path: string): Promise<T> {
   const response = await page.request.get(path);
   await expectOk(response, `GET ${path}`);
   return (await response.json()) as T;
+}
+
+function sha256Hex(data: Buffer | string): string {
+  return createHash("sha256").update(data).digest("hex");
+}
+
+/** Upload one audio chunk and seal it through the real accurate-STT/reconciler
+ * pipeline (deterministic in the compose test environment), producing a
+ * genuinely reconciled, commit-eligible operation -- the only path production
+ * accepts for `commit` (see `BRAIN_DUMP_NOT_RECONCILED` /
+ * `BRAIN_DUMP_PROPOSAL_NOT_RECONCILED`). Returns the sealed, awaiting-
+ * confirmation projection.
+ */
+async function sealWithDeterministicAudio(
+  page: Page,
+  operationId: string,
+  audioText: string
+): Promise<BrainDumpOperation> {
+  const audio = Buffer.from(audioText, "utf-8");
+  const digest = sha256Hex(audio);
+  const uploadResponse = await page.request.put(`/api/brain-dump-operations/${operationId}/audio/0`, {
+    data: audio,
+    headers: { "X-Content-SHA256": digest, "Content-Type": "application/octet-stream" }
+  });
+  await expectOk(uploadResponse, `PUT audio/0 for ${operationId}`);
+  const uploaded = (await uploadResponse.json()) as BrainDumpOperation;
+  const manifestHash = sha256Hex(
+    JSON.stringify([{ chunk_number: 0, sha256: digest, size_bytes: audio.length }])
+  );
+  return apiPost<BrainDumpOperation>(
+    page,
+    `/api/brain-dump-operations/${operationId}/seal`,
+    { expected_revision: uploaded.revision, expected_chunks: 1, manifest_hash: manifestHash },
+    unique("seal")
+  );
 }
 
 async function createProject(page: Page, name: string): Promise<Project> {
@@ -661,16 +697,24 @@ test("owner isolation hides tasks, brain dump operations, drafts and committed l
     { segments: [{ sequence: 1, text: "owner a private draft", stability: "stable" }] },
     unique("owner-a-transcript")
   );
-  const awaiting = await apiPost<BrainDumpOperation>(
+  // Production only ever accepts commit for a genuinely sealed and reconciled
+  // batch (`BRAIN_DUMP_NOT_RECONCILED` / `BRAIN_DUMP_PROPOSAL_NOT_RECONCILED`
+  // otherwise); a bare transcript-only `finish` has no reconciler-affirmed
+  // proposal and must not be committed here just to manufacture a linked
+  // task for the isolation assertions below. Delete the untouched fast-only
+  // draft (it is not reconciler-affirmed) and seal real audio through the
+  // deterministic accurate-STT/reconciler pipeline instead.
+  await apiPatch<BrainDumpOperation>(
     page,
-    `/api/brain-dump-operations/${operation.id}/finish`,
-    { expected_revision: withDraft.revision },
-    unique("owner-a-finish")
+    `/api/brain-dump-operations/${operation.id}/proposals/${withDraft.proposals[0].id}`,
+    { deleted: true, expected_revision: withDraft.revision },
+    unique("owner-a-delete-draft")
   );
+  const sealed = await sealWithDeterministicAudio(page, operation.id, "owner isolation sealed audio");
   const committed = await apiPost<BrainDumpOperation>(
     page,
     `/api/brain-dump-operations/${operation.id}/commit`,
-    { expected_revision: awaiting.revision },
+    { expected_revision: sealed.revision },
     unique("owner-a-commit")
   );
 
