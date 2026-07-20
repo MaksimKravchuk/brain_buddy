@@ -471,8 +471,6 @@ class OpenAITextReconciler:
             "нельзя",
         }
     )
-    _NEGATION_SCOPE_WINDOW = 2
-
     @staticmethod
     def _has_destructive_support(source_text: str) -> bool:
         """Explicit, unnegated destructive/negating vocabulary is required.
@@ -491,19 +489,61 @@ class OpenAITextReconciler:
             token.casefold()
             for token in re.findall(r"[^\W\d_]+", source_text, flags=re.UNICODE)
         ]
+        saw_destructive_term = False
         for index, token in enumerate(tokens):
             if token not in OpenAITextReconciler._DESTRUCTIVE_SINGLE_TERMS:
                 continue
-            window_start = max(0, index - OpenAITextReconciler._NEGATION_SCOPE_WINDOW)
+            saw_destructive_term = True
             if not any(
                 preceding in OpenAITextReconciler._NEGATION_MARKERS
-                for preceding in tokens[window_start:index]
+                for preceding in tokens[:index]
             ):
                 return True
+        if saw_destructive_term:
+            return False
         return any(
             pair in OpenAITextReconciler._DESTRUCTIVE_NEGATION_PAIRS
             for pair in zip(tokens, tokens[1:], strict=False)
         )
+
+    @staticmethod
+    def _source_clauses(text: str) -> list[str]:
+        """Return conservative command clauses without recombining their targets.
+
+        Punctuation always separates commands. A coordinating conjunction only
+        separates when at least a verb/object-sized two-token phrase follows it;
+        this keeps simple objects such as ``milk and bread`` together while
+        separating ``schedule meeting and call dentist``.
+        """
+
+        sentences: list[str] = []
+        start = 0
+        for index, character in enumerate(text):
+            if character in ".!?;":
+                if text[start:index].strip():
+                    sentences.append(text[start:index].strip())
+                start = index + 1
+        if text[start:].strip():
+            sentences.append(text[start:].strip())
+
+        clauses: list[str] = []
+        conjunction = re.compile(
+            r"\b(?:and|then|but|и|затем|но)\b(?=\s+[^\W\d_]+\s+[^\W\d_]+)",
+            flags=re.IGNORECASE | re.UNICODE,
+        )
+        for sentence in sentences:
+            clause_start = 0
+            for match in conjunction.finditer(sentence):
+                # A serial-list comma ("split, merge, and remove tasks") is
+                # one command description, not a boundary between commands.
+                if sentence[: match.start()].rstrip().endswith(","):
+                    continue
+                if sentence[clause_start : match.start()].strip():
+                    clauses.append(sentence[clause_start : match.start()].strip())
+                clause_start = match.end()
+            if sentence[clause_start:].strip():
+                clauses.append(sentence[clause_start:].strip())
+        return clauses
 
     @staticmethod
     def _named_entities(text: str) -> set[str]:
@@ -601,14 +641,38 @@ class OpenAITextReconciler:
         source_entities = OpenAITextReconciler._named_entities(
             source_text
         ) | OpenAITextReconciler._identity_anchor_terms(source_text)
-        if (title_entities - source_entities) and (source_entities - title_entities):
+        if title_entities - source_entities:
             raise ValidationFailure(
                 f"unsupported {operation} names a different concrete identity than "
                 "the cited transcript evidence supports."
             )
 
-        if destructive and not OpenAITextReconciler._has_destructive_support(
-            source_text
+        clauses = OpenAITextReconciler._source_clauses(source_text)
+        title_tokens = re.findall(r"[^\W\d_]+", title.casefold(), flags=re.UNICODE)
+        title_action = title_tokens[0] if title_tokens else ""
+        clause_supports_title = []
+        for clause in clauses:
+            clause_entities = OpenAITextReconciler._named_entities(
+                clause
+            ) | OpenAITextReconciler._identity_anchor_terms(clause)
+            if title_entities <= clause_entities:
+                clause_supports_title.append(clause)
+
+        if not clause_supports_title or (
+            len(clauses) > 1
+            and not any(
+                title_action
+                in re.findall(r"[^\W\d_]+", clause.casefold(), flags=re.UNICODE)
+                for clause in clause_supports_title
+            )
+        ):
+            raise ValidationFailure(
+                f"unsupported {operation} is not grounded in one cited transcript clause."
+            )
+
+        if destructive and not any(
+            OpenAITextReconciler._has_destructive_support(clause)
+            for clause in clause_supports_title
         ):
             raise ValidationFailure(
                 "unsupported destructive removal has no explicit destructive or "

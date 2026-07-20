@@ -1944,3 +1944,105 @@ def test_openai_reconciler_rejects_a_negated_destructive_removal(source_text: st
                 user_locks={},
             )
         )
+
+
+@pytest.mark.parametrize(
+    ("source_text", "draft_title"),
+    [
+        ("Buy milk", "Buy milk and transfer money"),
+        ("Купить молоко", "Купить молоко и яхту"),
+        ("Написать Alice про отчет", "Написать Alice про отчет and transfer money"),
+        ("Schedule meeting and call dentist", "Schedule dentist"),
+    ],
+)
+def test_openai_reconciler_rejects_additive_and_cross_clause_invention(
+    source_text: str, draft_title: str
+) -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text=source_text,
+        stability="stable",
+        provider_role="accurate",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": "add",
+                    "title": draft_title,
+                    "source_segment_ids": [segment.id],
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(ValidationFailure, match="unsupported task identity"):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id="operation_additive_invention",
+                transcript_segments=[segment],
+                active_proposals=[],
+                user_locks={},
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("source_text", "title"),
+    [
+        ("Delete calendar entry. Buy milk", "Buy milk"),
+        ("Do not delete Buy milk. Remove Buy bread.", "Buy milk"),
+        ("Не удаляй Купить молоко. Удали Купить хлеб.", "Купить молоко"),
+        ("Do not ever permanently delete buy milk", "Buy milk"),
+        ("Never under any circumstances delete buy milk", "Buy milk"),
+        ("Не надо ни в коем случае удалить задачу купить молоко", "Купить молоко"),
+    ],
+)
+def test_openai_reconciler_rejects_wrong_target_and_long_distance_negated_removal(
+    source_text: str, title: str
+) -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text=source_text,
+        stability="stable",
+        provider_role="accurate",
+    )
+    existing = ReconciledProposal(
+        id="proposal_existing",
+        title=title,
+        source_segment_ids=[segment.id],
+        status="provisional",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": "remove",
+                    "proposal_id": "proposal_existing",
+                    "source_segment_ids": [segment.id],
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(ValidationFailure, match="unsupported destructive removal"):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id="operation_scoped_removal",
+                transcript_segments=[segment],
+                active_proposals=[existing],
+                user_locks={},
+            )
+        )
