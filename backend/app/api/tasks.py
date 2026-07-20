@@ -74,6 +74,7 @@ from app.workflows.voice_brain_dump.domain import (
 )
 from app.workflows.voice_brain_dump.service import (
     VoiceBrainDumpService,
+    brain_dump_operation_is_committable,
     can_review_brain_dump_provisionally,
 )
 
@@ -798,10 +799,7 @@ def _to_brain_dump_response(
         raw_audio_present=bool(operation.audio_chunks),
         working_artifacts_expires_at=operation.working_artifacts_expires_at,
         reconciliation_quality=operation.reconciliation_quality,
-        committable=(
-            operation.status == "awaiting_confirmation"
-            and _brain_dump_committable(operation)
-        ),
+        committable=brain_dump_operation_is_committable(operation),
         available_recovery_actions=_brain_dump_available_recovery_actions(operation),
         provider_runs=[
             BrainDumpProviderRunResponse(
@@ -885,27 +883,6 @@ def _brain_dump_available_recovery_actions(
         actions.append("cancel")
     return actions
 
-
-def _brain_dump_committable(operation: BrainDumpOperationDocument) -> bool:
-    """Expose the exact server-side commit predicate to the review UI."""
-
-    return (
-        operation.reconciliation_quality == "accurate"
-        and any(
-            run.role == "reconciler"
-            and run.status == "succeeded"
-            and run.checkpoint == "reconciled"
-            for run in operation.provider_runs
-        )
-        and all(
-            proposal.deleted
-            or (
-                proposal.status in {"reconciled", "user_edited"}
-                and not proposal.conflicts
-            )
-            for proposal in operation.proposals
-        )
-    )
 
 
 def _to_brain_dump_segment_response(

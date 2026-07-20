@@ -920,6 +920,7 @@ def test_brain_dump_commit_replay_invalid_state_and_deleted_proposals(
     finished = finished.model_copy(
         update={
             "sealed_manifest_hash": "0" * 64,
+            "reconciliation_quality": "accurate",
             "proposals": [
                 proposal.model_copy(update={"status": "reconciled"})
                 for proposal in finished.proposals

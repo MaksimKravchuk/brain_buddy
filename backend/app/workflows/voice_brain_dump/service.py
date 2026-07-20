@@ -104,6 +104,34 @@ def can_review_brain_dump_provisionally(
     )
 
 
+def brain_dump_operation_is_committable(
+    operation: BrainDumpOperationDocument,
+) -> bool:
+    """Single service/API predicate for committing reviewed proposals."""
+
+    if operation.status != "awaiting_confirmation":
+        return False
+    if any(not proposal.deleted and proposal.conflicts for proposal in operation.proposals):
+        return False
+    if operation.legacy_import == "legacy_preview_only" or operation.manual_review:
+        return True
+    has_frozen_reconciled_batch = any(
+        run.role == "reconciler"
+        and run.status == "succeeded"
+        and run.checkpoint == "reconciled"
+        for run in operation.provider_runs
+    )
+    return (
+        operation.reconciliation_quality == "accurate"
+        and has_frozen_reconciled_batch
+        and all(
+            proposal.deleted
+            or proposal.status in {"reconciled", "user_edited"}
+            for proposal in operation.proposals
+        )
+    )
+
+
 class VoiceBrainDumpService:
     """Owns the AsyncOperation substrate for native voice Brain Dump capture."""
 
@@ -2262,8 +2290,11 @@ class VoiceBrainDumpService:
         is_provisional_review = (
             operation.legacy_import == "legacy_preview_only" or operation.manual_review
         )
-        if not is_provisional_review and not self._has_frozen_reconciled_batch(
-            operation
+        committable = brain_dump_operation_is_committable(operation)
+        if (
+            not committable
+            and not is_provisional_review
+            and not self._has_frozen_reconciled_batch(operation)
         ):
             raise ValidationFailure(
                 "BRAIN_DUMP_NOT_RECONCILED: canonical tasks require a sealed "
@@ -2294,6 +2325,8 @@ class VoiceBrainDumpService:
                     "fast proposal canonical; edit or delete it before save.",
                     {"proposal_ids": unreconciled},
                 )
+        if not committable:
+            raise ValidationFailure("Brain dump is not eligible to save.")
         now = utcnow()
         confirmed_actions = confirm_native_inbox_actions(
             operation_id=operation.id,
