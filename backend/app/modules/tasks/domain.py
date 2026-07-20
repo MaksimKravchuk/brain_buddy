@@ -258,6 +258,18 @@ class BrainDumpProposalPatchDocument(StorageBaseModel):
     created_at: datetime
 
 
+class BrainDumpActionReceiptDocument(StorageBaseModel):
+    """Immutable confirmation record linking a canonical task to its source."""
+
+    id: str
+    proposal_id: str
+    task_id: str
+    child_idempotency_key: str
+    source_segment_ids: list[str] = Field(default_factory=list)
+    proposal_patch_ids: list[str] = Field(default_factory=list)
+    confirmed_at: datetime
+
+
 class BrainDumpOperationDocument(StorageBaseModel):
     """Operation-private workspace for native voice Brain Dump capture."""
 
@@ -285,6 +297,7 @@ class BrainDumpOperationDocument(StorageBaseModel):
     ] = "none"
     provider_runs: list[BrainDumpProviderRunDocument] = Field(default_factory=list)
     proposal_patches: list[BrainDumpProposalPatchDocument] = Field(default_factory=list)
+    action_receipts: list[BrainDumpActionReceiptDocument] = Field(default_factory=list)
     status_history: list[BrainDumpStatus] = Field(default_factory=list)
     committed_task_ids: list[str] = Field(default_factory=list)
     created_at: datetime

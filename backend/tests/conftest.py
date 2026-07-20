@@ -137,6 +137,23 @@ def validation_service(container: Container):
     return container.validation_service
 
 
+def _allow_openai_voice_consent(container: Container) -> None:
+    """Grant the 'openai' voice-provider consent category in test containers.
+
+    Production ``build_container`` derives this allowlist strictly from
+    configured provider settings (never falling back to "openai" for an
+    explicitly empty configuration -- see ``TaskService.__init__``). Tests
+    default both voice providers to disabled/deterministic and instead swap
+    in fake or real-shaped adapters directly on ``task_service``, so they
+    need the "openai" category granted explicitly to exercise consent-bound
+    flows against those swapped-in adapters.
+    """
+
+    container.task_service.allowed_external_provider_categories = frozenset(
+        {"openai"}
+    )
+
+
 def _build_authenticated_client(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -151,6 +168,7 @@ def _build_authenticated_client(
     get_config.cache_clear()
     app = create_app()
     container: Container = app.state.container
+    _allow_openai_voice_consent(container)
 
     invite_code = f"invite_{subdir}"
     container.invite_repo.create(Invite(code=invite_code, created_at=utcnow()))
@@ -201,6 +219,7 @@ def second_api_client(
     get_config.cache_clear()
     app = create_app()
     container: Container = app.state.container
+    _allow_openai_voice_consent(container)
 
     # Mint two invites up-front so both users can sign up in the same app.
     first_code = "invite_first"

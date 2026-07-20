@@ -9,7 +9,7 @@ import re
 import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime, timedelta
-from typing import Concatenate, Literal, ParamSpec, TypeVar, cast
+from typing import Concatenate, Literal, ParamSpec, Protocol, TypeVar, cast
 
 from pydantic import BaseModel
 
@@ -60,6 +60,7 @@ from app.workflows.voice_brain_dump.providers import (
 )
 
 from .domain import (
+    BrainDumpActionReceiptDocument,
     BrainDumpAudioChunkDocument,
     BrainDumpConsent,
     BrainDumpOperationDocument,
@@ -90,6 +91,19 @@ _PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2, "none": 3}
 
 _P = ParamSpec("_P")
 _Result = TypeVar("_Result")
+
+
+class TaskPort(Protocol):
+    """Application boundary for confirmed voice actions creating Tasks records."""
+
+    def create_native_inbox_task(
+        self,
+        *,
+        owner_id: str,
+        title: str,
+        source_capture_ids: list[str],
+        idempotency_key: str,
+    ) -> TaskDocument: ...
 
 
 def _serialized_write(
@@ -125,6 +139,7 @@ class TaskService:
         max_cumulative_cost_usd_per_operation: float = 1.00,
         provider_run_lease_seconds: float = 30.0,
         allowed_external_provider_categories: frozenset[str] | None = None,
+        task_port: TaskPort | None = None,
     ) -> None:
         self.task_repo = task_repo
         self.accurate_stt = accurate_stt or DisabledAccurateStt()
@@ -136,12 +151,18 @@ class TaskService:
             max_cumulative_cost_usd_per_operation
         )
         self.provider_run_lease_seconds = provider_run_lease_seconds
+        # Voice confirmation crosses the Tasks boundary through this narrow
+        # application port. The in-process Tasks service is the MVP adapter;
+        # callers can inject another conforming application adapter in tests.
+        self.task_port: TaskPort = task_port or self
         # Consent identifies a configured provider category before bytes can
         # leave the device. The production container supplies this from
         # configuration; the default keeps isolated deterministic tests honest
         # without treating arbitrary caller text as a provider identity.
         self.allowed_external_provider_categories = (
-            allowed_external_provider_categories or frozenset({"openai"})
+            frozenset({"openai"})
+            if allowed_external_provider_categories is None
+            else allowed_external_provider_categories
         )
 
     def _assert_external_provider_consent(self, consent: BrainDumpConsent) -> None:
@@ -213,20 +234,32 @@ class TaskService:
                     )
                 )
                 purged += 1
-        purged += self.task_repo.purge_brain_dump_media_orphans(
-            self.task_repo.list_brain_dump_operations()
-        )
+        purged += self.task_repo.purge_brain_dump_media_orphans()
         return purged
 
     def purge_expired_working_artifacts(self, *, now: datetime | None = None) -> int:
         """Purge uncommitted transcript/proposal working data past retention.
 
-        Only operations that never reached ``completed`` are eligible, so a
-        committed batch's transcript/proposal provenance (referenced by each
-        committed ``TaskDocument.source_capture_ids``) is never deleted here.
-        This intentionally also covers operations abandoned mid-flight —
-        stuck ``recording``/``paused``/``awaiting_confirmation`` states that
-        nobody ever finished, retried, or discarded.
+        A completed/cancelled operation's committed transcript/proposal
+        provenance (referenced by each committed ``TaskDocument`` via its
+        deterministic child provenance keys) stays available for the full
+        configured retention window counted from *that* terminal
+        transition, not from when the operation was first created --
+        otherwise a batch that took a long time to review and confirm could
+        already be past a creation-anchored deadline the moment it
+        completes, purging its lineage with no retention window at all.
+        Nothing mutates a terminal operation afterward, so its own
+        ``updated_at`` reliably marks that completion/cancellation instant.
+
+        An operation that never reached a terminal status keeps the
+        existing creation-anchored deadline: this intentionally treats a
+        stuck ``recording``/``paused``/``awaiting_confirmation`` operation
+        nobody ever finished, retried, or discarded as abandoned once its
+        artifacts are older than the retention window. But an operation
+        whose latest provider run is still ``pending``/``running`` is
+        actively being processed, not abandoned, and must never be purged
+        out from under that in-flight work -- mirroring the same guard
+        ``purge_expired_raw_audio`` already applies.
         """
 
         current_time = now or utcnow()
@@ -239,11 +272,19 @@ class TaskService:
                     candidate.id, owner_id=candidate.owner_id
                 )
                 expires_at = (
-                    operation.working_artifacts_expires_at
+                    operation.updated_at + self.working_artifacts_retention
+                    if operation.status in {"completed", "cancelled"}
+                    else operation.working_artifacts_expires_at
                     or operation.created_at + self.working_artifacts_retention
+                )
+                provider_run_is_in_flight = bool(
+                    operation.provider_runs
+                    and operation.provider_runs[-1].status in {"pending", "running"}
                 )
                 if (
                     current_time < expires_at
+                    or operation.status == "completed"
+                    or provider_run_is_in_flight
                     or (
                         not operation.segments
                         and not operation.proposals
@@ -440,6 +481,55 @@ class TaskService:
                 owner_id=owner_id, state=payload.state
             ),
             source_capture_ids=self._source_capture_ids(payload.source_capture_ids),
+            created_at=now,
+            updated_at=now,
+        )
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=task.id,
+            response=task,
+        )
+        self.task_repo.create(task)
+        return task
+
+    def create_native_inbox_task(
+        self,
+        *,
+        owner_id: str,
+        title: str,
+        source_capture_ids: list[str],
+        idempotency_key: str,
+    ) -> TaskDocument:
+        """In-process ``TaskPort`` adapter for a confirmed Brain Dump action."""
+
+        command = "create_native_inbox_task"
+        payload = TaskCreateRequest(title=title, source_capture_ids=source_capture_ids)
+        request_hash = self._request_hash(command, payload)
+        record = self._idempotency_record(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+        )
+        if record is not None:
+            return self._task_result(record, owner_id=owner_id)
+        now = utcnow()
+        task = TaskDocument(
+            id=generate_id("task"),
+            owner_id=owner_id,
+            title=title,
+            details=None,
+            state="inbox",
+            project_id=None,
+            tag_ids=[],
+            order_key=self.task_repo.next_order_key(owner_id=owner_id, state="inbox"),
+            # This port receives a workflow-owned immutable action receipt,
+            # not a user-supplied Capture ID; the operation/receipt owner was
+            # checked by the enclosing confirmation command.
+            source_capture_ids=list(source_capture_ids),
             created_at=now,
             updated_at=now,
         )
@@ -772,11 +862,18 @@ class TaskService:
         """
 
         advanced = 0
-        now = utcnow()
         for candidate in self.task_repo.list_in_flight_provider_run_operations():
             if advanced >= limit:
                 break
             with self.task_repo.command_lock(candidate.owner_id):
+                # The claim time is read here, inside this candidate's owner
+                # lock, not once before the up-to-`limit` candidate loop. A
+                # stale pre-loop timestamp would understate every later
+                # candidate's actual claim time, so the lease it stamps could
+                # already be near-expired (or expired) the moment it is
+                # persisted -- letting a concurrent recovery sweep reclaim a
+                # lease that was, in wall-clock terms, freshly issued.
+                now = utcnow()
                 operation = self.get_brain_dump_operation(
                     candidate.id, owner_id=candidate.owner_id
                 )
@@ -1102,6 +1199,18 @@ class TaskService:
     ) -> BrainDumpOperationDocument:
         cumulative_spent = sum(
             max(run.estimated_cost_usd, run.consumed_cost_usd)
+            # A prior run still "pending"/"running" -- including one whose
+            # process crashed or is otherwise unresolved -- has an
+            # outstanding reservation that must count against the cap here
+            # exactly as it does for accurate-STT admission
+            # (``_operation_cost_budget_exceeded``); otherwise a stuck or
+            # unknown-outcome run's reserved spend would be silently
+            # dropped from the reconciler's own admission check.
+            + (
+                run.reserved_cost_usd
+                if run.status in {"pending", "running"}
+                else 0.0
+            )
             for run in checkpoint_runs
         )
         worst_case_next = getattr(
@@ -2116,33 +2225,43 @@ class TaskService:
             )
         now = utcnow()
         committed_task_ids: list[str] = []
+        action_receipts: list[BrainDumpActionReceiptDocument] = []
         for proposal in operation.proposals:
             if proposal.deleted:
                 continue
-            task = TaskDocument(
-                id=generate_id("task"),
+            child_key = f"brain_dump_action:{operation.id}:{proposal.id}"
+            source_ref = f"brain_dump:{operation.id}:{proposal.id}"
+            task = self.task_port.create_native_inbox_task(
                 owner_id=owner_id,
                 title=proposal.title,
-                details=None,
-                state="inbox",
-                project_id=None,
-                tag_ids=[],
-                order_key=self.task_repo.next_order_key(
-                    owner_id=owner_id, state="inbox"
-                ),
-                source_capture_ids=[f"brain_dump:{operation.id}:{proposal.id}"],
-                created_at=now,
-                updated_at=now,
+                source_capture_ids=[source_ref],
+                idempotency_key=child_key,
             )
-            self.task_repo.create(task)
             committed_task_ids.append(task.id)
+            action_receipts.append(
+                BrainDumpActionReceiptDocument(
+                    id=f"receipt:{operation.id}:{proposal.id}",
+                    proposal_id=proposal.id,
+                    task_id=task.id,
+                    child_idempotency_key=child_key,
+                    source_segment_ids=list(proposal.source_segment_ids),
+                    proposal_patch_ids=[
+                        patch.id
+                        for patch in operation.proposal_patches
+                        if patch.proposal_id == proposal.id
+                    ],
+                    confirmed_at=now,
+                )
+            )
         updated = operation.model_copy(
             update={
                 "status": "completed",
-                "segments": [],
-                "proposals": [],
-                "proposal_patches": [],
+                # Source/proposal/edit records are immutable audit evidence
+                # through working-artifact retention; source refs must never
+                # point at data erased by the confirmation itself.
+                "action_receipts": [*operation.action_receipts, *action_receipts],
                 "committed_task_ids": committed_task_ids,
+                "working_artifacts_expires_at": now + self.working_artifacts_retention,
                 "updated_at": now,
                 "revision": operation.revision + 1,
             }

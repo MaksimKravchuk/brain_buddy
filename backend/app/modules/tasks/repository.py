@@ -601,42 +601,52 @@ class TaskRepository(BaseRepository):
             for row in rows
         ]
 
-    def purge_brain_dump_media_orphans(
-        self, operations: list[BrainDumpOperationDocument]
-    ) -> int:
-        """Remove untracked media and interrupted atomic-write temp files."""
+    def purge_brain_dump_media_orphans(self) -> int:
+        """Remove untracked media and interrupted atomic-write temp files.
 
-        expected = {
-            (operation.owner_id, operation.id): {
-                f"{chunk.chunk_number:06d}-{chunk.sha256}.bin"
-                for chunk in operation.audio_chunks
+        Runs under the same global command lock used to serialize owner
+        writes (audio-chunk uploads included), and re-reads the "known
+        media" snapshot from the database only after acquiring it. Without
+        this, a chunk durably uploaded between an outside caller listing
+        operations and this sweep scanning the filesystem would look
+        orphaned -- and get deleted moments after being written -- because
+        the snapshot and the filesystem scan were not atomic with respect
+        to a concurrent upload.
+        """
+
+        with self.command_lock("system:media-orphan-sweep"):
+            operations = self.list_brain_dump_operations()
+            expected = {
+                (operation.owner_id, operation.id): {
+                    f"{chunk.chunk_number:06d}-{chunk.sha256}.bin"
+                    for chunk in operation.audio_chunks
+                }
+                for operation in operations
             }
-            for operation in operations
-        }
-        root = self.resolve("brain-dump-media")
-        if not root.exists():
-            return 0
-        removed = 0
-        for owner_path in root.iterdir():
-            if not owner_path.is_dir():
-                owner_path.unlink(missing_ok=True)
-                removed += 1
-                continue
-            for operation_path in owner_path.iterdir():
-                if not operation_path.is_dir():
-                    operation_path.unlink(missing_ok=True)
+            root = self.resolve("brain-dump-media")
+            if not root.exists():
+                return 0
+            removed = 0
+            for owner_path in root.iterdir():
+                if not owner_path.is_dir():
+                    owner_path.unlink(missing_ok=True)
                     removed += 1
                     continue
-                known = expected.get((owner_path.name, operation_path.name))
-                if known is None:
-                    shutil.rmtree(operation_path, ignore_errors=True)
-                    removed += 1
-                    continue
-                for media_path in operation_path.iterdir():
-                    if media_path.name not in known:
-                        media_path.unlink(missing_ok=True)
+                for operation_path in owner_path.iterdir():
+                    if not operation_path.is_dir():
+                        operation_path.unlink(missing_ok=True)
                         removed += 1
-        return removed
+                        continue
+                    known = expected.get((owner_path.name, operation_path.name))
+                    if known is None:
+                        shutil.rmtree(operation_path, ignore_errors=True)
+                        removed += 1
+                        continue
+                    for media_path in operation_path.iterdir():
+                        if media_path.name not in known:
+                            media_path.unlink(missing_ok=True)
+                            removed += 1
+            return removed
 
     def get_brain_dump_operation_for_owner(
         self, operation_id: str, *, owner_id: str

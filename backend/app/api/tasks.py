@@ -24,6 +24,7 @@ from app.modules.tasks.domain import (
 )
 from app.schemas.auth import User
 from app.schemas.tasks import (
+    BrainDumpActionReceiptResponse,
     BrainDumpAudioChunkResponse,
     BrainDumpConsentResponse,
     BrainDumpOperationResponse,
@@ -781,6 +782,18 @@ def _to_brain_dump_response(
                 base_revision=patch.base_revision,
             )
             for patch in operation.proposal_patches
+        ],
+        action_receipts=[
+            BrainDumpActionReceiptResponse(
+                id=receipt.id,
+                proposal_id=receipt.proposal_id,
+                task_id=receipt.task_id,
+                child_idempotency_key=receipt.child_idempotency_key,
+                source_segment_ids=receipt.source_segment_ids,
+                proposal_patch_ids=receipt.proposal_patch_ids,
+                confirmed_at=receipt.confirmed_at,
+            )
+            for receipt in operation.action_receipts
         ],
         status_history=operation.status_history,
         committed_task_ids=operation.committed_task_ids,
