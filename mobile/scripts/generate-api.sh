@@ -7,6 +7,12 @@ set -euo pipefail
 # or any arbitrary URL, and never requires the backend dev server to be
 # running. See backend/scripts/openapi_snapshot.py and
 # docs/api-compatibility.md.
+#
+# For byte/semantically reproducible output, run `uv sync --locked --extra
+# dev` in backend/ first; this activates the resulting backend/.venv
+# automatically if present, matching the locked FastAPI/Pydantic versions the
+# committed snapshot was generated against instead of whatever an unlocked
+# `pip install` happens to resolve.
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 backend_dir="${root}/../backend"

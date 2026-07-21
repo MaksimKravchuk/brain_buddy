@@ -1816,40 +1816,7 @@ export interface components {
          * TreeDetailResponse
          * @description Detailed tree payload returned from read endpoints.
          */
-        "TreeDetailResponse-Input": {
-            /**
-             * Id
-             * @description Tree identifier.
-             */
-            id: string;
-            /** @description Metadata describing the tree payload. */
-            metadata: components["schemas"]["TreeMetadata"];
-            /**
-             * Name
-             * @description Tree name.
-             */
-            name: string;
-            /**
-             * Nodes
-             * @description Collection of nodes for this tree.
-             */
-            nodes?: components["schemas"]["NodeResponse"][];
-            /**
-             * Owner Id
-             * @description Optional owner identifier.
-             */
-            owner_id?: string | null;
-            /**
-             * Relations
-             * @description Collection of relations for this tree.
-             */
-            relations?: components["schemas"]["RelationResponse"][];
-        };
-        /**
-         * TreeDetailResponse
-         * @description Detailed tree payload returned from read endpoints.
-         */
-        "TreeDetailResponse-Output": {
+        TreeDetailResponse: {
             /**
              * Id
              * @description Tree identifier.
@@ -1884,7 +1851,7 @@ export interface components {
          */
         TreeExportResponse: {
             /** @description Tree payload matching the export schema. */
-            tree: components["schemas"]["TreeDetailResponse-Output"];
+            tree: components["schemas"]["TreeDetailResponse"];
         };
         /**
          * TreeImportRequest
@@ -1892,7 +1859,7 @@ export interface components {
          */
         TreeImportRequest: {
             /** @description Complete tree payload to import. */
-            tree: components["schemas"]["TreeDetailResponse-Input"];
+            tree: components["schemas"]["TreeDetailResponse"];
         };
         /**
          * TreeListItem
@@ -4302,7 +4269,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TreeDetailResponse-Output"];
+                    "application/json": components["schemas"]["TreeDetailResponse"];
                 };
             };
             /** @description The command violates a domain invariant. */
@@ -4353,7 +4320,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TreeDetailResponse-Output"];
+                    "application/json": components["schemas"]["TreeDetailResponse"];
                 };
             };
             /** @description The command violates a domain invariant. */
@@ -4402,7 +4369,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TreeDetailResponse-Output"];
+                    "application/json": components["schemas"]["TreeDetailResponse"];
                 };
             };
             /** @description Authentication is required or the session is invalid. */
@@ -4455,7 +4422,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TreeDetailResponse-Output"];
+                    "application/json": components["schemas"]["TreeDetailResponse"];
                 };
             };
             /** @description The command violates a domain invariant. */
@@ -5283,7 +5250,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TreeDetailResponse-Output"];
+                    "application/json": components["schemas"]["TreeDetailResponse"];
                 };
             };
             /** @description Authentication is required or the session is invalid. */

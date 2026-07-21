@@ -44,11 +44,18 @@ storage migration.
 3. Run the isolated Schemathesis contract test. It calls only an ephemeral ASGI
    `TestClient` app configured with `BRAIN_BUDDY_ENV=test` and a temporary data root;
    it must never target Fly, production, or an arbitrary URL.
-4. Regenerate with `cd mobile && npm run api:generate`, then run
+4. First run `cd backend && uv sync --locked --extra dev` so generation uses the exact
+   `uv.lock`-pinned FastAPI/Pydantic versions the committed snapshot was generated
+   against; an unlocked `pip install` can silently resolve a newer minor version and
+   produce a semantically different (but still "valid") OpenAPI document, which is the
+   drift this step exists to prevent. Then regenerate with `cd mobile && npm run
+   api:generate` (it activates `backend/.venv` automatically when present), and run
    `cd backend && python -m scripts.openapi_snapshot check --snapshot ../mobile/api/openapi.json`.
    The generator creates an ephemeral test-mode app with a temporary data directory;
    it does not make a network request. `git diff --exit-code -- mobile/api/openapi.json
-   mobile/src/api/openapi.generated.ts` is the generated-client drift gate.
+   mobile/src/api/openapi.generated.ts` is the generated-client drift gate. CI enforces
+   the same locked install (`.github/workflows/ci.yml`, mobile job) so a fresh runner
+   reproduces the committed artifacts deterministically.
 5. For a breaking change, publish a migration date, support window, and a versioned
    OpenAPI snapshot before enabling the new behavior for another client.
 

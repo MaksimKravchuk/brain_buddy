@@ -43,6 +43,7 @@ ci-frontend: lint-frontend test-frontend build-frontend
 
 validate-ci:
 	python3 -m unittest scripts/test_validate_brain_buddy_design_skill.py -v
+	python3 -m unittest scripts/test_validate_mobile_privacy_evidence.py -v
 	python3 -m unittest scripts/test_validate_ci_artifacts.py -v
 	python3 -m unittest scripts/test_validate_allure_taxonomy.py -v
 	python3 scripts/validate_ci_artifacts.py workflow --ci .github/workflows/ci.yml --frontend-vite-config frontend/vite.config.ts --disallow-workflow frontend/.github/workflows/playwright.yml

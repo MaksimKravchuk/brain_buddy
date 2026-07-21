@@ -2818,62 +2818,7 @@
         "title": "TreeCreateRequest",
         "type": "object"
       },
-      "TreeDetailResponse-Input": {
-        "additionalProperties": false,
-        "description": "Detailed tree payload returned from read endpoints.",
-        "properties": {
-          "id": {
-            "description": "Tree identifier.",
-            "title": "Id",
-            "type": "string"
-          },
-          "metadata": {
-            "$ref": "#/components/schemas/TreeMetadata",
-            "description": "Metadata describing the tree payload."
-          },
-          "name": {
-            "description": "Tree name.",
-            "title": "Name",
-            "type": "string"
-          },
-          "nodes": {
-            "description": "Collection of nodes for this tree.",
-            "items": {
-              "$ref": "#/components/schemas/NodeResponse"
-            },
-            "title": "Nodes",
-            "type": "array"
-          },
-          "owner_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Optional owner identifier.",
-            "title": "Owner Id"
-          },
-          "relations": {
-            "description": "Collection of relations for this tree.",
-            "items": {
-              "$ref": "#/components/schemas/RelationResponse"
-            },
-            "title": "Relations",
-            "type": "array"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "metadata"
-        ],
-        "title": "TreeDetailResponse",
-        "type": "object"
-      },
-      "TreeDetailResponse-Output": {
+      "TreeDetailResponse": {
         "additionalProperties": false,
         "description": "Detailed tree payload returned from read endpoints.",
         "properties": {
@@ -2933,7 +2878,7 @@
         "description": "Export payload returned to clients.",
         "properties": {
           "tree": {
-            "$ref": "#/components/schemas/TreeDetailResponse-Output",
+            "$ref": "#/components/schemas/TreeDetailResponse",
             "description": "Tree payload matching the export schema."
           }
         },
@@ -2948,7 +2893,7 @@
         "description": "Import payload containing a tree export.",
         "properties": {
           "tree": {
-            "$ref": "#/components/schemas/TreeDetailResponse-Input",
+            "$ref": "#/components/schemas/TreeDetailResponse",
             "description": "Complete tree payload to import."
           }
         },
@@ -6594,7 +6539,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TreeDetailResponse-Output"
+                  "$ref": "#/components/schemas/TreeDetailResponse"
                 }
               }
             },
@@ -6655,7 +6600,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TreeDetailResponse-Output"
+                  "$ref": "#/components/schemas/TreeDetailResponse"
                 }
               }
             },
@@ -6770,7 +6715,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TreeDetailResponse-Output"
+                  "$ref": "#/components/schemas/TreeDetailResponse"
                 }
               }
             },
@@ -6840,7 +6785,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TreeDetailResponse-Output"
+                  "$ref": "#/components/schemas/TreeDetailResponse"
                 }
               }
             },
@@ -7907,7 +7852,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TreeDetailResponse-Output"
+                  "$ref": "#/components/schemas/TreeDetailResponse"
                 }
               }
             },

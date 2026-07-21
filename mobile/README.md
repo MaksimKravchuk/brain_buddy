@@ -27,10 +27,14 @@ Jest results use the Allure Jest environment and write `allure-results/`; artifa
 
 The committed `api/openapi.json` snapshot and `src/api/openapi.generated.ts` are generated
 from an ephemeral in-process backend test app. Generation never calls a running backend,
-an arbitrary URL, Fly, or production:
+an arbitrary URL, Fly, or production. Because FastAPI/Pydantic minor versions can change
+generated schema shape, always sync the backend's `uv.lock`-pinned environment first so the
+snapshot stays byte/semantically reproducible instead of drifting against whatever a fresh,
+unlocked `pip install` happens to resolve:
 
 ```bash
-npm run api:generate
+cd ../backend && uv sync --locked --extra dev
+cd ../mobile && npm run api:generate
 cd ../backend && python -m scripts.openapi_snapshot check --snapshot ../mobile/api/openapi.json
 cd ../mobile && npm run typecheck && npm test
 ```
