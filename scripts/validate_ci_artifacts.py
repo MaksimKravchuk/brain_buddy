@@ -466,35 +466,39 @@ def _job_block(workflow_text: str, job_name: str) -> str | None:
     return rest[: next_match.start()] if next_match else rest
 
 
-def _step_block_pattern(step_id: str, scan_paths: tuple[str, ...]) -> re.Pattern[str]:
-    """Match a step block, not a document-wide substring soup.
+def _scan_step_position(job_text: str, step_id: str, scan_paths: tuple[str, ...]) -> int | None:
+    """Return the start offset of the layer's privacy scan step, or None if absent.
 
-    Requires `id: <step_id>` immediately followed by `if: always()`, and
-    within that same step block (stopping at the next `- name:` step
-    boundary) a call to the maintainable scanner against every one of the
-    layer's exact, ordered `--path` arguments. This is what prevents one
-    layer's fully-wired step from being mistaken for a different layer's
-    missing one, and prevents a scan of a different (clean) root from being
-    accepted just because the right `--path` string appears elsewhere in the
-    block (e.g. a duplicate raw upload path only mentioned as a comment).
-    Each path must not be immediately followed by another word character or
-    hyphen, not just a `\b` word boundary: a hyphen is itself a non-word
-    character, so `\b` alone would let `--path backend/allure-results-clean`
-    (an unrelated, already-clean directory) satisfy a required
-    `backend/allure-results` argument as a same-boundary prefix match.
+    A step qualifies only if, within ONE step body as parsed by
+    `_split_job_steps`, it carries `id: <step_id>`, runs with `if: always()`,
+    and calls the maintainable scanner against every one of the layer's
+    exact, ordered `--path` arguments. Matching id/if and the scanner
+    invocation independently against the whole job text (rather than one
+    step's own body, bounded the same way every other step-scoped check in
+    this module is) let a named decoy step's `id: <step_id>` / `if:
+    always()` be satisfied by a scanner call that actually lives in a later,
+    distinct step — including a nameless or `if: false`/skipped one that
+    never runs with that id or guard at all. Each path must not be
+    immediately followed by another word character or hyphen, not just a
+    `\b` word boundary: a hyphen is itself a non-word character, so `\b`
+    alone would let `--path backend/allure-results-clean` (an unrelated,
+    already-clean directory) satisfy a required `backend/allure-results`
+    argument as a same-boundary prefix match.
     """
 
-    step_boundary = r"(?:(?!\n\s*- name:).)*?"
-    path_clauses = "".join(
-        step_boundary + r"--path\s+" + re.escape(path) + r"(?![\w-])" for path in scan_paths
-    )
-    return re.compile(
-        r"id:\s*" + re.escape(step_id) + r"\s*\n\s*if:\s*always\(\)"
-        + step_boundary
-        + r"validate_mobile_privacy_evidence\.py"
-        + path_clauses,
-        re.DOTALL,
-    )
+    for start, body in _split_job_steps(job_text):
+        if not re.search(r"^\s*id:\s*" + re.escape(step_id) + r"\s*$", body, re.MULTILINE):
+            continue
+        if not re.search(r"^\s*if:\s*always\(\)\s*$", body, re.MULTILINE):
+            continue
+        if "validate_mobile_privacy_evidence.py" not in body:
+            continue
+        if all(
+            re.search(r"--path\s+" + re.escape(path) + r"(?![\w-])", body)
+            for path in scan_paths
+        ):
+            return start
+    return None
 
 
 def _sanitize_step_position(job_text: str, scan_paths: tuple[str, ...]) -> int | None:
@@ -565,6 +569,13 @@ def _split_job_steps(job_text: str) -> list[tuple[int, str]]:
     return steps
 
 
+def _step_if_condition(body: str) -> str | None:
+    """Return a step body's own `if:` key value, or None if it has none."""
+
+    match = re.search(r"^\s*if:\s*(.+?)\s*$", body, re.MULTILINE)
+    return match.group(1) if match else None
+
+
 def _upload_artifact_steps(job_text: str) -> list[tuple[str | None, str | None, str | None, int]]:
     """Return (name, condition, path, position) for each upload step in a job.
 
@@ -579,12 +590,11 @@ def _upload_artifact_steps(job_text: str) -> list[tuple[str | None, str | None, 
             continue
         top_part = re.split(r"^[ \t]*with:[ \t]*$", body, maxsplit=1, flags=re.MULTILINE)[0]
         name_match = re.search(r"^[ \t]*-?[ \t]*name:[ \t]*(.+?)[ \t]*$", top_part, re.MULTILINE)
-        if_match = re.search(r"^\s*if:\s*(.+?)\s*$", body, re.MULTILINE)
         path_match = re.search(r"^\s*path:\s*(\S+)\s*$", body, re.MULTILINE)
         steps.append(
             (
                 name_match.group(1).strip() if name_match else None,
-                if_match.group(1) if if_match else None,
+                _step_if_condition(body),
                 path_match.group(1) if path_match else None,
                 start,
             )
@@ -719,8 +729,8 @@ def _missing_mobile_privacy_gate_errors(workflow_text: str) -> list[str]:
             )
             continue
 
-        scan_match = _step_block_pattern(step_id, scan_paths).search(job_text)
-        if scan_match is None:
+        scan_pos = _scan_step_position(job_text, step_id, scan_paths)
+        if scan_pos is None:
             errors.append(
                 f"{label} layer privacy scan step must set id: {step_id}, run with if: always(), "
                 f"and call validate_mobile_privacy_evidence.py against {path_args} "
@@ -734,7 +744,7 @@ def _missing_mobile_privacy_gate_errors(workflow_text: str) -> list[str]:
                 "with if: always() before its privacy scan step, so freshly generated "
                 "evidence is redacted rather than perpetually failing the scan (ADR-0008)"
             )
-        elif scan_match is not None and sanitize_pos > scan_match.start():
+        elif scan_pos is not None and sanitize_pos > scan_pos:
             errors.append(
                 f"{label} layer sanitize_privacy_evidence.py step must run before its "
                 "privacy scan step, not after it (ADR-0008)"
@@ -748,7 +758,7 @@ def _missing_mobile_privacy_gate_errors(workflow_text: str) -> list[str]:
         errors.extend(
             _upload_contract_errors(
                 job_text,
-                scan_match.start() if scan_match is not None else None,
+                scan_pos,
                 label,
                 step_id,
                 job_name,
@@ -776,53 +786,64 @@ def _missing_mobile_privacy_gate_errors(workflow_text: str) -> list[str]:
     ]
     earliest_publication_pos = min(publication_positions) if publication_positions else None
 
-    gate_positions: list[int] = []
-    all_layers_clean = True
-    for layer in PRIVACY_SCAN_LAYERS:
-        needs_expr = f"needs.{layer['job']}.outputs.privacy_scan_outcome != 'success'"
-        line_match = next(
-            (
-                match
-                for match in re.finditer(r"^.*$", report_job_text, re.MULTILINE)
-                if needs_expr in match.group(0)
-            ),
-            None,
-        )
-        if line_match is None:
+    needs_exprs = {
+        cast(str, layer["key"]): f"needs.{layer['job']}.outputs.privacy_scan_outcome != 'success'"
+        for layer in PRIVACY_SCAN_LAYERS
+    }
+
+    # The gate must be ONE actual step (per _split_job_steps, the same
+    # step-boundary rule every other check in this module uses) whose own
+    # `if:` key structurally contains all four checks. Scoping to a single
+    # step's real `if:` value — not any line anywhere in the job text — is
+    # what rejects an `if: false`/skipped step whose body merely mentions the
+    # check strings, and an `env:`-string decoy where the actual `if:` is
+    # harmless (e.g. `always()` or `false`) and the checks sit unused in a
+    # variable instead of gating anything.
+    gate_step: tuple[int, str, str] | None = None
+    for start, body in _split_job_steps(report_job_text):
+        condition = _step_if_condition(body)
+        if condition is not None and all(expr in condition for expr in needs_exprs.values()):
+            gate_step = (start, condition, body)
+            break
+
+    if gate_step is None:
+        covered_layers: set[str] = set()
+        for _start, body in _split_job_steps(report_job_text):
+            condition = _step_if_condition(body)
+            if condition is None:
+                continue
+            covered_layers.update(
+                key for key, expr in needs_exprs.items() if expr in condition
+            )
+        for layer_key, needs_expr in needs_exprs.items():
+            if layer_key in covered_layers:
+                continue
             errors.append(
-                f"missing aggregate Allure report publication gate on {layer['key']} privacy "
+                f"missing aggregate Allure report publication gate on {layer_key} privacy "
                 f"scan outcome: {needs_expr}, evaluated inside the allure-report job before its "
                 "download/generate/upload/publication steps (ADR-0008)"
             )
-            all_layers_clean = False
-            continue
-        if "&&" in line_match.group(0):
-            errors.append(
-                f"aggregate Allure report publication gate on {layer['key']} privacy scan "
-                f"outcome must not be weakened with an additional '&&' condition: {needs_expr} "
-                "(ADR-0008)"
-            )
-            all_layers_clean = False
-            continue
-        gate_positions.append(line_match.start())
-
-    if all_layers_clean and gate_positions:
-        gate_pos = min(gate_positions)
-        if earliest_publication_pos is not None and gate_pos > earliest_publication_pos:
-            errors.append(
-                "aggregate Allure report privacy gate must run before the allure-report job's "
-                "download/generate/upload/publication steps, not after them (ADR-0008)"
-            )
-        step_body_match = re.match(
-            r"(?:(?!\n\s*- name:).)*", report_job_text[gate_pos:], re.DOTALL
-        )
-        step_body = step_body_match.group(0) if step_body_match else ""
-        if "exit 1" not in step_body:
-            errors.append(
-                "aggregate Allure report privacy gate must hard-fail the job (e.g. exit 1) "
-                "when a layer privacy scan outcome is not explicitly 'success', not merely "
-                "record it (ADR-0008)"
-            )
+    else:
+        gate_pos, condition, step_body = gate_step
+        if "&&" in condition:
+            for layer_key, needs_expr in needs_exprs.items():
+                errors.append(
+                    f"aggregate Allure report publication gate on {layer_key} privacy scan "
+                    f"outcome must not be weakened with an additional '&&' condition: {needs_expr} "
+                    "(ADR-0008)"
+                )
+        else:
+            if earliest_publication_pos is not None and gate_pos > earliest_publication_pos:
+                errors.append(
+                    "aggregate Allure report privacy gate must run before the allure-report job's "
+                    "download/generate/upload/publication steps, not after them (ADR-0008)"
+                )
+            if "exit 1" not in step_body:
+                errors.append(
+                    "aggregate Allure report privacy gate must hard-fail the job (e.g. exit 1) "
+                    "when a layer privacy scan outcome is not explicitly 'success', not merely "
+                    "record it (ADR-0008)"
+                )
 
     return errors
 

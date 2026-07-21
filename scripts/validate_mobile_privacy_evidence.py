@@ -50,20 +50,59 @@ _AUDIO_PATH = re.compile(
 # just long free text, so this must not require a minimum length. The name
 # tuple is exposed (not just the compiled pattern) so sanitize_privacy_evidence.py
 # can redact by the same field names instead of duplicating this list.
+#
+# `(\\*)` captures however many backslashes escape this field's own quotes:
+# zero for a flat top-level field, or one-or-more when the whole object has
+# been JSON-serialized into a string and embedded inside another JSON value
+# (e.g. a step parameter or log line echoing a task/transcript payload as
+# text) — a raw-text scan sees that nesting as literal `\"body\"`, not `"body"`.
+# The same backslash run is required at all three other quote positions via
+# `\1`, so this only fires on a structurally consistent field, not an
+# accidental backslash run. The value body (captured, so callers can check
+# it is actually non-empty — see _has_non_empty_field_match below) is
+# matched lazily (`*?`, stopping at the first `\1"` it can reach) rather than
+# greedily: at nesting depth greater than zero, every sibling key/value in
+# the same enclosing string also delimits itself with the identical `\1"`
+# escape sequence, so a greedy (or "one-or-more") match would either swallow
+# through a nested sibling field (e.g. a `transcript` field immediately
+# following `body` in the same object) via the `\\.` escaped-char
+# alternative, or — for a field whose own value is legitimately empty —
+# overshoot its own (immediately adjacent) closing quote entirely and latch
+# onto a sibling field's quote instead, instead of stopping at this field's
+# own closing quote.
 _TRANSCRIPT_FIELD_NAMES = ("transcript", "transcriptText", "rawTranscript")
 _TRANSCRIPT_FIELD = re.compile(
-    r"\"(?:" + "|".join(_TRANSCRIPT_FIELD_NAMES) + r")\"\s*:\s*\"(?:[^\"\\]|\\.)+\""
+    r"(\\*)\"(?:" + "|".join(_TRANSCRIPT_FIELD_NAMES) + r")\1\"\s*:\s*\1\"((?:[^\"\\]|\\.)*?)\1\""
 )
 
 # Real Task/TaskComment wire field names (backend/app/schemas/tasks.py:
 # title, details; TaskCommentDocument.body). These keys are distinctive
 # enough on their own that even an ordinary short value ("buy milk") is a
 # leak signal, not just a long one. Exposed as a name tuple for the same
-# reason as _TRANSCRIPT_FIELD_NAMES above.
+# reason as _TRANSCRIPT_FIELD_NAMES above; same escaped-nesting handling as
+# _TRANSCRIPT_FIELD above.
 _TASK_CONTENT_FIELD_NAMES = ("title", "details", "body")
 _TASK_CONTENT_FIELD = re.compile(
-    r"\"(?:" + "|".join(_TASK_CONTENT_FIELD_NAMES) + r")\"\s*:\s*\"(?:[^\"\\]|\\.)+\""
+    r"(\\*)\"(?:" + "|".join(_TASK_CONTENT_FIELD_NAMES) + r")\1\"\s*:\s*\1\"((?:[^\"\\]|\\.)*?)\1\""
 )
+
+
+def _has_non_empty_field_match(pattern: re.Pattern[str], text: str) -> bool:
+    """True if `pattern` (one of the two field patterns above) finds a field
+    whose captured value is actually non-empty.
+
+    The patterns themselves must accept an empty value (`*?`, not `+?`) so
+    that a genuinely empty field's own closing quote — sitting immediately
+    after its opening one — is recognized as the match boundary instead of
+    being skipped past in search of *some* non-empty span (which, for an
+    escaped/nested field, is reachable only by overrunning into a sibling
+    field). Filtering on the captured group here, rather than requiring
+    non-empty content in the pattern, is what keeps an already-empty field
+    (e.g. post-sanitization, or a fixture asserting empty values are
+    allowed) from being reported as a leak.
+    """
+
+    return any(match.group(2) for match in pattern.finditer(text))
 
 # Developer/device home directories, not the shared GitHub-hosted runner
 # account, so a generic CI-produced ``/home/runner/...`` path in a source map
@@ -93,9 +132,13 @@ _CATEGORY_CHECKS: tuple[tuple[str, re.Pattern[str]], ...] = (
 
 def _categories_in_text(text: str) -> set[str]:
     found = {name for name, pattern in _CATEGORY_CHECKS if pattern.search(text)}
-    if _AUDIO_DATA_URI.search(text) or _AUDIO_PATH.search(text) or _TRANSCRIPT_FIELD.search(text):
+    if (
+        _AUDIO_DATA_URI.search(text)
+        or _AUDIO_PATH.search(text)
+        or _has_non_empty_field_match(_TRANSCRIPT_FIELD, text)
+    ):
         found.add("audio_transcript_content")
-    if _TASK_CONTENT_FIELD.search(text):
+    if _has_non_empty_field_match(_TASK_CONTENT_FIELD, text):
         found.add("task_content")
     return found
 

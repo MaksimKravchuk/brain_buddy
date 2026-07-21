@@ -49,15 +49,24 @@ _AUDIO_DATA_URI_WITH_PAYLOAD = re.compile(
     r"data:audio/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]*"
 )
 
+# Mirrors scanner._TRANSCRIPT_FIELD / scanner._TASK_CONTENT_FIELD, including
+# capturing the value (group 3) so an already-empty field can be recognized
+# and left untouched instead of overrunning into a sibling field — see
+# scanner._has_non_empty_field_match for why the value must be matched
+# lazily and zero-width-permitting (`*?`) rather than "one or more". Group 1
+# captures the backslash run (if any) escaping this field's own quotes, so a
+# field nested inside another JSON string is matched — and redacted back to
+# the same escaping depth — not just a flat top-level one. Group 2 captures
+# the field name for the replacement below.
 _TRANSCRIPT_FIELD_SUB = re.compile(
-    r"\"("
+    r"(\\*)\"("
     + "|".join(scanner._TRANSCRIPT_FIELD_NAMES)
-    + r")\"\s*:\s*\"(?:[^\"\\]|\\.)+\""
+    + r")\1\"\s*:\s*\1\"((?:[^\"\\]|\\.)*?)\1\""
 )
 _TASK_CONTENT_FIELD_SUB = re.compile(
-    r"\"("
+    r"(\\*)\"("
     + "|".join(scanner._TASK_CONTENT_FIELD_NAMES)
-    + r")\"\s*:\s*\"(?:[^\"\\]|\\.)+\""
+    + r")\1\"\s*:\s*\1\"((?:[^\"\\]|\\.)*?)\1\""
 )
 
 
@@ -71,8 +80,39 @@ def _redact_credential(match: re.Match[str]) -> str:
 def _redact_field(match: re.Match[str]) -> str:
     # Empty the value but keep the real key and valid JSON `"key": "value"`
     # shape; an empty string is not itself flagged by the task_content /
-    # audio_transcript_content checks.
-    return f'"{match.group(1)}": ""'
+    # audio_transcript_content checks. The escape prefix captured in group 1
+    # (empty for a flat field, one or more backslashes when the field was
+    # serialized inside another JSON string) is echoed back around every
+    # quote, so a nested occurrence redacts to a validly re-escaped empty
+    # string instead of breaking out of its enclosing JSON string value.
+    escape, name = match.group(1), match.group(2)
+    return f'{escape}"{name}{escape}": {escape}"{escape}"'
+
+
+def _redact_non_empty_fields(pattern: re.Pattern[str], text: str) -> tuple[str, bool]:
+    """Redact only matches whose captured value (group 3) is non-empty.
+
+    The pattern accepts an empty value so it can correctly recognize a
+    field's own (possibly immediately-adjacent) closing quote as its match
+    boundary instead of overrunning into a sibling field — see
+    scanner._has_non_empty_field_match. An already-empty field carries
+    nothing to redact, and rewriting it to the same text would still be
+    reported as "sanitized" by a naive subn() count, so it is left
+    byte-for-byte untouched here instead.
+    """
+
+    pieces: list[str] = []
+    last_end = 0
+    changed = False
+    for match in pattern.finditer(text):
+        if not match.group(3):
+            continue
+        pieces.append(text[last_end : match.start()])
+        pieces.append(_redact_field(match))
+        last_end = match.end()
+        changed = True
+    pieces.append(text[last_end:])
+    return "".join(pieces), changed
 
 
 def redact_text(text: str) -> tuple[str, set[str]]:
@@ -98,8 +138,13 @@ def redact_text(text: str) -> tuple[str, set[str]]:
         _AUDIO_DATA_URI_WITH_PAYLOAD, _REDACTED_AUDIO, "audio_transcript_content", text
     )
     text = apply(scanner._AUDIO_PATH, _REDACTED_AUDIO, "audio_transcript_content", text)
-    text = apply(_TRANSCRIPT_FIELD_SUB, _redact_field, "audio_transcript_content", text)
-    text = apply(_TASK_CONTENT_FIELD_SUB, _redact_field, "task_content", text)
+
+    text, changed = _redact_non_empty_fields(_TRANSCRIPT_FIELD_SUB, text)
+    if changed:
+        categories.add("audio_transcript_content")
+    text, changed = _redact_non_empty_fields(_TASK_CONTENT_FIELD_SUB, text)
+    if changed:
+        categories.add("task_content")
 
     return text, categories
 
