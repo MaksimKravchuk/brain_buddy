@@ -823,6 +823,223 @@ describe("AppRoutes", () => {
     expect(screen.getByLabelText("Details")).toHaveValue("My unsaved draft edit");
   });
 
+  it("on a same-task 409 Save conflict, refetches the Task, rebases only the concurrency baseline, keeps every unsaved draft field, and lets an explicit retry succeed at the refetched revision", async () => {
+    // Same concurrent-refetch setup as the previous spec (an unrelated
+    // capture invalidates the shared "tasks" query root and surfaces a
+    // same-task background refetch reporting the authoritative revision-2
+    // state left by someone else's concurrent edit). That prior spec only
+    // proves the *first* Save keeps targeting the stale baseline it was
+    // shown against. Per ADR-0006's invalid-transition contract, the UI must
+    // additionally refetch the Task on 409 and let a later explicit retry
+    // succeed against the now-current revision -- it must never leave the
+    // user stuck resubmitting a permanently stale expected_revision, and it
+    // must never silently convert the conflict into an overwrite.
+    const user = userEvent.setup();
+    let taskGetCount = 0;
+    let concurrentEditVisible = false;
+    const patchBodies: Array<Record<string, unknown>> = [];
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/tasks/task-1") && method === "PATCH") {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        patchBodies.push(body);
+        if (body.expected_revision === 2) {
+          return Promise.resolve(
+            jsonResponse({
+              ...taskResponse.items[0],
+              title: body.title,
+              details: body.details,
+              priority: body.priority,
+              revision: 3
+            })
+          );
+        }
+        // The real server revision is already 2 (the concurrent edit), so a
+        // request that still targets base revision 1 is an explicit conflict.
+        return Promise.resolve(jsonResponse({ detail: "Conflict" }, 409));
+      }
+      if (url.endsWith("/tasks/task-1") && method === "GET") {
+        taskGetCount += 1;
+        if (!concurrentEditVisible) {
+          return Promise.resolve(jsonResponse({ ...taskResponse.items[0], details: "Original details", revision: 1 }));
+        }
+        return Promise.resolve(
+          jsonResponse({ ...taskResponse.items[0], details: "Edited concurrently elsewhere", revision: 2 })
+        );
+      }
+      if (url.endsWith("/tasks") && method === "POST") {
+        // Any other task mutation invalidates the shared "tasks" query root,
+        // which is what triggers the concurrent-looking detail refetch here.
+        concurrentEditVisible = true;
+        return Promise.resolve(jsonResponse(taskFixture("task-unrelated", "Unrelated capture"), 201));
+      }
+      if (url.endsWith("/tasks") || url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse(taskResponse));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/next/task-1");
+
+    expect(await screen.findByLabelText("Details")).toHaveValue("Original details");
+    await user.clear(screen.getByLabelText("Title"));
+    await user.type(screen.getByLabelText("Title"), "My unsaved title edit");
+    await user.clear(screen.getByLabelText("Details"));
+    await user.type(screen.getByLabelText("Details"), "My unsaved draft edit");
+    await user.selectOptions(screen.getByLabelText("Priority"), "high");
+
+    // Trigger the concurrent-looking refetch via an unrelated create, the way
+    // it would happen for real.
+    await user.type(screen.getByLabelText("New task title"), "Unrelated capture");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await waitFor(() => expect(taskGetCount).toBeGreaterThanOrEqual(2));
+
+    // Every mounted unsaved draft field survives the concurrent refetch.
+    expect(screen.getByLabelText("Title")).toHaveValue("My unsaved title edit");
+    expect(screen.getByLabelText("Details")).toHaveValue("My unsaved draft edit");
+    expect(screen.getByLabelText("Priority")).toHaveValue("high");
+
+    const getCountBeforeSave = taskGetCount;
+
+    await user.click(screen.getByRole("button", { name: "Save task detail" }));
+
+    await waitFor(() => expect(patchBodies.length).toBeGreaterThanOrEqual(1));
+    expect(patchBodies[0]).toMatchObject({ expected_revision: 1 });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Conflict");
+
+    // ADR-0006: "on 409 refetches the Task while preserving unsaved user
+    // input for an explicit retry."
+    await waitFor(() => expect(taskGetCount).toBeGreaterThan(getCountBeforeSave));
+
+    // Only the concurrency baseline rebases to the refetched revision -- the
+    // user's own unsaved draft values are left completely untouched.
+    expect(screen.getByLabelText("Title")).toHaveValue("My unsaved title edit");
+    expect(screen.getByLabelText("Details")).toHaveValue("My unsaved draft edit");
+    expect(screen.getByLabelText("Priority")).toHaveValue("high");
+
+    // No automatic mutation/overwrite happens off the back of the conflict --
+    // still just the one, rejected PATCH until the user explicitly retries.
+    expect(patchBodies).toHaveLength(1);
+
+    // The explicit retry now targets the refetched revision and succeeds.
+    await user.click(screen.getByRole("button", { name: "Save task detail" }));
+
+    await waitFor(() => expect(patchBodies.length).toBeGreaterThanOrEqual(2));
+    expect(patchBodies[1]).toMatchObject({
+      expected_revision: 2,
+      title: "My unsaved title edit",
+      details: "My unsaved draft edit",
+      priority: "high"
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("on a same-task 409 transition conflict, refetches the Task, rebases only the concurrency baseline, keeps every unsaved draft field, and lets an explicit retry succeed at the refetched revision", async () => {
+    // Same contract as the Save spec above, but exercised through the
+    // detail Complete/transition path, which is a distinct mutation
+    // (POST .../transitions, not PATCH) with its own onError handler --
+    // it must uphold the same on-409 refetch/rebase/no-overwrite contract.
+    const user = userEvent.setup();
+    let taskGetCount = 0;
+    let concurrentEditVisible = false;
+    let transitionSucceeded = false;
+    const transitionBodies: Array<Record<string, unknown>> = [];
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/tasks/task-1/transitions") && method === "POST") {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        transitionBodies.push(body);
+        if (body.expected_revision === 2) {
+          transitionSucceeded = true;
+          return Promise.resolve(jsonResponse({ ...taskResponse.items[0], state: "completed", revision: 3 }));
+        }
+        return Promise.resolve(jsonResponse({ detail: "Conflict" }, 409));
+      }
+      if (url.endsWith("/tasks/task-1") && method === "GET") {
+        taskGetCount += 1;
+        if (transitionSucceeded) {
+          return Promise.resolve(jsonResponse({ ...taskResponse.items[0], state: "completed", revision: 3 }));
+        }
+        if (!concurrentEditVisible) {
+          return Promise.resolve(jsonResponse({ ...taskResponse.items[0], details: "Original details", revision: 1 }));
+        }
+        return Promise.resolve(
+          jsonResponse({ ...taskResponse.items[0], details: "Edited concurrently elsewhere", revision: 2 })
+        );
+      }
+      if (url.endsWith("/tasks") && method === "POST") {
+        concurrentEditVisible = true;
+        return Promise.resolve(jsonResponse(taskFixture("task-unrelated", "Unrelated capture"), 201));
+      }
+      if (url.endsWith("/tasks") || url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse(taskResponse));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/next/task-1");
+
+    expect(await screen.findByLabelText("Details")).toHaveValue("Original details");
+    await user.clear(screen.getByLabelText("Title"));
+    await user.type(screen.getByLabelText("Title"), "My unsaved title edit");
+    await user.clear(screen.getByLabelText("Details"));
+    await user.type(screen.getByLabelText("Details"), "My unsaved draft edit");
+    await user.selectOptions(screen.getByLabelText("Priority"), "high");
+
+    await user.type(screen.getByLabelText("New task title"), "Unrelated capture");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await waitFor(() => expect(taskGetCount).toBeGreaterThanOrEqual(2));
+
+    expect(screen.getByLabelText("Title")).toHaveValue("My unsaved title edit");
+    expect(screen.getByLabelText("Details")).toHaveValue("My unsaved draft edit");
+    expect(screen.getByLabelText("Priority")).toHaveValue("high");
+
+    const getCountBeforeTransition = taskGetCount;
+
+    await user.click(screen.getByRole("button", { name: "Complete" }));
+
+    await waitFor(() => expect(transitionBodies.length).toBeGreaterThanOrEqual(1));
+    expect(transitionBodies[0]).toMatchObject({ action: "complete", expected_revision: 1 });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Conflict");
+
+    // ADR-0006: on 409 the app refetches the Task while preserving unsaved
+    // user input for an explicit retry.
+    await waitFor(() => expect(taskGetCount).toBeGreaterThan(getCountBeforeTransition));
+
+    // Only the concurrency baseline rebases; the still-mounted unsaved draft
+    // fields are untouched by the transition conflict.
+    expect(screen.getByLabelText("Title")).toHaveValue("My unsaved title edit");
+    expect(screen.getByLabelText("Details")).toHaveValue("My unsaved draft edit");
+    expect(screen.getByLabelText("Priority")).toHaveValue("high");
+
+    // No automatic retry/overwrite off the back of the conflict.
+    expect(transitionBodies).toHaveLength(1);
+
+    // The explicit retry now targets the refetched revision and succeeds.
+    await user.click(screen.getByRole("button", { name: "Complete" }));
+
+    await waitFor(() => expect(transitionBodies.length).toBeGreaterThanOrEqual(2));
+    expect(transitionBodies[1]).toMatchObject({ action: "complete", expected_revision: 2 });
+    expect(await screen.findByRole("button", { name: "Reopen to Inbox" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("keeps direct task detail visible when the task is absent from the active projection", async () => {
     const directTask = taskFixture("task-direct", "Shared task outside Next", "waiting");
     vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
