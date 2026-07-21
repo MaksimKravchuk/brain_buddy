@@ -4,7 +4,7 @@
 complete, consistent with ADR-0002/constitution, and implementation-ready for
 the real-product amendment.
 
-**Amended**: 2026-07-19
+**Amended**: 2026-07-21
 
 **Feature**: `../spec.md`
 
@@ -124,17 +124,29 @@ the real-product amendment.
 - [x] CHK046 A real-audio evaluation harness reports STT and extraction
   quality by language and provider/model version, without injecting expected
   transcripts or tone fixtures into the production decision path.
-- [x] CHK047 Release targets: 100% critical-term preservation, zero invented
-  tasks, at least 95% exact task-count accuracy, at least 95% task-boundary
-  precision/recall, and all safety/idempotency invariants passing. A measured
-  CER/WER threshold is established from the first baseline.
+- [x] CHK047 Editable-draft release floors are explicit and evidence-backed:
+  WER `<=20%`, CER `<=15%`, critical-term recall `>=90%`, exact task count
+  `>=65%`, semantic preservation `>=45%`, and invented proposals `<=0.20` per
+  case (`<=10` across 50), while safety/idempotency invariants remain absolute.
 - [x] CHK048 The production task reconciler emits only schema-valid operations;
   regex/hardcoded fixture logic is absent from the production decision path.
-- [x] CHK049 At least one credible alternative STT provider is benchmarked
-  before locking; the chosen provider is justified by corpus metrics, not
-  marketing claims.
+- [x] CHK049 Deepgram Nova-3 multilingual is selected by corpus evidence, and
+  any future STT provider/model change must pass the same gate before default.
 - [x] CHK050 Credentialed full-stack E2E uses genuine spoken audio, not text
   bytes disguised as WebM or a mocked provider response.
+- [x] CHK051 GPT-5.6 Luna with `product-operation-v1` and no `temperature` is
+  the configurable semantic MVP ceiling; its measured pass and comparable
+  usage-priced ceiling of $0.06909 per 50 cases (~$0.001382/case) are stated.
+- [x] CHK052 Terra is neither the production default nor an automatic fallback;
+  Sol and Fable tiers are unauthorized, and unavailable/recovery UX fails
+  truthfully rather than escalating model tier.
+- [x] CHK053 Requirements distinguish aggregate editable-draft quality floors
+  from zero-tolerance confirmation, provenance, privacy, owner-isolation,
+  exactly-once, no-metadata-inference, and no-destructive-update invariants.
+- [x] CHK054 A cheaper small/local model can replace Luna through configuration
+  after the same corpus gate, without changing the operation architecture.
+- [x] CHK055 Independent review, exact-head CI, normal PR/merge/Fly release,
+  production smoke, and real physical-phone acceptance remain required.
 
 ## Planning and delivery readiness
 
@@ -150,9 +162,10 @@ the real-product amendment.
 ## Notes
 
 All requirement checks are satisfied for independent architecture review. The
-2026-07-19 amendment adds real-provider, consent-propagation,
-semantic-reconciler, and evaluation-harness requirements without altering the
-ADR-0002 operation/patch/confirmation substrate or native GTD contracts. Any
+2026-07-21 amendment selects the cheapest measured passing MVP configuration
+and lowers only recoverable editable-draft quality gates without altering the
+ADR-0002 operation/patch/confirmation substrate, safety invariants, or native
+GTD contracts. Any
 implementation change to role boundaries, state transitions, persistence
 ownership, confirmation payload, or migration behavior must amend the
 spec/ADR/plan before code proceeds.

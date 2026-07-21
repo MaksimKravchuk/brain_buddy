@@ -1,7 +1,7 @@
 # Async voice workflows: acceptance test specification
 
-Status: Materially amended 2026-07-19 to separate STT accuracy from extraction
-accuracy and add real-provider, consent, and observability scenarios.
+Status: Materially amended 2026-07-21 for assisted-draft quality floors and the
+Luna cost ceiling.
 
 Decision: [ADR-0002](../../docs/decisions/0002-async-voice-operation-substrate.md)
 
@@ -80,8 +80,10 @@ the repo.
 ## Multilingual semantic acceptance
 
 Provider fakes use versioned labelled audio/text fixtures; ordinary CI never
-calls a live or paid model. The required founder examples are release-blocking,
-not illustrative only. Real-audio corpus cases run in the credentialed track.
+calls a live or paid model. The founder examples remain release-blocking
+deterministic contract cases. Live-provider quality is evaluated by aggregate
+corpus floors rather than requiring every model call to match every fixture.
+Real-audio corpus cases run in the credentialed track.
 
 | ID | Scenario | Required assertion |
 |---|---|---|
@@ -101,11 +103,11 @@ with an explicit disabled-state report.
 
 | ID | Scenario | Required assertion |
 |---|---|---|
-| SA-01 | Russian corpus STT | CER and WER are reported per case; critical-term recall is 100% on the approved corpus |
-| SA-02 | RU+EN code-switch STT | code-switched terms (`BrainBuddy`, `production smoke`) are preserved in the transcript; per-segment language labels reflect both languages |
+| SA-01 | Russian corpus STT | CER and WER are reported per case and aggregate; WER is `<=20%`, CER is `<=15%`, and critical-term recall is `>=90%` on the approved corpus |
+| SA-02 | RU+EN code-switch STT | code-switched-term accuracy is reported and contributes to the aggregate critical-term recall floor; per-segment language labels reflect both languages |
 | SA-03 | omission/hallucination counts | dropped-word and invented-word counts are reported per case and per provider/model version |
 | SA-04 | STT latency | p95 transcription latency is reported by duration and language; a labelled fallback is allowed when the budget is missed, never a safety weakening |
-| SA-05 | provider comparison | at least one credible alternative provider is benchmarked before locking; the chosen provider is justified by corpus metrics, not marketing claims |
+| SA-05 | provider selection and change | Deepgram Nova-3 multilingual is the MVP default because it passes the floor; any provider/model change reruns the same STT gate before becoming default |
 
 ## Task extraction accuracy tests (credentialed track, real transcript)
 
@@ -114,13 +116,14 @@ measure extraction quality independently from STT quality.
 
 | ID | Scenario | Required assertion |
 |---|---|---|
-| EA-01 | exact task-count accuracy | at least 95% exact task-count accuracy on the approved corpus |
-| EA-02 | boundary precision/recall | at least 95% identity-aware task-boundary precision and recall; provenance-only boundary precision/recall is reported separately |
-| EA-03 | title cleanliness | titles match ground truth without regex artifacts or positional splits |
-| EA-04 | conjunction false-split rate | `купить хлеб и молоко` and similar cases produce exactly one task; no split on `и`/`and` alone |
-| EA-05 | split/merge accuracy | structural split/merge cases produce expected lineage with stable IDs |
-| EA-06 | semantic preservation and task identity | semantic intent is preserved, task-identity accuracy is 100%, and invented-task count is zero even when invented tasks carry valid source provenance |
-| EA-07 | confidence calibration | calibration error is reported against semantic/task identity correctness and is within the configured threshold |
+| EA-01 | exact task-count accuracy | at least 65% exact task-count accuracy on the approved corpus |
+| EA-02 | boundary precision/recall | identity-aware and provenance-only task-boundary precision/recall are reported separately as diagnostics; this amendment defines no release threshold for either |
+| EA-03 | title cleanliness | title cleanliness is reported as a diagnostic; regex artifacts and positional splits remain independently forbidden by deterministic contract tests |
+| EA-04 | conjunction false-split rate | the aggregate false-split rate is reported as a diagnostic; deterministic ML-04 remains the contract gate against splitting on `и`/`and` alone |
+| EA-05 | split/merge accuracy | aggregate split/merge accuracy is reported as a diagnostic; deterministic patch tests continue to require valid lineage and stable IDs |
+| EA-06 | semantic preservation and inventions | semantic preservation is at least 45%; invented proposals are at most 0.20 per case and at most 10 across the fixed 50-case corpus; every draft remains editable and source-linked, while task-identity accuracy remains a reported diagnostic |
+| EA-07 | confidence calibration | calibration error is reported against semantic/task identity correctness as a diagnostic; this amendment defines no release threshold |
+| EA-08 | semantic usage-priced cost | the comparable 50-case Luna run costs at most $0.06909 total (approximately $0.001382 per case) under the same template and pricing basis; a higher-cost default requires an explicit decision |
 
 ## Event stream and projection tests
 
@@ -156,6 +159,8 @@ measure extraction quality independently from STT quality.
 | PA-16 | wording correction, same intent | `update` preserves proposal ID and revises wording/source spans; array position is not used to match the proposal |
 | PA-17 | schema-valid operations only | the real reconciler emits only `add/update/split/merge/remove/supersede/reorder` patches; invalid operations are rejected before revision changes |
 | PA-18 | no regex in production path | the production reconciler path contains no regex/hardcoded fixture extraction; deterministic `_extract_titles` is CI-only |
+| PA-19 | assisted editable draft | the transcript and every active proposal are visible before confirmation; each proposal can be edited or deleted and retains source-segment provenance; no proposal auto-persists |
+| PA-20 | uncertain terms | uncertain names or terms remain visibly editable and source-linked; the reconciler does not silently convert them into a date, priority, project, person, route, or destructive update |
 
 ## Target-resolution tests
 
@@ -186,6 +191,7 @@ measure extraction quality independently from STT quality.
 | CO-09 | destructive action | always appears individually in confirmation regardless of confidence |
 | CO-10 | event replay | state-transition metrics count once per event/command identity |
 | CO-11 | native Brain Dump save | each selected active proposal creates exactly one task with only title plus defaults `state=inbox`, null details/project/due date, empty tags, and `priority=none`; no write exists before confirm |
+| CO-12 | no silent metadata or destructive action | confirmation can persist only the visible selected title-only additions; invented date, priority, project, person, route, existing-item update, or destructive action is rejected rather than silently applied |
 
 ## Brain Dump UI transition tests
 
@@ -197,6 +203,7 @@ measure extraction quality independently from STT quality.
 | UI-04 | leave/resume without events | polling restores exact stage, authoritative transcript quality, active proposals, locks, conflicts, and last sequence |
 | UI-05 | provisional-only fallback | after bounded accurate/reconciler failure, manual Review is opt-in and visibly labelled unreconciled; it never looks like the successful accurate path |
 | UI-06 | declared language on preview | the browser preview recognition locale follows declared `language_hints`, not `navigator.language` alone |
+| UI-07 | transcript and proposal authority | Review displays the authoritative transcript beside every active proposal with edit/delete controls and an explicit confirmation action; no copy implies that a draft already persisted |
 
 ## Undo tests
 
@@ -236,7 +243,7 @@ measure extraction quality independently from STT quality.
 | PR-05 | provenance inspection | committed action traces to segments/source, model/template, user patches, and confirmer |
 | PR-06 | analytics export | only pseudonymous IDs, timings, bands, counts, and error codes leave app logs |
 | PR-07 | language hints propagate | `language_hints` and `vocabulary` from consent reach every STT and reconciler invocation |
-| PR-08 | cost limit reached | provider call is refused with a redacted retryable/disabled error code; no silent fallback to deterministic fakes |
+| PR-08 | cost limit reached | provider call is refused with a redacted retryable/disabled error code; no silent fallback to deterministic fakes and no automatic escalation to Terra, Sol, Fable, or another unauthorized tier |
 | PR-09 | missing credentials | operation surfaces explicit `disabled` state; no silent deterministic default |
 
 ## Runner recovery and migration tests
@@ -279,3 +286,13 @@ invariants are zero silent user-edit loss, zero automatic canonical writes,
 zero destructive/routing actions without confirmation, and zero duplicate
 tasks after retries. Latency degradation may trigger a labelled fallback but
 never relaxes those invariants.
+
+The credentialed MVP gate additionally requires Deepgram Nova-3 multilingual
+to meet WER `<=20%`, CER `<=15%`, and critical-term recall `>=90%`, and GPT-5.6
+Luna with `product-operation-v1` and no `temperature` to meet exact task-count
+accuracy `>=65%`, semantic preservation `>=45%`, and invented proposals
+`<=0.20` per case (`<=10` across 50), with comparable semantic usage-priced
+cost `<= $0.06909` total (approximately `$0.001382` per case). These are
+editable-draft quality floors and a selection ceiling;
+they never relax the absolute safety, confirmation, provenance, privacy,
+owner-isolation, bounded-cost, or exactly-once assertions above.

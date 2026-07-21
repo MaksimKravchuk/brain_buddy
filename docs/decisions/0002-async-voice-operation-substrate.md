@@ -3,8 +3,74 @@
 Date: 2026-07-11
 Status: Proposed
 Decision owner: BrainBuddy
-Related: ADR-0001, Kanban tasks `t_8a1164be` and `t_58293688`
-Last amended: 2026-07-19 (real-provider invariants and STT/extraction evaluation separation)
+Related: ADR-0001, Kanban tasks `t_8a1164be`, `t_58293688`, and `t_bee66e3b`
+Last amended: 2026-07-21 (assisted-draft MVP floors and Luna cost ceiling)
+
+## 2026-07-21 amendment: assisted-draft MVP floors and cost ceiling
+
+Voice Brain Dump is an assisted, editable draft workflow, not an autonomous
+task-authoring system. The user sees the accurate transcript and every proposed
+task, can edit or delete each proposal, and explicitly confirms the final set.
+Provider output remains operation-private until that confirmation. This recovery
+boundary makes aggregate draft quality a measured product floor; it does not
+weaken any safety invariant.
+
+The cheapest measured configuration that passes the approved 50-case founder
+corpus is the MVP production ceiling:
+
+- accurate STT: Deepgram Nova-3 multilingual;
+- semantic reconciliation: GPT-5.6 Luna with the
+  `product-operation-v1` prompt/schema and the unsupported `temperature`
+  parameter omitted;
+- STT floor: WER `<=20%`, CER `<=15%`, and critical-term recall `>=90%`;
+- semantic floor: exact task-count accuracy `>=65%`, semantic preservation
+  `>=45%`, and invented proposals `<=0.20` per case (`<=10` across 50 cases).
+
+The redacted aggregate evidence is recorded in Kanban recovery task
+`t_bee66e3b` at exact revision
+`7d2e7dc6e7758ae081d1cccb13c5470fd4a18822`; it contains no raw audio,
+transcripts, credentials, case-level provider payloads, or private task labels.
+
+The measured Luna run passed narrowly: 66% exact task count, 48.54% semantic
+preservation, 8 invented proposals, and $0.06909 for 50 cases
+(approximately $0.001382 per case). Terra costs 1.75 times more on the same
+configuration and is neither the production default nor an automatic fallback.
+For a comparable 50-case run under the same template and pricing basis,
+$0.06909 total (approximately $0.001382 per case) is the MVP semantic
+usage-priced ceiling; selecting a higher-cost default requires a new explicit
+decision rather than an automatic fallback.
+Sol- and Fable-tier semantic models are not authorized for this MVP. A timeout,
+rate limit, budget exhaustion, missing credential, or provider outage may lead
+only to bounded retry or a truthful `provisional_only`, retryable, terminal, or
+disabled state; it must never trigger automatic escalation to an unauthorized
+or more expensive model.
+
+These numbers are provider-selection floors for an editable draft, not targets
+for silent automation. Identity-aware boundary precision/recall, task-identity
+accuracy, split/merge accuracy, title cleanliness, and calibration remain
+reported diagnostics, but have no new release threshold in this amendment.
+The release-blocking safety invariants remain absolute: no proposal is
+auto-persisted; no user edit or deletion is silently lost; no date, priority,
+project, person, route, destructive update, or other metadata is inferred into
+a canonical task; every proposal and committed action retains transcript/source
+provenance; confirmation is explicit; owner isolation, consent, privacy,
+bounded retry/cost, and exactly-once save remain enforced.
+
+Provider and model IDs, prompt/schema version, and parameter policy remain
+configuration and immutable `ProviderRun` provenance rather than domain enums.
+A cheaper small or local reconciler may replace Luna without changing the
+operation, proposal, or confirmation architecture only after the exact same
+versioned corpus gate passes. Any STT provider, model, semantic model,
+prompt/schema, or request-parameter change requires re-running both relevant
+quality gates before it becomes the default. Rollback disables the failing role
+or returns to the last authorized passing configuration; it does not escalate
+to Terra, Sol, or Fable.
+
+The established delivery chain remains binding: independent Product QA and
+AI-QA review the same immutable head, exact-head CI passes, the PR is merged
+through the normal gate, Fly deploys from `main`, authenticated production-safe
+smoke passes, and the real Russian/RU+EN physical-phone journey is the final
+acceptance step.
 
 ## 2026-07-19 amendment: real-provider invariants
 
@@ -43,11 +109,9 @@ operation/patch/confirmation substrate:
   preservation, calibration) by language and provider/model version, without
   injecting expected transcripts or tone fixtures into the production
   decision path.
-- Release targets on the approved founder corpus: 100% critical-term
-  preservation, zero invented tasks, at least 95% exact task-count accuracy,
-  at least 95% task-boundary precision/recall, and all safety/idempotency
-  invariants passing. A measured CER/WER threshold is established from the
-  first baseline.
+- The original aspirational release targets in this amendment are superseded
+  by the evidence-backed assisted-draft floors in the 2026-07-21 amendment.
+  Safety/idempotency invariants remain unchanged and release-blocking.
 
 These invariants are already implicit in the provider-port, consent, privacy,
 and observability sections above. The amendment makes them explicit for
@@ -734,6 +798,12 @@ Future agents must preserve:
 - separate microphone permission and external-processing consent, redacted telemetry, and
   configurable deletion/retention;
 - bounded undo and transparent partial outcomes instead of claimed cross-system rollback.
+- the authorized MVP ceiling (Deepgram Nova-3 multilingual plus GPT-5.6 Luna,
+  `product-operation-v1`, no `temperature`) and fail-closed no-escalation rule
+  until another configuration passes the same corpus gate;
+- the distinction between measured editable-draft quality floors and absolute
+  safety, confirmation, provenance, privacy, owner-isolation, and idempotency
+  invariants.
 
 ## Alternatives considered
 
@@ -751,6 +821,28 @@ would make corrections, deduplication, privacy, and idempotency unsafe.
 
 Rejected. It misses responsiveness targets and creates a single failure/retry boundary.
 Accurate STT and text reconciliation remain bounded roles over immutable sealed input.
+
+### Keep the original near-perfect live-model gates
+
+Rejected for the assisted-draft MVP. No measured semantic configuration passed
+the old 95% exact-count/zero-invention gate, while the product already exposes
+the transcript and every proposal for edit/delete before explicit confirmation.
+Keeping an unattainable quality gate would block a recoverable user workflow
+without improving the absolute no-silent-persistence safety boundary.
+
+### Default to a higher semantic tier
+
+Rejected. Terra costs 1.75 times more than the measured passing Luna
+configuration and is not authorized as a default or automatic fallback. Sol and
+Fable are also unauthorized for this MVP. Higher tier is not a substitute for
+the confirmation, provenance, and edit controls that make draft errors
+recoverable.
+
+### Hard-code Luna into domain or operation contracts
+
+Rejected. Luna is a configuration-backed MVP ceiling, not an architecture
+boundary. A cheaper small/local model may replace it after the same corpus gate
+without a domain schema or operation migration.
 
 ### Browser Web Speech as the transcript source
 

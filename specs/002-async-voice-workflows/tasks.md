@@ -181,27 +181,31 @@ adapters behind the same ports. They are the core of the 2026-07-19 amendment.
   `recognition.lang` from declared `language_hints` rather than
   `navigator.language`; update `frontend/src/api/client.ts` to send
   `language_hints`/`vocabulary` in the start request.
-- [ ] T042 [US4] Add `voice.*` configuration section to
+- [ ] T042 [US4] Add/complete the `voice.*` configuration section in
   `backend/app/core/config.py`: `accurate_stt.provider`,
   `accurate_stt.model`, `accurate_stt.api_key_env`,
   `accurate_stt.timeout_seconds`, `accurate_stt.max_retries`,
   `accurate_stt.retry_backoff_seconds`, `accurate_stt.max_cost_usd_per_operation`,
-  same shape for `fast_stt` and `reconciler`, and `retention.*`; add focused
-  config tests.
-- [ ] T043 [US4] Create `backend/app/workflows/voice_brain_dump/adapters/`
-  with `openai_stt.py` implementing `AccurateSttPort` over
-  `gpt-4o-mini-transcribe`/`gpt-4o-transcribe` using `httpx`; pass sealed
+  same shape for `fast_stt` and `reconciler`, plus reconciler
+  `template_version` and request-parameter policy, and `retention.*`; authorize
+  Deepgram Nova-3 multilingual plus GPT-5.6 Luna / `product-operation-v1` /
+  no-temperature as the MVP default, reject Terra/Sol/Fable defaults, and add
+  focused config tests.
+- [ ] T043 [US4] Add `backend/app/workflows/voice_brain_dump/adapters/deepgram_stt.py`
+  implementing `AccurateSttPort` over Deepgram Nova-3 multilingual using
+  `httpx`; pass sealed
   audio bytes as multipart audio, NOT `bytes.decode("utf-8")`; enforce
   timeout/retry/cost limits; record `provider`/`model`/`template_version`
   in `ProviderRun`.
-- [ ] T044 [US4] Benchmark at least one credible alternative STT provider
-  (ElevenLabs Scribe v2 or Deepgram Nova-3) behind the same `AccurateSttPort`;
-  record metrics in the evaluation report; do not lock the provider until
-  corpus evidence justifies it.
+- [ ] T044 [US4] Encode the corpus-backed Deepgram Nova-3 multilingual
+  selection behind the same `AccurateSttPort`; record/report WER `<=20%`, CER
+  `<=15%`, and critical-term recall `>=90%`, and require the same gate before a
+  future STT provider/model becomes default.
 - [ ] T045 [US5] Wire real adapters vs deterministic fakes by config + consent
   in `backend/app/container.py`; refuse
   `DeterministicAccurateStt` at production startup unconditionally; missing
-  credentials/consent surface as `provider: "disabled"`.
+  credentials/consent surface as `provider: "disabled"`; provider failure must
+  not auto-escalate to Terra, Sol, Fable, or another unauthorized tier.
 - [ ] T046 [US5] Remove `DeterministicAccurateStt` default from
   `backend/app/modules/tasks/service.py:116`; the container injects the
   configured adapter.
@@ -220,13 +224,15 @@ These tasks replace regex/hardcoded fixture extraction with a structured
 text-model reconciler emitting schema-valid operations.
 
 - [ ] T048 [US4] Add failing tests for PA-17 (schema-valid operations only)
-  and PA-18 (no regex in production path) in
+  PA-18 (no regex in production path), PA-19 (assisted editable draft), and
+  PA-20 (uncertain terms remain editable and metadata-free) in
   `backend/tests/test_voice_brain_dump_reconciliation.py`; assert the
   production reconciler path contains no `_extract_titles` regex calls.
-- [ ] T049 [US4] Create
+- [ ] T049 [US4] Amend
   `backend/app/workflows/voice_brain_dump/adapters/reconciler.py`
-  implementing `TextReconcilerPort.reconcile` using a current text model
-  (e.g. `gpt-4o`) through the existing model-routing configuration; emit
+  implementing `TextReconcilerPort.reconcile` using GPT-5.6 Luna through the
+  existing model-routing configuration, strict `product-operation-v1` output,
+  and no `temperature` request parameter; emit
   only schema-valid `add/update/split/merge/remove/supersede` patches;
   preserve transcript provenance, user locks, and conflicts; never infer
   metadata.
@@ -256,16 +262,20 @@ corpus-based release gates.
   rate, split/merge accuracy, semantic preservation, calibration error); report
   by language and provider/model version.
 - [ ] T053 [US4] Add credentialed-track tests for SA-01–SA-05 (STT accuracy)
-  and EA-01–EA-07 (extraction accuracy) in
+  and EA-01–EA-08 (extraction accuracy and semantic usage-priced cost) in
   `backend/tests/test_voice_brain_dump_evaluation.py`; skip with explicit
   disabled-state report when credentials/consent are absent; never commit
   recordings or ground-truth transcripts to the repo.
 - [ ] T054 [US4] Remove synthetic-tone frequency validation and injected
   expected transcripts from the production evaluation path; synthetic
   fixtures remain valid only for ordinary state-machine CI.
-- [ ] T055 [US4] Establish a measured CER/WER threshold from the first
-  baseline on the founder corpus; document it in the evaluation report; do
-  not invent a threshold before corpus evidence.
+- [ ] T055 [US4] Encode the measured founder-corpus thresholds and enforce the
+  evidence-backed gates: WER
+  `<=20%`, CER `<=15%`, critical-term recall `>=90%`, semantic exact task count
+  `>=65%`, semantic preservation `>=45%`, and inventions `<=0.20` per case
+  (`<=10` across 50), with comparable semantic usage-priced cost
+  `<= $0.06909` total (approximately `$0.001382` per case); preserve the
+  remaining semantic metrics as diagnostics.
 
 **Checkpoint**: STT quality is measured separately from extraction quality;
 release gates are corpus-backed.
@@ -275,7 +285,9 @@ release gates are corpus-backed.
 - [ ] T056 Extend `frontend/tests/native-tasks-voice-brain-dump.compose.spec.ts`
   with the exact deterministic journey: provisional mixed-language list ->
   processing stages -> accurate correction/split/merge -> edit/delete/conflict
-  -> explicit Save -> reload/relogin Inbox.
+  -> transcript plus every proposal -> explicit Save -> reload/relogin Inbox;
+  cover UI-07 and CO-12 so no draft, inferred metadata, or destructive update
+  silently persists.
 - [ ] T057 [P] Add redaction/retention/consent-withdrawal tests for PR-01–PR-09
   in `backend/tests/test_voice_brain_dump_repository.py` and API tests;
   inspect captured logs/events to prove no content leakage.
@@ -287,11 +299,15 @@ release gates are corpus-backed.
   the PR.
 - [ ] T060 Run the versioned multilingual evaluation (deterministic ML-01–ML-06
   for CI, real-audio corpus for credentialed track) and attach aggregate
-  metrics (no raw user content) to the PR; block release on SC-001–SC-009 or
-  any safety invariant failure.
+  metrics and measured cost (no raw user content) to the PR; block release on
+  SC-001–SC-009, any safety invariant, an unauthorized provider/model/template,
+  or an automatic tier fallback.
 - [ ] T061 Update `.env.example` and operator docs for provider selection,
   timeout/retention configuration, consent, and disabled/fallback behavior;
-  document provider-disabled state without secrets.
+  document Deepgram Nova-3 multilingual plus GPT-5.6 Luna /
+  `product-operation-v1` / no-temperature as the MVP default, the
+  provider-disabled state, no Terra/Sol/Fable escalation, and the re-gate rule
+  without secrets.
 - [ ] T062 Add credentialed full-stack E2E using genuine spoken audio
   (gated track, not ordinary CI): record -> real STT -> real reconciler ->
   Review -> Save -> reload/relogin Inbox.
