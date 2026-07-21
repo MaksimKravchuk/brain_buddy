@@ -357,6 +357,72 @@ export default defineConfig({
         self.assertIn("frontend lint", completed.stderr)
         self.assertIn("frontend coverage threshold statements", completed.stderr)
 
+    def test_workflow_rejects_missing_mobile_job(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / ".github" / "workflows" / "ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text("name: CI\njobs: {}\n", encoding="utf-8")
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("missing mobile CI job", completed.stderr)
+
+    def test_workflow_rejects_unlocked_backend_install_in_mobile_job(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / ".github" / "workflows" / "ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                """
+name: CI
+jobs:
+  mobile:
+    steps:
+      - name: Install backend contract dependencies
+        run: |
+          pip install -e ./backend[dev]
+      - name: Verify committed OpenAPI semantic and generated-client drift
+        run: python -m scripts.openapi_snapshot check --snapshot ../mobile/api/openapi.json
+      - name: Scan publishable mobile evidence for privacy leaks
+        run: python3 ../scripts/validate_mobile_privacy_evidence.py
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("uv sync --locked", completed.stderr)
+        self.assertIn("unlocked pip install", completed.stderr)
+
+    def test_workflow_rejects_inline_privacy_scan_without_the_maintainable_script(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / ".github" / "workflows" / "ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                """
+name: CI
+jobs:
+  mobile:
+    steps:
+      - name: Install backend contract dependencies
+        run: uv sync --locked --extra dev
+      - name: Verify committed OpenAPI semantic and generated-client drift
+        run: python -m scripts.openapi_snapshot check --snapshot ../mobile/api/openapi.json
+      - name: Scan mobile artifacts for credential-shaped values
+        run: |
+          python3 - <<'PY'
+          print("inline scan, not the maintainable validator")
+          PY
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("validate_mobile_privacy_evidence.py", completed.stderr)
+
     def test_mutation_workflow_rejects_a_non_nightly_workflow_without_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workflow = Path(tmp) / "mutation.yml"

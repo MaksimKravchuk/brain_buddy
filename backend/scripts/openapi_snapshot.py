@@ -7,8 +7,12 @@ directory with ``BRAIN_BUDDY_ENV=test`` and reads ``app.openapi()`` directly —
 exactly the same construction the backend test suite uses
 (``tests/conftest.py``, ``tests/test_mobile_session_api.py``).
 
-Usage (from ``backend/``, with the project's dev dependencies installed):
+Usage (from ``backend/``, with the project's dev dependencies installed via the
+locked environment so output stays byte/semantically reproducible -- an
+unlocked ``pip install`` can resolve a newer FastAPI/Pydantic and drift the
+generated document):
 
+    uv sync --locked --extra dev
     python -m scripts.openapi_snapshot dump --out ../mobile/api/openapi.json
     python -m scripts.openapi_snapshot check --snapshot ../mobile/api/openapi.json
 """

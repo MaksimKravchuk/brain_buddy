@@ -65,6 +65,17 @@ NATIVE_PRODUCT_E2E_STORIES = (
     "Voice Brain Dump failure recovery",
     "Owner isolation",
 )
+MOBILE_CI_REQUIREMENTS = (
+    # Fresh, unlocked `pip install` can silently resolve a newer FastAPI/
+    # Pydantic than the committed OpenAPI snapshot was generated against,
+    # reintroducing non-deterministic drift (see docs/api-compatibility.md).
+    ("locked backend contract dependency install", "uv sync --locked --extra dev"),
+    ("committed OpenAPI drift gate", "python -m scripts.openapi_snapshot check"),
+    (
+        "maintainable mobile privacy evidence scanner (ADR-0008)",
+        "scripts/validate_mobile_privacy_evidence.py",
+    ),
+)
 
 
 def _fail(message: str) -> int:
@@ -324,6 +335,21 @@ def _coverage_threshold_errors(vite_config: Path) -> list[str]:
     return errors
 
 
+def _missing_mobile_ci_errors(workflow_text: str) -> list[str]:
+    errors: list[str] = []
+    if "  mobile:" not in workflow_text:
+        errors.append("missing mobile CI job")
+    for label, snippet in MOBILE_CI_REQUIREMENTS:
+        if snippet not in workflow_text:
+            errors.append(f"missing {label}: {snippet}")
+    if "pip install -e ./backend" in workflow_text:
+        errors.append(
+            "mobile job must install backend contract dependencies via 'uv sync --locked', "
+            "not an unlocked pip install"
+        )
+    return errors
+
+
 def _missing_e2e_ci_errors(workflow_text: str) -> list[str]:
     errors: list[str] = []
     for label, snippet in E2E_CI_REQUIREMENTS:
@@ -343,6 +369,7 @@ def validate_workflow(
         workflow_text = ci.read_text(encoding="utf-8")
         errors.extend(_missing_artifact_errors(workflow_text))
         errors.extend(_missing_frontend_ci_errors(workflow_text))
+        errors.extend(_missing_mobile_ci_errors(workflow_text))
         errors.extend(_missing_e2e_ci_errors(workflow_text))
         if "retention-days: 30" not in workflow_text:
             errors.append("missing 30-day artifact retention")
