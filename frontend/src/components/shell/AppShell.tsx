@@ -664,7 +664,7 @@ function Sidebar({
                     />
                     <button
                       type="submit"
-                      className="rounded-md bg-brand-primary px-2 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                      className="min-h-11 rounded-md bg-brand-primary px-2 py-1.5 text-xs font-semibold text-white disabled:opacity-50 lg:min-h-0"
                       disabled={!newProjectName.trim()}
                     >
                       Add
@@ -822,7 +822,7 @@ function Sidebar({
                     />
                     <button
                       type="submit"
-                      className="rounded-md bg-brand-primary px-2 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                      className="min-h-11 rounded-md bg-brand-primary px-2 py-1.5 text-xs font-semibold text-white disabled:opacity-50 lg:min-h-0"
                       disabled={!newTagName.trim()}
                     >
                       Add

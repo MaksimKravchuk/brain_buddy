@@ -55,13 +55,23 @@ function focusIdentity(element: Element): string | null {
   return text ? `text:${text}` : null;
 }
 
+// A control can exist in the new subtree yet be unfocusable there -- e.g. it
+// sits inside a mobile DetailDisclosure ("Properties" / "Actions") that
+// mounts collapsed (`hidden`) after a desktop -> mobile swap. Focusing it
+// anyway would drop real-browser focus to document.body since a hidden
+// element can't hold it. Skip such candidates so the caller falls back to a
+// genuinely visible target instead.
+function isFocusable(element: HTMLElement): boolean {
+  return !element.closest("[hidden]");
+}
+
 function findFocusIdentity(root: HTMLElement, identity: string | null): HTMLElement | null {
   if (!identity) {
     return null;
   }
   const candidates = root.querySelectorAll<HTMLElement>(FOCUSABLE_DETAIL_SELECTOR);
   for (const candidate of Array.from(candidates)) {
-    if (focusIdentity(candidate) === identity) {
+    if (focusIdentity(candidate) === identity && isFocusable(candidate)) {
       return candidate;
     }
   }
@@ -114,9 +124,24 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const [mutationError, setMutationError] = useState<string | null>(null);
   const rowLinkRefs = useRef<Map<string, HTMLAnchorElement>>(new Map());
   const detailHeadingRef = useRef<HTMLHeadingElement | null>(null);
-  const pendingDetailFocusKeyRef = useRef<string | null>(null);
+  const pendingDetailFocusKeyRef = useRef<{
+    key: string;
+    taskId: string;
+    revision: number;
+  } | null>(null);
+  // Set right before a list-row mutation (Complete / Move / inline Save)
+  // fires, when there is no specific replacement control to identify (unlike
+  // the detail panel's per-action data-detail-focus-key). Consumed by the
+  // rescue effect below: if the mutation's refetch removed the focused row
+  // from the DOM (e.g. completing a task filters it out of "Next actions"),
+  // focus drops to document.body and the rescue effect redirects it to a
+  // genuinely useful, visible target instead.
+  const pendingListFocusRescueRef = useRef(false);
   const listHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const previousTaskIdRef = useRef<string | undefined>(undefined);
+  const requestListFocusRescue = useCallback(() => {
+    pendingListFocusRescueRef.current = true;
+  }, []);
   const registerRowLink = (rowTaskId: string, el: HTMLAnchorElement | null) => {
     if (el) {
       rowLinkRefs.current.set(rowTaskId, el);
@@ -162,6 +187,17 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     detailRootRef.current = null;
   }, []);
 
+  // A pending focus-restore intent (of any kind) is only valid for the
+  // mutation that requested it. Left uncleared past that point -- a failed
+  // mutation, a closed panel, or a switch to a different task -- it can be
+  // consumed later by an unrelated render and steal focus onto a
+  // same-labelled control that belongs to a different task entirely.
+  const clearPendingDetailFocus = useCallback(() => {
+    pendingDetailFocusKeyRef.current = null;
+    pendingDetailFocusRef.current = null;
+    pendingListFocusRescueRef.current = false;
+  }, []);
+
   const sort = parseTaskSort(searchParams.get("sort"));
   const searchQuery = searchParams.get("q") ?? "";
   const today = localDateIso();
@@ -189,6 +225,11 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const tagsQuery = useTags();
 
   useEffect(() => {
+    // Any focus-restore intent recorded before this run belongs to whichever
+    // task we're leaving (opening, closing, or switching tasks all land
+    // here). It must not survive to be consumed by the task we're arriving
+    // at -- see clearPendingDetailFocus.
+    clearPendingDetailFocus();
     if (taskId) {
       detailHeadingRef.current?.focus();
     } else if (previousTaskIdRef.current) {
@@ -200,7 +241,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       }
     }
     previousTaskIdRef.current = taskId;
-  }, [taskId]);
+  }, [taskId, clearPendingDetailFocus]);
 
   const projects = projectsQuery.data ?? emptyProjects;
   const tags = tagsQuery.data ?? emptyTags;
@@ -211,28 +252,66 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const activeProjectionTasks = groupByProject ? allTasksQuery.data?.items ?? [] : tasks;
   const detailIsInProjection = Boolean(taskId && activeProjectionTasks.some((task) => task.id === taskId));
 
-  const requestDetailFocusRestore = useCallback((focusKey: string) => {
-    pendingDetailFocusKeyRef.current = focusKey;
+  const requestDetailFocusRestore = useCallback((task: TaskResponse, focusKey: string) => {
+    // A list/projection refetch can win the race with the matching detail
+    // refetch. Keep this intent until the task's revision proves that the
+    // post-mutation detail has landed, rather than restoring to the stale DOM.
+    pendingDetailFocusKeyRef.current = {
+      key: focusKey,
+      taskId: task.id,
+      revision: task.revision
+    };
   }, []);
 
+  // Restores focus after a mutation's refetch lands and the DOM it touched
+  // has settled. Runs synchronously in the passive effect (which already
+  // fires after the DOM commit) rather than deferring another frame through
+  // requestAnimationFrame -- a real Save/Complete/Reopen/Cancel/Move can be
+  // followed by React Query resolving several queries (list, projection,
+  // detail) in whatever order the network returns them, and a single rAF
+  // keyed only on the detail revision is not guaranteed to run after every
+  // one of those has committed. Depending directly on every query's data
+  // reference instead means this effect re-evaluates after each relevant
+  // refetch actually lands, in whatever order they arrive.
+  //
+  // Two intents are handled:
+  //  1. A specific data-detail-focus-key request (detail Save/Complete/
+  //     Reopen/Cancel/Move): try to refocus the matching, visible control.
+  //  2. A generic list-row rescue request (list-row Complete/Move/inline
+  //     Save, which have no stable replacement control to identify): if
+  //     focus ended up on document.body, land on a useful heading instead.
+  // Either way, if focus is still stuck on document.body afterward, that is
+  // never useful -- fall back to the detail or list heading.
   useEffect(() => {
-    const focusKey = pendingDetailFocusKeyRef.current;
-    if (!taskId || !focusKey) {
+    const pendingDetailFocus = pendingDetailFocusKeyRef.current;
+    const rescueListFocus = pendingListFocusRescueRef.current;
+    const detailMutationSettled = Boolean(
+      pendingDetailFocus &&
+      detailQuery.data?.id === pendingDetailFocus.taskId &&
+      detailQuery.data.revision !== pendingDetailFocus.revision
+    );
+    if (!detailMutationSettled && !rescueListFocus) {
       return;
     }
-    const frame = window.requestAnimationFrame(() => {
+    if (detailMutationSettled && pendingDetailFocus) {
+      pendingDetailFocusKeyRef.current = null;
       const replacement = Array.from(document.querySelectorAll<HTMLElement>("[data-detail-focus-key]")).find(
-        (element) => element.dataset.detailFocusKey === focusKey && !element.hasAttribute("disabled")
+        (element) => element.dataset.detailFocusKey === pendingDetailFocus.key && !element.hasAttribute("disabled") && isFocusable(element)
       );
       if (replacement && document.contains(replacement)) {
         replacement.focus();
-      } else {
-        detailHeadingRef.current?.focus();
+        return;
       }
-      pendingDetailFocusKeyRef.current = null;
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [detailIsInProjection, isDesktop, taskId, detailQuery.data?.revision]);
+    }
+    pendingListFocusRescueRef.current = false;
+    if (document.activeElement === document.body || document.activeElement === null) {
+      if (taskId) {
+        detailHeadingRef.current?.focus();
+      } else {
+        listHeadingRef.current?.focus();
+      }
+    }
+  }, [detailIsInProjection, isDesktop, taskId, detailQuery.data, taskQuery.data, allTasksQuery.data]);
 
   const invalidateTasks = () => queryClient.invalidateQueries({ queryKey: ["tasks"] });
   const listPath = projectId
@@ -243,6 +322,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const closeTarget = { pathname: listPath, search: searchParams.toString() };
   const openedFromList = Boolean((location.state as TaskDetailLocationState | null)?.fromList);
   const closeDetail = () => {
+    clearPendingDetailFocus();
     if (openedFromList) {
       navigate(-1);
     } else {
@@ -296,7 +376,10 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       setMutationError(null);
       void invalidateTasks();
     },
-    onError: (caught: unknown) => setMutationError(getErrorMessage(caught))
+    onError: (caught: unknown) => {
+      pendingListFocusRescueRef.current = false;
+      setMutationError(getErrorMessage(caught));
+    }
   });
 
   const transitionMutation = useMutation({
@@ -306,7 +389,10 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       setMutationError(null);
       void invalidateTasks();
     },
-    onError: (caught: unknown) => setMutationError(getErrorMessage(caught))
+    onError: (caught: unknown) => {
+      pendingListFocusRescueRef.current = false;
+      setMutationError(getErrorMessage(caught));
+    }
   });
 
   const detailUpdateMutation = useMutation({
@@ -316,7 +402,10 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       setMutationError(null);
       void invalidateTasks();
     },
-    onError: (caught: unknown) => setMutationError(getErrorMessage(caught))
+    onError: (caught: unknown) => {
+      pendingDetailFocusKeyRef.current = null;
+      setMutationError(getErrorMessage(caught));
+    }
   });
 
   const detailTransitionMutation = useMutation({
@@ -330,7 +419,10 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       setMutationError(null);
       void invalidateTasks();
     },
-    onError: (caught: unknown) => setMutationError(getErrorMessage(caught))
+    onError: (caught: unknown) => {
+      pendingDetailFocusKeyRef.current = null;
+      setMutationError(getErrorMessage(caught));
+    }
   });
 
   const subtaskCreateMutation = useMutation({
@@ -490,10 +582,19 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       setEditingTaskId(null);
       setEditingTitle("");
     },
-    onComplete: (task: TaskResponse) => transitionMutation.mutate({ task, action: "complete" }),
+    onComplete: (task: TaskResponse) => {
+      requestListFocusRescue();
+      transitionMutation.mutate({ task, action: "complete" });
+    },
     onEditTitle: (title: string) => setEditingTitle(title),
-    onMoveToNext: (task: TaskResponse) => transitionMutation.mutate({ task, action: "move", toState: "next" }),
-    onSaveEdit: (task: TaskResponse) => updateMutation.mutate({ task, payload: { title: editingTitle.trim() } }),
+    onMoveToNext: (task: TaskResponse) => {
+      requestListFocusRescue();
+      transitionMutation.mutate({ task, action: "move", toState: "next" });
+    },
+    onSaveEdit: (task: TaskResponse) => {
+      requestListFocusRescue();
+      updateMutation.mutate({ task, payload: { title: editingTitle.trim() } });
+    },
     expandedTaskId: taskId,
     onCollapse: closeDetail,
     registerDetailHeading,
@@ -503,7 +604,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     detailIsLoading: detailQuery.isLoading,
     detailError: detailQuery.error,
     onSaveDetail: (task: TaskResponse, payload: Parameters<typeof apiClient.updateTask>[1], focusKey: string) => {
-      requestDetailFocusRestore(focusKey);
+      requestDetailFocusRestore(task, focusKey);
       detailUpdateMutation.mutate({ task, payload });
     },
     onTransitionDetail: (
@@ -513,7 +614,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       waitingFor: string | undefined,
       focusKey: string
     ) => {
-      requestDetailFocusRestore(focusKey);
+      requestDetailFocusRestore(task, focusKey);
       detailTransitionMutation.mutate({ task, action, toState, waitingFor });
     },
     onCreateSubtask: (task: TaskResponse, title: string) => subtaskCreateMutation.mutate({ task, title }),
@@ -607,26 +708,42 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             ) : projectGroups.length ? (
               <div className="flex flex-col gap-5" data-testid="grouped-task-list" aria-label={`${title} grouped by project`}>
                 {projectGroups.map((group) => {
-                  const groupKey = group.project?.id ?? "no-project";
+                  const groupKey = group.project?.id ?? group.kind;
+                  const groupLabel =
+                    group.kind === "project" && group.project
+                      ? group.project.name
+                      : group.kind === "unavailable"
+                        ? "Unavailable project"
+                        : "No project";
+                  const listLabel =
+                    group.kind === "project" && group.project
+                      ? `Tasks in ${group.project.name}`
+                      : group.kind === "unavailable"
+                        ? "Tasks with an unavailable project"
+                        : "Tasks with no project";
                   return (
                     <section key={groupKey} aria-labelledby={`task-group-${groupKey}`}>
                       <h2
                         id={`task-group-${groupKey}`}
                         className="mb-2 flex items-center gap-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500"
                       >
-                        <span
-                          aria-hidden
-                          className="h-2 w-2 shrink-0 rounded-full"
-                          style={{ backgroundColor: group.project?.color ?? "#94a3b8" }}
-                        />
-                        <span>{group.project ? group.project.name : "No project"}</span>
+                        {group.kind === "unavailable" ? (
+                          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" aria-hidden />
+                        ) : (
+                          <span
+                            aria-hidden
+                            className="h-2 w-2 shrink-0 rounded-full"
+                            style={{ backgroundColor: group.project?.color ?? "#94a3b8" }}
+                          />
+                        )}
+                        <span>{groupLabel}</span>
                         <span className="font-normal normal-case tracking-normal text-slate-400">{group.tasks.length}</span>
                       </h2>
                       <TaskList
                         {...sharedTaskListProps}
                         tasks={group.tasks}
                         showProjectColumn={false}
-                        listLabel={group.project ? `Tasks in ${group.project.name}` : "Tasks with no project"}
+                        listLabel={listLabel}
                       />
                     </section>
                   );
@@ -665,11 +782,11 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             isDesktop={isDesktop}
             onClose={closeDetail}
             onSave={(task, payload, focusKey) => {
-              requestDetailFocusRestore(focusKey);
+              requestDetailFocusRestore(task, focusKey);
               detailUpdateMutation.mutate({ task, payload });
             }}
             onTransition={(task, action, toState, waitingFor, focusKey) => {
-              requestDetailFocusRestore(focusKey);
+              requestDetailFocusRestore(task, focusKey);
               detailTransitionMutation.mutate({ task, action, toState, waitingFor });
             }}
             onCreateSubtask={(task, title) => subtaskCreateMutation.mutate({ task, title })}
@@ -1287,7 +1404,7 @@ function TaskDetailPanel({
               {(task.subtasks ?? []).map((subtask) => {
                 const done = subtask.state !== "open";
                 return (
-                  <div key={subtask.id} className="flex items-center gap-2 text-sm">
+                  <div key={subtask.id} className="flex min-h-11 items-center gap-2 text-sm lg:min-h-0">
                     <button
                       type="button"
                       className="relative -m-[15px] flex h-11 w-11 shrink-0 items-center justify-center lg:m-0 lg:h-[14px] lg:w-[14px]"
@@ -1650,11 +1767,19 @@ function formatWaitingSince(value: string): string {
 }
 
 interface ProjectGroup {
+  kind: "project" | "unassigned" | "unavailable";
   project: ProjectResponse | null;
   tasks: TaskResponse[];
 }
 
+// A task's project_id can reference a project absent from the fetched active
+// projects list -- e.g. the project was archived, or the projects query is
+// still settling on a refetch race. Such tasks must never silently vanish
+// from the grouped view: they get their own accessible fallback group,
+// distinct from "No project" (which means the task genuinely has no
+// project_id at all).
 function groupTasksByProject(tasks: TaskResponse[], projects: ProjectResponse[]): ProjectGroup[] {
+  const projectById = new Map(projects.map((project) => [project.id, project]));
   const byProjectId = new Map<string, TaskResponse[]>();
   const unassigned: TaskResponse[] = [];
   for (const task of tasks) {
@@ -1668,9 +1793,18 @@ function groupTasksByProject(tasks: TaskResponse[], projects: ProjectResponse[])
   }
   const groups: ProjectGroup[] = projects
     .filter((project) => byProjectId.has(project.id))
-    .map((project) => ({ project, tasks: byProjectId.get(project.id) ?? [] }));
+    .map((project) => ({ kind: "project" as const, project, tasks: byProjectId.get(project.id) ?? [] }));
+  const unavailable: TaskResponse[] = [];
+  for (const [projectId, bucketTasks] of byProjectId) {
+    if (!projectById.has(projectId)) {
+      unavailable.push(...bucketTasks);
+    }
+  }
+  if (unavailable.length) {
+    groups.push({ kind: "unavailable", project: null, tasks: unavailable });
+  }
   if (unassigned.length) {
-    groups.push({ project: null, tasks: unassigned });
+    groups.push({ kind: "unassigned", project: null, tasks: unassigned });
   }
   return groups;
 }
