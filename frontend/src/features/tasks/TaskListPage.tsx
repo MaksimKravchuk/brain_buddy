@@ -566,6 +566,18 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     : `${subtitleCount} ${subtitleCount === 1 ? "task" : "tasks"}`;
 
   const hasFrameError = taskQuery.isError || projectsQuery.isError || tagsQuery.isError;
+  // A failed background refetch (e.g. a stale connection or a transient 5xx)
+  // sets `isError` while leaving the query's last successful `data` in
+  // place -- React Query never clears cached data just because a later
+  // fetch attempt failed. Replacing the whole frame with an error-only state
+  // in that case would throw away a perfectly usable cached list (and the
+  // routed task detail/focus rendered alongside it) for a problem the user
+  // can retry without losing anything. Only the first, never-succeeded load
+  // has no cached data to fall back on and genuinely needs the full-page
+  // error state.
+  const hasCachedTaskListData = taskQuery.data !== undefined;
+  const hasGroupedFrameError = allTasksQuery.isError || projectsQuery.isError || tagsQuery.isError;
+  const hasCachedAllPagesData = allTasksQuery.data !== undefined;
 
   const toggleGroupByProject = () => {
     const next = new URLSearchParams(searchParams);
@@ -621,7 +633,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     detailError: detailQuery.error,
     onSaveDetail: (task: TaskResponse, payload: Parameters<typeof apiClient.updateTask>[1], focusKey: string) => {
       requestDetailFocusRestore(task, focusKey);
-      detailUpdateMutation.mutate({ task, payload });
+      return detailUpdateMutation.mutateAsync({ task, payload });
     },
     onTransitionDetail: (
       task: TaskResponse,
@@ -631,7 +643,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       focusKey: string
     ) => {
       requestDetailFocusRestore(task, focusKey);
-      detailTransitionMutation.mutate({ task, action, toState, waitingFor });
+      return detailTransitionMutation.mutateAsync({ task, action, toState, waitingFor });
     },
     onCreateSubtask: (task: TaskResponse, title: string) => subtaskCreateMutation.mutate({ task, title }),
     onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") =>
@@ -710,7 +722,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
 
         {isDesktop || !taskId ? (
           groupByProject ? (
-            allTasksQuery.isError || projectsQuery.isError || tagsQuery.isError ? (
+            hasGroupedFrameError && !hasCachedAllPagesData ? (
               <ErrorState
                 message={getErrorMessage(allTasksQuery.error ?? projectsQuery.error ?? tagsQuery.error)}
                 onRetry={() => {
@@ -721,54 +733,68 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
               />
             ) : allTasksQuery.isLoading || projectsQuery.isLoading || tagsQuery.isLoading ? (
               <LoadingState label={`${title} grouped by project`} />
-            ) : projectGroups.length ? (
-              <div className="flex flex-col gap-5" data-testid="grouped-task-list" aria-label={`${title} grouped by project`}>
-                {projectGroups.map((group) => {
-                  const groupKey = group.project?.id ?? group.kind;
-                  const groupLabel =
-                    group.kind === "project" && group.project
-                      ? group.project.name
-                      : group.kind === "unavailable"
-                        ? "Unavailable project"
-                        : "No project";
-                  const listLabel =
-                    group.kind === "project" && group.project
-                      ? `Tasks in ${group.project.name}`
-                      : group.kind === "unavailable"
-                        ? "Tasks with an unavailable project"
-                        : "Tasks with no project";
-                  return (
-                    <section key={groupKey} aria-labelledby={`task-group-${groupKey}`}>
-                      <h2
-                        id={`task-group-${groupKey}`}
-                        className="mb-2 flex items-center gap-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500"
-                      >
-                        {group.kind === "unavailable" ? (
-                          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" aria-hidden />
-                        ) : (
-                          <span
-                            aria-hidden
-                            className="h-2 w-2 shrink-0 rounded-full"
-                            style={{ backgroundColor: group.project?.color ?? "#94a3b8" }}
-                          />
-                        )}
-                        <span>{groupLabel}</span>
-                        <span className="font-normal normal-case tracking-normal text-slate-400">{group.tasks.length}</span>
-                      </h2>
-                      <TaskList
-                        {...sharedTaskListProps}
-                        tasks={group.tasks}
-                        showProjectColumn={false}
-                        listLabel={listLabel}
-                      />
-                    </section>
-                  );
-                })}
-              </div>
             ) : (
-              <EmptyState state={state} />
+              <>
+                {hasGroupedFrameError ? (
+                  <CachedDataErrorBanner
+                    message={getErrorMessage(allTasksQuery.error ?? projectsQuery.error ?? tagsQuery.error)}
+                    onRetry={() => {
+                      void allTasksQuery.refetch();
+                      void projectsQuery.refetch();
+                      void tagsQuery.refetch();
+                    }}
+                  />
+                ) : null}
+                {projectGroups.length ? (
+                  <div className="flex flex-col gap-5" data-testid="grouped-task-list" aria-label={`${title} grouped by project`}>
+                    {projectGroups.map((group) => {
+                      const groupKey = group.project?.id ?? group.kind;
+                      const groupLabel =
+                        group.kind === "project" && group.project
+                          ? group.project.name
+                          : group.kind === "unavailable"
+                            ? "Unavailable project"
+                            : "No project";
+                      const listLabel =
+                        group.kind === "project" && group.project
+                          ? `Tasks in ${group.project.name}`
+                          : group.kind === "unavailable"
+                            ? "Tasks with an unavailable project"
+                            : "Tasks with no project";
+                      return (
+                        <section key={groupKey} aria-labelledby={`task-group-${groupKey}`}>
+                          <h2
+                            id={`task-group-${groupKey}`}
+                            className="mb-2 flex items-center gap-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500"
+                          >
+                            {group.kind === "unavailable" ? (
+                              <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" aria-hidden />
+                            ) : (
+                              <span
+                                aria-hidden
+                                className="h-2 w-2 shrink-0 rounded-full"
+                                style={{ backgroundColor: group.project?.color ?? "#94a3b8" }}
+                              />
+                            )}
+                            <span>{groupLabel}</span>
+                            <span className="font-normal normal-case tracking-normal text-slate-400">{group.tasks.length}</span>
+                          </h2>
+                          <TaskList
+                            {...sharedTaskListProps}
+                            tasks={group.tasks}
+                            showProjectColumn={false}
+                            listLabel={listLabel}
+                          />
+                        </section>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <EmptyState state={state} />
+                )}
+              </>
             )
-          ) : hasFrameError ? (
+          ) : hasFrameError && !hasCachedTaskListData ? (
             <ErrorState
               message={getErrorMessage(taskQuery.error ?? projectsQuery.error ?? tagsQuery.error)}
               onRetry={() => {
@@ -779,10 +805,20 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             />
           ) : taskQuery.isLoading || projectsQuery.isLoading || tagsQuery.isLoading ? (
             <LoadingState label={title} />
-          ) : tasks.length ? (
-            <TaskList {...sharedTaskListProps} tasks={tasks} showProjectColumn />
           ) : (
-            <EmptyState state={state} />
+            <>
+              {hasFrameError ? (
+                <CachedDataErrorBanner
+                  message={getErrorMessage(taskQuery.error ?? projectsQuery.error ?? tagsQuery.error)}
+                  onRetry={() => {
+                    void taskQuery.refetch();
+                    void projectsQuery.refetch();
+                    void tagsQuery.refetch();
+                  }}
+                />
+              ) : null}
+              {tasks.length ? <TaskList {...sharedTaskListProps} tasks={tasks} showProjectColumn /> : <EmptyState state={state} />}
+            </>
           )
         ) : null}
 
@@ -800,11 +836,11 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             onClose={closeDetail}
             onSave={(task, payload, focusKey) => {
               requestDetailFocusRestore(task, focusKey);
-              detailUpdateMutation.mutate({ task, payload });
+              return detailUpdateMutation.mutateAsync({ task, payload });
             }}
             onTransition={(task, action, toState, waitingFor, focusKey) => {
               requestDetailFocusRestore(task, focusKey);
-              detailTransitionMutation.mutate({ task, action, toState, waitingFor });
+              return detailTransitionMutation.mutateAsync({ task, action, toState, waitingFor });
             }}
             onCreateSubtask={(task, title) => subtaskCreateMutation.mutate({ task, title })}
             onTransitionSubtask={(task, subtask, action) =>
@@ -922,14 +958,14 @@ function TaskList({
   detailTask?: TaskResponse;
   detailIsLoading: boolean;
   detailError: unknown;
-  onSaveDetail: (task: TaskResponse, payload: Parameters<typeof apiClient.updateTask>[1], focusKey: string) => void;
+  onSaveDetail: (task: TaskResponse, payload: Parameters<typeof apiClient.updateTask>[1], focusKey: string) => Promise<TaskResponse>;
   onTransitionDetail: (
     task: TaskResponse,
     action: "move" | "complete" | "reopen" | "cancel",
     toState: OpenTaskState | undefined,
     waitingFor: string | undefined,
     focusKey: string
-  ) => void;
+  ) => Promise<TaskResponse>;
   onCreateSubtask: (task: TaskResponse, title: string) => void;
   onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") => void;
   onCreateComment: (task: TaskResponse, body: string) => void;
@@ -1202,20 +1238,53 @@ function TaskDetailPanel({
   rootRef: (el: HTMLElement | null) => void;
   isDesktop: boolean;
   onClose: () => void;
-  onSave: (task: TaskResponse, payload: Parameters<typeof apiClient.updateTask>[1], focusKey: string) => void;
+  onSave: (task: TaskResponse, payload: Parameters<typeof apiClient.updateTask>[1], focusKey: string) => Promise<TaskResponse>;
   onTransition: (
     task: TaskResponse,
     action: "move" | "complete" | "reopen" | "cancel",
     toState: OpenTaskState | undefined,
     waitingFor: string | undefined,
     focusKey: string
-  ) => void;
+  ) => Promise<TaskResponse>;
   onCreateSubtask: (task: TaskResponse, title: string) => void;
   onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") => void;
   onCreateComment: (task: TaskResponse, body: string) => void;
 }): JSX.Element {
   const [propertiesOpen, setPropertiesOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
+  // The revision this panel's draft is based on. A same-task background
+  // refetch (e.g. another session editing this task concurrently, or an
+  // unrelated mutation elsewhere invalidating the shared "tasks" query root)
+  // can swap `task` for a newer revision while the user still has unsaved
+  // edits sitting in these uncontrolled fields. Submitting that newer
+  // revision as `expected_revision` would silently skip the optimistic-
+  // concurrency check the backend relies on. Pin the base revision once per
+  // mounted draft (this component already remounts per task ID -- see the
+  // `key` props at its call sites) and only advance it once a save/transition
+  // issued from THIS draft is confirmed by the server; leave it untouched on
+  // failure so an explicit retry reuses the same base revision.
+  const [baseRevision, setBaseRevision] = useState<number | undefined>(task?.revision);
+  useEffect(() => {
+    if (task && baseRevision === undefined) {
+      setBaseRevision(task.revision);
+    }
+  }, [task, baseRevision]);
+  const taskForMutation = task ? { ...task, revision: baseRevision ?? task.revision } : undefined;
+  const handleTransition = async (
+    targetTask: TaskResponse,
+    action: "move" | "complete" | "reopen" | "cancel",
+    toState: OpenTaskState | undefined,
+    waitingFor: string | undefined,
+    focusKey: string
+  ) => {
+    try {
+      const updated = await onTransition(targetTask, action, toState, waitingFor, focusKey);
+      setBaseRevision(updated.revision);
+    } catch {
+      // Surfaced via the mutation's own onError handler; keep the pinned
+      // base revision so a subsequent explicit retry targets the same state.
+    }
+  };
   const summaryProject = task?.project_id ? projects.find((candidate) => candidate.id === task.project_id) : undefined;
   const summaryTags = task ? tags.filter((tag) => task.tag_ids.includes(tag.id)) : [];
   const summaryState = task
@@ -1243,13 +1312,13 @@ function TaskDetailPanel({
         >
           <ArrowLeft className="h-5 w-5" aria-hidden />
         </button>
-        {task && task.state !== "completed" && task.state !== "cancelled" ? (
+        {task && taskForMutation && task.state !== "completed" && task.state !== "cancelled" ? (
           <button
             type="button"
             aria-label="Complete task"
             data-detail-focus-key="detail-complete-top"
             className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 lg:hidden"
-            onClick={() => onTransition(task, "complete", undefined, undefined, "detail-complete-top")}
+            onClick={() => void handleTransition(taskForMutation, "complete", undefined, undefined, "detail-complete-top")}
           >
             <Check className="h-5 w-5" aria-hidden />
           </button>
@@ -1302,8 +1371,8 @@ function TaskDetailPanel({
               const projectId = String(form.get("project_id") ?? "");
               const dueDate = String(form.get("due_date") ?? "");
               const waitingFor = String(form.get("waiting_for") ?? "").trim();
-              onSave(
-                task,
+              void onSave(
+                taskForMutation ?? task,
                 {
                   title: String(form.get("title") ?? "").trim(),
                   details: details || null,
@@ -1312,9 +1381,15 @@ function TaskDetailPanel({
                   due_date: dueDate || null,
                   priority: String(form.get("priority") ?? "none") as TaskPriority,
                   ...(task.state === "waiting" ? { waiting_for: waitingFor } : {}),
-                  expected_revision: task.revision
+                  expected_revision: baseRevision ?? task.revision
                 },
                 "detail-save"
+              ).then(
+                (updated) => setBaseRevision(updated.revision),
+                () => {
+                  // Surfaced via the mutation's own onError handler; keep the
+                  // pinned base revision so an explicit retry reuses it.
+                }
               );
             }}
           >
@@ -1377,7 +1452,7 @@ function TaskDetailPanel({
                       type="button"
                       data-detail-focus-key="detail-complete-action"
                       className="min-h-11 rounded-lg border border-emerald-200 px-3 text-sm text-emerald-700 lg:min-h-10"
-                      onClick={() => onTransition(task, "complete", undefined, undefined, "detail-complete-action")}
+                      onClick={() => void handleTransition(taskForMutation ?? task, "complete", undefined, undefined, "detail-complete-action")}
                     >
                       Complete
                     </button>
@@ -1385,7 +1460,7 @@ function TaskDetailPanel({
                       type="button"
                       data-detail-focus-key="detail-cancel"
                       className="min-h-11 rounded-lg border border-rose-200 px-3 text-sm text-rose-700 lg:min-h-10"
-                      onClick={() => onTransition(task, "cancel", undefined, undefined, "detail-cancel")}
+                      onClick={() => void handleTransition(taskForMutation ?? task, "cancel", undefined, undefined, "detail-cancel")}
                     >
                       Cancel
                     </button>
@@ -1395,8 +1470,8 @@ function TaskDetailPanel({
                         label={`Move to ${stateLabels[option].replace(" actions", "")}`}
                         targetState={option}
                         action="move"
-                        task={task}
-                        onTransition={onTransition}
+                        task={taskForMutation ?? task}
+                        onTransition={handleTransition}
                       />
                     ))}
                   </>
@@ -1407,8 +1482,8 @@ function TaskDetailPanel({
                       label={`Reopen to ${stateLabels[option].replace(" actions", "")}`}
                       targetState={option}
                       action="reopen"
-                      task={task}
-                      onTransition={onTransition}
+                      task={taskForMutation ?? task}
+                      onTransition={handleTransition}
                     />
                   ))
                 )}
@@ -1761,6 +1836,26 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Renders alongside still-usable cached rows when a background refetch of an
+// already-loaded frame fails, instead of ErrorState replacing the whole
+// frame. The cached list/grouping and any routed task detail/focus stay on
+// screen; only an honest, retryable notice is added.
+function CachedDataErrorBanner({ message, onRetry }: { message: string; onRetry: () => void }): JSX.Element {
+  return (
+    <div role="alert" className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+      <span>Showing previously loaded tasks — {message}</span>
+      <button
+        type="button"
+        className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-2.5 text-xs font-medium text-amber-900"
+        onClick={onRetry}
+      >
+        <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+        Retry
+      </button>
     </div>
   );
 }

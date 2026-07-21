@@ -742,6 +742,87 @@ describe("AppRoutes", () => {
     expect(screen.getByRole("heading", { name: "Task detail" })).toHaveFocus();
   });
 
+  it("submits the revision the draft was displayed against, not a newer revision picked up by a same-task concurrent refetch", async () => {
+    // A same-task refetch can land while the user still has an unsaved draft
+    // open -- e.g. an unrelated mutation elsewhere invalidates the shared
+    // "tasks" query root, which also refetches this open detail. The
+    // uncontrolled Details field correctly keeps showing the user's draft
+    // (no remount happens), but the underlying task object now reports a
+    // newer revision from someone else's concurrent edit. Save must still
+    // send the revision the draft was actually based on (1), never the
+    // revision that merely arrived later (2) -- sending the newer one would
+    // silently skip the backend's optimistic-concurrency check and could
+    // clobber the concurrent edit instead of surfacing an explicit conflict.
+    const user = userEvent.setup();
+    let taskGetCount = 0;
+    const patchBodies: Array<Record<string, unknown>> = [];
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/tasks/task-1") && method === "PATCH") {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        patchBodies.push(body);
+        // The real server revision is already 2, so a request that (correctly)
+        // targets base revision 1 is rejected as an explicit conflict.
+        return Promise.resolve(jsonResponse({ detail: "Conflict" }, 409));
+      }
+      if (url.endsWith("/tasks/task-1") && method === "GET") {
+        taskGetCount += 1;
+        if (taskGetCount === 1) {
+          return Promise.resolve(jsonResponse({ ...taskResponse.items[0], details: "Original details", revision: 1 }));
+        }
+        return Promise.resolve(
+          jsonResponse({ ...taskResponse.items[0], details: "Edited concurrently elsewhere", revision: 2 })
+        );
+      }
+      if (url.endsWith("/tasks") && method === "POST") {
+        // Any other task mutation invalidates the shared "tasks" query root,
+        // which is what triggers the concurrent-looking detail refetch here.
+        return Promise.resolve(jsonResponse(taskFixture("task-unrelated", "Unrelated capture"), 201));
+      }
+      if (url.endsWith("/tasks") || url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse(taskResponse));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/next/task-1");
+
+    expect(await screen.findByLabelText("Details")).toHaveValue("Original details");
+    await user.clear(screen.getByLabelText("Details"));
+    await user.type(screen.getByLabelText("Details"), "My unsaved draft edit");
+
+    // Trigger the concurrent-looking refetch via an unrelated create, the way
+    // it would happen for real (any task mutation anywhere invalidates the
+    // shared query root).
+    await user.type(screen.getByLabelText("New task title"), "Unrelated capture");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+
+    await waitFor(() => expect(taskGetCount).toBeGreaterThanOrEqual(2));
+    // The draft survives the concurrent refetch untouched -- it must not be
+    // silently overwritten by the newer, concurrently-edited server value.
+    expect(screen.getByLabelText("Details")).toHaveValue("My unsaved draft edit");
+
+    await user.click(screen.getByRole("button", { name: "Save task detail" }));
+
+    await waitFor(() => expect(patchBodies.length).toBeGreaterThanOrEqual(1));
+    expect(patchBodies[0]).toMatchObject({
+      details: "My unsaved draft edit",
+      expected_revision: 1
+    });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Conflict");
+    // The failed save must not discard the user's draft either.
+    expect(screen.getByLabelText("Details")).toHaveValue("My unsaved draft edit");
+  });
+
   it("keeps direct task detail visible when the task is absent from the active projection", async () => {
     const directTask = taskFixture("task-direct", "Shared task outside Next", "waiting");
     vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
@@ -1608,6 +1689,119 @@ describe("AppRoutes", () => {
     });
     expect(await screen.findByText("2 tasks")).toBeInTheDocument();
     expect(screen.queryByText("1 task")).not.toBeInTheDocument();
+  });
+
+  it("keeps the cached ordinary task-list frame and the routed task detail visible when a background refetch of that frame fails", async () => {
+    // React Query never clears a query's last successful `data` just because
+    // a later background refetch errors -- `isError` becomes true while
+    // `data` still holds the previous good page. Replacing the whole frame
+    // with ErrorState in that case would throw away a perfectly usable
+    // cached list (and the routed task detail sitting alongside it) for a
+    // transient failure the user can retry without losing anything.
+    const user = userEvent.setup();
+    let listAttempts = 0;
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.includes("/tasks?state=next")) {
+        listAttempts += 1;
+        if (listAttempts === 1) {
+          return Promise.resolve(jsonResponse(taskResponse));
+        }
+        return Promise.reject(new Error("network down"));
+      }
+      if (url.endsWith("/tasks") && method === "POST") {
+        // An unrelated create invalidates the shared "tasks" query root,
+        // forcing the already-loaded "next" list frame to refetch.
+        return Promise.resolve(jsonResponse(taskFixture("task-unrelated-ordinary", "Unrelated ordinary capture"), 201));
+      }
+      if (url.endsWith("/tasks/task-1")) {
+        return Promise.resolve(jsonResponse(taskResponse.items[0]));
+      }
+      if (url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse({
+          items: [],
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 0, next: 0, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/next/task-1");
+
+    expect(await screen.findByRole("link", { name: "Fix onboarding drop-off" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Task detail" })).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("New task title"), "Unrelated ordinary capture");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+
+    await waitFor(() => expect(listAttempts).toBeGreaterThanOrEqual(2));
+
+    // Honest, retryable notice -- but the cached row and the routed detail
+    // stay on screen instead of being replaced by a full-page error.
+    expect(await screen.findByText(/Showing previously loaded tasks/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Fix onboarding drop-off" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Task detail" })).toBeInTheDocument();
+    expect(screen.queryByText(/we couldn't load tasks/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(listAttempts).toBeGreaterThanOrEqual(3));
+  });
+
+  it("keeps the cached grouped all-pages frame visible when a background refetch of that frame fails", async () => {
+    const user = userEvent.setup();
+    let groupedAttempts = 0;
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.includes("/tasks?") && url.includes("limit=200")) {
+        groupedAttempts += 1;
+        if (groupedAttempts === 1) {
+          return Promise.resolve(jsonResponse(taskResponse));
+        }
+        return Promise.reject(new Error("network down"));
+      }
+      if (url.endsWith("/tasks") && method === "POST") {
+        return Promise.resolve(jsonResponse(taskFixture("task-unrelated-grouped", "Unrelated grouped capture"), 201));
+      }
+      if (url.endsWith("/tasks/task-1")) {
+        return Promise.resolve(jsonResponse(taskResponse.items[0]));
+      }
+      if (url.endsWith("/tasks") || url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse(taskResponse));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/next/task-1?group=project");
+    expect(await screen.findByTestId("grouped-task-list")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Task detail" })).toHaveFocus();
+
+    await user.type(screen.getByLabelText("New task title"), "Unrelated grouped capture");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+
+    await waitFor(() => expect(groupedAttempts).toBeGreaterThanOrEqual(2));
+
+    expect(await screen.findByText(/Showing previously loaded tasks/)).toBeInTheDocument();
+    expect(screen.getByTestId("grouped-task-list")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save task detail" })).toBeEnabled();
+    expect(screen.queryByText(/we couldn't load tasks/i)).not.toBeInTheDocument();
   });
 
   it("shows an aggregate error with retry when draining pages for Group by project fails", async () => {
