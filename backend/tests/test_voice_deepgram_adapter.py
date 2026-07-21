@@ -108,6 +108,27 @@ def test_deepgram_adapter_uses_single_declared_language_hint() -> None:
     assert captured_params["language"] == "ru"
 
 
+def test_deepgram_adapter_sends_admitted_ogg_as_ogg_content_type() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["content_type"] = request.headers["Content-Type"]
+        captured["body"] = request.read()
+        return _success_response()
+
+    provider = DeepgramAccurateStt(
+        api_key="secret-test-key",
+        max_retries=0,
+        transport=httpx.MockTransport(handler),
+    )
+    ogg_audio = b"OggS\x00opus-audio"
+
+    provider.transcribe_sealed_audio(_request(ogg_audio))
+
+    assert captured["content_type"] == "audio/ogg"
+    assert captured["body"] == ogg_audio
+
+
 def test_deepgram_adapter_rejects_unknown_binary_before_network() -> None:
     calls = 0
 

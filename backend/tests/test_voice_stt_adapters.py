@@ -91,6 +91,7 @@ def test_openai_adapter_repr_redacts_api_key() -> None:
     ("audio", "expected_filename", "expected_mime"),
     [
         (b"\x1aE\xdf\xa3webm-audio", b'recording.webm', b"audio/webm"),
+        (b"OggS\x00opus-audio", b'recording.ogg', b"audio/ogg"),
         (b"RIFF\x00\x00\x00\x00WAVEpcm-audio", b'recording.wav', b"audio/wav"),
         (b"\x00\x00\x00\x18ftypM4A m4a-audio", b'recording.m4a', b"audio/mp4"),
         (b"\xff\xf1\x50\x80aac-audio", b'recording.aac', b"audio/aac"),

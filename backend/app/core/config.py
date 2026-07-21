@@ -20,6 +20,12 @@ DEFAULT_DATA_DIR = BACKEND_ROOT / "data"
 SCHEMA_VERSION_FILENAME = "schema_version"
 DEFAULT_SCHEMA_VERSION = "0.1.0"
 
+# Pinned exactly to the authorized OpenAI chat completions endpoint. The
+# reconciler role never sends a Bearer credential or private reconciliation
+# payload anywhere else; see MVP_RECONCILER_ENDPOINT below and
+# ``validate_voice_provider_authorization``.
+MVP_RECONCILER_ENDPOINT = "https://api.openai.com/v1/chat/completions"
+
 
 class AppEnvironment(str, Enum):
     """Deployment environment flags."""
@@ -98,7 +104,7 @@ class VoiceProviderSettings(BaseModel):
     retry_backoff_seconds: tuple[float, ...] = (1.0, 2.0)
     max_cost_usd_per_operation: float = Field(default=0.50, gt=0, le=100)
     estimated_cost_usd_per_megabyte: float = Field(default=0.01, gt=0, le=10)
-    endpoint: str = ""
+    endpoint: str = Field(default=MVP_RECONCILER_ENDPOINT)
 
     model_config = ConfigDict(frozen=True)
 
@@ -183,12 +189,25 @@ def validate_voice_provider_authorization(voice: VoiceSettings) -> None:
     """
 
     accurate_stt = voice.accurate_stt
-    if accurate_stt.provider == "deepgram" and not accurate_stt.model.strip().casefold().startswith(
-        "nova-3"
+    # Exact allow-list, not a prefix/deny-list check: only the authorized
+    # Deepgram Nova-3 tuple, the explicit "disabled" state, and the
+    # test-only "deterministic" fake are ever authorized. This rejects
+    # every Nova-3 variant that isn't measured/authorized (e.g.
+    # "nova-3-medical") and explicit OpenAI accurate STT outright.
+    if accurate_stt.provider not in {"deepgram", "disabled", "deterministic"}:
+        raise ValueError(
+            f"Unauthorized accurate_stt provider '{accurate_stt.provider}'; the only "
+            "authorized accurate STT providers are 'deepgram' (Nova-3), 'disabled', "
+            "and 'deterministic' (test environment only)."
+        )
+    if (
+        accurate_stt.provider == "deepgram"
+        and accurate_stt.model.strip().casefold() != MVP_ACCURATE_STT_MODEL
     ):
         raise ValueError(
             f"Unauthorized accurate_stt model '{accurate_stt.model}' for provider "
-            "'deepgram'; the authorized MVP default is Nova-3 multilingual."
+            f"'deepgram'; the only authorized MVP model is exactly "
+            f"'{MVP_ACCURATE_STT_MODEL}' multilingual."
         )
     reconciler = voice.reconciler
     if reconciler.provider not in {"disabled", "deterministic"}:
@@ -196,14 +215,16 @@ def validate_voice_provider_authorization(voice: VoiceSettings) -> None:
             reconciler.provider == MVP_RECONCILER_PROVIDER
             and reconciler.model.strip() == MVP_RECONCILER_MODEL
             and reconciler.template_version.strip() == MVP_RECONCILER_TEMPLATE_VERSION
+            and reconciler.endpoint.strip() == MVP_RECONCILER_ENDPOINT
         )
         if not authorized:
             raise ValueError(
                 f"Unauthorized reconciler configuration provider={reconciler.provider!r} "
                 f"model={reconciler.model!r} template_version={reconciler.template_version!r} "
-                "is not authorized; the only authorized production reconciler is "
-                f"provider={MVP_RECONCILER_PROVIDER!r} model={MVP_RECONCILER_MODEL!r} "
-                f"template_version={MVP_RECONCILER_TEMPLATE_VERSION!r}."
+                f"endpoint={reconciler.endpoint!r} is not authorized; the only authorized "
+                f"production reconciler is provider={MVP_RECONCILER_PROVIDER!r} "
+                f"model={MVP_RECONCILER_MODEL!r} template_version={MVP_RECONCILER_TEMPLATE_VERSION!r} "
+                f"endpoint={MVP_RECONCILER_ENDPOINT!r}."
             )
 
 
@@ -344,7 +365,7 @@ def _build_config() -> AppConfig:
             ),
             endpoint=os.getenv(
                 "BRAIN_BUDDY_VOICE_RECONCILER_ENDPOINT",
-                "https://api.openai.com/v1/chat/completions",
+                MVP_RECONCILER_ENDPOINT,
             ),
             timeout_seconds=float(
                 os.getenv("BRAIN_BUDDY_VOICE_RECONCILER_TIMEOUT_SECONDS", "30")
@@ -440,6 +461,7 @@ __all__ = [
     "AppEnvironment",
     "MVP_ACCURATE_STT_MODEL",
     "MVP_ACCURATE_STT_PROVIDER",
+    "MVP_RECONCILER_ENDPOINT",
     "MVP_RECONCILER_MODEL",
     "MVP_RECONCILER_PROVIDER",
     "MVP_RECONCILER_TEMPLATE_VERSION",

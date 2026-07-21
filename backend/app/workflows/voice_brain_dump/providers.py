@@ -42,6 +42,8 @@ def sniff_audio_container(audio: bytes) -> tuple[str, str]:
 
     if audio.startswith(b"\x1aE\xdf\xa3"):
         return "recording.webm", "audio/webm"
+    if audio.startswith(b"OggS"):
+        return "recording.ogg", "audio/ogg"
     if audio.startswith(b"RIFF") and audio[8:12] == b"WAVE":
         return "recording.wav", "audio/wav"
     if len(audio) >= 12 and audio[4:8] == b"ftyp":
