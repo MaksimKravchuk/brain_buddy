@@ -493,6 +493,188 @@ jobs:
         self.assertIn("successful-scan gate for mobile Allure upload", completed.stderr)
         self.assertIn("aggregate Allure report publication gate", completed.stderr)
 
+    def test_workflow_rejects_when_only_backend_layer_is_wired(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / ".github" / "workflows" / "ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                """
+name: CI
+jobs:
+  backend:
+    outputs:
+      privacy_scan_outcome: ${{ steps.backend_privacy_scan.outcome }}
+    steps:
+      - name: Scan backend Allure evidence for privacy leaks
+        id: backend_privacy_scan
+        if: always()
+        run: |
+          python3 scripts/validate_mobile_privacy_evidence.py \\
+            --path backend/allure-results \\
+            --label backend-evidence
+      - name: Upload backend Allure results
+        if: steps.backend_privacy_scan.outcome == 'success'
+        with:
+          name: backend-allure-results
+  allure-report:
+    steps:
+      - name: Require explicit privacy scan success for all layers
+        if: needs.backend.outputs.privacy_scan_outcome != 'success'
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("frontend layer privacy scan step", completed.stderr)
+        self.assertIn("playwright layer privacy scan step", completed.stderr)
+        self.assertIn("mobile layer privacy scan step", completed.stderr)
+        # A fully wired backend layer must not itself be reported as missing.
+        self.assertNotIn("backend layer privacy scan step must set id", completed.stderr)
+        self.assertNotIn(
+            "missing backend job output privacy_scan_outcome", completed.stderr
+        )
+        self.assertNotIn(
+            "missing successful-scan gate for backend Allure upload", completed.stderr
+        )
+        self.assertNotIn(
+            "missing aggregate Allure report publication gate on backend",
+            completed.stderr,
+        )
+
+    def test_workflow_rejects_backend_layer_scan_step_scoped_to_wrong_allure_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / ".github" / "workflows" / "ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                """
+name: CI
+jobs:
+  backend:
+    outputs:
+      privacy_scan_outcome: ${{ steps.backend_privacy_scan.outcome }}
+    steps:
+      - name: Scan backend Allure evidence for privacy leaks
+        id: backend_privacy_scan
+        if: always()
+        run: |
+          python3 scripts/validate_mobile_privacy_evidence.py \\
+            --path frontend/allure-results/vitest \\
+            --label backend-evidence
+      - name: Upload backend Allure results
+        if: steps.backend_privacy_scan.outcome == 'success'
+        with:
+          name: backend-allure-results
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("backend layer privacy scan step", completed.stderr)
+        self.assertIn("backend/allure-results", completed.stderr)
+
+    def test_workflow_rejects_frontend_and_playwright_layers_missing_upload_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / ".github" / "workflows" / "ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                """
+name: CI
+jobs:
+  frontend:
+    outputs:
+      privacy_scan_outcome: ${{ steps.frontend_privacy_scan.outcome }}
+    steps:
+      - name: Scan frontend Allure evidence for privacy leaks
+        id: frontend_privacy_scan
+        if: always()
+        run: |
+          python3 scripts/validate_mobile_privacy_evidence.py \\
+            --path frontend/allure-results/vitest \\
+            --label frontend-evidence
+      - name: Upload frontend Allure results
+        if: always()
+        with:
+          name: frontend-allure-results
+  e2e:
+    outputs:
+      privacy_scan_outcome: ${{ steps.playwright_privacy_scan.outcome }}
+    steps:
+      - name: Scan Playwright Allure evidence for privacy leaks
+        id: playwright_privacy_scan
+        if: always()
+        run: |
+          python3 scripts/validate_mobile_privacy_evidence.py \\
+            --path frontend/allure-results/playwright \\
+            --label playwright-evidence
+      - name: Upload Playwright Allure results
+        if: always()
+        with:
+          name: playwright-allure-results
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "missing successful-scan gate for frontend Allure upload", completed.stderr
+        )
+        self.assertIn(
+            "missing successful-scan gate for playwright Allure upload", completed.stderr
+        )
+
+    def test_workflow_rejects_aggregate_gate_missing_non_mobile_layers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / ".github" / "workflows" / "ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                """
+name: CI
+jobs:
+  mobile:
+    outputs:
+      privacy_scan_outcome: ${{ steps.mobile_privacy_scan.outcome }}
+    steps:
+      - name: Scan publishable mobile evidence for privacy leaks
+        id: mobile_privacy_scan
+        if: always()
+        run: |
+          python3 ../scripts/validate_mobile_privacy_evidence.py \\
+            --path allure-results \\
+            --label mobile-evidence
+      - name: Upload mobile Allure results
+        if: steps.mobile_privacy_scan.outcome == 'success'
+        with:
+          name: mobile-allure-results
+  allure-report:
+    steps:
+      - name: Require explicit mobile privacy scan success
+        if: needs.mobile.outputs.privacy_scan_outcome != 'success'
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "aggregate Allure report publication gate on backend", completed.stderr
+        )
+        self.assertIn(
+            "aggregate Allure report publication gate on frontend", completed.stderr
+        )
+        self.assertIn(
+            "aggregate Allure report publication gate on playwright", completed.stderr
+        )
+        self.assertNotIn(
+            "aggregate Allure report publication gate on mobile", completed.stderr
+        )
+
     def test_mutation_workflow_rejects_a_non_nightly_workflow_without_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workflow = Path(tmp) / "mutation.yml"

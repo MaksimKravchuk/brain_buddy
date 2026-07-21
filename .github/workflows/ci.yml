@@ -54,6 +54,8 @@ jobs:
     needs:
       - workflow-lint
       - spec-kit
+    outputs:
+      privacy_scan_outcome: ${{ steps.backend_privacy_scan.outcome }}
     defaults:
       run:
         shell: bash
@@ -92,8 +94,17 @@ jobs:
         working-directory: .
         run: python3 scripts/validate_allure_taxonomy.py --path backend/allure-results --label backend-pytest
 
-      - name: Upload backend Allure results
+      - name: Scan backend Allure evidence for privacy leaks
+        id: backend_privacy_scan
         if: always()
+        working-directory: .
+        run: |
+          python3 scripts/validate_mobile_privacy_evidence.py \
+            --path backend/allure-results \
+            --label backend-evidence
+
+      - name: Upload backend Allure results
+        if: steps.backend_privacy_scan.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: backend-allure-results
@@ -116,6 +127,8 @@ jobs:
     needs:
       - workflow-lint
       - spec-kit
+    outputs:
+      privacy_scan_outcome: ${{ steps.frontend_privacy_scan.outcome }}
     defaults:
       run:
         shell: bash
@@ -145,8 +158,17 @@ jobs:
         working-directory: .
         run: python3 scripts/validate_allure_taxonomy.py --path frontend/allure-results/vitest --label frontend-vitest
 
-      - name: Upload frontend Allure results
+      - name: Scan frontend Allure evidence for privacy leaks
+        id: frontend_privacy_scan
         if: always()
+        working-directory: .
+        run: |
+          python3 scripts/validate_mobile_privacy_evidence.py \
+            --path frontend/allure-results/vitest \
+            --label frontend-evidence
+
+      - name: Upload frontend Allure results
+        if: steps.frontend_privacy_scan.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: frontend-allure-results
@@ -312,6 +334,8 @@ jobs:
       - backend
       - frontend
       - docker
+    outputs:
+      privacy_scan_outcome: ${{ steps.playwright_privacy_scan.outcome }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -342,8 +366,16 @@ jobs:
           python3 scripts/validate_ci_artifacts.py results --path frontend/allure-results/playwright --label playwright-e2e --since-file frontend/allure-results/playwright/.run-started-at
           python3 scripts/validate_ci_artifacts.py product-e2e-results --path frontend/allure-results/playwright
 
-      - name: Upload Playwright Allure results
+      - name: Scan Playwright Allure evidence for privacy leaks
+        id: playwright_privacy_scan
         if: always()
+        run: |
+          python3 scripts/validate_mobile_privacy_evidence.py \
+            --path frontend/allure-results/playwright \
+            --label playwright-evidence
+
+      - name: Upload Playwright Allure results
+        if: steps.playwright_privacy_scan.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: playwright-allure-results
@@ -385,10 +417,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Require explicit mobile privacy scan success
-        if: needs.mobile.outputs.privacy_scan_outcome != 'success'
+      - name: Require explicit privacy scan success for all layers
+        if: needs.backend.outputs.privacy_scan_outcome != 'success' || needs.frontend.outputs.privacy_scan_outcome != 'success' || needs.e2e.outputs.privacy_scan_outcome != 'success' || needs.mobile.outputs.privacy_scan_outcome != 'success'
         run: |
-          echo "::error::Mobile privacy scan did not explicitly succeed (outcome=${{ needs.mobile.outputs.privacy_scan_outcome }}); refusing to download, generate, upload, or publish the aggregate Allure report (ADR-0008)." >&2
+          echo "::error::One or more layer privacy scans did not explicitly succeed (backend=${{ needs.backend.outputs.privacy_scan_outcome }}, frontend=${{ needs.frontend.outputs.privacy_scan_outcome }}, playwright=${{ needs.e2e.outputs.privacy_scan_outcome }}, mobile=${{ needs.mobile.outputs.privacy_scan_outcome }}); refusing to download, generate, upload, or publish the aggregate Allure report (ADR-0008)." >&2
           exit 1
 
       - name: Download Allure results
