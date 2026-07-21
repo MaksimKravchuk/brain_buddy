@@ -102,6 +102,15 @@ def _categories_in_text(text: str) -> set[str]:
 _FAIL_CLOSED_BINARY_ROOT_NAMES = {"allure-results", "screenshots", "crash-artifacts"}
 
 
+def _is_fail_closed_binary_root(root: Path) -> bool:
+    # A scanned root passed as e.g. frontend/allure-results/vitest or
+    # frontend/allure-results/playwright is still Allure capture evidence
+    # even though its own leaf directory name ("vitest"/"playwright") is not
+    # one of the explicit fail-closed names: any ancestor segment named
+    # "allure-results" means every file beneath it is Allure evidence.
+    return root.name in _FAIL_CLOSED_BINARY_ROOT_NAMES or "allure-results" in root.parts
+
+
 def _categories_for_file(path: Path, *, fail_closed_binary: bool) -> set[str]:
     found: set[str] = set()
     if path.suffix.lower() in _AUDIO_EXTENSIONS:
@@ -145,7 +154,7 @@ def scan(roots: list[Path], label: str) -> int:
     scanned = 0
     for root_index, root in enumerate(existing_roots, start=1):
         root_files = [p for p in sorted(root.rglob("*")) if p.is_file()]
-        fail_closed_binary = root.name in _FAIL_CLOSED_BINARY_ROOT_NAMES
+        fail_closed_binary = _is_fail_closed_binary_root(root)
         for index, file_path in enumerate(root_files, start=1):
             scanned += 1
             display_refs[file_path] = (

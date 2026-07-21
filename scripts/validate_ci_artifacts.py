@@ -358,39 +358,124 @@ def _missing_e2e_ci_errors(workflow_text: str) -> list[str]:
     return errors
 
 
-MOBILE_PRIVACY_SCAN_STEP_ID_PATTERN = re.compile(
-    r"id:\s*mobile_privacy_scan\s*\n\s*if:\s*always\(\)"
+# Every raw publishable Allure layer must independently run the ADR-0008
+# privacy scan against its own exact Allure root, expose the outcome as a job
+# output, and gate its own raw Allure upload on that outcome — a workflow that
+# only wires up one layer (e.g. mobile) must not be accepted as covering the
+# others. `allure_path` is the exact --path argument the scan step must pass
+# for that layer (mobile's step already runs with `working-directory: mobile`,
+# so its path is the mobile-relative "allure-results", not a repo-relative one).
+PRIVACY_SCAN_LAYERS: tuple[dict[str, str], ...] = (
+    {
+        "key": "backend",
+        "job": "backend",
+        "step_id": "backend_privacy_scan",
+        "allure_path": "backend/allure-results",
+        "upload_step_name": "Upload backend Allure results",
+    },
+    {
+        "key": "frontend",
+        "job": "frontend",
+        "step_id": "frontend_privacy_scan",
+        "allure_path": "frontend/allure-results/vitest",
+        "upload_step_name": "Upload frontend Allure results",
+    },
+    {
+        "key": "playwright",
+        "job": "e2e",
+        "step_id": "playwright_privacy_scan",
+        "allure_path": "frontend/allure-results/playwright",
+        "upload_step_name": "Upload Playwright Allure results",
+    },
+    {
+        "key": "mobile",
+        "job": "mobile",
+        "step_id": "mobile_privacy_scan",
+        "allure_path": "allure-results",
+        "upload_step_name": "Upload mobile Allure results",
+    },
 )
 
 
-def _missing_mobile_privacy_gate_errors(workflow_text: str) -> list[str]:
-    """Guard the ADR-0008 mobile privacy scan publication contract.
+def _privacy_scan_step_block_pattern(step_id: str, allure_path: str) -> re.Pattern[str]:
+    """Match a step block, not a document-wide substring soup.
 
-    The scan must run with `if: always()` (so its outcome is captured even if
-    an earlier mobile step fails), and both the mobile Allure upload and the
-    aggregate Allure report job must refuse to publish unless that scan
-    explicitly succeeded.
+    Requires `id: <step_id>` immediately followed by `if: always()`, and
+    within that same step block (stopping at the next `- name:` step
+    boundary) a call to the maintainable scanner against the layer's exact
+    `--path`. This is what prevents one layer's fully-wired step from being
+    mistaken for a different layer's missing one: the id anchors the block,
+    and the path must appear inside that same anchored block.
+    """
+
+    step_boundary = r"(?:(?!\n\s*- name:).)*?"
+    return re.compile(
+        r"id:\s*" + re.escape(step_id) + r"\s*\n\s*if:\s*always\(\)"
+        + step_boundary
+        + r"validate_mobile_privacy_evidence\.py"
+        + step_boundary
+        + r"--path\s+" + re.escape(allure_path) + r"\b",
+        re.DOTALL,
+    )
+
+
+def _privacy_scan_output_pattern(step_id: str) -> re.Pattern[str]:
+    return re.compile(
+        r"privacy_scan_outcome:\s*\$\{\{\s*steps\." + re.escape(step_id) + r"\.outcome\s*\}\}"
+    )
+
+
+def _privacy_scan_upload_gate_pattern(step_id: str, upload_step_name: str) -> re.Pattern[str]:
+    return re.compile(
+        r"name:\s*" + re.escape(upload_step_name)
+        + r"\s*\n\s*if:\s*steps\." + re.escape(step_id) + r"\.outcome\s*==\s*'success'"
+    )
+
+
+def _missing_mobile_privacy_gate_errors(workflow_text: str) -> list[str]:
+    """Guard the ADR-0008 privacy scan publication contract for every layer.
+
+    Each raw publishable Allure layer (backend, frontend Vitest, Playwright,
+    mobile) must independently: run the scanner against its own exact Allure
+    root with `if: always()` under a unique step id, expose that step's
+    outcome as a job output, and gate its own raw Allure upload on that
+    outcome. The aggregate Allure report job must additionally refuse to
+    proceed unless ALL FOUR layer outputs explicitly equal 'success' —
+    checking mobile's outcome alone is not sufficient (aggregate-only
+    scanning previously left backend/frontend/Playwright evidence unscanned).
     """
 
     errors: list[str] = []
     if "validate_mobile_privacy_evidence.py" not in workflow_text:
         return errors
 
-    if not MOBILE_PRIVACY_SCAN_STEP_ID_PATTERN.search(workflow_text):
-        errors.append(
-            "mobile privacy scan step must set id: mobile_privacy_scan and run with "
-            "if: always() so its outcome is captured even after upstream step failures (ADR-0008)"
-        )
-    if "if: steps.mobile_privacy_scan.outcome == 'success'" not in workflow_text:
-        errors.append(
-            "missing successful-scan gate for mobile Allure upload: "
-            "if: steps.mobile_privacy_scan.outcome == 'success' (ADR-0008)"
-        )
-    if "needs.mobile.outputs.privacy_scan_outcome != 'success'" not in workflow_text:
-        errors.append(
-            "missing aggregate Allure report publication gate on mobile privacy scan outcome: "
-            "needs.mobile.outputs.privacy_scan_outcome != 'success' (ADR-0008)"
-        )
+    for layer in PRIVACY_SCAN_LAYERS:
+        label = layer["key"]
+        step_id = layer["step_id"]
+        if not _privacy_scan_step_block_pattern(step_id, layer["allure_path"]).search(workflow_text):
+            errors.append(
+                f"{label} layer privacy scan step must set id: {step_id}, run with if: always(), "
+                f"and call validate_mobile_privacy_evidence.py against --path {layer['allure_path']} "
+                "so its outcome is captured even after upstream step failures (ADR-0008)"
+            )
+        if not _privacy_scan_output_pattern(step_id).search(workflow_text):
+            errors.append(
+                f"missing {label} job output privacy_scan_outcome sourced from "
+                f"steps.{step_id}.outcome (ADR-0008)"
+            )
+        if not _privacy_scan_upload_gate_pattern(step_id, layer["upload_step_name"]).search(workflow_text):
+            errors.append(
+                f"missing successful-scan gate for {label} Allure upload: "
+                f"if: steps.{step_id}.outcome == 'success' (ADR-0008)"
+            )
+
+    for layer in PRIVACY_SCAN_LAYERS:
+        needs_expr = f"needs.{layer['job']}.outputs.privacy_scan_outcome != 'success'"
+        if needs_expr not in workflow_text:
+            errors.append(
+                f"missing aggregate Allure report publication gate on {layer['key']} privacy "
+                f"scan outcome: {needs_expr} (ADR-0008)"
+            )
     return errors
 
 
