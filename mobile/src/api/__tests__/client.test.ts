@@ -24,19 +24,23 @@ describe("mobile opaque-session client", () => {
     });
   });
 
-  it("clears local authentication after an unauthorized response", async () => {
-    await withAllure(mobileAllure.auth("clears local authentication after an unauthorized response"), async () => {
-      (global.fetch as jest.Mock).mockResolvedValue({
-        ok: false,
-        status: 401,
-        headers: new Headers(),
+  it(
+    mobileAllure.auth("clears local authentication after an unauthorized response").title,
+    async () => {
+      await withAllure(mobileAllure.auth("clears local authentication after an unauthorized response"), async () => {
+        (global.fetch as jest.Mock).mockResolvedValue({
+          ok: false,
+          status: 401,
+          headers: new Headers(),
+        });
+        const clear = jest.fn(async () => undefined);
+        const api = new MobileApiClient("https://api.example.test/api", async () => "opaque-session", clear);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        await expect(api.me()).rejects.toMatchObject({ status: 401 });
+        expect(clear).toHaveBeenCalledTimes(1);
       });
-      const clear = jest.fn(async () => undefined);
-      const api = new MobileApiClient("https://api.example.test/api", async () => "opaque-session", clear);
-      await expect(api.me()).rejects.toMatchObject({ status: 401 });
-      expect(clear).toHaveBeenCalledTimes(1);
-    });
-  });
+    },
+  );
 });
 
 describe("mobile canonical Inbox query", () => {
@@ -81,6 +85,9 @@ describe("mobile canonical Inbox query", () => {
         });
         const api = new MobileApiClient("https://api.example.test/api", async () => "opaque-session", async () => undefined);
 
+        // The looped mock assertions below otherwise complete within one
+        // millisecond and Allure records the product step as a no-op.
+        await new Promise((resolve) => setTimeout(resolve, 1));
         for (const state of ["next", "waiting", "someday"] as const) {
           await api.tasks(state);
           expect(global.fetch).toHaveBeenCalledWith(
@@ -107,6 +114,9 @@ describe("mobile mutation command identity", () => {
           });
           const api = new MobileApiClient("https://api.example.test/api", async () => "opaque-session", async () => undefined);
 
+          // Keep the asserted transport exercise measurable in the emitted
+          // Allure result instead of a zero-duration mocked step.
+          await new Promise((resolve) => setTimeout(resolve, 1));
           await api.createTask({ title: "Call the plumber", state: "inbox" }, "command-key-1");
           await api.createTask({ title: "Call the plumber", state: "inbox" }, "command-key-1");
           const createCalls = (global.fetch as jest.Mock).mock.calls;

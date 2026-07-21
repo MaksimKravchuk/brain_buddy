@@ -131,6 +131,107 @@ def test_browser_login_persistence_outage_also_returns_correlated_503(
     assert response.json()["reference_id"] == "browser-login-outage"
 
 
+def _fail_next_disk_read(monkeypatch) -> None:
+    """Simulate a real filesystem outage at the exact call `load_model` makes.
+
+    Mirrors `_fail_next_disk_write` but for the read path exercised by
+    `SessionRepository.get`, so `/api/auth/me` surfaces the repository's own
+    OSError-to-StorageUnavailableError translation rather than a bypass of it.
+    """
+
+    def _boom(path):
+        raise OSError("disk read error")
+
+    monkeypatch.setattr("app.repositories.base.read_json", _boom)
+
+
+def test_me_session_read_outage_returns_correlated_503(tmp_path, monkeypatch) -> None:
+    """A storage outage while resolving the session for `/me` surfaces a 503 envelope."""
+
+    client, email = _client_with_account(tmp_path, monkeypatch)
+    mobile = client.post(
+        "/api/auth/mobile/sessions",
+        json={"email": email, "password": "correct-horse-battery-staple"},
+    ).json()
+    _fail_next_disk_read(monkeypatch)
+
+    response = client.get(
+        "/api/auth/me",
+        headers={
+            "Authorization": f"Bearer {mobile['session_token']}",
+            "X-Correlation-ID": "me-storage-outage",
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.headers["X-Correlation-ID"] == "me-storage-outage"
+    body = response.json()
+    assert body["message"]
+    assert body["reference_id"] == "me-storage-outage"
+
+
+def test_me_session_exists_check_outage_returns_correlated_503(tmp_path, monkeypatch) -> None:
+    """A storage outage surfacing through the session existence check must still 503.
+
+    Exercises the exact `Path.exists()` call inside `SessionRepository.get`
+    end-to-end through `/me`, not just at the repository unit level.
+    """
+
+    client, email = _client_with_account(tmp_path, monkeypatch)
+    mobile = client.post(
+        "/api/auth/mobile/sessions",
+        json={"email": email, "password": "correct-horse-battery-staple"},
+    ).json()
+
+    def _boom(path) -> bool:
+        raise OSError("disk stat error")
+
+    monkeypatch.setattr("pathlib.Path.exists", _boom)
+
+    response = client.get(
+        "/api/auth/me",
+        headers={
+            "Authorization": f"Bearer {mobile['session_token']}",
+            "X-Correlation-ID": "me-exists-outage",
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.headers["X-Correlation-ID"] == "me-exists-outage"
+    body = response.json()
+    assert body["message"]
+    assert body["reference_id"] == "me-exists-outage"
+
+
+def test_logout_session_delete_outage_returns_correlated_503(tmp_path, monkeypatch) -> None:
+    """A storage outage while revoking the session on logout surfaces a 503 envelope."""
+
+    client, email = _client_with_account(tmp_path, monkeypatch)
+    mobile = client.post(
+        "/api/auth/mobile/sessions",
+        json={"email": email, "password": "correct-horse-battery-staple"},
+    ).json()
+
+    def _boom(path) -> None:
+        raise OSError("disk unlink error")
+
+    monkeypatch.setattr("pathlib.Path.unlink", _boom)
+
+    response = client.post(
+        "/api/auth/logout",
+        headers={
+            "Authorization": f"Bearer {mobile['session_token']}",
+            "X-Correlation-ID": "logout-storage-outage",
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.headers["X-Correlation-ID"] == "logout-storage-outage"
+    body = response.json()
+    assert body["message"]
+    assert body["reference_id"] == "logout-storage-outage"
+
+
 def test_bearer_logout_revokes_and_session_lookup_honours_expiry(tmp_path, monkeypatch) -> None:
     client, email = _client_with_account(tmp_path, monkeypatch)
     mobile = client.post(

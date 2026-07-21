@@ -57,15 +57,15 @@ class SessionRepository(BaseRepository):
         """Return the session if valid, deleting it lazily if expired."""
 
         path = self._session_path(token_hash)
-        if not path.exists():
-            return None
         with _file_guard():
+            if not path.exists():
+                return None
             session = self.load_model(path, Session)
-        if session.expires_at <= utcnow():
-            # Expired — clean up and behave as if missing.
-            with suppress(FileNotFoundError):  # pragma: no cover - race
-                path.unlink()
-            return None
+            if session.expires_at <= utcnow():
+                # Expired — clean up and behave as if missing.
+                with suppress(FileNotFoundError):  # pragma: no cover - race
+                    path.unlink()
+                return None
         return session
 
     def delete(self, token_hash: str) -> None:

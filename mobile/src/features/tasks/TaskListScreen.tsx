@@ -7,6 +7,7 @@ import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, Vi
 import type { TaskState } from "@/api/types";
 import { useAuth } from "@/auth/AuthProvider";
 import { colors, spacing, touchTarget } from "@/design/tokens";
+import { randomUUID } from "@/utils/uuid";
 
 const states: Exclude<TaskState, "completed" | "cancelled">[] = ["inbox", "next", "waiting", "someday"];
 
@@ -27,6 +28,10 @@ export function TaskListScreen({ state }: { state: Exclude<TaskState, "completed
   // Retained across a failed attempt so a Retry press reuses the same command
   // identity instead of minting a fresh idempotency key per press.
   const captureCommand = useRef<{ title: string; key: string } | null>(null);
+  // A ref (not React state) so a rapid double-press within the same
+  // synchronous tick sees the up-to-date in-flight status immediately,
+  // rather than the stale value captured by the last render's closure.
+  const captureInFlight = useRef(false);
   const captureMutation = useMutation({
     mutationFn: () => {
       const command = captureCommand.current;
@@ -34,18 +39,27 @@ export function TaskListScreen({ state }: { state: Exclude<TaskState, "completed
       return api.createTask({ title: command.title, state: "inbox" }, command.key);
     },
     onSuccess: async () => {
+      captureInFlight.current = false;
       captureCommand.current = null;
       setDraft("");
       await client.invalidateQueries({ queryKey: ["tasks"] });
     },
+    onError: () => {
+      captureInFlight.current = false;
+    },
   });
   const capture = () => {
+    if (captureInFlight.current) return;
     const title = draft.trim();
     if (!title) return;
-    captureCommand.current = { title, key: crypto.randomUUID() };
+    captureCommand.current = { title, key: randomUUID() };
+    captureInFlight.current = true;
     captureMutation.mutate();
   };
-  const retryCapture = () => captureMutation.mutate();
+  const retryCapture = () => {
+    captureInFlight.current = true;
+    captureMutation.mutate();
+  };
   const loadMore = () => {
     if (tasks.hasNextPage && !tasks.isFetchingNextPage) {
       void tasks.fetchNextPage();
