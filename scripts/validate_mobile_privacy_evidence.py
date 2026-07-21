@@ -5,7 +5,9 @@ Before mobile logs, Allure results, screenshots, crash artifacts, bundles,
 source maps, and build output are uploaded as CI artifacts, they must not
 carry credential values, email values, raw audio/transcript content, task
 content (Task/TaskComment title, details, or body text), absolute
-developer/device paths, or content hashes. ADR-0008 requires this scan as a
+developer/device paths, or content hashes. Screenshot and crash-artifact
+evidence that cannot be decoded as text fails closed rather than passing
+silently, since it cannot be verified clean. ADR-0008 requires this scan as a
 release gate; see "Verification / tests" item 7 in
 ``docs/decisions/0008-add-one-expo-mobile-client-over-opaque-sessions.md``.
 
@@ -39,28 +41,32 @@ _AUDIO_DATA_URI = re.compile(r"data:audio/[a-zA-Z0-9.+-]+;base64,")
 _AUDIO_PATH = re.compile(
     r"[^\s\"']+\.(?:m4a|wav|caf|mp3|aac|3gp|amr)\b", re.IGNORECASE
 )
-# A long free-text value under a transcript-shaped key is a stronger signal
-# than the key alone, which fixture objects legitimately use with short
-# placeholder strings.
+# Any non-empty value under a transcript-shaped key is a leak signal: real
+# voice brain-dump transcripts are ordinary short sentences ("buy milk"), not
+# just long free text, so this must not require a minimum length.
 _TRANSCRIPT_FIELD = re.compile(
-    r"\"(?:transcript|transcriptText|rawTranscript)\"\s*:\s*\"(?:[^\"\\]|\\.){200,}\""
+    r"\"(?:transcript|transcriptText|rawTranscript)\"\s*:\s*\"(?:[^\"\\]|\\.)+\""
 )
 
 # Real Task/TaskComment wire field names (backend/app/schemas/tasks.py:
-# title, details; TaskCommentDocument.body). A long value under one of these
-# keys is a stronger signal than the key alone, which short fixture titles
-# like "buy milk" legitimately use.
+# title, details; TaskCommentDocument.body). These keys are distinctive
+# enough on their own that even an ordinary short value ("buy milk") is a
+# leak signal, not just a long one.
 _TASK_CONTENT_FIELD = re.compile(
-    r"\"(?:title|details|body)\"\s*:\s*\"(?:[^\"\\]|\\.){80,}\""
+    r"\"(?:title|details|body)\"\s*:\s*\"(?:[^\"\\]|\\.)+\""
 )
 
 # Developer/device home directories, not the shared GitHub-hosted runner
 # account, so a generic CI-produced ``/home/runner/...`` path in a source map
-# does not fail the scan.
+# does not fail the scan. Also covers native iOS (`/var/mobile/...`) and
+# Android (`/data/user/0/...`) per-device absolute paths that can leak into
+# crash artifacts or logs.
 _ABSOLUTE_PATH = re.compile(
     r"/Users/[A-Za-z0-9_.\-]+/"
     r"|/home/(?!runner/)[A-Za-z0-9_.\-]+/"
     r"|[A-Za-z]:\\Users\\[A-Za-z0-9_.\-]+\\"
+    r"|/var/mobile/[A-Za-z0-9_.\-]+/"
+    r"|/data/user/0/[A-Za-z0-9_.\-]+/"
 )
 
 # A bare SHA-256 hex digest (e.g. an uploaded audio chunk's content hash).
@@ -85,6 +91,14 @@ def _categories_in_text(text: str) -> set[str]:
     return found
 
 
+# Screenshot and crash-artifact evidence is a literal capture of on-device
+# app/user state (unlike a build bundle's static icon/font assets), so its
+# content can never be assumed safe just because it fails to decode as UTF-8
+# text. Fail closed for these two evidence kinds: an unreadable file inside
+# them is itself a finding, not a silent pass.
+_FAIL_CLOSED_DIR_NAMES = {"screenshots", "crash-artifacts"}
+
+
 def _categories_for_file(path: Path) -> set[str]:
     found: set[str] = set()
     if path.suffix.lower() in _AUDIO_EXTENSIONS:
@@ -92,6 +106,8 @@ def _categories_for_file(path: Path) -> set[str]:
     try:
         text = path.read_text(encoding="utf-8")
     except (UnicodeDecodeError, OSError):
+        if set(path.parts) & _FAIL_CLOSED_DIR_NAMES:
+            found.add("unreadable_binary_evidence")
         return found
     return found | _categories_in_text(text)
 

@@ -76,6 +76,45 @@ class ValidateMobilePrivacyEvidenceTests(unittest.TestCase):
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("audio_transcript_content", completed.stderr)
 
+    def test_rejects_unreadable_binary_screenshot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence = Path(tmp) / "screenshots"
+            evidence.mkdir()
+            (evidence / "device-capture.png").write_bytes(
+                b"\x89PNG\r\n\x1a\n\x00\x01\xffnot-a-real-png"
+            )
+            completed = self.run_validator(
+                "--path", str(evidence), "--label", "mobile-evidence"
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("unreadable_binary_evidence", completed.stderr)
+
+    def test_rejects_unreadable_binary_crash_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence = Path(tmp) / "crash-artifacts"
+            evidence.mkdir()
+            (evidence / "core.dump").write_bytes(b"\x00\x01\x02\xff\xfeundecodable")
+            completed = self.run_validator(
+                "--path", str(evidence), "--label", "mobile-evidence"
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("unreadable_binary_evidence", completed.stderr)
+
+    def test_allows_unreadable_binary_build_asset(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence = Path(tmp) / "dist"
+            evidence.mkdir()
+            (evidence / "favicon.png").write_bytes(
+                b"\x89PNG\r\n\x1a\n\x00\x01\xffnot-a-real-png"
+            )
+            completed = self.run_validator(
+                "--path", str(evidence), "--label", "mobile-evidence"
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
     def test_rejects_audio_data_uri(self) -> None:
         completed = self.scan_text(
             "bundle.js", "const uri = 'data:audio/m4a;base64,ZmFrZQ==';"
@@ -92,12 +131,16 @@ class ValidateMobilePrivacyEvidenceTests(unittest.TestCase):
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("audio_transcript_content", completed.stderr)
 
-    def test_allows_short_transcript_fixture_field(self) -> None:
+    def test_rejects_short_transcript_fixture_field_without_printing_it(self) -> None:
+        fake_transcript = "buy milk"
         completed = self.scan_text(
-            "case-result.json", json.dumps({"transcript": "buy milk"})
+            "case-result.json", json.dumps({"transcript": fake_transcript})
         )
 
-        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("audio_transcript_content", completed.stderr)
+        self.assertNotIn(fake_transcript, completed.stderr)
+        self.assertNotIn(fake_transcript, completed.stdout)
 
     def test_rejects_long_task_content_field(self) -> None:
         completed = self.scan_text(
@@ -107,10 +150,60 @@ class ValidateMobilePrivacyEvidenceTests(unittest.TestCase):
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("task_content", completed.stderr)
 
+    def test_rejects_short_task_title_without_printing_it(self) -> None:
+        fake_title = "buy milk"
+        completed = self.scan_text(
+            "case-result.json", json.dumps({"title": fake_title})
+        )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("task_content", completed.stderr)
+        self.assertNotIn(fake_title, completed.stderr)
+        self.assertNotIn(fake_title, completed.stdout)
+
+    def test_rejects_short_task_comment_body_without_printing_it(self) -> None:
+        fake_body = "call mom back"
+        completed = self.scan_text(
+            "case-result.json", json.dumps({"body": fake_body})
+        )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("task_content", completed.stderr)
+        self.assertNotIn(fake_body, completed.stderr)
+        self.assertNotIn(fake_body, completed.stdout)
+
+    def test_allows_empty_task_content_field(self) -> None:
+        completed = self.scan_text("case-result.json", json.dumps({"title": ""}))
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
     def test_rejects_developer_absolute_path(self) -> None:
         completed = self.scan_text(
             "bundle.js",
             json.dumps({"sourceRoot": "/Users/exampledev/Code/brain_buddy/mobile"}),
+        )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("absolute_path", completed.stderr)
+
+    def test_rejects_ios_device_absolute_path(self) -> None:
+        completed = self.scan_text(
+            "crash-log.txt",
+            json.dumps(
+                {
+                    "path": "/var/mobile/Containers/Data/Application/"
+                    "5C1B2E7A-0000-0000-0000-000000000000/tmp/expo.log"
+                }
+            ),
+        )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("absolute_path", completed.stderr)
+
+    def test_rejects_android_device_absolute_path(self) -> None:
+        completed = self.scan_text(
+            "crash-log.txt",
+            json.dumps({"path": "/data/user/0/com.brainbuddy.app/files/expo.log"}),
         )
 
         self.assertNotEqual(completed.returncode, 0)

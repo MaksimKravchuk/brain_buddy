@@ -423,6 +423,76 @@ jobs:
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("validate_mobile_privacy_evidence.py", completed.stderr)
 
+    def test_workflow_rejects_mobile_privacy_scan_missing_if_always_guard(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / ".github" / "workflows" / "ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                """
+name: CI
+jobs:
+  mobile:
+    steps:
+      - name: Install backend contract dependencies
+        run: uv sync --locked --extra dev
+      - name: Verify committed OpenAPI semantic and generated-client drift
+        run: python -m scripts.openapi_snapshot check --snapshot ../mobile/api/openapi.json
+      - name: Scan publishable mobile evidence for privacy leaks
+        id: mobile_privacy_scan
+        run: python3 ../scripts/validate_mobile_privacy_evidence.py
+      - name: Upload mobile Allure results
+        if: steps.mobile_privacy_scan.outcome == 'success'
+        with:
+          name: mobile-allure-results
+  allure-report:
+    steps:
+      - name: Require explicit mobile privacy scan success
+        if: needs.mobile.outputs.privacy_scan_outcome != 'success'
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("if: always()", completed.stderr)
+        self.assertIn("ADR-0008", completed.stderr)
+
+    def test_workflow_rejects_mobile_privacy_scan_without_success_publication_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / ".github" / "workflows" / "ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                """
+name: CI
+jobs:
+  mobile:
+    steps:
+      - name: Install backend contract dependencies
+        run: uv sync --locked --extra dev
+      - name: Verify committed OpenAPI semantic and generated-client drift
+        run: python -m scripts.openapi_snapshot check --snapshot ../mobile/api/openapi.json
+      - name: Scan publishable mobile evidence for privacy leaks
+        id: mobile_privacy_scan
+        if: always()
+        run: python3 ../scripts/validate_mobile_privacy_evidence.py
+      - name: Upload mobile Allure results
+        with:
+          name: mobile-allure-results
+  allure-report:
+    steps:
+      - name: Generate Allure Report
+        run: npx allure generate ../allure-results -o ../allure-report
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("successful-scan gate for mobile Allure upload", completed.stderr)
+        self.assertIn("aggregate Allure report publication gate", completed.stderr)
+
     def test_mutation_workflow_rejects_a_non_nightly_workflow_without_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workflow = Path(tmp) / "mutation.yml"

@@ -172,6 +172,8 @@ jobs:
     needs:
       - workflow-lint
       - spec-kit
+    outputs:
+      privacy_scan_outcome: ${{ steps.mobile_privacy_scan.outcome }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -237,6 +239,8 @@ jobs:
         run: npx expo export --platform web
 
       - name: Scan publishable mobile evidence for privacy leaks
+        id: mobile_privacy_scan
+        if: always()
         working-directory: mobile
         run: |
           python3 ../scripts/validate_mobile_privacy_evidence.py \
@@ -264,7 +268,7 @@ jobs:
           test ! -d android
 
       - name: Upload mobile Allure results
-        if: always()
+        if: steps.mobile_privacy_scan.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: mobile-allure-results
@@ -380,6 +384,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Require explicit mobile privacy scan success
+        if: needs.mobile.outputs.privacy_scan_outcome != 'success'
+        run: |
+          echo "::error::Mobile privacy scan did not explicitly succeed (outcome=${{ needs.mobile.outputs.privacy_scan_outcome }}); refusing to download, generate, upload, or publish the aggregate Allure report (ADR-0008)." >&2
+          exit 1
 
       - name: Download Allure results
         uses: actions/download-artifact@v4
