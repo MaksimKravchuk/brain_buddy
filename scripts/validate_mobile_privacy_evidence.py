@@ -5,16 +5,20 @@ Before mobile logs, Allure results, screenshots, crash artifacts, bundles,
 source maps, and build output are uploaded as CI artifacts, they must not
 carry credential values, email values, raw audio/transcript content, task
 content (Task/TaskComment title, details, or body text), absolute
-developer/device paths, or content hashes. Screenshot and crash-artifact
-evidence that cannot be decoded as text fails closed rather than passing
-silently, since it cannot be verified clean. ADR-0008 requires this scan as a
-release gate; see "Verification / tests" item 7 in
+developer/device paths, or content hashes. Any unreadable binary screenshot
+or attachment anywhere under a publishable Allure root fails closed rather
+than passing silently, since it cannot be verified clean — this is not limited
+to directories named screenshots or crash-artifacts. Explicit screenshot and
+crash-artifact roots also fail closed. Static build assets remain allowed:
+they are bundled code, not capture/attachment evidence. ADR-0008 requires this
+scan as a release gate; see "Verification / tests" item 7 in
 ``docs/decisions/0008-add-one-expo-mobile-client-over-opaque-sessions.md``.
 
-This intentionally reports only the offending file path and category name,
-never the matched text, so a scan failure cannot itself leak the value it
-found. It uses only the Python standard library so it can run before mobile
-or backend dependencies are installed.
+This intentionally never prints the offending file's name or path, since a
+malicious or fixture filename can itself carry the same value found in its
+content; a finding names its category and a reproducible sorted-order
+position instead. It uses only the Python standard library so it can run
+before mobile or backend dependencies are installed.
 """
 
 from __future__ import annotations
@@ -91,22 +95,21 @@ def _categories_in_text(text: str) -> set[str]:
     return found
 
 
-# Screenshot and crash-artifact evidence is a literal capture of on-device
-# app/user state (unlike a build bundle's static icon/font assets), so its
-# content can never be assumed safe just because it fails to decode as UTF-8
-# text. Fail closed for these two evidence kinds: an unreadable file inside
-# them is itself a finding, not a silent pass.
-_FAIL_CLOSED_DIR_NAMES = {"screenshots", "crash-artifacts"}
+# Allure attachments can be nested under arbitrary directories, so the
+# complete Allure root is treated as capture evidence. The older explicit
+# screenshot/crash roots remain fail-closed as well. Other CI roots may carry
+# normal binary build assets; their text content is still scanned when decodable.
+_FAIL_CLOSED_BINARY_ROOT_NAMES = {"allure-results", "screenshots", "crash-artifacts"}
 
 
-def _categories_for_file(path: Path) -> set[str]:
+def _categories_for_file(path: Path, *, fail_closed_binary: bool) -> set[str]:
     found: set[str] = set()
     if path.suffix.lower() in _AUDIO_EXTENSIONS:
         found.add("audio_transcript_content")
     try:
         text = path.read_text(encoding="utf-8")
     except (UnicodeDecodeError, OSError):
-        if set(path.parts) & _FAIL_CLOSED_DIR_NAMES:
+        if fail_closed_binary:
             found.add("unreadable_binary_evidence")
         return found
     return found | _categories_in_text(text)
@@ -114,32 +117,50 @@ def _categories_for_file(path: Path) -> set[str]:
 
 def scan(roots: list[Path], label: str) -> int:
     existing_roots = [root for root in roots if root.is_dir()]
-    for root in roots:
+    for root_index, root in enumerate(roots, start=1):
         if root not in existing_roots:
-            print(f"{label}: no evidence at {root}, skipping", file=sys.stderr)
+            print(
+                f"{label}: requested evidence root #{root_index} is missing, skipping",
+                file=sys.stderr,
+            )
 
     if not existing_roots:
         print(
-            f"error: {label}: none of the requested evidence roots exist: "
-            + ", ".join(str(root) for root in roots),
+            f"error: {label}: none of the requested evidence roots exist "
+            f"({len(roots)} requested)",
             file=sys.stderr,
         )
         return 1
 
     findings: list[tuple[Path, str]] = []
+    # A finding is reported by its position in this deterministic sorted
+    # listing, never by its name or path: a malicious or fixture filename can
+    # itself carry the exact value its content matched (a credential, email,
+    # or transcript text used as a filename), so printing the raw basename or
+    # full path could leak it just as surely as printing the matched text
+    # would. The (root, sorted index, total) triple is still reproducible —
+    # rerun the same scan against the same evidence root and the Nth file in
+    # sorted order is the offending file — without ever echoing its content.
+    display_refs: dict[Path, str] = {}
     scanned = 0
-    for root in existing_roots:
-        for file_path in sorted(root.rglob("*")):
-            if not file_path.is_file():
-                continue
+    for root_index, root in enumerate(existing_roots, start=1):
+        root_files = [p for p in sorted(root.rglob("*")) if p.is_file()]
+        fail_closed_binary = root.name in _FAIL_CLOSED_BINARY_ROOT_NAMES
+        for index, file_path in enumerate(root_files, start=1):
             scanned += 1
-            for category in sorted(_categories_for_file(file_path)):
+            display_refs[file_path] = (
+                f"file #{index} of {len(root_files)} under evidence root #{root_index} (sorted order)"
+            )
+            for category in sorted(
+                _categories_for_file(file_path, fail_closed_binary=fail_closed_binary)
+            ):
                 findings.append((file_path, category))
 
     if findings:
         for file_path, category in findings:
-            # Path and category only: never the matched text itself.
-            print(f"error: {label}: {file_path} contains a {category} value", file=sys.stderr)
+            # Reference and category only: never the matched text, nor the
+            # file's own name or path.
+            print(f"error: {label}: {display_refs[file_path]} contains a {category} value", file=sys.stderr)
         categories = sorted({category for _, category in findings})
         print(
             f"error: {label}: privacy scan found {len(findings)} issue(s) "
@@ -149,7 +170,10 @@ def scan(roots: list[Path], label: str) -> int:
         )
         return 1
 
-    print(f"{label}: privacy scan passed for {scanned} file(s) in {', '.join(str(r) for r in existing_roots)}")
+    print(
+        f"{label}: privacy scan passed for {scanned} file(s) across "
+        f"{len(existing_roots)} evidence root(s)"
+    )
     return 0
 
 

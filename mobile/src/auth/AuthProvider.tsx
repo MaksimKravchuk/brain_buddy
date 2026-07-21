@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { MobileApiClient, MobileApiError, publicApiOrigin } from "@/api/client";
 import type { User } from "@/api/types";
@@ -16,6 +16,10 @@ type AuthState = {
   signIn(email: string, password: string): Promise<void>;
   signOut(): Promise<void>;
   retryBootstrap(): Promise<void>;
+  /** True when the most recent sign-out cleared the local credential but could
+   * not confirm the server revoked it (ADR-0008). Retryable via retryLogout. */
+  logoutRevocationUnresolved: boolean;
+  retryLogout(): Promise<void>;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -24,12 +28,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
   const [bootstrapError, setBootstrapError] = useState(false);
+  const [logoutRevocationUnresolved, setLogoutRevocationUnresolved] = useState(false);
   const [client] = useState(() => new QueryClient({ defaultOptions: { queries: { retry: false } } }));
   const api = useMemo(() => new MobileApiClient(publicApiOrigin(), readSessionToken, async () => {
     await clearSessionToken();
     client.clear();
     setUser(null);
   }), [client]);
+
+  // The local credential is already cleared by the time this runs; retaining
+  // it here is solely to let a failed server revocation be retried without
+  // asking the user to sign in again. Provider-memory only — never written to
+  // SecureStore, Zustand/AsyncStorage persistence, logs, or error
+  // serialization (ADR-0008), and never rendered.
+  const pendingLogoutTokenRef = useRef<string | null>(null);
+
+  const revokeRemoteSession = useCallback(async (token: string) => {
+    try {
+      await api.logout(token);
+      pendingLogoutTokenRef.current = null;
+      setLogoutRevocationUnresolved(false);
+    } catch {
+      pendingLogoutTokenRef.current = token;
+      setLogoutRevocationUnresolved(true);
+    }
+  }, [api]);
+
+  const retryLogout = useCallback(async () => {
+    const token = pendingLogoutTokenRef.current;
+    if (!token) return;
+    await revokeRemoteSession(token);
+  }, [revokeRemoteSession]);
 
   // A definitive 401 already cleared the credential via the client's
   // onUnauthorized callback above. Anything else (offline, DNS failure,
@@ -73,6 +102,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<AuthState>(() => ({
     user, ready, bootstrapError, api,
     retryBootstrap,
+    logoutRevocationUnresolved,
+    retryLogout,
     async signIn(email, password) {
       const session = await api.session(email, password);
       try { await saveSessionToken(session.session_token); } catch (error) {
@@ -81,6 +112,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       client.clear();
       setBootstrapError(false);
+      // A new session starts clean: discard any unresolved retry left over
+      // from a previous session's logout so it can never be confused with
+      // (or silently resurrected against) this one.
+      pendingLogoutTokenRef.current = null;
+      setLogoutRevocationUnresolved(false);
       setUser(session.user);
     },
     async signOut() {
@@ -89,9 +125,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       client.clear();
       setBootstrapError(false);
       setUser(null);
-      if (token) await api.logout(token).catch(() => undefined);
+      if (token) await revokeRemoteSession(token);
     },
-  }), [api, retryBootstrap, bootstrapError, client, ready, user]);
+  }), [api, retryBootstrap, bootstrapError, client, ready, user, logoutRevocationUnresolved, retryLogout, revokeRemoteSession]);
 
   return <AuthContext.Provider value={value}><QueryClientProvider client={client}>{children}</QueryClientProvider></AuthContext.Provider>;
 }
