@@ -97,9 +97,20 @@ def _categories_in_text(text: str) -> set[str]:
 
 # Allure attachments can be nested under arbitrary directories, so the
 # complete Allure root is treated as capture evidence. The older explicit
-# screenshot/crash roots remain fail-closed as well. Other CI roots may carry
-# normal binary build assets; their text content is still scanned when decodable.
-_FAIL_CLOSED_BINARY_ROOT_NAMES = {"allure-results", "screenshots", "crash-artifacts"}
+# screenshot/crash roots remain fail-closed as well, as do the Playwright
+# HTML report and its raw test-results sibling: both can carry
+# failure-only PNG screenshots, .webm videos, and .zip traces that are
+# exactly the kind of capture/attachment evidence this scan exists to gate,
+# and being binary they cannot be verified clean by the text-content checks
+# below. Other CI roots may carry normal binary build assets; their text
+# content is still scanned when decodable.
+_FAIL_CLOSED_BINARY_ROOT_NAMES = {
+    "allure-results",
+    "screenshots",
+    "crash-artifacts",
+    "playwright-report",
+    "test-results",
+}
 
 
 def _is_fail_closed_binary_root(root: Path) -> bool:

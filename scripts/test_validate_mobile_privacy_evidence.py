@@ -167,6 +167,32 @@ class ValidateMobilePrivacyEvidenceTests(unittest.TestCase):
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("unreadable_binary_evidence", completed.stderr)
 
+    def test_rejects_unreadable_binary_in_playwright_html_report_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence = Path(tmp) / "frontend" / "playwright-report"
+            evidence.mkdir(parents=True)
+            (evidence / "trace.zip").write_bytes(b"\x00\x01\x02\xff\xfeundecodable")
+            completed = self.run_validator(
+                "--path", str(evidence), "--label", "playwright-evidence"
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("unreadable_binary_evidence", completed.stderr)
+
+    def test_rejects_unreadable_binary_in_playwright_test_results_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence = Path(tmp) / "frontend" / "test-results" / "playwright"
+            evidence.mkdir(parents=True)
+            (evidence / "failure.png").write_bytes(
+                b"\x89PNG\r\n\x1a\n\x00\x01\xffnot-a-real-png"
+            )
+            completed = self.run_validator(
+                "--path", str(evidence.parent), "--label", "playwright-evidence"
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("unreadable_binary_evidence", completed.stderr)
+
     def test_rejects_audio_data_uri(self) -> None:
         completed = self.scan_text(
             "bundle.js", "const uri = 'data:audio/m4a;base64,ZmFrZQ==';"

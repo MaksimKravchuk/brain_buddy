@@ -514,8 +514,10 @@ jobs:
             --label backend-evidence
       - name: Upload backend Allure results
         if: steps.backend_privacy_scan.outcome == 'success'
+        uses: actions/upload-artifact@v4
         with:
           name: backend-allure-results
+          path: backend/allure-results
   allure-report:
     steps:
       - name: Require explicit privacy scan success for all layers
@@ -675,6 +677,329 @@ jobs:
             "aggregate Allure report publication gate on mobile", completed.stderr
         )
 
+    def test_workflow_rejects_upload_gate_weakened_with_or_true_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / ".github" / "workflows" / "ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                """
+name: CI
+jobs:
+  backend:
+    outputs:
+      privacy_scan_outcome: ${{ steps.backend_privacy_scan.outcome }}
+    steps:
+      - name: Scan backend Allure evidence for privacy leaks
+        id: backend_privacy_scan
+        if: always()
+        run: |
+          python3 scripts/validate_mobile_privacy_evidence.py \\
+            --path backend/allure-results \\
+            --label backend-evidence
+      - name: Upload backend Allure results
+        if: steps.backend_privacy_scan.outcome == 'success' || true
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-allure-results
+          path: backend/allure-results
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "missing successful-scan gate for backend Allure upload", completed.stderr
+        )
+
+    def test_workflow_rejects_scan_of_clean_root_when_real_path_is_only_a_comment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / ".github" / "workflows" / "ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                """
+name: CI
+jobs:
+  e2e:
+    outputs:
+      privacy_scan_outcome: ${{ steps.playwright_privacy_scan.outcome }}
+    steps:
+      - name: Scan Playwright Allure evidence for privacy leaks
+        id: playwright_privacy_scan
+        if: always()
+        run: |
+          # python3 scripts/validate_mobile_privacy_evidence.py --path frontend/allure-results/playwright --path frontend/playwright-report --path frontend/test-results --label playwright-evidence
+          python3 scripts/validate_mobile_privacy_evidence.py \\
+            --path frontend/already-clean-dir \\
+            --label playwright-evidence
+      - name: Upload Playwright Allure results
+        if: steps.playwright_privacy_scan.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-allure-results
+          path: frontend/allure-results/playwright
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("playwright layer privacy scan step", completed.stderr)
+        self.assertIn("frontend/allure-results/playwright", completed.stderr)
+
+    def test_workflow_rejects_aggregate_gate_weakened_with_and_false_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / ".github" / "workflows" / "ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                """
+name: CI
+jobs:
+  allure-report:
+    steps:
+      - name: Require explicit privacy scan success for all layers
+        if: needs.backend.outputs.privacy_scan_outcome != 'success' || needs.frontend.outputs.privacy_scan_outcome != 'success' || needs.e2e.outputs.privacy_scan_outcome != 'success' || needs.mobile.outputs.privacy_scan_outcome != 'success' && false
+        run: |
+          python3 scripts/validate_mobile_privacy_evidence.py
+          exit 1
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "must not be weakened with an additional '&&' condition", completed.stderr
+        )
+        self.assertIn("backend", completed.stderr)
+        self.assertIn("mobile", completed.stderr)
+
+    def test_workflow_rejects_playwright_layer_omitting_sibling_artifact_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / ".github" / "workflows" / "ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                """
+name: CI
+jobs:
+  e2e:
+    outputs:
+      privacy_scan_outcome: ${{ steps.playwright_privacy_scan.outcome }}
+    steps:
+      - name: Scan Playwright Allure evidence for privacy leaks
+        id: playwright_privacy_scan
+        if: always()
+        run: |
+          python3 scripts/validate_mobile_privacy_evidence.py \\
+            --path frontend/allure-results/playwright \\
+            --label playwright-evidence
+      - name: Upload Playwright Allure results
+        if: steps.playwright_privacy_scan.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-allure-results
+          path: frontend/allure-results/playwright
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-html-report
+          path: frontend/playwright-report
+      - name: Upload Playwright failure artifacts and Compose logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: frontend/test-results
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("playwright layer privacy scan step", completed.stderr)
+        self.assertIn("frontend/playwright-report", completed.stderr)
+        self.assertIn("frontend/test-results", completed.stderr)
+        self.assertIn(
+            "missing successful-scan gate for playwright Allure upload "
+            "(Upload Playwright HTML report)",
+            completed.stderr,
+        )
+        self.assertIn(
+            "missing successful-scan gate for playwright Allure upload "
+            "(Upload Playwright failure artifacts and Compose logs)",
+            completed.stderr,
+        )
+
+    def test_workflow_rejects_privacy_scan_step_wired_under_the_wrong_job(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / ".github" / "workflows" / "ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                """
+name: CI
+jobs:
+  mobile:
+    outputs:
+      privacy_scan_outcome: ${{ steps.mobile_privacy_scan.outcome }}
+    steps:
+      - name: Install mobile dependencies
+        run: npm ci
+  docker:
+    steps:
+      - name: Scan publishable mobile evidence for privacy leaks
+        id: mobile_privacy_scan
+        if: always()
+        run: |
+          python3 ../scripts/validate_mobile_privacy_evidence.py \\
+            --path allure-results \\
+            --label mobile-evidence
+      - name: Upload mobile Allure results
+        if: steps.mobile_privacy_scan.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-allure-results
+          path: mobile/allure-results
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("mobile layer privacy scan step must set id: mobile_privacy_scan", completed.stderr)
+        self.assertIn(
+            "missing successful-scan gate for mobile Allure upload", completed.stderr
+        )
+
+    def test_workflow_rejects_privacy_scan_when_owning_job_is_entirely_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / ".github" / "workflows" / "ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                """
+name: CI
+jobs:
+  docker:
+    steps:
+      - name: Scan publishable mobile evidence for privacy leaks
+        id: mobile_privacy_scan
+        if: always()
+        run: |
+          python3 ../scripts/validate_mobile_privacy_evidence.py \\
+            --path allure-results \\
+            --label mobile-evidence
+      - name: Upload mobile Allure results
+        if: steps.mobile_privacy_scan.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-allure-results
+          path: mobile/allure-results
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("mobile layer privacy scan step must set id: mobile_privacy_scan", completed.stderr)
+        self.assertIn("under the mobile job", completed.stderr)
+
+    def test_workflow_rejects_wrong_root_scanned_for_playwright_layer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / ".github" / "workflows" / "ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                """
+name: CI
+jobs:
+  e2e:
+    outputs:
+      privacy_scan_outcome: ${{ steps.playwright_privacy_scan.outcome }}
+    steps:
+      - name: Scan Playwright Allure evidence for privacy leaks
+        id: playwright_privacy_scan
+        if: always()
+        run: |
+          python3 scripts/validate_mobile_privacy_evidence.py \\
+            --path frontend/coverage \\
+            --label playwright-evidence
+      - name: Upload Playwright Allure results
+        if: steps.playwright_privacy_scan.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-allure-results
+          path: frontend/allure-results/playwright
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("playwright layer privacy scan step", completed.stderr)
+        self.assertIn("frontend/allure-results/playwright", completed.stderr)
+
+    def test_workflow_rejects_duplicate_ungated_raw_upload_of_same_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / ".github" / "workflows" / "ci.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                """
+name: CI
+jobs:
+  e2e:
+    outputs:
+      privacy_scan_outcome: ${{ steps.playwright_privacy_scan.outcome }}
+    steps:
+      - name: Scan Playwright Allure evidence for privacy leaks
+        id: playwright_privacy_scan
+        if: always()
+        run: |
+          python3 scripts/validate_mobile_privacy_evidence.py \\
+            --path frontend/allure-results/playwright \\
+            --path frontend/playwright-report \\
+            --path frontend/test-results \\
+            --label playwright-evidence
+      - name: Upload Playwright Allure results
+        if: steps.playwright_privacy_scan.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-allure-results
+          path: frontend/allure-results/playwright
+      - name: Upload Playwright HTML report
+        if: steps.playwright_privacy_scan.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-html-report
+          path: frontend/playwright-report
+      - name: Upload Playwright failure artifacts and Compose logs
+        if: steps.playwright_privacy_scan.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: frontend/test-results
+      - name: Mirror Playwright HTML report to a legacy artifact name
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-html-report-legacy
+          path: frontend/playwright-report
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("duplicate or alternate raw upload step(s)", completed.stderr)
+        self.assertIn("frontend/playwright-report", completed.stderr)
+        self.assertIn("Mirror Playwright HTML report to a legacy artifact name", completed.stderr)
+
     def test_mutation_workflow_rejects_a_non_nightly_workflow_without_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workflow = Path(tmp) / "mutation.yml"
@@ -723,6 +1048,35 @@ jobs:
         self.assertIn("not a product test", evidence)
         self.assertIn("mutation-summary.txt", evidence)
         self.assertIn("mutation-survivors.txt", evidence)
+
+    def test_workflow_rejects_unexpected_alternate_raw_upload_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / ".github" / "workflows" / "ci.yml"
+            workflow.parent.mkdir(parents=True)
+            source = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+                encoding="utf-8"
+            )
+            workflow.write_text(
+                source.replace(
+                    "  allure-report:\n",
+                    """      - name: Alternate raw upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: alternate-raw-evidence
+          path: frontend/alternate-test-results
+
+  allure-report:
+""",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("unexpected raw upload step Alternate raw upload", completed.stderr)
 
 
 if __name__ == "__main__":
