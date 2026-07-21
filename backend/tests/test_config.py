@@ -65,7 +65,7 @@ def test_get_config_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     assert "audio/x-brain-buddy-test-text" not in config.voice.audio_limits.allowed_mime_types
 
 
-def test_voice_stt_configuration_is_bounded_and_resolves_credentials(
+def test_production_rejects_explicit_openai_accurate_stt_before_container_wiring(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("BRAIN_BUDDY_ENV", "production")
@@ -78,16 +78,8 @@ def test_voice_stt_configuration_is_bounded_and_resolves_credentials(
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_MAX_COST_USD", "0.25")
     monkeypatch.setenv("OPENAI_API_KEY", "not-returned-from-config")
 
-    config = get_config()
-
-    assert config.voice.accurate_stt.provider == "openai"
-    assert config.voice.accurate_stt.model == "gpt-4o-transcribe"
-    assert config.voice.accurate_stt.api_key_env == "OPENAI_API_KEY"
-    assert config.voice.accurate_stt.timeout_seconds == 17
-    assert config.voice.accurate_stt.max_retries == 2
-    assert config.voice.accurate_stt.retry_backoff_seconds == (1.0, 3.0)
-    assert config.voice.accurate_stt.max_cost_usd_per_operation == 0.25
-    assert "not-returned-from-config" not in config.model_dump_json()
+    with pytest.raises(ValueError, match="Unauthorized accurate_stt provider 'openai'"):
+        get_config()
 
 
 def test_production_rejects_deterministic_stt_even_with_legacy_escape_hatch(
@@ -114,6 +106,24 @@ def test_container_defensively_disables_deterministic_stt_outside_test() -> None
 
     assert isinstance(provider, DisabledAccurateStt)
     assert provider.reason == "STT_DETERMINISTIC_PROVIDER_TEST_ONLY"
+
+
+def test_container_defensively_rejects_openai_accurate_stt_from_manual_config() -> None:
+    """The container must not bypass the startup exact STT allow-list."""
+
+    config = AppConfig(
+        environment=AppEnvironment.PRODUCTION,
+        voice=VoiceSettings(
+            accurate_stt=VoiceProviderSettings(
+                provider="openai", model="gpt-4o-transcribe"
+            )
+        ),
+    )
+
+    provider = _build_accurate_stt(config)
+
+    assert isinstance(provider, DisabledAccurateStt)
+    assert provider.reason == "STT_PROVIDER_UNSUPPORTED"
 
 
 def test_voice_operation_recovery_budget_is_configured(
@@ -173,7 +183,7 @@ def test_missing_deepgram_credentials_does_not_silently_switch_to_openai_stt(
     assert provider.reason == "STT_PROVIDER_CREDENTIALS_MISSING"
 
 
-def test_openai_configuration_without_named_credential_wires_disabled_provider(
+def test_openai_configuration_is_rejected_before_credential_resolution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("BRAIN_BUDDY_ENV", "production")
@@ -184,10 +194,8 @@ def test_openai_configuration_without_named_credential_wires_disabled_provider(
     )
     monkeypatch.delenv("MISSING_STT_API_KEY", raising=False)
 
-    provider = _build_accurate_stt(get_config())
-
-    assert isinstance(provider, DisabledAccurateStt)
-    assert provider.reason == "STT_PROVIDER_CREDENTIALS_MISSING"
+    with pytest.raises(ValueError, match="Unauthorized accurate_stt provider 'openai'"):
+        get_config()
 
 
 def test_compose_e2e_runs_backend_in_test_environment() -> None:
@@ -320,8 +328,8 @@ def test_build_container_derives_recovery_lease_from_worst_case_provider_timing(
 
     monkeypatch.setenv("BRAIN_BUDDY_ENV", "development")
     monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_PROVIDER", "openai")
+    monkeypatch.setenv("DEEPGRAM_API_KEY", "test-deepgram-key")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_PROVIDER", "deepgram")
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_TIMEOUT_SECONDS", "10")
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_MAX_RETRIES", "2")
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_RETRY_BACKOFF_SECONDS", "1,2")
@@ -531,12 +539,28 @@ def test_reconciler_rejects_unauthorized_template_version(
         get_config()
 
 
-def test_deepgram_accurate_stt_requires_a_nova_family_model(
+def test_reconciler_rejects_endpoint_override_before_container_wiring(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An OpenAI credential and private payload must never be redirected."""
+
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "production")
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER", "openai")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_ENDPOINT", "https://example.invalid")
+    monkeypatch.setenv("OPENAI_API_KEY", "not-returned-from-config")
+
+    with pytest.raises(ValueError, match="endpoint=.*example.invalid.*not authorized"):
+        get_config()
+
+
+@pytest.mark.parametrize("unauthorized_model", ["whisper-large-v3", "nova-3-medical"])
+def test_deepgram_accurate_stt_requires_exactly_the_authorized_nova_3_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unauthorized_model: str
 ) -> None:
     monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_PROVIDER", "deepgram")
-    monkeypatch.setenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_MODEL", "whisper-large-v3")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_MODEL", unauthorized_model)
 
     with pytest.raises(ValueError, match="Unauthorized accurate_stt model"):
         get_config()

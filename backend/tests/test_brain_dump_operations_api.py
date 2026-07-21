@@ -3557,6 +3557,57 @@ def test_upload_persists_verified_media_type_and_actual_duration(api_client) -> 
     assert persisted.audio_chunks[0].cumulative_duration_seconds == pytest.approx(0.5)
 
 
+def test_admitted_ogg_reaches_accurate_stt_instead_of_terminal_format_error(
+    api_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The admission contract cannot seal Ogg then fail before STT egress."""
+
+    from app.workflows.voice_brain_dump.audio_media import InspectedAudio
+
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"text": "Ready"})
+
+    monkeypatch.setattr(
+        "app.workflows.voice_brain_dump.service.inspect_audio",
+        lambda _audio, *, declared_mime_type: InspectedAudio(
+            mime_type=declared_mime_type, duration_seconds=0.5
+        ),
+    )
+    service = api_client.app.state.container.voice_brain_dump_service
+    service.accurate_stt = _real_adapter(httpx.MockTransport(handler))
+    operation = _start_operation(api_client, key="start-admitted-ogg")
+    audio = b"OggS\x00opus-audio"
+
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={
+            "Content-Type": "audio/ogg",
+            "X-Content-SHA256": hashlib.sha256(audio).hexdigest(),
+        },
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    sealed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/seal",
+        headers={"Idempotency-Key": "seal-admitted-ogg"},
+        json={
+            "expected_revision": uploaded.json()["revision"],
+            "expected_chunks": 1,
+            "manifest_hash": _manifest_hash(audio),
+        },
+    )
+    assert sealed.status_code == 200, sealed.text
+
+    completed = _advance_persisted_provider_runs(api_client, str(operation["id"]))
+
+    assert completed.json()["status"] == "awaiting_confirmation"
+    assert calls == 1
+
+
 def test_upload_rejects_chunk_exceeding_max_chunk_bytes_via_content_length(
     api_client,
 ) -> None:

@@ -29,7 +29,6 @@ from app.services import (
 )
 from app.workflows.voice_brain_dump.adapters import (
     DeepgramAccurateStt,
-    OpenAiAccurateStt,
     OpenAITextReconciler,
 )
 from app.workflows.voice_brain_dump.providers import (
@@ -88,21 +87,12 @@ def _build_accurate_stt(config: AppConfig) -> AccurateSttPort:
             max_cost_usd_per_operation=settings.max_cost_usd_per_operation,
             estimated_cost_usd_per_megabyte=settings.estimated_cost_usd_per_megabyte,
         )
-    if settings.provider == "openai":
-        api_key = os.getenv(settings.api_key_env)
-        if not api_key:
-            return DisabledAccurateStt("STT_PROVIDER_CREDENTIALS_MISSING")
-        return OpenAiAccurateStt(
-            api_key=api_key,
-            model=settings.model,
-            timeout_seconds=settings.timeout_seconds,
-            max_retries=settings.max_retries,
-            retry_backoff_seconds=settings.retry_backoff_seconds,
-            max_cost_usd_per_operation=settings.max_cost_usd_per_operation,
-            estimated_cost_usd_per_megabyte=settings.estimated_cost_usd_per_megabyte,
-        )
     if settings.provider == "disabled":
         return DisabledAccurateStt()
+    # No other provider (including "openai") is ever wired for accurate STT,
+    # even from a manually-constructed AppConfig that bypassed
+    # ``validate_voice_provider_authorization`` -- the exact allow-list is
+    # enforced here too, not only at config load.
     return DisabledAccurateStt("STT_PROVIDER_UNSUPPORTED")
 
 
