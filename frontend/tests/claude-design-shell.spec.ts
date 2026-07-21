@@ -362,6 +362,40 @@ test("mobile task detail wraps a long task title without horizontal overflow", a
   });
 });
 
+test("mobile pushed task detail uses its own summary-first topbar and exposes 44px task controls", async ({ page }) => {
+  await page.route("**/api/tasks/task-2", async (route) => {
+    await route.fulfill({
+      json: {
+        ...taskResponse.items[1],
+        subtasks: [{ id: "subtask-1", title: "Confirm the reproduction", state: "open", revision: 1 }]
+      }
+    });
+  });
+  await page.setViewportSize({ width: 402, height: 874 });
+  await page.goto("/tasks/next/task-2");
+
+  await test.step("show the detail topbar and concise summary before the editable form without the global shell topbar", async () => {
+    await expect(page.locator("header")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Back to list" })).toHaveCount(1);
+    await expect(page.getByText("Fix onboarding drop-off", { exact: true })).toBeVisible();
+    const summary = page.getByTestId("task-detail-summary");
+    const form = page.locator("form").first();
+    await expect(summary).toContainText("Next actions");
+    const [summaryBox, formBox] = await Promise.all([summary.boundingBox(), form.boundingBox()]);
+    if (!summaryBox || !formBox || summaryBox.y >= formBox.y) {
+      throw new Error(`Expected a summary before the detail form, received ${JSON.stringify({ summaryBox, formBox })}`);
+    }
+  });
+
+  await test.step("keep subtask completion at or above the 44px mobile target", async () => {
+    const button = page.getByRole("button", { name: "Complete Confirm the reproduction" });
+    const box = await button.boundingBox();
+    if (!box || box.width < 44 || box.height < 44) {
+      throw new Error(`Expected a >=44px mobile subtask target, received ${JSON.stringify(box)}`);
+    }
+  });
+});
+
 test.describe("mobile task shell at the canonical 375x812 viewport", () => {
   test.use({ viewport: { width: 375, height: 812 } });
 
@@ -383,6 +417,16 @@ test.describe("mobile task shell at the canonical 375x812 viewport", () => {
       await expect(drawer.getByRole("button", { name: "New project" })).toBeVisible();
       await expect(drawer.getByRole("button", { name: "New tag" })).toBeVisible();
       await expect(drawer.getByRole("button", { name: "Project options Launch v2" })).toBeVisible();
+    });
+    await test.step("Keep project and tag options at or above the 44px mobile target", async () => {
+      const drawer = page.getByRole("dialog", { name: "Task navigation" });
+      const targets = await Promise.all([
+        drawer.getByRole("button", { name: "Project options Launch v2" }).boundingBox(),
+        drawer.getByRole("button", { name: "Tag options deep-work" }).boundingBox()
+      ]);
+      if (targets.some((box) => !box || box.width < 44 || box.height < 44)) {
+        throw new Error(`Expected >=44px drawer option targets, received ${JSON.stringify(targets)}`);
+      }
     });
     await test.step("Keep wrapped mobile tag actions inside the drawer", async () => {
       const drawer = page.getByRole("dialog", { name: "Task navigation" });
@@ -421,6 +465,36 @@ test.describe("mobile task shell at the canonical 375x812 viewport", () => {
     });
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog", { name: "Task navigation" })).toHaveCount(0);
+  });
+
+  test("mobile tag options hit target does not overlap the tag navigation link, which stays tappable", async ({ page }) => {
+    await page.goto("/tasks/next");
+    await page.getByRole("button", { name: "Open task navigation" }).click();
+    const drawer = page.getByRole("dialog", { name: "Task navigation" });
+    const tagLink = drawer.getByRole("link", { name: "#deep-work" });
+    const tagOptions = drawer.getByRole("button", { name: "Tag options deep-work" });
+    await expect(tagLink).toBeVisible();
+    await expect(tagOptions).toBeVisible();
+
+    await test.step("keep the options hit target from covering the tag link's own hit target", async () => {
+      const [linkBox, optionsBox] = await Promise.all([tagLink.boundingBox(), tagOptions.boundingBox()]);
+      if (!linkBox || !optionsBox) {
+        throw new Error("Expected geometry for both the tag link and its options target");
+      }
+      const overlaps =
+        linkBox.x < optionsBox.x + optionsBox.width &&
+        linkBox.x + linkBox.width > optionsBox.x &&
+        linkBox.y < optionsBox.y + optionsBox.height &&
+        linkBox.y + linkBox.height > optionsBox.y;
+      if (overlaps) {
+        throw new Error(`Expected the tag options target not to overlap the tag link, received ${JSON.stringify({ linkBox, optionsBox })}`);
+      }
+    });
+
+    await test.step("tapping the tag navigation row still navigates instead of being intercepted", async () => {
+      await tagLink.click();
+      await expect(page).toHaveURL(/\/tags\/tag-deep-work/);
+    });
   });
 });
 

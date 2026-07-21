@@ -38,6 +38,12 @@ interface AppShellProps {
   onCreateTag?: (name: string) => void;
   onRenameTag?: (tag: TagResponse, name: string) => void;
   onDeleteTag?: (tag: TagResponse) => void;
+  /**
+   * True while a mobile-pushed task detail view (its own back-button topbar)
+   * has replaced the list pane. Suppresses the global topbar so mobile detail
+   * shows exactly one topbar instead of stacking both.
+   */
+  mobileDetailOpen?: boolean;
 }
 
 type SidebarProps = AppShellProps & {
@@ -81,7 +87,7 @@ export function SoonChip(): JSX.Element {
 }
 
 export function AppShell(props: AppShellProps): JSX.Element {
-  const { children } = props;
+  const { children, mobileDetailOpen } = props;
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [weeklyReviewOpen, setWeeklyReviewOpen] = useState(false);
   const location = useLocation();
@@ -99,8 +105,8 @@ export function AppShell(props: AppShellProps): JSX.Element {
 
   return (
     <div className="min-h-screen bg-surface-base text-slate-900">
-      <TopBar onOpenDrawer={() => setIsDrawerOpen(true)} drawerTriggerRef={drawerTriggerRef} />
-      <div className="flex h-[calc(100vh-56px)] min-h-0 overflow-hidden">
+      {mobileDetailOpen ? null : <TopBar onOpenDrawer={() => setIsDrawerOpen(true)} drawerTriggerRef={drawerTriggerRef} />}
+      <div className={`flex ${mobileDetailOpen ? "h-screen" : "h-[calc(100vh-56px)]"} min-h-0 overflow-hidden`}>
         <aside className="hidden w-[248px] shrink-0 overflow-y-auto border-r border-slate-200 px-3 pb-6 pt-4 lg:block">
           <Sidebar {...sidebarProps} />
         </aside>
@@ -302,7 +308,7 @@ function NavigationDrawer({ open, onClose, triggerRef, ...props }: NavigationDra
           onClick={(event) => {
             const target = event.target as HTMLElement;
             if (target.closest("a, [data-drawer-dismiss]")) {
-              onClose();
+              closeAndRestoreFocus();
             }
           }}
         >
@@ -433,10 +439,15 @@ function Sidebar({
                         type="button"
                         aria-label={`Project options ${project.name}`}
                         aria-expanded={openPopover === popoverId}
-                        className="absolute right-1 top-[7px] hidden h-5 w-5 items-center justify-center rounded-md text-slate-400 hover:bg-slate-200/70 hover:text-slate-600 focus-visible:inline-flex group-focus-within:inline-flex group-hover:inline-flex max-lg:inline-flex"
+                        className="absolute right-0 top-0 hidden h-11 w-11 items-center justify-center focus-visible:inline-flex group-focus-within:inline-flex group-hover:inline-flex max-lg:inline-flex lg:right-1 lg:top-[7px] lg:h-5 lg:w-5"
                         onClick={() => setOpenPopover(openPopover === popoverId ? null : popoverId)}
                       >
-                        <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
+                        <span
+                          aria-hidden
+                          className="flex h-5 w-5 items-center justify-center rounded-md text-slate-400 hover:bg-slate-200/70 hover:text-slate-600"
+                        >
+                          <MoreHorizontal className="h-3.5 w-3.5" />
+                        </span>
                       </button>
                       {openPopover === popoverId ? (
                         <div
@@ -552,7 +563,7 @@ function Sidebar({
               const popoverId = `tag-${tag.id}`;
               return (
                 <span key={tag.id} className="group inline-flex">
-                  <span className="relative inline-flex">
+                  <span className="relative inline-flex items-center">
                     <NavLink
                       to={`/tags/${tag.id}`}
                       className={`rounded-full border px-2.5 py-[3px] text-xs font-medium transition-colors ${
@@ -568,10 +579,15 @@ function Sidebar({
                         type="button"
                         aria-label={`Tag options ${tag.name}`}
                         aria-expanded={openPopover === popoverId}
-                        className="absolute -right-1.5 -top-1.5 hidden h-4 w-4 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-soft group-focus-within:inline-flex group-hover:inline-flex max-lg:inline-flex"
+                        className="ml-1 hidden h-11 w-11 shrink-0 items-center justify-center group-focus-within:inline-flex group-hover:inline-flex max-lg:inline-flex lg:absolute lg:-right-1.5 lg:-top-1.5 lg:ml-0 lg:h-4 lg:w-4"
                         onClick={() => setOpenPopover(openPopover === popoverId ? null : popoverId)}
                       >
-                        <MoreHorizontal className="h-2.5 w-2.5" aria-hidden />
+                        <span
+                          aria-hidden
+                          className="flex h-4 w-4 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-soft"
+                        >
+                          <MoreHorizontal className="h-2.5 w-2.5" />
+                        </span>
                       </button>
                     ) : null}
                   </span>
