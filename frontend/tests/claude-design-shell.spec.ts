@@ -387,6 +387,51 @@ test("mobile pushed task detail uses its own summary-first topbar and exposes 44
     }
   });
 
+  await test.step("collapse Properties and Actions while keeping the mobile workflow hierarchy inside the first viewport", async () => {
+    const properties = page.getByRole("button", { name: "Properties" });
+    const actions = page.getByRole("button", { name: "Actions" });
+    await expect(properties).toHaveAttribute("aria-expanded", "false");
+    await expect(actions).toHaveAttribute("aria-expanded", "false");
+
+    const [completeBox, titleBox, summaryBox, subtasksBox, agentBox, commentsBox] =
+      await Promise.all([
+        page.getByRole("button", { name: "Complete task" }).boundingBox(),
+        page.getByText("Fix onboarding drop-off", { exact: true }).boundingBox(),
+        page.getByTestId("task-detail-summary").boundingBox(),
+        page.getByRole("heading", { name: "Subtasks" }).boundingBox(),
+        page.getByRole("heading", { name: "Agent" }).boundingBox(),
+        page.getByRole("heading", { name: "Comments" }).boundingBox()
+      ]);
+    const boxes = { completeBox, titleBox, summaryBox, subtasksBox, agentBox, commentsBox };
+    if (!completeBox || !titleBox || !summaryBox || !subtasksBox || !agentBox || !commentsBox) {
+      throw new Error(`Expected geometry for the mobile workflow hierarchy, received ${JSON.stringify(boxes)}`);
+    }
+    const hierarchyBoxes = [completeBox, titleBox, summaryBox, subtasksBox, agentBox, commentsBox];
+    if (hierarchyBoxes.some((box) => box.y < 0 || box.y + box.height > 874)) {
+      throw new Error(`Expected the mobile workflow hierarchy inside the first viewport, received ${JSON.stringify(boxes)}`);
+    }
+    if (
+      Math.max(completeBox.y, titleBox.y) >= summaryBox.y ||
+      summaryBox.y >= subtasksBox.y ||
+      subtasksBox.y >= agentBox.y ||
+      agentBox.y >= commentsBox.y
+    ) {
+      throw new Error(`Expected completion/title, chips, then Subtasks -> Agent -> Comments, received ${JSON.stringify(boxes)}`);
+    }
+  });
+
+  await test.step("keep detail navigation, completion, and disclosure controls at or above the 44px mobile target", async () => {
+    const targets = await Promise.all([
+      page.getByRole("button", { name: "Back to list" }).boundingBox(),
+      page.getByRole("button", { name: "Complete task" }).boundingBox(),
+      page.getByRole("button", { name: "Properties" }).boundingBox(),
+      page.getByRole("button", { name: "Actions" }).boundingBox()
+    ]);
+    if (targets.some((box) => !box || box.width < 44 || box.height < 44)) {
+      throw new Error(`Expected >=44px detail targets, received ${JSON.stringify(targets)}`);
+    }
+  });
+
   await test.step("keep subtask completion at or above the 44px mobile target", async () => {
     const button = page.getByRole("button", { name: "Complete Confirm the reproduction" });
     const box = await button.boundingBox();

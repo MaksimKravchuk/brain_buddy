@@ -15,13 +15,29 @@ import {
   RotateCcw,
   Search,
   Sprout,
-  X
+  X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { ComponentType, KeyboardEvent as ReactKeyboardEvent, ReactNode, RefObject } from "react";
-import { Link, NavLink, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import type {
+  ComponentType,
+  KeyboardEvent as ReactKeyboardEvent,
+  ReactNode,
+  RefObject,
+} from "react";
+import {
+  Link,
+  NavLink,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from "react-router-dom";
 
-import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts } from "../../api/taskTypes";
+import type {
+  OpenTaskState,
+  ProjectResponse,
+  TagResponse,
+  TaskCounts,
+} from "../../api/taskTypes";
 import { useAuthStore } from "../../stores/authStore";
 
 interface AppShellProps {
@@ -52,17 +68,25 @@ type SidebarProps = AppShellProps & {
   onNavigate: () => void;
 };
 
-const listItems: Array<{ state: OpenTaskState; label: string; icon: ComponentType<{ className?: string }> }> = [
+const listItems: Array<{
+  state: OpenTaskState;
+  label: string;
+  icon: ComponentType<{ className?: string }>;
+}> = [
   { state: "inbox", label: "Inbox", icon: Inbox },
   { state: "next", label: "Next actions", icon: ArrowRight },
   { state: "waiting", label: "Waiting for", icon: Clock },
-  { state: "someday", label: "Someday / maybe", icon: Archive }
+  { state: "someday", label: "Someday / maybe", icon: Archive },
 ];
 
-const dateItems: Array<{ path: string; label: string; icon: ComponentType<{ className?: string }> }> = [
+const dateItems: Array<{
+  path: string;
+  label: string;
+  icon: ComponentType<{ className?: string }>;
+}> = [
   { path: "/tasks/overdue", label: "Overdue", icon: AlertTriangle },
   { path: "/tasks/today", label: "Today", icon: CalendarDays },
-  { path: "/tasks/upcoming", label: "Upcoming", icon: CalendarRange }
+  { path: "/tasks/upcoming", label: "Upcoming", icon: CalendarRange },
 ];
 
 const fallbackProjectColors = ["#0ea5e9", "#6366f1", "#94a3b8", "#10b981"];
@@ -71,17 +95,26 @@ const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 const navRowClass = (active: boolean): string =>
-  `flex h-[34px] w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium transition-colors ${
-    active ? "bg-white text-slate-900 shadow-soft" : "text-slate-600 hover:bg-surface-sunken hover:text-slate-900"
+  `flex min-h-11 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium transition-colors lg:min-h-[34px] ${
+    active
+      ? "bg-white text-slate-900 shadow-soft"
+      : "text-slate-600 hover:bg-surface-sunken hover:text-slate-900"
   }`;
 
 function SectionLabel({ children }: { children: ReactNode }): JSX.Element {
-  return <div className="px-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">{children}</div>;
+  return (
+    <div className="px-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
+      {children}
+    </div>
+  );
 }
 
 export function SoonChip(): JSX.Element {
   return (
-    <span aria-hidden className="rounded-full border border-slate-200 bg-surface-sunken px-[7px] py-[2px] text-[10px] font-semibold text-slate-600">
+    <span
+      aria-hidden
+      className="rounded-full border border-slate-200 bg-surface-sunken px-[7px] py-[2px] text-[10px] font-semibold text-slate-600"
+    >
       Soon
     </span>
   );
@@ -102,7 +135,7 @@ export function AppShell(props: AppShellProps): JSX.Element {
     ...props,
     weeklyReviewOpen,
     onOpenWeeklyReview: () => setWeeklyReviewOpen(true),
-    onNavigate: () => setWeeklyReviewOpen(false)
+    onNavigate: () => setWeeklyReviewOpen(false),
   };
 
   return (
@@ -114,7 +147,9 @@ export function AppShell(props: AppShellProps): JSX.Element {
           drawerTriggerRef={drawerTriggerRef}
         />
       )}
-      <div className={`flex ${mobileDetailOpen ? "h-screen" : "h-[calc(100vh-56px)]"} min-h-0 overflow-hidden`}>
+      <div
+        className={`flex ${mobileDetailOpen ? "h-screen" : "h-[calc(100vh-56px)]"} min-h-0 overflow-hidden`}
+      >
         <aside className="hidden w-[248px] shrink-0 overflow-y-auto border-r border-slate-200 px-3 pb-6 pt-4 lg:block">
           <Sidebar {...sidebarProps} />
         </aside>
@@ -134,7 +169,10 @@ export function AppShell(props: AppShellProps): JSX.Element {
 
 function WeeklyReviewPlaceholder(): JSX.Element {
   return (
-    <section aria-label="Weekly review placeholder" className="mx-auto max-w-[760px]">
+    <section
+      aria-label="Weekly review placeholder"
+      className="mx-auto max-w-[760px]"
+    >
       <div className="flex flex-col items-center gap-2 rounded-xl border-[1.5px] border-dashed border-slate-300 px-8 py-14 text-center">
         <div className="mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-info-bg text-brand-primary">
           <RotateCcw className="h-[26px] w-[26px]" aria-hidden />
@@ -143,8 +181,8 @@ function WeeklyReviewPlaceholder(): JSX.Element {
           Weekly review — coming soon
         </h2>
         <p className="m-0 max-w-[400px] text-sm leading-normal text-slate-500">
-          A guided pass over your lists — empty the inbox, refresh next actions, decide on the somedays. We&apos;re
-          still building this one.
+          A guided pass over your lists — empty the inbox, refresh next actions,
+          decide on the somedays. We&apos;re still building this one.
         </p>
         <span className="mt-3 rounded-full bg-surface-sunken px-2.5 py-[3px] text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-400">
           Coming soon
@@ -157,7 +195,7 @@ function WeeklyReviewPlaceholder(): JSX.Element {
 function TopBar({
   onOpenDrawer,
   onNavigate,
-  drawerTriggerRef
+  drawerTriggerRef,
 }: {
   onOpenDrawer: () => void;
   onNavigate: () => void;
@@ -177,7 +215,13 @@ function TopBar({
     } else {
       next.delete("q");
     }
-    navigate({ pathname: location.pathname, search: next.toString() ? `?${next.toString()}` : "" }, { replace: true });
+    navigate(
+      {
+        pathname: location.pathname,
+        search: next.toString() ? `?${next.toString()}` : "",
+      },
+      { replace: true },
+    );
   };
 
   return (
@@ -200,7 +244,10 @@ function TopBar({
         aria-label="Brain Buddy — Next actions"
         onClick={onNavigate}
       >
-        <Sprout className="h-[22px] w-[22px] shrink-0 text-brand-primary" aria-hidden />
+        <Sprout
+          className="h-[22px] w-[22px] shrink-0 text-brand-primary"
+          aria-hidden
+        />
         <span className="hidden lg:inline">Brain Buddy</span>
       </Link>
       <label className="hidden h-[34px] w-[340px] max-w-[32vw] items-center gap-2 rounded-lg border border-transparent bg-surface-sunken px-3 text-slate-400 transition focus-within:border-brand-primary focus-within:bg-white md:flex">
@@ -224,7 +271,10 @@ function TopBar({
           <Mic className="h-[15px] w-[15px] shrink-0" aria-hidden />
           <span className="hidden lg:inline">Brain dump</span>
         </button>
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sky-100 text-xs font-semibold text-sky-700" aria-label={user?.email ?? "User avatar"}>
+        <div
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sky-100 text-xs font-semibold text-sky-700"
+          aria-label={user?.email ?? "User avatar"}
+        >
           {initial}
         </div>
       </div>
@@ -238,7 +288,12 @@ type NavigationDrawerProps = SidebarProps & {
   triggerRef: RefObject<HTMLButtonElement>;
 };
 
-function NavigationDrawer({ open, onClose, triggerRef, ...props }: NavigationDrawerProps): JSX.Element | null {
+function NavigationDrawer({
+  open,
+  onClose,
+  triggerRef,
+  ...props
+}: NavigationDrawerProps): JSX.Element | null {
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
 
@@ -263,7 +318,9 @@ function NavigationDrawer({ open, onClose, triggerRef, ...props }: NavigationDra
       if (!panel) {
         return;
       }
-      const focusable = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+      const focusable = Array.from(
+        panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+      );
       if (focusable.length === 0) {
         return;
       }
@@ -294,7 +351,12 @@ function NavigationDrawer({ open, onClose, triggerRef, ...props }: NavigationDra
   };
 
   return (
-    <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Task navigation">
+    <div
+      className="fixed inset-0 z-40 lg:hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Task navigation"
+    >
       <button
         type="button"
         className="absolute inset-0 bg-slate-900/30"
@@ -307,11 +369,13 @@ function NavigationDrawer({ open, onClose, triggerRef, ...props }: NavigationDra
         className="absolute inset-y-0 left-0 flex w-[min(320px,calc(100vw-32px))] flex-col bg-surface-base px-3 pb-6 pt-3 shadow-floating"
       >
         <div className="mb-2 flex h-11 items-center justify-between px-2">
-          <span className="text-sm font-semibold text-slate-900">Navigation</span>
+          <span className="text-sm font-semibold text-slate-900">
+            Navigation
+          </span>
           <button
             ref={closeButtonRef}
             type="button"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-slate-600 hover:bg-white"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-slate-600 hover:bg-white lg:h-10 lg:w-10"
             aria-label="Close task navigation"
             onClick={closeAndRestoreFocus}
           >
@@ -349,7 +413,7 @@ function Sidebar({
   onDeleteTag,
   weeklyReviewOpen,
   onOpenWeeklyReview,
-  onNavigate
+  onNavigate,
 }: SidebarProps): JSX.Element {
   const [newProjectName, setNewProjectName] = useState("");
   const [projectEdits, setProjectEdits] = useState<Record<string, string>>({});
@@ -373,7 +437,11 @@ function Sidebar({
             <NavLink
               to={`/tasks/${item.state}`}
               onClick={onNavigate}
-              className={({ isActive }) => navRowClass(!weeklyReviewOpen && (isActive || activeState === item.state))}
+              className={({ isActive }) =>
+                navRowClass(
+                  !weeklyReviewOpen && (isActive || activeState === item.state),
+                )
+              }
             >
               <item.icon className="h-4 w-4 shrink-0" aria-hidden />
               <span className="min-w-0 flex-1 truncate">{item.label}</span>
@@ -384,7 +452,9 @@ function Sidebar({
                   </span>
                 ) : null
               ) : (
-                <span className="min-w-[20px] text-center text-xs font-medium text-slate-400">{counts[item.state]}</span>
+                <span className="min-w-[20px] text-center text-xs font-medium text-slate-400">
+                  {counts[item.state]}
+                </span>
               )}
             </NavLink>
           </li>
@@ -407,7 +477,7 @@ function Sidebar({
             type="button"
             disabled
             aria-label="Think with CRT — Coming soon"
-            className="flex h-[34px] w-full cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-slate-400"
+            className="flex min-h-11 w-full cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-slate-400 lg:min-h-[34px]"
           >
             <Network className="h-4 w-4 shrink-0" aria-hidden />
             <span className="min-w-0 flex-1 truncate">Think with CRT</span>
@@ -421,7 +491,13 @@ function Sidebar({
         <ul className="space-y-0.5">
           {dateItems.map((item) => (
             <li key={item.path}>
-              <NavLink to={item.path} onClick={onNavigate} className={({ isActive }) => navRowClass(!weeklyReviewOpen && isActive)}>
+              <NavLink
+                to={item.path}
+                onClick={onNavigate}
+                className={({ isActive }) =>
+                  navRowClass(!weeklyReviewOpen && isActive)
+                }
+              >
                 <item.icon className="h-4 w-4 shrink-0" aria-hidden />
                 <span className="min-w-0 flex-1 truncate">{item.label}</span>
               </NavLink>
@@ -435,21 +511,29 @@ function Sidebar({
         <ul className="space-y-0.5">
           {projects.length ? (
             projects.map((project, index) => {
-              const color = project.color ?? fallbackProjectColors[index % fallbackProjectColors.length];
+              const color =
+                project.color ??
+                fallbackProjectColors[index % fallbackProjectColors.length];
               const popoverId = `project-${project.id}`;
               return (
                 <li key={project.id} className="group relative">
                   <NavLink
                     to={`/projects/${project.id}`}
                     onClick={onNavigate}
-                    className={`flex min-h-[34px] w-full items-start gap-2.5 rounded-lg px-2.5 py-[7px] pr-7 text-sm font-medium transition-colors ${
+                    className={`flex min-h-11 w-full items-start gap-2.5 rounded-lg px-2.5 py-[7px] pr-7 text-sm font-medium transition-colors lg:min-h-[34px] ${
                       !weeklyReviewOpen && activeProjectId === project.id
                         ? "bg-white text-slate-900 shadow-soft"
                         : "text-slate-600 hover:bg-surface-sunken hover:text-slate-900"
                     }`}
                   >
-                    <span className="mt-[5px] h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} aria-hidden />
-                    <span className="line-clamp-2 min-w-0 flex-1 leading-[1.35]">{project.name}</span>
+                    <span
+                      className="mt-[5px] h-2 w-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: color }}
+                      aria-hidden
+                    />
+                    <span className="line-clamp-2 min-w-0 flex-1 leading-[1.35]">
+                      {project.name}
+                    </span>
                   </NavLink>
                   {onRenameProject || onArchiveProject ? (
                     <>
@@ -458,7 +542,11 @@ function Sidebar({
                         aria-label={`Project options ${project.name}`}
                         aria-expanded={openPopover === popoverId}
                         className="absolute right-0 top-0 hidden h-11 w-11 items-center justify-center focus-visible:inline-flex group-focus-within:inline-flex group-hover:inline-flex max-lg:inline-flex lg:right-1 lg:top-[7px] lg:h-5 lg:w-5"
-                        onClick={() => setOpenPopover(openPopover === popoverId ? null : popoverId)}
+                        onClick={() =>
+                          setOpenPopover(
+                            openPopover === popoverId ? null : popoverId,
+                          )
+                        }
                       >
                         <span
                           aria-hidden
@@ -478,7 +566,9 @@ function Sidebar({
                             className="flex flex-col gap-2"
                             onSubmit={(event) => {
                               event.preventDefault();
-                              const name = (projectEdits[project.id] ?? project.name).trim();
+                              const name = (
+                                projectEdits[project.id] ?? project.name
+                              ).trim();
                               if (name && name !== project.name) {
                                 onRenameProject?.(project, name);
                               }
@@ -487,15 +577,21 @@ function Sidebar({
                           >
                             <input
                               aria-label={`Project name ${project.name}`}
-                              className="min-w-0 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                              className="min-h-11 min-w-0 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs lg:min-h-0"
                               value={projectEdits[project.id] ?? project.name}
                               onChange={(event) => {
                                 const value = event.currentTarget.value;
-                                setProjectEdits((current) => ({ ...current, [project.id]: value }));
+                                setProjectEdits((current) => ({
+                                  ...current,
+                                  [project.id]: value,
+                                }));
                               }}
                             />
                             <div className="flex gap-1.5">
-                              <button type="submit" className="flex-1 rounded-md bg-brand-primary px-2 py-1.5 text-xs font-semibold text-white">
+                              <button
+                                type="submit"
+                                className="min-h-11 flex-1 rounded-md bg-brand-primary px-2 py-1.5 text-xs font-semibold text-white lg:min-h-0"
+                              >
                                 Rename
                               </button>
                               <button
@@ -518,7 +614,9 @@ function Sidebar({
               );
             })
           ) : (
-            <li className="px-2.5 py-2 text-xs text-slate-500">No active projects yet</li>
+            <li className="px-2.5 py-2 text-xs text-slate-500">
+              No active projects yet
+            </li>
           )}
           {onCreateProject ? (
             <li className="relative">
@@ -526,8 +624,12 @@ function Sidebar({
                 type="button"
                 aria-label="New project"
                 aria-expanded={openPopover === "new-project"}
-                className="flex h-[34px] w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-slate-400 transition-colors hover:bg-surface-sunken hover:text-slate-600"
-                onClick={() => setOpenPopover(openPopover === "new-project" ? null : "new-project")}
+                className="flex min-h-11 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-slate-400 transition-colors hover:bg-surface-sunken hover:text-slate-600 lg:min-h-[34px]"
+                onClick={() =>
+                  setOpenPopover(
+                    openPopover === "new-project" ? null : "new-project",
+                  )
+                }
               >
                 <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden />
                 <span className="min-w-0 flex-1 truncate">New project</span>
@@ -553,10 +655,12 @@ function Sidebar({
                     <input
                       autoFocus
                       aria-label="New project name"
-                      className="min-w-0 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                      className="min-h-11 min-w-0 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs lg:min-h-0"
                       placeholder="New project"
                       value={newProjectName}
-                      onChange={(event) => setNewProjectName(event.currentTarget.value)}
+                      onChange={(event) =>
+                        setNewProjectName(event.currentTarget.value)
+                      }
                     />
                     <button
                       type="submit"
@@ -585,13 +689,15 @@ function Sidebar({
                     <NavLink
                       to={`/tags/${tag.id}`}
                       onClick={onNavigate}
-                      className={`rounded-full border px-2.5 py-[3px] text-xs font-medium transition-colors ${
+                      className={`inline-flex min-h-11 items-center rounded-full border px-2.5 py-[3px] text-xs font-medium transition-colors lg:min-h-0 ${
                         !weeklyReviewOpen && activeTagId === tag.id
                           ? "border-brand-primary bg-info-bg text-info-fg"
                           : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
                       }`}
                     >
-                      {tag.name.startsWith("@") ? tag.name : `#${tag.name.replace(/^#/, "")}`}
+                      {tag.name.startsWith("@")
+                        ? tag.name
+                        : `#${tag.name.replace(/^#/, "")}`}
                     </NavLink>
                     {onRenameTag || onDeleteTag ? (
                       <button
@@ -599,7 +705,11 @@ function Sidebar({
                         aria-label={`Tag options ${tag.name}`}
                         aria-expanded={openPopover === popoverId}
                         className="ml-1 hidden h-11 w-11 shrink-0 items-center justify-center group-focus-within:inline-flex group-hover:inline-flex max-lg:inline-flex lg:absolute lg:-right-1.5 lg:-top-1.5 lg:ml-0 lg:h-4 lg:w-4"
-                        onClick={() => setOpenPopover(openPopover === popoverId ? null : popoverId)}
+                        onClick={() =>
+                          setOpenPopover(
+                            openPopover === popoverId ? null : popoverId,
+                          )
+                        }
                       >
                         <span
                           aria-hidden
@@ -618,42 +728,48 @@ function Sidebar({
                         className="absolute bottom-full right-0 z-50 mb-1 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-floating"
                         onKeyDown={popoverKeyDown}
                       >
-                          <form
-                            className="flex flex-col gap-2"
-                            onSubmit={(event) => {
-                              event.preventDefault();
-                              const name = (tagEdits[tag.id] ?? tag.name).trim();
-                              if (name && name !== tag.name) {
-                                onRenameTag?.(tag, name);
-                              }
-                              closePopover();
+                        <form
+                          className="flex flex-col gap-2"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            const name = (tagEdits[tag.id] ?? tag.name).trim();
+                            if (name && name !== tag.name) {
+                              onRenameTag?.(tag, name);
+                            }
+                            closePopover();
+                          }}
+                        >
+                          <input
+                            aria-label={`Tag name ${tag.name}`}
+                            className="min-h-11 min-w-0 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs lg:min-h-0"
+                            value={tagEdits[tag.id] ?? tag.name}
+                            onChange={(event) => {
+                              const value = event.currentTarget.value;
+                              setTagEdits((current) => ({
+                                ...current,
+                                [tag.id]: value,
+                              }));
                             }}
-                          >
-                            <input
-                              aria-label={`Tag name ${tag.name}`}
-                              className="min-w-0 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs"
-                              value={tagEdits[tag.id] ?? tag.name}
-                              onChange={(event) => {
-                                const value = event.currentTarget.value;
-                                setTagEdits((current) => ({ ...current, [tag.id]: value }));
+                          />
+                          <div className="flex gap-1.5">
+                            <button
+                              type="submit"
+                              className="min-h-11 flex-1 rounded-md bg-brand-primary px-2 py-1.5 text-xs font-semibold text-white lg:min-h-0"
+                            >
+                              Rename
+                            </button>
+                            <button
+                              type="button"
+                              className="flex-1 rounded-md border border-rose-200 bg-white px-2 py-1.5 text-xs text-rose-600"
+                              onClick={() => {
+                                onDeleteTag?.(tag);
+                                closePopover();
                               }}
-                            />
-                            <div className="flex gap-1.5">
-                              <button type="submit" className="flex-1 rounded-md bg-brand-primary px-2 py-1.5 text-xs font-semibold text-white">
-                                Rename
-                              </button>
-                              <button
-                                type="button"
-                                className="flex-1 rounded-md border border-rose-200 bg-white px-2 py-1.5 text-xs text-rose-600"
-                                onClick={() => {
-                                  onDeleteTag?.(tag);
-                                  closePopover();
-                                }}
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </form>
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </form>
                       </div>
                     ) : null
                   ) : null}
@@ -669,8 +785,10 @@ function Sidebar({
                 type="button"
                 aria-label="New tag"
                 aria-expanded={openPopover === "new-tag"}
-                className="rounded-full border border-dashed border-slate-300 bg-transparent px-2.5 py-[3px] text-xs font-medium text-slate-400 transition-colors hover:border-slate-400 hover:text-slate-600"
-                onClick={() => setOpenPopover(openPopover === "new-tag" ? null : "new-tag")}
+                className="inline-flex min-h-11 items-center rounded-full border border-dashed border-slate-300 bg-transparent px-2.5 py-[3px] text-xs font-medium text-slate-400 transition-colors hover:border-slate-400 hover:text-slate-600 lg:min-h-0"
+                onClick={() =>
+                  setOpenPopover(openPopover === "new-tag" ? null : "new-tag")
+                }
               >
                 New tag
               </button>
@@ -695,10 +813,12 @@ function Sidebar({
                     <input
                       autoFocus
                       aria-label="New tag name"
-                      className="min-w-0 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                      className="min-h-11 min-w-0 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs lg:min-h-0"
                       placeholder="New tag"
                       value={newTagName}
-                      onChange={(event) => setNewTagName(event.currentTarget.value)}
+                      onChange={(event) =>
+                        setNewTagName(event.currentTarget.value)
+                      }
                     />
                     <button
                       type="submit"

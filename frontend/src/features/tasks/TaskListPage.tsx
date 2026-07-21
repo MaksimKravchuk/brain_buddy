@@ -1,5 +1,5 @@
 /* istanbul ignore file -- task shell rendering is covered by route tests and Playwright snapshots. */
-import { AlertTriangle, ArrowLeft, ArrowUpDown, Check, Edit3, Layers, Plus, RotateCcw, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowUpDown, Check, ChevronDown, Edit3, Layers, Plus, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -37,6 +37,36 @@ function idempotencyKey(action: string): string {
 }
 
 const desktopMediaQuery = "(min-width: 1024px)";
+
+const FOCUSABLE_DETAIL_SELECTOR = "button, a[href], input, select, textarea, [tabindex]";
+
+// Identifies a focused control well enough to re-find its logical equivalent
+// after the task detail panel unmounts and remounts elsewhere in the tree
+// (e.g. the standalone <-> in-row swap that happens when a transition moves
+// a task out of or into the active list projection). Prefers aria-label
+// (stable across re-renders even when visible text doesn't uniquely
+// identify a control) and falls back to trimmed text content.
+function focusIdentity(element: Element): string | null {
+  const ariaLabel = element.getAttribute("aria-label");
+  if (ariaLabel) {
+    return `aria:${ariaLabel}`;
+  }
+  const text = element.textContent?.trim();
+  return text ? `text:${text}` : null;
+}
+
+function findFocusIdentity(root: HTMLElement, identity: string | null): HTMLElement | null {
+  if (!identity) {
+    return null;
+  }
+  const candidates = root.querySelectorAll<HTMLElement>(FOCUSABLE_DETAIL_SELECTOR);
+  for (const candidate of Array.from(candidates)) {
+    if (focusIdentity(candidate) === identity) {
+      return candidate;
+    }
+  }
+  return null;
+}
 
 interface TaskDetailLocationState {
   fromList?: boolean;
@@ -84,6 +114,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const [mutationError, setMutationError] = useState<string | null>(null);
   const rowLinkRefs = useRef<Map<string, HTMLAnchorElement>>(new Map());
   const detailHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const pendingDetailFocusKeyRef = useRef<string | null>(null);
   const listHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const previousTaskIdRef = useRef<string | undefined>(undefined);
   const registerRowLink = (rowTaskId: string, el: HTMLAnchorElement | null) => {
@@ -93,30 +124,42 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       rowLinkRefs.current.delete(rowTaskId);
     }
   };
-  // The detail heading can remount without the route changing: completing a
-  // task (or any mutation that flips detailIsInProjection/isDesktop) swaps
-  // between the standalone panel and the in-row panel, unmounting one heading
-  // and mounting another. Refocusing on every such mount would steal focus
-  // from whatever control the user is actively using (e.g. the Complete
-  // button they just clicked). Only carry focus across that remount when the
-  // outgoing heading actually held it — i.e. the swap happened while the
-  // heading itself was focused (the initial transient standalone -> in-row
-  // swap while the list is still loading), not mid-mutation while focus was
-  // elsewhere. Opening a task or switching tasks is handled separately by the
-  // effect below, keyed on taskId.
-  const detailHeadingWasFocusedRef = useRef(false);
   const registerDetailHeading = useCallback((el: HTMLHeadingElement | null) => {
+    detailHeadingRef.current = el;
+  }, []);
+
+  // The detail panel can remount without the route changing: completing,
+  // cancelling, or reopening a task flips detailIsInProjection, swapping
+  // between the standalone panel and the in-row panel — unmounting one
+  // <aside> and mounting another. That destroys whatever control the user
+  // was actively using (e.g. the Complete button they just clicked), and the
+  // browser drops focus to document.body since nothing claims it. Track the
+  // logical identity (aria-label or text) of the control focused inside the
+  // outgoing panel and, once the new panel mounts, try to refocus its
+  // equivalent; if it doesn't exist in the new panel (e.g. Complete ->
+  // Reopen buttons replace it), fall back to the detail heading rather than
+  // leaving focus on the body. Opening a task or switching tasks entirely is
+  // handled separately by the effect below, keyed on taskId.
+  const detailRootRef = useRef<HTMLElement | null>(null);
+  const pendingDetailFocusRef = useRef<string | null>(null);
+  const registerDetailRoot = useCallback((el: HTMLElement | null) => {
     if (el) {
-      const shouldRestoreFocus = detailHeadingWasFocusedRef.current;
-      detailHeadingRef.current = el;
-      if (shouldRestoreFocus) {
-        el.focus();
+      const pending = pendingDetailFocusRef.current;
+      pendingDetailFocusRef.current = null;
+      detailRootRef.current = el;
+      if (pending) {
+        const target = findFocusIdentity(el, pending);
+        (target ?? detailHeadingRef.current)?.focus();
       }
-      detailHeadingWasFocusedRef.current = false;
       return;
     }
-    detailHeadingWasFocusedRef.current = document.activeElement === detailHeadingRef.current;
-    detailHeadingRef.current = null;
+    const root = detailRootRef.current;
+    if (root && document.activeElement && root.contains(document.activeElement)) {
+      pendingDetailFocusRef.current = focusIdentity(document.activeElement);
+    } else {
+      pendingDetailFocusRef.current = null;
+    }
+    detailRootRef.current = null;
   }, []);
 
   const sort = parseTaskSort(searchParams.get("sort"));
@@ -167,6 +210,29 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     : taskQuery.data?.counts_by_state ?? emptyCounts;
   const activeProjectionTasks = groupByProject ? allTasksQuery.data?.items ?? [] : tasks;
   const detailIsInProjection = Boolean(taskId && activeProjectionTasks.some((task) => task.id === taskId));
+
+  const requestDetailFocusRestore = useCallback((focusKey: string) => {
+    pendingDetailFocusKeyRef.current = focusKey;
+  }, []);
+
+  useEffect(() => {
+    const focusKey = pendingDetailFocusKeyRef.current;
+    if (!taskId || !focusKey) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      const replacement = Array.from(document.querySelectorAll<HTMLElement>("[data-detail-focus-key]")).find(
+        (element) => element.dataset.detailFocusKey === focusKey && !element.hasAttribute("disabled")
+      );
+      if (replacement && document.contains(replacement)) {
+        replacement.focus();
+      } else {
+        detailHeadingRef.current?.focus();
+      }
+      pendingDetailFocusKeyRef.current = null;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [detailIsInProjection, isDesktop, taskId, detailQuery.data?.revision]);
 
   const invalidateTasks = () => queryClient.invalidateQueries({ queryKey: ["tasks"] });
   const listPath = projectId
@@ -431,13 +497,25 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     expandedTaskId: taskId,
     onCollapse: closeDetail,
     registerDetailHeading,
+    registerDetailRoot,
+    isDesktop,
     detailTask: detailQuery.data,
     detailIsLoading: detailQuery.isLoading,
     detailError: detailQuery.error,
-    onSaveDetail: (task: TaskResponse, payload: Parameters<typeof apiClient.updateTask>[1]) =>
-      detailUpdateMutation.mutate({ task, payload }),
-    onTransitionDetail: (task: TaskResponse, action: "move" | "complete" | "reopen" | "cancel", toState?: OpenTaskState, waitingFor?: string) =>
-      detailTransitionMutation.mutate({ task, action, toState, waitingFor }),
+    onSaveDetail: (task: TaskResponse, payload: Parameters<typeof apiClient.updateTask>[1], focusKey: string) => {
+      requestDetailFocusRestore(focusKey);
+      detailUpdateMutation.mutate({ task, payload });
+    },
+    onTransitionDetail: (
+      task: TaskResponse,
+      action: "move" | "complete" | "reopen" | "cancel",
+      toState: OpenTaskState | undefined,
+      waitingFor: string | undefined,
+      focusKey: string
+    ) => {
+      requestDetailFocusRestore(focusKey);
+      detailTransitionMutation.mutate({ task, action, toState, waitingFor });
+    },
     onCreateSubtask: (task: TaskResponse, title: string) => subtaskCreateMutation.mutate({ task, title }),
     onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") =>
       subtaskTransitionMutation.mutate({ task, subtask, action }),
@@ -583,11 +661,17 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             isLoading={detailQuery.isLoading}
             error={detailQuery.error}
             headingRef={registerDetailHeading}
+            rootRef={registerDetailRoot}
+            isDesktop={isDesktop}
             onClose={closeDetail}
-            onSave={(task, payload) => detailUpdateMutation.mutate({ task, payload })}
-            onTransition={(task, action, toState, waitingFor) =>
-              detailTransitionMutation.mutate({ task, action, toState, waitingFor })
-            }
+            onSave={(task, payload, focusKey) => {
+              requestDetailFocusRestore(focusKey);
+              detailUpdateMutation.mutate({ task, payload });
+            }}
+            onTransition={(task, action, toState, waitingFor, focusKey) => {
+              requestDetailFocusRestore(focusKey);
+              detailTransitionMutation.mutate({ task, action, toState, waitingFor });
+            }}
             onCreateSubtask={(task, title) => subtaskCreateMutation.mutate({ task, title })}
             onTransitionSubtask={(task, subtask, action) =>
               subtaskTransitionMutation.mutate({ task, subtask, action })
@@ -669,6 +753,8 @@ function TaskList({
   expandedTaskId,
   onCollapse,
   registerDetailHeading,
+  registerDetailRoot,
+  isDesktop,
   detailTask,
   detailIsLoading,
   detailError,
@@ -697,11 +783,19 @@ function TaskList({
   expandedTaskId?: string;
   onCollapse: () => void;
   registerDetailHeading: (el: HTMLHeadingElement | null) => void;
+  registerDetailRoot: (el: HTMLElement | null) => void;
+  isDesktop: boolean;
   detailTask?: TaskResponse;
   detailIsLoading: boolean;
   detailError: unknown;
-  onSaveDetail: (task: TaskResponse, payload: Parameters<typeof apiClient.updateTask>[1]) => void;
-  onTransitionDetail: (task: TaskResponse, action: "move" | "complete" | "reopen" | "cancel", toState?: OpenTaskState, waitingFor?: string) => void;
+  onSaveDetail: (task: TaskResponse, payload: Parameters<typeof apiClient.updateTask>[1], focusKey: string) => void;
+  onTransitionDetail: (
+    task: TaskResponse,
+    action: "move" | "complete" | "reopen" | "cancel",
+    toState: OpenTaskState | undefined,
+    waitingFor: string | undefined,
+    focusKey: string
+  ) => void;
   onCreateSubtask: (task: TaskResponse, title: string) => void;
   onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") => void;
   onCreateComment: (task: TaskResponse, body: string) => void;
@@ -742,6 +836,8 @@ function TaskList({
                 isLoading={detailIsLoading}
                 error={detailError}
                 headingRef={registerDetailHeading}
+                rootRef={registerDetailRoot}
+                isDesktop={isDesktop}
                 onClose={onCollapse}
                 onSave={onSaveDetail}
                 onTransition={onTransitionDetail}
@@ -913,7 +1009,38 @@ function TaskRow({
 }
 
 const detailFieldClass =
-  "min-h-10 rounded-lg border border-slate-200 px-3 text-sm text-slate-900 outline-none focus:border-brand-primary focus:shadow-ring-focus";
+  "min-h-11 rounded-lg border border-slate-200 px-3 text-sm text-slate-900 outline-none focus:border-brand-primary focus:shadow-ring-focus lg:min-h-10";
+
+function DetailDisclosure({
+  title,
+  open,
+  onToggle,
+  children
+}: {
+  title: string;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}): JSX.Element {
+  const contentId = `task-detail-${title.toLowerCase()}`;
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white/70 lg:border-0 lg:bg-transparent">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={contentId}
+        className="flex h-11 w-full items-center justify-between px-3 text-left text-sm font-semibold text-slate-800 lg:hidden"
+        onClick={onToggle}
+      >
+        {title}
+        <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden />
+      </button>
+      <div id={contentId} hidden={!open} className="px-3 pb-3 pt-1 lg:block lg:px-0 lg:pb-0">
+        {children}
+      </div>
+    </section>
+  );
+}
 
 function TaskDetailPanel({
   task,
@@ -922,6 +1049,8 @@ function TaskDetailPanel({
   isLoading,
   error,
   headingRef,
+  rootRef,
+  isDesktop,
   onClose,
   onSave,
   onTransition,
@@ -935,14 +1064,25 @@ function TaskDetailPanel({
   isLoading: boolean;
   error: unknown;
   headingRef: (el: HTMLHeadingElement | null) => void;
+  rootRef: (el: HTMLElement | null) => void;
+  isDesktop: boolean;
   onClose: () => void;
-  onSave: (task: TaskResponse, payload: Parameters<typeof apiClient.updateTask>[1]) => void;
-  onTransition: (task: TaskResponse, action: "move" | "complete" | "reopen" | "cancel", toState?: OpenTaskState, waitingFor?: string) => void;
+  onSave: (task: TaskResponse, payload: Parameters<typeof apiClient.updateTask>[1], focusKey: string) => void;
+  onTransition: (
+    task: TaskResponse,
+    action: "move" | "complete" | "reopen" | "cancel",
+    toState: OpenTaskState | undefined,
+    waitingFor: string | undefined,
+    focusKey: string
+  ) => void;
   onCreateSubtask: (task: TaskResponse, title: string) => void;
   onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") => void;
   onCreateComment: (task: TaskResponse, body: string) => void;
 }): JSX.Element {
+  const [propertiesOpen, setPropertiesOpen] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
   const summaryProject = task?.project_id ? projects.find((candidate) => candidate.id === task.project_id) : undefined;
+  const summaryTags = task ? tags.filter((tag) => task.tag_ids.includes(tag.id)) : [];
   const summaryState = task
     ? task.state === "completed"
       ? "Completed"
@@ -950,13 +1090,16 @@ function TaskDetailPanel({
         ? "Cancelled"
         : stateLabels[task.state]
     : undefined;
+  const propertiesVisible = isDesktop || propertiesOpen;
+  const actionsVisible = isDesktop || actionsOpen;
 
   return (
     <aside
-      className="-mx-4 -my-5 flex min-h-screen flex-col gap-[18px] bg-surface-base px-4 py-5 sm:-mx-6 sm:px-6 motion-safe:lg:animate-detail-enter lg:m-0 lg:min-h-0 lg:bg-transparent lg:p-0 lg:pt-3.5 lg:border-t lg:border-slate-200"
+      ref={rootRef}
+      className="-mx-4 -my-5 flex min-h-screen flex-col gap-3 bg-surface-base px-4 py-5 sm:-mx-6 sm:px-6 motion-safe:lg:animate-detail-enter lg:m-0 lg:min-h-0 lg:gap-[18px] lg:bg-transparent lg:p-0 lg:pt-3.5 lg:border-t lg:border-slate-200"
       aria-labelledby="task-detail-title"
     >
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
         <button
           type="button"
           aria-label="Back to list"
@@ -965,6 +1108,17 @@ function TaskDetailPanel({
         >
           <ArrowLeft className="h-5 w-5" aria-hidden />
         </button>
+        {task && task.state !== "completed" && task.state !== "cancelled" ? (
+          <button
+            type="button"
+            aria-label="Complete task"
+            data-detail-focus-key="detail-complete-top"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 lg:hidden"
+            onClick={() => onTransition(task, "complete", undefined, undefined, "detail-complete-top")}
+          >
+            <Check className="h-5 w-5" aria-hidden />
+          </button>
+        ) : null}
         <h2
           id="task-detail-title"
           ref={headingRef}
@@ -973,12 +1127,12 @@ function TaskDetailPanel({
         >
           Task detail
         </h2>
-        <p className="m-0 min-w-0 flex-1 break-words whitespace-normal text-[20px] font-semibold leading-[1.3] tracking-[-0.015em] text-slate-900 lg:hidden">
+        <p className="m-0 min-w-0 flex-1 break-words text-[20px] font-semibold leading-[1.3] tracking-[-0.015em] text-slate-900 lg:hidden">
           {task?.title ?? "Task"}
         </p>
         <button
           type="button"
-          className="hidden h-8 items-center gap-1 rounded-lg border border-slate-200 px-2 text-xs text-slate-600 lg:inline-flex"
+          className="hidden h-10 items-center gap-1 rounded-lg border border-slate-200 px-3 text-xs text-slate-600 lg:inline-flex"
           onClick={onClose}
         >
           <X className="h-3.5 w-3.5" aria-hidden />
@@ -989,20 +1143,22 @@ function TaskDetailPanel({
       {isLoading ? <p className="text-sm text-slate-600">Loading task detail…</p> : null}
       {error ? <p role="alert" className="text-sm text-rose-700">{getErrorMessage(error)}</p> : null}
       {task ? (
-        <div className="flex flex-col gap-[18px]">
+        <div className="flex flex-col gap-3 lg:gap-[18px]">
           <div
             data-testid="task-detail-summary"
             className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600 lg:hidden"
           >
             {summaryState ? <Chip variant="neutral">{summaryState}</Chip> : null}
             {summaryProject ? <Chip variant="neutral">{summaryProject.name}</Chip> : null}
+            {summaryTags.map((tag) => (
+              <Chip key={tag.id} variant="neutral">{tagLabel(tag)}</Chip>
+            ))}
             {task.due_date ? <Chip variant="due">{formatDueDate(task.due_date)}</Chip> : null}
             {task.priority !== "none" ? <Chip variant="neutral">{task.priority} priority</Chip> : null}
-            {task.state === "waiting" && task.waiting_for ? <span>Waiting on {task.waiting_for}</span> : null}
+            {task.state === "waiting" && task.waiting_for ? <Chip variant="neutral">Waiting on {task.waiting_for}</Chip> : null}
           </div>
           <form
-            className="grid gap-3 lg:grid-cols-2"
-            key={`${task.id}-${task.revision}`}
+            className="flex flex-col gap-3"
             onSubmit={(event) => {
               event.preventDefault();
               const form = new FormData(event.currentTarget);
@@ -1011,92 +1167,118 @@ function TaskDetailPanel({
               const projectId = String(form.get("project_id") ?? "");
               const dueDate = String(form.get("due_date") ?? "");
               const waitingFor = String(form.get("waiting_for") ?? "").trim();
-              onSave(task, {
-                title: String(form.get("title") ?? "").trim(),
-                details: details || null,
-                project_id: projectId || null,
-                tag_ids: tagIds,
-                due_date: dueDate || null,
-                priority: String(form.get("priority") ?? "none") as TaskPriority,
-                ...(task.state === "waiting" ? { waiting_for: waitingFor } : {}),
-                expected_revision: task.revision
-              });
+              onSave(
+                task,
+                {
+                  title: String(form.get("title") ?? "").trim(),
+                  details: details || null,
+                  project_id: projectId || null,
+                  tag_ids: tagIds,
+                  due_date: dueDate || null,
+                  priority: String(form.get("priority") ?? "none") as TaskPriority,
+                  ...(task.state === "waiting" ? { waiting_for: waitingFor } : {}),
+                  expected_revision: task.revision
+                },
+                "detail-save"
+              );
             }}
           >
-            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
-              Title
-              <input name="title" aria-label="Title" defaultValue={task.title} className={detailFieldClass} />
-            </label>
-            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
-              Project
-              <select name="project_id" aria-label="Project" defaultValue={task.project_id ?? ""} className={detailFieldClass}>
-                <option value="">No project</option>
-                {projects.map((project) => (
-                  <option key={project.id} value={project.id}>{project.name}</option>
-                ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600 lg:col-span-2">
-              Details
-              <textarea name="details" aria-label="Details" defaultValue={task.details ?? ""} rows={3} className={`${detailFieldClass} py-2`} />
-            </label>
-            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
-              Due date
-              <input name="due_date" aria-label="Due date" type="date" defaultValue={task.due_date ?? ""} className={detailFieldClass} />
-            </label>
-            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
-              Priority
-              <select name="priority" aria-label="Priority" defaultValue={task.priority} className={detailFieldClass}>
-                <option value="none">None</option>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-              </select>
-            </label>
-            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
-              Waiting for
-              <input name="waiting_for" aria-label="Waiting for" defaultValue={task.waiting_for ?? ""} className={detailFieldClass} />
-              <span className="text-[11px] font-normal text-slate-500">Required when moving or reopening to Waiting.</span>
-            </label>
-            <fieldset className="flex flex-wrap gap-2 text-xs font-medium text-slate-600">
-              <legend className="mb-1 w-full">Tags</legend>
-              {tags.map((tag) => (
-                <label key={tag.id} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1">
-                  <input name="tag_ids" type="checkbox" value={tag.id} defaultChecked={task.tag_ids.includes(tag.id)} />
-                  #{tag.name.replace(/^[#@]/, "")}
+            <DetailDisclosure title="Properties" open={propertiesVisible} onToggle={() => setPropertiesOpen((open) => !open)}>
+              <div className="grid gap-3 lg:grid-cols-2">
+                <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+                  Title
+                  <input name="title" aria-label="Title" defaultValue={task.title} className={detailFieldClass} />
                 </label>
-              ))}
-            </fieldset>
-            <div className="flex flex-wrap items-end gap-2 lg:col-span-2">
-              <button type="submit" className="h-10 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white">Save task detail</button>
-              {task.state !== "completed" && task.state !== "cancelled" ? (
-                <>
-                  <button type="button" className="h-10 rounded-lg border border-emerald-200 px-3 text-sm text-emerald-700" onClick={() => onTransition(task, "complete")}>Complete</button>
-                  <button type="button" className="h-10 rounded-lg border border-rose-200 px-3 text-sm text-rose-700" onClick={() => onTransition(task, "cancel")}>Cancel</button>
-                  {openStateOptions.filter((option) => option !== task.state).map((option) => (
+                <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+                  Project
+                  <select name="project_id" aria-label="Project" defaultValue={task.project_id ?? ""} className={detailFieldClass}>
+                    <option value="">No project</option>
+                    {projects.map((project) => (
+                      <option key={project.id} value={project.id}>{project.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-xs font-medium text-slate-600 lg:col-span-2">
+                  Details
+                  <textarea name="details" aria-label="Details" defaultValue={task.details ?? ""} rows={3} className={`${detailFieldClass} py-2`} />
+                </label>
+                <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+                  Due date
+                  <input name="due_date" aria-label="Due date" type="date" defaultValue={task.due_date ?? ""} className={detailFieldClass} />
+                </label>
+                <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+                  Priority
+                  <select name="priority" aria-label="Priority" defaultValue={task.priority} className={detailFieldClass}>
+                    <option value="none">None</option>
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+                  Waiting for
+                  <input name="waiting_for" aria-label="Waiting for" defaultValue={task.waiting_for ?? ""} className={detailFieldClass} />
+                  <span className="text-[11px] font-normal text-slate-500">Required when moving or reopening to Waiting.</span>
+                </label>
+                <fieldset className="flex flex-wrap gap-2 text-xs font-medium text-slate-600">
+                  <legend className="mb-1 w-full">Tags</legend>
+                  {tags.map((tag) => (
+                    <label key={tag.id} className="inline-flex min-h-11 items-center gap-1 rounded-full bg-slate-100 px-3 lg:min-h-8">
+                      <input name="tag_ids" type="checkbox" value={tag.id} defaultChecked={task.tag_ids.includes(tag.id)} />
+                      #{tag.name.replace(/^[#@]/, "")}
+                    </label>
+                  ))}
+                </fieldset>
+              </div>
+            </DetailDisclosure>
+            <DetailDisclosure title="Actions" open={actionsVisible} onToggle={() => setActionsOpen((open) => !open)}>
+              <div className="flex flex-wrap gap-2">
+                <button type="submit" data-detail-focus-key="detail-save" className="min-h-11 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white lg:min-h-10">
+                  Save task detail
+                </button>
+                {task.state !== "completed" && task.state !== "cancelled" ? (
+                  <>
+                    <button
+                      type="button"
+                      data-detail-focus-key="detail-complete-action"
+                      className="min-h-11 rounded-lg border border-emerald-200 px-3 text-sm text-emerald-700 lg:min-h-10"
+                      onClick={() => onTransition(task, "complete", undefined, undefined, "detail-complete-action")}
+                    >
+                      Complete
+                    </button>
+                    <button
+                      type="button"
+                      data-detail-focus-key="detail-cancel"
+                      className="min-h-11 rounded-lg border border-rose-200 px-3 text-sm text-rose-700 lg:min-h-10"
+                      onClick={() => onTransition(task, "cancel", undefined, undefined, "detail-cancel")}
+                    >
+                      Cancel
+                    </button>
+                    {openStateOptions.filter((option) => option !== task.state).map((option) => (
+                      <TaskTransitionButton
+                        key={option}
+                        label={`Move to ${stateLabels[option].replace(" actions", "")}`}
+                        targetState={option}
+                        action="move"
+                        task={task}
+                        onTransition={onTransition}
+                      />
+                    ))}
+                  </>
+                ) : (
+                  openStateOptions.map((option) => (
                     <TaskTransitionButton
                       key={option}
-                      label={`Move to ${stateLabels[option].replace(" actions", "")}`}
+                      label={`Reopen to ${stateLabels[option].replace(" actions", "")}`}
                       targetState={option}
-                      action="move"
+                      action="reopen"
                       task={task}
                       onTransition={onTransition}
                     />
-                  ))}
-                </>
-              ) : (
-                openStateOptions.map((option) => (
-                  <TaskTransitionButton
-                    key={option}
-                    label={`Reopen to ${stateLabels[option].replace(" actions", "")}`}
-                    targetState={option}
-                    action="reopen"
-                    task={task}
-                    onTransition={onTransition}
-                  />
-                ))
-              )}
-            </div>
+                  ))
+                )}
+              </div>
+            </DetailDisclosure>
           </form>
 
           <div className="flex flex-col gap-2">
@@ -1138,8 +1320,8 @@ function TaskDetailPanel({
                 }
               }}
             >
-              <input name="subtask_title" aria-label="New subtask title" className="min-h-10 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm" placeholder="Add a subtask" />
-              <button type="submit" className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm">Add subtask</button>
+              <input name="subtask_title" aria-label="New subtask title" className="min-h-11 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm lg:min-h-10" placeholder="Add a subtask" />
+              <button type="submit" className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm lg:min-h-10">Add subtask</button>
             </form>
           </div>
 
@@ -1175,8 +1357,8 @@ function TaskDetailPanel({
                 }
               }}
             >
-              <input name="comment_body" aria-label="New comment" className="min-h-10 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm" placeholder="Add a comment" />
-              <button type="submit" className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm">Add comment</button>
+              <input name="comment_body" aria-label="New comment" className="min-h-11 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm lg:min-h-10" placeholder="Add a comment" />
+              <button type="submit" className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm lg:min-h-10">Add comment</button>
             </form>
           </div>
         </div>
@@ -1196,18 +1378,31 @@ function TaskTransitionButton({
   action: "move" | "reopen";
   targetState: OpenTaskState;
   label: string;
-  onTransition: (task: TaskResponse, action: "move" | "complete" | "reopen" | "cancel", toState?: OpenTaskState, waitingFor?: string) => void;
+  onTransition: (
+    task: TaskResponse,
+    action: "move" | "complete" | "reopen" | "cancel",
+    toState: OpenTaskState | undefined,
+    waitingFor: string | undefined,
+    focusKey: string
+  ) => void;
 }): JSX.Element {
   return (
     <button
       type="button"
-      className="h-10 rounded-lg border border-slate-200 px-3 text-sm text-slate-700"
+      data-detail-focus-key={`detail-${action}-${targetState}`}
+      className="min-h-11 rounded-lg border border-slate-200 px-3 text-sm text-slate-700 lg:min-h-10"
       onClick={(event) => {
         const detailForm = event.currentTarget.form;
         const waitingFor = detailForm
           ? String(new FormData(detailForm).get("waiting_for") ?? "")
           : undefined;
-        onTransition(task, action, targetState, targetState === "waiting" ? waitingFor : undefined);
+        onTransition(
+          task,
+          action,
+          targetState,
+          targetState === "waiting" ? waitingFor : undefined,
+          `detail-${action}-${targetState}`
+        );
       }}
     >
       {label}

@@ -679,7 +679,7 @@ describe("AppRoutes", () => {
     // select remounts with the server's confirmed value) before checking
     // focus, so the assertion observes the effect's real post-refetch state.
     await waitFor(() => expect(screen.getByLabelText("Priority")).toHaveValue("high"));
-    expect(screen.getByRole("heading", { name: "Task detail" })).not.toHaveFocus();
+    expect(screen.getByRole("button", { name: "Save task detail" })).toHaveFocus();
 
     await user.type(screen.getByLabelText("New subtask title"), "Draft outline");
     await user.click(screen.getByRole("button", { name: "Add subtask" }));
@@ -693,7 +693,7 @@ describe("AppRoutes", () => {
 
     await user.click(screen.getByRole("button", { name: "Complete" }));
     await screen.findByRole("button", { name: "Reopen to Inbox" });
-    expect(screen.getByRole("heading", { name: "Task detail" })).not.toHaveFocus();
+    expect(screen.getByRole("heading", { name: "Task detail" })).toHaveFocus();
   });
 
   it("keeps direct task detail visible when the task is absent from the active projection", async () => {
