@@ -1,3 +1,5 @@
+import type { Page } from "@playwright/test";
+
 import { expect, test } from "../allure.fixtures";
 
 import {
@@ -8,6 +10,30 @@ import {
   uniqueEmail,
   type TaskRecord
 } from "./gtdHelpers";
+
+function assertCondition(condition: unknown, message: string): asserts condition {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+// Polls manually instead of `expect.poll(...).toBe(...)`: the Allure reporter
+// wraps each poll attempt's matcher in its own "Expect toBe" step, and a fast
+// attempt that resolves in under 1ms is recorded with equal start/stop
+// timestamps and no attachments -- a zero-duration, evidence-less step the
+// taxonomy validator correctly rejects as a no-op. Each GET below already
+// carries real request/response evidence and duration, and the final
+// `assertCondition` doesn't emit a synthetic Allure step at all.
+async function waitForPersistedTitle(page: Page, taskId: string, expectedTitle: string): Promise<TaskRecord> {
+  const deadline = Date.now() + 15_000;
+  let task: TaskRecord;
+  do {
+    task = await apiGet<TaskRecord>(page, `/api/tasks/${taskId}`);
+    if (task.title === expectedTitle) break;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  } while (Date.now() < deadline);
+  return task;
+}
 
 test.describe("task detail identity acceptance", () => {
   test("E2E-TASK-05 browser Back never saves terminal task B values into terminal task A", async ({ page }, testInfo) => {
@@ -35,7 +61,11 @@ test.describe("task detail identity acceptance", () => {
       await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(taskA.title);
 
       await page.getByRole("button", { name: "Save task detail" }).click();
-      await expect.poll(async () => (await apiGet<TaskRecord>(page, `/api/tasks/${taskA.id}`)).title).toBe(taskA.title);
+      const persisted = await waitForPersistedTitle(page, taskA.id, taskA.title);
+      assertCondition(
+        persisted.title === taskA.title,
+        `task A title must remain ${JSON.stringify(taskA.title)} after Back+Save, but persisted as ${JSON.stringify(persisted.title)}`
+      );
     });
   });
 });
