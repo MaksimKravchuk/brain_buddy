@@ -358,6 +358,42 @@ def _missing_e2e_ci_errors(workflow_text: str) -> list[str]:
     return errors
 
 
+MOBILE_PRIVACY_SCAN_STEP_ID_PATTERN = re.compile(
+    r"id:\s*mobile_privacy_scan\s*\n\s*if:\s*always\(\)"
+)
+
+
+def _missing_mobile_privacy_gate_errors(workflow_text: str) -> list[str]:
+    """Guard the ADR-0008 mobile privacy scan publication contract.
+
+    The scan must run with `if: always()` (so its outcome is captured even if
+    an earlier mobile step fails), and both the mobile Allure upload and the
+    aggregate Allure report job must refuse to publish unless that scan
+    explicitly succeeded.
+    """
+
+    errors: list[str] = []
+    if "validate_mobile_privacy_evidence.py" not in workflow_text:
+        return errors
+
+    if not MOBILE_PRIVACY_SCAN_STEP_ID_PATTERN.search(workflow_text):
+        errors.append(
+            "mobile privacy scan step must set id: mobile_privacy_scan and run with "
+            "if: always() so its outcome is captured even after upstream step failures (ADR-0008)"
+        )
+    if "if: steps.mobile_privacy_scan.outcome == 'success'" not in workflow_text:
+        errors.append(
+            "missing successful-scan gate for mobile Allure upload: "
+            "if: steps.mobile_privacy_scan.outcome == 'success' (ADR-0008)"
+        )
+    if "needs.mobile.outputs.privacy_scan_outcome != 'success'" not in workflow_text:
+        errors.append(
+            "missing aggregate Allure report publication gate on mobile privacy scan outcome: "
+            "needs.mobile.outputs.privacy_scan_outcome != 'success' (ADR-0008)"
+        )
+    return errors
+
+
 def validate_workflow(
     ci: Path, disallowed_workflows: list[Path], frontend_vite_config: Path | None
 ) -> int:
@@ -370,6 +406,7 @@ def validate_workflow(
         errors.extend(_missing_artifact_errors(workflow_text))
         errors.extend(_missing_frontend_ci_errors(workflow_text))
         errors.extend(_missing_mobile_ci_errors(workflow_text))
+        errors.extend(_missing_mobile_privacy_gate_errors(workflow_text))
         errors.extend(_missing_e2e_ci_errors(workflow_text))
         if "retention-days: 30" not in workflow_text:
             errors.append("missing 30-day artifact retention")
