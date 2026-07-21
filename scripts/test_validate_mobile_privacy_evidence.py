@@ -105,8 +105,9 @@ class ValidateMobilePrivacyEvidenceTests(unittest.TestCase):
     def test_allows_unreadable_binary_build_asset(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             evidence = Path(tmp) / "dist"
-            evidence.mkdir()
-            (evidence / "favicon.png").write_bytes(
+            vendored = evidence / "assets" / "node_modules" / "expo-router" / "assets"
+            vendored.mkdir(parents=True)
+            (vendored / "back-icon.png").write_bytes(
                 b"\x89PNG\r\n\x1a\n\x00\x01\xffnot-a-real-png"
             )
             completed = self.run_validator(
@@ -114,6 +115,33 @@ class ValidateMobilePrivacyEvidenceTests(unittest.TestCase):
             )
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_rejects_unreadable_binary_attachment_directly_in_allure_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence = Path(tmp) / "allure-results"
+            evidence.mkdir()
+            (evidence / "mystery.bin").write_bytes(b"\x00\x01\x02\xff\xfeundecodable")
+            completed = self.run_validator(
+                "--path", str(evidence), "--label", "mobile-evidence"
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("unreadable_binary_evidence", completed.stderr)
+
+    def test_rejects_unreadable_binary_attachment_in_arbitrary_allure_subdir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence = Path(tmp) / "allure-results"
+            attachment_dir = evidence / "attachments" / "arbitrary"
+            attachment_dir.mkdir(parents=True)
+            (attachment_dir / "diagnostic.bin").write_bytes(
+                b"\x00\x01\x02\xff\xfeundecodable"
+            )
+            completed = self.run_validator(
+                "--path", str(evidence), "--label", "mobile-evidence"
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("unreadable_binary_evidence", completed.stderr)
 
     def test_rejects_audio_data_uri(self) -> None:
         completed = self.scan_text(
@@ -250,6 +278,57 @@ class ValidateMobilePrivacyEvidenceTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("skipping", completed.stderr)
+
+    def test_never_leaks_sensitive_value_via_malicious_filename(self) -> None:
+        fake_credential = "fake-opaque-session-token-abcdef0123456789abcdef0123456789"
+        fake_email = "someone@fixture-example.test"
+        fake_transcript = "buy_milk_before_the_store_closes_tonight"
+        malicious_name = f"{fake_credential}-{fake_email}-{fake_transcript}.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence = Path(tmp) / "evidence"
+            evidence.mkdir()
+            (evidence / malicious_name).write_text(
+                json.dumps({"log": f"Authorization: Bearer {fake_credential}"}),
+                encoding="utf-8",
+            )
+            completed = self.run_validator(
+                "--path", str(evidence), "--label", "mobile-evidence"
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("credential", completed.stderr)
+        for secret in (fake_credential, fake_email, fake_transcript, malicious_name):
+            self.assertNotIn(secret, completed.stdout)
+            self.assertNotIn(secret, completed.stderr)
+
+    def test_finding_diagnostic_is_actionable_without_raw_filename(self) -> None:
+        fake_email = "someone@fixture-example.test"
+        completed = self.scan_text(
+            "case-result.json", json.dumps({"description": f"owner {fake_email}"})
+        )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("email", completed.stderr)
+        self.assertIn("file #1 of 1", completed.stderr)
+        self.assertNotIn("case-result.json", completed.stderr)
+        self.assertNotIn("case-result.json", completed.stdout)
+
+    def test_never_leaks_sensitive_value_via_evidence_root_path(self) -> None:
+        fake_email = "someone@fixture-example.test"
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence = Path(tmp) / fake_email
+            evidence.mkdir()
+            (evidence / "entry.json").write_text(
+                json.dumps({"description": f"owner {fake_email}"}), encoding="utf-8"
+            )
+            completed = self.run_validator(
+                "--path", str(evidence), "--label", "mobile-evidence"
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("email", completed.stderr)
+        self.assertNotIn(fake_email, completed.stdout)
+        self.assertNotIn(fake_email, completed.stderr)
 
     def test_fails_when_no_requested_roots_exist(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
