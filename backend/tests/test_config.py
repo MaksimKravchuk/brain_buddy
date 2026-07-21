@@ -554,6 +554,34 @@ def test_reconciler_rejects_endpoint_override_before_container_wiring(
         get_config()
 
 
+@pytest.mark.parametrize(
+    "variant_endpoint",
+    [
+        " https://api.openai.com/v1/chat/completions",
+        "https://api.openai.com/v1/chat/completions ",
+        "https://api.openai.com/v1/chat/completions\n",
+        "\thttps://api.openai.com/v1/chat/completions",
+    ],
+)
+def test_reconciler_rejects_endpoint_whitespace_and_newline_variants(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variant_endpoint: str
+) -> None:
+    """The allow-list is a literal comparison, not strip(): the unmodified
+    env value is what ``_build_text_reconciler`` forwards to the OpenAI
+    adapter, so leading/trailing whitespace or a smuggled newline around the
+    approved endpoint URL must be denied at startup rather than silently
+    accepted as the same string."""
+
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "production")
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER", "openai")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_ENDPOINT", variant_endpoint)
+    monkeypatch.setenv("OPENAI_API_KEY", "not-returned-from-config")
+
+    with pytest.raises(ValueError, match="not authorized"):
+        get_config()
+
+
 @pytest.mark.parametrize("unauthorized_model", ["whisper-large-v3", "nova-3-medical"])
 def test_deepgram_accurate_stt_requires_exactly_the_authorized_nova_3_model(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unauthorized_model: str
@@ -561,6 +589,26 @@ def test_deepgram_accurate_stt_requires_exactly_the_authorized_nova_3_model(
     monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_PROVIDER", "deepgram")
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_MODEL", unauthorized_model)
+
+    with pytest.raises(ValueError, match="Unauthorized accurate_stt model"):
+        get_config()
+
+
+@pytest.mark.parametrize(
+    "variant_model",
+    ["NOVA-3", "Nova-3", " nova-3", "nova-3 ", "nova-3\n", "\tnova-3"],
+)
+def test_deepgram_accurate_stt_rejects_case_and_whitespace_model_variants(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variant_model: str
+) -> None:
+    """The allow-list is a literal comparison, not strip()/casefold(): the
+    unmodified env value is what ``_build_accurate_stt`` forwards to the
+    Deepgram adapter, so a case- or whitespace-normalized variant of the
+    approved model must be denied at startup rather than silently accepted."""
+
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_PROVIDER", "deepgram")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_MODEL", variant_model)
 
     with pytest.raises(ValueError, match="Unauthorized accurate_stt model"):
         get_config()
