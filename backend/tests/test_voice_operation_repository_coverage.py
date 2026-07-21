@@ -44,15 +44,24 @@ def _start(
     key: str,
     external_processing_allowed: bool = False,
 ):
+    consent = {
+        "microphone": True,
+        "external_processing_allowed": external_processing_allowed,
+        "provider": "openai" if external_processing_allowed else None,
+    }
+    if external_processing_allowed:
+        consent.update(
+            {
+                "consent_policy_version": service.consent_policy_version,
+                "allowed_provider_categories": sorted(
+                    service.required_consent_categories
+                ),
+                "decision_recorded_at": utcnow().isoformat(),
+            }
+        )
     return service.start_brain_dump_operation(
         BrainDumpOperationStartRequest.model_validate(
-            {
-                "consent": {
-                    "microphone": True,
-                    "external_processing_allowed": external_processing_allowed,
-                    "provider": "openai" if external_processing_allowed else None,
-                }
-            }
+            {"consent": consent}
         ),
         owner_id=OWNER,
         idempotency_key=key,

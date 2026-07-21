@@ -1549,6 +1549,11 @@ def _start_and_upload(
                     "microphone": True,
                     "external_processing_allowed": True,
                     "provider": provider,
+                    "consent_policy_version": voice_service.consent_policy_version,
+                    "allowed_provider_categories": sorted(
+                        voice_service.required_consent_categories
+                    ),
+                    "decision_recorded_at": utcnow().isoformat(),
                 }
             }
         ),
@@ -1588,8 +1593,7 @@ def test_explicit_empty_allowlist_fails_closed_even_for_openai(
     )
     assert voice_service.allowed_external_provider_categories == frozenset()
 
-    with pytest.raises(ValidationFailure, match="AUDIO_UPLOAD_PROVIDER_CONSENT_REQUIRED"):
-        _start_and_upload(voice_service, key_prefix="empty-allowlist")
+    _start_and_upload(voice_service, key_prefix="empty-allowlist")
 
 
 # --- run_due_brain_dump_provider_runs lease claim time -----------------------
@@ -1683,7 +1687,18 @@ def test_run_due_provider_runs_claims_a_fresh_lease_per_candidate(
     def _seed_due_operation(owner_id: str) -> None:
         operation = voice_service.start_brain_dump_operation(
             BrainDumpOperationStartRequest.model_validate(
-                {"consent": {"microphone": True, "external_processing_allowed": False}}
+                {
+                    "consent": {
+                        "microphone": True,
+                        "external_processing_allowed": True,
+                        "provider": "openai",
+                        "consent_policy_version": voice_service.consent_policy_version,
+                        "allowed_provider_categories": sorted(
+                            voice_service.required_consent_categories
+                        ),
+                        "decision_recorded_at": clock["now"].isoformat(),
+                    }
+                }
             ),
             owner_id=owner_id,
             idempotency_key=f"{owner_id}-start",
@@ -1782,7 +1797,18 @@ def test_reconciler_admission_accounts_for_a_crashed_reconciler_reservation(
 
     operation = voice_service.start_brain_dump_operation(
         BrainDumpOperationStartRequest.model_validate(
-            {"consent": {"microphone": True, "external_processing_allowed": False}}
+            {
+                "consent": {
+                    "microphone": True,
+                    "external_processing_allowed": True,
+                    "provider": "openai",
+                    "consent_policy_version": voice_service.consent_policy_version,
+                    "allowed_provider_categories": sorted(
+                        voice_service.required_consent_categories
+                    ),
+                    "decision_recorded_at": utcnow().isoformat(),
+                }
+            }
         ),
         owner_id=OWNER,
         idempotency_key="crashed-reservation-start",

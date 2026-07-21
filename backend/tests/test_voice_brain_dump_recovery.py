@@ -11,6 +11,7 @@ import hashlib
 import json
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -26,7 +27,10 @@ from app.schemas.tasks import (
 from app.utils.time import utcnow
 from app.workflows.voice_brain_dump.domain import (
     BrainDumpOperationDocument,
+    BrainDumpProposalConflictDocument,
+    BrainDumpProposalDocument,
     BrainDumpProviderRunDocument,
+    BrainDumpTranscriptSegmentDocument,
     ProposalPatch,
     ReconciledProposal,
     apply_proposal_patches,
@@ -65,6 +69,251 @@ def test_structural_lineage_requires_meaningful_textual_evidence() -> None:
     ]
     assert VoiceBrainDumpService._titles_refer_to_same_item("Call", "Call")
     assert not VoiceBrainDumpService._titles_refer_to_same_item("Call", "Email")
+
+
+def test_current_external_consent_status_only_grandfathers_imported_operations(
+    data_dir: Path,
+) -> None:
+    """The schema-v1 fallback is narrow; native operations fail closed.
+
+    These are direct service-level cases because upload, seal, retry, lease
+    recovery, and reconciliation all share this one policy classifier.
+    """
+
+    service = _service(data_dir)
+    operation, _ = _seal(service)
+    now = utcnow()
+
+    def status_for(
+        *, legacy_import: str | None = None, **consent_updates: object
+    ) -> str:
+        consent = operation.consent.model_copy(update=consent_updates)
+        candidate = operation.model_copy(
+            update={"consent": consent, "legacy_import": legacy_import}
+        )
+        return service._current_external_consent_status(candidate, now=now)
+
+    assert status_for(consent_policy_version=None) == "policy_mismatch"
+    assert (
+        status_for(
+            legacy_import="legacy_preview_only", consent_policy_version=None
+        )
+        == "legacy"
+    )
+    assert status_for(consent_policy_version="stale-policy") == "policy_mismatch"
+    assert status_for(allowed_provider_categories=[]) == "policy_mismatch"
+    assert status_for(decision_recorded_at=None) == "policy_mismatch"
+    assert status_for(status="withdrawn") == "withdrawn"
+    assert status_for(withdrawn_at=now) == "withdrawn"
+    assert status_for(valid_until=now - timedelta(seconds=1)) == "expired"
+    assert status_for() == "current"
+
+
+def test_conflict_resolution_update_covers_removal_and_title_guards() -> None:
+    """Canonical and legacy conflict routes intentionally share every branch."""
+
+    now = utcnow()
+
+    def proposal(*, conflicts: list[BrainDumpProposalConflictDocument]):
+        return BrainDumpProposalDocument(
+            id="proposal_conflict",
+            ordinal=1,
+            title="Keep current title",
+            conflicts=conflicts,
+            created_at=now,
+            updated_at=now,
+        )
+
+    removal = proposal(
+        conflicts=[BrainDumpProposalConflictDocument(field="removal")]
+    )
+    accepted_removal, removal_patches, is_removal = (
+        VoiceBrainDumpService._conflict_resolution_update(removal, "accept")
+    )
+    assert accepted_removal["deleted"] is True
+    assert removal_patches[0].operation == "remove"
+    assert is_removal is True
+
+    kept_removal, kept_patches, is_removal = (
+        VoiceBrainDumpService._conflict_resolution_update(removal, "keep")
+    )
+    assert kept_removal["user_edited"] is True
+    assert kept_patches == []
+    assert is_removal is True
+
+    with pytest.raises(ValidationFailure, match="no conflict"):
+        VoiceBrainDumpService._conflict_resolution_update(proposal(conflicts=[]), "keep")
+
+    missing_suggestion = proposal(
+        conflicts=[BrainDumpProposalConflictDocument(field="title")]
+    )
+    with pytest.raises(ValidationFailure, match="no suggestion"):
+        VoiceBrainDumpService._conflict_resolution_update(missing_suggestion, "accept")
+
+    title_conflict = proposal(
+        conflicts=[
+            BrainDumpProposalConflictDocument(
+                field="title", suggested_value="Use suggested title"
+            )
+        ]
+    )
+    accepted_title, accepted_patches, is_removal = (
+        VoiceBrainDumpService._conflict_resolution_update(title_conflict, "accept")
+    )
+    assert accepted_title["title"] == "Use suggested title"
+    assert accepted_title["title_revision"] == 2
+    assert accepted_patches[0].title == "Use suggested title"
+    assert is_removal is False
+
+    kept_title, kept_title_patches, is_removal = (
+        VoiceBrainDumpService._conflict_resolution_update(title_conflict, "keep")
+    )
+    assert kept_title["title"] == "Keep current title"
+    assert kept_title["title_revision"] == 1
+    assert kept_title_patches[0].title is None
+    assert is_removal is False
+
+
+def test_preview_proposal_helpers_keep_recovery_projection_conservative(
+    data_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preview replacements never overwrite a protected or ambiguous proposal."""
+
+    service = _service(data_dir)
+    now = utcnow()
+
+    assert VoiceBrainDumpService._extract_task_titles(" \n ") == []
+    assert VoiceBrainDumpService._extract_task_titles(
+        "I need to buy milk; buy milk; then call dentist"
+    ) == ["Buy milk", "Call dentist"]
+    assert not VoiceBrainDumpService._titles_share_first_word("", "Buy milk")
+    assert VoiceBrainDumpService._titles_share_first_word("Buy milk", "Buy bread")
+    assert not VoiceBrainDumpService._titles_refer_to_same_item("Buy", "Call")
+
+    interim = BrainDumpTranscriptSegmentDocument(
+        id="segment_interim",
+        sequence=1,
+        text="buy milk",
+        stability="interim",
+        created_at=now,
+    )
+    stable = BrainDumpTranscriptSegmentDocument(
+        id="segment_stable",
+        sequence=2,
+        text="buy milk today",
+        stability="stable",
+        created_at=now,
+    )
+    assert VoiceBrainDumpService._segments_for_proposal_extraction(
+        [interim, stable]
+    ) == [stable]
+
+    existing = BrainDumpProposalDocument(
+        id="proposal_existing",
+        ordinal=1,
+        title="Buy milk",
+        source_segment_ids=[interim.id],
+        created_at=now,
+        updated_at=now,
+    )
+    assert service._proposals_from_segments([existing], [], now=now) == [existing]
+
+    monkeypatch.setattr(
+        VoiceBrainDumpService,
+        "_segments_for_proposal_extraction",
+        classmethod(lambda cls, _segments: []),
+    )
+    assert service._proposals_from_segments([existing], [stable], now=now) == [existing]
+    monkeypatch.undo()
+
+    semantic_update = service._proposals_from_segments([existing], [stable], now=now)
+    assert semantic_update[0].id == existing.id
+    assert semantic_update[0].title == "Buy milk today"
+    assert semantic_update[0].revision == existing.revision + 1
+
+    protected = existing.model_copy(update={"user_edited": True})
+    assert service._proposals_from_segments([protected], [stable], now=now) == [protected]
+
+    unchanged = semantic_update[0]
+    assert service._proposals_from_segments([unchanged], [stable], now=now) == [unchanged]
+
+    protected_exact = unchanged.model_copy(update={"user_edited": True})
+    assert service._proposals_from_segments([protected_exact], [stable], now=now) == [
+        protected_exact
+    ]
+
+    new_candidate = BrainDumpTranscriptSegmentDocument(
+        id="segment_new",
+        sequence=3,
+        text="call dentist",
+        stability="stable",
+        created_at=now,
+    )
+    appended = service._proposals_from_segments([unchanged], [new_candidate], now=now)
+    assert [proposal.title for proposal in appended] == ["Buy milk today", "Call dentist"]
+
+
+def test_reconciliation_helpers_preserve_stale_and_rejected_projections(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Recovery keeps an original proposal when a stale projection omits it,
+    and visibly marks terminal semantic rejection as conflicted."""
+
+    service = _service(data_dir)
+    now = utcnow()
+    existing = BrainDumpProposalDocument(
+        id="proposal_stale_projection",
+        ordinal=1,
+        title="Keep this proposal",
+        created_at=now,
+        updated_at=now,
+    )
+    monkeypatch.setattr(
+        "app.workflows.voice_brain_dump.service.apply_proposal_patches",
+        lambda _base, _patches: SimpleNamespace(history=[]),
+    )
+    assert service._apply_reconciler_patches([existing], [], now=now) == [existing]
+
+    operation, _ = _seal(service)
+    active_run = BrainDumpProviderRunDocument(
+        id="provider_run_rejected",
+        role="reconciler",
+        status="running",
+        input_hash="a" * 64,
+        checkpoint="accurate_transcribed",
+        created_at=now,
+        updated_at=now,
+    )
+    rejected = service._reconciler_failure(
+        operation.model_copy(update={"provider_runs": [active_run]}),
+        checkpoint_segments=[],
+        checkpoint_runs=[],
+        input_hash="a" * 64,
+        error="invalid semantic proposal",
+        now=now,
+        validation_rejected=True,
+    )
+    assert rejected.status == "terminal_error"
+    assert rejected.reconciliation_quality == "conflicted"
+
+
+def test_raw_audio_finish_returns_current_when_pending_phase_was_superseded(
+    data_dir: Path,
+) -> None:
+    """A stale phase-two worker cannot overwrite newer raw-audio state."""
+
+    service = _service(data_dir)
+    operation = service.start_brain_dump_operation(
+        BrainDumpOperationStartRequest.model_validate(
+            {"consent": {"microphone": True, "external_processing_allowed": False}}
+        ),
+        owner_id=OWNER,
+        idempotency_key="stale-delete-start",
+    )
+    stale_pending = operation.model_copy(update={"raw_audio_state": "deletion_pending"})
+    current = service._finish_raw_audio_deletion(stale_pending, owner_id=OWNER)
+    assert current.raw_audio_state != "deletion_pending"
 
 
 def _manifest_hash(audio: bytes) -> str:
@@ -126,6 +375,11 @@ def _seal(
                     "microphone": True,
                     "external_processing_allowed": True,
                     "provider": "openai",
+                    "consent_policy_version": service.consent_policy_version,
+                    "allowed_provider_categories": sorted(
+                        service.required_consent_categories
+                    ),
+                    "decision_recorded_at": utcnow().isoformat(),
                 }
             }
         ),

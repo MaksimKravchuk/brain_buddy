@@ -265,6 +265,15 @@ class BrainDumpConsentRequest(StrictBaseModel):
     allowed_provider_categories: list[str] = Field(default_factory=list, max_length=20)
     decision_recorded_at: datetime | None = None
 
+    @model_validator(mode="after")
+    def require_complete_canonical_grant(self) -> BrainDumpConsentRequest:
+        if self.consent_policy_version is not None and self.decision_recorded_at is None:
+            raise PydanticCustomError(
+                "brain_dump_consent_requires_decision_timestamp",
+                "A canonical consent grant requires decision_recorded_at.",
+            )
+        return self
+
 
 class BrainDumpOperationStartRequest(StrictBaseModel):
     consent: BrainDumpConsentRequest
@@ -317,11 +326,17 @@ class BrainDumpConsentDecisionRequest(StrictBaseModel):
 
     @model_validator(mode="after")
     def require_grant_fields(self) -> BrainDumpConsentDecisionRequest:
-        if self.decision == "grant" and not self.consent_policy_version:
-            raise PydanticCustomError(
-                "consent_decision_grant_requires_policy_version",
-                "A consent grant decision requires consent_policy_version.",
-            )
+        if self.decision == "grant":
+            if not self.consent_policy_version:
+                raise PydanticCustomError(
+                    "consent_decision_grant_requires_policy_version",
+                    "A consent grant decision requires consent_policy_version.",
+                )
+            if self.decision_recorded_at is None:
+                raise PydanticCustomError(
+                    "consent_decision_grant_requires_timestamp",
+                    "A consent grant decision requires decision_recorded_at.",
+                )
         return self
 
 

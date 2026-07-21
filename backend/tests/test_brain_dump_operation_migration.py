@@ -8,6 +8,7 @@ vs. deprecated-``/commit`` race producing no duplicate Tasks.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 
@@ -17,7 +18,12 @@ from app.utils.time import utcnow
 
 
 def _insert_legacy_payload(
-    api_client, *, operation_id: str, status: str, schema_version: int = 1
+    api_client,
+    *,
+    operation_id: str,
+    status: str,
+    schema_version: int = 1,
+    external_processing_allowed: bool = False,
 ) -> str:
     owner_id = api_client.get("/api/auth/me").json()["id"]
     container = api_client.app.state.container
@@ -29,9 +35,9 @@ def _insert_legacy_payload(
         "status": status,
         "consent": {
             "microphone": True,
-            "external_processing_allowed": False,
+            "external_processing_allowed": external_processing_allowed,
             "recorded_at": now,
-            "provider": None,
+            "provider": "openai" if external_processing_allowed else None,
         },
         "segments": [
             {
@@ -135,6 +141,33 @@ def test_active_legacy_v1_import_preserves_ids_locks_and_tombstones(
     assert ("proposal_locked", "add") in patch_ops
     assert ("proposal_removed", "add") in patch_ops
     assert ("proposal_removed", "remove") in patch_ops
+
+
+def test_migrated_schema_v1_operation_keeps_only_legacy_upload_compatibility(
+    api_client,
+) -> None:
+    """A real v1 row, not a fresh v2 start, may use the bounded fallback."""
+
+    operation_id = "brain_dump_legacy_recording_upload"
+    _insert_legacy_payload(
+        api_client,
+        operation_id=operation_id,
+        status="recording",
+        external_processing_allowed=True,
+    )
+
+    migrated = api_client.get(f"/api/brain-dump-operations/{operation_id}")
+    assert migrated.status_code == 200, migrated.text
+    assert migrated.json()["import_mode"] == "legacy_preview_only"
+
+    audio = b"legacy audio"
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation_id}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+
+    assert uploaded.status_code == 200, uploaded.text
 
 
 def test_legacy_import_freeze_requires_explicit_review_provisional_first(

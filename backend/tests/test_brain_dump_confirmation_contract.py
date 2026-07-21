@@ -56,6 +56,252 @@ def _freeze(api_client, operation: dict[str, object], key: str) -> dict[str, obj
     return response.json()
 
 
+def test_canonical_freeze_guards_replay_and_non_committable_selections(api_client) -> None:
+    """A frozen batch is replay-safe, while every stale or non-canonical
+    selection path remains an explicit typed refusal for mobile clients."""
+
+    from app.workflows.voice_brain_dump.domain import BrainDumpProposalConflictDocument
+
+    def freeze(
+        operation: dict[str, object],
+        key: str,
+        selected_ids: list[str],
+        *,
+        based_on_proposal_revision: int | None = None,
+    ):
+        return api_client.post(
+            f"/api/brain-dump-operations/{operation['id']}/proposal-batches",
+            headers={"Idempotency-Key": key},
+            json={
+                "based_on_proposal_revision": (
+                    operation["proposal_revision"]
+                    if based_on_proposal_revision is None
+                    else based_on_proposal_revision
+                ),
+                "expected_operation_revision": operation["revision"],
+                "selected_proposal_ids": selected_ids,
+            },
+        )
+
+    def stored(operation: dict[str, object]):
+        owner_id = api_client.get("/api/auth/me").json()["id"]
+        return api_client.app.state.container.voice_brain_dump_service.get_brain_dump_operation(
+            operation["id"], owner_id=owner_id
+        )
+
+    replayable = _reconciled_operation(api_client, "freeze-guards-replay", b"Buy milk.")
+    selected_id = replayable["proposals"][0]["id"]
+    first = freeze(replayable, "freeze-guards-replay", [selected_id])
+    assert first.status_code == 201, first.text
+    replay = freeze(replayable, "freeze-guards-replay", [selected_id])
+    assert replay.status_code == 201, replay.text
+    assert replay.json()["revision"] == first.json()["revision"]
+
+    stale_source = first.json()
+    stale = freeze(
+        stale_source,
+        "freeze-guards-stale-proposal-revision",
+        [selected_id],
+        based_on_proposal_revision=stale_source["proposal_revision"] + 1,
+    )
+    assert stale.status_code == 409, stale.text
+
+    inactive = _reconciled_operation(api_client, "freeze-guards-inactive", b"Call dentist.")
+    inactive_stored = stored(inactive)
+    api_client.app.state.container.voice_operation_repo.save_brain_dump_operation(
+        inactive_stored.model_copy(update={"status": "recording"})
+    )
+    inactive_response = freeze(
+        inactive,
+        "freeze-guards-inactive",
+        [inactive["proposals"][0]["id"]],
+    )
+    assert inactive_response.status_code == 400, inactive_response.text
+
+    conflicted = _reconciled_operation(api_client, "freeze-guards-conflict", b"Call dentist.")
+    conflicted_stored = stored(conflicted)
+    with_conflict = conflicted_stored.proposals[0].model_copy(
+        update={
+            "conflicts": [
+                BrainDumpProposalConflictDocument(
+                    field="title", suggested_value="Call dentist tomorrow"
+                )
+            ]
+        }
+    )
+    api_client.app.state.container.voice_operation_repo.save_brain_dump_operation(
+        conflicted_stored.model_copy(update={"proposals": [with_conflict]})
+    )
+    conflict_response = freeze(
+        conflicted,
+        "freeze-guards-conflict",
+        [with_conflict.id],
+    )
+    assert conflict_response.status_code == 400, conflict_response.text
+
+    preview_operation = _start_operation(api_client, key="start-freeze-guards-preview")
+    preview = api_client.post(
+        f"/api/brain-dump-operations/{preview_operation['id']}/transcript",
+        headers={"Idempotency-Key": "append-freeze-guards-preview"},
+        json={"segments": [{"sequence": 1, "text": "Buy milk", "stability": "stable"}]},
+    )
+    assert preview.status_code == 200, preview.text
+    preview_body = preview.json()
+    preview_stored = stored(preview_operation)
+    api_client.app.state.container.voice_operation_repo.save_brain_dump_operation(
+        preview_stored.model_copy(update={"status": "awaiting_confirmation"})
+    )
+    not_reconciled = freeze(
+        preview_body,
+        "freeze-guards-not-reconciled",
+        [preview_body["proposals"][0]["id"]],
+    )
+    assert not_reconciled.status_code == 400, not_reconciled.text
+
+    missing = _reconciled_operation(api_client, "freeze-guards-missing", b"Buy bread.")
+    missing_response = freeze(missing, "freeze-guards-missing", ["not-real"])
+    assert missing_response.status_code == 404, missing_response.text
+
+    deleted = _reconciled_operation(api_client, "freeze-guards-deleted", b"Buy oats.")
+    deleted_stored = stored(deleted)
+    removed_proposal = deleted_stored.proposals[0].model_copy(update={"deleted": True})
+    api_client.app.state.container.voice_operation_repo.save_brain_dump_operation(
+        deleted_stored.model_copy(update={"proposals": [removed_proposal]})
+    )
+    deleted_response = freeze(deleted, "freeze-guards-deleted", [removed_proposal.id])
+    assert deleted_response.status_code == 400, deleted_response.text
+
+    duplicate = _reconciled_operation(api_client, "freeze-guards-duplicate", b"Buy coffee.")
+    duplicate_id = duplicate["proposals"][0]["id"]
+    duplicate_response = freeze(
+        duplicate,
+        "freeze-guards-duplicate",
+        [duplicate_id, duplicate_id],
+    )
+    assert duplicate_response.status_code == 400, duplicate_response.text
+
+
+def test_canonical_confirm_guards_replay_and_batch_freshness(api_client) -> None:
+    """Confirm only accepts the current immutable frozen batch, while a
+    completed batch stays safely replayable under a new parent key."""
+
+    def request(operation: dict[str, object], batch: dict[str, object], key: str):
+        return api_client.post(
+            f"/api/brain-dump-operations/{operation['id']}/confirm",
+            headers={"Idempotency-Key": key},
+            json={
+                "proposal_batch_id": batch["id"],
+                "expected_batch_revision": batch["revision"],
+                "expected_operation_revision": operation["revision"],
+            },
+        )
+
+    def frozen(key: str) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
+        operation = _reconciled_operation(api_client, f"confirm-guards-{key}", b"Buy milk.")
+        frozen_operation = _freeze(api_client, operation, f"freeze-confirm-guards-{key}")
+        return operation, frozen_operation, frozen_operation["active_proposal_batch"]
+
+    original, frozen_operation, batch = frozen("completed")
+    confirmed = request(frozen_operation, batch, "confirm-guards-completed")
+    assert confirmed.status_code == 200, confirmed.text
+    replay = request(frozen_operation, batch, "confirm-guards-completed-new-key")
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["committed_task_ids"] == confirmed.json()["committed_task_ids"]
+
+    _, missing_operation, _ = frozen("missing")
+    missing = request(
+        missing_operation,
+        {"id": "not-real", "revision": 1},
+        "confirm-guards-not-found",
+    )
+    assert missing.status_code == 404, missing.text
+
+    _, stale_operation, stale_batch = frozen("stale")
+    stale = request(
+        stale_operation,
+        {**stale_batch, "revision": stale_batch["revision"] + 1},
+        "confirm-guards-stale-batch",
+    )
+    assert stale.status_code == 409, stale.text
+
+    _, non_frozen_operation, non_frozen_batch = frozen("non-frozen")
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    service = api_client.app.state.container.voice_brain_dump_service
+    stored = service.get_brain_dump_operation(non_frozen_operation["id"], owner_id=owner_id)
+    committed_batch = stored.proposal_batches[0].model_copy(update={"status": "committed"})
+    api_client.app.state.container.voice_operation_repo.save_brain_dump_operation(
+        stored.model_copy(update={"proposal_batches": [committed_batch]})
+    )
+    non_frozen = request(
+        non_frozen_operation,
+        non_frozen_batch,
+        "confirm-guards-not-frozen",
+    )
+    assert non_frozen.status_code == 400, non_frozen.text
+
+    _, changed_operation, changed_batch = frozen("proposal-changed")
+    changed_stored = service.get_brain_dump_operation(changed_operation["id"], owner_id=owner_id)
+    changed_current = changed_stored.model_copy(
+        update={
+            "proposal_revision": changed_stored.proposal_revision + 1,
+            "revision": changed_stored.revision + 1,
+        }
+    )
+    api_client.app.state.container.voice_operation_repo.save_brain_dump_operation(changed_current)
+    changed = request(
+        {
+            **changed_operation,
+            "revision": changed_current.revision,
+        },
+        changed_batch,
+        "confirm-guards-proposal-changed",
+    )
+    assert changed.status_code == 409, changed.text
+
+
+def test_confirm_returns_concurrently_folded_batch_without_second_fold(
+    api_client, monkeypatch
+) -> None:
+    """A retry that loses the final-fold race returns the existing terminal
+    batch rather than folding it a second time."""
+
+    operation = _reconciled_operation(api_client, "confirm-concurrent-fold", b"Buy milk.")
+    frozen = _freeze(api_client, operation, "freeze-confirm-concurrent-fold")
+    batch = frozen["active_proposal_batch"]
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    service = api_client.app.state.container.voice_brain_dump_service
+    real_confirm_one_action = service._confirm_one_action
+
+    def concurrent_final_fold(**kwargs):
+        real_confirm_one_action(**kwargs)
+        current = service.get_brain_dump_operation(operation["id"], owner_id=owner_id)
+        service.operation_repo.save_brain_dump_operation(
+            current.model_copy(
+                update={
+                    "proposal_batches": [
+                        item.model_copy(update={"status": "committed"})
+                        if item.id == batch["id"]
+                        else item
+                        for item in current.proposal_batches
+                    ]
+                }
+            )
+        )
+
+    monkeypatch.setattr(service, "_confirm_one_action", concurrent_final_fold)
+    confirmed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/confirm",
+        headers={"Idempotency-Key": "confirm-concurrent-fold"},
+        json={
+            "proposal_batch_id": batch["id"],
+            "expected_batch_revision": batch["revision"],
+            "expected_operation_revision": frozen["revision"],
+        },
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["committed_proposal_batch"]["status"] == "committed"
+
+
 def _confirm(
     api_client, operation: dict[str, object], batch: dict[str, object], key: str
 ):
