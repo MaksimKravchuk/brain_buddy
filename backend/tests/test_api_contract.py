@@ -30,11 +30,11 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
     assert error_schema["required"] == ["message"]
 
     expected_error_statuses = {
-        ("/api/auth/login", "post"): {"401", "422", "429"},
+        ("/api/auth/login", "post"): {"401", "422", "429", "503"},
         ("/api/auth/logout", "post"): set(),
         ("/api/auth/me", "get"): {"401"},
-        ("/api/auth/mobile/sessions", "post"): {"401", "422", "429"},
-        ("/api/auth/signup", "post"): {"400", "409", "422"},
+        ("/api/auth/mobile/sessions", "post"): {"401", "422", "429", "503"},
+        ("/api/auth/signup", "post"): {"400", "409", "422", "503"},
         ("/api/brain-dump-operations", "post"): {"400", "401", "409", "422"},
         ("/api/brain-dump-operations/{operation_id}", "get"): {"401", "404", "422"},
         ("/api/brain-dump-operations/{operation_id}/audio/{chunk_number}", "put"): {
@@ -210,10 +210,10 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
     assert set(expected_error_statuses) == discovered_operations
     for (path, method), expected_statuses in expected_error_statuses.items():
         responses = schema["paths"][path][method]["responses"]
-        documented_4xx_statuses = {
-            status_code for status_code in responses if 400 <= int(status_code) < 500
+        documented_error_statuses = {
+            status_code for status_code in responses if 400 <= int(status_code) < 600
         }
-        assert documented_4xx_statuses == expected_statuses
+        assert documented_error_statuses == expected_statuses
         for status_code in expected_statuses:
             content = responses[status_code]["content"]
             assert content["application/json"]["schema"] == {

@@ -79,6 +79,58 @@ def test_dual_or_malformed_credentials_are_rejected(tmp_path, monkeypatch) -> No
     assert malformed.status_code == 401
 
 
+def _fail_next_disk_write(monkeypatch) -> None:
+    """Simulate a real filesystem outage at the exact call `dump_model` makes.
+
+    Patches through the write path (not `SessionRepository.create` itself) so
+    the repository's own OSError-to-StorageUnavailableError translation is
+    what's under test, not a bypass of it.
+    """
+
+    def _boom(path, payload, *, indent: int = 2) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr("app.repositories.base.write_json", _boom)
+
+
+def test_mobile_session_persistence_outage_returns_correlated_503(tmp_path, monkeypatch) -> None:
+    """A session-storage outage during mobile login surfaces a correlated 503, not a bare 500."""
+
+    client, email = _client_with_account(tmp_path, monkeypatch)
+    _fail_next_disk_write(monkeypatch)
+
+    response = client.post(
+        "/api/auth/mobile/sessions",
+        json={"email": email, "password": "correct-horse-battery-staple"},
+        headers={"X-Correlation-ID": "mobile-session-outage"},
+    )
+
+    assert response.status_code == 503
+    assert response.headers["X-Correlation-ID"] == "mobile-session-outage"
+    body = response.json()
+    assert body["message"]
+    assert body["reference_id"] == "mobile-session-outage"
+
+
+def test_browser_login_persistence_outage_also_returns_correlated_503(
+    tmp_path, monkeypatch
+) -> None:
+    """The shared session-creation path protects the cookie login route too."""
+
+    client, email = _client_with_account(tmp_path, monkeypatch)
+    _fail_next_disk_write(monkeypatch)
+
+    response = client.post(
+        "/api/auth/login",
+        json={"email": email, "password": "correct-horse-battery-staple"},
+        headers={"X-Correlation-ID": "browser-login-outage"},
+    )
+
+    assert response.status_code == 503
+    assert response.headers["X-Correlation-ID"] == "browser-login-outage"
+    assert response.json()["reference_id"] == "browser-login-outage"
+
+
 def test_bearer_logout_revokes_and_session_lookup_honours_expiry(tmp_path, monkeypatch) -> None:
     client, email = _client_with_account(tmp_path, monkeypatch)
     mobile = client.post(

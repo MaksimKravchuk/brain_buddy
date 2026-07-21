@@ -163,6 +163,82 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  mobile:
+    name: Expo mobile
+    runs-on: ubuntu-latest
+    needs:
+      - workflow-lint
+      - spec-kit
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend contract dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ./backend[dev]
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.0"
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install mobile dependencies
+        working-directory: mobile
+        run: npm ci
+
+      - name: Type check mobile client
+        working-directory: mobile
+        run: npm run typecheck
+
+      - name: Lint mobile client
+        working-directory: mobile
+        run: npm run lint
+
+      - name: Run mobile Jest with Allure
+        working-directory: mobile
+        run: |
+          rm -rf allure-results
+          npm test
+
+      - name: Validate mobile Allure results
+        if: always()
+        run: python3 scripts/validate_allure_taxonomy.py --path mobile/allure-results --label mobile-jest
+
+      - name: Verify committed OpenAPI semantic and generated-client drift
+        run: |
+          cd backend
+          python -m scripts.openapi_snapshot check --snapshot ../mobile/api/openapi.json
+          cd ../mobile
+          npm run api:generate
+          git diff --exit-code -- api/openapi.json src/api/openapi.generated.ts
+
+      - name: Verify Expo SDK dependencies
+        working-directory: mobile
+        run: npx expo install --check && npx expo-doctor
+
+      - name: Export Expo web bundle
+        working-directory: mobile
+        run: npx expo export --platform web
+
+      - name: Upload mobile Allure results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-allure-results
+          path: mobile/allure-results
+          if-no-files-found: error
+          retention-days: 30
+
   docker:
     name: Docker Images
     runs-on: ubuntu-latest
@@ -262,6 +338,7 @@ jobs:
     needs:
       - backend
       - frontend
+      - mobile
       - e2e
     if: always()
     permissions:
@@ -331,6 +408,7 @@ jobs:
       - spec-kit
       - backend
       - frontend
+      - mobile
       - docker
       - e2e
       - allure-report

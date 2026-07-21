@@ -1,10 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-api_origin="${1:-${EXPO_PUBLIC_API_ORIGIN:-http://127.0.0.1:8000/api}}"
-api_origin="${api_origin%/}"
-root="$(cd "$(dirname "$0")/.." && pwd)"
+# Deterministic, ephemeral contract generation: build the FastAPI app
+# in-process against a throwaway test-mode data directory and read
+# app.openapi() directly. This never targets a live server, Fly, production,
+# or any arbitrary URL, and never requires the backend dev server to be
+# running. See backend/scripts/openapi_snapshot.py and
+# docs/api-compatibility.md.
 
-curl --fail --silent --show-error "${api_origin}/openapi.json" -o "${root}/api/openapi.json"
+root="$(cd "$(dirname "$0")/.." && pwd)"
+backend_dir="${root}/../backend"
+
+(
+  cd "${backend_dir}"
+  if [ -f .venv/bin/activate ]; then
+    # shellcheck source=/dev/null
+    source .venv/bin/activate
+  fi
+  python -m scripts.openapi_snapshot dump --out "${root}/api/openapi.json"
+)
+
 npm exec --yes --package=openapi-typescript@7.13.0 -- \
   openapi-typescript "${root}/api/openapi.json" -o "${root}/src/api/openapi.generated.ts"

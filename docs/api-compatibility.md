@@ -2,17 +2,18 @@
 
 ## Scope and source of truth
 
-Brain Buddy currently exposes one browser-facing HTTP API under `/api`. There is no
-mobile/iOS client contract yet. The live OpenAPI document at `/api/openapi.json` is
-the machine-readable source of truth for future consumers; `/api/docs` is its human
-view. Consumers must generate or validate clients from a pinned OpenAPI snapshot,
-not from frontend implementation details or persisted JSON files.
+Brain Buddy exposes one HTTP API under `/api`, consumed by the browser and the bounded
+Expo mobile client. The backend Pydantic/OpenAPI document is the machine-readable source
+of truth; `/api/docs` is its human view. `mobile/api/openapi.json` is the committed mobile
+snapshot and `mobile/src/api/openapi.generated.ts` is its generated transport surface.
+Both are generated from an ephemeral in-process test app, never from a live server,
+Fly, production, or an arbitrary URL.
 
-`info.version` currently reports the persisted-data schema version for operational
-visibility. It is **not yet an independently versioned mobile-client semantic version**.
-Before adding a second client, add a separately owned API semantic-version setting and
-publish its compatibility window; do not infer client compatibility from a storage
-migration alone.
+`info.version` is the independently owned API semantic version. It is not the persisted
+data schema version (which remains available from health/operational reporting). Mobile
+compatibility is constrained by the committed snapshot and semantic drift gate; a breaking
+change requires a versioned migration/support-window decision rather than an implicit
+storage migration.
 
 ## Compatibility rules for the current `/api` contract
 
@@ -28,8 +29,11 @@ migration alone.
 - Every documented JSON error uses `ErrorResponse`: `message` is required; `detail`
   and `reference_id` are optional. All API responses carry `X-Correlation-ID`, and the
   error `reference_id` equals that response header.
-- Auth remains an opaque, HTTP-only cookie session. Future clients must use the
-  supported authentication flow rather than assuming bearer-token compatibility.
+- Browser auth remains an opaque, HTTP-only cookie session. The mobile client establishes
+  the same server-owned opaque session through `POST /api/auth/mobile/sessions`, stores
+  only its returned token in SecureStore, and sends
+  `Authorization: Bearer <opaque-session-token>`. This is not a JWT and does not create
+  a second identity model.
 
 ## Contract change checklist
 
@@ -40,7 +44,12 @@ migration alone.
 3. Run the isolated Schemathesis contract test. It calls only an ephemeral ASGI
    `TestClient` app configured with `BRAIN_BUDDY_ENV=test` and a temporary data root;
    it must never target Fly, production, or an arbitrary URL.
-4. For a breaking change, publish a migration date, support window, and a versioned
+4. Regenerate with `cd mobile && npm run api:generate`, then run
+   `cd backend && python -m scripts.openapi_snapshot check --snapshot ../mobile/api/openapi.json`.
+   The generator creates an ephemeral test-mode app with a temporary data directory;
+   it does not make a network request. `git diff --exit-code -- mobile/api/openapi.json
+   mobile/src/api/openapi.generated.ts` is the generated-client drift gate.
+5. For a breaking change, publish a migration date, support window, and a versioned
    OpenAPI snapshot before enabling the new behavior for another client.
 
 ## Verification ownership
