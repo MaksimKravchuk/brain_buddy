@@ -343,8 +343,15 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       // flight for this query key (e.g. a background refetch some earlier,
       // unrelated invalidation kicked off) and hand back whatever *that*
       // pre-conflict request resolves to. Call the API directly so this is
-      // always a genuinely new request issued after the conflict, then
-      // publish it into the cache by hand.
+      // always a genuinely new request issued after the conflict. First
+      // cancel that exact detail query: it already consumes AbortSignal, and
+      // cancelling prevents its older response from publishing after the
+      // authoritative revision fetched below. Do not cancel the broad task
+      // root, which would disrupt other owner-scoped projections.
+      await queryClient.cancelQueries(
+        { queryKey: taskKeys.detail(taskId), exact: true },
+        { silent: true }
+      );
       const refreshed = await apiClient.getTask(taskId);
       queryClient.setQueryData(taskKeys.detail(taskId), refreshed);
       (caught as ApiError & { conflictRevision?: number }).conflictRevision = refreshed.revision;

@@ -134,6 +134,24 @@ function createDeferred<T>() {
   return { promise, resolve };
 }
 
+// Releasing a held-open mocked fetch response only settles that Promise --
+// the rest of the chain (Response#json(), the query retryer's own .then(),
+// the query cache dispatch) runs across further microtask turns that a bare
+// `act(async () => { release() })` does not wait for, since the callback
+// itself never awaits that chain. Worse, React Query's own observer
+// notification (which drives the React re-render) is scheduled via its
+// notifyManager, whose default scheduler is a *real* `setTimeout(fn, 0)` --
+// not a microtask. A same-delay `setTimeout(resolve, 0)` flush here would
+// race that internal timer for queue order (whichever was registered first
+// runs first), which is exactly backwards: at the point this is called, our
+// own flush timer registers before React Query's internal one even exists
+// yet, so it would routinely fire first and observe pre-settlement state.
+// A strictly larger delay guarantees this fires after any 0ms timer already
+// queued by the time it was scheduled, regardless of registration order.
+function flushMicrotasks(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 10));
+}
+
 beforeEach(() => {
   act(() => {
     useAuthStore.setState({
@@ -1121,15 +1139,18 @@ describe("AppRoutes", () => {
     expect(screen.queryByRole("button", { name: "Move to Waiting for" })).not.toBeInTheDocument();
   });
 
-  it("on a same-task 409 with a pre-conflict GET still held in flight, issues a genuine post-conflict GET instead of deduplicating onto the stale one, preserves every unsaved draft, and lets an explicit retry succeed", async () => {
+  it("on a same-task 409 with a pre-conflict GET still held in flight, issues a genuine post-conflict GET instead of deduplicating onto the stale one, preserves every unsaved draft, and survives the stale GET resolving after the authoritative publish without regressing the rendered detail or the explicit retry", async () => {
     // ADR-0006's on-409 refetch must be a real post-conflict request. If a
     // background refetch for this same detail query key was already in
     // flight when the conflict landed (e.g. an unrelated mutation elsewhere
     // invalidated the shared "tasks" query root moments earlier), the
     // conflict handler must not silently attach to that older, pre-conflict
     // promise -- doing so can hand back stale data and rebase the retry onto
-    // the wrong revision. This test holds that earlier GET open forever and
-    // proves the conflict handler issues an independent, genuinely new GET.
+    // the wrong revision. Beyond that, the older promise is still alive:
+    // this test resolves it only *after* the authoritative revision-2 GET
+    // has already been published into the cache, proving that late arrival
+    // can never regress the rendered detail back to the pre-conflict
+    // revision, nor corrupt the baseline the explicit retry targets.
     const user = userEvent.setup();
     let taskGetCount = 0;
     let releaseStaleInFlightGet: (() => void) | undefined;
@@ -1141,25 +1162,39 @@ describe("AppRoutes", () => {
       if (url.endsWith("/tasks/task-1") && method === "GET") {
         taskGetCount += 1;
         if (taskGetCount === 1) {
-          return Promise.resolve(jsonResponse({ ...taskResponse.items[0], details: "Original details", revision: 1 }));
+          return Promise.resolve(
+            jsonResponse({ ...taskResponse.items[0], title: "Fix onboarding drop-off", details: "Original details", revision: 1 })
+          );
         }
         if (taskGetCount === 2) {
           // The background refetch triggered by the unrelated create's
-          // invalidateTasks() below. Held open deliberately so it is still
-          // in flight at the moment the conflicting Save is rejected.
+          // invalidateTasks() below. Held open deliberately, and released
+          // later -- strictly after the authoritative revision-2 GET below
+          // has already been published -- to prove its late arrival is inert.
           return new Promise<Response>((resolve) => {
             releaseStaleInFlightGet = () =>
-              resolve(jsonResponse({ ...taskResponse.items[0], details: "Stale pre-conflict snapshot", revision: 1 }));
+              resolve(
+                jsonResponse({
+                  ...taskResponse.items[0],
+                  title: "STALE TITLE (must never reappear)",
+                  details: "Stale pre-conflict snapshot",
+                  revision: 1
+                })
+              );
           });
         }
         // The genuine post-conflict GET the conflict handler must issue.
-        return Promise.resolve(jsonResponse({ ...taskResponse.items[0], details: "Edited concurrently elsewhere", revision: 2 }));
+        return Promise.resolve(
+          jsonResponse({ ...taskResponse.items[0], title: "Edited concurrently elsewhere", details: "Original details", revision: 2 })
+        );
       }
       if (url.endsWith("/tasks/task-1") && method === "PATCH") {
         const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
         patchBodies.push(body);
         if (body.expected_revision === 2) {
-          return Promise.resolve(jsonResponse({ ...taskResponse.items[0], ...body, revision: 3 }));
+          return Promise.resolve(
+            jsonResponse({ ...taskResponse.items[0], ...body, title: "Edited concurrently elsewhere", revision: 3 })
+          );
         }
         return Promise.resolve(jsonResponse({ detail: "Conflict" }, 409));
       }
@@ -1179,6 +1214,15 @@ describe("AppRoutes", () => {
     });
 
     renderRoutes("/tasks/next/task-1");
+
+    const detailPanel = () => {
+      const heading = screen.getByRole("heading", { name: "Task detail" });
+      const aside = heading.closest("aside");
+      if (!aside) {
+        throw new Error("expected the task detail panel to be mounted");
+      }
+      return aside as HTMLElement;
+    };
 
     expect(await screen.findByLabelText("Details")).toHaveValue("Original details");
     await user.clear(screen.getByLabelText("Details"));
@@ -1202,13 +1246,199 @@ describe("AppRoutes", () => {
     // ever resolving that stuck promise.
     await waitFor(() => expect(taskGetCount).toBeGreaterThanOrEqual(3));
 
+    // The alert only renders once rejectAfterConflictRefetch has finished --
+    // i.e. once the revision-2 GET has resolved *and* been published into
+    // the cache. This is the ordering guarantee the stale-GET release below
+    // depends on.
     expect(await screen.findByRole("alert")).toHaveTextContent("Conflict");
     expect(screen.getByLabelText("Details")).toHaveValue("My unsaved draft edit");
+    expect(within(detailPanel()).getByText("Edited concurrently elsewhere")).toBeInTheDocument();
 
+    // Now release the stale, pre-conflict GET -- strictly after the
+    // authoritative revision-2 publish above. Its resolution must be inert:
+    // it must not regress the rendered detail back to the pre-conflict title.
+    await act(async () => {
+      releaseStaleInFlightGet?.();
+      await flushMicrotasks();
+    });
+
+    expect(within(detailPanel()).queryByText("STALE TITLE (must never reappear)")).not.toBeInTheDocument();
+    expect(within(detailPanel()).getByText("Edited concurrently elsewhere")).toBeInTheDocument();
+    expect(screen.getByLabelText("Details")).toHaveValue("My unsaved draft edit");
+
+    // The explicit retry now targets the refetched revision and succeeds --
+    // proving the retry's own concurrency baseline was never corrupted by
+    // the late-arriving stale GET either.
     await user.click(screen.getByRole("button", { name: "Save task detail" }));
     await waitFor(() => expect(patchBodies.length).toBeGreaterThanOrEqual(2));
     expect(patchBodies[1]).toMatchObject({ expected_revision: 2, details: "My unsaved draft edit" });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("on a same-task 409 transition conflict, a stale pre-conflict GET resolving after the authoritative publish cannot regress the cache -- including through the explicit retry's own projection remount", async () => {
+    // Same race as the Save spec above, but through the detail
+    // Complete/transition path (POST .../transitions, not PATCH). The stale,
+    // pre-conflict GET is released right after the authoritative revision-2
+    // GET has been published (same window as the Save spec) -- i.e. before
+    // the explicit retry, whose own success triggers a *second*,
+    // React-Query-driven invalidation of this same query. That second
+    // invalidation defaults to cancelRefetch: true and would cancel a
+    // still-in-flight stale GET on its own, which would mask the bug this
+    // spec targets; releasing early keeps the assertion specific to the
+    // conflict handler's own fencing. The retry then moves the task out of
+    // the "Next" projection, remounting TaskDetailPanel entirely (see the
+    // "publishes the authoritative TaskResponse" spec above) -- proving the
+    // freshly mounted panel still reflects the correctly-fenced state, not
+    // whatever the (already-settled) stale GET would have written.
+    const user = userEvent.setup();
+    // The single source of truth the mock server advances on every
+    // successful transition -- read live by every "genuine" GET, so a
+    // later action (the explicit Reopen retry) always sees the correct,
+    // just-confirmed state rather than a hardcoded snapshot.
+    let server: { state: "next" | "completed"; revision: number } = { state: "next", revision: 1 };
+    let taskGetCount = 0;
+    let releaseStaleInFlightGet: (() => void) | undefined;
+    const transitionBodies: Array<Record<string, unknown>> = [];
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/tasks/task-1/transitions") && method === "POST") {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        transitionBodies.push(body);
+        if (body.expected_revision !== server.revision) {
+          return Promise.resolve(jsonResponse({ detail: "Conflict" }, 409));
+        }
+        server = {
+          state: body.action === "complete" ? "completed" : (String(body.to_state ?? server.state) as "next" | "completed"),
+          revision: server.revision + 1
+        };
+        return Promise.resolve(jsonResponse({ ...taskResponse.items[0], ...server, title: "Edited concurrently elsewhere" }));
+      }
+      if (url.endsWith("/tasks/task-1") && method === "GET") {
+        taskGetCount += 1;
+        if (taskGetCount === 1) {
+          return Promise.resolve(
+            jsonResponse({ ...taskResponse.items[0], title: "Fix onboarding drop-off", state: "next", revision: 1 })
+          );
+        }
+        if (taskGetCount === 2) {
+          // The background refetch triggered by the unrelated create's
+          // invalidateTasks() below. Held open deliberately, and released
+          // later -- strictly after the authoritative revision-2 GET has
+          // already been published -- to prove its late arrival is inert.
+          // It reflects the pre-conflict snapshot the client actually saw
+          // (revision 1), not whatever the server has since moved on to.
+          return new Promise<Response>((resolve) => {
+            releaseStaleInFlightGet = () =>
+              resolve(
+                jsonResponse({
+                  ...taskResponse.items[0],
+                  title: "STALE TITLE (must never reappear)",
+                  state: "next",
+                  revision: 1
+                })
+              );
+          });
+        }
+        // The genuine post-conflict GET (and every later background
+        // refetch) must reflect the live server-side truth.
+        return Promise.resolve(jsonResponse({ ...taskResponse.items[0], ...server, title: "Edited concurrently elsewhere" }));
+      }
+      if (url.endsWith("/tasks") && method === "POST") {
+        // Simulates a genuine concurrent edit landing server-side, moments
+        // before the Complete click below, that the client doesn't know
+        // about yet (the stale in-flight GET above still reports revision 1).
+        server = { ...server, revision: 2 };
+        return Promise.resolve(jsonResponse(taskFixture("task-unrelated", "Unrelated capture"), 201));
+      }
+      if (url.endsWith("/tasks") || url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse({
+          ...taskResponse,
+          items: server.state === "next" ? [{ ...taskResponse.items[0], ...server }] : []
+        }));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/next/task-1");
+
+    const detailPanel = () => {
+      const heading = screen.getByRole("heading", { name: "Task detail" });
+      const aside = heading.closest("aside");
+      if (!aside) {
+        throw new Error("expected the task detail panel to be mounted");
+      }
+      return aside as HTMLElement;
+    };
+
+    expect(await screen.findByRole("button", { name: "Complete" })).toBeInTheDocument();
+
+    // Every mounted unsaved draft field must survive the 409/rebase below.
+    await user.clear(screen.getByLabelText("Title"));
+    await user.type(screen.getByLabelText("Title"), "My unsaved title edit");
+    await user.type(screen.getByLabelText("Details"), "My unsaved draft edit");
+    await user.selectOptions(screen.getByLabelText("Priority"), "high");
+
+    // Trigger the background refetch (GET #2) and leave it in flight.
+    await user.type(screen.getByLabelText("New task title"), "Unrelated capture");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await waitFor(() => expect(taskGetCount).toBe(2));
+    expect(releaseStaleInFlightGet).toBeDefined();
+
+    // Complete collides with the real revision-1 baseline (a genuine
+    // concurrent edit landed server-side even though the stale in-flight GET
+    // above hasn't told the client about it yet) and is rejected with 409.
+    await user.click(screen.getByRole("button", { name: "Complete" }));
+    await waitFor(() => expect(transitionBodies.length).toBeGreaterThanOrEqual(1));
+    expect(transitionBodies[0]).toMatchObject({ action: "complete", expected_revision: 1 });
+
+    // The alert only renders once rejectAfterConflictRefetch has finished --
+    // i.e. once the revision-2 GET has resolved *and* been published.
+    expect(await screen.findByRole("alert")).toHaveTextContent("Conflict");
+    expect(screen.getByLabelText("Title")).toHaveValue("My unsaved title edit");
+    expect(screen.getByLabelText("Details")).toHaveValue("My unsaved draft edit");
+    expect(screen.getByLabelText("Priority")).toHaveValue("high");
+    expect(within(detailPanel()).getByText("Edited concurrently elsewhere")).toBeInTheDocument();
+
+    // Now release the stale, pre-conflict GET -- strictly after the
+    // authoritative revision-2 publish above, and before the explicit retry
+    // below. Its resolution must be inert: it must not regress the rendered
+    // detail back to the pre-conflict title.
+    await act(async () => {
+      releaseStaleInFlightGet?.();
+      await flushMicrotasks();
+    });
+
+    expect(within(detailPanel()).queryByText("STALE TITLE (must never reappear)")).not.toBeInTheDocument();
+    expect(within(detailPanel()).getByText("Edited concurrently elsewhere")).toBeInTheDocument();
+    expect(screen.getByLabelText("Title")).toHaveValue("My unsaved title edit");
+    expect(screen.getByLabelText("Details")).toHaveValue("My unsaved draft edit");
+
+    // The explicit retry now targets the refetched revision and succeeds,
+    // moving the task out of the Next projection and remounting the panel.
+    // The remount must read the correctly-fenced state, not whatever the
+    // (already inert) stale GET would have written.
+    await user.click(screen.getByRole("button", { name: "Complete" }));
+    await waitFor(() => expect(transitionBodies.length).toBeGreaterThanOrEqual(2));
+    expect(transitionBodies[1]).toMatchObject({ action: "complete", expected_revision: 2 });
+
+    expect(await screen.findByRole("button", { name: "Reopen to Next" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Complete" })).not.toBeInTheDocument();
+    expect(within(detailPanel()).getByText("Edited concurrently elsewhere")).toBeInTheDocument();
+
+    // A further action from the remounted panel must still target the
+    // correct, uncorrupted concurrency baseline (3), not the stale one (1).
+    await user.click(screen.getByRole("button", { name: "Reopen to Next" }));
+    await waitFor(() => expect(transitionBodies.length).toBeGreaterThanOrEqual(3));
+    expect(transitionBodies[2]).toMatchObject({ action: "reopen", to_state: "next", expected_revision: 3 });
+    expect(await screen.findByRole("button", { name: "Complete" })).toBeInTheDocument();
   });
 
   it("keeps direct task detail visible when the task is absent from the active projection", async () => {

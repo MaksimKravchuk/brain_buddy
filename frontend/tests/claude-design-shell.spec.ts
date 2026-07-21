@@ -468,11 +468,8 @@ test.describe("mobile task shell at the canonical 375x812 viewport", () => {
     await page.getByRole("button", { name: "Open task navigation" }).click();
     await expect(page.getByRole("dialog", { name: "Task navigation" })).toBeVisible();
     await test.step("Verify the mobile task drawer fits inside the viewport", async () => {
-      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-      await attachment("Viewport overflow", `Horizontal overflow: ${overflow}px`, ContentType.TEXT);
-      if (overflow > 0) {
-        throw new Error(`Expected no horizontal overflow, received ${overflow}px`);
-      }
+      await page.waitForFunction(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
+      await attachment("Viewport overflow", "Horizontal overflow: 0px", ContentType.TEXT);
     });
     await test.step("Verify drawer CRUD stays reachable and Escape closes the drawer", async () => {
       const drawer = page.getByRole("dialog", { name: "Task navigation" });
@@ -786,10 +783,7 @@ test.describe("mobile at-rest topbar and card density at 402x874", () => {
       await expect(page.getByText("Brain Buddy", { exact: true })).toBeHidden();
     });
 
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-    if (overflow > 0) {
-      throw new Error(`Expected no horizontal overflow, received ${overflow}px`);
-    }
+    await page.waitForFunction(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
   });
 
   test("task cards use compact ~14px padding/radius, a >=44px check target, a wrapping title, and inline-wrapping chips instead of full-width strips", async ({ page }) => {
@@ -821,10 +815,7 @@ test.describe("mobile at-rest topbar and card density at 402x874", () => {
       }
     });
 
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-    if (overflow > 0) {
-      throw new Error(`Expected no horizontal overflow, received ${overflow}px`);
-    }
+    await page.waitForFunction(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 
     await expect(page.locator("body")).toHaveScreenshot("claude-design-task-cards-mobile-402x874.png", {
       animations: "disabled",
