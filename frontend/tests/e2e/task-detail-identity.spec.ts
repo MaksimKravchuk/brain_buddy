@@ -141,4 +141,92 @@ test.describe("task detail identity acceptance", () => {
       );
     });
   });
+
+  test("E2E-TASK-07 browser transition 409 refetches revision 2, preserves the draft, and retries explicitly", async ({ page }, testInfo) => {
+    const email = uniqueEmail("task-detail-transition-conflict", testInfo);
+    await signupThroughUi(page, email, await mintInvite());
+
+    const task = await createTaskViaApi(page, "Task detail transition must retry after a real conflict", { state: "next" });
+    const draftTitle = "Browser draft survives transition conflict";
+    const authoritativeTitle = "Authoritative edit before transition retry";
+    const titleInput = page.getByRole("textbox", { name: "Title", exact: true });
+
+    await test.step("owner opens the real detail page and enters an unsaved title draft", async () => {
+      await page.goto(`/tasks/next/${task.id}`);
+      await expect(titleInput).toHaveValue(task.title);
+      await titleInput.fill(draftTitle);
+    });
+
+    await test.step("a separate real API PATCH advances the task to revision 2 before the browser transition", async () => {
+      const authoritative = await apiPatch<TaskRecord>(page, `/api/tasks/${task.id}`, {
+        title: authoritativeTitle,
+        expected_revision: task.revision
+      });
+      if (authoritative.status() !== 200) {
+        throw new Error(`authoritative revision bump failed with ${authoritative.status()} ${await authoritative.text()}`);
+      }
+    });
+
+    await test.step("first browser Complete receives 409, fetches authoritative revision 2, and leaves the draft visible", async () => {
+      const conflictRequest = page.waitForRequest(
+        (request) => request.method() === "POST" && request.url().endsWith(`/api/tasks/${task.id}/transitions`)
+      );
+      const conflictResponse = page.waitForResponse(
+        (response) => response.request().method() === "POST" && response.url().endsWith(`/api/tasks/${task.id}/transitions`)
+      );
+      const authoritativeGet = page.waitForResponse(
+        (response) => response.request().method() === "GET" && response.url().endsWith(`/api/tasks/${task.id}`)
+      );
+
+      await page.getByRole("button", { name: "Complete", exact: true }).click();
+
+      const request = await conflictRequest;
+      const requestBody = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>;
+      assertCondition(
+        requestBody.expected_revision === task.revision,
+        `first transition must use stale revision ${task.revision}, got ${JSON.stringify(requestBody)}`
+      );
+
+      const transition = await conflictResponse;
+      assertCondition(transition.status() === 409, `expected first Complete to return 409, got ${transition.status()}`);
+
+      const refetch = await authoritativeGet;
+      assertCondition(refetch.status() === 200, `expected conflict refetch to return 200, got ${refetch.status()}`);
+      const authoritative = (await refetch.json()) as TaskRecord;
+      assertCondition(
+        authoritative.title === authoritativeTitle && authoritative.revision === 2,
+        `conflict refetch must return the authoritative revision 2 task, got ${JSON.stringify(authoritative)}`
+      );
+
+      await expect(page.getByRole("alert")).toContainText("has newer changes; reload before saving.");
+      await expect(titleInput).toHaveValue(draftTitle);
+    });
+
+    await test.step("explicit retry Complete uses revision 2 and succeeds with a real 200 transition", async () => {
+      const retryRequest = page.waitForRequest(
+        (request) => request.method() === "POST" && request.url().endsWith(`/api/tasks/${task.id}/transitions`)
+      );
+      const retryResponse = page.waitForResponse(
+        (response) => response.request().method() === "POST" && response.url().endsWith(`/api/tasks/${task.id}/transitions`)
+      );
+
+      await page.getByRole("button", { name: "Complete", exact: true }).click();
+
+      const request = await retryRequest;
+      const requestBody = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>;
+      assertCondition(
+        requestBody.expected_revision === 2,
+        `retry transition must use rebased revision 2, got ${JSON.stringify(requestBody)}`
+      );
+
+      const transition = await retryResponse;
+      assertCondition(transition.status() === 200, `expected retry Complete to return 200, got ${transition.status()}`);
+      const completed = (await transition.json()) as TaskRecord;
+      assertCondition(
+        completed.state === "completed" && completed.revision === 3,
+        `retry transition must complete revision 3, got ${JSON.stringify(completed)}`
+      );
+      await expect(page.getByRole("button", { name: "Reopen to Next" })).toBeVisible();
+    });
+  });
 });
