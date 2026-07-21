@@ -38,7 +38,9 @@ class TranscriptHypothesis:
         if self.sequence < 1:
             raise ValidationFailure("Transcript sequence must be positive.")
         if self.start_ms < 0 or self.end_ms < 0 or self.end_ms <= self.start_ms:
-            raise ValidationFailure("Transcript hypothesis requires a positive audio span.")
+            raise ValidationFailure(
+                "Transcript hypothesis requires a positive audio span."
+            )
         if not self.text.strip():
             raise ValidationFailure("Transcript hypothesis text is required.")
 
@@ -211,7 +213,12 @@ def active_transcript_hypotheses(
     }
     return sorted(
         [hypothesis for hypothesis in hypotheses if hypothesis.id not in superseded],
-        key=lambda segment: (segment.start_ms, segment.end_ms, segment.sequence, segment.id),
+        key=lambda segment: (
+            segment.start_ms,
+            segment.end_ms,
+            segment.sequence,
+            segment.id,
+        ),
     )
 
 
@@ -233,7 +240,9 @@ def apply_proposal_patches(
             for predecessor_id in patch.predecessor_ids:
                 predecessor = by_id.get(predecessor_id)
                 if predecessor is not None:
-                    successor_ids = sorted({*predecessor.successor_ids, patch.proposal_id})
+                    successor_ids = sorted(
+                        {*predecessor.successor_ids, patch.proposal_id}
+                    )
                     tombstone = _replace(
                         predecessor,
                         tombstoned=True,
@@ -248,7 +257,9 @@ def apply_proposal_patches(
                 title=patch.title,
                 source_segment_ids=patch.source_segment_ids,
                 predecessor_ids=patch.predecessor_ids,
-                status="reconciled" if patch.producer == "reconciler" else "provisional",
+                status=(
+                    "reconciled" if patch.producer == "reconciler" else "provisional"
+                ),
                 ordinal=ordinal,
             )
             by_id[proposal.id] = proposal
@@ -313,7 +324,11 @@ def apply_proposal_patches(
                 title_revision = current.title_revision + 1
             if patch.source_segment_ids:
                 source_segment_ids = patch.source_segment_ids
-        elif "title" in current.locked_fields and patch.title and patch.title != current.title:
+        elif (
+            "title" in current.locked_fields
+            and patch.title
+            and patch.title != current.title
+        ):
             status = "conflicted"
             conflicts.append(
                 ProposalConflict(
@@ -361,16 +376,26 @@ def apply_proposal_patches(
         by_id[current.id] = updated
         history[current.id] = updated
 
-    active = [by_id[item_id] for item_id in order if item_id in by_id and not by_id[item_id].tombstoned]
+    active = [
+        by_id[item_id]
+        for item_id in order
+        if item_id in by_id and not by_id[item_id].tombstoned
+    ]
     active.sort(key=lambda proposal: (proposal.ordinal, proposal.id))
-    active = [_replace(proposal, ordinal=index + 1) for index, proposal in enumerate(active)]
-    return ProposalProjection(active=active, history=list(history.values()), patches=patches)
+    active = [
+        _replace(proposal, ordinal=index + 1) for index, proposal in enumerate(active)
+    ]
+    return ProposalProjection(
+        active=active, history=list(history.values()), patches=patches
+    )
 
 
 def _insertion_ordinal(
     by_id: dict[str, ReconciledProposal], order: list[str], predecessor_ids: list[str]
 ) -> int:
-    predecessor_ordinals = [by_id[item_id].ordinal for item_id in predecessor_ids if item_id in by_id]
+    predecessor_ordinals = [
+        by_id[item_id].ordinal for item_id in predecessor_ids if item_id in by_id
+    ]
     if predecessor_ordinals:
         return min(predecessor_ordinals)
     return len([proposal for proposal in by_id.values() if not proposal.tombstoned]) + 1
@@ -553,7 +578,9 @@ class BrainDumpActionReceiptDocument(StorageBaseModel):
 
     id: str
     proposal_id: str
-    task_id: str
+    task_id: str | None = None
+    """``None`` only for a ``failed``/``skipped`` outcome -- no Task was
+    ever created for that action, so nothing exists to reference."""
     child_idempotency_key: str
     source_segment_ids: list[str] = Field(default_factory=list)
     proposal_patch_ids: list[str] = Field(default_factory=list)
@@ -566,7 +593,9 @@ class BrainDumpActionReceiptDocument(StorageBaseModel):
     reconciliation_quality: Literal[
         "none", "provisional_only", "accurate", "conflicted"
     ] = "none"
-    confirmed_title_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    confirmed_title_sha256: str | None = Field(
+        default=None, min_length=64, max_length=64
+    )
     proposal_revision: int | None = Field(default=None, ge=1)
     user_edited: bool = False
     confidence: Literal["unknown"] = "unknown"
@@ -644,7 +673,12 @@ class BrainDumpProposalBatchDocument(StorageBaseModel):
 
     id: str
     based_on_proposal_revision: int = Field(ge=1)
-    status: Literal["frozen", "committed", "superseded"] = "frozen"
+    status: Literal["frozen", "committed", "superseded", "failed"] = "frozen"
+    """``failed``: every action resolved (succeeded or terminally failed) but
+    at least one did not succeed; per-action results are the source of truth
+    for what to retry, and retrying requires a fresh freeze (ADR-0002 "the
+    batch becomes failed with per-action results and can be retried
+    idempotently")."""
     actions: list[BrainDumpProposalBatchActionDocument] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list, max_length=20)
     created_at: datetime
@@ -700,7 +734,9 @@ class BrainDumpOperationDocument(StorageBaseModel):
     """Operation-level counter bumped by any accepted proposal patch; a
     ``ProposalBatch`` freezes against this value and any later change
     supersedes it (ADR-0002 "freeze/confirm, patch, and conflicts")."""
-    consent_decisions: list[BrainDumpConsentDecisionDocument] = Field(default_factory=list)
+    consent_decisions: list[BrainDumpConsentDecisionDocument] = Field(
+        default_factory=list
+    )
     proposal_batches: list[BrainDumpProposalBatchDocument] = Field(default_factory=list)
     raw_audio_state: Literal[
         "not_received", "retained", "deletion_pending", "deleted"
@@ -715,10 +751,13 @@ class BrainDumpOperationDocument(StorageBaseModel):
 def active_proposal_batch(
     operation: BrainDumpOperationDocument,
 ) -> BrainDumpProposalBatchDocument | None:
-    """The one currently frozen (not yet committed/superseded) batch, if any."""
+    """The one batch still awaiting resolution, if any: either currently
+    frozen, or ``failed`` (a partial-failure result the owner has not yet
+    superseded with a fresh freeze). Committed/superseded batches are never
+    "active"."""
 
     for batch in reversed(operation.proposal_batches):
-        if batch.status == "frozen":
+        if batch.status in {"frozen", "failed"}:
             return batch
     return None
 
@@ -734,8 +773,14 @@ def committed_proposal_batch(
     return None
 
 
-def import_mode(operation: BrainDumpOperationDocument) -> Literal["native_v2", "legacy_preview_only"]:
-    return "legacy_preview_only" if operation.legacy_import == "legacy_preview_only" else "native_v2"
+def import_mode(
+    operation: BrainDumpOperationDocument,
+) -> Literal["native_v2", "legacy_preview_only"]:
+    return (
+        "legacy_preview_only"
+        if operation.legacy_import == "legacy_preview_only"
+        else "native_v2"
+    )
 
 
 def operation_warning_codes(operation: BrainDumpOperationDocument) -> list[str]:

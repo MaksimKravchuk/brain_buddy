@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -15,6 +16,25 @@ class ConfirmableProposal(Protocol):
     title: str
     source_segment_ids: list[str]
     deleted: bool
+
+
+def brain_dump_source_action_key(*, operation_id: str, proposal_id: str) -> str:
+    """Permanent ``TaskPort`` dedupe identity for one proposal's confirmation.
+
+    Deliberately independent of any ``ProposalBatch`` ID: canonical confirm's
+    own ``H(operation_id, batch_id, action_id)`` key still governs batch-
+    scoped attempt/receipt bookkeeping, but the actual idempotency key handed
+    to ``TaskPort`` must be the same for the same proposal no matter which
+    path confirms it. That is what lets a crash after canonical Task
+    persistence but before this operation's own receipt write, followed by
+    the deprecated ``/commit`` alias (or a second canonical confirm through a
+    new batch after a partial-failure retry), reuse the exact same Task
+    instead of creating a duplicate for the same proposal.
+    """
+
+    return hashlib.sha256(
+        f"brain_dump_source_action:{operation_id}:{proposal_id}".encode()
+    ).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,7 +62,9 @@ def confirm_native_inbox_actions(
     for proposal in proposals:
         if proposal.deleted:
             continue
-        child_key = f"brain_dump_action:{operation_id}:{proposal.id}"
+        child_key = brain_dump_source_action_key(
+            operation_id=operation_id, proposal_id=proposal.id
+        )
         source_ref = f"brain_dump:{operation_id}:{proposal.id}"
         task = task_port.create_native_inbox_task(
             owner_id=owner_id,

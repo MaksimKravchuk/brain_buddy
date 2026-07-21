@@ -459,7 +459,7 @@ class BrainDumpProposalPatchResponse(StrictBaseModel):
 class BrainDumpActionReceiptResponse(StrictBaseModel):
     id: str
     proposal_id: str
-    task_id: str
+    task_id: str | None = None
     child_idempotency_key: str
     source_segment_ids: list[str] = Field(default_factory=list)
     proposal_patch_ids: list[str] = Field(default_factory=list)
@@ -510,7 +510,7 @@ class BrainDumpProposalBatchActionResultResponse(StrictBaseModel):
 class BrainDumpProposalBatchResponse(StrictBaseModel):
     id: str
     based_on_proposal_revision: int
-    status: Literal["frozen", "committed", "superseded"]
+    status: Literal["frozen", "committed", "superseded", "failed"]
     snapshot: list[BrainDumpProposalBatchActionResponse] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     created_at: datetime

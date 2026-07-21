@@ -1,14 +1,20 @@
 """Canonical raw-audio retention and delete-now tests (T059).
 
 Covers: owner scoping, idempotent replay, persistence/physical chunk
-cleanup across a simulated process restart, and preserved Tasks/action
-receipts/non-audio provenance after delete-now.
+cleanup across a simulated process restart, preserved Tasks/action
+receipts/non-audio provenance after delete-now, and durable
+``deletion_pending`` before any physical unlink -- with the startup sweep
+converging a crash between the two phases -- for delete-now, consent
+withdrawal, and cancel.
 """
 
 from __future__ import annotations
 
 import hashlib
 
+import pytest
+
+from app.schemas.tasks import BrainDumpConsentDecisionRequest, ExpectedRevisionRequest
 from app.workflows.voice_brain_dump.repository import OperationRepository
 from tests.test_brain_dump_operations_api import _start_operation, _upload_and_seal
 
@@ -63,7 +69,9 @@ def test_delete_now_is_idempotent_on_replay(api_client) -> None:
     second = _delete_now(api_client, operation, "delete-replay-key")
     assert second.status_code == 200, second.text
     second_body = second.json()
-    assert second_body["raw_audio"]["deleted_at"] == first_body["raw_audio"]["deleted_at"]
+    assert (
+        second_body["raw_audio"]["deleted_at"] == first_body["raw_audio"]["deleted_at"]
+    )
     assert second_body["revision"] == first_body["revision"]
 
 
@@ -151,7 +159,9 @@ def test_delete_now_preserves_tasks_receipts_and_non_audio_provenance(
     # are non-audio provenance and must never be removed by audio delete.
     assert deleted_body["committed_task_ids"] == committed_task_ids
     assert deleted_body["action_receipts"] == action_receipts
-    assert deleted_body["committed_proposal_batch"]["snapshot"] == active_batch["snapshot"]
+    assert (
+        deleted_body["committed_proposal_batch"]["snapshot"] == active_batch["snapshot"]
+    )
 
     inbox = api_client.get("/api/tasks", params={"state": "inbox"}).json()
     assert [item["title"] for item in inbox["items"]] == ["Buy milk"]
@@ -164,7 +174,9 @@ def test_accurate_reconciliation_unavailable_once_raw_audio_is_gone(
     read the sealed original audio accurate STT requires -- the projection
     must say so even though this operation was never a legacy import."""
 
-    operation = _reconciled_operation(api_client, "retention-availability", b"Buy milk.")
+    operation = _reconciled_operation(
+        api_client, "retention-availability", b"Buy milk."
+    )
     assert operation["accurate_reconciliation_available"] is True
 
     deleted = _delete_now(api_client, operation, "delete-availability")
@@ -185,9 +197,14 @@ def test_startup_sweep_drains_operation_stranded_in_deletion_pending(
     container = api_client.app.state.container
     voice_service = container.voice_brain_dump_service
 
-    stranded = voice_service.get_brain_dump_operation(operation["id"], owner_id=owner_id)
+    stranded = voice_service.get_brain_dump_operation(
+        operation["id"], owner_id=owner_id
+    )
     pending = stranded.model_copy(
-        update={"raw_audio_state": "deletion_pending", "revision": stranded.revision + 1}
+        update={
+            "raw_audio_state": "deletion_pending",
+            "revision": stranded.revision + 1,
+        }
     )
     container.voice_operation_repo.save_brain_dump_operation(pending)
     chunk_path = container.voice_operation_repo.brain_dump_audio_chunk_path(
@@ -199,9 +216,169 @@ def test_startup_sweep_drains_operation_stranded_in_deletion_pending(
     assert drained == 1
     assert not chunk_path.exists()
 
-    recovered = voice_service.get_brain_dump_operation(operation["id"], owner_id=owner_id)
+    recovered = voice_service.get_brain_dump_operation(
+        operation["id"], owner_id=owner_id
+    )
     assert recovered.raw_audio_state == "deleted"
     assert recovered.raw_audio_deleted_at is not None
 
     # Idempotent: nothing left to drain on a second pass.
     assert voice_service.drain_pending_raw_audio_deletions() == 0
+
+
+def _crash_before_unlink(monkeypatch, container):
+    """Simulate a process crash after ``deletion_pending`` is durably
+    committed (phase 1) but before the physical unlink runs (phase 2):
+    raise before the real ``delete_brain_dump_audio_chunks`` ever executes,
+    so no bytes are removed yet."""
+
+    real_delete = container.voice_operation_repo.delete_brain_dump_audio_chunks
+
+    def crashing_delete(*args, **kwargs):
+        raise RuntimeError("simulated crash before physical unlink")
+
+    monkeypatch.setattr(
+        container.voice_operation_repo,
+        "delete_brain_dump_audio_chunks",
+        crashing_delete,
+    )
+    return real_delete
+
+
+def test_consent_withdrawal_persists_deletion_pending_before_unlink_and_sweep_converges(
+    api_client, monkeypatch
+) -> None:
+    """Consent withdrawal must durably commit ``deletion_pending`` before any
+    physical unlink. A crash between that commit and the unlink must leave
+    the chunk bytes intact and the record accurately ``deletion_pending``
+    (never a state/bytes mismatch); the startup sweep then converges it to
+    ``deleted`` without a fresh user command."""
+
+    audio = b"Buy milk."
+    operation = _reconciled_operation(api_client, "withdraw-crash", audio)
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    container = api_client.app.state.container
+    voice_service = container.voice_brain_dump_service
+    chunk_path = container.voice_operation_repo.brain_dump_audio_chunk_path(
+        owner_id, operation["id"], 0, hashlib.sha256(audio).hexdigest()
+    )
+    assert chunk_path.exists()
+
+    _crash_before_unlink(monkeypatch, container)
+    with pytest.raises(RuntimeError):
+        voice_service.record_brain_dump_consent_decision(
+            operation["id"],
+            BrainDumpConsentDecisionRequest(
+                decision="withdraw",
+                expected_operation_revision=operation["revision"],
+            ),
+            owner_id=owner_id,
+            idempotency_key="withdraw-crash-key",
+        )
+    monkeypatch.undo()
+
+    # Phase 1 landed durably; physical bytes are untouched because the
+    # crash happened before the unlink -- never "state says deleted while
+    # bytes still linger" or "bytes gone while state still says retained".
+    stranded = voice_service.get_brain_dump_operation(
+        operation["id"], owner_id=owner_id
+    )
+    assert stranded.raw_audio_state == "deletion_pending"
+    assert stranded.consent.status == "withdrawn"
+    assert chunk_path.exists()
+
+    drained = voice_service.drain_pending_raw_audio_deletions()
+    assert drained == 1
+    assert not chunk_path.exists()
+    recovered = voice_service.get_brain_dump_operation(
+        operation["id"], owner_id=owner_id
+    )
+    assert recovered.raw_audio_state == "deleted"
+    assert recovered.raw_audio_deleted_at is not None
+
+
+def test_cancel_persists_deletion_pending_before_unlink_and_sweep_converges(
+    api_client, monkeypatch
+) -> None:
+    """Cancelling an operation with retained audio must durably commit
+    ``deletion_pending`` before any physical unlink, exactly like delete-now
+    and consent withdrawal. A crash between the two phases must not lose or
+    strand the audio outside the sweep's reach."""
+
+    audio = b"Buy milk."
+    operation = _reconciled_operation(api_client, "cancel-crash", audio)
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    container = api_client.app.state.container
+    voice_service = container.voice_brain_dump_service
+    chunk_path = container.voice_operation_repo.brain_dump_audio_chunk_path(
+        owner_id, operation["id"], 0, hashlib.sha256(audio).hexdigest()
+    )
+    assert chunk_path.exists()
+
+    _crash_before_unlink(monkeypatch, container)
+    with pytest.raises(RuntimeError):
+        voice_service.transition_brain_dump_operation(
+            operation["id"],
+            ExpectedRevisionRequest(expected_revision=operation["revision"]),
+            owner_id=owner_id,
+            idempotency_key="cancel-crash-key",
+            action="cancel",
+        )
+    monkeypatch.undo()
+
+    stranded = voice_service.get_brain_dump_operation(
+        operation["id"], owner_id=owner_id
+    )
+    assert stranded.status == "cancelled"
+    assert stranded.raw_audio_state == "deletion_pending"
+    assert chunk_path.exists()
+
+    drained = voice_service.drain_pending_raw_audio_deletions()
+    assert drained == 1
+    assert not chunk_path.exists()
+    recovered = voice_service.get_brain_dump_operation(
+        operation["id"], owner_id=owner_id
+    )
+    assert recovered.raw_audio_state == "deleted"
+
+
+def test_delete_now_persists_deletion_pending_before_unlink_and_sweep_converges(
+    api_client, monkeypatch
+) -> None:
+    """The explicit delete-now command must also leave a durably-committed
+    ``deletion_pending`` record if the physical unlink itself crashes, so
+    the sweep -- not a repeated user call -- is what converges it."""
+
+    audio = b"Buy milk."
+    operation = _reconciled_operation(api_client, "delete-now-crash", audio)
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    container = api_client.app.state.container
+    voice_service = container.voice_brain_dump_service
+    chunk_path = container.voice_operation_repo.brain_dump_audio_chunk_path(
+        owner_id, operation["id"], 0, hashlib.sha256(audio).hexdigest()
+    )
+    assert chunk_path.exists()
+
+    _crash_before_unlink(monkeypatch, container)
+    with pytest.raises(RuntimeError):
+        voice_service.delete_brain_dump_raw_audio(
+            operation["id"],
+            ExpectedRevisionRequest(expected_revision=operation["revision"]),
+            owner_id=owner_id,
+            idempotency_key="delete-now-crash-key",
+        )
+    monkeypatch.undo()
+
+    stranded = voice_service.get_brain_dump_operation(
+        operation["id"], owner_id=owner_id
+    )
+    assert stranded.raw_audio_state == "deletion_pending"
+    assert chunk_path.exists()
+
+    drained = voice_service.drain_pending_raw_audio_deletions()
+    assert drained == 1
+    assert not chunk_path.exists()
+    recovered = voice_service.get_brain_dump_operation(
+        operation["id"], owner_id=owner_id
+    )
+    assert recovered.raw_audio_state == "deleted"
