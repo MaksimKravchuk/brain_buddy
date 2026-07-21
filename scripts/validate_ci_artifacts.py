@@ -605,13 +605,73 @@ def _step_run_body(body: str) -> str | None:
     return "\n".join(run_lines)
 
 
+_SHELL_BLOCK_OPENERS = {"if", "for", "while", "until", "case"}
+_SHELL_BLOCK_CLOSERS = {"fi", "done", "esac"}
+
+
+def _join_shell_line_continuations(run_body: str) -> list[str]:
+    """Collapse ``\\``-continued shell lines into single logical lines.
+
+    A required command such as the scanner invocation is conventionally
+    spread across several backslash-continued physical lines (one flag per
+    line); collapsing them first lets `_shell_top_level_statements` see one
+    logical shell statement instead of a fragment of it.
+    """
+
+    logical_lines: list[str] = []
+    buffer = ""
+    for line in run_body.split("\n"):
+        stripped = line.rstrip()
+        if stripped.endswith("\\") and not stripped.endswith("\\\\"):
+            buffer += stripped[:-1] + " "
+            continue
+        buffer += line
+        logical_lines.append(buffer)
+        buffer = ""
+    if buffer:
+        logical_lines.append(buffer)
+    return logical_lines
+
+
+def _shell_top_level_statements(run_body: str) -> list[str]:
+    """Return a step's shell statements that are not nested in control flow.
+
+    actionlint only validates workflow/YAML shape, not whether a `run:`
+    script's own shell control flow ever reaches a given line — a command
+    wrapped in e.g. ``if false; then <command>; fi`` is syntactically valid
+    and still lets the step exit 0 without the wrapped command ever
+    running. Tracking if/for/while/until/case openers against their
+    fi/done/esac closers per logical statement (semicolon- and
+    newline-separated, after joining backslash continuations) and only
+    trusting statements seen while that depth is zero is what stops a step
+    being credited for a required command it never actually executes.
+    """
+
+    statements: list[str] = []
+    depth = 0
+    for logical_line in _join_shell_line_continuations(run_body):
+        for segment in logical_line.split(";"):
+            statement = segment.strip()
+            if not statement:
+                continue
+            word = statement.split(None, 1)[0]
+            if word in _SHELL_BLOCK_CLOSERS:
+                depth = max(0, depth - 1)
+                continue
+            if depth == 0:
+                statements.append(statement)
+            if word in _SHELL_BLOCK_OPENERS:
+                depth += 1
+    return statements
+
+
 def _has_scanner_invocation(run_body: str) -> bool:
-    return bool(
-        re.search(
-            r"(?m)^\s*python(?:3)?\s+(?:\.\./)?scripts/"
-            r"validate_mobile_privacy_evidence\.py(?:\s|$)",
-            run_body,
-        )
+    pattern = re.compile(
+        r"^python(?:3)?\s+(?:\.\./)?scripts/"
+        r"validate_mobile_privacy_evidence\.py(?:\s|$)"
+    )
+    return any(
+        pattern.match(statement) for statement in _shell_top_level_statements(run_body)
     )
 
 
@@ -898,7 +958,10 @@ def _missing_mobile_privacy_gate_errors(workflow_text: str) -> list[str]:
                 "download/generate/upload/publication steps, not after them (ADR-0008)"
             )
         run_body = _step_run_body(step_body)
-        if run_body is None or not re.search(r"(?m)^\s*exit\s+1\s*$", run_body):
+        if run_body is None or not any(
+            re.fullmatch(r"exit\s+1", statement)
+            for statement in _shell_top_level_statements(run_body)
+        ):
             errors.append(
                 "aggregate Allure report privacy gate must hard-fail the job (e.g. exit 1) "
                 "when a layer privacy scan outcome is not explicitly 'success', not merely "
