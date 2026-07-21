@@ -92,7 +92,7 @@ const brainDumpRecordingResponse = {
   owner_id: "user-1",
   kind: "voice_brain_dump",
   status: "recording",
-  consent: { microphone: true, external_processing_allowed: true, provider: "openai", recorded_at: "2026-07-15T10:00:00Z" },
+  consent: { microphone: true, external_processing_allowed: true, provider: "openai", provider_categories: ["openai"], recorded_at: "2026-07-15T10:00:00Z" },
   segments: [],
   proposals: [],
   committed_task_ids: [],
@@ -137,6 +137,18 @@ test.beforeEach(async ({ page }) => {
     }
     if (url.pathname.includes("/tags")) {
       await route.fulfill({ json: tagsResponse });
+      return;
+    }
+    if (url.pathname === "/api/brain-dump-capability") {
+      await route.fulfill({
+        json: {
+          available: true,
+          accurate_stt: { available: true, provider_category: "openai", model: "test-stt", reason_code: null },
+          reconciler: { available: true, provider_category: "openai", model: "test-reconciler", reason_code: null },
+          consent_provider_category: "openai",
+          consent_provider_categories: ["openai"]
+        }
+      });
       return;
     }
     if (url.pathname === "/api/brain-dump-operations" && route.request().method() === "POST") {
@@ -400,6 +412,29 @@ test("Brain Dump recording and review surfaces use source-derived mobile geometr
     };
     writableWindow.SpeechRecognition = FakeSpeechRecognition;
     writableWindow.webkitSpeechRecognition = FakeSpeechRecognition;
+    class FakeMediaRecorder {
+      state = "inactive";
+      mimeType = "audio/webm";
+      ondataavailable: ((event: Event) => void) | null = null;
+      onstop: ((event: Event) => void) | null = null;
+      start() {
+        this.state = "recording";
+      }
+      stop() {
+        this.state = "inactive";
+        this.onstop?.(new Event("stop"));
+      }
+      pause() {
+        this.state = "paused";
+      }
+      resume() {
+        this.state = "recording";
+      }
+    }
+    Object.defineProperty(window, "MediaRecorder", {
+      configurable: true,
+      value: FakeMediaRecorder
+    });
   });
   await page.goto("/brain-dump/new");
 

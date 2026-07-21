@@ -255,6 +255,10 @@ class BrainDumpConsentRequest(StrictBaseModel):
     microphone: bool
     external_processing_allowed: bool = False
     provider: str | None = Field(default=None, max_length=100)
+    """Deprecated single-category field; prefer ``provider_categories``."""
+    provider_categories: list[str] = Field(
+        default_factory=list, max_length=10
+    )
     language_hints: list[str] = Field(default_factory=list, max_length=10)
     vocabulary: list[str] = Field(default_factory=list, max_length=200)
 
@@ -286,6 +290,7 @@ class BrainDumpConsentResponse(StrictBaseModel):
     microphone: bool
     external_processing_allowed: bool
     provider: str | None = None
+    provider_categories: list[str] = Field(default_factory=list)
     language_hints: list[str] = Field(default_factory=list)
     vocabulary: list[str] = Field(default_factory=list)
     recorded_at: datetime
@@ -313,6 +318,11 @@ class BrainDumpCapabilityResponse(StrictBaseModel):
     accurate_stt: BrainDumpProviderCapabilityResponse
     reconciler: BrainDumpProviderCapabilityResponse
     consent_provider_category: str | None = None
+    """Deprecated: the accurate-STT category alone. Prefer
+    ``consent_provider_categories``, the complete set the client must
+    consent to (naming one category never authorizes another provider
+    role)."""
+    consent_provider_categories: list[str] = Field(default_factory=list)
 
 
 class BrainDumpTranscriptSegmentResponse(StrictBaseModel):

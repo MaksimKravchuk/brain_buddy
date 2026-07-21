@@ -37,7 +37,8 @@ function availableCapability() {
       model: "test-reconciler",
       reason_code: null
     },
-    consent_provider_category: "openai"
+    consent_provider_category: "openai",
+    consent_provider_categories: ["openai"]
   };
 }
 
@@ -266,7 +267,8 @@ describe("BrainDumpRoute", () => {
         model: "gpt-5.6-luna",
         reason_code: null
       },
-      consent_provider_category: null
+      consent_provider_category: null,
+      consent_provider_categories: []
     });
 
     renderBrainDump();
@@ -274,6 +276,142 @@ describe("BrainDumpRoute", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Voice transcription isn't configured yet"
+    );
+    expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("discloses every configured provider category before consent and submits that complete set", async () => {
+    vi.mocked(apiClient.getBrainDumpCapability).mockResolvedValue({
+      available: true,
+      accurate_stt: {
+        available: true,
+        provider_category: "deepgram",
+        model: "nova-3",
+        reason_code: null
+      },
+      reconciler: {
+        available: true,
+        provider_category: "openai",
+        model: "gpt-5.6-luna",
+        reason_code: null
+      },
+      consent_provider_category: "deepgram",
+      consent_provider_categories: ["deepgram", "openai"]
+    });
+    let startBody: unknown;
+    fetchMock.mockImplementation((input, init) => {
+      if (String(input).endsWith("/brain-dump-operations") && init?.method === "POST") {
+        startBody = JSON.parse(String(init.body));
+        return jsonResponse(operation(), 201);
+      }
+      throw new Error(`unexpected fetch ${String(input)}`);
+    });
+
+    renderBrainDump(undefined, undefined, false);
+
+    expect(
+      await screen.findByText(
+        "Allow secure cloud transcription by deepgram and openai after Stop. Audio is not sent without this consent."
+      )
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Allow secure cloud transcription" }));
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+
+    await waitFor(() => {
+      expect(startBody).toEqual({
+        consent: {
+          microphone: true,
+          external_processing_allowed: true,
+          provider: "deepgram",
+          provider_categories: ["deepgram", "openai"],
+          language_hints: ["ru", "en"],
+          vocabulary: ["BrainBuddy", "production smoke"]
+        }
+      });
+    });
+  });
+
+  it("keeps provider consent undisclosed when capability preflight is unavailable", async () => {
+    const capabilitySpy = vi
+      .spyOn(apiClient, "getBrainDumpCapability")
+      .mockRejectedValueOnce(new Error("offline"));
+    const callsBeforeRender = capabilitySpy.mock.calls.length;
+
+    renderBrainDump("/brain-dump/new", undefined, false);
+
+    await waitFor(() => {
+      expect(capabilitySpy).toHaveBeenCalledTimes(callsBeforeRender + 1);
+    });
+    expect(
+      screen.getByText(
+        "Check configured cloud transcription providers before recording. Audio is not sent without this consent."
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Allow secure cloud transcription by/)).not.toBeInTheDocument();
+  });
+
+  it("does not update provider disclosure after its preflight request is cancelled", async () => {
+    let resolveCapability: ((value: ReturnType<typeof availableCapability>) => void) | undefined;
+    const capabilitySpy = vi.spyOn(apiClient, "getBrainDumpCapability").mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveCapability = resolve;
+        })
+    );
+    const callsBeforeRender = capabilitySpy.mock.calls.length;
+
+    const { unmount } = renderBrainDump("/brain-dump/new", undefined, false);
+    unmount();
+    await act(async () => {
+      resolveCapability?.(availableCapability());
+      await Promise.resolve();
+    });
+
+    expect(capabilitySpy).toHaveBeenCalledTimes(callsBeforeRender + 1);
+  });
+
+  it("ignores a capability preflight rejection after its request is cancelled", async () => {
+    let rejectCapability: ((reason: Error) => void) | undefined;
+    vi.spyOn(apiClient, "getBrainDumpCapability").mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectCapability = reject;
+        })
+    );
+
+    const { unmount } = renderBrainDump("/brain-dump/new", undefined, false);
+    unmount();
+    await act(async () => {
+      rejectCapability?.(new Error("offline"));
+      await Promise.resolve();
+    });
+  });
+
+  it("keeps capture local when the reconciler capability is unavailable without a recognized reason", async () => {
+    vi.mocked(apiClient.getBrainDumpCapability).mockResolvedValue({
+      available: false,
+      accurate_stt: {
+        available: true,
+        provider_category: "deepgram",
+        model: "nova-3",
+        reason_code: null
+      },
+      reconciler: {
+        available: false,
+        provider_category: null,
+        model: null,
+        reason_code: "UNRECOGNIZED_SAFE_CODE"
+      },
+      consent_provider_category: null,
+      consent_provider_categories: []
+    });
+
+    renderBrainDump();
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Voice capture isn't available right now. No audio is sent. Try again later."
     );
     expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
@@ -311,6 +449,7 @@ describe("BrainDumpRoute", () => {
         microphone: true,
         external_processing_allowed: true,
         provider: "openai",
+        provider_categories: ["openai"],
         language_hints: ["ru", "en"],
         vocabulary: ["BrainBuddy", "production smoke"]
       }
@@ -1146,11 +1285,40 @@ describe("BrainDumpRoute", () => {
     const deleteButton = await screen.findByRole("button", { name: "Delete Renew car insurance" });
 
     await userEvent.click(deleteButton);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Request failed");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This changed since you last loaded it. Refresh the page and try again."
+    );
     expect(screen.getByDisplayValue("Renew car insurance")).toBeInTheDocument();
 
     await userEvent.click(deleteButton);
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Could not delete the task."));
+    expect(screen.getByDisplayValue("Renew car insurance")).toBeInTheDocument();
+  });
+
+  it("replaces raw server delete details with safe recovery guidance", async () => {
+    const captured = operation({
+      id: "brain_dump_provider_failure",
+      status: "awaiting_confirmation",
+      revision: 4,
+      proposals: [proposal("proposal_1", 1, "Renew car insurance")]
+    });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_provider_failure") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(captured);
+      }
+      if (url.includes("/proposals/proposal_1")) {
+        return jsonResponse({ message: "provider returned internal diagnostic" }, 503);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_provider_failure/review");
+    await userEvent.click(await screen.findByRole("button", { name: "Delete Renew car insurance" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Could not delete the task.");
+    expect(alert).not.toHaveTextContent("provider returned internal diagnostic");
     expect(screen.getByDisplayValue("Renew car insurance")).toBeInTheDocument();
   });
 

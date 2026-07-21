@@ -187,10 +187,12 @@ class VoiceBrainDumpService:
                 "AUDIO_UPLOAD_CONSENT_REQUIRED: external processing consent is "
                 "required before audio may leave the device."
             )
-        if (
-            not consent.provider
-            or consent.provider not in self.allowed_external_provider_categories
-        ):
+        # Coarse device-egress gate, at upload time: the consent must name at
+        # least one recognized, configured category before any audio byte
+        # leaves the device. Which specific category each provider role
+        # actually requires is enforced separately, at that role's own
+        # egress boundary (see the accurate-STT and reconciler checks below).
+        if not consent.consented_categories() & self.allowed_external_provider_categories:
             raise ValidationFailure(
                 "AUDIO_UPLOAD_PROVIDER_CONSENT_REQUIRED: external processing "
                 "consent must name a configured provider category before audio "
@@ -215,17 +217,37 @@ class VoiceBrainDumpService:
             category_attr="provider_id",
         )
         available = accurate.available and reconciler.available
+        # The complete set of categories the client must consent to before
+        # recording: each configured role's own category, deduped. Naming
+        # only one still authorizes only that one role at its egress
+        # boundary (see the accurate-STT and reconciler consent checks) --
+        # so a mixed-vendor pipeline (e.g. Deepgram STT + OpenAI reconciler)
+        # is only ever fully authorized when the client visibly consents to
+        # every category it lists here.
+        consent_categories = (
+            sorted(
+                {
+                    category
+                    for category in (
+                        accurate.provider_category,
+                        reconciler.provider_category,
+                    )
+                    if category is not None
+                }
+            )
+            if available
+            else []
+        )
         return BrainDumpCapability(
             available=available,
             accurate_stt=accurate,
             reconciler=reconciler,
-            # The category the client must submit as ``consent.provider``:
-            # only meaningful once the whole pipeline is available, and
-            # always a member of ``allowed_external_provider_categories``
-            # (see the membership checks in the STT/reconciler stages).
+            # Deprecated: the accurate-STT category alone. Retained for
+            # response backward compatibility.
             consent_provider_category=(
                 accurate.provider_category if available else None
             ),
+            consent_provider_categories=consent_categories,
         )
 
     # CI/test-only alias: the container maps the ``deterministic`` fixture
@@ -546,6 +568,7 @@ class VoiceBrainDumpService:
                 microphone=payload.consent.microphone,
                 external_processing_allowed=payload.consent.external_processing_allowed,
                 provider=payload.consent.provider,
+                provider_categories=payload.consent.provider_categories,
                 language_hints=payload.consent.language_hints,
                 vocabulary=payload.consent.vocabulary,
                 recorded_at=now,
@@ -1129,13 +1152,16 @@ class VoiceBrainDumpService:
                 raise ProviderTerminalError("STT_EXTERNAL_PROCESSING_CONSENT_REQUIRED")
             if (
                 self.accurate_stt.requires_external_processing
-                # Membership, not identity: the accurate-STT and reconciler
-                # roles may be different configured vendors (e.g. Deepgram
-                # for STT, OpenAI for the reconciler) under one consent
-                # category set. A stale/unconfigured category still fails
-                # closed here because it was never added to the allowed set.
-                and operation.consent.provider
-                not in self.allowed_external_provider_categories
+                # Each provider role gates on its *own* category, not
+                # membership in the union of every configured category: the
+                # accurate-STT and reconciler roles may be different
+                # configured vendors (e.g. Deepgram for STT, OpenAI for the
+                # reconciler) under one consent, but naming only the
+                # reconciler's category must never authorize this STT call --
+                # the client must have visibly consented to this role's own
+                # vendor category specifically.
+                and self.accurate_stt.provider_name
+                not in operation.consent.consented_categories()
             ):
                 raise ProviderTerminalError("STT_CONSENT_PROVIDER_MISMATCH")
             accurate_result = self.accurate_stt.transcribe_sealed_audio(
@@ -1320,10 +1346,11 @@ class VoiceBrainDumpService:
                     attempt=attempt,
                     recovery_count=recovery_count,
                 )
-            # Membership, not identity: see the matching accurate-STT check
-            # above for why the reconciler's own vendor id must not be
-            # required to equal consent.provider verbatim.
-            if operation.consent.provider not in self.allowed_external_provider_categories:
+            # Gate on the reconciler's own vendor id specifically -- see the
+            # matching accurate-STT check above for why membership in the
+            # client's *complete* consented category set is required, never
+            # membership in the union of every configured category.
+            if self.text_reconciler.provider_id not in operation.consent.consented_categories():
                 return self._reconciler_failure(
                     operation,
                     checkpoint_segments=checkpoint_segments,

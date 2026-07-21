@@ -217,6 +217,10 @@ class BrainDumpCapability:
     accurate_stt: ProviderCapability
     reconciler: ProviderCapability
     consent_provider_category: str | None = None
+    """Deprecated: the accurate-STT category alone. Kept for response
+    backward compatibility; ``consent_provider_categories`` is the complete
+    set a client must actually consent to before recording."""
+    consent_provider_categories: list[str] = dataclass_field(default_factory=list)
 
 
 def active_transcript_hypotheses(
@@ -443,8 +447,23 @@ class BrainDumpConsent(StorageBaseModel):
     external_processing_allowed: bool = False
     recorded_at: datetime
     provider: str | None = None
+    """Deprecated single-category field, retained only so a consent
+    recorded before ``provider_categories`` existed still authorizes the one
+    category it named. New consents should populate ``provider_categories``;
+    ``consented_categories()`` is the single source of truth for gating."""
+    provider_categories: list[str] = Field(default_factory=list, max_length=10)
+    """Complete set of provider categories the owner consented to. Each
+    adapter's own egress boundary (accurate-STT, reconciler) requires its
+    own category to be a member of this set -- naming one provider's
+    category never authorizes a different provider role (ADR-0002)."""
     language_hints: list[str] = Field(default_factory=list, max_length=10)
     vocabulary: list[str] = Field(default_factory=list, max_length=200)
+
+    def consented_categories(self) -> frozenset[str]:
+        """The complete, deduped set of categories this consent authorizes."""
+
+        legacy = frozenset({self.provider}) if self.provider else frozenset()
+        return frozenset(self.provider_categories) | legacy
 
 
 class BrainDumpTranscriptSegmentDocument(StorageBaseModel):

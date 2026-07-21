@@ -87,6 +87,10 @@ const CAPABILITY_REASON_COPY: Record<string, string> = {
 
 const CAPABILITY_UNAVAILABLE_FALLBACK = "Voice capture isn't available right now. No audio is sent. Try again later.";
 
+function formatProviderCategories(categories: string[]): string {
+  return categories.join(" and ");
+}
+
 function describeCapabilityUnavailable(capability: BrainDumpCapabilityResponse): string {
   const failing = !capability.accurate_stt.available
     ? capability.accurate_stt
@@ -101,25 +105,22 @@ function isGenericRequestFailedMessage(message: string): boolean {
   return message.trim().toLowerCase() === "request failed";
 }
 
-function extractApiErrorMessage(payload: unknown): string | null {
-  if (payload && typeof payload === "object" && "message" in payload) {
-    const message = (payload as { message?: unknown }).message;
-    return typeof message === "string" && message.trim() ? message.trim() : null;
-  }
-  return null;
-}
+const STALE_REVISION_MESSAGE = "This changed since you last loaded it. Refresh the page and try again.";
 
-// Voice capture failures must always show actionable copy, never the bare
-// "Request failed" fallback `ApiError` uses when a response has no HTTP
-// reason phrase (always true in tests, and true in some deployments). Prefer
-// the backend's own redacted error message when present.
-function describeVoiceCaptureError(caught: unknown, fallback: string): string {
+// Every command/mutation failure must always show actionable copy, never
+// the bare "Request failed" fallback `ApiError` uses when a response has no
+// HTTP reason phrase (always true in tests, and true in some deployments) --
+// and never a raw backend/provider payload. A 409 always means the local
+// copy is stale (an ``expected_revision``/lease mismatch), so it gets its
+// own explicit reset/retry copy. Server payloads can contain provider or
+// transport diagnostics, so they are never rendered to the user; the action
+// itself is left untouched, preserving the appropriate retry affordance.
+function describeApiError(caught: unknown, fallback: string): string {
   if (caught instanceof ApiError) {
-    const payloadMessage = extractApiErrorMessage(caught.payload);
-    if (payloadMessage && !isGenericRequestFailedMessage(payloadMessage)) {
-      return payloadMessage;
+    if (caught.status === 409) {
+      return STALE_REVISION_MESSAGE;
     }
-    return isGenericRequestFailedMessage(caught.message) ? fallback : caught.message || fallback;
+    return fallback;
   }
   if (caught instanceof Error) {
     return isGenericRequestFailedMessage(caught.message) ? fallback : caught.message;
@@ -142,6 +143,7 @@ export function BrainDumpRoute(): JSX.Element {
   const [externalProcessingAllowed, setExternalProcessingAllowed] = useState(false);
   const [vocabularyText, setVocabularyText] = useState("BrainBuddy, production smoke");
   const [isSaving, setIsSaving] = useState(false);
+  const [capability, setCapability] = useState<BrainDumpCapabilityResponse | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -174,6 +176,26 @@ export function BrainDumpRoute(): JSX.Element {
       setSavedCount(operation.committed_task_ids.length);
     }
   }, [operation]);
+
+  useEffect(() => {
+    if (params.operationId !== "new") {
+      return;
+    }
+    const controller = new AbortController();
+    apiClient
+      .getBrainDumpCapability(controller.signal)
+      .then((next) => {
+        if (!controller.signal.aborted) {
+          setCapability(next);
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setCapability(null);
+        }
+      });
+    return () => controller.abort();
+  }, [params.operationId]);
 
   useEffect(() => {
     return () => {
@@ -387,7 +409,12 @@ export function BrainDumpRoute(): JSX.Element {
       // create an operation, or begin local recording until both selected
       // external roles are presently configured and callable.
       const capability = await apiClient.getBrainDumpCapability();
-      if (!capability.available || !capability.consent_provider_category) {
+      setCapability(capability);
+      if (
+        !capability.available ||
+        !capability.consent_provider_category ||
+        capability.consent_provider_categories.length === 0
+      ) {
         setError(describeCapabilityUnavailable(capability));
         return;
       }
@@ -398,6 +425,7 @@ export function BrainDumpRoute(): JSX.Element {
           microphone: true,
           external_processing_allowed: externalProcessingAllowed,
           provider: capability.consent_provider_category,
+          provider_categories: capability.consent_provider_categories,
           language_hints: [...languageOptions[languageMode].hints],
           vocabulary
         }
@@ -422,7 +450,7 @@ export function BrainDumpRoute(): JSX.Element {
       if (!streamIsManagedByRecorder) {
         stream?.getTracks().forEach((track) => track.stop());
       }
-      setError(describeVoiceCaptureError(caught, "Microphone permission was denied."));
+      setError(describeApiError(caught, "Microphone permission was denied."));
     } finally {
       setIsStarting(false);
     }
@@ -549,7 +577,7 @@ export function BrainDumpRoute(): JSX.Element {
         void queryClient.invalidateQueries({ queryKey: taskKeys.all });
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Brain dump command failed.");
+      setError(describeApiError(caught, "Brain dump command failed."));
     } finally {
       if (action === "commit") {
         setIsSaving(false);
@@ -582,7 +610,7 @@ export function BrainDumpRoute(): JSX.Element {
           : kind === "resolve"
             ? "Could not resolve the conflict."
             : "Could not delete the task.";
-      setError(caught instanceof Error ? caught.message : fallback);
+      setError(describeApiError(caught, fallback));
     }
   }
 
@@ -671,6 +699,7 @@ export function BrainDumpRoute(): JSX.Element {
 
   return (
     <RecordingSurface
+      capability={capability}
       consentWithdrawnMidCapture={consentWithdrawnMidCapture}
       externalProcessingAllowed={externalProcessingAllowed}
       error={error}
@@ -739,6 +768,7 @@ function RecoverySurface({
 }
 
 function RecordingSurface({
+  capability,
   consentWithdrawnMidCapture,
   externalProcessingAllowed,
   error,
@@ -759,6 +789,7 @@ function RecordingSurface({
   onVocabularyTextChange,
   vocabularyText
 }: {
+  capability: BrainDumpCapabilityResponse | null;
   consentWithdrawnMidCapture: boolean;
   externalProcessingAllowed: boolean;
   error: string | null;
@@ -825,7 +856,11 @@ function RecordingSurface({
                 </label>
                 <label className="flex items-start gap-2 text-xs text-slate-600">
                   <input aria-label="Allow secure cloud transcription" className="mt-0.5" type="checkbox" checked={externalProcessingAllowed} onChange={(event) => onExternalProcessingAllowedChange(event.target.checked)} />
-                  <span>Allow secure cloud transcription after Stop. Audio is not sent without this consent.</span>
+                  <span>
+                    {capability?.available && capability.consent_provider_categories.length > 0
+                      ? `Allow secure cloud transcription by ${formatProviderCategories(capability.consent_provider_categories)} after Stop. Audio is not sent without this consent.`
+                      : "Check configured cloud transcription providers before recording. Audio is not sent without this consent."}
+                  </span>
                 </label>
               </div>
             ) : null}

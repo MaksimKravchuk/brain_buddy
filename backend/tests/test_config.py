@@ -126,9 +126,14 @@ def test_voice_operation_recovery_budget_is_configured(
     assert get_config().voice.max_operation_recoveries == 3
 
 
-def test_test_environment_uses_explicit_ci_fake_while_production_defaults_disabled(
+def test_test_environment_uses_explicit_ci_fake_while_production_defaults_to_deepgram(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Production's unconditional default is Deepgram -- selected even when
+    uncredentialed. Without DEEPGRAM_API_KEY, the *selection* stays
+    "deepgram" (never an implicit vendor switch); ``_build_accurate_stt``
+    truthfully wires a disabled adapter instead."""
+
     monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BRAIN_BUDDY_ENV", "test")
     monkeypatch.delenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_PROVIDER", raising=False)
@@ -137,7 +142,35 @@ def test_test_environment_uses_explicit_ci_fake_while_production_defaults_disabl
     get_config.cache_clear()
     monkeypatch.setenv("BRAIN_BUDDY_ENV", "production")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    assert get_config().voice.accurate_stt.provider == "disabled"
+    monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
+    config = get_config()
+    assert config.voice.accurate_stt.provider == "deepgram"
+
+    provider = _build_accurate_stt(config)
+    assert isinstance(provider, DisabledAccurateStt)
+    assert provider.reason == "STT_PROVIDER_CREDENTIALS_MISSING"
+
+
+def test_missing_deepgram_credentials_does_not_silently_switch_to_openai_stt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: an uncredentialed default Deepgram selection must never
+    silently egress to OpenAI just because OPENAI_API_KEY happens to be
+    present. An alternate STT vendor is only ever chosen by explicit
+    ``BRAIN_BUDDY_VOICE_ACCURATE_STT_PROVIDER`` configuration."""
+
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "production")
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_PROVIDER", raising=False)
+    monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "not-returned-from-config")
+
+    config = get_config()
+
+    assert config.voice.accurate_stt.provider == "deepgram"
+    provider = _build_accurate_stt(config)
+    assert isinstance(provider, DisabledAccurateStt)
+    assert provider.reason == "STT_PROVIDER_CREDENTIALS_MISSING"
 
 
 def test_openai_configuration_without_named_credential_wires_disabled_provider(
@@ -208,14 +241,14 @@ def test_build_container_uses_openai_reconciler_outside_test(
     monkeypatch.setenv("BRAIN_BUDDY_ENV", "development")
     monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER", "openai")
-    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_MODEL", "gpt-4o")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_MODEL", "gpt-5.6-luna")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     get_config.cache_clear()  # type: ignore[attr-defined]
 
     container = build_container(get_config())
 
     assert isinstance(container.voice_brain_dump_service.text_reconciler, OpenAITextReconciler)
-    assert container.voice_brain_dump_service.text_reconciler.model == "gpt-4o"
+    assert container.voice_brain_dump_service.text_reconciler.model == "gpt-5.6-luna"
 
 
 def test_voice_reconciler_configuration_is_bounded_and_resolves_credentials(
@@ -224,7 +257,7 @@ def test_voice_reconciler_configuration_is_bounded_and_resolves_credentials(
     monkeypatch.setenv("BRAIN_BUDDY_ENV", "production")
     monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER", "openai")
-    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_MODEL", "gpt-4o-mini")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_MODEL", "gpt-5.6-luna")
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_API_KEY_ENV", "RECONCILER_API_KEY")
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_TIMEOUT_SECONDS", "12")
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_MAX_RETRIES", "3")
@@ -238,7 +271,7 @@ def test_voice_reconciler_configuration_is_bounded_and_resolves_credentials(
     config = get_config()
 
     assert config.voice.reconciler.provider == "openai"
-    assert config.voice.reconciler.model == "gpt-4o-mini"
+    assert config.voice.reconciler.model == "gpt-5.6-luna"
     assert config.voice.reconciler.api_key_env == "RECONCILER_API_KEY"
     assert config.voice.reconciler.timeout_seconds == 12
     assert config.voice.reconciler.max_retries == 3
@@ -307,14 +340,32 @@ def test_build_container_derives_recovery_lease_from_worst_case_provider_timing(
     assert container.voice_brain_dump_service.provider_run_lease_seconds == pytest.approx(63.0)
 
 
-def test_unsupported_reconciler_provider_fails_closed(
+def test_config_rejects_unauthorized_reconciler_provider(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """An unsupported reconciler provider is not the authorized MVP tuple
+    either -- it must fail fast and loud at config load, not silently reach
+    ``_build_text_reconciler``'s fallback disablement."""
+
     monkeypatch.setenv("BRAIN_BUDDY_ENV", "production")
     monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER", "unknown")
 
-    provider = _build_text_reconciler(get_config())
+    with pytest.raises(ValueError, match="not authorized"):
+        get_config()
+
+
+def test_build_text_reconciler_defensively_disables_unsupported_provider() -> None:
+    """Defense in depth: even an ``AppConfig`` built without going through
+    ``validate_voice_provider_authorization`` (e.g. constructed directly)
+    must still fail closed for an unsupported reconciler provider."""
+
+    config = AppConfig(
+        environment=AppEnvironment.PRODUCTION,
+        voice=VoiceSettings(reconciler=VoiceProviderSettings(provider="unknown")),
+    )
+
+    provider = _build_text_reconciler(config)
 
     assert isinstance(provider, DisabledTextReconciler)
 
@@ -429,6 +480,52 @@ def test_forbidden_reconciler_tiers_are_rejected_as_defaults(
     monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER", "openai")
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_MODEL", forbidden_model)
+
+    with pytest.raises(ValueError, match="not authorized"):
+        get_config()
+
+
+def test_reconciler_rejects_unauthorized_real_model_that_is_not_a_forbidden_tier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The authorization gate is an allow-list of the exact MVP tuple, not a
+    deny-list of Terra/Sol/Fable tokens -- an unmeasured real model like
+    gpt-4o must be rejected too, even though it names none of them."""
+
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER", "openai")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_MODEL", "gpt-4o")
+
+    with pytest.raises(ValueError, match="not authorized"):
+        get_config()
+
+
+def test_reconciler_rejects_unauthorized_provider_even_with_authorized_model_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Naming the authorized model/template under a different, unauthorized
+    provider must still be rejected -- the tuple is checked as a whole."""
+
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER", "anthropic")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_MODEL", "gpt-5.6-luna")
+    monkeypatch.setenv(
+        "BRAIN_BUDDY_VOICE_RECONCILER_TEMPLATE_VERSION", "product-operation-v1"
+    )
+
+    with pytest.raises(ValueError, match="not authorized"):
+        get_config()
+
+
+def test_reconciler_rejects_unauthorized_template_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER", "openai")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_MODEL", "gpt-5.6-luna")
+    monkeypatch.setenv(
+        "BRAIN_BUDDY_VOICE_RECONCILER_TEMPLATE_VERSION", "product-operation-v2"
+    )
 
     with pytest.raises(ValueError, match="not authorized"):
         get_config()
