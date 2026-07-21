@@ -340,10 +340,27 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     return stateLabels[state ?? "next"];
   }, [dateView, projectId, projects, state, tagId, tags]);
 
-  const taskNoun = counts[state ?? "next"] === 1 ? "task" : "tasks";
-  const subtitle = state
-    ? `${counts[state]} ${taskNoun}`
-    : `${activeProjectionTasks.length} ${activeProjectionTasks.length === 1 ? "task" : "tasks"}`;
+  // Counts by open state ignore only the state filter and honor project/tag/date/query
+  // filters, so their sum is the exact non-terminal total for a flat, non-state view
+  // without draining every cursor page. Once terminal tasks are included there is no
+  // canonical exact total, so the flat subtitle falls back to loaded-subset "N+" copy
+  // until every page has been fetched.
+  const openTasksTotal = counts.inbox + counts.next + counts.waiting + counts.someday;
+  let subtitleCount: number;
+  let subtitleIsPartial = false;
+  if (state) {
+    subtitleCount = counts[state];
+  } else if (groupByProject) {
+    subtitleCount = activeProjectionTasks.length;
+  } else if (!showCompleted) {
+    subtitleCount = openTasksTotal;
+  } else {
+    subtitleCount = activeProjectionTasks.length;
+    subtitleIsPartial = Boolean(taskQuery.hasNextPage);
+  }
+  const subtitle = subtitleIsPartial
+    ? `${subtitleCount}+ tasks`
+    : `${subtitleCount} ${subtitleCount === 1 ? "task" : "tasks"}`;
 
   const hasFrameError = taskQuery.isError || projectsQuery.isError || tagsQuery.isError;
 

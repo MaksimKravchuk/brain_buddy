@@ -55,6 +55,12 @@ const PATH_RULES: Array<{ match: RegExp } & EpicFeatureStory> = [
     story: "Project and tag persistence",
   },
   {
+    match: /e2e\/taskListPaginationSubtitle/,
+    epic: "End-to-end journeys",
+    feature: "Native task organization",
+    story: "Flat pagination subtitle truthfulness",
+  },
+  {
     match: /e2e\/versioning/,
     epic: "End-to-end journeys",
     feature: "Optimistic concurrency",

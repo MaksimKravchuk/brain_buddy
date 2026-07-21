@@ -1095,7 +1095,7 @@ describe("AppRoutes", () => {
           items: [flatFirstPageTask],
           next_cursor: null,
           has_more: false,
-          counts_by_state: { inbox: 0, next: 2, waiting: 0, someday: 0 }
+          counts_by_state: { inbox: 0, next: 1, waiting: 0, someday: 0 }
         }));
       }
       if (url.includes("/tasks?")) {
@@ -1189,5 +1189,232 @@ describe("AppRoutes", () => {
     expect(await screen.findByText("Confirm vendor contract")).toBeInTheDocument();
     expect(screen.getByText(/Waiting on Legal sign-off from Dana/)).toBeInTheDocument();
     expect(screen.getByText(/since Jul 10/)).toBeInTheDocument();
+  });
+
+  it("shows the truthful non-terminal total instead of the first loaded page on a flat Project route with more pages remaining", async () => {
+    const firstPageTasks = Array.from({ length: 50 }, (_, index) => ({
+      ...taskFixture(`proj-page-${index}`, `Project task ${String(index).padStart(2, "0")}`, "next"),
+      project_id: "project-onboarding"
+    }));
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/tasks?") && url.includes("project_id=project-onboarding")) {
+        return Promise.resolve(jsonResponse({
+          items: firstPageTasks,
+          next_cursor: "proj-next-page",
+          has_more: true,
+          counts_by_state: { inbox: 80, next: 126, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(taskResponse));
+    });
+
+    renderRoutes("/projects/project-onboarding");
+
+    expect(await screen.findByRole("heading", { name: "Onboarding drop-off" })).toBeInTheDocument();
+    expect(await screen.findByText("206 tasks")).toBeInTheDocument();
+    expect(screen.queryByText("50 tasks")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Load more tasks" })).toBeInTheDocument();
+  });
+
+  it("shows the truthful non-terminal total instead of the first loaded page on a flat Tag route with an active search filter", async () => {
+    const firstPageTasks = Array.from({ length: 50 }, (_, index) => ({
+      ...taskFixture(`tag-q-page-${index}`, `Outreach task ${String(index).padStart(2, "0")}`, "next"),
+      tag_ids: ["tag-deep-work"]
+    }));
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/tasks?") && url.includes("tag_id=tag-deep-work") && url.includes("q=call")) {
+        return Promise.resolve(jsonResponse({
+          items: firstPageTasks,
+          next_cursor: "tag-q-next-page",
+          has_more: true,
+          counts_by_state: { inbox: 40, next: 63, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(taskResponse));
+    });
+
+    renderRoutes("/tags/tag-deep-work?q=call");
+
+    expect(await screen.findByRole("heading", { name: "#deep-work" })).toBeInTheDocument();
+    expect(await screen.findByText("103 tasks")).toBeInTheDocument();
+    expect(screen.queryByText("50 tasks")).not.toBeInTheDocument();
+  });
+
+  it("shows the truthful non-terminal total instead of the first loaded page on a flat date-view route with more pages remaining", async () => {
+    const firstPageTasks = Array.from({ length: 50 }, (_, index) =>
+      taskFixture(`overdue-page-${index}`, `Overdue task ${String(index).padStart(2, "0")}`, "next")
+    );
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/tasks?") && url.includes("due_before=")) {
+        return Promise.resolve(jsonResponse({
+          items: firstPageTasks,
+          next_cursor: "overdue-next-page",
+          has_more: true,
+          counts_by_state: { inbox: 0, next: 120, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(taskResponse));
+    });
+
+    renderRoutes("/tasks/overdue");
+
+    expect(await screen.findByRole("heading", { name: "Overdue" })).toBeInTheDocument();
+    expect(await screen.findByText("120 tasks")).toBeInTheDocument();
+    expect(screen.queryByText("50 tasks")).not.toBeInTheDocument();
+  });
+
+  it("falls back to loaded-subset '+' copy when terminal tasks are included, then shows the exact count once fully loaded", async () => {
+    const user = userEvent.setup();
+    const openFirstPage = Array.from({ length: 50 }, (_, index) => ({
+      ...taskFixture(`proj-open-${index}`, `Open task ${String(index).padStart(2, "0")}`, "next"),
+      project_id: "project-onboarding"
+    }));
+    const terminalFirstPage = Array.from({ length: 50 }, (_, index) => ({
+      ...taskFixture(`proj-term-${index}`, `Terminal-inclusive task ${String(index).padStart(2, "0")}`, "next"),
+      project_id: "project-onboarding"
+    }));
+    const terminalSecondPage = Array.from({ length: 12 }, (_, index) => ({
+      ...taskFixture(`proj-term-${index + 50}`, `Terminal-inclusive task ${String(index + 50).padStart(2, "0")}`, "completed"),
+      project_id: "project-onboarding"
+    }));
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (
+        url.includes("/tasks?") &&
+        url.includes("project_id=project-onboarding") &&
+        url.includes("include_completed=true") &&
+        url.includes("cursor=term-next-page")
+      ) {
+        return Promise.resolve(jsonResponse({
+          items: terminalSecondPage,
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 20, next: 40, waiting: 0, someday: 0 }
+        }));
+      }
+      if (
+        url.includes("/tasks?") &&
+        url.includes("project_id=project-onboarding") &&
+        url.includes("include_completed=true")
+      ) {
+        return Promise.resolve(jsonResponse({
+          items: terminalFirstPage,
+          next_cursor: "term-next-page",
+          has_more: true,
+          counts_by_state: { inbox: 20, next: 40, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/tasks?") && url.includes("project_id=project-onboarding")) {
+        return Promise.resolve(jsonResponse({
+          items: openFirstPage,
+          next_cursor: "proj-next-page",
+          has_more: true,
+          counts_by_state: { inbox: 20, next: 40, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(taskResponse));
+    });
+
+    renderRoutes("/projects/project-onboarding");
+
+    expect(await screen.findByRole("heading", { name: "Onboarding drop-off" })).toBeInTheDocument();
+    expect(await screen.findByText("60 tasks")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "Show terminal tasks" }));
+
+    expect(await screen.findByText("50+ tasks")).toBeInTheDocument();
+    expect(screen.queryByText("60 tasks")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Load more tasks" }));
+
+    expect(await screen.findByText("62 tasks")).toBeInTheDocument();
+    expect(screen.queryByText("50+ tasks")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Load more tasks" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the flat truthful subtitle and the grouped drained subtitle in agreement when toggling Group by project on a Tag route with more pages remaining", async () => {
+    const user = userEvent.setup();
+    const flatFirstTask = { ...taskFixture("tag-consist-1", "First tag task", "next"), project_id: "project-launch", tag_ids: ["tag-deep-work"] };
+    const flatSecondTask = { ...taskFixture("tag-consist-2", "Second tag task", "next"), project_id: "project-onboarding", tag_ids: ["tag-deep-work"] };
+    const groupedThirdTask = { ...taskFixture("tag-consist-3", "Third tag task", "next"), project_id: "project-onboarding", tag_ids: ["tag-deep-work"] };
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/tasks?") && url.includes("tag_id=tag-deep-work") && url.includes("limit=200") && url.includes("cursor=tag-consist-next")) {
+        return Promise.resolve(jsonResponse({
+          items: [groupedThirdTask],
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 0, next: 3, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/tasks?") && url.includes("tag_id=tag-deep-work") && url.includes("limit=200")) {
+        return Promise.resolve(jsonResponse({
+          items: [flatFirstTask, flatSecondTask],
+          next_cursor: "tag-consist-next",
+          has_more: true,
+          counts_by_state: { inbox: 0, next: 3, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/tasks?") && url.includes("tag_id=tag-deep-work")) {
+        return Promise.resolve(jsonResponse({
+          items: [flatFirstTask, flatSecondTask],
+          next_cursor: "tag-consist-flat-next",
+          has_more: true,
+          counts_by_state: { inbox: 0, next: 3, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(taskResponse));
+    });
+
+    renderRoutes("/tags/tag-deep-work");
+
+    expect(await screen.findByText("First tag task")).toBeInTheDocument();
+    expect(await screen.findByText("3 tasks")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Load more tasks" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Group by project" }));
+
+    const groupedList = await screen.findByTestId("grouped-task-list");
+    expect(await within(groupedList).findByText("Third tag task")).toBeInTheDocument();
+    expect(await screen.findByText("3 tasks")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Load more tasks" })).not.toBeInTheDocument();
   });
 });
