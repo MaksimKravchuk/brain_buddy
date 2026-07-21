@@ -37,6 +37,20 @@ def redacted_provider_usage(value: object) -> dict[str, float]:
     }
 
 
+def sniff_audio_container(audio: bytes) -> tuple[str, str]:
+    """Sniff supported container signatures instead of trusting upload metadata."""
+
+    if audio.startswith(b"\x1aE\xdf\xa3"):
+        return "recording.webm", "audio/webm"
+    if audio.startswith(b"RIFF") and audio[8:12] == b"WAVE":
+        return "recording.wav", "audio/wav"
+    if len(audio) >= 12 and audio[4:8] == b"ftyp":
+        return "recording.m4a", "audio/mp4"
+    if len(audio) >= 2 and audio[0] == 0xFF and audio[1] & 0xF0 == 0xF0:
+        return "recording.aac", "audio/aac"
+    raise ProviderTerminalError("STT_AUDIO_FORMAT_UNSUPPORTED")
+
+
 @dataclass(frozen=True)
 class FastSttRequest:
     operation_id: str
@@ -86,6 +100,8 @@ class ReconcileResult:
     patches: list[ProposalPatch]
     confidences: dict[str, float] = field(default_factory=dict)
     estimated_cost_usd: float = 0.0
+    model: str | None = None
+    template_version: str | None = None
 
 
 class FastSttPort(Protocol):
@@ -242,9 +258,12 @@ class DisabledTextReconciler:
     provider_id = "disabled"
     requires_external_processing = True
 
+    def __init__(self, reason: str = "RECONCILER_PROVIDER_DISABLED") -> None:
+        self.reason = reason
+
     def reconcile(self, request: ReconcileTextRequest) -> ReconcileResult:
         del request
-        raise ProviderTerminalError("RECONCILER_PROVIDER_DISABLED")
+        raise ProviderTerminalError(self.reason)
 
 
 def _extract_titles(text: str) -> list[str]:

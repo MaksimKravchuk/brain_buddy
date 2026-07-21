@@ -1,4 +1,11 @@
-"""OpenAI accurate-STT adapter over sealed original audio."""
+"""Deepgram Nova-3 multilingual accurate-STT adapter over sealed original audio.
+
+Sealed audio bytes travel as the raw binary request body (Deepgram's own audio
+API contract), never as ``bytes.decode("utf-8")`` text and never wrapped in a
+multipart form. This is the authorized MVP default for the ``accurate_stt``
+role; see ``backend/app/core/config.py`` for the allow-listed provider/model
+authorization and ADR-0002 for the port contract.
+"""
 
 from __future__ import annotations
 
@@ -18,7 +25,7 @@ from app.workflows.voice_brain_dump.providers import (
     sniff_audio_container,
 )
 
-OPENAI_TRANSCRIPTIONS_URL = "https://api.openai.com/v1/audio/transcriptions"
+DEEPGRAM_LISTEN_URL = "https://api.deepgram.com/v1/listen"
 _RETRYABLE_STATUS_CODES = {408, 409, 429, 500, 502, 503, 504}
 _LANGUAGE_ALIASES = {
     "en": "en",
@@ -29,12 +36,25 @@ _LANGUAGE_ALIASES = {
 }
 
 
+def _deepgram_language_param(language_hints: Sequence[str]) -> str:
+    """Nova-3 multilingual code-switch mode unless exactly one hint is declared."""
+
+    normalized = {
+        _LANGUAGE_ALIASES.get(hint.strip().casefold(), hint.strip().split("-", 1)[0].casefold())
+        for hint in language_hints
+        if hint.strip()
+    }
+    if len(normalized) == 1:
+        return next(iter(normalized))
+    return "multi"
+
+
 @dataclass(slots=True)
-class OpenAiAccurateStt:
-    """Transcribe sealed audio with OpenAI without logging provider payloads."""
+class DeepgramAccurateStt:
+    """Transcribe sealed audio with Deepgram without logging provider payloads."""
 
     api_key: str = field(repr=False)
-    model: str = "gpt-4o-mini-transcribe"
+    model: str = "nova-3"
     timeout_seconds: float = 60.0
     max_retries: int = 2
     retry_backoff_seconds: Sequence[float] = (1.0, 2.0)
@@ -42,7 +62,7 @@ class OpenAiAccurateStt:
     estimated_cost_usd_per_megabyte: float = 0.01
     transport: httpx.BaseTransport | None = None
     sleep: Callable[[float], None] = time.sleep
-    provider_name: str = field(default="openai", init=False)
+    provider_name: str = field(default="deepgram", init=False)
     requires_external_processing: bool = field(default=True, init=False)
 
     def transcribe_sealed_audio(self, request: AccurateSttRequest) -> SttResult:
@@ -51,8 +71,7 @@ class OpenAiAccurateStt:
         # Conservatively scaled by the adapter's own bounded retry budget: a
         # single logical call may itself cost the provider once per internal
         # transport attempt, so both the admission check and any recorded
-        # spend (success or failure) must assume the worst case, not just the
-        # first attempt.
+        # spend (success or failure) must assume the worst case.
         estimated_cost = (
             (len(request.sealed_audio) / 1_000_000)
             * self.estimated_cost_usd_per_megabyte
@@ -71,12 +90,17 @@ class OpenAiAccurateStt:
             wrapped = ProviderTerminalError("STT_PROVIDER_INVALID_RESPONSE")
             wrapped.estimated_cost_usd = estimated_cost
             raise wrapped from exc
-        text = payload.get("text") if isinstance(payload, dict) else None
-        if not isinstance(text, str) or not text.strip():
+
+        text = self._extract_transcript(payload)
+        if text is None:
             wrapped = ProviderTerminalError("STT_PROVIDER_INVALID_RESPONSE")
             wrapped.estimated_cost_usd = estimated_cost
             raise wrapped
         normalized_text = " ".join(text.split())
+        if not normalized_text:
+            wrapped = ProviderTerminalError("STT_PROVIDER_INVALID_RESPONSE")
+            wrapped.estimated_cost_usd = estimated_cost
+            raise wrapped
         language = ",".join(request.language_hints) or None
         segment = TranscriptHypothesis(
             id=self._stable_segment_id(request, normalized_text),
@@ -90,6 +114,12 @@ class OpenAiAccurateStt:
             model=self.model,
             supersedes_segment_ids=request.supersedes_segment_ids,
         )
+        usage = {}
+        metadata = payload.get("metadata") if isinstance(payload, dict) else None
+        if isinstance(metadata, dict) and isinstance(
+            metadata.get("duration"), int | float
+        ):
+            usage = {"duration_seconds": metadata["duration"]}
         return SttResult(
             role="accurate",
             provider=self.provider_name,
@@ -98,11 +128,24 @@ class OpenAiAccurateStt:
             estimated_cost_usd=estimated_cost,
             cost_estimate_basis="audio_bytes_proxy",
             actual_cost_usd=None,
-            provider_usage=redacted_provider_usage(payload.get("usage")),
+            provider_usage=redacted_provider_usage(usage),
         )
 
+    @staticmethod
+    def _extract_transcript(payload: object) -> str | None:
+        if not isinstance(payload, dict):
+            return None
+        try:
+            channels = payload["results"]["channels"]
+            alternatives = channels[0]["alternatives"]
+            transcript = alternatives[0]["transcript"]
+        except (KeyError, IndexError, TypeError):
+            return None
+        return transcript if isinstance(transcript, str) else None
+
     def _post_with_retries(self, request: AccurateSttRequest) -> httpx.Response:
-        filename, content_type = sniff_audio_container(request.sealed_audio)
+        _filename, content_type = sniff_audio_container(request.sealed_audio)
+        params = self._query_params(request)
         attempt = 0
         while True:
             try:
@@ -111,16 +154,15 @@ class OpenAiAccurateStt:
                     transport=self.transport,
                 ) as client:
                     response = client.post(
-                        OPENAI_TRANSCRIPTIONS_URL,
-                        headers={"Authorization": f"Bearer {self.api_key}"},
-                        data=self._form_fields(request),
-                        files={
-                            "file": (
-                                filename,
-                                request.sealed_audio,
-                                content_type,
-                            )
+                        DEEPGRAM_LISTEN_URL,
+                        params=params,
+                        headers={
+                            "Authorization": f"Token {self.api_key}",
+                            "Content-Type": content_type,
                         },
+                        # Deepgram's audio API consumes the raw sealed bytes
+                        # as the request body -- never multipart, never text.
+                        content=request.sealed_audio,
                     )
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 if attempt >= self.max_retries:
@@ -143,16 +185,16 @@ class OpenAiAccurateStt:
                 raise ProviderTerminalError("STT_AUDIO_TOO_LARGE")
             raise ProviderTerminalError("STT_PROVIDER_REJECTED_REQUEST")
 
-    def _form_fields(self, request: AccurateSttRequest) -> dict[str, str]:
-        fields = {"model": self.model, "response_format": "json"}
-        if request.language_hints:
-            first_hint = request.language_hints[0].strip().casefold()
-            fields["language"] = _LANGUAGE_ALIASES.get(
-                first_hint, first_hint.split("-", 1)[0]
-            )
-        if request.vocabulary:
-            fields["prompt"] = "Key terms: " + ", ".join(request.vocabulary)
-        return fields
+    def _query_params(
+        self, request: AccurateSttRequest
+    ) -> list[tuple[str, str | int | float | bool | None]]:
+        params: list[tuple[str, str | int | float | bool | None]] = [
+            ("model", self.model),
+            ("language", _deepgram_language_param(request.language_hints)),
+            ("smart_format", "true"),
+        ]
+        params.extend(("keyterm", term) for term in request.vocabulary)
+        return params
 
     def _backoff(self, attempt: int) -> None:
         if not self.retry_backoff_seconds:

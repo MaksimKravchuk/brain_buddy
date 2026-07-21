@@ -127,6 +127,7 @@ class OpenAITextReconciler:
 
     api_key: str = field(repr=False)
     model: str = "gpt-4o"
+    template_version: str = "product-operation-v1"
     endpoint: str = _DEFAULT_ENDPOINT
     timeout_seconds: float = 30.0
     max_retries: int = 2
@@ -173,6 +174,8 @@ class OpenAITextReconciler:
                 if draft.confidence is not None
             },
             estimated_cost_usd=estimated_cost,
+            model=self.model,
+            template_version=self.template_version,
         )
 
     def _payload(self, request: ReconcileTextRequest) -> dict[str, object]:
@@ -198,11 +201,13 @@ class OpenAITextReconciler:
             )
         return {
             "model": self.model,
-            "temperature": 0,
+            # No ``temperature`` request parameter: GPT-5.6 Luna and the
+            # authorized MVP configuration do not accept it, and it must be
+            # omitted rather than sent as an explicit ``0``.
             "response_format": {
                 "type": "json_schema",
                 "json_schema": {
-                    "name": "voice_brain_dump_reconciliation",
+                    "name": self.template_version,
                     "strict": True,
                     "schema": _strict_response_schema(allowed_operations),
                 },

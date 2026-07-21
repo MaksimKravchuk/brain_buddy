@@ -331,3 +331,134 @@ def test_reconciler_retry_backoff_rejects_non_finite_negative_or_unbounded_value
 
     with pytest.raises(ValueError, match="retry backoff"):
         get_config()
+
+
+def test_deepgram_is_the_credentialed_mvp_default_accurate_stt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MVP default: Deepgram Nova-3 multilingual, chosen automatically over
+    ``openai`` when both credentials happen to be present, and never an
+    automatic escalation -- purely a static default-selection preference."""
+
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "production")
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_PROVIDER", raising=False)
+    monkeypatch.setenv("DEEPGRAM_API_KEY", "not-returned-from-config")
+    monkeypatch.setenv("OPENAI_API_KEY", "also-not-returned-from-config")
+
+    config = get_config()
+
+    assert config.voice.accurate_stt.provider == "deepgram"
+    assert config.voice.accurate_stt.model == "nova-3"
+    assert config.voice.accurate_stt.api_key_env == "DEEPGRAM_API_KEY"
+    assert "not-returned-from-config" not in config.model_dump_json()
+
+
+def test_container_wires_deepgram_adapter_when_credentialed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.container import build_container
+    from app.workflows.voice_brain_dump.adapters import DeepgramAccurateStt
+
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "development")
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_PROVIDER", "deepgram")
+    monkeypatch.setenv("DEEPGRAM_API_KEY", "test-deepgram-key")
+    get_config.cache_clear()  # type: ignore[attr-defined]
+
+    container = build_container(get_config())
+
+    accurate_stt = container.voice_brain_dump_service.accurate_stt
+    assert isinstance(accurate_stt, DeepgramAccurateStt)
+    assert accurate_stt.model == "nova-3"
+
+
+def test_deepgram_without_credentials_wires_disabled_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "production")
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_PROVIDER", "deepgram")
+    monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
+
+    provider = _build_accurate_stt(get_config())
+
+    assert isinstance(provider, DisabledAccurateStt)
+    assert provider.reason == "STT_PROVIDER_CREDENTIALS_MISSING"
+
+
+def test_reconciler_mvp_default_is_luna_product_operation_v1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "production")
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER", "openai")
+    monkeypatch.delenv("BRAIN_BUDDY_VOICE_RECONCILER_MODEL", raising=False)
+    monkeypatch.delenv("BRAIN_BUDDY_VOICE_RECONCILER_TEMPLATE_VERSION", raising=False)
+
+    config = get_config()
+
+    assert config.voice.reconciler.model == "gpt-5.6-luna"
+    assert config.voice.reconciler.template_version == "product-operation-v1"
+
+
+def test_reconciler_never_sends_a_temperature_parameter() -> None:
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+    from app.workflows.voice_brain_dump.providers import ReconcileTextRequest
+
+    reconciler = OpenAITextReconciler(api_key="test-key", model="gpt-5.6-luna")
+    payload = reconciler._payload(  # noqa: SLF001 - contract check, not a public API
+        ReconcileTextRequest(
+            operation_id="op_1",
+            transcript_segments=[],
+            active_proposals=[],
+        )
+    )
+
+    assert "temperature" not in payload
+    assert payload["model"] == "gpt-5.6-luna"
+
+
+@pytest.mark.parametrize("forbidden_model", ["gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-fable"])
+def test_forbidden_reconciler_tiers_are_rejected_as_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, forbidden_model: str
+) -> None:
+    """Terra is 1.75x more expensive and not an authorized default or
+    automatic fallback; Sol and Fable are not authorized at all."""
+
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER", "openai")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_MODEL", forbidden_model)
+
+    with pytest.raises(ValueError, match="not authorized"):
+        get_config()
+
+
+def test_deepgram_accurate_stt_requires_a_nova_family_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_PROVIDER", "deepgram")
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_MODEL", "whisper-large-v3")
+
+    with pytest.raises(ValueError, match="Unauthorized accurate_stt model"):
+        get_config()
+
+
+def test_validate_voice_provider_authorization_accepts_the_mvp_defaults() -> None:
+    from app.core.config import (
+        VoiceProviderSettings,
+        VoiceSettings,
+        validate_voice_provider_authorization,
+    )
+
+    voice = VoiceSettings(
+        accurate_stt=VoiceProviderSettings(provider="deepgram", model="nova-3"),
+        reconciler=VoiceProviderSettings(
+            provider="openai",
+            model="gpt-5.6-luna",
+            template_version="product-operation-v1",
+        ),
+    )
+
+    validate_voice_provider_authorization(voice)  # must not raise

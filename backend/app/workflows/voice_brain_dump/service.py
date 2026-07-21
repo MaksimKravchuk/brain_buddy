@@ -40,6 +40,7 @@ from .confirmation import confirm_native_inbox_actions
 from .domain import (
     BrainDumpActionReceiptDocument,
     BrainDumpAudioChunkDocument,
+    BrainDumpCapability,
     BrainDumpConsent,
     BrainDumpOperationDocument,
     BrainDumpProposalConflictDocument,
@@ -51,6 +52,7 @@ from .domain import (
     IdempotencyRecord,
     ProposalConflict,
     ProposalPatch,
+    ProviderCapability,
     ReconciledProposal,
     TranscriptHypothesis,
     apply_proposal_patches,
@@ -194,6 +196,62 @@ class VoiceBrainDumpService:
                 "consent must name a configured provider category before audio "
                 "may leave the device."
             )
+
+    def get_brain_dump_capability(self) -> BrainDumpCapability:
+        """Truthful, secret-free preflight snapshot for a mobile client.
+
+        Never calls a provider. Reports only static, non-secret
+        configuration metadata (provider category, model) plus an
+        allowlisted reason code when a role is unavailable -- no provider
+        payloads, credentials, or arbitrary exception text.
+        """
+
+        accurate = self._role_capability(
+            self.accurate_stt,
+            category_attr="provider_name",
+        )
+        reconciler = self._role_capability(
+            self.text_reconciler,
+            category_attr="provider_id",
+        )
+        available = accurate.available and reconciler.available
+        return BrainDumpCapability(
+            available=available,
+            accurate_stt=accurate,
+            reconciler=reconciler,
+            # The category the client must submit as ``consent.provider``:
+            # only meaningful once the whole pipeline is available, and
+            # always a member of ``allowed_external_provider_categories``
+            # (see the membership checks in the STT/reconciler stages).
+            consent_provider_category=(
+                accurate.provider_category if available else None
+            ),
+        )
+
+    # CI/test-only alias: the container maps the ``deterministic`` fixture
+    # provider to the ``openai`` consent category when building
+    # ``allowed_external_provider_categories`` (see ``build_container``), so
+    # a reported category must use the same alias here -- otherwise a truthful
+    # test-environment capability response would name a category the consent
+    # gate does not actually accept. Production configuration never resolves
+    # to ``deterministic`` (config.py refuses it outside ``AppEnvironment.TEST``).
+    _CI_ONLY_CONSENT_CATEGORY_ALIASES = {"deterministic": "openai"}
+
+    def _role_capability(self, adapter: object, *, category_attr: str) -> ProviderCapability:
+        category = getattr(adapter, category_attr, None)
+        if category is None or category == "disabled":
+            return ProviderCapability(
+                available=False,
+                provider_category=None,
+                reason_code=getattr(adapter, "reason", "PROVIDER_DISABLED"),
+            )
+        return ProviderCapability(
+            available=True,
+            provider_category=self._CI_ONLY_CONSENT_CATEGORY_ALIASES.get(
+                category, category
+            ),
+            model=getattr(adapter, "model", None) or None,
+        )
 
     # Only a terminal operation's raw audio/working artifacts are ever
     # eligible for retention-window purge. Every other status -- including
@@ -1071,7 +1129,13 @@ class VoiceBrainDumpService:
                 raise ProviderTerminalError("STT_EXTERNAL_PROCESSING_CONSENT_REQUIRED")
             if (
                 self.accurate_stt.requires_external_processing
-                and operation.consent.provider != self.accurate_stt.provider_name
+                # Membership, not identity: the accurate-STT and reconciler
+                # roles may be different configured vendors (e.g. Deepgram
+                # for STT, OpenAI for the reconciler) under one consent
+                # category set. A stale/unconfigured category still fails
+                # closed here because it was never added to the allowed set.
+                and operation.consent.provider
+                not in self.allowed_external_provider_categories
             ):
                 raise ProviderTerminalError("STT_CONSENT_PROVIDER_MISMATCH")
             accurate_result = self.accurate_stt.transcribe_sealed_audio(
@@ -1256,7 +1320,10 @@ class VoiceBrainDumpService:
                     attempt=attempt,
                     recovery_count=recovery_count,
                 )
-            if operation.consent.provider != self.text_reconciler.provider_id:
+            # Membership, not identity: see the matching accurate-STT check
+            # above for why the reconciler's own vendor id must not be
+            # required to equal consent.provider verbatim.
+            if operation.consent.provider not in self.allowed_external_provider_categories:
                 return self._reconciler_failure(
                     operation,
                     checkpoint_segments=checkpoint_segments,
@@ -1291,6 +1358,8 @@ class VoiceBrainDumpService:
                 accurate_hypothesis.text.encode("utf-8")
             ).hexdigest()
             reconciler_cost = fixture_result.estimated_cost_usd
+            reconciler_model = fixture_result.model
+            reconciler_template_version = fixture_result.template_version
         else:
             reconciler_request = ReconcileTextRequest(
                 operation_id=operation.id,
@@ -1347,6 +1416,8 @@ class VoiceBrainDumpService:
             patch_drafts = reconcile_result.patches
             reconciler_input_hash = reconcile_result.input_hash
             reconciler_cost = reconcile_result.estimated_cost_usd
+            reconciler_model = reconcile_result.model
+            reconciler_template_version = reconcile_result.template_version
         proposal_patches = self._append_proposal_patch_documents(
             operation_id=operation.id,
             existing=operation.proposal_patches,
@@ -1376,6 +1447,8 @@ class VoiceBrainDumpService:
                             "attempt": attempt,
                             "recovery_count": recovery_count,
                             "provider": self.text_reconciler.provider_id,
+                            "model": reconciler_model,
+                            "template_version": reconciler_template_version,
                             "estimated_cost_usd": reconciler_cost,
                             "reserved_cost_usd": 0.0,
                             "consumed_cost_usd": reconciler_cost,

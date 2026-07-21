@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-router-dom";
 
+import { apiClient } from "../../api/client";
 import { BrainDumpRoute } from "./BrainDumpRoute";
 
 interface FakeRecognitionInstance {
@@ -20,6 +21,25 @@ let recognition: FakeRecognitionInstance | null = null;
 let recognitions: FakeRecognitionInstance[] = [];
 let micTrackStop: ReturnType<typeof vi.fn>;
 const fetchMock = vi.fn<typeof fetch>();
+
+function availableCapability() {
+  return {
+    available: true,
+    accurate_stt: {
+      available: true,
+      provider_category: "openai",
+      model: "test-accurate-stt",
+      reason_code: null
+    },
+    reconciler: {
+      available: true,
+      provider_category: "openai",
+      model: "test-reconciler",
+      reason_code: null
+    },
+    consent_provider_category: "openai"
+  };
+}
 
 function jsonResponse(data: unknown, status = 200) {
   return Promise.resolve(
@@ -139,6 +159,7 @@ describe("BrainDumpRoute", () => {
   beforeEach(() => {
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(apiClient, "getBrainDumpCapability").mockResolvedValue(availableCapability());
     recognition = null;
     recognitions = [];
     Object.defineProperty(window.navigator, "language", { configurable: true, value: "en-US" });
@@ -228,6 +249,34 @@ describe("BrainDumpRoute", () => {
     expect(await screen.findByRole("button", { name: "Resume" })).toBeEnabled();
     await userEvent.click(screen.getByRole("button", { name: "Resume" }));
     expect(await screen.findByRole("button", { name: "Pause" })).toBeEnabled();
+  });
+
+  it("does not request microphone access or create an operation when capability preflight is unavailable", async () => {
+    vi.mocked(apiClient.getBrainDumpCapability).mockResolvedValue({
+      available: false,
+      accurate_stt: {
+        available: false,
+        provider_category: null,
+        model: null,
+        reason_code: "STT_PROVIDER_CREDENTIALS_MISSING"
+      },
+      reconciler: {
+        available: true,
+        provider_category: "openai",
+        model: "gpt-5.6-luna",
+        reason_code: null
+      },
+      consent_provider_category: null
+    });
+
+    renderBrainDump();
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Voice transcription isn't configured yet"
+    );
+    expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("declares RU plus EN hints and keeps browser recognition visibly provisional", async () => {

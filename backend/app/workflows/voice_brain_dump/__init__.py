@@ -2,9 +2,11 @@
 
 from .confirmation import ConfirmedAction, confirm_native_inbox_actions
 from .domain import (
+    BrainDumpCapability,
     ProposalConflict,
     ProposalPatch,
     ProposalProjection,
+    ProviderCapability,
     ReconciledProposal,
     TranscriptHypothesis,
     active_transcript_hypotheses,
@@ -27,6 +29,7 @@ from .task_port import InProcessTaskPort, TaskPort
 __all__ = [
     "AccurateSttPort",
     "AccurateSttRequest",
+    "BrainDumpCapability",
     "ConfirmedAction",
     "DeterministicAccurateStt",
     "DeterministicFastStt",
@@ -37,6 +40,7 @@ __all__ = [
     "ProposalConflict",
     "ProposalPatch",
     "ProposalProjection",
+    "ProviderCapability",
     "ReconcileTextRequest",
     "ReconciledProposal",
     "TaskPort",

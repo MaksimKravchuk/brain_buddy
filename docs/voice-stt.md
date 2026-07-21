@@ -2,14 +2,22 @@
 
 Voice Brain Dump records original browser audio and treats browser speech recognition only as a provisional preview. After Stop, the backend may send sealed audio to the configured accurate-STT provider only when the operation contains explicit external-processing consent.
 
-## Configure OpenAI
+## Configure the authorized MVP providers
 
 Set these in the runtime environment (see `.env.example`):
 
-- `BRAIN_BUDDY_VOICE_ACCURATE_STT_PROVIDER=openai`
-- `BRAIN_BUDDY_VOICE_ACCURATE_STT_MODEL=gpt-4o-mini-transcribe` (or `gpt-4o-transcribe`)
-- `BRAIN_BUDDY_VOICE_ACCURATE_STT_API_KEY_ENV=OPENAI_API_KEY`
-- set the named credential variable, e.g. `OPENAI_API_KEY`, outside source control
+- `BRAIN_BUDDY_VOICE_ACCURATE_STT_PROVIDER=deepgram`
+- `BRAIN_BUDDY_VOICE_ACCURATE_STT_MODEL=nova-3`
+- `BRAIN_BUDDY_VOICE_ACCURATE_STT_API_KEY_ENV=DEEPGRAM_API_KEY`
+- set `DEEPGRAM_API_KEY` outside source control
+- `BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER=openai`
+- `BRAIN_BUDDY_VOICE_RECONCILER_MODEL=gpt-5.6-luna`
+- `BRAIN_BUDDY_VOICE_RECONCILER_TEMPLATE_VERSION=product-operation-v1`
+- set the named reconciler credential variable outside source control
+
+Nova-3 uses Deepgram's multilingual mode for Russian + English captures. The
+reconciler is pinned to GPT-5.6 Luna with the `product-operation-v1` contract;
+Terra, Sol, and Fable are not authorized defaults or automatic fallbacks.
 
 Timeout, retry backoff, per-operation estimated-cost ceiling, and retention settings are independently bounded. Missing credentials resolve to the explicit `disabled` provider. No-consent, disabled, authentication, cost-limit, oversized-audio, retry-exhaustion, and invalid-response failures use redacted error codes; provider response bodies, transcripts, vocabulary, audio, credentials, and paths are not copied into errors or logs.
 
@@ -17,7 +25,7 @@ Timeout, retry backoff, per-operation estimated-cost ceiling, and retention sett
 
 ## Language and keyterm hints
 
-Before recording, choose Russian, Russian + English, or English. The first declared hint controls the provisional browser recognizer locale (`ru-RU` or `en-US`). All declared hints and comma-separated keyterms are persisted with consent and passed to accurate STT. For RU + EN, OpenAI receives `language=ru` plus the English/Russian keyterms as a prompt.
+Before recording, choose Russian, Russian + English, or English. The first declared hint controls the provisional browser recognizer locale (`ru-RU` or `en-US`). All declared hints and comma-separated keyterms are persisted with consent and passed to accurate STT. For RU + EN, Deepgram receives `language=multi` plus the English/Russian keyterms.
 
 ## Real-audio evaluation
 

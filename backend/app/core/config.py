@@ -91,6 +91,7 @@ class VoiceProviderSettings(BaseModel):
 
     provider: str = "disabled"
     model: str = ""
+    template_version: str = ""
     api_key_env: str = "OPENAI_API_KEY"
     timeout_seconds: float = Field(default=60.0, gt=0, le=300)
     max_retries: int = Field(default=2, ge=0, le=5)
@@ -156,6 +157,47 @@ class VoiceSettings(BaseModel):
     lease_recovery_margin_seconds: float = Field(default=30.0, ge=0, le=600)
 
 
+# MVP authorization: the founder-approved default is Deepgram Nova-3
+# multilingual for accurate STT and GPT-5.6 Luna (``product-operation-v1``,
+# no ``temperature`` parameter) for the reconciler. Terra is 1.75x more
+# expensive and is not an authorized default or automatic fallback; Sol and
+# Fable tiers are not authorized at all. See
+# specs/002-async-voice-workflows/plan.md.
+MVP_ACCURATE_STT_PROVIDER = "deepgram"
+MVP_ACCURATE_STT_MODEL = "nova-3"
+MVP_RECONCILER_PROVIDER = "openai"
+MVP_RECONCILER_MODEL = "gpt-5.6-luna"
+MVP_RECONCILER_TEMPLATE_VERSION = "product-operation-v1"
+FORBIDDEN_RECONCILER_MODEL_TOKENS = ("terra", "sol", "fable")
+
+
+def validate_voice_provider_authorization(voice: VoiceSettings) -> None:
+    """Reject configuration that is not an authorized MVP provider/model.
+
+    This is a static allow/deny-list check on configuration values, never a
+    live provider call. It runs unconditionally (not just in production) so a
+    misconfigured deployment fails fast and loud rather than silently
+    escalating to an unauthorized, higher-cost tier.
+    """
+
+    accurate_stt = voice.accurate_stt
+    if accurate_stt.provider == "deepgram" and not accurate_stt.model.strip().casefold().startswith(
+        "nova-3"
+    ):
+        raise ValueError(
+            f"Unauthorized accurate_stt model '{accurate_stt.model}' for provider "
+            "'deepgram'; the authorized MVP default is Nova-3 multilingual."
+        )
+    reconciler = voice.reconciler
+    if reconciler.provider not in {"disabled", "deterministic"}:
+        reconciler_model = reconciler.model.strip().casefold()
+        if any(token in reconciler_model for token in FORBIDDEN_RECONCILER_MODEL_TOKENS):
+            raise ValueError(
+                f"Unauthorized reconciler model '{reconciler.model}'; Terra, Sol, and "
+                "Fable are not authorized defaults or automatic fallbacks."
+            )
+
+
 class AppConfig(BaseModel):
     """Top-level Brain Buddy application configuration."""
 
@@ -217,9 +259,13 @@ def _build_config() -> AppConfig:
     password_policy = PasswordPolicy()
     accurate_provider = os.getenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_PROVIDER")
     if not accurate_provider:
+        # MVP default: Deepgram Nova-3 multilingual when credentialed;
+        # ``openai`` remains an explicit, non-default rollback choice.
         accurate_provider = (
             "deterministic"
             if environment is AppEnvironment.TEST
+            else "deepgram"
+            if os.getenv("DEEPGRAM_API_KEY")
             else "openai"
             if os.getenv("OPENAI_API_KEY")
             else "disabled"
@@ -236,13 +282,20 @@ def _build_config() -> AppConfig:
         ).split(",")
         if value.strip()
     )
+    _default_accurate_stt_model = {
+        "deepgram": MVP_ACCURATE_STT_MODEL,
+    }.get(accurate_provider, "gpt-4o-mini-transcribe")
+    _default_accurate_stt_api_key_env = {
+        "deepgram": "DEEPGRAM_API_KEY",
+    }.get(accurate_provider, "OPENAI_API_KEY")
     accurate_stt = VoiceProviderSettings(
         provider=accurate_provider,
         model=os.getenv(
-            "BRAIN_BUDDY_VOICE_ACCURATE_STT_MODEL", "gpt-4o-mini-transcribe"
+            "BRAIN_BUDDY_VOICE_ACCURATE_STT_MODEL", _default_accurate_stt_model
         ),
         api_key_env=os.getenv(
-            "BRAIN_BUDDY_VOICE_ACCURATE_STT_API_KEY_ENV", "OPENAI_API_KEY"
+            "BRAIN_BUDDY_VOICE_ACCURATE_STT_API_KEY_ENV",
+            _default_accurate_stt_api_key_env,
         ),
         timeout_seconds=float(
             os.getenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_TIMEOUT_SECONDS", "60")
@@ -272,7 +325,13 @@ def _build_config() -> AppConfig:
         fast_stt=VoiceProviderSettings(provider="disabled"),
         reconciler=VoiceProviderSettings(
             provider=os.getenv("BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER", "disabled"),
-            model=os.getenv("BRAIN_BUDDY_VOICE_RECONCILER_MODEL", "gpt-4o"),
+            # MVP default: GPT-5.6 Luna via ``product-operation-v1``, no
+            # ``temperature`` parameter. Terra/Sol/Fable are rejected below.
+            model=os.getenv("BRAIN_BUDDY_VOICE_RECONCILER_MODEL", MVP_RECONCILER_MODEL),
+            template_version=os.getenv(
+                "BRAIN_BUDDY_VOICE_RECONCILER_TEMPLATE_VERSION",
+                MVP_RECONCILER_TEMPLATE_VERSION,
+            ),
             api_key_env=os.getenv(
                 "BRAIN_BUDDY_VOICE_RECONCILER_API_KEY_ENV", "OPENAI_API_KEY"
             ),
@@ -349,6 +408,7 @@ def _build_config() -> AppConfig:
             os.getenv("BRAIN_BUDDY_VOICE_LEASE_RECOVERY_MARGIN_SECONDS", "30")
         ),
     )
+    validate_voice_provider_authorization(voice)
 
     return AppConfig(
         environment=environment,
@@ -371,6 +431,12 @@ def get_config() -> AppConfig:
 __all__ = [
     "AppConfig",
     "AppEnvironment",
+    "FORBIDDEN_RECONCILER_MODEL_TOKENS",
+    "MVP_ACCURATE_STT_MODEL",
+    "MVP_ACCURATE_STT_PROVIDER",
+    "MVP_RECONCILER_MODEL",
+    "MVP_RECONCILER_PROVIDER",
+    "MVP_RECONCILER_TEMPLATE_VERSION",
     "PasswordPolicy",
     "SessionSettings",
     "VoiceAudioLimits",
@@ -378,4 +444,5 @@ __all__ = [
     "VoiceRetentionSettings",
     "VoiceSettings",
     "get_config",
+    "validate_voice_provider_authorization",
 ]

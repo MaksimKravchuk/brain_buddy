@@ -28,6 +28,7 @@ from app.services import (
     VersionService,
 )
 from app.workflows.voice_brain_dump.adapters import (
+    DeepgramAccurateStt,
     OpenAiAccurateStt,
     OpenAITextReconciler,
 )
@@ -74,6 +75,19 @@ def _build_accurate_stt(config: AppConfig) -> AccurateSttPort:
         if config.environment is not AppEnvironment.TEST:
             return DisabledAccurateStt("STT_DETERMINISTIC_PROVIDER_TEST_ONLY")
         return DeterministicAccurateStt(allow_text_fixture_audio=True)
+    if settings.provider == "deepgram":
+        api_key = os.getenv(settings.api_key_env)
+        if not api_key:
+            return DisabledAccurateStt("STT_PROVIDER_CREDENTIALS_MISSING")
+        return DeepgramAccurateStt(
+            api_key=api_key,
+            model=settings.model,
+            timeout_seconds=settings.timeout_seconds,
+            max_retries=settings.max_retries,
+            retry_backoff_seconds=settings.retry_backoff_seconds,
+            max_cost_usd_per_operation=settings.max_cost_usd_per_operation,
+            estimated_cost_usd_per_megabyte=settings.estimated_cost_usd_per_megabyte,
+        )
     if settings.provider == "openai":
         api_key = os.getenv(settings.api_key_env)
         if not api_key:
@@ -132,10 +146,11 @@ def _build_text_reconciler(config: AppConfig) -> TextReconcilerPort:
     if settings.provider == "openai":
         api_key = os.getenv(settings.api_key_env)
         if not api_key:
-            return DisabledTextReconciler()
+            return DisabledTextReconciler("RECONCILER_PROVIDER_CREDENTIALS_MISSING")
         return OpenAITextReconciler(
             api_key=api_key,
             model=settings.model,
+            template_version=settings.template_version or "product-operation-v1",
             endpoint=settings.endpoint,
             timeout_seconds=settings.timeout_seconds,
             max_retries=settings.max_retries,
@@ -143,7 +158,9 @@ def _build_text_reconciler(config: AppConfig) -> TextReconcilerPort:
             max_cost_usd_per_operation=settings.max_cost_usd_per_operation,
             estimated_cost_usd_per_megabyte=settings.estimated_cost_usd_per_megabyte,
         )
-    return DisabledTextReconciler()
+    if settings.provider == "disabled":
+        return DisabledTextReconciler()
+    return DisabledTextReconciler("RECONCILER_PROVIDER_UNSUPPORTED")
 
 
 def build_container(config: AppConfig) -> Container:
