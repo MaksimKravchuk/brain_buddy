@@ -2766,3 +2766,306 @@ describe("AppRoutes", () => {
     expect(screen.queryByRole("button", { name: "Load more tasks" })).not.toBeInTheDocument();
   });
 });
+
+describe("cross-account task cache isolation", () => {
+  // Guards the leak this test file's parent bug describes: task list/detail/
+  // project/tag cache identity used to be keyed only on task id and filters,
+  // with no notion of which signed-in principal fetched it. A same-SPA
+  // session loss followed by a different principal signing in from the same
+  // preserved URL (ProtectedRoute -> /login -> LoginPage's redirectTo) could
+  // then render the outgoing principal's cached data, or have a held
+  // post-409 conflict refetch publish it after the switch. taskKeys now
+  // qualifies every task cache entry by the signed-in principal, and
+  // installTaskCacheOwnerGuard purges the outgoing principal's subtree
+  // synchronously on every login/signup/logout/unauthorized-clear/hydrate
+  // transition.
+  const user = userEvent.setup();
+  // Neither test cares about list-row content -- only about the routed
+  // task detail URL -- and an empty list keeps the shared taskResponse
+  // fixture's own "Fix onboarding drop-off" row out of the DOM so it can't
+  // be confused with a genuine leak of A's cached detail data.
+  const emptyTaskListResponse = {
+    items: [],
+    next_cursor: null,
+    has_more: false,
+    counts_by_state: { inbox: 0, next: 0, waiting: 0, someday: 0 }
+  };
+
+  it("never renders principal A's cached task detail after a same-SPA session loss and sign-in as a different principal on the same preserved URL", async () => {
+    let taskGetCount = 0;
+    let releaseSecondPrincipalGet: (() => void) | undefined;
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.includes("/auth/login") && method === "POST") {
+        return Promise.resolve(jsonResponse({ id: "user-2", email: "b@example.test" }));
+      }
+      if (url.endsWith("/tasks/task-1") && method === "GET") {
+        taskGetCount += 1;
+        if (taskGetCount === 1) {
+          // Principal A's own initial detail load.
+          return Promise.resolve(jsonResponse(taskResponse.items[0]));
+        }
+        // Principal B's request for the same task id after the preserved-
+        // URL redirect. Held deliberately so the test can assert nothing
+        // renders A's cached title while it's pending, then resolved 404
+        // (B does not own this task) to prove it's never rendered after
+        // either.
+        return new Promise<Response>((resolve) => {
+          releaseSecondPrincipalGet = () => resolve(jsonResponse({ detail: "Task not found" }, 404));
+        });
+      }
+      if (url.endsWith("/tasks") || url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse(emptyTaskListResponse));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/next/task-1");
+
+    // The row link and the detail panel's mobile summary both render "Fix
+    // onboarding drop-off" at this desktop-and-mobile-agnostic viewport, so
+    // assert on the count rather than a single unique match throughout.
+    expect(await screen.findAllByText("Fix onboarding drop-off")).not.toHaveLength(0);
+
+    // Session loss (e.g. the unauthorized handler firing off a 401
+    // elsewhere) clears the session. ProtectedRoute redirects to /login,
+    // preserving this task detail URL as the post-login target.
+    act(() => {
+      useAuthStore.setState({ user: null, status: "anon" });
+    });
+
+    expect(await screen.findByRole("heading", { name: "Sign in to Brain Buddy" })).toBeInTheDocument();
+    expect(screen.queryAllByText("Fix onboarding drop-off")).toHaveLength(0);
+
+    // A different principal signs in from the same preserved URL.
+    await user.type(screen.getByLabelText("Email"), "b@example.test");
+    await user.type(screen.getByLabelText("Password"), "correct horse battery staple");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await flushMicrotasks();
+    // B's own request for task-1 is still pending -- must never render A's
+    // cached title while it settles.
+    expect(await screen.findByText("Loading task detail…")).toBeInTheDocument();
+    expect(screen.queryAllByText("Fix onboarding drop-off")).toHaveLength(0);
+
+    await waitFor(() => expect(releaseSecondPrincipalGet).toBeDefined());
+    await act(async () => {
+      releaseSecondPrincipalGet?.();
+      await flushMicrotasks();
+    });
+
+    // B's request resolves 404 (B does not own this task) -- an honest
+    // not-found state, never A's stale cached detail.
+    expect(await screen.findByRole("alert")).toHaveTextContent("Task not found");
+    expect(screen.queryAllByText("Fix onboarding drop-off")).toHaveLength(0);
+  });
+
+  it("drops a post-409 conflict refetch released after a same-SPA identity switch instead of publishing or rebasing the outgoing principal's Task", async () => {
+    let taskGetCount = 0;
+    let releaseConflictGet: (() => void) | undefined;
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.includes("/auth/login") && method === "POST") {
+        return Promise.resolve(jsonResponse({ id: "user-2", email: "b@example.test" }));
+      }
+      if (url.endsWith("/tasks/task-1") && method === "GET") {
+        taskGetCount += 1;
+        if (taskGetCount === 1) {
+          return Promise.resolve(
+            jsonResponse({ ...taskResponse.items[0], title: "Fix onboarding drop-off", details: "Original details", revision: 1 })
+          );
+        }
+        if (taskGetCount === 2) {
+          // ADR-0006's post-409 refetch, issued while principal A is still
+          // signed in. Held deliberately and released only after the SPA
+          // has switched to a different principal, to prove the late
+          // arrival can never publish A's Task into the cache or rebase
+          // any (by then orphaned) draft's concurrency baseline.
+          return new Promise<Response>((resolve) => {
+            releaseConflictGet = () =>
+              resolve(
+                jsonResponse({
+                  ...taskResponse.items[0],
+                  title: "STALE A TITLE (must never publish)",
+                  details: "Stale A details",
+                  revision: 2
+                })
+              );
+          });
+        }
+        // Principal B's own request for the same task id -- B does not own it.
+        return Promise.resolve(jsonResponse({ detail: "Task not found" }, 404));
+      }
+      if (url.endsWith("/tasks/task-1") && method === "PATCH") {
+        return Promise.resolve(jsonResponse({ detail: "Conflict" }, 409));
+      }
+      if (url.endsWith("/tasks") || url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse(emptyTaskListResponse));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/tasks/next/task-1"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByLabelText("Details")).toHaveValue("Original details");
+    await user.clear(screen.getByLabelText("Details"));
+    await user.type(screen.getByLabelText("Details"), "My unsaved draft edit");
+    await user.click(screen.getByRole("button", { name: "Save task detail" }));
+
+    await waitFor(() => expect(taskGetCount).toBeGreaterThanOrEqual(2));
+    expect(releaseConflictGet).toBeDefined();
+
+    // Session loss, then a different principal signs in from the same
+    // preserved URL -- while the conflict refetch above is still held.
+    act(() => {
+      useAuthStore.setState({ user: null, status: "anon" });
+    });
+    expect(await screen.findByRole("heading", { name: "Sign in to Brain Buddy" })).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Email"), "b@example.test");
+    await user.type(screen.getByLabelText("Password"), "correct horse battery staple");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Task not found");
+
+    // Release the held conflict refetch strictly after B's own 404 landed.
+    await act(async () => {
+      releaseConflictGet?.();
+      await flushMicrotasks();
+    });
+
+    // The late arrival must be inert: it never publishes A's Task into
+    // either principal's cache slot, and B's honest not-found state must
+    // survive it untouched.
+    expect(screen.queryByText("STALE A TITLE (must never publish)")).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Task not found");
+    expect(client.getQueryData(["tasks", "user-1", "detail", "task-1"])).toBeUndefined();
+    expect(client.getQueryData(["tasks", "user-2", "detail", "task-1"])).toBeUndefined();
+  });
+
+  it("drops an in-flight, successful detail Save/transition response released after a same-SPA identity switch instead of publishing the outgoing principal's Task", async () => {
+    // Distinct from the post-409 conflict-refetch spec above: this covers
+    // the *ordinary* success path (detailUpdateMutation's onSuccess ->
+    // publishDetail + invalidateTasks), which has no ADR-0006 conflict
+    // branch to guard it. A same-SPA identity switch while a genuine
+    // in-flight PATCH is still pending must stop its onSuccess from
+    // publishing/invalidating against whichever principal happens to be
+    // signed in when the response finally lands.
+    let taskGetCount = 0;
+    let releaseHeldSave: (() => void) | undefined;
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.includes("/auth/login") && method === "POST") {
+        return Promise.resolve(jsonResponse({ id: "user-2", email: "b@example.test" }));
+      }
+      if (url.endsWith("/tasks/task-1") && method === "GET") {
+        taskGetCount += 1;
+        if (taskGetCount === 1) {
+          return Promise.resolve(
+            jsonResponse({ ...taskResponse.items[0], title: "Fix onboarding drop-off", details: "Original details", revision: 1 })
+          );
+        }
+        // Principal B's own request for the same task id -- B does not own it.
+        return Promise.resolve(jsonResponse({ detail: "Task not found" }, 404));
+      }
+      if (url.endsWith("/tasks/task-1") && method === "PATCH") {
+        // A genuine, successful (never 409) Save response. Held
+        // deliberately and released only after the SPA has switched to a
+        // different principal, to prove the ordinary success path can
+        // never publish A's Task into the cache or invalidate B's queries.
+        return new Promise<Response>((resolve) => {
+          releaseHeldSave = () =>
+            resolve(
+              jsonResponse({
+                ...taskResponse.items[0],
+                title: "A UPDATED TITLE (must never publish)",
+                details: "A's saved details",
+                revision: 2
+              })
+            );
+        });
+      }
+      if (url.endsWith("/tasks") || url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse(emptyTaskListResponse));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/tasks/next/task-1"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByLabelText("Details")).toHaveValue("Original details");
+    await user.clear(screen.getByLabelText("Details"));
+    await user.type(screen.getByLabelText("Details"), "My unsaved draft edit");
+    await user.click(screen.getByRole("button", { name: "Save task detail" }));
+
+    await waitFor(() => expect(releaseHeldSave).toBeDefined());
+
+    // Session loss, then a different principal signs in from the same
+    // preserved URL -- while the Save above is still held in flight.
+    act(() => {
+      useAuthStore.setState({ user: null, status: "anon" });
+    });
+    expect(await screen.findByRole("heading", { name: "Sign in to Brain Buddy" })).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Email"), "b@example.test");
+    await user.type(screen.getByLabelText("Password"), "correct horse battery staple");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Task not found");
+    const tasksListGetCountBeforeRelease = taskGetCount;
+
+    // Release the held Save strictly after B's own 404 landed.
+    await act(async () => {
+      releaseHeldSave?.();
+      await flushMicrotasks();
+    });
+
+    // The late, successful arrival must be inert: it never publishes A's
+    // Task into either principal's cache slot, never re-invalidates/
+    // refetches on B's behalf, and B's honest not-found state survives it
+    // untouched.
+    expect(screen.queryByText("A UPDATED TITLE (must never publish)")).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Task not found");
+    expect(client.getQueryData(["tasks", "user-1", "detail", "task-1"])).toBeUndefined();
+    expect(client.getQueryData(["tasks", "user-2", "detail", "task-1"])).toBeUndefined();
+    expect(taskGetCount).toBe(tasksListGetCountBeforeRelease);
+  });
+});

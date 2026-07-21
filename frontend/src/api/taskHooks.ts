@@ -2,16 +2,35 @@ import { useMemo } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import { apiClient } from "./client";
+import type { AuthUser } from "./auth";
 import type { TaskCounts, TaskListFilters, TaskResponse } from "./taskTypes";
 import type { OpenTaskState } from "./taskTypes";
+import { useAuthStore } from "../stores/authStore";
+
+// Every task-tracker cache entry is qualified by the signed-in principal so
+// a same-SPA identity switch (logout, session loss, login/signup as a
+// different account) can never have a new principal's query read another
+// principal's cached list/detail/project/tag entry through a colliding key.
+// installTaskCacheOwnerGuard (api/taskCacheOwnerGuard.ts) complements this by
+// synchronously purging the outgoing owner's subtree on that same transition.
+export function taskOwnerKey(user: AuthUser | null): string {
+  return user?.id ?? "anon";
+}
+
+export function getCurrentTaskOwnerKey(): string {
+  return taskOwnerKey(useAuthStore.getState().user);
+}
 
 export const taskKeys = {
-  all: ["tasks"] as const,
-  list: (filters: TaskListFilters) => [...taskKeys.all, "list", filters] as const,
-  allPages: (filters: TaskListFilters) => [...taskKeys.all, "all-pages", filters] as const,
-  detail: (taskId: string) => [...taskKeys.all, "detail", taskId] as const,
-  projects: () => [...taskKeys.all, "projects"] as const,
-  tags: () => [...taskKeys.all, "tags"] as const
+  all: (owner: string = getCurrentTaskOwnerKey()) => ["tasks", owner] as const,
+  list: (filters: TaskListFilters, owner: string = getCurrentTaskOwnerKey()) =>
+    [...taskKeys.all(owner), "list", filters] as const,
+  allPages: (filters: TaskListFilters, owner: string = getCurrentTaskOwnerKey()) =>
+    [...taskKeys.all(owner), "all-pages", filters] as const,
+  detail: (taskId: string, owner: string = getCurrentTaskOwnerKey()) =>
+    [...taskKeys.all(owner), "detail", taskId] as const,
+  projects: (owner: string = getCurrentTaskOwnerKey()) => [...taskKeys.all(owner), "projects"] as const,
+  tags: (owner: string = getCurrentTaskOwnerKey()) => [...taskKeys.all(owner), "tags"] as const
 };
 
 const emptyCounts: TaskCounts = { inbox: 0, next: 0, waiting: 0, someday: 0 };

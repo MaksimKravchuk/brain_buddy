@@ -1,4 +1,6 @@
 /* istanbul ignore file -- route glue is exercised by AppRoutes tests and Playwright shell snapshots. */
+import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { ProtectedRoute } from "../components/auth/ProtectedRoute";
@@ -6,8 +8,12 @@ import { BrainDumpRoute } from "../features/brain-dump/BrainDumpRoute";
 import { TaskListPage } from "../features/tasks/TaskListPage";
 import LoginPage from "../pages/LoginPage";
 import SignupPage from "../pages/SignupPage";
+import { installTaskCacheOwnerGuard } from "../api/taskCacheOwnerGuard";
 
 export function AppRoutes(): JSX.Element {
+  const queryClient = useQueryClient();
+  useEffect(() => installTaskCacheOwnerGuard(queryClient), [queryClient]);
+
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
