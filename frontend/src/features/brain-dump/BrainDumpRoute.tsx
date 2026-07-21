@@ -479,7 +479,7 @@ export function BrainDumpRoute(): JSX.Element {
       }
       if (action === "commit") {
         setSavedCount(updated.committed_task_ids.length);
-        void queryClient.invalidateQueries({ queryKey: taskKeys.all });
+        void queryClient.invalidateQueries({ queryKey: taskKeys.all() });
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Brain dump command failed.");

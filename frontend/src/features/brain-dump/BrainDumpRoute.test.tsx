@@ -1169,7 +1169,7 @@ describe("BrainDumpRoute", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Save 1 to inbox" }));
 
     expect(await screen.findByText("Saved 1 task to Inbox")).toBeInTheDocument();
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["tasks"] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["tasks", "anon"] });
   });
 
   it("navigates to the inbox from the saved confirmation", async () => {
