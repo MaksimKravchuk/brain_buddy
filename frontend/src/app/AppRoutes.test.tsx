@@ -1040,6 +1040,177 @@ describe("AppRoutes", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("publishes the authoritative TaskResponse into the detail cache on Complete/Reopen/Move so an inline<->standalone projection swap never shows a stale revision", async () => {
+    // Completing, reopening, or moving a task out of and back into the
+    // active "Next" projection remounts the task detail panel -- it swaps
+    // between the standalone route panel and the in-row panel embedded in
+    // TaskList (see TaskListPage's `detailIsInProjection` branch). Each swap
+    // is a genuine unmount/mount of TaskDetailPanel, which re-pins its
+    // uncontrolled draft state from whatever `task` prop it is handed at
+    // mount time. That value must be the mutation's own authoritative
+    // response, published synchronously -- not whatever the shared "tasks"
+    // query root's background refetch eventually delivers, which this test
+    // holds open forever below to prove the swap never depends on it landing.
+    const user = userEvent.setup();
+    let currentTask = { ...taskResponse.items[0], waiting_for: taskResponse.items[0].waiting_for as string | null };
+    let detailGetCount = 0;
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/tasks/task-1") && method === "GET") {
+        detailGetCount += 1;
+        if (detailGetCount === 1) {
+          return Promise.resolve(jsonResponse(currentTask));
+        }
+        // Every background detail refetch that invalidateTasks() triggers
+        // after a mutation is deliberately held open forever.
+        return new Promise<Response>(() => {});
+      }
+      if (url.endsWith("/tasks/task-1/transitions") && method === "POST") {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        currentTask = {
+          ...currentTask,
+          state: body.action === "complete" ? "completed" : String(body.to_state),
+          waiting_for: typeof body.waiting_for === "string" && body.waiting_for ? body.waiting_for : currentTask.waiting_for,
+          revision: currentTask.revision + 1
+        };
+        return Promise.resolve(jsonResponse(currentTask));
+      }
+      if (url.endsWith("/tasks") || url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse({
+          ...taskResponse,
+          items: currentTask.state === "next" ? [currentTask] : []
+        }));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/next/task-1");
+
+    await screen.findByRole("link", { name: "Fix onboarding drop-off" });
+    expect(await screen.findByRole("button", { name: "Complete" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Complete" }));
+    await waitFor(() => expect(currentTask.state).toBe("completed"));
+    // The task leaves the Next projection and the panel swaps inline ->
+    // standalone. The swapped-in panel must show the completed state
+    // immediately, not the stale "next" state from the very first GET.
+    expect(await screen.findByRole("button", { name: "Reopen to Next" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Fix onboarding drop-off" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Reopen to Next" }));
+    await waitFor(() => expect(currentTask.state).toBe("next"));
+    // Reopening returns the task to Next, swapping standalone -> inline.
+    // Same requirement in reverse.
+    expect(await screen.findByRole("button", { name: "Complete" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reopen to Next" })).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Waiting for"), "Ada from finance");
+    await user.click(screen.getByRole("button", { name: "Move to Waiting for" }));
+    await waitFor(() => expect(currentTask.state).toBe("waiting"));
+    // Moving to Waiting removes the task from Next again, swapping inline ->
+    // standalone a second time.
+    expect(await screen.findByRole("button", { name: "Move to Next" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Move to Waiting for" })).not.toBeInTheDocument();
+  });
+
+  it("on a same-task 409 with a pre-conflict GET still held in flight, issues a genuine post-conflict GET instead of deduplicating onto the stale one, preserves every unsaved draft, and lets an explicit retry succeed", async () => {
+    // ADR-0006's on-409 refetch must be a real post-conflict request. If a
+    // background refetch for this same detail query key was already in
+    // flight when the conflict landed (e.g. an unrelated mutation elsewhere
+    // invalidated the shared "tasks" query root moments earlier), the
+    // conflict handler must not silently attach to that older, pre-conflict
+    // promise -- doing so can hand back stale data and rebase the retry onto
+    // the wrong revision. This test holds that earlier GET open forever and
+    // proves the conflict handler issues an independent, genuinely new GET.
+    const user = userEvent.setup();
+    let taskGetCount = 0;
+    let releaseStaleInFlightGet: (() => void) | undefined;
+    const patchBodies: Array<Record<string, unknown>> = [];
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/tasks/task-1") && method === "GET") {
+        taskGetCount += 1;
+        if (taskGetCount === 1) {
+          return Promise.resolve(jsonResponse({ ...taskResponse.items[0], details: "Original details", revision: 1 }));
+        }
+        if (taskGetCount === 2) {
+          // The background refetch triggered by the unrelated create's
+          // invalidateTasks() below. Held open deliberately so it is still
+          // in flight at the moment the conflicting Save is rejected.
+          return new Promise<Response>((resolve) => {
+            releaseStaleInFlightGet = () =>
+              resolve(jsonResponse({ ...taskResponse.items[0], details: "Stale pre-conflict snapshot", revision: 1 }));
+          });
+        }
+        // The genuine post-conflict GET the conflict handler must issue.
+        return Promise.resolve(jsonResponse({ ...taskResponse.items[0], details: "Edited concurrently elsewhere", revision: 2 }));
+      }
+      if (url.endsWith("/tasks/task-1") && method === "PATCH") {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        patchBodies.push(body);
+        if (body.expected_revision === 2) {
+          return Promise.resolve(jsonResponse({ ...taskResponse.items[0], ...body, revision: 3 }));
+        }
+        return Promise.resolve(jsonResponse({ detail: "Conflict" }, 409));
+      }
+      if (url.endsWith("/tasks") && method === "POST") {
+        return Promise.resolve(jsonResponse(taskFixture("task-unrelated", "Unrelated capture"), 201));
+      }
+      if (url.endsWith("/tasks") || url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse(taskResponse));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/next/task-1");
+
+    expect(await screen.findByLabelText("Details")).toHaveValue("Original details");
+    await user.clear(screen.getByLabelText("Details"));
+    await user.type(screen.getByLabelText("Details"), "My unsaved draft edit");
+
+    // Trigger the background refetch (GET #2) and leave it in flight.
+    await user.type(screen.getByLabelText("New task title"), "Unrelated capture");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await waitFor(() => expect(taskGetCount).toBe(2));
+    expect(releaseStaleInFlightGet).toBeDefined();
+
+    // Save collides with the real revision-1 baseline (a genuine concurrent
+    // edit landed server-side even though the stale in-flight GET above
+    // hasn't told the client about it yet) and is rejected with 409.
+    await user.click(screen.getByRole("button", { name: "Save task detail" }));
+    await waitFor(() => expect(patchBodies.length).toBeGreaterThanOrEqual(1));
+    expect(patchBodies[0]).toMatchObject({ expected_revision: 1 });
+
+    // The conflict handler must issue a genuine third GET rather than
+    // deduplicating onto the still-unresolved second one -- proven without
+    // ever resolving that stuck promise.
+    await waitFor(() => expect(taskGetCount).toBeGreaterThanOrEqual(3));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Conflict");
+    expect(screen.getByLabelText("Details")).toHaveValue("My unsaved draft edit");
+
+    await user.click(screen.getByRole("button", { name: "Save task detail" }));
+    await waitFor(() => expect(patchBodies.length).toBeGreaterThanOrEqual(2));
+    expect(patchBodies[1]).toMatchObject({ expected_revision: 2, details: "My unsaved draft edit" });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("keeps direct task detail visible when the task is absent from the active projection", async () => {
     const directTask = taskFixture("task-direct", "Shared task outside Next", "waiting");
     vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
