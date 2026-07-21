@@ -283,8 +283,15 @@
             "type": "array"
           },
           "task_id": {
-            "title": "Task Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
           },
           "user_edited": {
             "default": false,
@@ -295,7 +302,6 @@
         "required": [
           "id",
           "proposal_id",
-          "task_id",
           "child_idempotency_key",
           "confirmed_at"
         ],
@@ -1166,7 +1172,8 @@
             "enum": [
               "frozen",
               "committed",
-              "superseded"
+              "superseded",
+              "failed"
             ],
             "title": "Status",
             "type": "string"

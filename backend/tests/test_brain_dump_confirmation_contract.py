@@ -4,12 +4,16 @@ Covers: immutable action snapshots with no result fields, byte-stable
 snapshots across the confirm write, receipt-derived per-action results,
 deterministic ``H(operation_id, batch_id, action_id)`` child idempotency,
 parent-key conflicts, partial-recovery after a simulated restart, owner
-scoping, and "no Task exists before confirm".
+scoping, "no Task exists before confirm", rejecting stale/cancelled/
+superseded batches interleaved mid-confirm, a shared canonical/legacy
+source-action identity, and terminal TaskPort failure handling.
 """
 
 from __future__ import annotations
 
+from app.exceptions import RepositoryError
 from app.utils.time import utcnow
+from app.workflows.voice_brain_dump.confirmation import brain_dump_source_action_key
 from tests.test_brain_dump_operations_api import (
     _start_operation,
     _upload_and_seal,
@@ -183,11 +187,9 @@ def test_confirm_survives_partial_recovery_without_duplicate_tasks(api_client) -
     # Pre-create the Task via the same TaskPort/child-key derivation the
     # confirm command itself would use, modelling a durable write that
     # completed just before a process crash.
-    import hashlib
-
-    child_key = hashlib.sha256(
-        f"{operation['id']}:{active_batch['id']}:{action['action_id']}".encode()
-    ).hexdigest()
+    child_key = brain_dump_source_action_key(
+        operation_id=operation["id"], proposal_id=action["proposal_id"]
+    )
     from app.workflows.voice_brain_dump.domain import BrainDumpActionReceiptDocument
 
     task = container.task_service.create_native_inbox_task(
@@ -280,11 +282,9 @@ def test_confirm_reuses_task_created_before_crash_with_no_local_trace(
     active_batch = frozen["active_proposal_batch"]
     action = active_batch["snapshot"][0]
 
-    import hashlib
-
-    child_key = hashlib.sha256(
-        f"{operation['id']}:{active_batch['id']}:{action['action_id']}".encode()
-    ).hexdigest()
+    child_key = brain_dump_source_action_key(
+        operation_id=operation["id"], proposal_id=action["proposal_id"]
+    )
     container = api_client.app.state.container
     owner_id = api_client.get("/api/auth/me").json()["id"]
     pre_created_task = container.task_service.create_native_inbox_task(
@@ -337,3 +337,240 @@ def test_owner_cannot_freeze_or_confirm_another_owners_operation(
         },
     )
     assert confirm_as_b.status_code == 404, confirm_as_b.text
+
+
+def _patch_service_task_port(api_client, wrapper_factory):
+    """Temporarily wrap ``task_port.create_native_inbox_task`` and return a
+    restore callable. ``wrapper_factory(real_create)`` builds the wrapper."""
+
+    service = api_client.app.state.container.voice_brain_dump_service
+    real_create = service.task_port.create_native_inbox_task
+    service.task_port.create_native_inbox_task = wrapper_factory(real_create)
+
+    def restore() -> None:
+        service.task_port.create_native_inbox_task = real_create
+
+    return service, restore
+
+
+def test_confirm_rejects_action_after_interleaved_cancel(api_client) -> None:
+    """A cancel that lands between one action's ``TaskPort`` call and the
+    next action's confirmation must stop the batch from completing: no
+    later action may create a Task, and cancelled must never turn into
+    completed."""
+
+    operation = _reconciled_operation(
+        api_client, "confirm-interleave-cancel", b"Buy milk. Call the dentist."
+    )
+    frozen = _freeze(api_client, operation, "freeze-interleave-cancel")
+    active_batch = frozen["active_proposal_batch"]
+    assert len(active_batch["snapshot"]) == 2
+
+    calls = {"n": 0}
+
+    def wrapper_factory(real_create):
+        def wrapped(**kwargs):
+            calls["n"] += 1
+            result = real_create(**kwargs)
+            if calls["n"] == 1:
+                current = api_client.get(
+                    f"/api/brain-dump-operations/{operation['id']}"
+                ).json()
+                cancelled = api_client.post(
+                    f"/api/brain-dump-operations/{operation['id']}/commands/cancel",
+                    headers={"Idempotency-Key": "interleave-cancel"},
+                    json={"expected_revision": current["revision"]},
+                )
+                assert cancelled.status_code == 200, cancelled.text
+            return result
+
+        return wrapped
+
+    _, restore = _patch_service_task_port(api_client, wrapper_factory)
+    try:
+        confirmed = _confirm(api_client, operation, frozen, "confirm-interleave-cancel")
+    finally:
+        restore()
+
+    assert confirmed.status_code >= 400, confirmed.text
+    assert calls["n"] == 1, "the second action must never reach TaskPort"
+
+    final = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
+    assert final["status"] == "cancelled"
+
+    inbox = api_client.get("/api/tasks", params={"state": "inbox"}).json()
+    assert len(inbox["items"]) == 1
+
+
+def test_confirm_rejects_action_after_interleaved_proposal_patch_supersedes_batch(
+    api_client,
+) -> None:
+    """A proposal patch (which supersedes the active frozen batch) landing
+    mid-confirm must stop later actions from creating Tasks against the now
+    stale batch."""
+
+    operation = _reconciled_operation(
+        api_client, "confirm-interleave-patch", b"Buy milk. Call the dentist."
+    )
+    frozen = _freeze(api_client, operation, "freeze-interleave-patch")
+    active_batch = frozen["active_proposal_batch"]
+    assert len(active_batch["snapshot"]) == 2
+    other_proposal = next(p for p in operation["proposals"] if not p["deleted"])
+
+    calls = {"n": 0}
+
+    def wrapper_factory(real_create):
+        def wrapped(**kwargs):
+            calls["n"] += 1
+            result = real_create(**kwargs)
+            if calls["n"] == 1:
+                current = api_client.get(
+                    f"/api/brain-dump-operations/{operation['id']}"
+                ).json()
+                current_proposal = next(
+                    p for p in current["proposals"] if p["id"] == other_proposal["id"]
+                )
+                patched = api_client.post(
+                    f"/api/brain-dump-operations/{operation['id']}/proposals/"
+                    f"{other_proposal['id']}/patches",
+                    headers={"Idempotency-Key": "interleave-patch"},
+                    json={
+                        "operation": "update",
+                        "title": "Buy milk and eggs",
+                        "base_proposal_revision": current_proposal["revision"],
+                        "expected_operation_revision": current["revision"],
+                    },
+                )
+                assert patched.status_code == 200, patched.text
+            return result
+
+        return wrapped
+
+    _, restore = _patch_service_task_port(api_client, wrapper_factory)
+    try:
+        confirmed = _confirm(api_client, operation, frozen, "confirm-interleave-patch")
+    finally:
+        restore()
+
+    assert confirmed.status_code >= 400, confirmed.text
+    assert calls["n"] == 1, "the second action must never reach TaskPort"
+
+    final = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
+    assert final["status"] != "completed"
+    # The batch this confirm targeted must never reach "committed".
+    assert final.get("committed_proposal_batch") is None or (
+        final["committed_proposal_batch"]["id"] != active_batch["id"]
+    )
+
+    inbox = api_client.get("/api/tasks", params={"state": "inbox"}).json()
+    assert len(inbox["items"]) == 1
+
+
+def test_canonical_confirm_and_legacy_commit_share_source_action_identity(
+    api_client,
+) -> None:
+    """A crash after canonical Task persistence but before this operation's
+    own receipt/attempt write, followed by a legacy ``/commit`` retry, must
+    resolve to the exact same Task instead of creating a duplicate for the
+    same proposal."""
+
+    operation = _reconciled_operation(
+        api_client, "confirm-shared-identity", b"Buy milk."
+    )
+    frozen = _freeze(api_client, operation, "freeze-shared-identity")
+    active_batch = frozen["active_proposal_batch"]
+    action = active_batch["snapshot"][0]
+
+    container = api_client.app.state.container
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+
+    # Simulate canonical confirm having durably created the Task through
+    # TaskPort's permanent child key, before a crash lost this operation's
+    # own started/succeeded attempt and receipt rows entirely.
+    child_key = brain_dump_source_action_key(
+        operation_id=operation["id"], proposal_id=action["proposal_id"]
+    )
+    pre_created_task = container.task_service.create_native_inbox_task(
+        owner_id=owner_id,
+        title=action["title"],
+        source_capture_ids=[f"brain_dump:{operation['id']}:{action['proposal_id']}"],
+        idempotency_key=child_key,
+    )
+
+    committed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/commit",
+        headers={"Idempotency-Key": "commit-shared-identity"},
+        json={"expected_revision": frozen["revision"]},
+    )
+    assert committed.status_code == 200, committed.text
+    body = committed.json()
+    assert body["committed_task_ids"] == [pre_created_task.id]
+
+    inbox = api_client.get("/api/tasks", params={"state": "inbox"}).json()
+    matching = [item for item in inbox["items"] if item["id"] == pre_created_task.id]
+    assert len(matching) == 1
+
+
+def test_confirm_records_terminal_failure_without_masking_partial_success(
+    api_client,
+) -> None:
+    """A ``TaskPort`` failure for one action must append a terminal failed
+    attempt/receipt, leave that action's folded result non-pending, and
+    still record the other, independent action's success -- never silently
+    dropped, never retried into a duplicate."""
+
+    operation = _reconciled_operation(
+        api_client, "confirm-partial-failure", b"Buy milk. Call the dentist."
+    )
+    frozen = _freeze(api_client, operation, "freeze-partial-failure")
+    active_batch = frozen["active_proposal_batch"]
+    assert len(active_batch["snapshot"]) == 2
+
+    calls = {"n": 0}
+
+    def wrapper_factory(real_create):
+        def wrapped(**kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RepositoryError("Simulated permanent TaskPort failure.")
+            return real_create(**kwargs)
+
+        return wrapped
+
+    _, restore = _patch_service_task_port(api_client, wrapper_factory)
+    try:
+        confirmed = _confirm(api_client, operation, frozen, "confirm-partial-failure")
+    finally:
+        restore()
+
+    assert confirmed.status_code == 200, confirmed.text
+    body = confirmed.json()
+    # A partial failure must not silently look like full success.
+    assert body["status"] != "completed"
+
+    # The batch response projection must reflect the mixed outcome.
+    active_response = body["active_proposal_batch"]
+    assert active_response is not None
+    assert active_response["id"] == active_batch["id"]
+    assert active_response["status"] == "failed"
+    statuses = sorted(result["status"] for result in active_response["results"])
+    assert statuses == ["failed", "succeeded"]
+    succeeded_result = next(
+        r for r in active_response["results"] if r["status"] == "succeeded"
+    )
+    failed_result = next(
+        r for r in active_response["results"] if r["status"] == "failed"
+    )
+    assert succeeded_result["result_task_id"] is not None
+    assert failed_result["result_task_id"] is None
+
+    inbox = api_client.get("/api/tasks", params={"state": "inbox"}).json()
+    assert len(inbox["items"]) == 1
+
+    # Idempotent replay of the exact same command returns the same result
+    # rather than re-attempting the failed action or creating a duplicate.
+    replay = _confirm(api_client, operation, frozen, "confirm-partial-failure")
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["committed_task_ids"] == body["committed_task_ids"]
+    inbox_after_replay = api_client.get("/api/tasks", params={"state": "inbox"}).json()
+    assert len(inbox_after_replay["items"]) == 1

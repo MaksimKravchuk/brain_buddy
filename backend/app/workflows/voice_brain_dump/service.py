@@ -42,7 +42,7 @@ from app.utils.identifiers import generate_id
 from app.utils.time import utcnow
 
 from .audio_media import canonical_audio_mime_type, inspect_audio
-from .confirmation import confirm_native_inbox_actions
+from .confirmation import brain_dump_source_action_key, confirm_native_inbox_actions
 from .domain import (
     BrainDumpActionReceiptAttemptDocument,
     BrainDumpActionReceiptDocument,
@@ -133,7 +133,9 @@ def brain_dump_operation_is_committable(
 
     if operation.status != "awaiting_confirmation":
         return False
-    if any(not proposal.deleted and proposal.conflicts for proposal in operation.proposals):
+    if any(
+        not proposal.deleted and proposal.conflicts for proposal in operation.proposals
+    ):
         return False
     if operation.manual_review:
         # Covers both the terminal-failure and legacy-import provisional
@@ -151,8 +153,7 @@ def brain_dump_operation_is_committable(
         operation.reconciliation_quality == "accurate"
         and has_frozen_reconciled_batch
         and all(
-            proposal.deleted
-            or proposal.status in {"reconciled", "user_edited"}
+            proposal.deleted or proposal.status in {"reconciled", "user_edited"}
             for proposal in operation.proposals
         )
     )
@@ -289,7 +290,9 @@ class VoiceBrainDumpService:
     # be purged out from under it, no matter how old it looks: purging an
     # in-progress or recoverable operation would destroy data a resume/retry
     # still needs, not merely "abandoned" work.
-    _TERMINAL_PURGE_ELIGIBLE_STATUSES = frozenset({"completed", "cancelled", "terminal_error"})
+    _TERMINAL_PURGE_ELIGIBLE_STATUSES = frozenset(
+        {"completed", "cancelled", "terminal_error"}
+    )
 
     # Raw audio's retention clock starts at successful reconciliation, not
     # only at operation completion/cancellation/failure, so an operation
@@ -380,11 +383,19 @@ class VoiceBrainDumpService:
         Active transcript/proposal review artifacts are independent and are
         never removed here. Audio is deferred only while a provider run is
         pending/running and may still need the bytes.
+
+        Uses the same two-phase, restart-safe deletion as every other
+        raw-audio path (``deletion_pending`` durably committed before any
+        physical unlink, then ``_finish_raw_audio_deletion`` outside that
+        transaction) so a crash mid-sweep leaves an operation the next
+        ``drain_pending_raw_audio_deletions`` pass converges, never one whose
+        audio is physically gone while the record still claims "retained".
         """
 
         current_time = now or utcnow()
         purged = 0
         for candidate in self.operation_repo.list_expired_raw_audio_operations():
+            pending: BrainDumpOperationDocument | None = None
             with self.operation_repo.command_lock(candidate.owner_id):
                 operation = self.get_brain_dump_operation(
                     candidate.id, owner_id=candidate.owner_id
@@ -415,26 +426,17 @@ class VoiceBrainDumpService:
                     or provider_run_is_in_flight
                 ):
                     continue
-                self.operation_repo.delete_brain_dump_audio_chunks(
-                    owner_id=operation.owner_id,
-                    operation_id=operation.id,
-                    chunks=[
-                        (chunk.chunk_number, chunk.sha256)
-                        for chunk in operation.audio_chunks
-                    ],
+                pending = operation.model_copy(
+                    update={
+                        "raw_audio_state": "deletion_pending",
+                        "updated_at": current_time,
+                        "revision": operation.revision + 1,
+                    }
                 )
-                self.operation_repo.save_brain_dump_operation(
-                    operation.model_copy(
-                        update={
-                            "audio_chunks": [],
-                            "media_ref": None,
-                            "sealed_manifest_hash": None,
-                            "raw_audio_state": "deleted",
-                            "raw_audio_deleted_at": current_time,
-                            "updated_at": current_time,
-                            "revision": operation.revision + 1,
-                        }
-                    )
+                self.operation_repo.save_brain_dump_operation(pending)
+            if pending is not None:
+                self._finish_raw_audio_deletion(
+                    pending, owner_id=candidate.owner_id, restamp_expiry=False
                 )
                 purged += 1
         purged += self.operation_repo.purge_brain_dump_media_orphans()
@@ -476,10 +478,7 @@ class VoiceBrainDumpService:
                 operation = self.get_brain_dump_operation(
                     candidate.id, owner_id=candidate.owner_id
                 )
-                if (
-                    operation.status
-                    not in self._TERMINAL_PURGE_ELIGIBLE_STATUSES
-                ):
+                if operation.status not in self._TERMINAL_PURGE_ELIGIBLE_STATUSES:
                     continue
                 if operation.schema_version == 1:
                     # Terminal schema-v1 rows are historical, byte-immutable
@@ -490,13 +489,10 @@ class VoiceBrainDumpService:
                     operation.working_artifacts_expires_at
                     or operation.updated_at + self.working_artifacts_retention
                 )
-                if (
-                    current_time < expires_at
-                    or (
-                        not operation.segments
-                        and not operation.proposals
-                        and not operation.proposal_patches
-                    )
+                if current_time < expires_at or (
+                    not operation.segments
+                    and not operation.proposals
+                    and not operation.proposal_patches
                 ):
                     continue
                 self.operation_repo.save_brain_dump_operation(
@@ -756,15 +752,30 @@ class VoiceBrainDumpService:
                 raise ValidationFailure(
                     "Audio chunks can only be uploaded while recording or paused."
                 )
-            self._assert_external_provider_consent(operation.consent)
-            self._assert_current_external_consent(operation.consent)
+            # A canonical current processing-policy/category consent grant
+            # independently authorizes audio leaving the device even when
+            # the legacy ``consent.provider`` field was never set (ADR-0008
+            # mobile clients grant consent only through the canonical
+            # consent-decisions command). Only an operation that never
+            # recorded a canonical decision at all ("legacy") falls back to
+            # the old provider-membership check; every other non-current
+            # status still fails closed with its specific code.
+            consent_status = self._current_external_consent_status(
+                operation.consent, now=utcnow()
+            )
+            if consent_status == "legacy":
+                self._assert_external_provider_consent(operation.consent)
+            else:
+                self._assert_current_external_consent(operation.consent)
             existing = {
                 chunk.chunk_number: chunk for chunk in operation.audio_chunks
             }.get(chunk_number)
             if existing is not None:
-                if existing.sha256 != actual_sha256 or existing.size_bytes != len(
-                    content
-                ) or existing.mime_type != normalized_content_type:
+                if (
+                    existing.sha256 != actual_sha256
+                    or existing.size_bytes != len(content)
+                    or existing.mime_type != normalized_content_type
+                ):
                     raise ConflictError(
                         "Brain dump audio chunk",
                         str(chunk_number),
@@ -867,7 +878,9 @@ class VoiceBrainDumpService:
         command = f"brain_dump_seal:{operation_id}"
         request_hash = self._request_hash(command, payload)
         with self.operation_repo.command_lock(owner_id):
-            self.operation_repo.purge_expired_idempotency(owner_id=owner_id, now=utcnow())
+            self.operation_repo.purge_expired_idempotency(
+                owner_id=owner_id, now=utcnow()
+            )
             self._reconcile_idempotent_result(owner_id=owner_id, key=idempotency_key)
             record = self._idempotency_record(
                 owner_id=owner_id,
@@ -888,9 +901,7 @@ class VoiceBrainDumpService:
                 raise ValidationFailure("Only an active brain dump can be sealed.")
             self._assert_current_external_consent(operation.consent)
             expected_numbers = set(range(payload.expected_chunks))
-            uploaded_numbers = {
-                chunk.chunk_number for chunk in operation.audio_chunks
-            }
+            uploaded_numbers = {chunk.chunk_number for chunk in operation.audio_chunks}
             missing = sorted(expected_numbers - uploaded_numbers)
             unexpected = sorted(uploaded_numbers - expected_numbers)
             if missing or unexpected:
@@ -963,9 +974,7 @@ class VoiceBrainDumpService:
                     "the configured maximum recording duration."
                 )
             now = utcnow()
-            reservation = getattr(
-                self.accurate_stt, "max_cost_usd_per_operation", 0.0
-            )
+            reservation = getattr(self.accurate_stt, "max_cost_usd_per_operation", 0.0)
             claimed = operation.model_copy(
                 update={
                     "status": "accurate_transcribing",
@@ -1418,11 +1427,7 @@ class VoiceBrainDumpService:
             # (``_operation_cost_budget_exceeded``); otherwise a stuck or
             # unknown-outcome run's reserved spend would be silently
             # dropped from the reconciler's own admission check.
-            + (
-                run.reserved_cost_usd
-                if run.status in {"pending", "running"}
-                else 0.0
-            )
+            + (run.reserved_cost_usd if run.status in {"pending", "running"} else 0.0)
             for run in checkpoint_runs
         )
         worst_case_next = getattr(
@@ -1553,7 +1558,9 @@ class VoiceBrainDumpService:
                     error=redacted_code,
                     error_code=redacted_code,
                     now=now,
-                    retryable=isinstance(exc, ProviderRetryableError | ValidationFailure),
+                    retryable=isinstance(
+                        exc, ProviderRetryableError | ValidationFailure
+                    ),
                     attempt=attempt,
                     recovery_count=recovery_count,
                     estimated_cost_usd=exc.estimated_cost_usd,
@@ -1606,8 +1613,7 @@ class VoiceBrainDumpService:
                 # Stamped once, at the first successful reconciliation, and
                 # never recomputed afterward — see ``purge_expired_raw_audio``.
                 "raw_audio_expires_at": (
-                    operation.raw_audio_expires_at
-                    or now + self.raw_audio_retention
+                    operation.raw_audio_expires_at or now + self.raw_audio_retention
                 ),
                 "updated_at": now,
                 "revision": operation.revision + 1,
@@ -1627,7 +1633,9 @@ class VoiceBrainDumpService:
         command = f"brain_dump_retry:{operation_id}"
         request_hash = self._request_hash(command, payload)
         with self.operation_repo.command_lock(owner_id):
-            self.operation_repo.purge_expired_idempotency(owner_id=owner_id, now=utcnow())
+            self.operation_repo.purge_expired_idempotency(
+                owner_id=owner_id, now=utcnow()
+            )
             self._reconcile_idempotent_result(owner_id=owner_id, key=idempotency_key)
             record = self._idempotency_record(
                 owner_id=owner_id,
@@ -1662,17 +1670,20 @@ class VoiceBrainDumpService:
                 and latest_provider_run.role == "reconciler"
                 and latest_provider_run.checkpoint == "accurate_transcribed"
                 and (
-                    latest_provider_run.status == "retryable_error"
-                    or recoverable_claim
+                    latest_provider_run.status == "retryable_error" or recoverable_claim
                 )
             )
-            last_run = latest_provider_run if resume_reconciliation else next(
-                (
-                    run
-                    for run in reversed(operation.provider_runs)
-                    if run.role == "accurate_stt"
-                ),
-                None,
+            last_run = (
+                latest_provider_run
+                if resume_reconciliation
+                else next(
+                    (
+                        run
+                        for run in reversed(operation.provider_runs)
+                        if run.role == "accurate_stt"
+                    ),
+                    None,
+                )
             )
             if last_run is None or operation.sealed_manifest_hash is None:
                 raise ValidationFailure(
@@ -1771,9 +1782,11 @@ class VoiceBrainDumpService:
                             attempt=attempt,
                             recovery_count=recovery_count,
                             reserved_cost_usd=getattr(
-                                self.text_reconciler
-                                if resume_reconciliation
-                                else self.accurate_stt,
+                                (
+                                    self.text_reconciler
+                                    if resume_reconciliation
+                                    else self.accurate_stt
+                                ),
                                 "max_cost_usd_per_operation",
                                 0.0,
                             ),
@@ -2204,21 +2217,23 @@ class VoiceBrainDumpService:
     def _supersede_active_batch(
         batches: list[BrainDumpProposalBatchDocument],
     ) -> list[BrainDumpProposalBatchDocument]:
-        """Mark any currently ``frozen`` batch ``superseded``.
+        """Mark any currently ``frozen``/``failed`` batch ``superseded``.
 
         Only ``status`` changes; every batch's ``actions`` snapshot is never
         rewritten once created (ADR-0002 "a frozen batch never changes in
-        place").
+        place"). A ``failed`` batch is superseded exactly like a ``frozen``
+        one: further edits mean a fresh freeze is required before retrying.
         """
 
         return [
-            batch.model_copy(update={"status": "superseded"})
-            if batch.status == "frozen"
-            else batch
+            (
+                batch.model_copy(update={"status": "superseded"})
+                if batch.status in {"frozen", "failed"}
+                else batch
+            )
             for batch in batches
         ]
 
-    @_serialized_write
     def record_brain_dump_consent_decision(
         self,
         operation_id: str,
@@ -2231,97 +2246,134 @@ class VoiceBrainDumpService:
 
         A grant must repeat the exact current policy version and category
         set; a mismatch fails closed rather than silently accepting a stale
-        or partial grant. Withdrawal reuses the same effect application as
-        the deprecated ``withdraw_consent`` action so both paths share one
-        behavior (ADR-0002: "no bypass of ... canonical ... semantics").
+        or partial grant. Withdrawal reuses the same phase-1 effect
+        application as the deprecated ``withdraw_consent`` action so both
+        paths share one behavior (ADR-0002: "no bypass of ... canonical ...
+        semantics"), including the two-phase raw-audio deletion. Not wrapped
+        in ``@_serialized_write`` for the same reason: the withdraw branch's
+        physical audio cleanup must happen outside any transaction.
         """
 
         command = f"brain_dump_consent_decision:{operation_id}"
         request_hash = self._request_hash(command, payload)
-        record = self._idempotency_record(
+        replay = self._command_replay_or_none(
             owner_id=owner_id,
-            key=idempotency_key,
+            idempotency_key=idempotency_key,
             command=command,
             request_hash=request_hash,
         )
-        if record is not None:
-            return self._brain_dump_operation_result(record, owner_id=owner_id)
-        operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
-        self._assert_revision(
-            "Brain dump operation",
-            operation.id,
-            operation.revision,
-            payload.expected_operation_revision,
-        )
-        now = utcnow()
+        if replay is not None:
+            return replay
         if payload.decision == "grant":
-            if operation.status in {"completed", "cancelled"}:
-                raise ValidationFailure(
-                    "Consent cannot be granted on a completed or cancelled brain dump."
+            with self.operation_repo.command_lock(owner_id):
+                operation = self.get_brain_dump_operation(
+                    operation_id, owner_id=owner_id
                 )
-            if payload.consent_policy_version != self.consent_policy_version:
-                raise ValidationFailure(
-                    "CONSENT_POLICY_VERSION_MISMATCH: consent_policy_version does "
-                    "not match the current processing policy."
+                self._assert_revision(
+                    "Brain dump operation",
+                    operation.id,
+                    operation.revision,
+                    payload.expected_operation_revision,
                 )
-            if set(payload.allowed_provider_categories) != set(
-                self.required_consent_categories
-            ):
-                raise ValidationFailure(
-                    "CONSENT_CATEGORY_SET_MISMATCH: allowed_provider_categories "
-                    "must exactly equal the current required category set."
-                )
-            valid_until = now + timedelta(seconds=self.consent_valid_for_seconds)
-            decision_doc = BrainDumpConsentDecisionDocument(
-                id=generate_id("consent_decision"),
-                decision="grant",
-                consent_policy_version=payload.consent_policy_version,
-                allowed_provider_categories=list(payload.allowed_provider_categories),
-                decision_recorded_at=payload.decision_recorded_at,
-                valid_until=valid_until,
-                recorded_at=now,
-            )
-            updated = operation.model_copy(
-                update={
-                    "consent": operation.consent.model_copy(
-                        update={
-                            "external_processing_allowed": True,
-                            "consent_policy_version": payload.consent_policy_version,
-                            "allowed_provider_categories": list(
-                                payload.allowed_provider_categories
-                            ),
-                            "decision_recorded_at": payload.decision_recorded_at,
-                            "valid_until": valid_until,
-                            "withdrawn_at": None,
-                            "status": "granted",
-                        }
+                if operation.status in {"completed", "cancelled"}:
+                    raise ValidationFailure(
+                        "Consent cannot be granted on a completed or cancelled brain dump."
+                    )
+                if payload.consent_policy_version != self.consent_policy_version:
+                    raise ValidationFailure(
+                        "CONSENT_POLICY_VERSION_MISMATCH: consent_policy_version does "
+                        "not match the current processing policy."
+                    )
+                if set(payload.allowed_provider_categories) != set(
+                    self.required_consent_categories
+                ):
+                    raise ValidationFailure(
+                        "CONSENT_CATEGORY_SET_MISMATCH: allowed_provider_categories "
+                        "must exactly equal the current required category set."
+                    )
+                now = utcnow()
+                valid_until = now + timedelta(seconds=self.consent_valid_for_seconds)
+                decision_doc = BrainDumpConsentDecisionDocument(
+                    id=generate_id("consent_decision"),
+                    decision="grant",
+                    consent_policy_version=payload.consent_policy_version,
+                    allowed_provider_categories=list(
+                        payload.allowed_provider_categories
                     ),
-                    "consent_decisions": [*operation.consent_decisions, decision_doc],
-                    "updated_at": now,
-                    "revision": operation.revision + 1,
-                }
+                    decision_recorded_at=payload.decision_recorded_at,
+                    valid_until=valid_until,
+                    recorded_at=now,
+                )
+                updated = operation.model_copy(
+                    update={
+                        "consent": operation.consent.model_copy(
+                            update={
+                                "external_processing_allowed": True,
+                                "consent_policy_version": payload.consent_policy_version,
+                                "allowed_provider_categories": list(
+                                    payload.allowed_provider_categories
+                                ),
+                                "decision_recorded_at": payload.decision_recorded_at,
+                                "valid_until": valid_until,
+                                "withdrawn_at": None,
+                                "status": "granted",
+                            }
+                        ),
+                        "consent_decisions": [
+                            *operation.consent_decisions,
+                            decision_doc,
+                        ],
+                        "updated_at": now,
+                        "revision": operation.revision + 1,
+                    }
+                )
+                self.operation_repo.save_brain_dump_operation(updated)
+                self._store_idempotency(
+                    owner_id=owner_id,
+                    key=idempotency_key,
+                    command=command,
+                    request_hash=request_hash,
+                    resource_id=updated.id,
+                    response=updated,
+                )
+                return updated
+
+        pending: BrainDumpOperationDocument | None = None
+        with self.operation_repo.command_lock(owner_id):
+            operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
+            self._assert_revision(
+                "Brain dump operation",
+                operation.id,
+                operation.revision,
+                payload.expected_operation_revision,
             )
-        else:
+            now = utcnow()
             decision_doc = BrainDumpConsentDecisionDocument(
                 id=generate_id("consent_decision"),
                 decision="withdraw",
                 recorded_at=now,
             )
-            withdrawn = self._apply_consent_withdrawal_effects(operation, now=now)
-            updated = withdrawn.model_copy(
+            withdrawn = self._begin_consent_withdrawal(operation, now=now)
+            pending = withdrawn.model_copy(
                 update={
                     "consent_decisions": [*withdrawn.consent_decisions, decision_doc],
                 }
             )
-        self.operation_repo.save_brain_dump_operation(updated)
-        self._store_idempotency(
-            owner_id=owner_id,
-            key=idempotency_key,
-            command=command,
-            request_hash=request_hash,
-            resource_id=updated.id,
-            response=updated,
+            self.operation_repo.save_brain_dump_operation(pending)
+        updated = (
+            self._finish_raw_audio_deletion(pending, owner_id=owner_id)
+            if pending.raw_audio_state == "deletion_pending"
+            else pending
         )
+        with self.operation_repo.command_lock(owner_id):
+            self._store_idempotency(
+                owner_id=owner_id,
+                key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+                resource_id=updated.id,
+                response=updated,
+            )
         return updated
 
     @_serialized_write
@@ -2485,7 +2537,10 @@ class VoiceBrainDumpService:
                 "Only an operation awaiting confirmation can freeze a proposal batch."
             )
         is_provisional_review = operation.manual_review
-        if operation.legacy_import == "legacy_preview_only" and not is_provisional_review:
+        if (
+            operation.legacy_import == "legacy_preview_only"
+            and not is_provisional_review
+        ):
             raise ConflictError(
                 "Brain dump proposal batch",
                 operation.id,
@@ -2508,7 +2563,9 @@ class VoiceBrainDumpService:
                 "Brain dump conflicts must be reviewed before freezing.",
                 {"proposal_ids": conflicted},
             )
-        if not is_provisional_review and not self._has_frozen_reconciled_batch(operation):
+        if not is_provisional_review and not self._has_frozen_reconciled_batch(
+            operation
+        ):
             raise ValidationFailure(
                 "BRAIN_DUMP_NOT_RECONCILED: canonical tasks require a sealed "
                 "audio checkpoint that completed accurate STT and reconciler "
@@ -2666,7 +2723,9 @@ class VoiceBrainDumpService:
                 None,
             )
             if batch is None:
-                raise NotFoundError("Brain dump proposal batch", payload.proposal_batch_id)
+                raise NotFoundError(
+                    "Brain dump proposal batch", payload.proposal_batch_id
+                )
             if batch.status != "frozen":
                 raise ValidationFailure(
                     "Only the current frozen proposal batch can be confirmed."
@@ -2709,7 +2768,7 @@ class VoiceBrainDumpService:
             batch = next(
                 item for item in operation.proposal_batches if item.id == batch_id
             )
-            if batch.status == "committed":
+            if batch.status in {"committed", "failed"}:
                 # A concurrent retry already ran this final fold.
                 self._store_idempotency(
                     owner_id=owner_id,
@@ -2727,6 +2786,7 @@ class VoiceBrainDumpService:
                 if receipt.batch_id == batch_id
             }
             committed_task_ids = list(operation.committed_task_ids)
+            any_failed = False
             for action_id in action_ids:
                 receipt = receipts_by_action.get(action_id)
                 if receipt is None:
@@ -2734,11 +2794,18 @@ class VoiceBrainDumpService:
                         f"Brain dump action '{action_id}' has no terminal "
                         "receipt after every action was processed."
                     )
-                if receipt.task_id not in committed_task_ids:
+                if receipt.outcome != "succeeded":
+                    any_failed = True
+                    continue
+                if receipt.task_id and receipt.task_id not in committed_task_ids:
                     committed_task_ids.append(receipt.task_id)
+            # A partial/full failure leaves the batch "failed" (ADR-0002:
+            # "the batch becomes failed with per-action results and can be
+            # retried idempotently") rather than silently completing the
+            # operation; independent successes are still recorded above.
             committed_batch = batch.model_copy(
                 update={
-                    "status": "committed",
+                    "status": "failed" if any_failed else "committed",
                     "committed_at": now,
                     "revision": batch.revision + 1,
                 }
@@ -2749,13 +2816,20 @@ class VoiceBrainDumpService:
             ]
             updated = operation.model_copy(
                 update={
-                    "status": "completed",
+                    "status": operation.status if any_failed else "completed",
                     "proposal_batches": proposal_batches,
                     "committed_task_ids": committed_task_ids,
                     "raw_audio_expires_at": (
-                        operation.raw_audio_expires_at or now + self.raw_audio_retention
+                        operation.raw_audio_expires_at
+                        if any_failed
+                        else operation.raw_audio_expires_at
+                        or now + self.raw_audio_retention
                     ),
-                    "working_artifacts_expires_at": now + self.working_artifacts_retention,
+                    "working_artifacts_expires_at": (
+                        operation.working_artifacts_expires_at
+                        if any_failed
+                        else now + self.working_artifacts_retention
+                    ),
                     "updated_at": now,
                     "revision": operation.revision + 1,
                 }
@@ -2782,7 +2856,16 @@ class VoiceBrainDumpService:
     ) -> None:
         """Resolve one confirmed action through its own started/terminal
         transactions, calling ``TaskPort`` only between them (never under
-        the Voice-DB lock)."""
+        the Voice-DB lock).
+
+        Re-validates operation/batch state fresh on every call: a cancel, or
+        a proposal patch that supersedes this batch, may land between
+        confirm's initial validation and this action's turn in the
+        per-action loop. Without this check a stale action could still
+        create a Task after cancellation, or against a batch the owner has
+        already edited past (ADR-0002/0008: "no stale action may create a
+        Task or turn cancelled into completed").
+        """
 
         with self.operation_repo.command_lock(owner_id):
             operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
@@ -2796,12 +2879,25 @@ class VoiceBrainDumpService:
             )
             if existing is not None:
                 return
+            if operation.status == "cancelled":
+                raise ConflictError(
+                    "Brain dump operation",
+                    operation_id,
+                    "BRAIN_DUMP_CANCELLED: operation was cancelled before "
+                    "this action could be confirmed.",
+                )
             batch = next(
-                item for item in operation.proposal_batches if item.id == batch_id
+                (item for item in operation.proposal_batches if item.id == batch_id),
+                None,
             )
-            action = next(
-                item for item in batch.actions if item.action_id == action_id
-            )
+            if batch is None or batch.status != "frozen":
+                raise ConflictError(
+                    "Brain dump proposal batch",
+                    batch_id,
+                    "BRAIN_DUMP_BATCH_STALE: proposal batch is no longer the "
+                    "current frozen batch; freeze again before confirming.",
+                )
+            action = next(item for item in batch.actions if item.action_id == action_id)
             attempt_number = 1 + sum(
                 1
                 for prior in operation.action_receipt_attempts
@@ -2832,15 +2928,32 @@ class VoiceBrainDumpService:
                 )
             )
 
-        child_key = hashlib.sha256(
-            f"{operation_id}:{batch_id}:{action_id}".encode()
-        ).hexdigest()
-        task = self.task_port.create_native_inbox_task(
-            owner_id=owner_id,
-            title=action.title,
-            source_capture_ids=[f"brain_dump:{operation_id}:{action.proposal_id}"],
-            idempotency_key=child_key,
+        child_key = brain_dump_source_action_key(
+            operation_id=operation_id, proposal_id=action.proposal_id
         )
+        try:
+            task = self.task_port.create_native_inbox_task(
+                owner_id=owner_id,
+                title=action.title,
+                source_capture_ids=[f"brain_dump:{operation_id}:{action.proposal_id}"],
+                idempotency_key=child_key,
+            )
+        except (RepositoryError, ConflictError, ValidationFailure) as exc:
+            # Only expected, deterministic TaskPort failures are folded into
+            # a terminal "failed" result -- anything else (a bug, an
+            # integrity assertion) still propagates rather than being
+            # silently masked as a normal action outcome.
+            self._record_confirm_action_failure(
+                operation_id=operation_id,
+                owner_id=owner_id,
+                batch_id=batch_id,
+                action_id=action_id,
+                action=action,
+                attempt_number=attempt_number,
+                request_hash=request_hash,
+                error=exc,
+            )
+            return
 
         with self.operation_repo.command_lock(owner_id):
             operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
@@ -2855,11 +2968,7 @@ class VoiceBrainDumpService:
             if existing is not None:
                 return
             proposal = next(
-                (
-                    item
-                    for item in operation.proposals
-                    if item.id == action.proposal_id
-                ),
+                (item for item in operation.proposals if item.id == action.proposal_id),
                 None,
             )
             reconciler_run = next(
@@ -2909,9 +3018,7 @@ class VoiceBrainDumpService:
                 reconciliation_provider=(
                     reconciler_run.provider if reconciler_run else None
                 ),
-                reconciliation_model=(
-                    reconciler_run.model if reconciler_run else None
-                ),
+                reconciliation_model=(reconciler_run.model if reconciler_run else None),
                 reconciliation_template_version=(
                     reconciler_run.template_version if reconciler_run else None
                 ),
@@ -2942,7 +3049,90 @@ class VoiceBrainDumpService:
                 )
             )
 
-    @_serialized_write
+    def _record_confirm_action_failure(
+        self,
+        *,
+        operation_id: str,
+        owner_id: str,
+        batch_id: str,
+        action_id: str,
+        action: BrainDumpProposalBatchActionDocument,
+        attempt_number: int,
+        request_hash: str,
+        error: Exception,
+    ) -> None:
+        """Append a terminal ``failed_terminal`` attempt and a ``failed``
+        receipt for one action whose ``TaskPort`` call raised an expected,
+        deterministic error.
+
+        No Task was created, so ``task_id`` stays unset: the folded result/
+        status projection reports "failed", never a lingering "pending",
+        and -- unlike a raised exception that aborts the whole confirm
+        command -- other independent actions in the same batch still run.
+        """
+
+        with self.operation_repo.command_lock(owner_id):
+            operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
+            existing = next(
+                (
+                    receipt
+                    for receipt in operation.action_receipts
+                    if receipt.batch_id == batch_id and receipt.action_id == action_id
+                ),
+                None,
+            )
+            if existing is not None:
+                return
+            now = utcnow()
+            error_code = self._redact_provider_error(str(error))
+            failed_attempt = BrainDumpActionReceiptAttemptDocument(
+                id=(
+                    f"attempt:{operation_id}:{batch_id}:{action_id}:"
+                    f"{len(operation.action_receipt_attempts) + 1}"
+                ),
+                batch_id=batch_id,
+                action_id=action_id,
+                sequence=len(operation.action_receipt_attempts) + 1,
+                attempt=attempt_number,
+                request_hash=request_hash,
+                status="failed_terminal",
+                task_id=None,
+                error_code=error_code,
+                created_at=now,
+            )
+            receipt = BrainDumpActionReceiptDocument(
+                id=f"receipt:{operation_id}:{batch_id}:{action_id}",
+                proposal_id=action.proposal_id,
+                task_id=None,
+                child_idempotency_key=brain_dump_source_action_key(
+                    operation_id=operation_id, proposal_id=action.proposal_id
+                ),
+                batch_id=batch_id,
+                action_id=action_id,
+                outcome="failed",
+                source_operation_id=operation_id,
+                source_manifest_hash=operation.sealed_manifest_hash,
+                reconciliation_quality=operation.reconciliation_quality,
+                confirmed_title_sha256=hashlib.sha256(
+                    action.title.encode("utf-8")
+                ).hexdigest(),
+                confidence="unknown",
+                confirmed_by_actor_id=owner_id,
+                confirmed_at=now,
+            )
+            self.operation_repo.save_brain_dump_operation(
+                operation.model_copy(
+                    update={
+                        "action_receipt_attempts": [
+                            *operation.action_receipt_attempts,
+                            failed_attempt,
+                        ],
+                        "action_receipts": [*operation.action_receipts, receipt],
+                        "updated_at": now,
+                    }
+                )
+            )
+
     def transition_brain_dump_operation(
         self,
         operation_id: str,
@@ -2952,97 +3142,104 @@ class VoiceBrainDumpService:
         idempotency_key: str,
         action: str,
     ) -> BrainDumpOperationDocument:
+        """Not wrapped in ``@_serialized_write``: ``cancel`` may need to mark
+        raw audio ``deletion_pending`` and physically clean it up outside any
+        transaction (the same two-phase, restart-safe pattern
+        ``delete_brain_dump_raw_audio``/consent withdrawal use), so this
+        manages its own lock scopes instead of holding one open throughout.
+        """
+
         command = f"brain_dump_{action}:{operation_id}"
         request_hash = self._request_hash(command, payload)
-        record = self._idempotency_record(
+        replay = self._command_replay_or_none(
             owner_id=owner_id,
-            key=idempotency_key,
+            idempotency_key=idempotency_key,
             command=command,
             request_hash=request_hash,
         )
-        if record is not None:
-            return self._brain_dump_operation_result(record, owner_id=owner_id)
-        operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
-        self._assert_revision(
-            "Brain dump operation",
-            operation.id,
-            operation.revision,
-            payload.expected_revision,
-        )
-        status_by_action = {
-            "pause": "paused",
-            "resume": "recording",
-            "finish": "awaiting_confirmation",
-            "cancel": "cancelled",
-        }
-        next_status = status_by_action.get(action)
-        if next_status is None:
-            raise ValidationFailure("Unsupported brain dump operation transition.")
-        if action == "pause" and operation.status != "recording":
-            raise ValidationFailure("Only a recording brain dump can be paused.")
-        if action == "resume" and operation.status != "paused":
-            raise ValidationFailure("Only a paused brain dump can be resumed.")
-        if action == "finish" and operation.status not in {"recording", "paused"}:
-            raise ValidationFailure("Only an active brain dump can be finished.")
-        if action == "cancel" and operation.status in {"completed", "cancelled"}:
-            next_status = operation.status
-        now = utcnow()
-        proposals = operation.proposals
-        if action == "finish":
-            proposals = [
-                (
-                    proposal.model_copy(
-                        update={
-                            "status": "ready_to_review",
-                            "updated_at": now,
-                            "revision": proposal.revision + 1,
-                        }
-                    )
-                    if not proposal.deleted and not proposal.user_edited
-                    else proposal
-                )
-                for proposal in operation.proposals
-            ]
-        clear_raw_audio = action == "cancel"
-        if clear_raw_audio:
-            self.operation_repo.delete_brain_dump_audio_chunks(
-                owner_id=owner_id,
-                operation_id=operation.id,
-                chunks=[
-                    (chunk.chunk_number, chunk.sha256)
-                    for chunk in operation.audio_chunks
-                ],
+        if replay is not None:
+            return replay
+        pending: BrainDumpOperationDocument | None = None
+        clear_raw_audio = False
+        with self.operation_repo.command_lock(owner_id):
+            operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
+            self._assert_revision(
+                "Brain dump operation",
+                operation.id,
+                operation.revision,
+                payload.expected_revision,
             )
-        updated = operation.model_copy(
-            update={
-                "status": next_status,
-                "proposals": proposals,
-                "audio_chunks": [] if clear_raw_audio else operation.audio_chunks,
-                "media_ref": None if clear_raw_audio else operation.media_ref,
-                "sealed_manifest_hash": (
-                    None if clear_raw_audio else operation.sealed_manifest_hash
-                ),
-                "working_artifacts_expires_at": (
-                    now + self.working_artifacts_retention
-                    if action == "cancel"
-                    else operation.working_artifacts_expires_at
-                ),
-                "updated_at": now,
-                "revision": operation.revision + 1,
+            status_by_action = {
+                "pause": "paused",
+                "resume": "recording",
+                "finish": "awaiting_confirmation",
+                "cancel": "cancelled",
             }
+            next_status = status_by_action.get(action)
+            if next_status is None:
+                raise ValidationFailure("Unsupported brain dump operation transition.")
+            if action == "pause" and operation.status != "recording":
+                raise ValidationFailure("Only a recording brain dump can be paused.")
+            if action == "resume" and operation.status != "paused":
+                raise ValidationFailure("Only a paused brain dump can be resumed.")
+            if action == "finish" and operation.status not in {"recording", "paused"}:
+                raise ValidationFailure("Only an active brain dump can be finished.")
+            if action == "cancel" and operation.status in {"completed", "cancelled"}:
+                next_status = operation.status
+            now = utcnow()
+            proposals = operation.proposals
+            if action == "finish":
+                proposals = [
+                    (
+                        proposal.model_copy(
+                            update={
+                                "status": "ready_to_review",
+                                "updated_at": now,
+                                "revision": proposal.revision + 1,
+                            }
+                        )
+                        if not proposal.deleted and not proposal.user_edited
+                        else proposal
+                    )
+                    for proposal in operation.proposals
+                ]
+            clear_raw_audio = action == "cancel" and bool(operation.audio_chunks)
+            updated = operation.model_copy(
+                update={
+                    "status": next_status,
+                    "proposals": proposals,
+                    "raw_audio_state": (
+                        "deletion_pending"
+                        if clear_raw_audio
+                        else operation.raw_audio_state
+                    ),
+                    "working_artifacts_expires_at": (
+                        now + self.working_artifacts_retention
+                        if action == "cancel"
+                        else operation.working_artifacts_expires_at
+                    ),
+                    "updated_at": now,
+                    "revision": operation.revision + 1,
+                }
+            )
+            self.operation_repo.save_brain_dump_operation(updated)
+            pending = updated
+        updated = (
+            self._finish_raw_audio_deletion(pending, owner_id=owner_id)
+            if clear_raw_audio
+            else pending
         )
-        self.operation_repo.save_brain_dump_operation(updated)
-        self._store_idempotency(
-            owner_id=owner_id,
-            key=idempotency_key,
-            command=command,
-            request_hash=request_hash,
-            resource_id=updated.id,
-            response=updated,
-        )
+        with self.operation_repo.command_lock(owner_id):
+            self._store_idempotency(
+                owner_id=owner_id,
+                key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+                resource_id=updated.id,
+                response=updated,
+            )
         return updated
 
-    @_serialized_write
     def withdraw_brain_dump_consent(
         self,
         operation_id: str,
@@ -3068,62 +3265,78 @@ class VoiceBrainDumpService:
             explicit ``terminal_error`` recovery state so the UI never shows
             a phantom "still processing" surface for a run that can no
             longer complete;
-          * removes raw audio promptly, leaving any already-reconciled
-            transcript/proposal provenance intact and still committable
-            (``_has_frozen_reconciled_batch`` never depends on raw audio
-            still being present);
+          * marks raw audio ``deletion_pending`` and removes it through the
+            same two-phase, restart-safe deletion every other raw-audio path
+            uses (``_finish_raw_audio_deletion``), leaving any already-
+            reconciled transcript/proposal provenance intact and still
+            committable (``_has_frozen_reconciled_batch`` never depends on
+            raw audio still being present);
           * leaves uncommitted transcript/proposal working data in place for
             the standard working-artifact retention sweep to delete, rather
             than destroying it synchronously and losing the user's in-review
             edits.
+
+        Not wrapped in ``@_serialized_write``: physical audio cleanup must
+        happen outside any transaction, after ``deletion_pending`` is
+        durably committed on its own (see ``delete_brain_dump_raw_audio``).
         """
 
         command = f"brain_dump_withdraw_consent:{operation_id}"
         request_hash = self._request_hash(command, payload)
-        record = self._idempotency_record(
+        replay = self._command_replay_or_none(
             owner_id=owner_id,
-            key=idempotency_key,
+            idempotency_key=idempotency_key,
             command=command,
             request_hash=request_hash,
         )
-        if record is not None:
-            return self._brain_dump_operation_result(record, owner_id=owner_id)
-        operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
-        if operation.status in {"completed", "cancelled"}:
-            raise ValidationFailure(
-                "Consent cannot be withdrawn from a completed or cancelled "
-                "brain dump; there is no future processing left to stop."
+        if replay is not None:
+            return replay
+        pending: BrainDumpOperationDocument | None = None
+        with self.operation_repo.command_lock(owner_id):
+            operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
+            if operation.status in {"completed", "cancelled"}:
+                raise ValidationFailure(
+                    "Consent cannot be withdrawn from a completed or cancelled "
+                    "brain dump; there is no future processing left to stop."
+                )
+            self._assert_revision(
+                "Brain dump operation",
+                operation.id,
+                operation.revision,
+                payload.expected_revision,
             )
-        self._assert_revision(
-            "Brain dump operation",
-            operation.id,
-            operation.revision,
-            payload.expected_revision,
+            now = utcnow()
+            pending = self._begin_consent_withdrawal(operation, now=now)
+            self.operation_repo.save_brain_dump_operation(pending)
+        updated = (
+            self._finish_raw_audio_deletion(pending, owner_id=owner_id)
+            if pending.raw_audio_state == "deletion_pending"
+            else pending
         )
-        now = utcnow()
-        updated = self._apply_consent_withdrawal_effects(operation, now=now)
-        self.operation_repo.save_brain_dump_operation(updated)
-        self._store_idempotency(
-            owner_id=owner_id,
-            key=idempotency_key,
-            command=command,
-            request_hash=request_hash,
-            resource_id=updated.id,
-            response=updated,
-        )
+        with self.operation_repo.command_lock(owner_id):
+            self._store_idempotency(
+                owner_id=owner_id,
+                key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+                resource_id=updated.id,
+                response=updated,
+            )
         return updated
 
-    def _apply_consent_withdrawal_effects(
+    def _begin_consent_withdrawal(
         self, operation: BrainDumpOperationDocument, *, now: datetime
     ) -> BrainDumpOperationDocument:
-        """Shared effect application for both the deprecated ``withdraw_consent``
-        action and the canonical ``consent-decisions`` withdraw command:
+        """Phase 1 (durable, committed by the caller) of consent withdrawal,
+        shared by both the deprecated ``withdraw_consent`` action and the
+        canonical ``consent-decisions`` withdraw command:
           * flips ``consent.external_processing_allowed`` false (and the
             canonical ``status``/``withdrawn_at`` fields when present) in the
             same write as every other effect below;
           * invalidates a due/leased in-flight provider run immediately;
-          * removes raw audio promptly, leaving already-reconciled
-            transcript/proposal provenance intact and still committable;
+          * marks raw audio ``deletion_pending`` (never physically deletes it
+            here -- the caller runs ``_finish_raw_audio_deletion`` afterward,
+            outside this transaction);
           * leaves uncommitted transcript/proposal working data for the
             standard working-artifact retention sweep to delete.
         """
@@ -3144,14 +3357,6 @@ class VoiceBrainDumpService:
             )
             provider_runs = [*provider_runs[:-1], invalidated_run]
         had_audio = bool(operation.audio_chunks)
-        self.operation_repo.delete_brain_dump_audio_chunks(
-            owner_id=operation.owner_id,
-            operation_id=operation.id,
-            chunks=[
-                (chunk.chunk_number, chunk.sha256)
-                for chunk in operation.audio_chunks
-            ],
-        )
         return operation.model_copy(
             update={
                 "consent": operation.consent.model_copy(
@@ -3168,17 +3373,14 @@ class VoiceBrainDumpService:
                     else operation.status_history
                 ),
                 "provider_runs": provider_runs,
-                "audio_chunks": [],
-                "media_ref": None,
-                "sealed_manifest_hash": None,
-                "raw_audio_state": "deleted" if had_audio else operation.raw_audio_state,
-                "raw_audio_deleted_at": now if had_audio else operation.raw_audio_deleted_at,
+                "raw_audio_state": (
+                    "deletion_pending" if had_audio else operation.raw_audio_state
+                ),
                 "updated_at": now,
                 "revision": operation.revision + 1,
             }
         )
 
-    @_serialized_write
     def delete_brain_dump_raw_audio(
         self,
         operation_id: str,
@@ -3190,138 +3392,114 @@ class VoiceBrainDumpService:
         """Let the owner remove raw audio without discarding review work.
 
         Canonical, two-phase, restart-safe state (ADR-0008 ``.../audio/delete``):
-        persist ``deletion_pending`` before physical cleanup, then persist
-        ``deleted``/``deleted_at`` once cleanup completes. A repeated call
-        (including after a crash between the two writes) is idempotent and
-        converges to the same terminal result.
+        persist ``deletion_pending`` in its own committed transaction before
+        any physical unlink, physically clean up media OUTSIDE any
+        transaction, then persist ``deleted``/``deleted_at`` in a second
+        committed transaction (``_finish_raw_audio_deletion``). A repeated
+        call (including after a crash between the two writes) is idempotent
+        and converges to the same terminal result; not wrapped in
+        ``@_serialized_write``, which would hold one transaction open across
+        both phases and defeat the crash safety they exist for.
         """
 
         command = f"brain_dump_delete_raw_audio:{operation_id}"
         request_hash = self._request_hash(command, payload)
-        record = self._idempotency_record(
+        replay = self._command_replay_or_none(
             owner_id=owner_id,
-            key=idempotency_key,
+            idempotency_key=idempotency_key,
             command=command,
             request_hash=request_hash,
         )
-        if record is not None:
-            return self._brain_dump_operation_result(record, owner_id=owner_id)
-        operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
-        self._assert_revision(
-            "Brain dump operation",
-            operation.id,
-            operation.revision,
-            payload.expected_revision,
-        )
-        if operation.raw_audio_state == "deleted":
+        if replay is not None:
+            return replay
+        pending: BrainDumpOperationDocument | None = None
+        with self.operation_repo.command_lock(owner_id):
+            operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
+            self._assert_revision(
+                "Brain dump operation",
+                operation.id,
+                operation.revision,
+                payload.expected_revision,
+            )
+            if operation.raw_audio_state == "deleted":
+                self._store_idempotency(
+                    owner_id=owner_id,
+                    key=idempotency_key,
+                    command=command,
+                    request_hash=request_hash,
+                    resource_id=operation.id,
+                    response=operation,
+                )
+                return operation
+            if (
+                operation.status in {"accurate_transcribing", "reconciling"}
+                and operation.provider_runs
+                and operation.provider_runs[-1].status in {"pending", "running"}
+            ):
+                raise ValidationFailure(
+                    "Raw audio cannot be deleted while provider processing is in flight."
+                )
+            available_states = {
+                "awaiting_confirmation",
+                "committing",
+                "completed",
+                "cancelled",
+                "terminal_error",
+                "retryable_error",
+            }
+            if operation.status not in available_states:
+                raise ValidationFailure(
+                    "AUDIO_DELETE_NOT_AVAILABLE: raw audio can only be deleted "
+                    "once processing reaches review or a terminal/cancelled state."
+                )
+            now = utcnow()
+            pending = operation.model_copy(
+                update={
+                    "raw_audio_state": "deletion_pending",
+                    "updated_at": now,
+                    "revision": operation.revision + 1,
+                }
+            )
+            self.operation_repo.save_brain_dump_operation(pending)
+        updated = self._finish_raw_audio_deletion(pending, owner_id=owner_id)
+        with self.operation_repo.command_lock(owner_id):
             self._store_idempotency(
                 owner_id=owner_id,
                 key=idempotency_key,
                 command=command,
                 request_hash=request_hash,
-                resource_id=operation.id,
-                response=operation,
+                resource_id=updated.id,
+                response=updated,
             )
-            return operation
-        if (
-            operation.status in {"accurate_transcribing", "reconciling"}
-            and operation.provider_runs
-            and operation.provider_runs[-1].status in {"pending", "running"}
-        ):
-            raise ValidationFailure(
-                "Raw audio cannot be deleted while provider processing is in flight."
-            )
-        available_states = {
-            "awaiting_confirmation",
-            "committing",
-            "completed",
-            "cancelled",
-            "terminal_error",
-            "retryable_error",
-        }
-        if operation.status not in available_states:
-            raise ValidationFailure(
-                "AUDIO_DELETE_NOT_AVAILABLE: raw audio can only be deleted once "
-                "processing reaches review or a terminal/cancelled state."
-            )
-        now = utcnow()
-        pending = operation.model_copy(
-            update={
-                "raw_audio_state": "deletion_pending",
-                "updated_at": now,
-                "revision": operation.revision + 1,
-            }
-        )
-        self.operation_repo.save_brain_dump_operation(pending)
-        updated = self._complete_raw_audio_deletion(pending, owner_id=owner_id)
-        self._store_idempotency(
-            owner_id=owner_id,
-            key=idempotency_key,
-            command=command,
-            request_hash=request_hash,
-            resource_id=updated.id,
-            response=updated,
-        )
-        return updated
-
-    def _complete_raw_audio_deletion(
-        self, pending: BrainDumpOperationDocument, *, owner_id: str
-    ) -> BrainDumpOperationDocument:
-        """Phase 2 of two-phase raw-audio deletion: physically clean up media,
-        then persist the terminal ``deleted`` state.
-
-        ``pending`` must already be durably persisted with
-        ``raw_audio_state="deletion_pending"`` (phase 1) before this runs.
-        Called both synchronously right after phase 1 for a fresh
-        ``audio/delete`` command, and by ``drain_pending_raw_audio_deletions``
-        for an operation a prior crash stranded between the two phases --
-        either caller converges to the same terminal ``deleted`` result.
-        """
-
-        self.operation_repo.delete_brain_dump_audio_chunks(
-            owner_id=owner_id,
-            operation_id=pending.id,
-            chunks=[
-                (chunk.chunk_number, chunk.sha256) for chunk in pending.audio_chunks
-            ],
-        )
-        deleted_at = utcnow()
-        updated = pending.model_copy(
-            update={
-                "audio_chunks": [],
-                "media_ref": None,
-                "sealed_manifest_hash": None,
-                "raw_audio_expires_at": deleted_at,
-                "raw_audio_state": "deleted",
-                "raw_audio_deleted_at": deleted_at,
-                "updated_at": deleted_at,
-                "revision": pending.revision + 1,
-            }
-        )
-        self.operation_repo.save_brain_dump_operation(updated)
         return updated
 
     def drain_pending_raw_audio_deletions(self) -> int:
         """Startup/periodic recovery for raw-audio deletion (ADR-0008
-        ``.../audio/delete``): finish any operation a crash left stranded in
-        ``deletion_pending`` between its two persisted phases, without
-        waiting for a fresh user command. Never uses a user idempotency key
-        -- it only completes state the operation itself already durably
-        recorded, under the same owner lock every other command uses."""
+        ``.../audio/delete``, and the consent-withdrawal/cancel/retention
+        paths that share the same two-phase state): finish any operation a
+        crash left stranded in ``deletion_pending`` between its two
+        persisted phases, without waiting for a fresh user command. Never
+        uses a user idempotency key -- it only completes state the operation
+        itself already durably recorded, under the same owner lock every
+        other command uses."""
 
         drained = 0
-        for candidate in self.operation_repo.list_deletion_pending_raw_audio_operations():
+        for (
+            candidate
+        ) in self.operation_repo.list_deletion_pending_raw_audio_operations():
             if candidate.raw_audio_state != "deletion_pending":
                 continue
+            pending: BrainDumpOperationDocument | None = None
             with self.operation_repo.command_lock(candidate.owner_id):
                 current = self.get_brain_dump_operation(
                     candidate.id, owner_id=candidate.owner_id
                 )
-                if current.raw_audio_state != "deletion_pending":
-                    # Already completed (concurrently, or by an explicit
-                    # user retry) between the list scan and this lock.
-                    continue
-                self._complete_raw_audio_deletion(current, owner_id=candidate.owner_id)
+                if current.raw_audio_state == "deletion_pending":
+                    pending = current
+                # else: already completed (concurrently, or by an explicit
+                # user retry) between the list scan and this lock.
+            if pending is not None:
+                self._finish_raw_audio_deletion(pending, owner_id=candidate.owner_id)
                 drained += 1
         return drained
 
@@ -3354,11 +3532,7 @@ class VoiceBrainDumpService:
 
         cumulative_spent = sum(
             max(run.estimated_cost_usd, run.consumed_cost_usd)
-            + (
-                run.reserved_cost_usd
-                if run.status in {"pending", "running"}
-                else 0.0
-            )
+            + (run.reserved_cost_usd if run.status in {"pending", "running"} else 0.0)
             for run in prior_runs
         )
         cap = self.max_cumulative_cost_usd_per_operation
@@ -3530,9 +3704,12 @@ class VoiceBrainDumpService:
         batch_actions: list[BrainDumpProposalBatchActionDocument] = []
         for action in confirmed_actions:
             proposal = proposal_by_id[action.proposal_id]
-            action_id = "action_" + hashlib.sha256(
-                f"{synthetic_batch_id}:{action.proposal_id}".encode()
-            ).hexdigest()[:16]
+            action_id = (
+                "action_"
+                + hashlib.sha256(
+                    f"{synthetic_batch_id}:{action.proposal_id}".encode()
+                ).hexdigest()[:16]
+            )
             batch_actions.append(
                 BrainDumpProposalBatchActionDocument(
                     action_id=action_id,
@@ -3569,7 +3746,9 @@ class VoiceBrainDumpService:
                     reconciliation_provider=(
                         reconciler_run.provider if reconciler_run else None
                     ),
-                    reconciliation_model=reconciler_run.model if reconciler_run else None,
+                    reconciliation_model=(
+                        reconciler_run.model if reconciler_run else None
+                    ),
                     reconciliation_template_version=(
                         reconciler_run.template_version if reconciler_run else None
                     ),
@@ -3625,6 +3804,94 @@ class VoiceBrainDumpService:
             response=updated,
         )
         return updated
+
+    def _command_replay_or_none(
+        self, *, owner_id: str, idempotency_key: str, command: str, request_hash: str
+    ) -> BrainDumpOperationDocument | None:
+        """Shared preamble for a manually-locked command (one not wrapped in
+        ``@_serialized_write`` because it needs more than one committed
+        transaction -- e.g. a two-phase raw-audio deletion): purge expired
+        idempotency records, reconcile a crash-recovered result, and replay
+        this exact command's already-stored result if present. Runs in its
+        own committed transaction, separate from whatever the caller does
+        next, exactly like every other durable checkpoint in this module.
+        Returns ``None`` when the caller still has to do the actual work.
+        """
+
+        with self.operation_repo.command_lock(owner_id):
+            self.operation_repo.purge_expired_idempotency(
+                owner_id=owner_id, now=utcnow()
+            )
+            self._reconcile_idempotent_result(owner_id=owner_id, key=idempotency_key)
+            record = self._idempotency_record(
+                owner_id=owner_id,
+                key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+            )
+            if record is not None:
+                return self._brain_dump_operation_result(record, owner_id=owner_id)
+        return None
+
+    def _finish_raw_audio_deletion(
+        self,
+        pending: BrainDumpOperationDocument,
+        *,
+        owner_id: str,
+        restamp_expiry: bool = True,
+    ) -> BrainDumpOperationDocument:
+        """Phase 2 of two-phase raw-audio deletion (ADR-0002/0008 delete-now,
+        consent withdrawal, cancel, and retention cleanup all share this):
+        physically remove media OUTSIDE any transaction, then persist the
+        terminal ``deleted`` state in its own committed transaction.
+
+        ``pending`` must already be durably committed with
+        ``raw_audio_state="deletion_pending"`` (phase 1) by the caller
+        *before* this runs and before any physical unlink -- that is what
+        gives ``drain_pending_raw_audio_deletions`` enough reference (owner
+        + operation ID) to converge an operation a crash stranded between
+        the two phases, without a fresh user command. Safe to call again:
+        a concurrent completion is detected under the lock and returned
+        as-is rather than double-processed.
+
+        ``restamp_expiry`` controls ``raw_audio_expires_at``: an explicit
+        owner-triggered deletion (delete-now, consent withdrawal, cancel)
+        stamps it to this instant, so the UI's "retained until" reflects
+        when audio actually left. The retention *sweep*
+        (``purge_expired_raw_audio``) passes ``restamp_expiry=False``: it is
+        only enforcing an already-past reconciliation-anchored deadline, and
+        that anchor must never be silently pushed forward by the sweep that
+        merely acts on it.
+        """
+
+        self.operation_repo.delete_brain_dump_audio_chunks(
+            owner_id=owner_id,
+            operation_id=pending.id,
+            chunks=[
+                (chunk.chunk_number, chunk.sha256) for chunk in pending.audio_chunks
+            ],
+        )
+        with self.operation_repo.command_lock(owner_id):
+            current = self.get_brain_dump_operation(pending.id, owner_id=owner_id)
+            if current.raw_audio_state != "deletion_pending":
+                return current
+            deleted_at = utcnow()
+            updated = current.model_copy(
+                update={
+                    "audio_chunks": [],
+                    "media_ref": None,
+                    "sealed_manifest_hash": None,
+                    "raw_audio_expires_at": (
+                        deleted_at if restamp_expiry else current.raw_audio_expires_at
+                    ),
+                    "raw_audio_state": "deleted",
+                    "raw_audio_deleted_at": deleted_at,
+                    "updated_at": deleted_at,
+                    "revision": current.revision + 1,
+                }
+            )
+            self.operation_repo.save_brain_dump_operation(updated)
+            return updated
 
     def _idempotency_record(
         self, *, owner_id: str, key: str, command: str, request_hash: str
@@ -4075,8 +4342,7 @@ class VoiceBrainDumpService:
         now: datetime,
     ) -> list[BrainDumpProposalDocument]:
         base = [
-            self._proposal_document_to_reconciled(proposal)
-            for proposal in existing
+            self._proposal_document_to_reconciled(proposal) for proposal in existing
         ]
         projection = apply_proposal_patches(base, patches)
         by_existing_id = {proposal.id: proposal for proposal in existing}

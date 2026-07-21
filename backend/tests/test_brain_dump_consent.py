@@ -105,6 +105,45 @@ def test_valid_grant_is_current_and_persists_decision_fields(api_client) -> None
     )
 
 
+def test_canonical_grant_authorizes_upload_without_legacy_provider(api_client) -> None:
+    """Mobile's canonical consent decision is sufficient to authorize upload.
+
+    The mobile client deliberately does not select a legacy provider at
+    operation creation.  Once it records the current policy/category grant,
+    upload must proceed; a missing legacy ``consent.provider`` must not make
+    the otherwise-valid canonical grant fail closed.
+    """
+
+    started = api_client.post(
+        "/api/brain-dump-operations",
+        headers={"Idempotency-Key": "start-canonical-provider-null"},
+        json={
+            "consent": {
+                "microphone": True,
+                "external_processing_allowed": True,
+                "provider": None,
+                "language_hints": [],
+                "vocabulary": [],
+            }
+        },
+    )
+    assert started.status_code == 201, started.text
+    operation = started.json()
+    assert operation["consent"]["provider"] is None
+
+    granted = _grant(api_client, operation, key="grant-canonical-provider-null")
+    assert granted.status_code == 200, granted.text
+
+    audio = b"Buy milk."
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": __import__("hashlib").sha256(audio).hexdigest()},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    assert uploaded.json()["audio_chunks"][0]["size_bytes"] == len(audio)
+
+
 def test_withdrawal_blocks_further_upload_and_purges_uncommitted_audio(
     api_client,
 ) -> None:
@@ -176,8 +215,10 @@ def test_expired_canonical_consent_fails_closed_before_seal(api_client) -> None:
         json={
             "expected_revision": expired.revision,
             "expected_chunks": 1,
-            "manifest_hash": __import__("hashlib").sha256(
-                __import__("json").dumps(
+            "manifest_hash": __import__("hashlib")
+            .sha256(
+                __import__("json")
+                .dumps(
                     [
                         {
                             "chunk_number": 0,
@@ -187,8 +228,10 @@ def test_expired_canonical_consent_fails_closed_before_seal(api_client) -> None:
                     ],
                     sort_keys=True,
                     separators=(",", ":"),
-                ).encode()
-            ).hexdigest(),
+                )
+                .encode()
+            )
+            .hexdigest(),
         },
     )
     assert sealed.status_code == 400, sealed.text

@@ -529,7 +529,7 @@ export interface components {
             /** Source Segment Ids */
             source_segment_ids?: string[];
             /** Task Id */
-            task_id: string;
+            task_id?: string | null;
             /**
              * User Edited
              * @default false
@@ -853,7 +853,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "frozen" | "committed" | "superseded";
+            status: "frozen" | "committed" | "superseded" | "failed";
             /** Warnings */
             warnings?: string[];
         };
