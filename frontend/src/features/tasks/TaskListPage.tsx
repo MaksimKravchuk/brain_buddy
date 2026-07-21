@@ -6,7 +6,20 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from "reac
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { apiClient, ApiError } from "../../api/client";
-import { getCurrentTaskOwnerKey, parseOpenTaskState, parseTaskDateView, taskKeys, useAllTaskPages, useProjects, useTags, useTaskDetail, useTaskList } from "../../api/taskHooks";
+import {
+  captureTaskRequestContext,
+  isStaleTaskRequestContext,
+  parseOpenTaskState,
+  parseTaskDateView,
+  reconcileTaskResponse,
+  taskKeys,
+  useAllTaskPages,
+  useProjects,
+  useTags,
+  useTaskDetail,
+  useTaskList
+} from "../../api/taskHooks";
+import type { TaskRequestContext } from "../../api/taskHooks";
 import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts, TaskPriority, TaskResponse, TaskSort, TaskSubtaskResponse, TaskUpdateRequest } from "../../api/taskTypes";
 import { AppShell, SoonChip } from "../../components/shell/AppShell";
 import { getErrorMessage } from "../../utils/error";
@@ -330,33 +343,44 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   }, [activeProjectionTasks, detailIsInProjection, isDesktop, taskId, detailQuery.data, taskQuery.data, allTasksQuery.data]);
 
   const invalidateTasks = () => queryClient.invalidateQueries({ queryKey: taskKeys.all() });
-  // Every mutation below captures the signed-in principal at initiation --
-  // via onMutate, which TanStack Query guarantees runs synchronously before
-  // mutationFn, with no `await` in between for identity to change across --
-  // and re-checks it before touching the shared QueryClient cache,
-  // invalidating queries, or firing an owner-scoped navigation in onSuccess.
-  // A same-SPA identity switch (logout, session loss, login/signup as a
-  // different account) while the request is still in flight must never let
-  // the outgoing principal's response publish, invalidate, or rebase the
-  // incoming principal's task data. installTaskCacheOwnerGuard complements
-  // this by synchronously purging the outgoing principal's cache subtree on
-  // that same transition.
-  const captureRequestOwner = () => ({ requestOwner: getCurrentTaskOwnerKey() });
-  const isStaleOwnerContext = (context: { requestOwner: string } | undefined) =>
-    context !== undefined && context.requestOwner !== getCurrentTaskOwnerKey();
+  // Every mutation below captures the signed-in principal *and* the auth
+  // epoch at initiation -- via onMutate, which TanStack Query guarantees
+  // runs synchronously before mutationFn, with no `await` in between for
+  // either to change across -- and re-checks both before touching the
+  // shared QueryClient cache, invalidating queries, or firing an
+  // owner-scoped navigation in onSuccess.
+  //
+  // Owner id alone is not enough: a same-SPA identity switch through an
+  // anon gap and back to the *same* owner (A -> anon -> the same A signing
+  // back in) resolves to an identical owner key for two genuinely distinct
+  // sessions, so an owner-only check cannot tell a response belonging to
+  // the earlier, since-ended A session apart from the later one currently
+  // in effect. The monotonic auth epoch is what makes that distinction
+  // possible -- it advances on every transition, even one that resolves
+  // back to the same owner. installTaskCacheOwnerGuard complements this by
+  // synchronously purging the outgoing owner's cache subtree on that same
+  // transition.
+  const captureRequestContext = (): TaskRequestContext => captureTaskRequestContext();
+  const isStaleRequestContext = (context: TaskRequestContext | undefined) =>
+    context !== undefined && isStaleTaskRequestContext(context);
   // ADR-0006: "on 409 refetches the Task while preserving unsaved user
   // input for an explicit retry." Fetches the single owner-scoped Task
   // (never a broad list refetch) and stamps the authoritative revision onto
   // the rethrown error so the caller can rebase just its concurrency
   // baseline -- draft field values are left completely untouched. A
   // non-409 error is rethrown unchanged; callers must not refetch/rebase
-  // on those. `requestOwner` is the principal captured at the owning
-  // mutation's initiation (mirroring captureRequestOwner above), not
-  // re-derived here -- the identity switch this guards against may have
-  // already happened before the 409 was even caught, during the original
-  // request's own flight.
-  const rejectAfterConflictRefetch = async (caught: unknown, taskId: string, requestOwner: string): Promise<never> => {
+  // on those. `requestContext` is the owner+epoch captured at the owning
+  // mutation's initiation (mirroring captureRequestContext above), not
+  // re-derived here -- the transition this guards against may have already
+  // happened before the 409 was even caught, during the original request's
+  // own flight.
+  const rejectAfterConflictRefetch = async (
+    caught: unknown,
+    taskId: string,
+    requestContext: TaskRequestContext
+  ): Promise<never> => {
     if (caught instanceof ApiError && caught.status === 409) {
+      const queryKey = taskKeys.detail(taskId, requestContext.owner);
       // queryClient.fetchQuery would dedupe onto any refetch already in
       // flight for this query key (e.g. a background refetch some earlier,
       // unrelated invalidation kicked off) and hand back whatever *that*
@@ -366,20 +390,24 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       // cancelling prevents its older response from publishing after the
       // authoritative revision fetched below. Do not cancel the broad task
       // root, which would disrupt other owner-scoped projections.
-      await queryClient.cancelQueries(
-        { queryKey: taskKeys.detail(taskId, requestOwner), exact: true },
-        { silent: true }
-      );
+      await queryClient.cancelQueries({ queryKey, exact: true }, { silent: true });
       const refreshed = await apiClient.getTask(taskId);
-      if (getCurrentTaskOwnerKey() === requestOwner) {
-        queryClient.setQueryData(taskKeys.detail(taskId, requestOwner), refreshed);
-        (caught as ApiError & { conflictRevision?: number }).conflictRevision = refreshed.revision;
+      if (!isStaleTaskRequestContext(requestContext)) {
+        const reconciled = reconcileTaskResponse(queryClient, queryKey, requestContext, refreshed);
+        if (reconciled === refreshed) {
+          queryClient.setQueryData(queryKey, refreshed);
+          (caught as ApiError & { conflictRevision?: number }).conflictRevision = refreshed.revision;
+        }
+        // else: a revision already cached under this exact owner+epoch is
+        // newer than this refetch's own revision (e.g. a different, faster
+        // mutation already published it) -- never rebase the draft's
+        // concurrency baseline backwards onto an older revision.
       }
-      // else: the signed-in identity changed (before the 409 was even
+      // else: the signed-in session moved on (before the 409 was even
       // caught, or while this refetch was in flight). Drop the result
-      // silently -- it must never publish another principal's Task into
-      // the cache, and leaving conflictRevision unset makes
-      // rebaseOnConflict below a no-op for this (now orphaned) draft.
+      // silently -- it must never publish another session's Task into the
+      // cache, and leaving conflictRevision unset makes rebaseOnConflict
+      // below a no-op for this (now orphaned) draft.
     }
     throw caught;
   };
@@ -425,9 +453,9 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
         idempotencyKey("create")
       );
     },
-    onMutate: captureRequestOwner,
+    onMutate: captureRequestContext,
     onSuccess: (_data, _variables, context) => {
-      if (isStaleOwnerContext(context)) return;
+      if (isStaleRequestContext(context)) return;
       setNewTitle("");
       setNewWaitingFor("");
       setMutationError(null);
@@ -441,9 +469,9 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const updateMutation = useMutation({
     mutationFn: ({ task, payload }: { task: TaskResponse; payload: Omit<TaskUpdateRequest, "expected_revision"> }) =>
       apiClient.updateTask(task.id, { ...payload, expected_revision: task.revision }, idempotencyKey("edit")),
-    onMutate: captureRequestOwner,
+    onMutate: captureRequestContext,
     onSuccess: (_data, _variables, context) => {
-      if (isStaleOwnerContext(context)) return;
+      if (isStaleRequestContext(context)) return;
       setEditingTaskId(null);
       setEditingTitle("");
       setMutationError(null);
@@ -458,9 +486,9 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const transitionMutation = useMutation({
     mutationFn: ({ task, action, toState }: { task: TaskResponse; action: "move" | "complete" | "reopen"; toState?: OpenTaskState }) =>
       apiClient.transitionTask(task.id, { action, to_state: toState, expected_revision: task.revision }, idempotencyKey(action)),
-    onMutate: captureRequestOwner,
+    onMutate: captureRequestContext,
     onSuccess: (_data, _variables, context) => {
-      if (isStaleOwnerContext(context)) return;
+      if (isStaleRequestContext(context)) return;
       setMutationError(null);
       void invalidateTasks();
     },
@@ -477,23 +505,32 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   // either swapping standalone <-> in-row, or the same panel type reading
   // fresh cache on remount. That new mount must never read a stale,
   // pre-mutation revision while waiting on invalidateTasks()'s background
-  // refetch to eventually land.
-  const publishDetail = (data: TaskResponse) => queryClient.setQueryData(taskKeys.detail(data.id), data);
+  // refetch to eventually land. Guarded by the same reconcile used for
+  // direct GETs, so a stale (post-transition) response never publishes and
+  // an older revision never overwrites a newer one already cached (e.g. a
+  // faster, later mutation that already landed).
+  const publishDetail = (data: TaskResponse, context: TaskRequestContext) => {
+    const queryKey = taskKeys.detail(data.id, context.owner);
+    const reconciled = reconcileTaskResponse(queryClient, queryKey, context, data);
+    if (reconciled === data) {
+      queryClient.setQueryData(queryKey, data);
+    }
+  };
 
   const detailUpdateMutation = useMutation({
     mutationFn: ({ task, payload }: { task: TaskResponse; payload: Parameters<typeof apiClient.updateTask>[1] }) => {
       // Captured independently from onMutate's context (mutationFn doesn't
       // receive it), but at the same synchronous instant -- no `await`
       // separates the two, so they always agree.
-      const requestOwner = getCurrentTaskOwnerKey();
+      const requestContext = captureTaskRequestContext();
       return apiClient
         .updateTask(task.id, payload, idempotencyKey("detail-edit"))
-        .catch((caught: unknown) => rejectAfterConflictRefetch(caught, task.id, requestOwner));
+        .catch((caught: unknown) => rejectAfterConflictRefetch(caught, task.id, requestContext));
     },
-    onMutate: captureRequestOwner,
+    onMutate: captureRequestContext,
     onSuccess: (data, _variables, context) => {
-      if (isStaleOwnerContext(context)) return;
-      publishDetail(data);
+      if (isStaleRequestContext(context)) return;
+      publishDetail(data, context);
       setMutationError(null);
       void invalidateTasks();
     },
@@ -505,19 +542,19 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
 
   const detailTransitionMutation = useMutation({
     mutationFn: ({ task, action, toState, waitingFor }: { task: TaskResponse; action: "move" | "complete" | "reopen" | "cancel"; toState?: OpenTaskState; waitingFor?: string }) => {
-      const requestOwner = getCurrentTaskOwnerKey();
+      const requestContext = captureTaskRequestContext();
       return apiClient
         .transitionTask(
           task.id,
           { action, to_state: toState, waiting_for: waitingFor || undefined, expected_revision: task.revision },
           idempotencyKey(`detail-${action}`)
         )
-        .catch((caught: unknown) => rejectAfterConflictRefetch(caught, task.id, requestOwner));
+        .catch((caught: unknown) => rejectAfterConflictRefetch(caught, task.id, requestContext));
     },
-    onMutate: captureRequestOwner,
+    onMutate: captureRequestContext,
     onSuccess: (data, _variables, context) => {
-      if (isStaleOwnerContext(context)) return;
-      publishDetail(data);
+      if (isStaleRequestContext(context)) return;
+      publishDetail(data, context);
       setMutationError(null);
       void invalidateTasks();
     },
@@ -530,9 +567,9 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const subtaskCreateMutation = useMutation({
     mutationFn: ({ task, title }: { task: TaskResponse; title: string }) =>
       apiClient.createSubtask(task.id, { title }, idempotencyKey("subtask-create")),
-    onMutate: captureRequestOwner,
+    onMutate: captureRequestContext,
     onSuccess: (_data, _variables, context) => {
-      if (isStaleOwnerContext(context)) return;
+      if (isStaleRequestContext(context)) return;
       setMutationError(null);
       void invalidateTasks();
     },
@@ -542,9 +579,9 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const subtaskTransitionMutation = useMutation({
     mutationFn: ({ task, subtask, action }: { task: TaskResponse; subtask: TaskSubtaskResponse; action: "complete" | "reopen" | "cancel" }) =>
       apiClient.transitionSubtask(task.id, subtask.id, { action, expected_revision: subtask.revision }, idempotencyKey(`subtask-${action}`)),
-    onMutate: captureRequestOwner,
+    onMutate: captureRequestContext,
     onSuccess: (_data, _variables, context) => {
-      if (isStaleOwnerContext(context)) return;
+      if (isStaleRequestContext(context)) return;
       setMutationError(null);
       void invalidateTasks();
     },
@@ -554,9 +591,9 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const commentCreateMutation = useMutation({
     mutationFn: ({ task, body }: { task: TaskResponse; body: string }) =>
       apiClient.createComment(task.id, { body }, idempotencyKey("comment-create")),
-    onMutate: captureRequestOwner,
+    onMutate: captureRequestContext,
     onSuccess: (_data, _variables, context) => {
-      if (isStaleOwnerContext(context)) return;
+      if (isStaleRequestContext(context)) return;
       setMutationError(null);
       void invalidateTasks();
     },
@@ -576,9 +613,9 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       }
       return apiClient.updateProject(project.id, { name, expected_revision: project.revision }, idempotencyKey("rename-project"));
     },
-    onMutate: captureRequestOwner,
+    onMutate: captureRequestContext,
     onSuccess: (_project, variables, context) => {
-      if (isStaleOwnerContext(context)) return;
+      if (isStaleRequestContext(context)) return;
       setMutationError(null);
       void invalidateTasks();
       void queryClient.invalidateQueries({ queryKey: taskKeys.projects() });
@@ -602,9 +639,9 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       }
       return apiClient.updateTag(tag.id, { name, expected_revision: tag.revision }, idempotencyKey("rename-tag"));
     },
-    onMutate: captureRequestOwner,
+    onMutate: captureRequestContext,
     onSuccess: (_tag, variables, context) => {
-      if (isStaleOwnerContext(context)) return;
+      if (isStaleRequestContext(context)) return;
       setMutationError(null);
       void invalidateTasks();
       void queryClient.invalidateQueries({ queryKey: taskKeys.tags() });

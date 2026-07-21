@@ -1,9 +1,9 @@
 import { useEffect } from "react";
 import { BrowserRouter } from "react-router-dom";
 
-import { setUnauthorizedHandler } from "./api/client";
+import { setAuthEpochProvider, setUnauthorizedHandler } from "./api/client";
 import { AppRoutes } from "./app/AppRoutes";
-import { useAuthStore } from "./stores/authStore";
+import { getAuthEpoch, useAuthStore } from "./stores/authStore";
 
 export default function App(): JSX.Element {
   const hydrate = useAuthStore((state) => state.hydrate);
@@ -19,6 +19,11 @@ export default function App(): JSX.Element {
     });
     return () => setUnauthorizedHandler(null);
   }, [clearSession]);
+
+  useEffect(() => {
+    setAuthEpochProvider(getAuthEpoch);
+    return () => setAuthEpochProvider(null);
+  }, []);
 
   return (
     <BrowserRouter>

@@ -2837,9 +2837,12 @@ describe("cross-account task cache isolation", () => {
 
     // Session loss (e.g. the unauthorized handler firing off a 401
     // elsewhere) clears the session. ProtectedRoute redirects to /login,
-    // preserving this task detail URL as the post-login target.
+    // preserving this task detail URL as the post-login target. Go through
+    // the real clearSession() action (what the 401 handler actually calls)
+    // rather than poking the store directly, so the auth epoch advances the
+    // same way it would in production.
     act(() => {
-      useAuthStore.setState({ user: null, status: "anon" });
+      useAuthStore.getState().clearSession();
     });
 
     expect(await screen.findByRole("heading", { name: "Sign in to Brain Buddy" })).toBeInTheDocument();
@@ -2941,7 +2944,7 @@ describe("cross-account task cache isolation", () => {
     // Session loss, then a different principal signs in from the same
     // preserved URL -- while the conflict refetch above is still held.
     act(() => {
-      useAuthStore.setState({ user: null, status: "anon" });
+      useAuthStore.getState().clearSession();
     });
     expect(await screen.findByRole("heading", { name: "Sign in to Brain Buddy" })).toBeInTheDocument();
 
@@ -3041,7 +3044,7 @@ describe("cross-account task cache isolation", () => {
     // Session loss, then a different principal signs in from the same
     // preserved URL -- while the Save above is still held in flight.
     act(() => {
-      useAuthStore.setState({ user: null, status: "anon" });
+      useAuthStore.getState().clearSession();
     });
     expect(await screen.findByRole("heading", { name: "Sign in to Brain Buddy" })).toBeInTheDocument();
 
@@ -3067,5 +3070,677 @@ describe("cross-account task cache isolation", () => {
     expect(client.getQueryData(["tasks", "user-1", "detail", "task-1"])).toBeUndefined();
     expect(client.getQueryData(["tasks", "user-2", "detail", "task-1"])).toBeUndefined();
     expect(taskGetCount).toBe(tasksListGetCountBeforeRelease);
+  });
+
+  it("rejects a stale detail Save response after a session goes anon and the SAME principal signs back in -- owner text alone cannot detect this, only the auth epoch can", async () => {
+    // Distinct from the two specs above: there the outgoing and incoming
+    // principal differ (user-1 vs user-2), so owner-qualified cache keys
+    // alone already isolate them. Here the SAME user id signs back in after
+    // an anon gap -- a genuinely distinct session that happens to resolve to
+    // an identical owner key. Only a monotonic auth epoch can tell this
+    // later A session apart from the earlier one whose Save is still held.
+    let taskGetCount = 0;
+    let releaseHeldSave: (() => void) | undefined;
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.includes("/auth/login") && method === "POST") {
+        return Promise.resolve(jsonResponse({ id: "user-1", email: "max@example.test" }));
+      }
+      if (url.endsWith("/tasks/task-1") && method === "GET") {
+        taskGetCount += 1;
+        return Promise.resolve(
+          jsonResponse({ ...taskResponse.items[0], title: "Fix onboarding drop-off", details: "Original details", revision: 1 })
+        );
+      }
+      if (url.endsWith("/tasks/task-1") && method === "PATCH") {
+        // A genuine, successful (never 409) Save issued by the FIRST A
+        // session. Held deliberately and released only after the SPA has
+        // gone anon and the same principal has signed back in.
+        return new Promise<Response>((resolve) => {
+          releaseHeldSave = () =>
+            resolve(
+              jsonResponse({
+                ...taskResponse.items[0],
+                title: "STALE FIRST-SESSION A TITLE (must never publish)",
+                details: "Stale first-session A details",
+                revision: 2
+              })
+            );
+        });
+      }
+      if (url.endsWith("/tasks") || url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse(emptyTaskListResponse));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/tasks/next/task-1"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByLabelText("Details")).toHaveValue("Original details");
+    await user.clear(screen.getByLabelText("Details"));
+    await user.type(screen.getByLabelText("Details"), "My unsaved draft edit");
+    await user.click(screen.getByRole("button", { name: "Save task detail" }));
+
+    await waitFor(() => expect(releaseHeldSave).toBeDefined());
+
+    // The session goes anon, then the SAME principal (user-1) signs back in
+    // from the same preserved URL -- a second, distinct session for A.
+    act(() => {
+      useAuthStore.getState().clearSession();
+    });
+    expect(await screen.findByRole("heading", { name: "Sign in to Brain Buddy" })).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Email"), "max@example.test");
+    await user.type(screen.getByLabelText("Password"), "correct horse battery staple");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    // The second A session's own fresh GET lands normally.
+    expect(await screen.findByLabelText("Details")).toHaveValue("Original details");
+    const getCountBeforeRelease = taskGetCount;
+
+    // Release the first session's held Save strictly after the second
+    // session's own detail load has landed.
+    await act(async () => {
+      releaseHeldSave?.();
+      await flushMicrotasks();
+    });
+
+    // The late arrival from the first A session must be inert: it never
+    // publishes into the (identically-keyed) cache slot the second A
+    // session is actively reading, and the rendered draft/detail survive it
+    // untouched. It also must never trigger the second session's own
+    // invalidation/refetch -- a naive assertion on the cache's final value
+    // alone could be fooled by that refetch incidentally correcting a stale
+    // publish it should never have been allowed to make in the first place.
+    expect(screen.queryByText("STALE FIRST-SESSION A TITLE (must never publish)")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Details")).toHaveValue("Original details");
+    expect(client.getQueryData(["tasks", "user-1", "detail", "task-1"])).toMatchObject({
+      revision: 1,
+      title: "Fix onboarding drop-off"
+    });
+    expect(taskGetCount).toBe(getCountBeforeRelease);
+  });
+
+  it("drops a post-409 conflict refetch released after a session goes anon and the SAME principal signs back in", async () => {
+    let taskGetCount = 0;
+    let releaseConflictGet: (() => void) | undefined;
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.includes("/auth/login") && method === "POST") {
+        return Promise.resolve(jsonResponse({ id: "user-1", email: "max@example.test" }));
+      }
+      if (url.endsWith("/tasks/task-1") && method === "GET") {
+        taskGetCount += 1;
+        if (taskGetCount === 1 || taskGetCount === 3) {
+          // Call 1: the first A session's initial load. Call 3: the second
+          // A session's own fresh load, after relogin.
+          return Promise.resolve(
+            jsonResponse({ ...taskResponse.items[0], title: "Fix onboarding drop-off", details: "Original details", revision: 1 })
+          );
+        }
+        // Call 2: ADR-0006's post-409 refetch, issued by the first A
+        // session. Held deliberately and released only after the same
+        // principal has signed back in as a second, distinct session.
+        return new Promise<Response>((resolve) => {
+          releaseConflictGet = () =>
+            resolve(
+              jsonResponse({
+                ...taskResponse.items[0],
+                title: "STALE FIRST-SESSION A TITLE (must never publish)",
+                details: "Stale first-session A details",
+                revision: 2
+              })
+            );
+        });
+      }
+      if (url.endsWith("/tasks/task-1") && method === "PATCH") {
+        return Promise.resolve(jsonResponse({ detail: "Conflict" }, 409));
+      }
+      if (url.endsWith("/tasks") || url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse(emptyTaskListResponse));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/tasks/next/task-1"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByLabelText("Details")).toHaveValue("Original details");
+    await user.clear(screen.getByLabelText("Details"));
+    await user.type(screen.getByLabelText("Details"), "My unsaved draft edit");
+    await user.click(screen.getByRole("button", { name: "Save task detail" }));
+
+    await waitFor(() => expect(taskGetCount).toBeGreaterThanOrEqual(2));
+    expect(releaseConflictGet).toBeDefined();
+
+    act(() => {
+      useAuthStore.getState().clearSession();
+    });
+    expect(await screen.findByRole("heading", { name: "Sign in to Brain Buddy" })).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Email"), "max@example.test");
+    await user.type(screen.getByLabelText("Password"), "correct horse battery staple");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    expect(await screen.findByLabelText("Details")).toHaveValue("Original details");
+
+    await act(async () => {
+      releaseConflictGet?.();
+      await flushMicrotasks();
+    });
+
+    expect(screen.queryByText("STALE FIRST-SESSION A TITLE (must never publish)")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Details")).toHaveValue("Original details");
+    expect(client.getQueryData(["tasks", "user-1", "detail", "task-1"])).toMatchObject({
+      revision: 1,
+      title: "Fix onboarding drop-off"
+    });
+  });
+
+  it("drops a held ordinary Task GET released after a session goes anon and the SAME principal signs back in", async () => {
+    // Distinct from the Save/conflict-refetch specs above: this covers the
+    // plain automatic detail query (useTaskDetail's own queryFn), which has
+    // no mutation guard to lean on at all -- its safety must come from the
+    // owner+epoch-qualified cache being evicted and refetched fresh on every
+    // transition, not from any explicit per-call check.
+    let taskGetCount = 0;
+    let releaseFirstSessionGet: (() => void) | undefined;
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.includes("/auth/login") && method === "POST") {
+        return Promise.resolve(jsonResponse({ id: "user-1", email: "max@example.test" }));
+      }
+      if (url.endsWith("/tasks/task-1") && method === "GET") {
+        taskGetCount += 1;
+        if (taskGetCount === 1) {
+          // The first A session's own initial load. Held forever -- the
+          // session goes anon and a second A session signs in before this
+          // ever resolves.
+          return new Promise<Response>((resolve) => {
+            releaseFirstSessionGet = () =>
+              resolve(
+                jsonResponse({
+                  ...taskResponse.items[0],
+                  title: "STALE FIRST-SESSION A TITLE (must never publish)",
+                  details: "Stale first-session A details",
+                  revision: 7
+                })
+              );
+          });
+        }
+        // The second A session's own fresh load, after relogin.
+        return Promise.resolve(
+          jsonResponse({ ...taskResponse.items[0], title: "Fix onboarding drop-off", details: "Original details", revision: 1 })
+        );
+      }
+      if (url.endsWith("/tasks") || url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse(emptyTaskListResponse));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/tasks/next/task-1"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    await waitFor(() => expect(releaseFirstSessionGet).toBeDefined());
+
+    act(() => {
+      useAuthStore.getState().clearSession();
+    });
+    expect(await screen.findByRole("heading", { name: "Sign in to Brain Buddy" })).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Email"), "max@example.test");
+    await user.type(screen.getByLabelText("Password"), "correct horse battery staple");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    // The second A session's own fresh GET lands normally.
+    expect(await screen.findByLabelText("Details")).toHaveValue("Original details");
+
+    await act(async () => {
+      releaseFirstSessionGet?.();
+      await flushMicrotasks();
+    });
+
+    expect(screen.queryByText("STALE FIRST-SESSION A TITLE (must never publish)")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Details")).toHaveValue("Original details");
+    expect(client.getQueryData(["tasks", "user-1", "detail", "task-1"])).toMatchObject({
+      revision: 1,
+      title: "Fix onboarding drop-off"
+    });
+  });
+
+  it("drops a held ordinary Task GET released after a session transition even when nothing is cached yet to fall back to", async () => {
+    // Distinct from the previous spec: there the second A session's own
+    // fresh GET had already resolved and populated the cache by the time
+    // the first session's stale GET was released, so a naive "fall back to
+    // whatever is cached, or else the fetched value" reconciliation could
+    // accidentally look correct by returning the (by-then-present) fresh
+    // value instead of ever exercising its "nothing cached yet" branch.
+    // Here the second session's own GET is *also* held, so nothing is
+    // cached at all when the first session's stale response lands -- a
+    // reconciler that falls back to `fetched` when there is no existing
+    // value to protect would publish the stale Task anyway.
+    let taskGetCount = 0;
+    let releaseFirstSessionGet: (() => void) | undefined;
+    let releaseSecondSessionGet: (() => void) | undefined;
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.includes("/auth/login") && method === "POST") {
+        return Promise.resolve(jsonResponse({ id: "user-1", email: "max@example.test" }));
+      }
+      if (url.endsWith("/tasks/task-1") && method === "GET") {
+        taskGetCount += 1;
+        if (taskGetCount === 1) {
+          // The first A session's own initial load. Held forever -- the
+          // session goes anon and a second A session signs in before this
+          // ever resolves.
+          return new Promise<Response>((resolve) => {
+            releaseFirstSessionGet = () =>
+              resolve(
+                jsonResponse({
+                  ...taskResponse.items[0],
+                  title: "STALE FIRST-SESSION A TITLE (must never publish)",
+                  details: "Stale first-session A details",
+                  revision: 7
+                })
+              );
+          });
+        }
+        if (taskGetCount === 2) {
+          // The second A session's own fresh load. Also held, so nothing
+          // is cached at all when the first session's stale GET releases.
+          return new Promise<Response>((resolve) => {
+            releaseSecondSessionGet = () =>
+              resolve(
+                jsonResponse({ ...taskResponse.items[0], title: "Fix onboarding drop-off", details: "Original details", revision: 1 })
+              );
+          });
+        }
+        // Any further (e.g. orphaned-query retry) calls settle immediately
+        // with the same stale marker so they can't leave a dangling timer.
+        return Promise.resolve(
+          jsonResponse({
+            ...taskResponse.items[0],
+            title: "STALE FIRST-SESSION A TITLE (must never publish)",
+            details: "Stale first-session A details",
+            revision: 7
+          })
+        );
+      }
+      if (url.endsWith("/tasks") || url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse(emptyTaskListResponse));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/tasks/next/task-1"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    await waitFor(() => expect(releaseFirstSessionGet).toBeDefined());
+
+    act(() => {
+      useAuthStore.getState().clearSession();
+    });
+    expect(await screen.findByRole("heading", { name: "Sign in to Brain Buddy" })).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Email"), "max@example.test");
+    await user.type(screen.getByLabelText("Password"), "correct horse battery staple");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() => expect(releaseSecondSessionGet).toBeDefined());
+
+    // Release only the first session's stale GET. Nothing is cached yet --
+    // the second session's own GET is still held.
+    await act(async () => {
+      releaseFirstSessionGet?.();
+      await flushMicrotasks();
+    });
+
+    // The stale response must be inert: no title, no cache entry, and no
+    // user-visible error -- the query must still look like it's loading,
+    // never like it failed.
+    expect(screen.queryByText("STALE FIRST-SESSION A TITLE (must never publish)")).not.toBeInTheDocument();
+    expect(client.getQueryData(["tasks", "user-1", "detail", "task-1"])).toBeUndefined();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(await screen.findByText("Loading task detail…")).toBeInTheDocument();
+
+    // Now release the second session's own GET -- this is the value that
+    // should actually publish.
+    await act(async () => {
+      releaseSecondSessionGet?.();
+      await flushMicrotasks();
+    });
+
+    expect(await screen.findByLabelText("Details")).toHaveValue("Original details");
+    expect(client.getQueryData(["tasks", "user-1", "detail", "task-1"])).toMatchObject({
+      revision: 1,
+      title: "Fix onboarding drop-off"
+    });
+  });
+
+  it("never lets a held, older-revision detail GET overwrite a newer successful mutation's published Task -- even with no auth transition at all", async () => {
+    // Purely a same-session revision-ordering hazard: an unrelated capture
+    // invalidates the shared "tasks" query root, kicking off a background
+    // detail refetch that this test holds open. Meanwhile the user's own
+    // Save completes first and publishes revision 2. The held background
+    // refetch (still reporting the pre-Save revision 1) must not then
+    // clobber that newer, authoritative revision once it's released.
+    let detailGetCount = 0;
+    let releaseBackgroundGet: (() => void) | undefined;
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/tasks/task-1") && method === "GET") {
+        detailGetCount += 1;
+        if (detailGetCount === 1) {
+          return Promise.resolve(
+            jsonResponse({ ...taskResponse.items[0], title: "Fix onboarding drop-off", details: "Original details", revision: 1 })
+          );
+        }
+        // The background refetch triggered by the unrelated create below.
+        // Held until released explicitly, deliberately reporting the STALE
+        // pre-Save revision.
+        return new Promise<Response>((resolve) => {
+          releaseBackgroundGet = () =>
+            resolve(
+              jsonResponse({ ...taskResponse.items[0], title: "Fix onboarding drop-off", details: "Original details", revision: 1 })
+            );
+        });
+      }
+      if (url.endsWith("/tasks/task-1") && method === "PATCH") {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return Promise.resolve(
+          jsonResponse({ ...taskResponse.items[0], details: String(body.details), revision: 2 })
+        );
+      }
+      if (url.endsWith("/tasks") && method === "POST") {
+        return Promise.resolve(jsonResponse(taskFixture("task-unrelated", "Unrelated capture"), 201));
+      }
+      if (url.endsWith("/tasks") || url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse(emptyTaskListResponse));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/tasks/next/task-1"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByLabelText("Details")).toHaveValue("Original details");
+
+    // Kick off the background refetch (held) via an unrelated create, the
+    // way it would happen for real -- any task mutation invalidates the
+    // shared "tasks" query root.
+    await user.type(screen.getByLabelText("New task title"), "Unrelated capture");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await waitFor(() => expect(releaseBackgroundGet).toBeDefined());
+
+    // The user's own Save completes first, publishing revision 2.
+    await user.clear(screen.getByLabelText("Details"));
+    await user.type(screen.getByLabelText("Details"), "My saved edit");
+    await user.click(screen.getByRole("button", { name: "Save task detail" }));
+    await waitFor(() =>
+      expect(client.getQueryData(["tasks", "user-1", "detail", "task-1"])).toMatchObject({ revision: 2 })
+    );
+
+    // Now release the held, older-revision background refetch.
+    await act(async () => {
+      releaseBackgroundGet?.();
+      await flushMicrotasks();
+    });
+
+    // The older revision must never have clobbered the newer publish.
+    expect(client.getQueryData(["tasks", "user-1", "detail", "task-1"])).toMatchObject({
+      revision: 2,
+      details: "My saved edit"
+    });
+    expect(screen.getByLabelText("Details")).toHaveValue("My saved edit");
+  });
+
+  it("drops a held task list GET released after a session goes anon and the SAME principal signs back in", async () => {
+    // Same A -> anon -> same A shape as the detail specs above, exercised
+    // through the plain list query (useTaskList) end to end via the real
+    // routed shell. installTaskCacheOwnerGuard's purge already protects
+    // this path structurally (see taskHooks.epoch.test.tsx for a spec that
+    // defeats that structural protection and proves the hook's own
+    // owner+epoch guard independently) -- this is the full-stack regression
+    // check that the routed behavior is actually correct end to end.
+    let nextListGetCount = 0;
+    let releaseFirstSessionList: (() => void) | undefined;
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.includes("/auth/login") && method === "POST") {
+        return Promise.resolve(jsonResponse({ id: "user-1", email: "max@example.test" }));
+      }
+      if (url.includes("/tasks?") && url.includes("state=next")) {
+        nextListGetCount += 1;
+        if (nextListGetCount === 1) {
+          // The first A session's own initial list load. Held forever --
+          // the session goes anon and a second A session signs in before
+          // this ever resolves.
+          return new Promise<Response>((resolve) => {
+            releaseFirstSessionList = () =>
+              resolve(
+                jsonResponse({
+                  items: [taskFixture("task-stale", "STALE FIRST-SESSION LIST TASK (must never publish)")],
+                  next_cursor: null,
+                  has_more: false,
+                  counts_by_state: { inbox: 0, next: 1, waiting: 0, someday: 0 }
+                })
+              );
+          });
+        }
+        // The second A session's own fresh list load, after relogin.
+        return Promise.resolve(
+          jsonResponse({
+            items: [taskFixture("task-fresh", "Fresh second-session task")],
+            next_cursor: null,
+            has_more: false,
+            counts_by_state: { inbox: 0, next: 1, waiting: 0, someday: 0 }
+          })
+        );
+      }
+      if (url.includes("/tasks?") || url.endsWith("/tasks")) {
+        return Promise.resolve(jsonResponse(emptyTaskListResponse));
+      }
+      if (url.includes("/tasks/")) {
+        return Promise.resolve(jsonResponse(taskResponse.items[0]));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={["/tasks/next"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    await waitFor(() => expect(releaseFirstSessionList).toBeDefined());
+
+    act(() => {
+      useAuthStore.getState().clearSession();
+    });
+    expect(await screen.findByRole("heading", { name: "Sign in to Brain Buddy" })).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Email"), "max@example.test");
+    await user.type(screen.getByLabelText("Password"), "correct horse battery staple");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    // The second A session's own fresh list load lands normally.
+    expect(await screen.findByText("Fresh second-session task")).toBeInTheDocument();
+
+    await act(async () => {
+      releaseFirstSessionList?.();
+      await flushMicrotasks();
+    });
+
+    expect(screen.queryByText("STALE FIRST-SESSION LIST TASK (must never publish)")).not.toBeInTheDocument();
+    expect(screen.getByText("Fresh second-session task")).toBeInTheDocument();
+  });
+
+  it("drops held project/tag list GETs released after a session goes anon and the SAME principal signs back in", async () => {
+    // Same shape again, exercised through useProjects/useTags. See the note
+    // on the list spec above about the structural-vs-hook-level distinction
+    // -- taskHooks.epoch.test.tsx is what actually discriminates the hook's
+    // own owner+epoch guard from installTaskCacheOwnerGuard's purge.
+    let projectsGetCount = 0;
+    let tagsGetCount = 0;
+    let releaseFirstSessionProjects: (() => void) | undefined;
+    let releaseFirstSessionTags: (() => void) | undefined;
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.includes("/auth/login") && method === "POST") {
+        return Promise.resolve(jsonResponse({ id: "user-1", email: "max@example.test" }));
+      }
+      if (url.includes("/tasks?") || url.endsWith("/tasks")) {
+        return Promise.resolve(jsonResponse(emptyTaskListResponse));
+      }
+      if (url.includes("/tasks/")) {
+        return Promise.resolve(jsonResponse(taskResponse.items[0]));
+      }
+      if (url.includes("/projects")) {
+        projectsGetCount += 1;
+        if (projectsGetCount === 1) {
+          return new Promise<Response>((resolve) => {
+            releaseFirstSessionProjects = () =>
+              resolve(
+                jsonResponse([
+                  { id: "project-stale", name: "STALE FIRST-SESSION PROJECT (must never publish)", color: "#000000", state: "active", revision: 1, open_task_count: 0 }
+                ])
+              );
+          });
+        }
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        tagsGetCount += 1;
+        if (tagsGetCount === 1) {
+          return new Promise<Response>((resolve) => {
+            releaseFirstSessionTags = () =>
+              resolve(
+                jsonResponse([
+                  { id: "tag-stale", name: "stale-first-session-tag-must-never-publish", state: "active", revision: 1, open_task_count: 0 }
+                ])
+              );
+          });
+        }
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={["/tasks/next"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    await waitFor(() => expect(releaseFirstSessionProjects).toBeDefined());
+    await waitFor(() => expect(releaseFirstSessionTags).toBeDefined());
+
+    act(() => {
+      useAuthStore.getState().clearSession();
+    });
+    expect(await screen.findByRole("heading", { name: "Sign in to Brain Buddy" })).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Email"), "max@example.test");
+    await user.type(screen.getByLabelText("Password"), "correct horse battery staple");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    // The second A session's own fresh projects/tags loads land normally.
+    expect(await screen.findByText("Launch v2")).toBeInTheDocument();
+
+    await act(async () => {
+      releaseFirstSessionProjects?.();
+      releaseFirstSessionTags?.();
+      await flushMicrotasks();
+    });
+
+    expect(screen.queryByText("STALE FIRST-SESSION PROJECT (must never publish)")).not.toBeInTheDocument();
+    expect(screen.queryByText(/stale-first-session-tag/)).not.toBeInTheDocument();
+    expect(screen.getByText("Launch v2")).toBeInTheDocument();
   });
 });
