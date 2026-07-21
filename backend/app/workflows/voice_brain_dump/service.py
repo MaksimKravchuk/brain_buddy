@@ -223,19 +223,27 @@ class VoiceBrainDumpService:
         )
 
     def _current_external_consent_status(
-        self, consent: BrainDumpConsent, *, now: datetime
+        self, operation: BrainDumpOperationDocument, *, now: datetime
     ) -> Literal["legacy", "current", "withdrawn", "expired", "policy_mismatch"]:
-        """Classify a consent record against the canonical policy.
+        """Classify an operation's consent against the canonical policy.
 
-        Returns ``"legacy"`` when this operation's consent predates the
-        canonical decision-log contract (``consent_policy_version`` unset) --
-        callers must then fall back to the pre-existing
-        ``_assert_external_provider_consent`` provider-membership check
-        instead of failing closed on fields that were never recorded.
+        Returns ``"legacy"`` only for a genuinely migrated schema-v1 import
+        (``operation.legacy_import == "legacy_preview_only"``) whose consent
+        predates the canonical decision-log contract -- callers then fall
+        back to the pre-existing ``_assert_external_provider_consent``
+        provider-membership check instead of failing closed on fields that
+        were never recorded. A freshly started operation with no
+        ``consent_policy_version`` is never "legacy": ADR-0008 requires every
+        fresh start to fail closed as ``"policy_mismatch"`` rather than
+        silently inheriting the older, weaker bypass meant only for
+        already-persisted v1 data.
         """
 
+        consent = operation.consent
         if consent.consent_policy_version is None:
-            return "legacy"
+            if operation.legacy_import == "legacy_preview_only":
+                return "legacy"
+            return "policy_mismatch"
         if consent.status == "withdrawn" or consent.withdrawn_at is not None:
             return "withdrawn"
         if consent.consent_policy_version != self.consent_policy_version:
@@ -244,18 +252,20 @@ class VoiceBrainDumpService:
             self.required_consent_categories
         ):
             return "policy_mismatch"
+        if consent.decision_recorded_at is None:
+            return "policy_mismatch"
         if consent.valid_until is None or consent.valid_until <= now:
             return "expired"
         return "current"
 
     def _assert_current_external_consent(
-        self, consent: BrainDumpConsent, *, now: datetime | None = None
+        self, operation: BrainDumpOperationDocument, *, now: datetime | None = None
     ) -> None:
         """Fail closed before upload/seal/retry when a canonical grant exists
         but is no longer current (ADR-0008: version/category/expiry/
         withdrawal must be revalidated, never assumed from a stale boolean)."""
 
-        status = self._current_external_consent_status(consent, now=now or utcnow())
+        status = self._current_external_consent_status(operation, now=now or utcnow())
         if status in {"legacy", "current"}:
             return
         code = {
@@ -756,17 +766,18 @@ class VoiceBrainDumpService:
             # independently authorizes audio leaving the device even when
             # the legacy ``consent.provider`` field was never set (ADR-0008
             # mobile clients grant consent only through the canonical
-            # consent-decisions command). Only an operation that never
-            # recorded a canonical decision at all ("legacy") falls back to
-            # the old provider-membership check; every other non-current
-            # status still fails closed with its specific code.
+            # consent-decisions command). Only a genuinely migrated
+            # ``legacy_preview_only`` import ("legacy") falls back to the old
+            # provider-membership check; a fresh start with no canonical
+            # decision recorded fails closed exactly like every other
+            # non-current status.
             consent_status = self._current_external_consent_status(
-                operation.consent, now=utcnow()
+                operation, now=utcnow()
             )
             if consent_status == "legacy":
                 self._assert_external_provider_consent(operation.consent)
             else:
-                self._assert_current_external_consent(operation.consent)
+                self._assert_current_external_consent(operation)
             existing = {
                 chunk.chunk_number: chunk for chunk in operation.audio_chunks
             }.get(chunk_number)
@@ -899,7 +910,7 @@ class VoiceBrainDumpService:
             )
             if operation.status not in {"recording", "paused"}:
                 raise ValidationFailure("Only an active brain dump can be sealed.")
-            self._assert_current_external_consent(operation.consent)
+            self._assert_current_external_consent(operation)
             expected_numbers = set(range(payload.expected_chunks))
             uploaded_numbers = {chunk.chunk_number for chunk in operation.audio_chunks}
             missing = sorted(expected_numbers - uploaded_numbers)
@@ -1062,7 +1073,7 @@ class VoiceBrainDumpService:
                 # revalidation). A stale grant fails the operation closed
                 # here; the provider is never invoked.
                 claim_consent_status = self._current_external_consent_status(
-                    operation.consent, now=now
+                    operation, now=now
                 )
                 if claim_consent_status not in {"legacy", "current"}:
                     failure_code = self._CONSENT_FAILURE_CODES[claim_consent_status]
@@ -1269,9 +1280,7 @@ class VoiceBrainDumpService:
             # unconditional, exactly like the seal-time check. A grant
             # current when the operation sealed can have expired or been
             # withdrawn by the time this queued run actually executes.
-            consent_status = self._current_external_consent_status(
-                operation.consent, now=now
-            )
+            consent_status = self._current_external_consent_status(operation, now=now)
             if consent_status not in {"legacy", "current"}:
                 raise ProviderTerminalError(self._CONSENT_FAILURE_CODES[consent_status])
             if self.accurate_stt.requires_external_processing:
@@ -1453,9 +1462,7 @@ class VoiceBrainDumpService:
         # transcript may have been accepted before the grant expired/was
         # withdrawn, but reconciliation must still refuse to call the
         # provider once it is no longer current.
-        consent_status = self._current_external_consent_status(
-            operation.consent, now=now
-        )
+        consent_status = self._current_external_consent_status(operation, now=now)
         if consent_status not in {"legacy", "current"}:
             return self._reconciler_failure(
                 operation,
@@ -1661,7 +1668,7 @@ class VoiceBrainDumpService:
             )
             if operation.status != "retryable_error" and not recoverable_claim:
                 raise ValidationFailure("Only a retryable brain dump can be retried.")
-            self._assert_current_external_consent(operation.consent)
+            self._assert_current_external_consent(operation)
             latest_provider_run = (
                 operation.provider_runs[-1] if operation.provider_runs else None
             )

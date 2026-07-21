@@ -90,6 +90,39 @@ def test_grant_requires_exact_category_set_match(api_client) -> None:
     assert "CONSENT_CATEGORY_SET_MISMATCH" in mismatched.text
 
 
+def test_grant_request_requires_policy_version_and_recorded_timestamp(api_client) -> None:
+    """Canonical grant payloads are rejected before they can be persisted
+    without the two audit fields that make consent current and attributable."""
+
+    operation = _start_operation(api_client, key="start-consent-required-fields")
+    policy = _policy(api_client)
+    missing_version = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/consent-decisions",
+        headers={"Idempotency-Key": "grant-missing-policy-version"},
+        json={
+            "decision": "grant",
+            "allowed_provider_categories": policy["required_provider_categories"],
+            "decision_recorded_at": utcnow().isoformat(),
+            "expected_operation_revision": operation["revision"],
+        },
+    )
+    assert missing_version.status_code == 422, missing_version.text
+    assert "consent_decision_grant_requires_policy_version" in missing_version.text
+
+    missing_timestamp = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/consent-decisions",
+        headers={"Idempotency-Key": "grant-missing-recorded-at"},
+        json={
+            "decision": "grant",
+            "consent_policy_version": policy["consent_policy_version"],
+            "allowed_provider_categories": policy["required_provider_categories"],
+            "expected_operation_revision": operation["revision"],
+        },
+    )
+    assert missing_timestamp.status_code == 422, missing_timestamp.text
+    assert "consent_decision_grant_requires_timestamp" in missing_timestamp.text
+
+
 def test_valid_grant_is_current_and_persists_decision_fields(api_client) -> None:
     operation = _start_operation(api_client, key="start-consent-valid")
     granted = _grant(api_client, operation, key="grant-valid")
@@ -142,6 +175,36 @@ def test_canonical_grant_authorizes_upload_without_legacy_provider(api_client) -
     )
     assert uploaded.status_code == 200, uploaded.text
     assert uploaded.json()["audio_chunks"][0]["size_bytes"] == len(audio)
+
+
+def test_fresh_start_without_canonical_grant_fails_closed_before_upload(api_client) -> None:
+    """A newly created v2 operation cannot borrow the schema-v1 fallback."""
+
+    started = api_client.post(
+        "/api/brain-dump-operations",
+        headers={"Idempotency-Key": "start-fresh-no-canonical-grant"},
+        json={
+            "consent": {
+                "microphone": True,
+                "external_processing_allowed": True,
+                "provider": "openai",
+                "language_hints": [],
+                "vocabulary": [],
+            }
+        },
+    )
+    assert started.status_code == 201, started.text
+    operation = started.json()
+    audio = b"Buy milk."
+
+    blocked = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": __import__("hashlib").sha256(audio).hexdigest()},
+    )
+
+    assert blocked.status_code == 400, blocked.text
+    assert "CONSENT_POLICY_MISMATCH" in blocked.text
 
 
 def test_withdrawal_blocks_further_upload_and_purges_uncommitted_audio(

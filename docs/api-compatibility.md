@@ -2,17 +2,17 @@
 
 ## Scope and source of truth
 
-Brain Buddy currently exposes one browser-facing HTTP API under `/api`. There is no
-mobile/iOS client contract yet. The live OpenAPI document at `/api/openapi.json` is
-the machine-readable source of truth for future consumers; `/api/docs` is its human
-view. Consumers must generate or validate clients from a pinned OpenAPI snapshot,
-not from frontend implementation details or persisted JSON files.
+Brain Buddy exposes one HTTP API under `/api`, consumed by the browser and the bounded
+Expo mobile client. The backend Pydantic/OpenAPI contract is the source of truth; the
+live `/api/openapi.json` and `/api/docs` are views of it. Consumers generate or validate
+from the committed `openapi/brainbuddy-v1.json` snapshot, never frontend implementation
+details or persisted JSON files. `scripts/generate_openapi.py` deterministically builds
+that snapshot from an ephemeral test app and temporary data root; `--check` verifies the
+committed bytes without writing them.
 
-`info.version` currently reports the persisted-data schema version for operational
-visibility. It is **not yet an independently versioned mobile-client semantic version**.
-Before adding a second client, add a separately owned API semantic-version setting and
-publish its compatibility window; do not infer client compatibility from a storage
-migration alone.
+`info.version` is the independently owned API semantic version (`1.0.0`), while
+`/health.schema_version` reports persisted-data schema version. Do not infer mobile
+compatibility from a storage migration alone.
 
 ## Compatibility rules for the current `/api` contract
 
@@ -103,11 +103,12 @@ cancelled v1 operations are read-only and are never migrated or replayed.
 
 ### Mobile operation allowlist
 
-`mobile/scripts/generate-api.sh` fetches the full OpenAPI document to
-`mobile/api/openapi.json` (the committed audit/drift copy), then
-`mobile/scripts/filter-mobile-openapi.mjs` derives a generation-only
-allowlisted subset by dropping every operation the backend marks
-`deprecated: true` before `openapi-typescript` ever sees it. This keeps the
-mobile client generation allowlist a direct, low-maintenance function of the
-same `deprecated` flag used above, rather than a hand-maintained duplicate
-list that can drift from the backend's actual routes.
+`mobile/scripts/generate-api.sh` regenerates and checks the pinned committed
+snapshot, then copies it to `mobile/api/openapi.json` as the committed audit/drift copy.
+Before `openapi-typescript` runs, `mobile/scripts/filter-mobile-openapi.mjs` derives the
+generation-only `mobile/api/openapi.mobile.json` using an explicit bounded
+`(method, path)` allowlist. A new non-deprecated backend route is therefore not exposed
+to mobile accidentally. The filter also hard-excludes the deprecated direct proposal
+`PATCH`, `/finish`, `/commit`, `/transcript`, the untyped action dispatcher, and Smart
+Add even if a future change tries to allowlist one. Deprecated operations are excluded,
+but "drop deprecated" is not the mobile contract or its enforcement mechanism.

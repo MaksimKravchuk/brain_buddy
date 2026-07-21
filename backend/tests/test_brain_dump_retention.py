@@ -74,6 +74,29 @@ def test_delete_now_is_idempotent_on_replay(api_client) -> None:
     )
     assert second_body["revision"] == first_body["revision"]
 
+    # A fresh parent key after the operation is already deleted converges to
+    # the same terminal projection instead of requiring the original key.
+    new_key = _delete_now(api_client, second_body, "delete-replay-after-terminal")
+    assert new_key.status_code == 200, new_key.text
+    assert new_key.json()["raw_audio"]["state"] == "deleted"
+
+
+def test_delete_now_refuses_recording_operation_before_review_stage(api_client) -> None:
+    """Delete-now is intentionally unavailable while recording remains active."""
+
+    operation = _start_operation(api_client, key="start-delete-recording-guard")
+    audio = b"recording audio"
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+
+    deleted = _delete_now(api_client, uploaded.json(), "delete-recording-guard")
+    assert deleted.status_code == 400, deleted.text
+    assert "AUDIO_DELETE_NOT_AVAILABLE" in deleted.text
+
 
 def test_delete_now_physically_removes_chunks_and_survives_restart(
     api_client,
@@ -224,6 +247,31 @@ def test_startup_sweep_drains_operation_stranded_in_deletion_pending(
 
     # Idempotent: nothing left to drain on a second pass.
     assert voice_service.drain_pending_raw_audio_deletions() == 0
+
+
+def test_startup_sweep_skips_a_pending_scan_entry_already_completed(
+    api_client, monkeypatch
+) -> None:
+    """The sweep rechecks state under the owner lock so a stale scan row
+    cannot cause a second physical deletion after another worker completed it."""
+
+    operation = _reconciled_operation(api_client, "retention-drain-stale", b"Buy tea.")
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    container = api_client.app.state.container
+    voice_service = container.voice_brain_dump_service
+    current = voice_service.get_brain_dump_operation(operation["id"], owner_id=owner_id)
+    stale_scan_entry = current.model_copy(update={"raw_audio_state": "deletion_pending"})
+    monkeypatch.setattr(
+        container.voice_operation_repo,
+        "list_deletion_pending_raw_audio_operations",
+        lambda: [stale_scan_entry],
+    )
+
+    assert voice_service.drain_pending_raw_audio_deletions() == 0
+    assert (
+        voice_service.get_brain_dump_operation(operation["id"], owner_id=owner_id).raw_audio_state
+        == "retained"
+    )
 
 
 def _crash_before_unlink(monkeypatch, container):

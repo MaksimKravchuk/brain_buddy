@@ -17,6 +17,7 @@ from app.exceptions import (
     ProviderTerminalError,
     ValidationFailure,
 )
+from app.utils.time import utcnow
 from app.workflows.voice_brain_dump.adapters import OpenAiAccurateStt
 
 
@@ -27,19 +28,30 @@ def _start_operation(
     external_processing_allowed: bool = True,
     language_hints: list[str] | None = None,
     vocabulary: list[str] | None = None,
+    canonical_consent: bool = True,
 ):
+    service = api_client.app.state.container.voice_brain_dump_service
+    consent = {
+        "microphone": True,
+        "external_processing_allowed": external_processing_allowed,
+        "provider": "openai" if external_processing_allowed else None,
+        "language_hints": language_hints or [],
+        "vocabulary": vocabulary or [],
+    }
+    if external_processing_allowed and canonical_consent:
+        consent.update(
+            {
+                "consent_policy_version": service.consent_policy_version,
+                "allowed_provider_categories": sorted(
+                    service.required_consent_categories
+                ),
+                "decision_recorded_at": utcnow().isoformat(),
+            }
+        )
     response = api_client.post(
         "/api/brain-dump-operations",
         headers={"Idempotency-Key": key},
-        json={
-            "consent": {
-                "microphone": True,
-                "external_processing_allowed": external_processing_allowed,
-                "provider": "openai" if external_processing_allowed else None,
-                "language_hints": language_hints or [],
-                "vocabulary": vocabulary or [],
-            }
-        },
+        json={"consent": consent},
     )
     assert response.status_code == 201, response.text
     return response.json()
@@ -701,6 +713,234 @@ def test_schema_v2_conflict_resolution_requires_a_visible_title_conflict(
     assert "no conflict to resolve" in response.text
 
 
+def test_canonical_proposal_patch_enforces_replay_and_mutation_guards(api_client) -> None:
+    """The mobile patch command is idempotent and fails closed on stale,
+    removed, missing, and non-editable proposal states."""
+
+    def preview(key: str) -> tuple[dict[str, object], dict[str, object]]:
+        operation = _start_operation(api_client, key=f"start-canonical-patch-{key}")
+        response = api_client.post(
+            f"/api/brain-dump-operations/{operation['id']}/transcript",
+            headers={"Idempotency-Key": f"preview-canonical-patch-{key}"},
+            json={
+                "segments": [
+                    {"sequence": 1, "text": "Call the dentist", "stability": "stable"}
+                ]
+            },
+        )
+        assert response.status_code == 200, response.text
+        return operation, response.json()
+
+    operation, previewed = preview("main")
+    proposal = previewed["proposals"][0]
+    patch_path = (
+        f"/api/brain-dump-operations/{operation['id']}/proposals/{proposal['id']}/patches"
+    )
+    update_payload = {
+        "operation": "update",
+        "title": "Call the dentist today",
+        "base_proposal_revision": proposal["revision"],
+        "expected_operation_revision": previewed["revision"],
+    }
+    updated = api_client.post(
+        patch_path,
+        headers={"Idempotency-Key": "canonical-patch-update"},
+        json=update_payload,
+    )
+    assert updated.status_code == 200, updated.text
+    updated_body = updated.json()
+    updated_proposal = updated_body["proposals"][0]
+    assert updated_proposal["title"] == "Call the dentist today"
+
+    replay = api_client.post(
+        patch_path,
+        headers={"Idempotency-Key": "canonical-patch-update"},
+        json=update_payload,
+    )
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["revision"] == updated_body["revision"]
+
+    stale = api_client.post(
+        patch_path,
+        headers={"Idempotency-Key": "canonical-patch-stale"},
+        json={
+            "operation": "update",
+            "title": "Stale title",
+            "base_proposal_revision": proposal["revision"],
+            "expected_operation_revision": updated_body["revision"],
+        },
+    )
+    assert stale.status_code == 409, stale.text
+
+    missing_title = api_client.post(
+        patch_path,
+        headers={"Idempotency-Key": "canonical-patch-missing-title"},
+        json={
+            "operation": "update",
+            "base_proposal_revision": updated_proposal["revision"],
+            "expected_operation_revision": updated_body["revision"],
+        },
+    )
+    assert missing_title.status_code == 400, missing_title.text
+
+    removed = api_client.post(
+        patch_path,
+        headers={"Idempotency-Key": "canonical-patch-remove"},
+        json={
+            "operation": "remove",
+            "base_proposal_revision": updated_proposal["revision"],
+            "expected_operation_revision": updated_body["revision"],
+        },
+    )
+    assert removed.status_code == 200, removed.text
+    removed_body = removed.json()
+    removed_proposal = removed_body["proposals"][0]
+    assert removed_proposal["deleted"] is True
+
+    deleted = api_client.post(
+        patch_path,
+        headers={"Idempotency-Key": "canonical-patch-deleted"},
+        json={
+            "operation": "update",
+            "title": "Do not restore",
+            "base_proposal_revision": removed_proposal["revision"],
+            "expected_operation_revision": removed_body["revision"],
+        },
+    )
+    assert deleted.status_code == 400, deleted.text
+
+    missing_operation, missing_preview = preview("missing")
+    missing = api_client.post(
+        f"/api/brain-dump-operations/{missing_operation['id']}/proposals/not-real/patches",
+        headers={"Idempotency-Key": "canonical-patch-not-found"},
+        json={
+            "operation": "remove",
+            "base_proposal_revision": 1,
+            "expected_operation_revision": missing_preview["revision"],
+        },
+    )
+    assert missing.status_code == 404, missing.text
+
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    service = api_client.app.state.container.voice_brain_dump_service
+    stored = service.get_brain_dump_operation(missing_operation["id"], owner_id=owner_id)
+    api_client.app.state.container.voice_operation_repo.save_brain_dump_operation(
+        stored.model_copy(update={"status": "sealing"})
+    )
+    inactive = api_client.post(
+        f"/api/brain-dump-operations/{missing_operation['id']}/proposals/{missing_preview['proposals'][0]['id']}/patches",
+        headers={"Idempotency-Key": "canonical-patch-inactive"},
+        json={
+            "operation": "remove",
+            "base_proposal_revision": missing_preview["proposals"][0]["revision"],
+            "expected_operation_revision": missing_preview["revision"],
+        },
+    )
+    assert inactive.status_code == 400, inactive.text
+
+
+def test_canonical_conflict_resolution_enforces_replay_and_visibility_guards(
+    api_client,
+) -> None:
+    """The typed mobile resolver shares conflict semantics without opening a
+    bypass around operation/proposal visibility or idempotency."""
+
+    from app.workflows.voice_brain_dump.domain import BrainDumpProposalConflictDocument
+
+    def conflict_operation(key: str) -> tuple[dict[str, object], dict[str, object]]:
+        operation = _start_operation(api_client, key=f"start-canonical-conflict-{key}")
+        preview = api_client.post(
+            f"/api/brain-dump-operations/{operation['id']}/transcript",
+            headers={"Idempotency-Key": f"preview-canonical-conflict-{key}"},
+            json={
+                "segments": [
+                    {"sequence": 1, "text": "Call the dentist", "stability": "stable"}
+                ]
+            },
+        )
+        assert preview.status_code == 200, preview.text
+        owner_id = api_client.get("/api/auth/me").json()["id"]
+        service = api_client.app.state.container.voice_brain_dump_service
+        stored = service.get_brain_dump_operation(operation["id"], owner_id=owner_id)
+        proposal = stored.proposals[0].model_copy(
+            update={
+                "conflicts": [
+                    BrainDumpProposalConflictDocument(
+                        field="title", suggested_value="Call the dentist today"
+                    )
+                ]
+            }
+        )
+        api_client.app.state.container.voice_operation_repo.save_brain_dump_operation(
+            stored.model_copy(update={"proposals": [proposal]})
+        )
+        return operation, api_client.get(
+            f"/api/brain-dump-operations/{operation['id']}"
+        ).json()
+
+    operation, conflicted = conflict_operation("main")
+    proposal = conflicted["proposals"][0]
+    resolve_path = (
+        f"/api/brain-dump-operations/{operation['id']}/proposals/{proposal['id']}/conflicts/resolve"
+    )
+    payload = {"resolution": "accept", "expected_operation_revision": conflicted["revision"]}
+    resolved = api_client.post(
+        resolve_path,
+        headers={"Idempotency-Key": "canonical-conflict-accept"},
+        json=payload,
+    )
+    assert resolved.status_code == 200, resolved.text
+    resolved_body = resolved.json()
+    assert resolved_body["proposals"][0]["title"] == "Call the dentist today"
+
+    replay = api_client.post(
+        resolve_path,
+        headers={"Idempotency-Key": "canonical-conflict-accept"},
+        json=payload,
+    )
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["revision"] == resolved_body["revision"]
+
+    missing_operation, missing_conflicted = conflict_operation("missing")
+    missing = api_client.post(
+        f"/api/brain-dump-operations/{missing_operation['id']}/proposals/not-real/conflicts/resolve",
+        headers={"Idempotency-Key": "canonical-conflict-not-found"},
+        json={"resolution": "keep", "expected_operation_revision": missing_conflicted["revision"]},
+    )
+    assert missing.status_code == 404, missing.text
+
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    service = api_client.app.state.container.voice_brain_dump_service
+    stored = service.get_brain_dump_operation(missing_operation["id"], owner_id=owner_id)
+    deleted_proposal = stored.proposals[0].model_copy(update={"deleted": True})
+    api_client.app.state.container.voice_operation_repo.save_brain_dump_operation(
+        stored.model_copy(update={"proposals": [deleted_proposal]})
+    )
+    deleted = api_client.post(
+        f"/api/brain-dump-operations/{missing_operation['id']}/proposals/{deleted_proposal.id}/conflicts/resolve",
+        headers={"Idempotency-Key": "canonical-conflict-deleted"},
+        json={"resolution": "keep", "expected_operation_revision": stored.revision},
+    )
+    assert deleted.status_code == 400, deleted.text
+
+    inactive_operation, inactive_conflicted = conflict_operation("inactive")
+    inactive_stored = service.get_brain_dump_operation(
+        inactive_operation["id"], owner_id=owner_id
+    )
+    api_client.app.state.container.voice_operation_repo.save_brain_dump_operation(
+        inactive_stored.model_copy(update={"status": "sealing"})
+    )
+    inactive = api_client.post(
+        f"/api/brain-dump-operations/{inactive_operation['id']}/proposals/{inactive_conflicted['proposals'][0]['id']}/conflicts/resolve",
+        headers={"Idempotency-Key": "canonical-conflict-inactive"},
+        json={
+            "resolution": "keep",
+            "expected_operation_revision": inactive_conflicted["revision"],
+        },
+    )
+    assert inactive.status_code == 400, inactive.text
+
+
 def test_seal_rejects_external_reconciliation_without_explicit_consent(
     api_client,
 ) -> None:
@@ -869,23 +1109,15 @@ def test_external_stt_receives_declared_hints_through_the_real_decision_path(
     api_client.app.state.container.voice_brain_dump_service.accurate_stt = _real_adapter(
         httpx.MockTransport(handler)
     )
-    started = api_client.post(
-        "/api/brain-dump-operations",
-        headers={"Idempotency-Key": "start-real-hints"},
-        json={
-            "consent": {
-                "microphone": True,
-                "external_processing_allowed": True,
-                "provider": "openai",
-                "language_hints": ["ru", "en"],
-                "vocabulary": ["BrainBuddy", "production smoke"],
-            }
-        },
+    operation = _start_operation(
+        api_client,
+        key="start-real-hints",
+        language_hints=["ru", "en"],
+        vocabulary=["BrainBuddy", "production smoke"],
     )
-    assert started.status_code == 201, started.text
 
     sealed = _upload_and_seal(
-        api_client, started.json(), b"\x1aE\xdf\xa3real-webm", "seal-real-hints"
+        api_client, operation, b"\x1aE\xdf\xa3real-webm", "seal-real-hints"
     )
 
     assert sealed.status_code == 200, sealed.text
@@ -980,7 +1212,7 @@ def test_external_stt_consent_is_bound_to_the_named_provider(api_client) -> None
     )
 
     assert rejected.status_code == 400
-    assert "AUDIO_UPLOAD_PROVIDER_CONSENT_REQUIRED" in rejected.text
+    assert "CONSENT_POLICY_MISMATCH" in rejected.text
     assert calls == 0
 
 def test_reconciler_consent_is_bound_to_the_named_provider(api_client) -> None:
@@ -1019,7 +1251,7 @@ def test_reconciler_consent_is_bound_to_the_named_provider(api_client) -> None:
     )
 
     assert rejected.status_code == 400
-    assert "AUDIO_UPLOAD_PROVIDER_CONSENT_REQUIRED" in rejected.text
+    assert "CONSENT_POLICY_MISMATCH" in rejected.text
     assert calls == 0
 
 def test_audio_upload_fails_closed_and_persists_nothing_without_external_consent(
@@ -1040,7 +1272,7 @@ def test_audio_upload_fails_closed_and_persists_nothing_without_external_consent
     )
 
     assert uploaded.status_code == 400, uploaded.text
-    assert "AUDIO_UPLOAD_CONSENT_REQUIRED" in uploaded.text
+    assert "CONSENT_POLICY_MISMATCH" in uploaded.text
 
     fetched = api_client.get(f"/api/brain-dump-operations/{operation['id']}")
     assert fetched.status_code == 200
@@ -1087,7 +1319,10 @@ def test_explicit_empty_provider_allowlist_fails_closed_before_audio_upload(
         frozenset()
     )
     operation = _start_operation(
-        api_client, key="start-locked-down-allowlist", external_processing_allowed=True
+        api_client,
+        key="start-locked-down-allowlist",
+        external_processing_allowed=True,
+        canonical_consent=False,
     )
 
     audio = b"\x1aE\xdf\xa3must-not-be-persisted"
@@ -1099,7 +1334,7 @@ def test_explicit_empty_provider_allowlist_fails_closed_before_audio_upload(
     )
 
     assert rejected.status_code == 400, rejected.text
-    assert "AUDIO_UPLOAD_PROVIDER_CONSENT_REQUIRED" in rejected.text
+    assert "CONSENT_POLICY_MISMATCH" in rejected.text
 
     fetched = api_client.get(f"/api/brain-dump-operations/{operation['id']}")
     assert fetched.status_code == 200
@@ -1791,7 +2026,7 @@ def test_withdraw_consent_stops_future_processing_and_purges_raw_audio(
         headers={"X-Content-SHA256": hashlib.sha256(b"more-audio").hexdigest()},
     )
     assert blocked_upload.status_code == 400, blocked_upload.text
-    assert "CONSENT_REQUIRED" in blocked_upload.text
+    assert "CONSENT_WITHDRAWN" in blocked_upload.text
 
 
 def test_withdraw_consent_is_not_cancel_and_does_not_discard_a_reconciled_batch(
