@@ -3,8 +3,9 @@
 Date: 2026-07-16
 Status: Accepted
 Decision owner: BrainBuddy
-Related: `.specify/`, `.claude/skills/`, `specs/`, `docs/spec-kit-workflow.md`,
-ADR-0001, ADR-0002, Kanban task `t_3b2a9cc9`
+Related: `.specify/`, `.claude/skills/`, official Hermes Spec Kit skills,
+`specs/`, `docs/spec-kit-workflow.md`, ADR-0001, ADR-0002, Kanban task
+`t_3b2a9cc9`
 
 ## Context
 
@@ -23,9 +24,9 @@ starts.
 
 Adopt the official `github/spec-kit` release `v0.12.17` as BrainBuddy's mandatory
 feature-spec authoring workflow. Refresh the existing repository scaffold using
-the pinned CLI through isolated `uv tool`/`uvx`, install the supported Claude
-Code skills integration, and preserve existing specs, ADRs, and constitution
-history.
+the pinned CLI through isolated `uv tool`/`uvx`, keep the supported Claude Code
+project integration, and provision the official Hermes planning skills into the
+architect profile. Preserve existing specs, ADRs, and constitution history.
 
 The canonical path for new or materially changed feature specs is:
 
@@ -34,10 +35,12 @@ constitution -> /speckit-specify -> /speckit-clarify -> /speckit-plan -> /specki
 ```
 
 Spec Kit owns versioned planning artifacts under `specs/` and project workflow
-infrastructure under `.specify/` plus `.claude/skills/`. Hermes Kanban remains
-responsible for task routing, implementation ownership, review handoffs, CI/PR
-traceability, and release gates. BrainBuddy disables `/speckit-implement` and
-keeps the runnable `speckit` workflow planning-only.
+infrastructure under `.specify/` plus the installed skills integrations.
+Hermes Kanban remains responsible for task routing, implementation ownership,
+review handoffs, CI/PR traceability, and release gates. BrainBuddy exposes only
+the official planning skills to the architect profile, disables
+`/speckit-implement`, and does not use `speckit-taskstoissues` as a second graph
+publisher.
 
 Architect-profile agents own Spec Kit technical planning for new or materially
 changed architecture/feature specs: module boundaries, contracts, ADR alignment,
@@ -87,6 +90,8 @@ project keeps Spec Kit scoped to authoring and planning.
 Positive consequences:
 - New feature specs have a single documented workflow and minimum artifact set.
 - Claude Code receives first-class Spec Kit skills in the repository.
+- The Hermes architect profile receives the official planning-only Spec Kit
+  skills, while the Kanban orchestrator receives the compact handoff policy.
 - BrainBuddy quality gates are encoded in the constitution, templates, docs, and
   CI check rather than relying on memory.
 - The installed workflow cannot advance into implementation outside Hermes
@@ -99,6 +104,10 @@ Tradeoffs / risks:
 - Future Spec Kit refreshes may reinstall implementation commands, so reviews
   must preserve the local disabled `/speckit-implement` stub and planning-only
   workflow.
+- Upstream installs Hermes skills globally and does not declare the integration
+  multi-install safe. BrainBuddy therefore does not record Claude and Hermes as
+  concurrent project integrations: it projects only the seven official planning
+  skills into the architect profile and keeps Claude as the project integration.
 
 What future agents must preserve:
 - Pin and document the Spec Kit release used for repository refreshes.
@@ -118,6 +127,13 @@ What future agents must preserve:
 - `specify check` reports Claude Code available.
 - `uvx --from git+https://github.com/github/spec-kit.git@v0.12.17 specify init --here --integration claude --force`
   refreshes the repository while preserving the existing constitution.
+- The official `v0.12.17` Hermes integration is the source of the seven planning
+  skills projected into the architect profile. The project integration status
+  remains Claude-only and `multi_install_safe=true`; this avoids upstream's
+  global uninstall/overwrite hazard.
+- `hermes --profile architect skills list` exposes constitution, specify,
+  clarify, plan, checklist, tasks, and analyze, but not implement or
+  taskstoissues.
 - The local `.specify/workflows/speckit/workflow.yml` ends at tasks plus Hermes
   Kanban handoff and does not call `speckit.implement`.
 - `python3 scripts/check_spec_kit_specs.py` validates required new-spec artifacts,
