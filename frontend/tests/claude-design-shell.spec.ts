@@ -712,16 +712,8 @@ test.describe("mobile at-rest topbar and card density at 402x874", () => {
     await expect(row).toBeVisible();
 
     await test.step("card padding and radius are compact", async () => {
-      const styles = await row.evaluate((element) => {
-        const computed = getComputedStyle(element);
-        return { paddingLeft: parseFloat(computed.paddingLeft), borderRadius: parseFloat(computed.borderTopLeftRadius) };
-      });
-      if (styles.paddingLeft < 12 || styles.paddingLeft > 16) {
-        throw new Error(`Expected ~14px card padding, received ${styles.paddingLeft}px`);
-      }
-      if (styles.borderRadius < 12 || styles.borderRadius > 16) {
-        throw new Error(`Expected ~14px card radius, received ${styles.borderRadius}px`);
-      }
+      await expect(row).toHaveCSS("padding-left", "14px");
+      await expect(row).toHaveCSS("border-top-left-radius", "14px");
     });
 
     await test.step("the complete checkbox exposes a >=44px hit target", async () => {
