@@ -5,13 +5,14 @@ This runbook operationalizes
 agent-created PRs, visual review apps, normal production releases, and incidents involving
 those paths. It does not grant authority to mutate remote resources.
 
-## Current-state warning
+## Current preview implementation
 
-As of 2026-07-12, `.github/workflows/fly-review-frontend.yml` does **not** conform to
-ADR-0003: it runs for every same-repository PR, lacks label/path eligibility, per-PR
-concurrency, and a latest-head guard, and masks destroy failures. Do not infer compliance
-from the workflow's existence. Deployment configuration changes belong in a separate,
-reviewed implementation PR.
+`.github/workflows/fly-review-frontend.yml` implements the ADR-0003 preview boundary:
+`preview:visual` is mandatory, rendered frontend paths are checked, fork/backend-only/docs-only
+PRs fail closed, per-PR concurrency cancels stale deployments, and the live head is re-read
+immediately before Fly mutation. Removing the label or closing the PR destroys only the
+derived PR app and verifies absence. The workflow requires a separate preview-only
+`FLY_PREVIEW_API_TOKEN`; production credentials are not a fallback.
 
 The active production workflow is maintained on `main`. Normal production release is:
 reviewed PR -> required CI green -> merge to `main` -> successful `push` CI workflow ->
