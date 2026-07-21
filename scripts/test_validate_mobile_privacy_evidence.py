@@ -255,6 +255,44 @@ class ValidateMobilePrivacyEvidenceTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
+    def test_rejects_task_content_nested_inside_a_serialized_json_string(self) -> None:
+        # A step parameter or log line can echo an entire task/transcript
+        # object as a JSON-encoded string value rather than a flat field, so
+        # the field's own quotes are themselves backslash-escaped in the raw
+        # file text (e.g. `\"body\"`, not `"body"`).
+        fake_body = "call mom back"
+        nested = json.dumps({"body": fake_body})
+        completed = self.scan_text(
+            "case-result.json", json.dumps({"stepDescription": nested})
+        )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("task_content", completed.stderr)
+        self.assertNotIn(fake_body, completed.stderr)
+        self.assertNotIn(fake_body, completed.stdout)
+
+    def test_rejects_transcript_nested_inside_a_serialized_json_string(self) -> None:
+        fake_transcript = "buy milk"
+        nested = json.dumps({"transcript": fake_transcript})
+        completed = self.scan_text(
+            "case-result.json", json.dumps({"stepDescription": nested})
+        )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("audio_transcript_content", completed.stderr)
+        self.assertNotIn(fake_transcript, completed.stderr)
+        self.assertNotIn(fake_transcript, completed.stdout)
+
+    def test_allows_empty_task_content_field_nested_inside_a_serialized_json_string(
+        self,
+    ) -> None:
+        nested = json.dumps({"title": ""})
+        completed = self.scan_text(
+            "case-result.json", json.dumps({"stepDescription": nested})
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
     def test_rejects_developer_absolute_path(self) -> None:
         completed = self.scan_text(
             "bundle.js",

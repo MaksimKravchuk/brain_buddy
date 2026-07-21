@@ -87,6 +87,80 @@ class SanitizePrivacyEvidenceTests(unittest.TestCase):
         self.assertNotEqual(scanned.returncode, 0)
         self.assertIn("unreadable_binary_evidence", scanned.stderr)
 
+    def test_redacts_task_and_transcript_fields_nested_inside_a_serialized_json_string(
+        self,
+    ) -> None:
+        # A step parameter or log line can echo an entire task/transcript
+        # object as a JSON-encoded string value: the field names are
+        # themselves backslash-escaped in the raw file text (e.g.
+        # `\"body\"`, not `"body"`), which the scanner must detect and this
+        # sanitizer must redact while keeping both the outer file and the
+        # nested payload valid, parseable JSON.
+        task_body = "call mom back"
+        transcript = "buy milk"
+        nested = json.dumps({"body": task_body, "transcript": transcript})
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence = Path(tmp) / "allure-results"
+            evidence.mkdir()
+            result_file = evidence / "result.json"
+            result_file.write_text(
+                json.dumps({"stepDescription": nested}), encoding="utf-8"
+            )
+
+            before = self.run_script(
+                SCANNER, "--path", str(evidence), "--label", "test-evidence"
+            )
+            sanitized = self.run_script(
+                SANITIZER, "--path", str(evidence), "--label", "test-evidence"
+            )
+            after_text = result_file.read_text(encoding="utf-8")
+            after = self.run_script(
+                SCANNER, "--path", str(evidence), "--label", "test-evidence"
+            )
+
+        self.assertNotEqual(before.returncode, 0)
+        self.assertEqual(sanitized.returncode, 0, sanitized.stderr)
+        self.assertEqual(after.returncode, 0, after.stderr)
+        self.assertNotIn(task_body, sanitized.stdout)
+        self.assertNotIn(transcript, sanitized.stdout)
+
+        outer = json.loads(after_text)
+        inner = json.loads(outer["stepDescription"])
+        self.assertEqual(inner, {"body": "", "transcript": ""})
+
+    def test_redacts_only_the_field_with_real_content_among_empty_nested_siblings(
+        self,
+    ) -> None:
+        # Regression for a greedy/overrunning value match: once a nested
+        # `body` field is redacted to an empty string, a naive pattern can
+        # walk straight through its own (now immediately-adjacent) empty
+        # closing quote and latch onto a neighboring field's escaped quotes
+        # instead, corrupting the nested JSON payload.
+        task_body = "call mom back"
+        nested = json.dumps({"title": "", "body": task_body, "details": ""})
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence = Path(tmp) / "allure-results"
+            evidence.mkdir()
+            result_file = evidence / "result.json"
+            result_file.write_text(
+                json.dumps({"stepDescription": nested}), encoding="utf-8"
+            )
+
+            sanitized = self.run_script(
+                SANITIZER, "--path", str(evidence), "--label", "test-evidence"
+            )
+            after_text = result_file.read_text(encoding="utf-8")
+            after = self.run_script(
+                SCANNER, "--path", str(evidence), "--label", "test-evidence"
+            )
+
+        self.assertEqual(sanitized.returncode, 0, sanitized.stderr)
+        self.assertEqual(after.returncode, 0, after.stderr)
+
+        outer = json.loads(after_text)
+        inner = json.loads(outer["stepDescription"])
+        self.assertEqual(inner, {"title": "", "body": "", "details": ""})
+
 
 if __name__ == "__main__":
     unittest.main()

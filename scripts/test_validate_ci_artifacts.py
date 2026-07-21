@@ -1151,6 +1151,95 @@ jobs:
             completed.stderr,
         )
 
+    def test_workflow_rejects_scan_step_id_and_command_split_across_a_nameless_step(self) -> None:
+        # Mutation: the step carrying `id: backend_privacy_scan` / `if:
+        # always()` is turned into an inert decoy, and the real scanner
+        # invocation is moved into a distinct, later nameless step (further
+        # disabled here with `if: false`) instead of living in that step's
+        # own body. A step-block matcher that only stops at `- name:`
+        # boundaries can be walked straight through a nameless step into the
+        # real command, wrongly crediting the decoy id/if as though the
+        # scanner actually ran under it.
+        source = self.real_ci_workflow_text()
+        old = (
+            "      - name: Scan backend Allure evidence for privacy leaks\n"
+            "        id: backend_privacy_scan\n"
+            "        if: always()\n"
+            "        working-directory: .\n"
+            "        run: |\n"
+            "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence\n"
+        )
+        self.assertIn(old, source)
+        new = (
+            "      - name: Scan backend Allure evidence for privacy leaks\n"
+            "        id: backend_privacy_scan\n"
+            "        if: always()\n"
+            "        working-directory: .\n"
+            "        run: echo \"scan placeholder\"\n"
+            "      - if: false\n"
+            "        working-directory: .\n"
+            "        run: |\n"
+            "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence\n"
+        )
+        mutated = source.replace(old, new, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("backend layer privacy scan step must set id: backend_privacy_scan", completed.stderr)
+
+    def test_workflow_rejects_aggregate_gate_disabled_via_if_false_env_string_decoy(self) -> None:
+        # Mutation: the real gate step's `if:` is disabled (`if: false`, so
+        # the step — and its `exit 1` — never actually runs), while the four
+        # needs.*.outputs.privacy_scan_outcome != 'success' checks are moved
+        # into an `env:` block instead of the step's own `if:` condition.
+        # Line-based matching anywhere in the job text credited any line
+        # containing the check text, regardless of whether it lived inside a
+        # real, executable `if:` key or a step that was itself skipped.
+        source = self.real_ci_workflow_text()
+        gate_step = self.real_aggregate_gate_step_text(source)
+        decoy_step = (
+            "      - name: Require explicit privacy scan success for all layers\n"
+            "        if: false\n"
+            "        env:\n"
+            "          BACKEND_CHECK: needs.backend.outputs.privacy_scan_outcome != 'success'\n"
+            "          FRONTEND_CHECK: needs.frontend.outputs.privacy_scan_outcome != 'success'\n"
+            "          PLAYWRIGHT_CHECK: needs.e2e.outputs.privacy_scan_outcome != 'success'\n"
+            "          MOBILE_CHECK: needs.mobile.outputs.privacy_scan_outcome != 'success'\n"
+            "        run: |\n"
+            "          exit 1\n"
+            "\n"
+        )
+        mutated = source.replace(gate_step, decoy_step, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("aggregate Allure report publication gate on backend", completed.stderr)
+        self.assertIn("aggregate Allure report publication gate on frontend", completed.stderr)
+        self.assertIn("aggregate Allure report publication gate on playwright", completed.stderr)
+        self.assertIn("aggregate Allure report publication gate on mobile", completed.stderr)
+
     def test_workflow_rejects_clean_root_scan_with_required_root_only_in_trailing_comment(
         self,
     ) -> None:
