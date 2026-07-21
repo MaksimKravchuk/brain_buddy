@@ -88,6 +88,25 @@ def build_logging_dict(level: str) -> dict[str, Any]:
                 "level": level,
                 "propagate": False,
             },
+            # httpx/httpcore log their own request line -- including the full
+            # request URL with query parameters -- at INFO. Voice provider
+            # adapters (Deepgram, OpenAI) pass vocabulary/keyterms as query
+            # parameters, so an app log level of INFO or more verbose must
+            # never surface those third-party loggers' own request-URL log
+            # lines. Capping them at WARNING is independent of the configured
+            # app level: raising the app level for troubleshooting must not
+            # also start leaking provider URLs/credentials-adjacent request
+            # metadata into ordinary logs.
+            "httpx": {
+                "handlers": ["console"],
+                "level": "WARNING",
+                "propagate": False,
+            },
+            "httpcore": {
+                "handlers": ["console"],
+                "level": "WARNING",
+                "propagate": False,
+            },
         },
     }
 

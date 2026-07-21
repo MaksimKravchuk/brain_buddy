@@ -7,7 +7,17 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 from app.ai.providers import MockValidationProvider, OpenAIValidationProvider
-from app.core.config import AppConfig, AppEnvironment, VoiceProviderSettings
+from app.core.config import (
+    MVP_ACCURATE_STT_MODEL,
+    MVP_ACCURATE_STT_PROVIDER,
+    MVP_RECONCILER_ENDPOINT,
+    MVP_RECONCILER_MODEL,
+    MVP_RECONCILER_PROVIDER,
+    MVP_RECONCILER_TEMPLATE_VERSION,
+    AppConfig,
+    AppEnvironment,
+    VoiceProviderSettings,
+)
 from app.modules.tasks import TaskRepository, TaskService
 from app.repositories import (
     IndexRepository,
@@ -75,6 +85,20 @@ def _build_accurate_stt(config: AppConfig) -> AccurateSttPort:
             return DisabledAccurateStt("STT_DETERMINISTIC_PROVIDER_TEST_ONLY")
         return DeterministicAccurateStt(allow_text_fixture_audio=True)
     if settings.provider == "deepgram":
+        # Exact literal re-check, not just a provider-name check: a
+        # manually-constructed ``AppConfig`` (e.g. built directly in a test or
+        # by future code) can carry ``provider="deepgram"`` with an
+        # unauthorized model that never went through
+        # ``validate_voice_provider_authorization``. Wiring the real adapter
+        # from that config would still send credentials and private audio to
+        # Deepgram under a model no corpus gate ever measured, so this is the
+        # last egress boundary before a live provider call and must fail
+        # closed before resolving any credential.
+        if (
+            settings.provider != MVP_ACCURATE_STT_PROVIDER
+            or settings.model != MVP_ACCURATE_STT_MODEL
+        ):
+            return DisabledAccurateStt("STT_PROVIDER_UNSUPPORTED")
         api_key = os.getenv(settings.api_key_env)
         if not api_key:
             return DisabledAccurateStt("STT_PROVIDER_CREDENTIALS_MISSING")
@@ -134,13 +158,28 @@ def _build_text_reconciler(config: AppConfig) -> TextReconcilerPort:
     if config.environment is AppEnvironment.TEST:
         return DeterministicTextReconciler()
     if settings.provider == "openai":
+        # Exact literal re-check of the whole authorized tuple, not just the
+        # provider name: a manually-constructed ``AppConfig`` can carry
+        # ``provider="openai"`` with an unauthorized model, template version,
+        # or endpoint that never went through
+        # ``validate_voice_provider_authorization``. This is the last egress
+        # boundary before a live provider call, so it must fail closed before
+        # resolving any credential or sending the private reconciliation
+        # payload -- including to an endpoint outside the authorized host.
+        if (
+            settings.provider != MVP_RECONCILER_PROVIDER
+            or settings.model != MVP_RECONCILER_MODEL
+            or settings.template_version != MVP_RECONCILER_TEMPLATE_VERSION
+            or settings.endpoint != MVP_RECONCILER_ENDPOINT
+        ):
+            return DisabledTextReconciler("RECONCILER_PROVIDER_UNSUPPORTED")
         api_key = os.getenv(settings.api_key_env)
         if not api_key:
             return DisabledTextReconciler("RECONCILER_PROVIDER_CREDENTIALS_MISSING")
         return OpenAITextReconciler(
             api_key=api_key,
             model=settings.model,
-            template_version=settings.template_version or "product-operation-v1",
+            template_version=settings.template_version,
             endpoint=settings.endpoint,
             timeout_seconds=settings.timeout_seconds,
             max_retries=settings.max_retries,

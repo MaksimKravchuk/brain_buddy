@@ -165,9 +165,9 @@ backend/app/workflows/voice_brain_dump/
 ├── evaluation.py     # real-audio evaluation harness (STT vs extraction quality)
 ├── adapters/         # real provider adapters (new)
 │   ├── __init__.py
-│   ├── deepgram_stt.py   # Deepgram Nova-3 multilingual accurate STT
-│   ├── openai_stt.py     # retained adapter, not the authorized MVP default
-│   └── reconciler.py     # GPT-5.6 Luna structured semantic draft
+│   ├── deepgram_stt.py   # Deepgram Nova-3 multilingual accurate STT (the only authorized accurate_stt adapter)
+│   ├── openai_stt.py     # retained for adapter-contract tests only; the container never wires it for accurate_stt in any environment
+│   └── reconciler.py     # GPT-5.6 Luna structured semantic draft, pinned to the authorized OpenAI chat-completions endpoint
 ├── repository.py     # owner-scoped payload/history, leases, media refs, v1 import
 ├── service.py        # commands, projections, patch validation, freeze/confirm coordination
 └── runner.py         # in-process due-run scan, leases, deadlines, bounded recovery
@@ -206,8 +206,8 @@ Configuration is role- and schema-based, never a stored vendor enum:
 # backend/app/core/config.py (new voice.* section)
 voice:
   accurate_stt:
-    provider: "deepgram" | "openai" | "deterministic" | "disabled"
-    model: "nova-3"                   # MVP default: Nova-3 multilingual
+    provider: "deepgram" | "deterministic" | "disabled"  # "openai" is never authorized here; see below
+    model: "nova-3"                   # the ONLY authorized production model; any other value, including another Nova-3 variant, fails closed
     api_key_env: "DEEPGRAM_API_KEY"   # env var name, never the value
     timeout_seconds: 60
     max_retries: 3
@@ -220,6 +220,7 @@ voice:
     provider: "openai" | "deterministic" | "disabled"
     model: "gpt-5.6-luna"
     template_version: "product-operation-v1"
+    endpoint: "https://api.openai.com/v1/chat/completions"  # pinned; any other endpoint fails closed
     request_parameters: {}            # temperature is omitted, not zero
     # ... same shape
   retention:
@@ -240,9 +241,22 @@ voice:
   `temperature`. Terra is not an automatic fallback; Terra, Sol, and Fable are
   rejected as MVP defaults. Provider failure surfaces bounded retry,
   `provisional_only`, terminal, or disabled state rather than tier escalation.
+- Both allow-list checks are exact, literal comparisons, not deny-lists or
+  normalized (case/whitespace-insensitive) matches: `accurate_stt` authorizes
+  only the exact tuple `provider="deepgram", model="nova-3"` (plus the
+  `"disabled"` and test-only `"deterministic"` states); `reconciler`
+  authorizes only the exact tuple `provider="openai",
+  model="gpt-5.6-luna", template_version="product-operation-v1",
+  endpoint="https://api.openai.com/v1/chat/completions"`. `"openai"` is never
+  an authorized `accurate_stt` provider at any layer. `backend/app/core/config.py`
+  enforces this at config load (`validate_voice_provider_authorization`) and
+  `backend/app/container.py` re-enforces the identical exact tuples at the
+  adapter-wiring egress boundary, so a manually-constructed configuration that
+  bypassed config-load validation still fails closed before any credential or
+  private reconciliation payload reaches a live provider call.
 - The role remains configurable. A cheaper small/local model may replace Luna
   without a domain or workflow migration only after the same corpus gate passes
-  for the exact provider/model/template/parameter tuple.
+  for the exact provider/model/template/endpoint/parameter tuple.
 
 ### Consent and language hint propagation
 
@@ -283,8 +297,9 @@ The sealed original audio lifecycle is unchanged from ADR-0002:
 3. Accurate STT receives the sealed `media_ref` (opaque reference to stored
    bytes), audio metadata, language hints, and vocabulary. It NEVER receives
    fast text as its audio input.
-4. The adapter decodes audio bytes using the provider's audio API (e.g.
-   multipart upload to OpenAI), NOT `bytes.decode("utf-8")`.
+4. The authorized production adapter (Deepgram Nova-3) sends the sealed audio
+   bytes as the raw binary request body over Deepgram's own audio API —
+   never multipart, and NOT `bytes.decode("utf-8")`.
 5. After successful reconciliation, raw audio is retained for 24h then deleted;
    transcript provenance and confirmed action receipts follow ADR-0001
    retention rules.
@@ -468,10 +483,13 @@ The evaluation harness separates the two quality dimensions:
   it remains only inside `DeterministicTextReconciler` for CI state-machine
   tests, clearly labelled as non-production.
 - Existing OpenAI STT/reconciler settings migrate by configuration only. The
-  selected default switches to Deepgram Nova-3 multilingual plus GPT-5.6 Luna;
-  `ProviderRun` pins provider/model/template/parameter policy. Rollback selects
-  the last authorized passing configuration or disables the role; it never
-  escalates to Terra, Sol, or Fable.
+  selected default switches accurate STT to Deepgram Nova-3 multilingual;
+  OpenAI is retained only for the reconciler role, pinned to GPT-5.6 Luna at
+  the `product-operation-v1` template and the exact authorized
+  `https://api.openai.com/v1/chat/completions` endpoint. `ProviderRun` pins
+  provider/model/template/endpoint/parameter policy. Rollback selects the last
+  authorized passing configuration or disables the role; it never escalates to
+  Terra, Sol, or Fable.
 
 ## Contracts and flow
 

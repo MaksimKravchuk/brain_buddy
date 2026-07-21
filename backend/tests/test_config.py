@@ -126,6 +126,88 @@ def test_container_defensively_rejects_openai_accurate_stt_from_manual_config() 
     assert provider.reason == "STT_PROVIDER_UNSUPPORTED"
 
 
+def test_container_defensively_rejects_unauthorized_deepgram_model_from_manual_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A manually-constructed ``AppConfig`` can carry ``provider="deepgram"``
+    with an unmeasured model variant that never went through
+    ``validate_voice_provider_authorization``. The container is the last
+    egress boundary before a live provider call and must fail closed rather
+    than resolve credentials and call Deepgram under that model."""
+
+    monkeypatch.setenv("UNAUTHORIZED_DEEPGRAM_KEY", "should-never-egress")
+    config = AppConfig(
+        environment=AppEnvironment.PRODUCTION,
+        voice=VoiceSettings(
+            accurate_stt=VoiceProviderSettings(
+                provider="deepgram",
+                model="nova-3-medical",
+                api_key_env="UNAUTHORIZED_DEEPGRAM_KEY",
+            )
+        ),
+    )
+
+    provider = _build_accurate_stt(config)
+
+    assert isinstance(provider, DisabledAccurateStt)
+    assert provider.reason == "STT_PROVIDER_UNSUPPORTED"
+
+
+def test_container_defensively_rejects_unauthorized_reconciler_tuple_from_manual_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A manually-constructed ``AppConfig`` can carry ``provider="openai"``
+    with an unauthorized model, template version, or endpoint that never went
+    through ``validate_voice_provider_authorization``. The container must
+    fail closed before resolving credentials or sending the private
+    reconciliation payload to an unauthorized endpoint."""
+
+    monkeypatch.setenv("UNAUTHORIZED_RECONCILER_KEY", "should-never-egress")
+    config = AppConfig(
+        environment=AppEnvironment.PRODUCTION,
+        voice=VoiceSettings(
+            reconciler=VoiceProviderSettings(
+                provider="openai",
+                model="gpt-4o",
+                template_version="evil-template",
+                endpoint="https://evil.example.com/v1/chat/completions",
+                api_key_env="UNAUTHORIZED_RECONCILER_KEY",
+            )
+        ),
+    )
+
+    provider = _build_text_reconciler(config)
+
+    assert isinstance(provider, DisabledTextReconciler)
+    assert provider.reason == "RECONCILER_PROVIDER_UNSUPPORTED"
+
+
+def test_container_defensively_rejects_authorized_model_with_wrong_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Even the exact authorized model/template must not egress the private
+    reconciliation payload and credential to a different endpoint host."""
+
+    monkeypatch.setenv("UNAUTHORIZED_RECONCILER_KEY_2", "should-never-egress")
+    config = AppConfig(
+        environment=AppEnvironment.PRODUCTION,
+        voice=VoiceSettings(
+            reconciler=VoiceProviderSettings(
+                provider="openai",
+                model="gpt-5.6-luna",
+                template_version="product-operation-v1",
+                endpoint="https://attacker.example.com/v1/chat/completions",
+                api_key_env="UNAUTHORIZED_RECONCILER_KEY_2",
+            )
+        ),
+    )
+
+    provider = _build_text_reconciler(config)
+
+    assert isinstance(provider, DisabledTextReconciler)
+    assert provider.reason == "RECONCILER_PROVIDER_UNSUPPORTED"
+
+
 def test_voice_operation_recovery_budget_is_configured(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

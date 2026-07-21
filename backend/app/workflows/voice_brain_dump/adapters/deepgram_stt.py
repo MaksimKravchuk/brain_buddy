@@ -65,6 +65,18 @@ class DeepgramAccurateStt:
     provider_name: str = field(default="deepgram", init=False)
     requires_external_processing: bool = field(default=True, init=False)
 
+    def __post_init__(self) -> None:
+        # Defense in depth beyond the container's allow-list: even a direct,
+        # manually-constructed adapter instance (bypassing
+        # ``app.container._build_accurate_stt`` entirely) must never be able
+        # to send credentials/audio to Deepgram under an unmeasured Nova-3
+        # variant (e.g. "nova-3-medical", "nova-3-general").
+        if self.model != "nova-3":
+            raise ValueError(
+                f"Unauthorized Deepgram accurate STT model {self.model!r}; only "
+                "the exact authorized 'nova-3' multilingual model may be used."
+            )
+
     def transcribe_sealed_audio(self, request: AccurateSttRequest) -> SttResult:
         if not request.sealed_audio:
             raise ProviderTerminalError("STT_AUDIO_MISSING")
