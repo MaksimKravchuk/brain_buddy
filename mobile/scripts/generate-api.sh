@@ -20,5 +20,8 @@ backend_dir="${root}/../backend"
   python -m scripts.openapi_snapshot dump --out "${root}/api/openapi.json"
 )
 
-npm exec --yes --package=openapi-typescript@7.13.0 -- \
-  openapi-typescript "${root}/api/openapi.json" -o "${root}/src/api/openapi.generated.ts"
+# openapi-typescript is a pinned devDependency (see package.json /
+# package-lock.json) so this never reaches the network at generation time —
+# `--no-install` fails loudly instead of silently falling back to a registry
+# fetch if `npm ci` was skipped.
+npx --no-install openapi-typescript "${root}/api/openapi.json" -o "${root}/src/api/openapi.generated.ts"

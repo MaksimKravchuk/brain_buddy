@@ -150,7 +150,11 @@ def create_mobile_session(
     )
 
 
-@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(400, 401, 503),
+)
 def logout(
     request: Request,
     auth_service: AuthService = Depends(get_auth_service),
@@ -163,6 +167,6 @@ def logout(
     return response
 
 
-@router.get("/me", response_model=MeResponse, responses=error_responses(401))
+@router.get("/me", response_model=MeResponse, responses=error_responses(400, 401, 503))
 def me(current_user: User = Depends(get_current_user)) -> MeResponse:
     return MeResponse(id=current_user.id, email=current_user.email)

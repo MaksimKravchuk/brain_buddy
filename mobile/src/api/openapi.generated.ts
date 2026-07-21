@@ -2228,6 +2228,33 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description The command violates a domain invariant. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The persistence layer is temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     me_api_auth_me_get: {
@@ -2248,8 +2275,26 @@ export interface operations {
                     "application/json": components["schemas"]["MeResponse"];
                 };
             };
+            /** @description The command violates a domain invariant. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Authentication is required or the session is invalid. */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The persistence layer is temporarily unavailable. */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

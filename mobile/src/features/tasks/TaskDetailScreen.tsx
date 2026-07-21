@@ -6,6 +6,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-nati
 import { MobileApiError } from "@/api/client";
 import { useAuth } from "@/auth/AuthProvider";
 import { colors, spacing, touchTarget } from "@/design/tokens";
+import { randomUUID } from "@/utils/uuid";
 
 export function TaskDetailScreen({ taskId }: { taskId: string }) {
   const { api } = useAuth();
@@ -17,7 +18,7 @@ export function TaskDetailScreen({ taskId }: { taskId: string }) {
   const complete = useMutation({
     mutationFn: () => {
       if (!task.data) throw new Error("Task is not loaded.");
-      if (!completeKey.current) completeKey.current = crypto.randomUUID();
+      if (!completeKey.current) completeKey.current = randomUUID();
       return api.transition(
         task.data.id,
         { action: "complete", expected_revision: task.data.revision },

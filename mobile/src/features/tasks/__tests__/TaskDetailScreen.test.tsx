@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
+import * as Crypto from "expo-crypto";
 import type { ReactNode } from "react";
 
 import { MobileApiError } from "@/api/client";
@@ -78,6 +79,40 @@ describe("TaskDetailScreen complete-task command identity and recovery", () => {
             { action: "complete", expected_revision: 1 },
             expect.any(String),
           );
+        },
+      );
+    },
+  );
+
+  it(
+    mobileAllure.tasks("mints the complete command key via Expo's native UUID primitive, not the global crypto polyfill").title,
+    async () => {
+      await withAllure(
+        mobileAllure.tasks("mints the complete command key via Expo's native UUID primitive, not the global crypto polyfill"),
+        async () => {
+          // Hermes on Android/iOS does not guarantee a global `crypto.randomUUID`
+          // polyfill. Spying (rather than deleting the global) proves the
+          // command key never touches it, without risking an uncaught
+          // ReferenceError inside a React event handler if the source were to
+          // regress and reference the bare `crypto` global directly.
+          const globalCryptoSpy = jest.spyOn(global.crypto, "randomUUID");
+          try {
+            const task = makeTask();
+            const transition = jest.fn().mockResolvedValueOnce({ ...task, state: "completed" });
+            const api = { task: jest.fn().mockResolvedValue(task), transition };
+            const screen = await renderScreen(api);
+
+            await waitFor(() => expect(screen.getByText("Call the plumber")).toBeTruthy());
+            await fireEvent.press(screen.getByText("Complete task"));
+
+            await waitFor(() => expect(transition).toHaveBeenCalledTimes(1));
+            expect(Crypto.randomUUID).toHaveBeenCalled();
+            expect(globalCryptoSpy).not.toHaveBeenCalled();
+            const [, , key] = transition.mock.calls[0];
+            expect(typeof key).toBe("string");
+          } finally {
+            globalCryptoSpy.mockRestore();
+          }
         },
       );
     },

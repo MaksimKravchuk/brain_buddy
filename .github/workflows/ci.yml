@@ -230,6 +230,51 @@ jobs:
         working-directory: mobile
         run: npx expo export --platform web
 
+      - name: Scan mobile artifacts for credential-shaped values
+        working-directory: mobile
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          # Scan generated, publishable evidence only. Source may legitimately
+          # contain the bearer-header policy, but a long bearer/JWT-like value
+          # in a bundle, source map, or test report would be a privacy failure.
+          secret = re.compile(r"(?:Bearer\s+|eyJ)[A-Za-z0-9._~-]{32,}")
+          roots = (Path("dist"), Path("allure-results"))
+          matches: list[str] = []
+          for root in roots:
+              if not root.exists():
+                  continue
+              for path in root.rglob("*"):
+                  if not path.is_file():
+                      continue
+                  try:
+                      text = path.read_text(encoding="utf-8")
+                  except UnicodeDecodeError:
+                      continue
+                  if secret.search(text):
+                      matches.append(str(path))
+          if matches:
+              raise SystemExit("credential-shaped value found in mobile artifact(s): " + ", ".join(matches))
+          print("mobile artifact privacy scan passed")
+          PY
+
+      - name: Verify Expo CNG prebuild for iOS and Android
+        working-directory: mobile
+        run: |
+          temp_mobile="$(mktemp -d)/mobile"
+          trap 'rm -rf "${temp_mobile%/mobile}"' EXIT
+          cp -a . "$temp_mobile"
+          (
+            cd "$temp_mobile"
+            npx expo prebuild --platform ios --no-install
+            rm -rf ios android
+            npx expo prebuild --platform android --no-install
+          )
+          test ! -d ios
+          test ! -d android
+
       - name: Upload mobile Allure results
         if: always()
         uses: actions/upload-artifact@v4

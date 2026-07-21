@@ -31,8 +31,8 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
 
     expected_error_statuses = {
         ("/api/auth/login", "post"): {"401", "422", "429", "503"},
-        ("/api/auth/logout", "post"): set(),
-        ("/api/auth/me", "get"): {"401"},
+        ("/api/auth/logout", "post"): {"400", "401", "503"},
+        ("/api/auth/me", "get"): {"400", "401", "503"},
         ("/api/auth/mobile/sessions", "post"): {"401", "422", "429", "503"},
         ("/api/auth/signup", "post"): {"400", "409", "422", "503"},
         ("/api/brain-dump-operations", "post"): {"400", "401", "409", "422"},

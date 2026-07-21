@@ -3447,6 +3447,36 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The command violates a domain invariant."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required or the session is invalid."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The persistence layer is temporarily unavailable."
           }
         },
         "summary": "Logout",
@@ -3469,6 +3499,16 @@
             },
             "description": "Successful Response"
           },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The command violates a domain invariant."
+          },
           "401": {
             "content": {
               "application/json": {
@@ -3478,6 +3518,16 @@
               }
             },
             "description": "Authentication is required or the session is invalid."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The persistence layer is temporarily unavailable."
           }
         },
         "summary": "Me",

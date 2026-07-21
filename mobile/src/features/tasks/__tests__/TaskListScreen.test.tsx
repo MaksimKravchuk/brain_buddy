@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
+import * as Crypto from "expo-crypto";
 import type { ReactNode } from "react";
 
 import { TaskListScreen } from "../TaskListScreen";
@@ -94,6 +95,67 @@ describe("TaskListScreen quick capture", () => {
           const [secondBody, secondKey] = createTask.mock.calls[1];
           expect(secondKey).toBe(firstKey);
           expect(secondBody).toEqual(firstBody);
+        },
+      );
+    },
+  );
+
+  it(
+    mobileAllure.tasks("mints the capture command key via Expo's native UUID primitive, not the global crypto polyfill").title,
+    async () => {
+      await withAllure(
+        mobileAllure.tasks("mints the capture command key via Expo's native UUID primitive, not the global crypto polyfill"),
+        async () => {
+          // Hermes on Android/iOS does not guarantee a global `crypto.randomUUID`
+          // polyfill. Spying (rather than deleting the global) proves the
+          // command key never touches it, without risking an uncaught
+          // ReferenceError inside a React event handler if the source were to
+          // regress and reference the bare `crypto` global directly.
+          const globalCryptoSpy = jest.spyOn(global.crypto, "randomUUID");
+          try {
+            const emptyPage: TaskList = { items: [], next_cursor: null, has_more: false, counts_by_state: counts };
+            const createTask = jest.fn().mockResolvedValue(makeTask("t1", { state: "inbox" }));
+            const api = { tasks: jest.fn().mockResolvedValue(emptyPage), createTask };
+            const screen = await renderScreen("inbox", api);
+
+            await fireEvent.changeText(screen.getByLabelText("Capture a task"), "Call the plumber");
+            await fireEvent.press(screen.getByLabelText("Add task"));
+
+            await waitFor(() => expect(createTask).toHaveBeenCalledTimes(1));
+            expect(Crypto.randomUUID).toHaveBeenCalled();
+            expect(globalCryptoSpy).not.toHaveBeenCalled();
+            const [, key] = createTask.mock.calls[0];
+            expect(typeof key).toBe("string");
+          } finally {
+            globalCryptoSpy.mockRestore();
+          }
+        },
+      );
+    },
+  );
+
+  it(
+    mobileAllure.tasks("a rapid double capture press before the first attempt settles does not replace the in-flight command key").title,
+    async () => {
+      await withAllure(
+        mobileAllure.tasks("a rapid double capture press before the first attempt settles does not replace the in-flight command key"),
+        async () => {
+          const emptyPage: TaskList = { items: [], next_cursor: null, has_more: false, counts_by_state: counts };
+          const createTask = jest.fn(() => Promise.reject(new Error("temporary failure")));
+          const api = { tasks: jest.fn().mockResolvedValue(emptyPage), createTask };
+          const screen = await renderScreen("inbox", api);
+
+          await fireEvent.changeText(screen.getByLabelText("Capture a task"), "Call the plumber");
+          const addButton = screen.getByLabelText("Add task");
+          await act(async () => {
+            fireEvent.press(addButton);
+            fireEvent.press(addButton);
+            fireEvent.press(addButton);
+          });
+
+          await waitFor(() => expect(createTask).toHaveBeenCalledTimes(1));
+          expect(createTask.mock.calls).toHaveLength(1);
+          await waitFor(() => expect(screen.getByText("Task capture failed.")).toBeTruthy());
         },
       );
     },

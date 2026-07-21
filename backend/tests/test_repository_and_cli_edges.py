@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from app import cli
-from app.exceptions import ConflictError, NotFoundError
+from app.exceptions import ConflictError, NotFoundError, StorageUnavailableError
 from app.repositories import (
     InviteRepository,
     ProviderRepository,
@@ -81,6 +82,65 @@ def test_session_repository_removes_expired_sessions_and_ignores_missing_delete(
     assert repository.get(expired.token_hash) is None
     assert not repository._session_path(expired.token_hash).exists()
     repository.delete("already-missing")
+
+
+def test_session_repository_get_maps_exists_os_error_to_storage_unavailable(
+    data_dir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A storage outage surfacing through `Path.exists()` must not raise a bare OSError.
+
+    Since Python 3.13, `Path.exists()` re-raises OS errors other than
+    ENOENT/ENOTDIR/EACCES/ELOOP instead of swallowing them, so a transient
+    disk outage during the existence check must still be translated by the
+    repository's own `_file_guard`, not leak out as a raw 500.
+    """
+
+    repository = SessionRepository(data_dir)
+    now = datetime.now(UTC)
+    session = Session(
+        token_hash="present",
+        user_id="user",
+        created_at=now,
+        expires_at=now + timedelta(hours=1),
+    )
+    repository.create(session)
+
+    def _boom(self: Path) -> bool:
+        raise OSError("simulated storage outage")
+
+    monkeypatch.setattr(Path, "exists", _boom)
+
+    with pytest.raises(StorageUnavailableError):
+        repository.get(session.token_hash)
+
+
+def test_session_repository_get_maps_expired_unlink_os_error_to_storage_unavailable(
+    data_dir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Lazy cleanup of an expired session must also translate outage errors.
+
+    `get()` unlinks an expired session file inline; a permission/outage error
+    during that unlink (anything other than the already-missing case) must
+    surface as `StorageUnavailableError`, not propagate as a bare OSError.
+    """
+
+    repository = SessionRepository(data_dir)
+    now = datetime.now(UTC)
+    expired = Session(
+        token_hash="expired-outage",
+        user_id="user",
+        created_at=now - timedelta(hours=2),
+        expires_at=now - timedelta(hours=1),
+    )
+    repository.create(expired)
+
+    def _boom(self: Path, *args: object, **kwargs: object) -> None:
+        raise PermissionError("simulated storage outage")
+
+    monkeypatch.setattr(Path, "unlink", _boom)
+
+    with pytest.raises(StorageUnavailableError):
+        repository.get(expired.token_hash)
 
 
 def test_user_repository_handles_malformed_index_and_normalizes_new_users(
