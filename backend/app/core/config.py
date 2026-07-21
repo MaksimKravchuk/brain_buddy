@@ -200,9 +200,14 @@ def validate_voice_provider_authorization(voice: VoiceSettings) -> None:
             "authorized accurate STT providers are 'deepgram' (Nova-3), 'disabled', "
             "and 'deterministic' (test environment only)."
         )
+    # Literal comparison, not strip()/casefold(): the unmodified raw value is
+    # what ``_build_accurate_stt`` forwards to the Deepgram adapter, so a
+    # case- or whitespace-normalized check here would authorize a value that
+    # is not byte-for-byte the measured, approved model (e.g. "NOVA-3" or
+    # "nova-3\n").
     if (
         accurate_stt.provider == "deepgram"
-        and accurate_stt.model.strip().casefold() != MVP_ACCURATE_STT_MODEL
+        and accurate_stt.model != MVP_ACCURATE_STT_MODEL
     ):
         raise ValueError(
             f"Unauthorized accurate_stt model '{accurate_stt.model}' for provider "
@@ -211,11 +216,16 @@ def validate_voice_provider_authorization(voice: VoiceSettings) -> None:
         )
     reconciler = voice.reconciler
     if reconciler.provider not in {"disabled", "deterministic"}:
+        # Literal comparison, not strip(): the unmodified raw values are what
+        # ``_build_text_reconciler`` forwards to the OpenAI adapter, so a
+        # whitespace-normalized check here would authorize a value that is
+        # not byte-for-byte the approved model/template/endpoint (e.g. a
+        # trailing newline smuggled onto the approved endpoint URL).
         authorized = (
             reconciler.provider == MVP_RECONCILER_PROVIDER
-            and reconciler.model.strip() == MVP_RECONCILER_MODEL
-            and reconciler.template_version.strip() == MVP_RECONCILER_TEMPLATE_VERSION
-            and reconciler.endpoint.strip() == MVP_RECONCILER_ENDPOINT
+            and reconciler.model == MVP_RECONCILER_MODEL
+            and reconciler.template_version == MVP_RECONCILER_TEMPLATE_VERSION
+            and reconciler.endpoint == MVP_RECONCILER_ENDPOINT
         )
         if not authorized:
             raise ValueError(
