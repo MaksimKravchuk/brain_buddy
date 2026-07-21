@@ -5,8 +5,8 @@ import type { ReactNode } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-import { apiClient } from "../../api/client";
-import { parseOpenTaskState, parseTaskDateView, useAllTaskPages, useProjects, useTags, useTaskDetail, useTaskList } from "../../api/taskHooks";
+import { apiClient, ApiError } from "../../api/client";
+import { parseOpenTaskState, parseTaskDateView, taskKeys, useAllTaskPages, useProjects, useTags, useTaskDetail, useTaskList } from "../../api/taskHooks";
 import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts, TaskPriority, TaskResponse, TaskSort, TaskSubtaskResponse, TaskUpdateRequest } from "../../api/taskTypes";
 import { AppShell, SoonChip } from "../../components/shell/AppShell";
 import { getErrorMessage } from "../../utils/error";
@@ -330,6 +330,23 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   }, [activeProjectionTasks, detailIsInProjection, isDesktop, taskId, detailQuery.data, taskQuery.data, allTasksQuery.data]);
 
   const invalidateTasks = () => queryClient.invalidateQueries({ queryKey: ["tasks"] });
+  // ADR-0006: "on 409 refetches the Task while preserving unsaved user
+  // input for an explicit retry." Fetches the single owner-scoped Task
+  // (never a broad list refetch) and stamps the authoritative revision onto
+  // the rethrown error so the caller can rebase just its concurrency
+  // baseline -- draft field values are left completely untouched. A
+  // non-409 error is rethrown unchanged; callers must not refetch/rebase
+  // on those.
+  const rejectAfterConflictRefetch = async (caught: unknown, taskId: string): Promise<never> => {
+    if (caught instanceof ApiError && caught.status === 409) {
+      const refreshed = await queryClient.fetchQuery({
+        queryKey: taskKeys.detail(taskId),
+        queryFn: ({ signal }) => apiClient.getTask(taskId, signal)
+      });
+      (caught as ApiError & { conflictRevision?: number }).conflictRevision = refreshed.revision;
+    }
+    throw caught;
+  };
   const listPath = projectId
     ? `/projects/${projectId}`
     : tagId
@@ -413,7 +430,9 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
 
   const detailUpdateMutation = useMutation({
     mutationFn: ({ task, payload }: { task: TaskResponse; payload: Parameters<typeof apiClient.updateTask>[1] }) =>
-      apiClient.updateTask(task.id, payload, idempotencyKey("detail-edit")),
+      apiClient
+        .updateTask(task.id, payload, idempotencyKey("detail-edit"))
+        .catch((caught: unknown) => rejectAfterConflictRefetch(caught, task.id)),
     onSuccess: () => {
       setMutationError(null);
       void invalidateTasks();
@@ -426,11 +445,13 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
 
   const detailTransitionMutation = useMutation({
     mutationFn: ({ task, action, toState, waitingFor }: { task: TaskResponse; action: "move" | "complete" | "reopen" | "cancel"; toState?: OpenTaskState; waitingFor?: string }) =>
-      apiClient.transitionTask(
-        task.id,
-        { action, to_state: toState, waiting_for: waitingFor || undefined, expected_revision: task.revision },
-        idempotencyKey(`detail-${action}`)
-      ),
+      apiClient
+        .transitionTask(
+          task.id,
+          { action, to_state: toState, waiting_for: waitingFor || undefined, expected_revision: task.revision },
+          idempotencyKey(`detail-${action}`)
+        )
+        .catch((caught: unknown) => rejectAfterConflictRefetch(caught, task.id)),
     onSuccess: () => {
       setMutationError(null);
       void invalidateTasks();
@@ -1270,6 +1291,19 @@ function TaskDetailPanel({
     }
   }, [task, baseRevision]);
   const taskForMutation = task ? { ...task, revision: baseRevision ?? task.revision } : undefined;
+  // On a 409 the owning mutation (detailUpdateMutation/detailTransitionMutation
+  // above) has already issued the owner-scoped refetch and stamped the
+  // authoritative revision it found onto the rethrown error. Rebase only
+  // this draft's concurrency baseline to that revision -- never the draft
+  // field values -- so the next explicit retry targets the current state.
+  const rebaseOnConflict = (caught: unknown) => {
+    if (caught instanceof ApiError && caught.status === 409) {
+      const conflictRevision = (caught as ApiError & { conflictRevision?: number }).conflictRevision;
+      if (typeof conflictRevision === "number") {
+        setBaseRevision(conflictRevision);
+      }
+    }
+  };
   const handleTransition = async (
     targetTask: TaskResponse,
     action: "move" | "complete" | "reopen" | "cancel",
@@ -1280,9 +1314,11 @@ function TaskDetailPanel({
     try {
       const updated = await onTransition(targetTask, action, toState, waitingFor, focusKey);
       setBaseRevision(updated.revision);
-    } catch {
+    } catch (caught) {
       // Surfaced via the mutation's own onError handler; keep the pinned
-      // base revision so a subsequent explicit retry targets the same state.
+      // base revision so a subsequent explicit retry targets the same state,
+      // unless the conflict refetch found a newer one (see rebaseOnConflict).
+      rebaseOnConflict(caught);
     }
   };
   const summaryProject = task?.project_id ? projects.find((candidate) => candidate.id === task.project_id) : undefined;
@@ -1386,9 +1422,11 @@ function TaskDetailPanel({
                 "detail-save"
               ).then(
                 (updated) => setBaseRevision(updated.revision),
-                () => {
+                (caught: unknown) => {
                   // Surfaced via the mutation's own onError handler; keep the
-                  // pinned base revision so an explicit retry reuses it.
+                  // pinned base revision so an explicit retry reuses it,
+                  // unless the conflict refetch found a newer one.
+                  rebaseOnConflict(caught);
                 }
               );
             }}
