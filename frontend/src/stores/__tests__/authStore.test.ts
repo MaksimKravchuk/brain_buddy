@@ -62,4 +62,31 @@ describe("authStore", () => {
     expect(useAuthStore.getState().status).toBe("anon");
     expect(useAuthStore.getState().user).toBeNull();
   });
+
+  it("advances the auth epoch on every session transition, even A -> anon -> the same A", async () => {
+    // The epoch must be a strictly monotonic transition counter, independent
+    // of whether the resolved owner identity happens to repeat. Owner
+    // equality alone cannot distinguish a fresh A session from an earlier one
+    // that also happened to be A, once an anon gap separates them.
+    vi.spyOn(authApi, "login").mockResolvedValue({ id: "u1", email: "a@b.c" });
+
+    const epoch0 = useAuthStore.getState().epoch;
+    await useAuthStore.getState().login({ email: "a@b.c", password: "x" });
+    const epochAfterFirstLogin = useAuthStore.getState().epoch;
+    expect(epochAfterFirstLogin).toBeGreaterThan(epoch0);
+
+    useAuthStore.getState().clearSession();
+    const epochAfterClear = useAuthStore.getState().epoch;
+    expect(epochAfterClear).toBeGreaterThan(epochAfterFirstLogin);
+    expect(useAuthStore.getState().user).toBeNull();
+
+    await useAuthStore.getState().login({ email: "a@b.c", password: "x" });
+    const epochAfterSecondLogin = useAuthStore.getState().epoch;
+
+    // Same resolved user both times, but this must be recognized as a
+    // distinct session from the first login.
+    expect(useAuthStore.getState().user?.id).toBe("u1");
+    expect(epochAfterSecondLogin).toBeGreaterThan(epochAfterClear);
+    expect(epochAfterSecondLogin).toBeGreaterThan(epochAfterFirstLogin);
+  });
 });

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-router-dom";
 
 import { BrainDumpRoute } from "./BrainDumpRoute";
+import { useAuthStore } from "../../stores/authStore";
 
 interface FakeRecognitionInstance {
   continuous: boolean;
@@ -1170,6 +1171,51 @@ describe("BrainDumpRoute", () => {
 
     expect(await screen.findByText("Saved 1 task to Inbox")).toBeInTheDocument();
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["tasks", "anon"] });
+  });
+
+  it("discards a commit response that outlives its auth epoch instead of invalidating the task cache", async () => {
+    const captured = consentedOperation({
+      id: "brain_dump_existing",
+      status: "awaiting_confirmation",
+      revision: 4,
+      proposals: [proposal("proposal_1", 1, "Renew car insurance")]
+    });
+    let resolveCommit: ((response: Response) => void) | undefined;
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_existing") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(captured);
+      }
+      if (url.endsWith("/brain_dump_existing/commit")) {
+        return new Promise<Response>((resolve) => {
+          resolveCommit = resolve;
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    const queryClient = new QueryClient();
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const epochBeforeCommit = useAuthStore.getState().epoch;
+
+    renderBrainDump("/brain-dump/brain_dump_existing/review", queryClient);
+    await userEvent.click(await screen.findByRole("button", { name: "Save 1 to inbox" }));
+    await waitFor(() => expect(resolveCommit).toBeDefined());
+
+    // Same owner identity (still signed out / "anon"), but a new session --
+    // e.g. a sign-out/sign-in cycle -- has advanced the auth epoch while the
+    // commit was in flight.
+    useAuthStore.setState({ epoch: epochBeforeCommit + 1 });
+
+    await act(async () => {
+      resolveCommit?.(
+        await jsonResponse(operation({ ...captured, status: "completed", revision: 5, committed_task_ids: ["task_1"] }))
+      );
+    });
+
+    expect(screen.queryByText("Saved 1 task to Inbox")).not.toBeInTheDocument();
+    expect(invalidateSpy).not.toHaveBeenCalled();
+
+    useAuthStore.setState({ epoch: epochBeforeCommit });
   });
 
   it("navigates to the inbox from the saved confirmation", async () => {

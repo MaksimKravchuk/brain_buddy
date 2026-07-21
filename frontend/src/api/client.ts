@@ -57,6 +57,17 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
   onUnauthorized = handler;
 }
 
+// Injected by App.tsx (see setAuthEpochProvider) rather than imported
+// directly, so this module never has to depend on the auth store -- auth.ts
+// already imports ApiError from here, so importing the store here too would
+// create a cycle back through it.
+type AuthEpochProvider = () => number;
+let authEpochProvider: AuthEpochProvider = () => 0;
+
+export function setAuthEpochProvider(provider: AuthEpochProvider | null) {
+  authEpochProvider = provider ?? (() => 0);
+}
+
 function normalizeRelationCreate(payload: RelationCreateRequest): RelationCreateRequest {
   const sourceNodeId =
     payload.source_node_id ?? payload.source_id ?? payload.from_id ?? null;
@@ -118,6 +129,7 @@ async function request<T>(path: string, options: JsonRequestOptions = {}): Promi
   }
 
   const startMs = nowMs();
+  const requestEpoch = authEpochProvider();
   let response: Response;
   try {
     response = await fetch(buildUrl(path), {
@@ -140,7 +152,11 @@ async function request<T>(path: string, options: JsonRequestOptions = {}): Promi
     throw error;
   }
 
-  if (response.status === 401 && onUnauthorized) {
+  // Only clear the session for a 401 that still belongs to the epoch it was
+  // issued under. A request sent before a logout/login can resolve after the
+  // session has already moved on -- that outgoing 401 must not clear the new
+  // session it knows nothing about.
+  if (response.status === 401 && onUnauthorized && requestEpoch === authEpochProvider()) {
     onUnauthorized();
   }
 

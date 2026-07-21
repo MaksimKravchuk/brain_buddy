@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { apiClient, setUnauthorizedHandler } from "../client";
+import { apiClient, setAuthEpochProvider, setUnauthorizedHandler } from "../client";
 import type { RelationCreateRequest, TreeMetadata } from "../types";
 
 const metadata: TreeMetadata = {
@@ -24,11 +24,13 @@ describe("apiClient", () => {
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
     setUnauthorizedHandler(null);
+    setAuthEpochProvider(null);
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
     setUnauthorizedHandler(null);
+    setAuthEpochProvider(null);
   });
 
   it("preserves form bodies and omits absent relation update fields", async () => {
@@ -215,6 +217,43 @@ describe("apiClient", () => {
       correlationId: "corr-1",
       payload: { detail: "expired" }
     });
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not clear the session for a 401 from a request issued before a session transition that has since advanced the epoch", async () => {
+    // A request sent under an old session can still be in flight when the
+    // user logs out/in again. If its 401 arrives after that transition, it
+    // must not clear the brand-new session it knows nothing about.
+    const onUnauthorized = vi.fn();
+    setUnauthorizedHandler(onUnauthorized);
+    let epoch = 0;
+    setAuthEpochProvider(() => epoch);
+
+    let resolveFetch!: (value: Response) => void;
+    fetchMock.mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveFetch = resolve;
+        })
+    );
+
+    const pending = apiClient.listTrees();
+    // The session transitions (e.g. a fresh login) while the stale request
+    // is still in flight.
+    epoch += 1;
+    resolveFetch(response({ detail: "expired" }, 401));
+
+    await expect(pending).rejects.toMatchObject({ status: 401 });
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it("still clears the session for a 401 belonging to the currently active epoch", async () => {
+    const onUnauthorized = vi.fn();
+    setUnauthorizedHandler(onUnauthorized);
+    setAuthEpochProvider(() => 3);
+    fetchMock.mockResolvedValue(response({ detail: "expired" }, 401));
+
+    await expect(apiClient.listTrees()).rejects.toMatchObject({ status: 401 });
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
 

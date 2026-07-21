@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { apiClient } from "../../api/client";
-import { taskKeys } from "../../api/taskHooks";
+import { captureTaskRequestContext, isStaleTaskRequestContext, taskKeys } from "../../api/taskHooks";
 import type { BrainDumpOperationResponse, BrainDumpProposal, BrainDumpProposalStatus } from "../../api/taskTypes";
 
 type SpeechRecognitionResultEventLike = {
@@ -366,6 +366,10 @@ export function BrainDumpRoute(): JSX.Element {
       return;
     }
     setError(null);
+    // Captured at commit initiation so a response that outlives its session
+    // (sign-out/sign-in, hydrate resolution) never reaches the task cache --
+    // see taskHooks.ts's TaskRequestContext for why owner alone can't detect this.
+    const commitRequestContext = action === "commit" ? captureTaskRequestContext() : null;
     if (action === "commit") {
       if (isSaving) {
         return;
@@ -447,6 +451,12 @@ export function BrainDumpRoute(): JSX.Element {
         return;
       }
       const updated = await apiClient.commandBrainDump(current.id, action, current.revision, idempotencyKey(action));
+      if (action === "commit" && commitRequestContext && isStaleTaskRequestContext(commitRequestContext)) {
+        // The session that initiated this commit has since ended (or a new one
+        // started for the same owner); never publish its success state or
+        // invalidate a cache that no longer belongs to it.
+        return;
+      }
       applyOperation(updated);
       if (action === "pause" || action === "cancel" || action === "withdraw_consent") {
         stopRecognition();
