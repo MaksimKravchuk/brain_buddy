@@ -1,18 +1,23 @@
 # Fly.io Frontend Review Apps
 
-This repo currently ships a GitHub Actions workflow that deploys a frontend preview app on
-every same-repository pull request and destroys it when the PR closes. This is legacy
-behavior, not the approved target policy. [ADR-0003](decisions/0003-autonomous-delivery-guardrails.md)
-and the [autonomous delivery runbook](autonomous-delivery-runbook.md) require the explicit
-`preview:visual` label, visual-path eligibility, one-preview-per-PR race controls, auditable
-URL reporting, and guarded cleanup before this automation is conformant.
+The frontend review-app workflow follows
+[ADR-0003](decisions/0003-autonomous-delivery-guardrails.md) and the
+[autonomous delivery runbook](autonomous-delivery-runbook.md). A preview is opt-in: an open,
+same-repository PR targeting `main` must have the explicit `preview:visual` label and an
+eligible rendered frontend change. Backend-only, docs-only, CI-only, spec-only, and test-only
+changes do not qualify.
 
-Do not use direct `flyctl` commands to work around the policy. Workflow remediation belongs
-in a separate reviewed implementation PR.
+Each PR has one stable Fly app. Per-PR concurrency cancels superseded deployments, the
+workflow re-verifies the live PR head immediately before mutation, runs a frontend build and
+post-deploy smoke check, and upserts one auditable PR comment. Removing `preview:visual` or
+closing the PR performs fail-closed cleanup of only that derived preview app.
+
+Do not use direct `flyctl` commands to work around this policy.
 
 ## Workflow
 - **Workflow:** `.github/workflows/fly-review-frontend.yml`
-- **Trigger:** pull requests opened, synchronized, reopened, and closed
+- **Deploy trigger:** `preview:visual` added, or a labeled PR opened, synchronized, or reopened
+- **Cleanup trigger:** `preview:visual` removed or the PR closed
 - **App name format:** `<FLY_APP_PREFIX>-<PR number>`
 - **Review URL:** `https://<app-name>.fly.dev`
 
@@ -21,7 +26,7 @@ Add these secrets in the repository settings before using review apps:
 
 | Secret | Purpose |
 | --- | --- |
-| `FLY_API_TOKEN` | Fly API token with deploy permissions (`flyctl auth token`) |
+| `FLY_PREVIEW_API_TOKEN` | Preview-only Fly API token with deploy/destroy permissions |
 | `FLY_ORG` | Fly organization slug used to create apps |
 
 ## Optional GitHub Secrets
@@ -34,3 +39,4 @@ Add these secrets in the repository settings before using review apps:
 ## Notes
 - The workflow skips forks because Fly secrets are not available to them.
 - If `FLY_REVIEW_BACKEND_ORIGIN` is unset, the workflow uses the `BACKEND_ORIGIN` value in `fly.frontend.toml`.
+- Production app names are explicitly rejected before create, deploy, or cleanup.
