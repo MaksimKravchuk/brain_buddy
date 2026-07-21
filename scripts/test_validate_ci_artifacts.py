@@ -1200,6 +1200,92 @@ jobs:
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("backend layer privacy scan step must set id: backend_privacy_scan", completed.stderr)
 
+    def test_workflow_rejects_scan_invocation_wrapped_in_unreachable_shell_conditional(
+        self,
+    ) -> None:
+        # Mutation: the step keeps its correct id/if: always()/command/path
+        # text verbatim, but wraps the scanner invocation in an
+        # actionlint-valid `if false; then ...; fi` shell block. Bash's
+        # `if` construct with a false condition and no `else` still exits 0,
+        # so the step reports success without the scanner ever running —
+        # a shell-level control-flow bypass the workflow YAML shape alone
+        # cannot reveal.
+        source = self.real_ci_workflow_text()
+        old = (
+            "        run: |\n"
+            "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence\n"
+        )
+        self.assertIn(old, source)
+        new = (
+            "        run: |\n"
+            "          if false; then\n"
+            "            python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "              --path backend/allure-results \\\n"
+            "              --label backend-evidence\n"
+            "          fi\n"
+        )
+        mutated = source.replace(old, new, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "backend layer privacy scan step must set id: backend_privacy_scan",
+            completed.stderr,
+        )
+
+    def test_workflow_rejects_aggregate_exit_one_wrapped_in_unreachable_shell_conditional(
+        self,
+    ) -> None:
+        # Mutation: the aggregate gate step keeps its exact required
+        # `needs.*.outputs.privacy_scan_outcome != 'success'` GitHub
+        # expression and a lexical `exit 1` in its run script, but wraps
+        # that `exit 1` in an actionlint-valid `if false; then ...; fi`
+        # shell block, so the gate step exits 0 (never hard-failing) even
+        # when a layer's privacy scan did not succeed.
+        source = self.real_ci_workflow_text()
+        old = (
+            "        run: |\n"
+            "          echo \"::error::One or more layer privacy scans did not explicitly succeed "
+            "(backend=${{ needs.backend.outputs.privacy_scan_outcome }}, "
+            "frontend=${{ needs.frontend.outputs.privacy_scan_outcome }}, "
+            "playwright=${{ needs.e2e.outputs.privacy_scan_outcome }}, "
+            "mobile=${{ needs.mobile.outputs.privacy_scan_outcome }}); refusing to download, "
+            "generate, upload, or publish the aggregate Allure report (ADR-0008).\" >&2\n"
+            "          exit 1\n"
+        )
+        self.assertIn(old, source)
+        new = (
+            "        run: |\n"
+            "          if false; then\n"
+            "            exit 1\n"
+            "          fi\n"
+        )
+        mutated = source.replace(old, new, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("aggregate Allure report privacy gate must hard-fail", completed.stderr)
+
     def test_workflow_rejects_scanner_command_and_paths_hidden_only_in_env(self) -> None:
         source = self.real_ci_workflow_text()
         old = (
