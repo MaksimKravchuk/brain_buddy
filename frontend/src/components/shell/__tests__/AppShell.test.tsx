@@ -173,6 +173,24 @@ describe("AppShell canonical sidebar", () => {
     expect(trigger).toHaveFocus();
   });
 
+  it("restores focus to the Open task navigation trigger when the drawer closes via a navigation link or Weekly Review, not just Escape/overlay/explicit close", async () => {
+    const user = userEvent.setup();
+    renderShell();
+    const trigger = screen.getByRole("button", { name: "Open task navigation" });
+
+    await user.click(trigger);
+    let drawer = screen.getByRole("dialog", { name: "Task navigation" });
+    await user.click(within(drawer).getByRole("link", { name: "Overdue" }));
+    expect(screen.queryByRole("dialog", { name: "Task navigation" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+
+    await user.click(trigger);
+    drawer = screen.getByRole("dialog", { name: "Task navigation" });
+    await user.click(within(drawer).getByRole("button", { name: "Weekly review" }));
+    expect(screen.queryByRole("dialog", { name: "Task navigation" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
   it("traps Tab and Shift+Tab focus inside the actual drawer panel instead of escaping to the overlay or controls behind it", async () => {
     const user = userEvent.setup();
     renderShell();

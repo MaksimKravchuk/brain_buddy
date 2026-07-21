@@ -596,6 +596,106 @@ describe("AppRoutes", () => {
     });
   });
 
+  it("does not steal focus back to the Task detail heading after a save, subtask, comment, or transition mutation refetches the task", async () => {
+    const user = userEvent.setup();
+
+    // React Query applies structural sharing: if a refetch resolves to a value
+    // that is deep-equal to the previous one, it reuses the SAME object
+    // reference for `data`, so an effect keyed on `detailQuery.data` would
+    // never re-run and the steal-focus bug would look fixed even when it is
+    // not (a false green). A stateless mock that always returns the original
+    // fixture falls into exactly that trap. This mock instead tracks mutable
+    // task state and reflects every mutation (PATCH/subtask/comment/
+    // transition) in the next GET, the way the real backend does, so each
+    // refetch genuinely changes `detailQuery.data` and can exercise the bug.
+    let currentTask = {
+      ...taskResponse.items[0],
+      subtasks: [] as Array<{ id: string; title: string; state: string; revision: number }>,
+      comments: [] as Array<{ id: string; body: string; actor_id: string }>
+    };
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      if (url.endsWith("/tasks/task-1") && method === "PATCH") {
+        currentTask = { ...currentTask, ...body, revision: currentTask.revision + 1 };
+        return Promise.resolve(jsonResponse(currentTask));
+      }
+      if (url.endsWith("/tasks/task-1") && method === "GET") {
+        return Promise.resolve(jsonResponse(currentTask));
+      }
+      if (url.endsWith("/tasks/task-1/subtasks") && method === "POST") {
+        const subtask = { id: `subtask-${currentTask.subtasks.length + 1}`, title: body.title, state: "open", revision: 1 };
+        currentTask = { ...currentTask, subtasks: [...currentTask.subtasks, subtask] };
+        return Promise.resolve(jsonResponse(subtask, 201));
+      }
+      if (url.endsWith("/tasks/task-1/comments") && method === "POST") {
+        const comment = { id: `comment-${currentTask.comments.length + 1}`, body: body.body, actor_id: "user-1" };
+        currentTask = { ...currentTask, comments: [...currentTask.comments, comment] };
+        return Promise.resolve(jsonResponse(comment, 201));
+      }
+      if (url.endsWith("/tasks/task-1/transitions") && method === "POST") {
+        currentTask = { ...currentTask, state: "completed", revision: currentTask.revision + 1 };
+        return Promise.resolve(jsonResponse(currentTask));
+      }
+      if (url.endsWith("/tasks") || url.includes("/tasks?")) {
+        // Completing a Next task removes it from the list projection. The
+        // detail panel then swaps from the inline row to its standalone path;
+        // that remount must not treat a mutation-driven projection swap as a
+        // newly opened detail route and steal focus back to the heading.
+        return Promise.resolve(jsonResponse({
+          ...taskResponse,
+          items: currentTask.state === "completed" ? taskResponse.items.filter((task) => task.id !== "task-1") : taskResponse.items
+        }));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/next/task-1");
+
+    // Before the task list finishes loading, the detail panel renders in its
+    // transient "standalone" form (the task isn't in the active projection
+    // yet); once the list resolves it swaps to the in-row form, remounting
+    // the heading. That swap is unrelated to the bug under test, so let it
+    // settle — and re-query the heading by role afterward rather than
+    // holding onto an early reference, which the swap would silently make
+    // stale (a variable pointing at a since-detached node can never observe
+    // a genuine steal-focus regression).
+    await screen.findByRole("link", { name: "Fix onboarding drop-off" });
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Task detail" })).toHaveFocus());
+
+    await user.selectOptions(await screen.findByLabelText("Priority"), "high");
+    await user.click(screen.getByRole("button", { name: "Save task detail" }));
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/tasks\/task-1$/), expect.objectContaining({ method: "PATCH" }));
+    });
+    // Wait for the refetch to actually land and re-render (the Priority
+    // select remounts with the server's confirmed value) before checking
+    // focus, so the assertion observes the effect's real post-refetch state.
+    await waitFor(() => expect(screen.getByLabelText("Priority")).toHaveValue("high"));
+    expect(screen.getByRole("heading", { name: "Task detail" })).not.toHaveFocus();
+
+    await user.type(screen.getByLabelText("New subtask title"), "Draft outline");
+    await user.click(screen.getByRole("button", { name: "Add subtask" }));
+    await screen.findByText("Draft outline");
+    expect(screen.getByRole("heading", { name: "Task detail" })).not.toHaveFocus();
+
+    await user.type(screen.getByLabelText("New comment"), "Looks good");
+    await user.click(screen.getByRole("button", { name: "Add comment" }));
+    await screen.findByText("Looks good");
+    expect(screen.getByRole("heading", { name: "Task detail" })).not.toHaveFocus();
+
+    await user.click(screen.getByRole("button", { name: "Complete" }));
+    await screen.findByRole("button", { name: "Reopen to Inbox" });
+    expect(screen.getByRole("heading", { name: "Task detail" })).not.toHaveFocus();
+  });
+
   it("keeps direct task detail visible when the task is absent from the active projection", async () => {
     const directTask = taskFixture("task-direct", "Shared task outside Next", "waiting");
     vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
@@ -1361,6 +1461,58 @@ describe("AppRoutes", () => {
     expect(await screen.findByText("62 tasks")).toBeInTheDocument();
     expect(screen.queryByText("50+ tasks")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Load more tasks" })).not.toBeInTheDocument();
+  });
+
+  it("shows the truthful terminal-inclusive subtitle count on a flat state route instead of the open-only state count", async () => {
+    const user = userEvent.setup();
+    const openTasks = Array.from({ length: 6 }, (_, index) => taskFixture(`next-open-${index}`, `Open next task ${index}`, "next"));
+    const terminalInclusiveTasks = [
+      ...openTasks,
+      taskFixture("next-done-1", "Completed next task 1", "completed"),
+      taskFixture("next-done-2", "Completed next task 2", "completed")
+    ];
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/tasks?") && url.includes("state=next") && url.includes("include_completed=true")) {
+        return Promise.resolve(jsonResponse({
+          items: terminalInclusiveTasks,
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 0, next: 6, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/tasks?") && url.includes("state=next")) {
+        return Promise.resolve(jsonResponse({
+          items: openTasks,
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 0, next: 6, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(taskResponse));
+    });
+
+    renderRoutes("/tasks/next");
+
+    expect(await screen.findByRole("heading", { name: "Next actions" })).toBeInTheDocument();
+    expect(await screen.findByText("6 tasks")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "Show terminal tasks" }));
+
+    expect(await screen.findByText("Completed next task 2")).toBeInTheDocument();
+    // The full terminal-inclusive projection has 8 loaded rows with no further
+    // pages; the subtitle must report that truthful drained total, not the
+    // open-only `next` state count (6) which ignores the completed rows now
+    // visible in the list.
+    expect(await screen.findByText("8 tasks")).toBeInTheDocument();
+    expect(screen.queryByText("6 tasks")).not.toBeInTheDocument();
   });
 
   it("keeps the flat truthful subtitle and the grouped drained subtitle in agreement when toggling Group by project on a Tag route with more pages remaining", async () => {

@@ -1,7 +1,7 @@
 /* istanbul ignore file -- task shell rendering is covered by route tests and Playwright snapshots. */
 import { AlertTriangle, ArrowLeft, ArrowUpDown, Check, Edit3, Layers, Plus, RotateCcw, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode, RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
@@ -93,6 +93,31 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       rowLinkRefs.current.delete(rowTaskId);
     }
   };
+  // The detail heading can remount without the route changing: completing a
+  // task (or any mutation that flips detailIsInProjection/isDesktop) swaps
+  // between the standalone panel and the in-row panel, unmounting one heading
+  // and mounting another. Refocusing on every such mount would steal focus
+  // from whatever control the user is actively using (e.g. the Complete
+  // button they just clicked). Only carry focus across that remount when the
+  // outgoing heading actually held it — i.e. the swap happened while the
+  // heading itself was focused (the initial transient standalone -> in-row
+  // swap while the list is still loading), not mid-mutation while focus was
+  // elsewhere. Opening a task or switching tasks is handled separately by the
+  // effect below, keyed on taskId.
+  const detailHeadingWasFocusedRef = useRef(false);
+  const registerDetailHeading = useCallback((el: HTMLHeadingElement | null) => {
+    if (el) {
+      const shouldRestoreFocus = detailHeadingWasFocusedRef.current;
+      detailHeadingRef.current = el;
+      if (shouldRestoreFocus) {
+        el.focus();
+      }
+      detailHeadingWasFocusedRef.current = false;
+      return;
+    }
+    detailHeadingWasFocusedRef.current = document.activeElement === detailHeadingRef.current;
+    detailHeadingRef.current = null;
+  }, []);
 
   const sort = parseTaskSort(searchParams.get("sort"));
   const searchQuery = searchParams.get("q") ?? "";
@@ -132,7 +157,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       }
     }
     previousTaskIdRef.current = taskId;
-  }, [detailQuery.data, taskId]);
+  }, [taskId]);
 
   const projects = projectsQuery.data ?? emptyProjects;
   const tags = tagsQuery.data ?? emptyTags;
@@ -348,15 +373,19 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const openTasksTotal = counts.inbox + counts.next + counts.waiting + counts.someday;
   let subtitleCount: number;
   let subtitleIsPartial = false;
-  if (state) {
-    subtitleCount = counts[state];
-  } else if (groupByProject) {
+  if (groupByProject) {
     subtitleCount = activeProjectionTasks.length;
-  } else if (!showCompleted) {
-    subtitleCount = openTasksTotal;
-  } else {
+  } else if (showCompleted) {
+    // Once terminal rows are included, `counts[state]` (open-only) is no
+    // longer truthful for a state route either — it silently drops the
+    // completed/cancelled rows the list is now showing. Use the same
+    // loaded-rows-plus-partial-flag truth used by every other flat view.
     subtitleCount = activeProjectionTasks.length;
     subtitleIsPartial = Boolean(taskQuery.hasNextPage);
+  } else if (state) {
+    subtitleCount = counts[state];
+  } else {
+    subtitleCount = openTasksTotal;
   }
   const subtitle = subtitleIsPartial
     ? `${subtitleCount}+ tasks`
@@ -401,7 +430,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     onSaveEdit: (task: TaskResponse) => updateMutation.mutate({ task, payload: { title: editingTitle.trim() } }),
     expandedTaskId: taskId,
     onCollapse: closeDetail,
-    detailHeadingRef,
+    registerDetailHeading,
     detailTask: detailQuery.data,
     detailIsLoading: detailQuery.isLoading,
     detailError: detailQuery.error,
@@ -429,6 +458,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       onCreateTag={(name) => tagMutation.mutate({ action: "create", name })}
       onRenameTag={(tag, name) => tagMutation.mutate({ action: "rename", tag, name })}
       onDeleteTag={(tag) => tagMutation.mutate({ action: "delete", tag })}
+      mobileDetailOpen={Boolean(taskId) && !isDesktop}
     >
       <section aria-labelledby="task-list-title" className="mx-auto max-w-[760px]">
         {isDesktop || !taskId ? (
@@ -552,7 +582,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             tags={tags}
             isLoading={detailQuery.isLoading}
             error={detailQuery.error}
-            headingRef={detailHeadingRef}
+            headingRef={registerDetailHeading}
             onClose={closeDetail}
             onSave={(task, payload) => detailUpdateMutation.mutate({ task, payload })}
             onTransition={(task, action, toState, waitingFor) =>
@@ -638,7 +668,7 @@ function TaskList({
   onSaveEdit,
   expandedTaskId,
   onCollapse,
-  detailHeadingRef,
+  registerDetailHeading,
   detailTask,
   detailIsLoading,
   detailError,
@@ -666,7 +696,7 @@ function TaskList({
   onSaveEdit: (task: TaskResponse) => void;
   expandedTaskId?: string;
   onCollapse: () => void;
-  detailHeadingRef: RefObject<HTMLHeadingElement>;
+  registerDetailHeading: (el: HTMLHeadingElement | null) => void;
   detailTask?: TaskResponse;
   detailIsLoading: boolean;
   detailError: unknown;
@@ -711,7 +741,7 @@ function TaskList({
                 tags={tags}
                 isLoading={detailIsLoading}
                 error={detailError}
-                headingRef={detailHeadingRef}
+                headingRef={registerDetailHeading}
                 onClose={onCollapse}
                 onSave={onSaveDetail}
                 onTransition={onTransitionDetail}
@@ -904,7 +934,7 @@ function TaskDetailPanel({
   tags: TagResponse[];
   isLoading: boolean;
   error: unknown;
-  headingRef: RefObject<HTMLHeadingElement>;
+  headingRef: (el: HTMLHeadingElement | null) => void;
   onClose: () => void;
   onSave: (task: TaskResponse, payload: Parameters<typeof apiClient.updateTask>[1]) => void;
   onTransition: (task: TaskResponse, action: "move" | "complete" | "reopen" | "cancel", toState?: OpenTaskState, waitingFor?: string) => void;
@@ -912,9 +942,18 @@ function TaskDetailPanel({
   onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") => void;
   onCreateComment: (task: TaskResponse, body: string) => void;
 }): JSX.Element {
+  const summaryProject = task?.project_id ? projects.find((candidate) => candidate.id === task.project_id) : undefined;
+  const summaryState = task
+    ? task.state === "completed"
+      ? "Completed"
+      : task.state === "cancelled"
+        ? "Cancelled"
+        : stateLabels[task.state]
+    : undefined;
+
   return (
     <aside
-      className="-mx-4 -my-5 flex min-h-[calc(100vh-56px)] flex-col gap-[18px] bg-surface-base px-4 py-5 sm:-mx-6 sm:px-6 motion-safe:lg:animate-detail-enter lg:m-0 lg:min-h-0 lg:bg-transparent lg:p-0 lg:pt-3.5 lg:border-t lg:border-slate-200"
+      className="-mx-4 -my-5 flex min-h-screen flex-col gap-[18px] bg-surface-base px-4 py-5 sm:-mx-6 sm:px-6 motion-safe:lg:animate-detail-enter lg:m-0 lg:min-h-0 lg:bg-transparent lg:p-0 lg:pt-3.5 lg:border-t lg:border-slate-200"
       aria-labelledby="task-detail-title"
     >
       <div className="flex items-center gap-3">
@@ -951,6 +990,16 @@ function TaskDetailPanel({
       {error ? <p role="alert" className="text-sm text-rose-700">{getErrorMessage(error)}</p> : null}
       {task ? (
         <div className="flex flex-col gap-[18px]">
+          <div
+            data-testid="task-detail-summary"
+            className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600 lg:hidden"
+          >
+            {summaryState ? <Chip variant="neutral">{summaryState}</Chip> : null}
+            {summaryProject ? <Chip variant="neutral">{summaryProject.name}</Chip> : null}
+            {task.due_date ? <Chip variant="due">{formatDueDate(task.due_date)}</Chip> : null}
+            {task.priority !== "none" ? <Chip variant="neutral">{task.priority} priority</Chip> : null}
+            {task.state === "waiting" && task.waiting_for ? <span>Waiting on {task.waiting_for}</span> : null}
+          </div>
           <form
             className="grid gap-3 lg:grid-cols-2"
             key={`${task.id}-${task.revision}`}
@@ -1059,13 +1108,18 @@ function TaskDetailPanel({
                   <div key={subtask.id} className="flex items-center gap-2 text-sm">
                     <button
                       type="button"
-                      className={`flex h-[14px] w-[14px] shrink-0 items-center justify-center rounded-full border border-[1.5px] ${
-                        done ? "border-brand-primary bg-brand-primary text-white" : "border-slate-300 bg-white text-white"
-                      }`}
+                      className="relative -m-[15px] flex h-11 w-11 shrink-0 items-center justify-center lg:m-0 lg:h-[14px] lg:w-[14px]"
                       aria-label={done ? `Reopen ${subtask.title}` : `Complete ${subtask.title}`}
                       onClick={() => onTransitionSubtask(task, subtask, done ? "reopen" : "complete")}
                     >
-                      <Check className="h-2.5 w-2.5" aria-hidden />
+                      <span
+                        aria-hidden
+                        className={`flex h-[14px] w-[14px] items-center justify-center rounded-full border border-[1.5px] ${
+                          done ? "border-brand-primary bg-brand-primary text-white" : "border-slate-300 bg-white text-white"
+                        }`}
+                      >
+                        <Check className="h-2.5 w-2.5" />
+                      </span>
                     </button>
                     <span className={done ? "text-slate-500 line-through" : "text-slate-800"}>{subtask.title}</span>
                   </div>
