@@ -49,6 +49,7 @@ interface AppShellProps {
 type SidebarProps = AppShellProps & {
   weeklyReviewOpen: boolean;
   onOpenWeeklyReview: () => void;
+  onNavigate: () => void;
 };
 
 const listItems: Array<{ state: OpenTaskState; label: string; icon: ComponentType<{ className?: string }> }> = [
@@ -100,12 +101,19 @@ export function AppShell(props: AppShellProps): JSX.Element {
   const sidebarProps: SidebarProps = {
     ...props,
     weeklyReviewOpen,
-    onOpenWeeklyReview: () => setWeeklyReviewOpen(true)
+    onOpenWeeklyReview: () => setWeeklyReviewOpen(true),
+    onNavigate: () => setWeeklyReviewOpen(false)
   };
 
   return (
     <div className="min-h-screen bg-surface-base text-slate-900">
-      {mobileDetailOpen ? null : <TopBar onOpenDrawer={() => setIsDrawerOpen(true)} drawerTriggerRef={drawerTriggerRef} />}
+      {mobileDetailOpen ? null : (
+        <TopBar
+          onOpenDrawer={() => setIsDrawerOpen(true)}
+          onNavigate={() => setWeeklyReviewOpen(false)}
+          drawerTriggerRef={drawerTriggerRef}
+        />
+      )}
       <div className={`flex ${mobileDetailOpen ? "h-screen" : "h-[calc(100vh-56px)]"} min-h-0 overflow-hidden`}>
         <aside className="hidden w-[248px] shrink-0 overflow-y-auto border-r border-slate-200 px-3 pb-6 pt-4 lg:block">
           <Sidebar {...sidebarProps} />
@@ -148,9 +156,11 @@ function WeeklyReviewPlaceholder(): JSX.Element {
 
 function TopBar({
   onOpenDrawer,
+  onNavigate,
   drawerTriggerRef
 }: {
   onOpenDrawer: () => void;
+  onNavigate: () => void;
   drawerTriggerRef: RefObject<HTMLButtonElement>;
 }): JSX.Element {
   const navigate = useNavigate();
@@ -184,7 +194,12 @@ function TopBar({
       >
         <Menu className="h-5 w-5" />
       </button>
-      <Link to="/tasks/next" className="flex items-center gap-2 text-[15px] font-semibold tracking-[-0.005em] text-slate-900" aria-label="Brain Buddy — Next actions">
+      <Link
+        to="/tasks/next"
+        className="flex items-center gap-2 text-[15px] font-semibold tracking-[-0.005em] text-slate-900"
+        aria-label="Brain Buddy — Next actions"
+        onClick={onNavigate}
+      >
         <Sprout className="h-[22px] w-[22px] shrink-0 text-brand-primary" aria-hidden />
         <span className="hidden lg:inline">Brain Buddy</span>
       </Link>
@@ -333,7 +348,8 @@ function Sidebar({
   onRenameTag,
   onDeleteTag,
   weeklyReviewOpen,
-  onOpenWeeklyReview
+  onOpenWeeklyReview,
+  onNavigate
 }: SidebarProps): JSX.Element {
   const [newProjectName, setNewProjectName] = useState("");
   const [projectEdits, setProjectEdits] = useState<Record<string, string>>({});
@@ -356,6 +372,7 @@ function Sidebar({
           <li key={item.state}>
             <NavLink
               to={`/tasks/${item.state}`}
+              onClick={onNavigate}
               className={({ isActive }) => navRowClass(!weeklyReviewOpen && (isActive || activeState === item.state))}
             >
               <item.icon className="h-4 w-4 shrink-0" aria-hidden />
@@ -404,7 +421,7 @@ function Sidebar({
         <ul className="space-y-0.5">
           {dateItems.map((item) => (
             <li key={item.path}>
-              <NavLink to={item.path} className={({ isActive }) => navRowClass(!weeklyReviewOpen && isActive)}>
+              <NavLink to={item.path} onClick={onNavigate} className={({ isActive }) => navRowClass(!weeklyReviewOpen && isActive)}>
                 <item.icon className="h-4 w-4 shrink-0" aria-hidden />
                 <span className="min-w-0 flex-1 truncate">{item.label}</span>
               </NavLink>
@@ -424,6 +441,7 @@ function Sidebar({
                 <li key={project.id} className="group relative">
                   <NavLink
                     to={`/projects/${project.id}`}
+                    onClick={onNavigate}
                     className={`flex min-h-[34px] w-full items-start gap-2.5 rounded-lg px-2.5 py-[7px] pr-7 text-sm font-medium transition-colors ${
                       !weeklyReviewOpen && activeProjectId === project.id
                         ? "bg-white text-slate-900 shadow-soft"
@@ -566,6 +584,7 @@ function Sidebar({
                   <span className="relative inline-flex items-center">
                     <NavLink
                       to={`/tags/${tag.id}`}
+                      onClick={onNavigate}
                       className={`rounded-full border px-2.5 py-[3px] text-xs font-medium transition-colors ${
                         !weeklyReviewOpen && activeTagId === tag.id
                           ? "border-brand-primary bg-info-bg text-info-fg"

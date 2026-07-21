@@ -80,6 +80,29 @@ describe("AppShell canonical sidebar", () => {
     expect(screen.queryByRole("region", { name: "Weekly review placeholder" })).not.toBeInTheDocument();
   });
 
+  it("exits Weekly review when the same-route Next actions link is reselected via the mobile drawer", async () => {
+    const user = userEvent.setup();
+    renderShell();
+    const trigger = screen.getByRole("button", { name: "Open task navigation" });
+
+    await user.click(trigger);
+    let drawer = screen.getByRole("dialog", { name: "Task navigation" });
+    await user.click(within(drawer).getByRole("button", { name: "Weekly review" }));
+    expect(screen.queryByRole("dialog", { name: "Task navigation" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    expect(screen.getByRole("region", { name: "Weekly review placeholder" })).toBeInTheDocument();
+    expect(screen.queryByText("Next task list content")).not.toBeInTheDocument();
+
+    await user.click(trigger);
+    drawer = screen.getByRole("dialog", { name: "Task navigation" });
+    await user.click(within(drawer).getByRole("link", { name: /Next actions/ }));
+
+    expect(screen.queryByRole("dialog", { name: "Task navigation" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    expect(screen.queryByRole("region", { name: "Weekly review placeholder" })).not.toBeInTheDocument();
+    expect(screen.getByText("Next task list content")).toBeInTheDocument();
+  });
+
   it("drives project create, rename and archive through the popover menus", async () => {
     const user = userEvent.setup();
     const handlers = renderShell();
