@@ -28,6 +28,7 @@ from app.schemas.auth import User
 from app.schemas.tasks import (
     BrainDumpActionReceiptResponse,
     BrainDumpAudioChunkResponse,
+    BrainDumpCapabilityResponse,
     BrainDumpConsentResponse,
     BrainDumpOperationResponse,
     BrainDumpOperationStartRequest,
@@ -35,6 +36,7 @@ from app.schemas.tasks import (
     BrainDumpProposalPatchResponse,
     BrainDumpProposalResponse,
     BrainDumpProposalUpdateRequest,
+    BrainDumpProviderCapabilityResponse,
     BrainDumpProviderRunResponse,
     BrainDumpSealRequest,
     BrainDumpTranscriptAppendRequest,
@@ -68,9 +70,11 @@ from app.schemas.tasks import (
 )
 from app.workflows.voice_brain_dump.audio_media import canonical_audio_mime_type
 from app.workflows.voice_brain_dump.domain import (
+    BrainDumpCapability,
     BrainDumpOperationDocument,
     BrainDumpProposalDocument,
     BrainDumpTranscriptSegmentDocument,
+    ProviderCapability,
 )
 from app.workflows.voice_brain_dump.service import (
     VoiceBrainDumpService,
@@ -85,6 +89,21 @@ def _require_idempotency_key(idempotency_key: str | None) -> str:
     if not idempotency_key:
         raise ValidationFailure("Idempotency-Key header is required.")
     return idempotency_key
+
+
+@router.get(
+    "/brain-dump-capability",
+    response_model=BrainDumpCapabilityResponse,
+    responses=error_responses(401),
+)
+def get_brain_dump_capability(
+    current_user: User = Depends(get_current_user),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
+) -> BrainDumpCapabilityResponse:
+    """Mobile preflight: call before requesting microphone/recording access."""
+
+    del current_user
+    return _to_capability_response(voice_brain_dump_service.get_brain_dump_capability())
 
 
 @router.post(
@@ -760,6 +779,28 @@ def list_tasks(
         next_cursor=next_cursor,
         has_more=has_more,
         counts_by_state=TaskCounts(**counts_by_state),
+    )
+
+
+def _to_provider_capability_response(
+    capability: ProviderCapability,
+) -> BrainDumpProviderCapabilityResponse:
+    return BrainDumpProviderCapabilityResponse(
+        available=capability.available,
+        provider_category=capability.provider_category,
+        model=capability.model,
+        reason_code=capability.reason_code,
+    )
+
+
+def _to_capability_response(
+    capability: BrainDumpCapability,
+) -> BrainDumpCapabilityResponse:
+    return BrainDumpCapabilityResponse(
+        available=capability.available,
+        accurate_stt=_to_provider_capability_response(capability.accurate_stt),
+        reconciler=_to_provider_capability_response(capability.reconciler),
+        consent_provider_category=capability.consent_provider_category,
     )
 
 

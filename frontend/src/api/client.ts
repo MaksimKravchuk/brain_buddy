@@ -20,6 +20,7 @@ import {
   VersionListItem
 } from "./types";
 import type {
+  BrainDumpCapabilityResponse,
   BrainDumpOperationResponse,
   BrainDumpStartRequest,
   BrainDumpTranscriptAppendRequest,
@@ -360,6 +361,10 @@ export const apiClient = {
       method: "DELETE",
       headers: { "Idempotency-Key": idempotencyKey }
     });
+  },
+
+  getBrainDumpCapability(signal?: AbortSignal) {
+    return request<BrainDumpCapabilityResponse>("/brain-dump-capability", { signal });
   },
 
   startBrainDump(payload: BrainDumpStartRequest, idempotencyKey: string) {

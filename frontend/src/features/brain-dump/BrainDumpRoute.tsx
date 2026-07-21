@@ -3,9 +3,9 @@ import { ChevronLeft, Inbox, Mic, Pause, Play, Square, Trash2 } from "lucide-rea
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
-import { apiClient } from "../../api/client";
+import { ApiError, apiClient } from "../../api/client";
 import { taskKeys } from "../../api/taskHooks";
-import type { BrainDumpOperationResponse, BrainDumpProposal, BrainDumpProposalStatus } from "../../api/taskTypes";
+import type { BrainDumpCapabilityResponse, BrainDumpOperationResponse, BrainDumpProposal, BrainDumpProposalStatus } from "../../api/taskTypes";
 
 type SpeechRecognitionResultEventLike = {
   results: ArrayLike<{ 0: { transcript: string }; isFinal?: boolean }>;
@@ -66,6 +66,65 @@ type LanguageMode = keyof typeof languageOptions;
 
 function idempotencyKey(suffix: string) {
   return `brain-dump-${suffix}-${Date.now()}`;
+}
+
+// Safe, allowlisted copy for the reason codes the backend capability
+// endpoint can report (see `app/workflows/voice_brain_dump/providers.py`
+// disabled adapters). Anything unrecognized falls back to a generic,
+// still-truthful "not available right now" message rather than surfacing a
+// raw backend code.
+const CAPABILITY_REASON_COPY: Record<string, string> = {
+  STT_PROVIDER_DISABLED: "Voice transcription is turned off on this server.",
+  STT_PROVIDER_CREDENTIALS_MISSING:
+    "Voice transcription isn't configured yet. Ask an administrator to add cloud transcription credentials.",
+  STT_PROVIDER_UNSUPPORTED: "Voice transcription is configured with an unsupported provider. Contact an administrator.",
+  STT_DETERMINISTIC_PROVIDER_TEST_ONLY: "Voice transcription is running in a test-only mode and cannot process real audio.",
+  RECONCILER_PROVIDER_DISABLED: "Task reconciliation is turned off on this server.",
+  RECONCILER_PROVIDER_CREDENTIALS_MISSING:
+    "Task reconciliation isn't configured yet. Ask an administrator to add cloud transcription credentials.",
+  RECONCILER_PROVIDER_UNSUPPORTED: "Task reconciliation is configured with an unsupported provider. Contact an administrator."
+};
+
+const CAPABILITY_UNAVAILABLE_FALLBACK = "Voice capture isn't available right now. No audio is sent. Try again later.";
+
+function describeCapabilityUnavailable(capability: BrainDumpCapabilityResponse): string {
+  const failing = !capability.accurate_stt.available
+    ? capability.accurate_stt
+    : !capability.reconciler.available
+      ? capability.reconciler
+      : null;
+  const reasonCode = failing?.reason_code;
+  return (reasonCode && CAPABILITY_REASON_COPY[reasonCode]) || CAPABILITY_UNAVAILABLE_FALLBACK;
+}
+
+function isGenericRequestFailedMessage(message: string): boolean {
+  return message.trim().toLowerCase() === "request failed";
+}
+
+function extractApiErrorMessage(payload: unknown): string | null {
+  if (payload && typeof payload === "object" && "message" in payload) {
+    const message = (payload as { message?: unknown }).message;
+    return typeof message === "string" && message.trim() ? message.trim() : null;
+  }
+  return null;
+}
+
+// Voice capture failures must always show actionable copy, never the bare
+// "Request failed" fallback `ApiError` uses when a response has no HTTP
+// reason phrase (always true in tests, and true in some deployments). Prefer
+// the backend's own redacted error message when present.
+function describeVoiceCaptureError(caught: unknown, fallback: string): string {
+  if (caught instanceof ApiError) {
+    const payloadMessage = extractApiErrorMessage(caught.payload);
+    if (payloadMessage && !isGenericRequestFailedMessage(payloadMessage)) {
+      return payloadMessage;
+    }
+    return isGenericRequestFailedMessage(caught.message) ? fallback : caught.message || fallback;
+  }
+  if (caught instanceof Error) {
+    return isGenericRequestFailedMessage(caught.message) ? fallback : caught.message;
+  }
+  return fallback;
 }
 
 export function BrainDumpRoute(): JSX.Element {
@@ -324,13 +383,21 @@ export function BrainDumpRoute(): JSX.Element {
     setIsStarting(true);
     let stream: MediaStream | null = null;
     try {
+      // Capability is the preflight gate: do not prompt for microphone access,
+      // create an operation, or begin local recording until both selected
+      // external roles are presently configured and callable.
+      const capability = await apiClient.getBrainDumpCapability();
+      if (!capability.available || !capability.consent_provider_category) {
+        setError(describeCapabilityUnavailable(capability));
+        return;
+      }
       stream = await probeMicrophone();
       const vocabulary = vocabularyText.split(",").map((value) => value.trim()).filter(Boolean);
       const started = operationRef.current ?? (await apiClient.startBrainDump({
         consent: {
           microphone: true,
           external_processing_allowed: externalProcessingAllowed,
-          provider: externalProcessingAllowed ? "openai" : null,
+          provider: capability.consent_provider_category,
           language_hints: [...languageOptions[languageMode].hints],
           vocabulary
         }
@@ -355,7 +422,7 @@ export function BrainDumpRoute(): JSX.Element {
       if (!streamIsManagedByRecorder) {
         stream?.getTracks().forEach((track) => track.stop());
       }
-      setError(caught instanceof Error ? caught.message : "Microphone permission was denied.");
+      setError(describeVoiceCaptureError(caught, "Microphone permission was denied."));
     } finally {
       setIsStarting(false);
     }

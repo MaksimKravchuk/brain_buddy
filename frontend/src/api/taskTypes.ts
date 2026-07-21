@@ -263,3 +263,17 @@ export interface BrainDumpStartRequest {
 export interface BrainDumpTranscriptAppendRequest {
   segments: Array<{ sequence: number; text: string; stability: "interim" | "stable" }>;
 }
+
+export interface BrainDumpProviderCapability {
+  available: boolean;
+  provider_category: string | null;
+  model: string | null;
+  reason_code: string | null;
+}
+
+export interface BrainDumpCapabilityResponse {
+  available: boolean;
+  accurate_stt: BrainDumpProviderCapability;
+  reconciler: BrainDumpProviderCapability;
+  consent_provider_category: string | null;
+}

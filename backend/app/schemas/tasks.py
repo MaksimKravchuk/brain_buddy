@@ -291,6 +291,30 @@ class BrainDumpConsentResponse(StrictBaseModel):
     recorded_at: datetime
 
 
+class BrainDumpProviderCapabilityResponse(StrictBaseModel):
+    """Truthful, secret-free capability for one provider role.
+
+    ``provider_category`` and ``model`` are non-secret configuration
+    metadata (e.g. "deepgram" / "nova-3"), never credentials. ``reason_code``
+    is a safe, allowlisted code (e.g. "STT_PROVIDER_CREDENTIALS_MISSING"),
+    never raw exception text or a provider payload.
+    """
+
+    available: bool
+    provider_category: str | None = None
+    model: str | None = None
+    reason_code: str | None = None
+
+
+class BrainDumpCapabilityResponse(StrictBaseModel):
+    """Mobile-preflight contract: call before requesting the microphone."""
+
+    available: bool
+    accurate_stt: BrainDumpProviderCapabilityResponse
+    reconciler: BrainDumpProviderCapabilityResponse
+    consent_provider_category: str | None = None
+
+
 class BrainDumpTranscriptSegmentResponse(StrictBaseModel):
     id: str
     sequence: int

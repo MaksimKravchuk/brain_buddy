@@ -3708,6 +3708,188 @@ def test_seal_rejects_audio_exceeding_duration_limit(api_client) -> None:
     assert "AUDIO_DURATION_LIMIT_EXCEEDED" in sealed.text
 
 
+def test_brain_dump_capability_reports_available_test_environment_defaults(
+    api_client,
+) -> None:
+    """The TEST-environment container wires deterministic CI fakes for both
+    roles; capability must report them as available and alias the category
+    to ``openai`` to match what the consent gate actually accepts."""
+
+    response = api_client.get("/api/brain-dump-capability")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["available"] is True
+    assert body["accurate_stt"]["available"] is True
+    assert body["accurate_stt"]["provider_category"] == "openai"
+    assert body["accurate_stt"]["reason_code"] is None
+    assert body["reconciler"]["available"] is True
+    assert body["reconciler"]["provider_category"] == "openai"
+    assert body["consent_provider_category"] == "openai"
+
+
+def test_brain_dump_capability_requires_authentication(anonymous_api_client) -> None:
+    response = anonymous_api_client.get("/api/brain-dump-capability")
+
+    assert response.status_code == 401
+    assert response.headers.get("X-Correlation-ID")
+
+
+def test_brain_dump_capability_reports_disabled_accurate_stt_with_safe_reason(
+    api_client,
+) -> None:
+    from app.workflows.voice_brain_dump.providers import DisabledAccurateStt
+
+    container = api_client.app.state.container
+    container.voice_brain_dump_service.accurate_stt = DisabledAccurateStt(
+        "STT_PROVIDER_CREDENTIALS_MISSING"
+    )
+
+    response = api_client.get("/api/brain-dump-capability")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["available"] is False
+    assert body["accurate_stt"]["available"] is False
+    assert body["accurate_stt"]["provider_category"] is None
+    assert body["accurate_stt"]["reason_code"] == "STT_PROVIDER_CREDENTIALS_MISSING"
+    # Overall unavailable must never surface a consent category to submit.
+    assert body["consent_provider_category"] is None
+
+
+def test_brain_dump_capability_reports_disabled_reconciler_with_safe_reason(
+    api_client,
+) -> None:
+    from app.workflows.voice_brain_dump.providers import DisabledTextReconciler
+
+    container = api_client.app.state.container
+    container.voice_brain_dump_service.text_reconciler = DisabledTextReconciler(
+        "RECONCILER_PROVIDER_CREDENTIALS_MISSING"
+    )
+
+    response = api_client.get("/api/brain-dump-capability")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["available"] is False
+    assert body["reconciler"]["available"] is False
+    assert body["reconciler"]["reason_code"] == "RECONCILER_PROVIDER_CREDENTIALS_MISSING"
+    assert body["consent_provider_category"] is None
+
+
+def test_brain_dump_capability_never_exposes_credentials_or_payloads(
+    api_client,
+) -> None:
+    """Even a live credentialed adapter must only ever surface non-secret
+    category/model metadata through capability -- never the API key."""
+
+    from app.workflows.voice_brain_dump.adapters import DeepgramAccurateStt
+
+    container = api_client.app.state.container
+    container.voice_brain_dump_service.accurate_stt = DeepgramAccurateStt(
+        api_key="super-secret-deepgram-key",
+        model="nova-3",
+    )
+
+    response = api_client.get("/api/brain-dump-capability")
+
+    assert response.status_code == 200, response.text
+    assert "super-secret-deepgram-key" not in response.text
+    body = response.json()
+    assert body["accurate_stt"]["available"] is True
+    assert body["accurate_stt"]["provider_category"] == "deepgram"
+    assert body["accurate_stt"]["model"] == "nova-3"
+
+
+def test_mixed_provider_categories_consent_reaches_reconciled_state(
+    api_client,
+) -> None:
+    """Regression: accurate_stt (Deepgram) and reconciler (OpenAI/Luna) may
+    be different configured vendor categories under the founder-approved MVP.
+    A single ``consent.provider`` naming either configured category must
+    satisfy both the accurate-STT and reconciler consent gates -- the checks
+    must be membership in the allowed set, never identity with one role's
+    own vendor name."""
+
+    from app.workflows.voice_brain_dump.adapters import (
+        DeepgramAccurateStt,
+        OpenAITextReconciler,
+    )
+
+    container = api_client.app.state.container
+    container.voice_brain_dump_service.allowed_external_provider_categories = (
+        frozenset({"deepgram", "openai"})
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "results": {
+                    "channels": [
+                        {"alternatives": [{"transcript": "Купить хлеб и молоко"}]}
+                    ]
+                },
+                "metadata": {"duration": 1.5},
+            },
+        )
+
+    container.voice_brain_dump_service.accurate_stt = DeepgramAccurateStt(
+        api_key="test-key",
+        model="nova-3",
+        max_retries=0,
+        transport=httpx.MockTransport(handler),
+    )
+
+    def complete(payload: dict[str, object]) -> dict[str, object]:
+        context = json.loads(payload["messages"][1]["content"])  # type: ignore[index]
+        segment_id = context["transcript_segments"][0]["id"]
+        return {
+            "operations": [
+                {
+                    "operation": "add",
+                    "proposal_id": None,
+                    "title": "Купить хлеб и молоко",
+                    "source_segment_ids": [segment_id],
+                    "predecessor_ids": [],
+                    "base_revision": None,
+                }
+            ]
+        }
+
+    container.voice_brain_dump_service.text_reconciler = OpenAITextReconciler(
+        api_key="test-key", complete=complete
+    )
+
+    operation = api_client.post(
+        "/api/brain-dump-operations",
+        headers={"Idempotency-Key": "start-mixed-provider"},
+        json={
+            "consent": {
+                "microphone": True,
+                "external_processing_allowed": True,
+                # Names only the accurate-STT category; the reconciler is a
+                # different configured vendor (openai/Luna) under the same
+                # consent action.
+                "provider": "deepgram",
+                "language_hints": ["ru"],
+                "vocabulary": [],
+            }
+        },
+    )
+    assert operation.status_code == 201, operation.text
+    audio = _wav_audio()
+    result = _upload_and_seal(api_client, operation.json(), audio, "seal-mixed-provider")
+
+    assert result.status_code == 200, result.text
+    body = result.json()
+    assert body["status"] == "awaiting_confirmation", body
+    assert body["reconciliation_quality"] == "accurate"
+    assert any(
+        proposal["title"] == "Купить хлеб и молоко" for proposal in body["proposals"]
+    )
+
+
 def test_config_audio_limits_env_overrides(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:

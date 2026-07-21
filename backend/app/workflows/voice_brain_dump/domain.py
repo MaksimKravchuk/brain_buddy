@@ -199,6 +199,26 @@ class ProposalProjection:
     patches: list[ProposalPatch]
 
 
+@dataclass(frozen=True)
+class ProviderCapability:
+    """Truthful, secret-free capability snapshot for one provider role."""
+
+    available: bool
+    provider_category: str | None = None
+    model: str | None = None
+    reason_code: str | None = None
+
+
+@dataclass(frozen=True)
+class BrainDumpCapability:
+    """Mobile-preflight projection: never a live provider call."""
+
+    available: bool
+    accurate_stt: ProviderCapability
+    reconciler: ProviderCapability
+    consent_provider_category: str | None = None
+
+
 def active_transcript_hypotheses(
     hypotheses: list[TranscriptHypothesis],
 ) -> list[TranscriptHypothesis]:
