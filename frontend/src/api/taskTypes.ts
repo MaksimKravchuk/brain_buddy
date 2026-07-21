@@ -199,7 +199,9 @@ export interface BrainDumpOperationResponse {
   consent: {
     microphone: boolean;
     external_processing_allowed: boolean;
+    /** @deprecated single-category field; prefer `provider_categories`. */
     provider: string | null;
+    provider_categories: string[];
     language_hints: string[];
     vocabulary: string[];
     recorded_at: string;
@@ -254,7 +256,9 @@ export interface BrainDumpStartRequest {
   consent: {
     microphone: boolean;
     external_processing_allowed: boolean;
+    /** @deprecated single-category field; prefer `provider_categories`. */
     provider?: string | null;
+    provider_categories: string[];
     language_hints: string[];
     vocabulary: string[];
   };
@@ -275,5 +279,8 @@ export interface BrainDumpCapabilityResponse {
   available: boolean;
   accurate_stt: BrainDumpProviderCapability;
   reconciler: BrainDumpProviderCapability;
+  /** @deprecated the accurate-STT category alone; prefer `consent_provider_categories`. */
   consent_provider_category: string | null;
+  /** Complete set of categories the client must consent to before recording. */
+  consent_provider_categories: string[];
 }

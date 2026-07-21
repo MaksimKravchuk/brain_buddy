@@ -3726,6 +3726,35 @@ def test_brain_dump_capability_reports_available_test_environment_defaults(
     assert body["reconciler"]["available"] is True
     assert body["reconciler"]["provider_category"] == "openai"
     assert body["consent_provider_category"] == "openai"
+    assert body["consent_provider_categories"] == ["openai"]
+
+
+def test_brain_dump_capability_reports_the_complete_category_set_for_a_mixed_vendor_pipeline(
+    api_client,
+) -> None:
+    """When accurate_stt and reconciler are different configured vendor
+    categories, capability must visibly name *both* -- a client that only
+    consents to one would otherwise have no way to know the other is also
+    required before recording (ADR-0002)."""
+
+    from app.workflows.voice_brain_dump.adapters import DeepgramAccurateStt
+
+    container = api_client.app.state.container
+    container.voice_brain_dump_service.accurate_stt = DeepgramAccurateStt(
+        api_key="test-key", model="nova-3"
+    )
+
+    response = api_client.get("/api/brain-dump-capability")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["available"] is True
+    assert body["accurate_stt"]["provider_category"] == "deepgram"
+    assert body["reconciler"]["provider_category"] == "openai"
+    # Deprecated singular field stays the accurate-STT category alone...
+    assert body["consent_provider_category"] == "deepgram"
+    # ...but the complete set names every category actually required.
+    assert body["consent_provider_categories"] == ["deepgram", "openai"]
 
 
 def test_brain_dump_capability_requires_authentication(anonymous_api_client) -> None:
@@ -3801,22 +3830,16 @@ def test_brain_dump_capability_never_exposes_credentials_or_payloads(
     assert body["accurate_stt"]["model"] == "nova-3"
 
 
-def test_mixed_provider_categories_consent_reaches_reconciled_state(
-    api_client,
-) -> None:
-    """Regression: accurate_stt (Deepgram) and reconciler (OpenAI/Luna) may
-    be different configured vendor categories under the founder-approved MVP.
-    A single ``consent.provider`` naming either configured category must
-    satisfy both the accurate-STT and reconciler consent gates -- the checks
-    must be membership in the allowed set, never identity with one role's
-    own vendor name."""
+def _wire_mixed_vendor_pipeline(container) -> None:
+    """Configure accurate_stt=Deepgram, reconciler=OpenAI/Luna -- the
+    founder-approved MVP pairing of two different configured vendor
+    categories under one operation."""
 
     from app.workflows.voice_brain_dump.adapters import (
         DeepgramAccurateStt,
         OpenAITextReconciler,
     )
 
-    container = api_client.app.state.container
     container.voice_brain_dump_service.allowed_external_provider_categories = (
         frozenset({"deepgram", "openai"})
     )
@@ -3861,17 +3884,76 @@ def test_mixed_provider_categories_consent_reaches_reconciled_state(
         api_key="test-key", complete=complete
     )
 
+
+def test_deepgram_only_consent_cannot_authorize_openai_reconciler(
+    api_client,
+) -> None:
+    """Regression: accurate_stt (Deepgram) and reconciler (OpenAI/Luna) are
+    different configured vendor categories under the founder-approved MVP.
+    Naming *only* the accurate-STT category in consent must authorize the
+    Deepgram call but must never spill over to authorize the reconciler's
+    distinct OpenAI category -- each provider role gates on its own vendor
+    category, never on membership in the union of every configured one."""
+
+    container = api_client.app.state.container
+    _wire_mixed_vendor_pipeline(container)
+
     operation = api_client.post(
         "/api/brain-dump-operations",
-        headers={"Idempotency-Key": "start-mixed-provider"},
+        headers={"Idempotency-Key": "start-deepgram-only"},
         json={
             "consent": {
                 "microphone": True,
                 "external_processing_allowed": True,
                 # Names only the accurate-STT category; the reconciler is a
-                # different configured vendor (openai/Luna) under the same
-                # consent action.
-                "provider": "deepgram",
+                # different configured vendor (openai/Luna) that was never
+                # consented to.
+                "provider_categories": ["deepgram"],
+                "language_hints": ["ru"],
+                "vocabulary": [],
+            }
+        },
+    )
+    assert operation.status_code == 201, operation.text
+    assert operation.json()["consent"]["provider_categories"] == ["deepgram"]
+    audio = _wav_audio()
+    result = _upload_and_seal(api_client, operation.json(), audio, "seal-deepgram-only")
+
+    assert result.status_code == 200, result.text
+    body = result.json()
+    # The accurate-STT (Deepgram) call was authorized and succeeded, but the
+    # reconciler (OpenAI) call must be blocked rather than silently reusing
+    # the STT consent -- so the operation never reaches confirmation.
+    assert body["status"] == "terminal_error", body
+    assert body["status"] != "awaiting_confirmation"
+    last_run = body["provider_runs"][-1]
+    assert last_run["role"] == "reconciler"
+    assert last_run["error_code"] == "RECONCILER_CONSENT_PROVIDER_MISMATCH"
+    assert not any(
+        proposal["title"] == "Купить хлеб и молоко" for proposal in body["proposals"]
+    )
+
+
+def test_openai_only_consent_cannot_authorize_deepgram_accurate_stt(
+    api_client,
+) -> None:
+    """Mirror regression: naming only the reconciler's OpenAI category must
+    never authorize the Deepgram accurate-STT call either."""
+
+    container = api_client.app.state.container
+    _wire_mixed_vendor_pipeline(container)
+
+    operation = api_client.post(
+        "/api/brain-dump-operations",
+        headers={"Idempotency-Key": "start-openai-only"},
+        json={
+            "consent": {
+                "microphone": True,
+                "external_processing_allowed": True,
+                # Names only the reconciler's category; the accurate-STT
+                # role is a different configured vendor (deepgram) that was
+                # never consented to.
+                "provider_categories": ["openai"],
                 "language_hints": ["ru"],
                 "vocabulary": [],
             }
@@ -3879,7 +3961,43 @@ def test_mixed_provider_categories_consent_reaches_reconciled_state(
     )
     assert operation.status_code == 201, operation.text
     audio = _wav_audio()
-    result = _upload_and_seal(api_client, operation.json(), audio, "seal-mixed-provider")
+    result = _upload_and_seal(api_client, operation.json(), audio, "seal-openai-only")
+
+    assert result.status_code == 200, result.text
+    body = result.json()
+    assert body["status"] == "terminal_error", body
+    last_run = body["provider_runs"][-1]
+    assert last_run["role"] == "accurate_stt"
+    assert last_run["error_code"] == "STT_CONSENT_PROVIDER_MISMATCH"
+
+
+def test_complete_provider_category_consent_authorizes_mixed_vendor_pipeline(
+    api_client,
+) -> None:
+    """Naming the *complete* set of required categories authorizes both the
+    Deepgram accurate-STT call and the distinct OpenAI reconciler call."""
+
+    container = api_client.app.state.container
+    _wire_mixed_vendor_pipeline(container)
+
+    operation = api_client.post(
+        "/api/brain-dump-operations",
+        headers={"Idempotency-Key": "start-mixed-provider-complete"},
+        json={
+            "consent": {
+                "microphone": True,
+                "external_processing_allowed": True,
+                "provider_categories": ["deepgram", "openai"],
+                "language_hints": ["ru"],
+                "vocabulary": [],
+            }
+        },
+    )
+    assert operation.status_code == 201, operation.text
+    audio = _wav_audio()
+    result = _upload_and_seal(
+        api_client, operation.json(), audio, "seal-mixed-provider-complete"
+    )
 
     assert result.status_code == 200, result.text
     body = result.json()

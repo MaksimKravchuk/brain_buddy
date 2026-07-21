@@ -801,6 +801,7 @@ def _to_capability_response(
         accurate_stt=_to_provider_capability_response(capability.accurate_stt),
         reconciler=_to_provider_capability_response(capability.reconciler),
         consent_provider_category=capability.consent_provider_category,
+        consent_provider_categories=capability.consent_provider_categories,
     )
 
 
@@ -816,6 +817,7 @@ def _to_brain_dump_response(
             microphone=operation.consent.microphone,
             external_processing_allowed=operation.consent.external_processing_allowed,
             provider=operation.consent.provider,
+            provider_categories=operation.consent.provider_categories,
             language_hints=operation.consent.language_hints,
             vocabulary=operation.consent.vocabulary,
             recorded_at=operation.consent.recorded_at,
