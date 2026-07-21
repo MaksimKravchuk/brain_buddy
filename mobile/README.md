@@ -25,7 +25,7 @@ Jest results use the Allure Jest environment and write `allure-results/`; artifa
 
 ## API contract refresh
 
-The committed `api/openapi.json` snapshot and `src/api/openapi.generated.ts` are generated
+The committed `api/openapi.json` snapshot and `src/api/generated/openapi.generated.ts` are generated
 from an ephemeral in-process backend test app. Generation never calls a running backend,
 an arbitrary URL, Fly, or production. Because FastAPI/Pydantic minor versions can change
 generated schema shape, always sync the backend's `uv.lock`-pinned environment first so the

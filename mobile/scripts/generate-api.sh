@@ -30,4 +30,4 @@ backend_dir="${root}/../backend"
 # package-lock.json) so this never reaches the network at generation time —
 # `--no-install` fails loudly instead of silently falling back to a registry
 # fetch if `npm ci` was skipped.
-npx --no-install openapi-typescript "${root}/api/openapi.json" -o "${root}/src/api/openapi.generated.ts"
+npx --no-install openapi-typescript "${root}/api/openapi.json" -o "${root}/src/api/generated/openapi.generated.ts"
