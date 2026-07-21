@@ -27,6 +27,7 @@ a leak.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -115,12 +116,8 @@ def _redact_non_empty_fields(pattern: re.Pattern[str], text: str) -> tuple[str, 
     return "".join(pieces), changed
 
 
-def redact_text(text: str) -> tuple[str, set[str]]:
-    """Redact every ADR-0008 leak category from decoded text.
-
-    Returns the redacted text and the set of category names that fired, for
-    diagnostic-safe reporting (never the matched values themselves).
-    """
+def _redact_plain_text(text: str) -> tuple[str, set[str]]:
+    """Redact every ADR-0008 leak category from non-JSON decoded text."""
 
     categories: set[str] = set()
 
@@ -147,6 +144,61 @@ def redact_text(text: str) -> tuple[str, set[str]]:
         categories.add("task_content")
 
     return text, categories
+
+
+def _redact_json_value(value: object) -> tuple[object, set[str]]:
+    """Redact parsed JSON while preserving every enclosing serialization layer."""
+
+    if isinstance(value, dict):
+        redacted: dict[object, object] = {}
+        categories: set[str] = set()
+        for key, child in value.items():
+            if isinstance(key, str) and isinstance(child, str) and child:
+                if key == "session_token" and len(child) >= 20:
+                    redacted[key] = _REDACTED_CREDENTIAL
+                    categories.add("credential")
+                    continue
+                if key in scanner._TRANSCRIPT_FIELD_NAMES:
+                    redacted[key] = ""
+                    categories.add("audio_transcript_content")
+                    continue
+                if key in scanner._TASK_CONTENT_FIELD_NAMES:
+                    redacted[key] = ""
+                    categories.add("task_content")
+                    continue
+            redacted_child, child_categories = _redact_json_value(child)
+            redacted[key] = redacted_child
+            categories |= child_categories
+        return redacted, categories
+    if isinstance(value, list):
+        redacted_items: list[object] = []
+        categories: set[str] = set()
+        for child in value:
+            redacted_child, child_categories = _redact_json_value(child)
+            redacted_items.append(redacted_child)
+            categories |= child_categories
+        return redacted_items, categories
+    if isinstance(value, str):
+        try:
+            nested = json.loads(value)
+        except json.JSONDecodeError:
+            return _redact_plain_text(value)
+        if isinstance(nested, (dict, list)):
+            redacted_nested, categories = _redact_json_value(nested)
+            return json.dumps(redacted_nested, ensure_ascii=False), categories
+        return _redact_plain_text(value)
+    return value, set()
+
+
+def redact_text(text: str) -> tuple[str, set[str]]:
+    """Redact text, parsing JSON first to preserve nested JSON-string values."""
+
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return _redact_plain_text(text)
+    redacted, categories = _redact_json_value(payload)
+    return json.dumps(redacted, ensure_ascii=False), categories
 
 
 def sanitize(roots: list[Path], label: str) -> int:

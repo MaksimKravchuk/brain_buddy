@@ -34,6 +34,7 @@ class SanitizePrivacyEvidenceTests(unittest.TestCase):
                 json.dumps(
                     {
                         "authorization": f"Bearer {credential}",
+                        "session_token": credential,
                         "email": email,
                         "path": absolute_path,
                         "chunkHash": content_hash,
@@ -160,6 +161,39 @@ class SanitizePrivacyEvidenceTests(unittest.TestCase):
         outer = json.loads(after_text)
         inner = json.loads(outer["stepDescription"])
         self.assertEqual(inner, {"title": "", "body": "", "details": ""})
+
+    def test_redacts_mixed_depth_nested_json_without_corrupting_escaped_values(self) -> None:
+        transcript = 'line one\\n"quoted"\\backslash'
+        task_body = 'call mom\\nthen say "hello"\\again'
+        deepest = json.dumps({"transcript": transcript, "body": task_body})
+        middle = json.dumps({"attachment": deepest, "title": "visible task"})
+        outer_payload = {"stepDescription": json.dumps({"payload": middle})}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence = Path(tmp) / "allure-results"
+            evidence.mkdir()
+            result_file = evidence / "result.json"
+            result_file.write_text(json.dumps(outer_payload), encoding="utf-8")
+
+            before = self.run_script(
+                SCANNER, "--path", str(evidence), "--label", "test-evidence"
+            )
+            sanitized = self.run_script(
+                SANITIZER, "--path", str(evidence), "--label", "test-evidence"
+            )
+            after = self.run_script(
+                SCANNER, "--path", str(evidence), "--label", "test-evidence"
+            )
+            parsed_outer = json.loads(result_file.read_text(encoding="utf-8"))
+
+        self.assertNotEqual(before.returncode, 0)
+        self.assertEqual(sanitized.returncode, 0, sanitized.stderr)
+        self.assertEqual(after.returncode, 0, after.stderr)
+        parsed_step = json.loads(parsed_outer["stepDescription"])
+        parsed_middle = json.loads(parsed_step["payload"])
+        parsed_deepest = json.loads(parsed_middle["attachment"])
+        self.assertEqual(parsed_middle["title"], "")
+        self.assertEqual(parsed_deepest, {"transcript": "", "body": ""})
 
 
 if __name__ == "__main__":

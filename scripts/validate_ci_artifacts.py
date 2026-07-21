@@ -491,10 +491,11 @@ def _scan_step_position(job_text: str, step_id: str, scan_paths: tuple[str, ...]
             continue
         if not re.search(r"^\s*if:\s*always\(\)\s*$", body, re.MULTILINE):
             continue
-        if "validate_mobile_privacy_evidence.py" not in body:
+        run_body = _step_run_body(body)
+        if run_body is None or not _has_scanner_invocation(run_body):
             continue
         if all(
-            re.search(r"--path\s+" + re.escape(path) + r"(?![\w-])", body)
+            re.search(r"--path\s+" + re.escape(path) + r"(?![\w-])", run_body)
             for path in scan_paths
         ):
             return start
@@ -516,12 +517,13 @@ def _sanitize_step_position(job_text: str, scan_paths: tuple[str, ...]) -> int |
     """
 
     for start, body in _split_job_steps(job_text):
-        if "sanitize_privacy_evidence.py" not in body:
+        run_body = _step_run_body(body)
+        if run_body is None or not _has_sanitizer_invocation(run_body):
             continue
         if not re.search(r"^\s*if:\s*always\(\)\s*$", body, re.MULTILINE):
             continue
         if all(
-            re.search(r"--path\s+" + re.escape(path) + r"(?![\w-])", body)
+            re.search(r"--path\s+" + re.escape(path) + r"(?![\w-])", run_body)
             for path in scan_paths
         ):
             return start
@@ -574,6 +576,53 @@ def _step_if_condition(body: str) -> str | None:
 
     match = re.search(r"^\s*if:\s*(.+?)\s*$", body, re.MULTILINE)
     return match.group(1) if match else None
+
+
+def _step_run_body(body: str) -> str | None:
+    """Return only a step's executable ``run:`` value, never nested ``env:`` text."""
+
+    lines = body.splitlines()
+    if not lines:
+        return None
+    step_match = re.match(r"^([ \t]*)-[ \t]", lines[0])
+    if step_match is None:
+        return None
+    property_indent = step_match.group(1) + "  "
+    run_match = re.search(
+        rf"^{re.escape(property_indent)}run:\s*(.*?)\s*$", body, re.MULTILINE
+    )
+    if run_match is None:
+        return None
+    value = run_match.group(1)
+    if value not in {"|", "|-", "|+", ">", ">-", ">+"}:
+        return value
+
+    run_lines: list[str] = []
+    for line in body[run_match.end() :].splitlines():
+        if line and len(line) - len(line.lstrip(" \t")) <= len(property_indent):
+            break
+        run_lines.append(line)
+    return "\n".join(run_lines)
+
+
+def _has_scanner_invocation(run_body: str) -> bool:
+    return bool(
+        re.search(
+            r"(?m)^\s*python(?:3)?\s+(?:\.\./)?scripts/"
+            r"validate_mobile_privacy_evidence\.py(?:\s|$)",
+            run_body,
+        )
+    )
+
+
+def _has_sanitizer_invocation(run_body: str) -> bool:
+    return bool(
+        re.search(
+            r"(?m)^\s*python(?:3)?\s+(?:\.\./)?scripts/"
+            r"sanitize_privacy_evidence\.py(?:\s|$)",
+            run_body,
+        )
+    )
 
 
 def _upload_artifact_steps(job_text: str) -> list[tuple[str | None, str | None, str | None, int]]:
@@ -800,13 +849,31 @@ def _missing_mobile_privacy_gate_errors(workflow_text: str) -> list[str]:
     # harmless (e.g. `always()` or `false`) and the checks sit unused in a
     # variable instead of gating anything.
     gate_step: tuple[int, str, str] | None = None
+    invalid_gate_condition: str | None = None
     for start, body in _split_job_steps(report_job_text):
         condition = _step_if_condition(body)
-        if condition is not None and all(expr in condition for expr in needs_exprs.values()):
+        if condition is None or not all(expr in condition for expr in needs_exprs.values()):
+            continue
+        if _is_exact_aggregate_gate_condition(condition, tuple(needs_exprs.values())):
             gate_step = (start, condition, body)
             break
+        invalid_gate_condition = condition
 
-    if gate_step is None:
+    if gate_step is None and invalid_gate_condition is not None:
+        if "&&" in invalid_gate_condition:
+            for layer_key, needs_expr in needs_exprs.items():
+                errors.append(
+                    f"aggregate Allure report publication gate on {layer_key} privacy scan "
+                    f"outcome must not be weakened with an additional '&&' condition: {needs_expr} "
+                    "(ADR-0008)"
+                )
+        else:
+            errors.append(
+                "aggregate Allure report publication gate must use exactly the four required "
+                "privacy-scan outcome comparisons joined by '||', not predicate text inside a "
+                "function, string, or other non-gating expression (ADR-0008)"
+            )
+    elif gate_step is None:
         covered_layers: set[str] = set()
         for _start, body in _split_job_steps(report_job_text):
             condition = _step_if_condition(body)
@@ -825,27 +892,29 @@ def _missing_mobile_privacy_gate_errors(workflow_text: str) -> list[str]:
             )
     else:
         gate_pos, condition, step_body = gate_step
-        if "&&" in condition:
-            for layer_key, needs_expr in needs_exprs.items():
-                errors.append(
-                    f"aggregate Allure report publication gate on {layer_key} privacy scan "
-                    f"outcome must not be weakened with an additional '&&' condition: {needs_expr} "
-                    "(ADR-0008)"
-                )
-        else:
-            if earliest_publication_pos is not None and gate_pos > earliest_publication_pos:
-                errors.append(
-                    "aggregate Allure report privacy gate must run before the allure-report job's "
-                    "download/generate/upload/publication steps, not after them (ADR-0008)"
-                )
-            if "exit 1" not in step_body:
-                errors.append(
-                    "aggregate Allure report privacy gate must hard-fail the job (e.g. exit 1) "
-                    "when a layer privacy scan outcome is not explicitly 'success', not merely "
-                    "record it (ADR-0008)"
-                )
+        if earliest_publication_pos is not None and gate_pos > earliest_publication_pos:
+            errors.append(
+                "aggregate Allure report privacy gate must run before the allure-report job's "
+                "download/generate/upload/publication steps, not after them (ADR-0008)"
+            )
+        run_body = _step_run_body(step_body)
+        if run_body is None or not re.search(r"(?m)^\s*exit\s+1\s*$", run_body):
+            errors.append(
+                "aggregate Allure report privacy gate must hard-fail the job (e.g. exit 1) "
+                "when a layer privacy scan outcome is not explicitly 'success', not merely "
+                "record it (ADR-0008)"
+            )
 
     return errors
+
+
+def _is_exact_aggregate_gate_condition(
+    condition: str, required_expressions: tuple[str, ...]
+) -> bool:
+    """Accept only the four-way OR predicate that can select the hard-fail step."""
+
+    terms = tuple(term.strip() for term in condition.split("||"))
+    return len(terms) == len(required_expressions) and set(terms) == set(required_expressions)
 
 
 def validate_workflow(

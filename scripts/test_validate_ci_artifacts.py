@@ -1200,6 +1200,93 @@ jobs:
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("backend layer privacy scan step must set id: backend_privacy_scan", completed.stderr)
 
+    def test_workflow_rejects_scanner_command_and_paths_hidden_only_in_env(self) -> None:
+        source = self.real_ci_workflow_text()
+        old = (
+            "      - name: Scan backend Allure evidence for privacy leaks\n"
+            "        id: backend_privacy_scan\n"
+            "        if: always()\n"
+            "        working-directory: .\n"
+            "        run: |\n"
+            "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence\n"
+        )
+        self.assertIn(old, source)
+        new = (
+            "      - name: Scan backend Allure evidence for privacy leaks\n"
+            "        id: backend_privacy_scan\n"
+            "        if: always()\n"
+            "        env:\n"
+            "          DECOY_SCAN: python3 scripts/validate_mobile_privacy_evidence.py --path backend/allure-results\n"
+            "        run: true\n"
+        )
+        mutated = source.replace(old, new, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("backend layer privacy scan step", completed.stderr)
+
+    def test_workflow_rejects_aggregate_predicates_hidden_in_false_function(self) -> None:
+        source = self.real_ci_workflow_text()
+        old_condition = (
+            "        if: needs.backend.outputs.privacy_scan_outcome != 'success' || "
+            "needs.frontend.outputs.privacy_scan_outcome != 'success' || "
+            "needs.e2e.outputs.privacy_scan_outcome != 'success' || "
+            "needs.mobile.outputs.privacy_scan_outcome != 'success'\n"
+        )
+        decoy_condition = (
+            "        if: false && contains(\"needs.backend.outputs.privacy_scan_outcome != 'success' "
+            "needs.frontend.outputs.privacy_scan_outcome != 'success' "
+            "needs.e2e.outputs.privacy_scan_outcome != 'success' "
+            "needs.mobile.outputs.privacy_scan_outcome != 'success'\", 'privacy')\n"
+        )
+        self.assertIn(old_condition, source)
+        mutated = source.replace(old_condition, decoy_condition, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("must not be weakened with an additional '&&' condition", completed.stderr)
+
+    def test_workflow_rejects_aggregate_exit_one_hidden_only_in_env(self) -> None:
+        source = self.real_ci_workflow_text()
+        old = (
+            "        run: |\n"
+            "          echo \"::error::One or more layer privacy scans did not explicitly succeed "
+            "(backend=${{ needs.backend.outputs.privacy_scan_outcome }}, "
+            "frontend=${{ needs.frontend.outputs.privacy_scan_outcome }}, "
+            "playwright=${{ needs.e2e.outputs.privacy_scan_outcome }}, "
+            "mobile=${{ needs.mobile.outputs.privacy_scan_outcome }}); refusing to download, "
+            "generate, upload, or publish the aggregate Allure report (ADR-0008).\" >&2\n"
+            "          exit 1\n"
+        )
+        self.assertIn(old, source)
+        new = (
+            "        env:\n"
+            "          EXIT_ONE: exit 1\n"
+            "        run: echo \"privacy scan outcome recorded\"\n"
+        )
+        mutated = source.replace(old, new, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("aggregate Allure report privacy gate must hard-fail", completed.stderr)
+
     def test_workflow_rejects_aggregate_gate_disabled_via_if_false_env_string_decoy(self) -> None:
         # Mutation: the real gate step's `if:` is disabled (`if: false`, so
         # the step — and its `exit 1` — never actually runs), while the four
