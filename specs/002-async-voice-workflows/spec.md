@@ -1,6 +1,6 @@
 # Feature specification: asynchronous voice workflows
 
-Status: Materially amended 2026-07-19 for friend-demo-ready real product.
+Status: Materially amended 2026-07-21 for the assisted-draft Luna cost ceiling.
 Architecture: [ADR-0002](../../docs/decisions/0002-async-voice-operation-substrate.md)
 Acceptance tests: [acceptance-tests.md](acceptance-tests.md)
 
@@ -18,6 +18,13 @@ must not instantiate deterministic STT silently, binary audio must never be
 decoded as UTF-8 text, real Russian and RU/EN recordings must produce
 inspectable faithful transcripts, and a real structured semantic reconciler
 must replace regex/hardcoded fixture logic in the production decision path.
+
+The 2026-07-21 amendment fixes the MVP as an assisted, editable draft and uses
+the cheapest measured passing provider/model configuration rather than the
+highest-quality tier. The user sees the transcript and every proposal, can edit
+or delete proposals, and explicitly confirms the final set. Draft quality floors
+are therefore separate from unchanged zero-tolerance safety and persistence
+invariants.
 
 ## User stories
 
@@ -55,7 +62,8 @@ RU/EN brain dump. Stop yields a faithful transcript preserving critical names
 and keyterms (`BrainBuddy`, `production smoke`, `Наташа`, recurring project and
 person names). Browser recognition remains a labelled provisional preview; it
 is never authoritative or required for final success. Independent acceptance:
-real-audio corpus cases preserve every critical keyterm.
+the real-audio corpus meets WER `<=20%`, CER `<=15%`, and critical-term recall
+`>=90%`.
 
 ### US5 — Control consent, cost, and provider behavior (P1)
 
@@ -64,6 +72,8 @@ can disable external processing and see a clearly labelled fallback or disabled
 state rather than a silent upload. The chosen provider, model, language hints,
 and vocabulary/keyterm prompts are configuration-backed; a provider change does
 not alter operation, transcript, proposal, or confirmation contracts.
+The product never escalates automatically to a more expensive or unauthorized
+semantic tier when the configured role is unavailable.
 
 ## Required user outcomes
 
@@ -99,7 +109,8 @@ not alter operation, transcript, proposal, or confirmation contracts.
     is never decoded as UTF-8 text. Deterministic fakes are CI-only and must
     not be the production default.
 14. Real Russian and RU/EN recordings produce inspectable faithful transcripts
-    that preserve every critical keyterm on the approved founder corpus.
+    meeting WER `<=20%`, CER `<=15%`, and critical-term recall `>=90%` on the
+    approved founder corpus.
 15. The production task reconciler is a structured semantic text-model process
     emitting schema-valid operations; regex/hardcoded fixture logic is removed
     from the production decision path.
@@ -109,6 +120,9 @@ not alter operation, transcript, proposal, or confirmation contracts.
 17. Provider configuration, timeout/retry/cost limits, and disabled/fallback
     behavior are explicit and observable; no raw audio or transcript enters
     ordinary logs.
+18. Semantic output is an assisted draft: the transcript and every proposal are
+    visible and editable/deletable before explicit confirmation; aggregate draft
+    quality meets the configured corpus floor without weakening safety.
 
 ## Scope
 
@@ -118,12 +132,11 @@ supersession; ordered events with polling fallback; stable proposal IDs and
 lineage patches; user field locks/conflicts; snapshot-scoped target
 resolution; confirmation batches; idempotent commit; persisted bounded
 recovery; migration; privacy/retention; Weekly Review substrate compatibility;
-real configurable accurate-STT adapter over sealed original audio (initial
-provider candidates: OpenAI `gpt-4o-mini-transcribe`/`gpt-4o-transcribe`, plus
-at least one credible alternative such as ElevenLabs Scribe v2 or Deepgram
-Nova-3 benchmarked before locking); explicit RU/RU+EN language handling and
+real configurable accurate-STT adapter over sealed original audio (MVP default:
+Deepgram Nova-3 multilingual); explicit RU/RU+EN language handling and
 vocabulary/keyterm prompting; browser recognition as labelled provisional
-preview only; real structured semantic task reconciler; explicit
+preview only; real structured semantic task reconciler (MVP default: GPT-5.6
+Luna using `product-operation-v1` with no `temperature` parameter); explicit
 external-processing consent; provider configuration, timeout/retry/cost limits,
 disabled/fallback behavior; real-audio evaluation harness separating STT
 quality from task-extraction quality; credentialed full-stack E2E using genuine
@@ -136,7 +149,9 @@ engine; arbitrary tool execution; automatic compensation of completed external
 writes; unrelated GTD redesign; visual redesign; broad platform framework;
 self-hosted GPU infrastructure; diarization; general voice-agent functionality
 unless measured corpus evidence proves necessity for this single loop;
-deterministic fakes as speech-quality or product E2E evidence.
+deterministic fakes as speech-quality or product E2E evidence; Terra as a
+production default or automatic fallback; Sol- or Fable-tier semantic models;
+autonomous proposal persistence or silent metadata inference.
 
 ## Functional requirements
 
@@ -184,7 +199,8 @@ deterministic fakes as speech-quality or product E2E evidence.
 - **FR-014** Provider configuration, timeout/retry/cost limits, and
   disabled/fallback behavior MUST be explicit, configuration-backed, and
   observable. Provider absence is an explicit disabled/fallback state, never
-  a silent degradation to deterministic fakes.
+  a silent degradation to deterministic fakes or automatic escalation to an
+  unauthorized or more expensive model.
 - **FR-015** Raw audio, transcripts, task text, vocabulary, paths, content
   hashes usable as fingerprints, emails, and credentials MUST NOT enter logs,
   metrics, analytics, operation events, committed fixtures, or PR evidence.
@@ -193,7 +209,8 @@ deterministic fakes as speech-quality or product E2E evidence.
   supersede/reorder operations. Regex/hardcoded fixture extraction MUST be
   removed from the production decision path; deterministic fixtures remain
   valid only for ordinary state-machine CI, never as speech-quality or
-  product E2E evidence.
+  product E2E evidence. Its output is always an assisted editable draft and
+  never has canonical-write authority.
 - **FR-017** Transcript provenance MUST link every proposal and committed
   action to source transcript segment IDs; native Inbox tasks MUST link the
   operation action receipt and proposal ID through their source reference.
@@ -240,7 +257,9 @@ metadata.
 ## Success criteria
 
 - **SC-001** ML-01 through ML-06 pass against a versioned labelled corpus,
-  including exact three-task and one-task founder examples.
+  including exact three-task and one-task founder examples. These remain
+  deterministic contract scenarios; they do not replace aggregate live-model
+  corpus gates.
 - **SC-002** Evaluation reports identity-aware task-boundary precision/recall,
   provenance-only boundary precision/recall, task-identity and exact-count
   accuracy, invented-task count, title cleanliness, code-switched-term
@@ -258,18 +277,21 @@ metadata.
 - **SC-006** Production cannot instantiate deterministic STT silently; binary
   audio is never decoded as UTF-8 text in the production path.
 - **SC-007** Real Russian and RU/EN recordings from the approved founder
-  corpus produce inspectable faithful transcripts; every critical keyterm is
-  preserved.
+  corpus produce inspectable faithful transcripts with WER `<=20%`, CER
+  `<=15%`, and critical-term recall `>=90%`.
 - **SC-008** The production task reconciler emits only schema-valid operations;
   regex/hardcoded fixture logic is absent from the production decision path.
-- **SC-009** Release target on the approved founder corpus: 100%
-  critical-term preservation, zero invented tasks, 100% accepted task
-  identities, at least 95% exact task-count accuracy, at least 95%
-  identity-aware task-boundary precision/recall, and all safety/idempotency
-  invariants passing. Provenance-only boundary precision/recall remains a
-  diagnostic and cannot satisfy the identity-aware gate. A measured CER/WER
-  threshold is established from the first baseline rather than invented before
-  corpus evidence.
+- **SC-009** MVP release floor on the approved 50-case founder corpus: WER
+  `<=20%`, CER `<=15%`, critical-term recall `>=90%`, semantic exact task-count
+  accuracy `>=65%`, semantic preservation `>=45%`, and invented proposals
+  `<=0.20` per case (`<=10` total). Under the same template and pricing basis,
+  semantic usage-priced cost is `<= $0.06909` for 50 cases (approximately
+  `$0.001382` per case). Identity-aware and provenance-only boundary
+  precision/recall, task identity, split/merge accuracy, title cleanliness, and
+  calibration remain reported diagnostics. All safety/idempotency/privacy
+  invariants remain release-blocking regardless of aggregate quality. A
+  higher-cost default requires a new explicit decision; it is never selected
+  automatically as fallback.
 
 ## Release gate
 
@@ -279,4 +301,7 @@ latency telemetry is produced for all stated SLOs, the configured confidence
 thresholds are backed by a versioned labelled evaluation report, the real-audio
 evaluation harness separates STT from extraction quality, and the credentialed
 full-stack E2E uses genuine spoken audio rather than text bytes disguised as
-WebM or a mocked provider response.
+WebM or a mocked provider response. The default configuration is Deepgram
+Nova-3 multilingual plus GPT-5.6 Luna with `product-operation-v1` and no
+`temperature`; any provider/model/prompt/parameter change must pass the same
+applicable corpus gates before release.

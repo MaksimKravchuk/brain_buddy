@@ -1,6 +1,6 @@
 # Implementation Plan: Real, friend-demo-ready Voice Brain Dump
 
-**Branch**: `feat/voice-brain-dump-real-product` | **Amended**: 2026-07-19
+**Branch**: `feat/voice-brain-dump-real-product` | **Amended**: 2026-07-21
 **Spec**: `specs/002-async-voice-workflows/spec.md`
 **Architecture**: [ADR-0002](../../docs/decisions/0002-async-voice-operation-substrate.md)
 
@@ -15,11 +15,24 @@ operations; the user reviews/edits/deletes/resolves conflicts; explicit
 confirmation creates title-only native Inbox tasks exactly once; reload/relogin
 shows exactly those durable tasks.
 
+The MVP default is the cheapest measured passing configuration: Deepgram
+Nova-3 multilingual for accurate STT and GPT-5.6 Luna for semantic drafting,
+using the `product-operation-v1` prompt/schema with the unsupported
+`temperature` parameter omitted. The output is an assisted editable draft; the
+user sees the transcript and every proposal, can edit/delete, and explicitly
+confirms before exactly-once persistence.
+
 This plan amends the 2026-07-18 plan. The operation/patch/confirmation
 substrate, ADR-0002 state machine, provider-port boundaries, and
 deterministic CI contract are preserved. The amendment targets the five
 verified root causes: browser locale, UTF-8 audio decoding, regex extraction,
 synthetic-tone evaluation, and consent/hint propagation.
+
+The 2026-07-21 amendment changes only provider authorization, aggregate quality
+floors, and cost posture. Terra is 1.75 times more expensive and is not an
+authorized default or automatic fallback; Sol and Fable tiers are not
+authorized. The provider-port, operation, proposal, confirmation, owner,
+privacy, retry, and release architectures remain unchanged.
 
 ## Root cause re-verification against origin/main (2026-07-19)
 
@@ -55,12 +68,11 @@ All five stated root causes are confirmed against `origin/main` `c0c12b0`:
 **Language/Version**: Python 3.11 (backend); TypeScript strict + React (frontend).
 
 **Primary dependencies**: Existing FastAPI, Pydantic, sqlite3, React, React
-Query, Vite. The first real STT adapter may use `httpx` (already a backend
-dependency) to call OpenAI `gpt-4o-mini-transcribe`/`gpt-4o-transcribe`; at
-least one credible alternative (ElevenLabs Scribe v2 or Deepgram Nova-3) is
-benchmarked before locking. The real text reconciler uses a current text model
-through the existing model-routing configuration; no new SDK is introduced into
-the production decision path unless benchmarks require it.
+Query, Vite, and `httpx`. The accurate-STT adapter calls Deepgram Nova-3
+multilingual over the existing `AccurateSttPort`. The real text reconciler calls
+GPT-5.6 Luna through the existing `TextReconcilerPort` and configurable HTTP
+adapter boundary. It uses strict structured output with
+`product-operation-v1` and omits `temperature`. No new SDK is required.
 
 **Storage**: Existing `backend/data/tasks.sqlite3` owner-partitioned deployment.
 Raw audio remains under the configured data root behind opaque owner-scoped
@@ -92,7 +104,8 @@ for new schema-v2 accurate reconciliation; polling must restore full state; no
 raw content in telemetry; bounded retries/leases; no canonical task before
 confirmation; no paid live provider in ordinary CI; production must not
 instantiate deterministic STT silently; binary audio never decoded as UTF-8
-text; no regex/hardcoded fixture logic in production decision path.
+text; no regex/hardcoded fixture logic in production decision path; no automatic
+fallback to Terra, Sol, Fable, or another unauthorized semantic tier.
 
 **Scale/scope**: One primary-user MVP workflow with bounded recording duration
 and short working-artifact retention. Weekly Review receives shared
@@ -152,8 +165,9 @@ backend/app/workflows/voice_brain_dump/
 ├── evaluation.py     # real-audio evaluation harness (STT vs extraction quality)
 ├── adapters/         # real provider adapters (new)
 │   ├── __init__.py
-│   ├── openai_stt.py     # OpenAI gpt-4o-mini-transcribe / gpt-4o-transcribe
-│   └── reconciler.py    # structured semantic text-model reconciler
+│   ├── deepgram_stt.py   # Deepgram Nova-3 multilingual accurate STT
+│   ├── openai_stt.py     # retained adapter, not the authorized MVP default
+│   └── reconciler.py     # GPT-5.6 Luna structured semantic draft
 ├── repository.py     # owner-scoped payload/history, leases, media refs, v1 import
 ├── service.py        # commands, projections, patch validation, freeze/confirm coordination
 └── runner.py         # in-process due-run scan, leases, deadlines, bounded recovery
@@ -192,9 +206,9 @@ Configuration is role- and schema-based, never a stored vendor enum:
 # backend/app/core/config.py (new voice.* section)
 voice:
   accurate_stt:
-    provider: "openai" | "elevenlabs" | "deepgram" | "deterministic" | "disabled"
-    model: "gpt-4o-mini-transcribe"  # or provider-specific
-    api_key_env: "OPENAI_API_KEY"     # env var name, never the value
+    provider: "deepgram" | "openai" | "deterministic" | "disabled"
+    model: "nova-3"                   # MVP default: Nova-3 multilingual
+    api_key_env: "DEEPGRAM_API_KEY"   # env var name, never the value
     timeout_seconds: 60
     max_retries: 3
     retry_backoff_seconds: [2, 4, 8]
@@ -204,7 +218,9 @@ voice:
     # ... same shape
   reconciler:
     provider: "openai" | "deterministic" | "disabled"
-    model: "gpt-4o"
+    model: "gpt-5.6-luna"
+    template_version: "product-operation-v1"
+    request_parameters: {}            # temperature is omitted, not zero
     # ... same shape
   retention:
     raw_audio_seconds: 86400       # 24h after successful reconciliation
@@ -219,6 +235,14 @@ voice:
   fakes.
 - Provider/model/version is recorded in `ProviderRun` as provenance, never as a
   domain-state enum.
+- The production default allow-list authorizes only Deepgram Nova-3
+  multilingual and GPT-5.6 Luna with `product-operation-v1` and no
+  `temperature`. Terra is not an automatic fallback; Terra, Sol, and Fable are
+  rejected as MVP defaults. Provider failure surfaces bounded retry,
+  `provisional_only`, terminal, or disabled state rather than tier escalation.
+- The role remains configurable. A cheaper small/local model may replace Luna
+  without a domain or workflow migration only after the same corpus gate passes
+  for the exact provider/model/template/parameter tuple.
 
 ### Consent and language hint propagation
 
@@ -390,15 +414,22 @@ The evaluation harness separates the two quality dimensions:
 
 ### Release targets
 
-- STT: 100% critical-term preservation on the approved corpus; a measured
-  CER/WER threshold established from the first baseline (not invented before
-  corpus evidence).
-- Extraction: at least 95% exact task-count accuracy, at least 95%
-  identity-aware task-boundary precision/recall, 100% accepted task identities,
-  zero invented tasks, zero silent user-edit loss, zero canonical writes before
-  confirmation, zero duplicate tasks after retries. Provenance-only boundary
-  precision/recall is reported separately and never substitutes for task
-  identity.
+- STT: WER `<=20%`, CER `<=15%`, and critical-term recall `>=90%` on the
+  approved corpus.
+- Extraction: exact task-count accuracy `>=65%`, semantic preservation
+  `>=45%`, and invented proposals `<=0.20` per case (`<=10` across 50).
+  Identity-aware/provenance boundary precision/recall, task identity,
+  split/merge accuracy, title cleanliness, and calibration remain diagnostics.
+- The measured Luna `product-operation-v1`/no-temperature run passes at 66%
+  exact count, 48.54% semantic preservation, 8 inventions, and $0.06909 for 50
+  cases (approximately $0.001382 per case). Terra costs 1.75 times more and is
+  not selected. Under the same template and pricing basis, that Luna cost is
+  the MVP semantic usage-priced ceiling; a higher-cost default needs an explicit
+  decision.
+- Zero silent user-edit loss, zero canonical writes before confirmation, zero
+  inferred date/priority/project/person or destructive action, owner isolation,
+  provenance, consent/privacy, and zero duplicate tasks after retries remain
+  absolute release gates.
 - Safety invariants are release-blocking regardless of latency/cost.
 
 ## Migration and compatibility constraints with native GTD contracts
@@ -436,6 +467,11 @@ The evaluation harness separates the two quality dimensions:
 - `_extract_titles` regex logic is removed from `service.py` production path;
   it remains only inside `DeterministicTextReconciler` for CI state-machine
   tests, clearly labelled as non-production.
+- Existing OpenAI STT/reconciler settings migrate by configuration only. The
+  selected default switches to Deepgram Nova-3 multilingual plus GPT-5.6 Luna;
+  `ProviderRun` pins provider/model/template/parameter policy. Rollback selects
+  the last authorized passing configuration or disables the role; it never
+  escalates to Terra, Sol, or Fable.
 
 ## Contracts and flow
 
@@ -495,17 +531,22 @@ The evaluation harness separates the two quality dimensions:
 1. Land storage/contracts/provider config dark; schema-v1 remains
    default-compatible; deterministic fakes remain CI-only.
 2. Enable real STT adapter for credentialed local/preview environments with
-   consent; benchmark at least one alternative provider before locking.
+   consent; select Deepgram Nova-3 multilingual from the measured corpus gate.
 3. Run exact-head backend/frontend/Compose E2E and labelled evaluation gates;
    real-audio corpus gates run in a credentialed track, not ordinary CI.
 4. Enable configured real providers only with consent, credentials,
    deadlines, and budget; provider absence is an explicit disabled/fallback
-   state.
+   state, never an automatic model-tier escalation.
 5. Independent Product QA and AI-QA review the same immutable head before
    merge.
 6. Merge through normal PR, automatic Fly deploy, main CI, and authenticated
    production-safe smoke. The credentialed real-phone Russian journey is the
    final acceptance step.
+
+Any provider/model/template/request-parameter change reruns the applicable
+50-case corpus gate before promotion. The same immutable revision then follows
+the independent review, exact-head CI, PR/merge, Fly deploy, production smoke,
+and physical-phone chain above.
 
 ## Complexity tracking
 
@@ -515,4 +556,5 @@ schema-valid operations, and separates STT from extraction quality in the
 evaluation harness. No new broker, worker service, CRDT, distributed
 transaction, domain-state vendor enum, or external side effect is introduced.
 The operation/patch/confirmation substrate and ADR-0002 state machine are
-preserved.
+preserved. The amendment adds no provider abstraction, broker, service, or
+domain enum; it narrows the configured MVP authorization and acceptance floor.
