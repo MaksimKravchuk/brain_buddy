@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAuthStore } from "../stores/authStore";
@@ -81,11 +81,57 @@ function renderRoutes(initialEntry: string) {
   );
 }
 
+// Exposes real router navigation alongside AppRoutes so tests can drive
+// forward pushes and a genuine `navigate(-1)` Back, which plain MemoryRouter
+// initialEntries cannot trigger on their own. Pushing forward (rather than
+// starting directly on the destination) matters: it lets React Query cache
+// each visited task's detail, so navigating back later serves the cached
+// data on the very first render instead of passing through a loading state.
+function NavigationHarness({ paths }: { paths: string[] }): JSX.Element {
+  const navigate = useNavigate();
+  return (
+    <div>
+      {paths.map((path) => (
+        <button key={path} type="button" onClick={() => navigate(path)}>
+          {`Go to ${path}`}
+        </button>
+      ))}
+      <button type="button" onClick={() => navigate(-1)}>
+        Simulate browser back
+      </button>
+    </div>
+  );
+}
+
+function renderRoutesWithNavigator(initialEntry: string, paths: string[]) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <NavigationHarness paths={paths} />
+        <AppRoutes />
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+}
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json" }
   });
+}
+
+// Lets a test hold a mocked fetch response open and choose exactly when it
+// resolves, so two competing refetches (e.g. detail vs. list) can be made to
+// land in a deliberately adverse order.
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
 }
 
 beforeEach(() => {
@@ -995,6 +1041,173 @@ describe("AppRoutes", () => {
     expect(document.activeElement).not.toBe(document.body);
     expect(document.activeElement).not.toBeNull();
     expect(screen.getByRole("heading", { name: "Next actions" })).toHaveFocus();
+  });
+
+  it("does not leak task B's unsaved form values into task A after a standalone A -> B -> browser-back-to-A navigation", async () => {
+    // Both tasks are "waiting" while the route filters "next", so neither is
+    // ever in the active list projection -- each opens through the same
+    // standalone <TaskDetailPanel> JSX slot instead of an in-row one. That
+    // slot is where a missing `key` lets React reuse the same mounted host
+    // DOM across tasks instead of remounting fresh uncontrolled inputs.
+    const user = userEvent.setup();
+    const taskA = { ...taskFixture("task-a", "Alpha standalone", "waiting"), waiting_for: "Alice" };
+    const taskB = { ...taskFixture("task-b", "Bravo standalone", "waiting"), waiting_for: "Bob" };
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/tasks/task-a") && method === "PATCH") {
+        return Promise.resolve(jsonResponse({ ...taskA, ...JSON.parse(String(init?.body)), revision: 2 }));
+      }
+      if (url.endsWith("/tasks/task-a")) {
+        return Promise.resolve(jsonResponse(taskA));
+      }
+      if (url.endsWith("/tasks/task-b")) {
+        return Promise.resolve(jsonResponse(taskB));
+      }
+      if (url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse({
+          items: [],
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 0, next: 0, waiting: 2, someday: 0 }
+        }));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    // Visit A first (so React Query caches its detail), then push forward to
+    // B, then go back -- back-navigating to a task already cached serves its
+    // data on the very first render, with no intervening loading gap that
+    // would otherwise force the uncontrolled inputs to remount naturally.
+    renderRoutesWithNavigator("/tasks/next/task-a", ["/tasks/next/task-b"]);
+
+    await screen.findByDisplayValue("Alpha standalone");
+
+    await user.click(screen.getByRole("button", { name: "Go to /tasks/next/task-b" }));
+    await screen.findByDisplayValue("Bravo standalone");
+    await user.clear(screen.getByLabelText("Title"));
+    await user.type(screen.getByLabelText("Title"), "Bravo edited in B");
+    await user.clear(screen.getByLabelText("Waiting for"));
+    await user.type(screen.getByLabelText("Waiting for"), "Beatrice");
+
+    await user.click(screen.getByRole("button", { name: "Simulate browser back" }));
+
+    // The header text is driven directly from task data (not an uncontrolled
+    // input), so it proves the route/data actually switched to task A.
+    await screen.findByText("Alpha standalone");
+    expect(screen.getByLabelText("Title")).toHaveValue("Alpha standalone");
+    expect(screen.getByLabelText("Waiting for")).toHaveValue("Alice");
+
+    await user.click(screen.getByRole("button", { name: "Save task detail" }));
+
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringMatching(/\/tasks\/task-a$/),
+        expect.objectContaining({ method: "PATCH" })
+      )
+    );
+    const saveDetailCall = vi.mocked(fetch).mock.calls.find(
+      ([input, init]) => /\/tasks\/task-a$/.test(String(input)) && (init as RequestInit | undefined)?.method === "PATCH"
+    );
+    expect(JSON.parse(String(saveDetailCall?.[1]?.body))).toMatchObject({
+      title: "Alpha standalone",
+      waiting_for: "Alice"
+    });
+  });
+
+  it("does not strand list-row focus on document.body when the detail refetch settles before the list refetch confirms the row left the projection", async () => {
+    // task-1's detail is open in-row (desktop, in projection) while its own
+    // row-level Complete button (distinct from the detail panel's Complete
+    // control) is clicked. Completing it invalidates both the detail query
+    // and the "next" list query at once; this mock lets the test choose
+    // which one resolves first -- here, deliberately, the unrelated detail
+    // refetch lands before the list refetch that actually removes the row.
+    const user = userEvent.setup();
+    let completed = false;
+    const detailGates: Array<{ resolve: (value: Response) => void }> = [];
+    const listGates: Array<{ resolve: (value: Response) => void }> = [];
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/tasks/task-1/transitions") && method === "POST") {
+        completed = true;
+        return Promise.resolve(jsonResponse({ ...taskResponse.items[0], state: "completed", revision: 2 }));
+      }
+      if (url.endsWith("/tasks/task-1") && method === "GET") {
+        if (!completed) {
+          return Promise.resolve(jsonResponse(taskResponse.items[0]));
+        }
+        const deferred = createDeferred<Response>();
+        detailGates.push(deferred);
+        return deferred.promise;
+      }
+      if (url.includes("/tasks?state=next")) {
+        if (!completed) {
+          return Promise.resolve(jsonResponse(taskResponse));
+        }
+        const deferred = createDeferred<Response>();
+        listGates.push(deferred);
+        return deferred.promise;
+      }
+      if (url.includes("/tasks?")) {
+        // Inbox badge query -- irrelevant to the race under test.
+        return Promise.resolve(jsonResponse({
+          items: [],
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 0, next: completed ? 0 : 1, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/next/task-1");
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Task detail" })).toHaveFocus());
+
+    const rowCompleteButton = await screen.findByRole("button", { name: "Complete Fix onboarding drop-off" });
+    await user.click(rowCompleteButton);
+
+    await waitFor(() => {
+      expect(detailGates).toHaveLength(1);
+      expect(listGates).toHaveLength(1);
+    });
+
+    // Adverse ordering: the detail refetch lands first. The row is still
+    // present in the (not yet refetched) list, so nothing should move yet.
+    await act(async () => {
+      detailGates[0].resolve(jsonResponse({ ...taskResponse.items[0], state: "completed", revision: 2 }));
+    });
+    await screen.findByRole("button", { name: "Reopen to Inbox" });
+    expect(rowCompleteButton).toHaveFocus();
+
+    // The list refetch lands next, confirming the row actually left the
+    // projection -- only now should a stranded document.body focus be rescued.
+    await act(async () => {
+      listGates[0].resolve(jsonResponse({
+        items: [],
+        next_cursor: null,
+        has_more: false,
+        counts_by_state: { inbox: 0, next: 0, waiting: 0, someday: 0 }
+      }));
+    });
+
+    await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+    expect(document.activeElement).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "Task detail" })).toHaveFocus();
   });
 
   it("shows an honest, noninteractive Agent placeholder in task detail", async () => {
