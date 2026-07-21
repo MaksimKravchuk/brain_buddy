@@ -665,24 +665,100 @@ def _shell_top_level_statements(run_body: str) -> list[str]:
     return statements
 
 
+_ERROR_SUPPRESSION_DIRECTIVE_RE = re.compile(
+    r"(?m)^\s*set\s+(?:[a-zA-Z]*\+e\b|.*\+o\s+errexit\b)"
+)
+
+
+def _run_body_has_error_suppression_directive(run_body: str) -> bool:
+    """Return True if the script disables bash's default errexit anywhere.
+
+    `set +e` (or `set +o errexit`) does not itself touch the required
+    command's own text, so no per-statement check can see it: it silently
+    changes whether a *later* failing command still stops the script. If it
+    appears anywhere in the run body we cannot trust any statement in that
+    body to be fail-closed, regardless of where the directive sits relative
+    to the required command.
+    """
+
+    return bool(_ERROR_SUPPRESSION_DIRECTIVE_RE.search(run_body))
+
+
+def _statement_has_disallowed_shell_wrapping(statement: str) -> bool:
+    """Return True if a statement is anything but a single trivial command.
+
+    A regex anchored with ``^`` only proves the statement *starts with* the
+    required command — it says nothing about what follows. That gap is what
+    let a scanner invocation suffixed with the actionlint-valid `` || true ``
+    be credited as "the scanner ran successfully" even though `` || true ``
+    makes the statement's exit status always 0 regardless of the scanner's
+    own result. Scanning the full statement, quote-aware, for any shell
+    metacharacter that can chain another command, swallow an exit status, or
+    otherwise change what "this statement failed" means — `` && ``, `` || ``,
+    a pipe, backgrounding with `` & ``, subshell/grouping/function
+    parentheses, command substitution, backticks, or a leading `` ! ``
+    negation — closes it without needing to model shell semantics at all:
+    only a bare, unwrapped command is ever accepted.
+    """
+
+    in_single = False
+    in_double = False
+    for index, char in enumerate(statement):
+        if char == "'" and not in_double:
+            in_single = not in_single
+            continue
+        if char == '"' and not in_single:
+            in_double = not in_double
+            continue
+        if in_single or in_double:
+            continue
+        if char in "|&();`":
+            return True
+        if char == "!" and (index == 0 or statement[index - 1].isspace()):
+            return True
+    return False
+
+
+def _has_required_top_level_command(run_body: str, pattern: re.Pattern[str]) -> bool:
+    """Return True only if the pattern matches an unwrapped, final statement.
+
+    Requiring the match to be the run body's last top-level statement closes
+    a related masking route: an unconditionally-run trailing statement (e.g.
+    a bare ``true``) added after a correctly-invoked command would, without
+    bash's default `` -e ``, decide the step's exit status instead of the
+    required command — so a workflow author (or shell) that doesn't rely on
+    that default can still silently neutralize a failing scan or sanitize
+    call. Refusing to credit anything but the final statement removes the
+    need to reason about shell-specific errexit behavior at all.
+    """
+
+    if _run_body_has_error_suppression_directive(run_body):
+        return False
+
+    statements = _shell_top_level_statements(run_body)
+    if not statements:
+        return False
+
+    last_statement = statements[-1]
+    return bool(pattern.match(last_statement)) and not _statement_has_disallowed_shell_wrapping(
+        last_statement
+    )
+
+
 def _has_scanner_invocation(run_body: str) -> bool:
     pattern = re.compile(
         r"^python(?:3)?\s+(?:\.\./)?scripts/"
         r"validate_mobile_privacy_evidence\.py(?:\s|$)"
     )
-    return any(
-        pattern.match(statement) for statement in _shell_top_level_statements(run_body)
-    )
+    return _has_required_top_level_command(run_body, pattern)
 
 
 def _has_sanitizer_invocation(run_body: str) -> bool:
-    return bool(
-        re.search(
-            r"(?m)^\s*python(?:3)?\s+(?:\.\./)?scripts/"
-            r"sanitize_privacy_evidence\.py(?:\s|$)",
-            run_body,
-        )
+    pattern = re.compile(
+        r"^python(?:3)?\s+(?:\.\./)?scripts/"
+        r"sanitize_privacy_evidence\.py(?:\s|$)"
     )
+    return _has_required_top_level_command(run_body, pattern)
 
 
 def _upload_artifact_steps(job_text: str) -> list[tuple[str | None, str | None, str | None, int]]:

@@ -1,8 +1,8 @@
 /*
  * Application-facing aliases over the generated OpenAPI snapshot. Do not add
- * hand-written server payload types here; refresh openapi.generated.ts instead.
+ * hand-written server payload types here; refresh generated/openapi.generated.ts instead.
  */
-import type { components } from "./openapi.generated";
+import type { components } from "./generated/openapi.generated";
 
 type Schemas = components["schemas"];
 

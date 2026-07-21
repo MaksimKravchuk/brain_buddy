@@ -1534,6 +1534,298 @@ jobs:
         self.assertIn("unexpected raw upload step Upload extra evidence", completed.stderr)
         self.assertIn("frontend/evidence-cache", completed.stderr)
 
+    def test_workflow_rejects_scanner_invocation_suffixed_with_or_true(self) -> None:
+        # Mutation: the scan step keeps its exact id/if: always()/--path
+        # arguments, but the scanner invocation itself is suffixed with the
+        # actionlint-valid `|| true`, so the step (and therefore
+        # steps.backend_privacy_scan.outcome) reports success even when the
+        # scanner actually found and reported privacy leaks.
+        source = self.real_ci_workflow_text()
+        old = (
+            "        run: |\n"
+            "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence\n"
+        )
+        self.assertIn(old, source)
+        new = (
+            "        run: |\n"
+            "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence || true\n"
+        )
+        mutated = source.replace(old, new, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "backend layer privacy scan step must set id: backend_privacy_scan",
+            completed.stderr,
+        )
+
+    def test_workflow_rejects_scanner_invocation_followed_by_masking_statement(self) -> None:
+        # Mutation: the scanner invocation itself is untouched, but a
+        # trailing, unconditionally-run `true` statement is appended to the
+        # same step after it. A shell without errexit (or one where a prior
+        # `set +e` has disabled it) would let this later, always-succeeding
+        # statement determine the step's exit status regardless of whether
+        # the scanner call actually failed.
+        source = self.real_ci_workflow_text()
+        old = (
+            "        run: |\n"
+            "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence\n"
+        )
+        self.assertIn(old, source)
+        new = (
+            "        run: |\n"
+            "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence\n"
+            "          true\n"
+        )
+        mutated = source.replace(old, new, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "backend layer privacy scan step must set id: backend_privacy_scan",
+            completed.stderr,
+        )
+
+    def test_workflow_rejects_scanner_invocation_after_set_plus_e_directive(self) -> None:
+        # Mutation: `set +e` is added ahead of the scanner invocation in the
+        # same step, disabling bash's default errexit for the rest of the
+        # script so the scanner's own non-zero exit no longer fails the step.
+        source = self.real_ci_workflow_text()
+        old = (
+            "        run: |\n"
+            "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence\n"
+        )
+        self.assertIn(old, source)
+        new = (
+            "        run: |\n"
+            "          set +e\n"
+            "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence\n"
+        )
+        mutated = source.replace(old, new, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "backend layer privacy scan step must set id: backend_privacy_scan",
+            completed.stderr,
+        )
+
+    def test_workflow_rejects_scanner_invocation_piped_to_swallow_exit_status(self) -> None:
+        # Mutation: the scanner invocation is piped into `cat`, so — absent
+        # `pipefail` — the pipeline's exit status becomes `cat`'s (always 0)
+        # instead of the scanner's own.
+        source = self.real_ci_workflow_text()
+        old = (
+            "        run: |\n"
+            "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence\n"
+        )
+        self.assertIn(old, source)
+        new = (
+            "        run: |\n"
+            "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence | cat\n"
+        )
+        mutated = source.replace(old, new, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "backend layer privacy scan step must set id: backend_privacy_scan",
+            completed.stderr,
+        )
+
+    def test_workflow_rejects_scanner_invocation_backgrounded_with_ampersand(self) -> None:
+        # Mutation: the scanner invocation is backgrounded, so the step
+        # moves on (and can succeed) without ever waiting on — or failing
+        # for — the scanner's own exit status.
+        source = self.real_ci_workflow_text()
+        old = (
+            "        run: |\n"
+            "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence\n"
+        )
+        self.assertIn(old, source)
+        new = (
+            "        run: |\n"
+            "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence &\n"
+            "          wait\n"
+        )
+        mutated = source.replace(old, new, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "backend layer privacy scan step must set id: backend_privacy_scan",
+            completed.stderr,
+        )
+
+    def test_workflow_rejects_aggregate_gate_hard_fail_suffixed_with_or_true(self) -> None:
+        # Mutation: the aggregate gate step keeps its exact required
+        # predicate, but its `exit 1` is suffixed with an actionlint-valid
+        # `|| true`, so the gate step never actually hard-fails.
+        source = self.real_ci_workflow_text()
+        old = (
+            "generate, upload, or publish the aggregate Allure report (ADR-0008).\" >&2\n"
+            "          exit 1\n"
+        )
+        self.assertIn(old, source)
+        new = (
+            "generate, upload, or publish the aggregate Allure report (ADR-0008).\" >&2\n"
+            "          exit 1 || true\n"
+        )
+        mutated = source.replace(old, new, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("aggregate Allure report privacy gate must hard-fail", completed.stderr)
+
+    def test_workflow_rejects_sanitizer_invocation_wrapped_in_unreachable_shell_conditional(
+        self,
+    ) -> None:
+        # Mutation: the sanitize step keeps its exact if: always()/--path
+        # arguments verbatim, but the sanitizer invocation is wrapped in an
+        # actionlint-valid `if false; then ...; fi` block, so it never
+        # actually runs even though the step reports success.
+        source = self.real_ci_workflow_text()
+        old = (
+            "        run: |\n"
+            "          python3 scripts/sanitize_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence\n"
+        )
+        self.assertIn(old, source)
+        new = (
+            "        run: |\n"
+            "          if false; then\n"
+            "            python3 scripts/sanitize_privacy_evidence.py \\\n"
+            "              --path backend/allure-results \\\n"
+            "              --label backend-evidence\n"
+            "          fi\n"
+        )
+        mutated = source.replace(old, new, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "backend layer must run sanitize_privacy_evidence.py", completed.stderr
+        )
+
+    def test_workflow_rejects_sanitizer_invocation_suffixed_with_or_true(self) -> None:
+        # Mutation: the sanitizer invocation itself is suffixed with the
+        # actionlint-valid `|| true`, so the step reports success even when
+        # sanitization actually failed and left raw evidence unredacted.
+        source = self.real_ci_workflow_text()
+        old = (
+            "        run: |\n"
+            "          python3 scripts/sanitize_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence\n"
+        )
+        self.assertIn(old, source)
+        new = (
+            "        run: |\n"
+            "          python3 scripts/sanitize_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence || true\n"
+        )
+        mutated = source.replace(old, new, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "backend layer must run sanitize_privacy_evidence.py", completed.stderr
+        )
+
     def test_workflow_rejects_nameless_upload_artifact_step_for_raw_evidence(self) -> None:
         # Mutation: an extra actions/upload-artifact step for a raw
         # Playwright root is added without a step-level `name:` key at all,

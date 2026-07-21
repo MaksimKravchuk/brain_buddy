@@ -271,7 +271,7 @@ jobs:
           python -m scripts.openapi_snapshot check --snapshot ../mobile/api/openapi.json
           cd ../mobile
           npm run api:generate
-          git diff --exit-code -- api/openapi.json src/api/openapi.generated.ts
+          git diff --exit-code -- api/openapi.json src/api/generated/openapi.generated.ts
 
       - name: Verify Expo SDK dependencies
         working-directory: mobile

@@ -5,7 +5,7 @@
 Brain Buddy exposes one HTTP API under `/api`, consumed by the browser and the bounded
 Expo mobile client. The backend Pydantic/OpenAPI document is the machine-readable source
 of truth; `/api/docs` is its human view. `mobile/api/openapi.json` is the committed mobile
-snapshot and `mobile/src/api/openapi.generated.ts` is its generated transport surface.
+snapshot and `mobile/src/api/generated/openapi.generated.ts` is its generated transport surface.
 Both are generated from an ephemeral in-process test app, never from a live server,
 Fly, production, or an arbitrary URL.
 
@@ -53,7 +53,7 @@ storage migration.
    `cd backend && python -m scripts.openapi_snapshot check --snapshot ../mobile/api/openapi.json`.
    The generator creates an ephemeral test-mode app with a temporary data directory;
    it does not make a network request. `git diff --exit-code -- mobile/api/openapi.json
-   mobile/src/api/openapi.generated.ts` is the generated-client drift gate. CI enforces
+   mobile/src/api/generated/openapi.generated.ts` is the generated-client drift gate. CI enforces
    the same locked install (`.github/workflows/ci.yml`, mobile job) so a fresh runner
    reproduces the committed artifacts deterministically.
 5. For a breaking change, publish a migration date, support window, and a versioned
