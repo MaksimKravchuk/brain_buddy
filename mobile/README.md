@@ -25,14 +25,23 @@ Jest results use the Allure Jest environment and write `allure-results/`; artifa
 
 ## API contract refresh
 
-The committed `api/openapi.json` snapshot and `src/api/openapi.generated.ts` are generated from the backend OpenAPI document. Refresh only against an intended running backend:
+The committed `api/openapi.json` snapshot and `src/api/openapi.generated.ts` are generated
+from an ephemeral in-process backend test app. Generation never calls a running backend,
+an arbitrary URL, Fly, or production:
 
 ```bash
-EXPO_PUBLIC_API_ORIGIN=http://127.0.0.1:8000/api npm run api:generate
-npm run typecheck && npm test
+npm run api:generate
+cd ../backend && python -m scripts.openapi_snapshot check --snapshot ../mobile/api/openapi.json
+cd ../mobile && npm run typecheck && npm test
 ```
 
-The client attaches the opaque credential as `Authorization: Bearer <token>`. Expo SecureStore is the only persistent credential store; the client clears stale credentials on first-install marker absence, unauthorized responses, or sign-out.
+The backend owns API semantic versioning; it is distinct from persisted-data schema version.
+The client attaches the opaque session credential as
+`Authorization: Bearer <opaque-session-token>`; it is not a JWT. Expo SecureStore is the only
+persistent credential store. The client clears
+a credential on first-install marker absence, definitive `401`, or sign-out, but preserves it
+for retry after transient network and `5xx` bootstrap failures. JSON API failures include
+`X-Correlation-ID`, mirrored as `reference_id` in the standard error envelope.
 
 ## EAS profiles
 

@@ -4,23 +4,6 @@
  */
 
 export interface paths {
-    "/api/auth/signup": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Signup */
-        post: operations["signup_api_auth_signup_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/auth/login": {
         parameters: {
             query?: never;
@@ -32,26 +15,6 @@ export interface paths {
         put?: never;
         /** Login */
         post: operations["login_api_auth_login_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/auth/mobile/sessions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Create Mobile Session
-         * @description Issue the existing opaque server Session once for native secure storage.
-         */
-        post: operations["create_mobile_session_api_auth_mobile_sessions_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -92,44 +55,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/trees": {
+    "/api/auth/mobile/sessions": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** List Trees */
-        get: operations["list_trees_api_trees_get"];
+        get?: never;
         put?: never;
-        /** Create Tree */
-        post: operations["create_tree_api_trees_post"];
+        /**
+         * Create Mobile Session
+         * @description Issue the existing opaque server Session once for native secure storage.
+         */
+        post: operations["create_mobile_session_api_auth_mobile_sessions_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/trees/{tree_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Tree */
-        get: operations["get_tree_api_trees__tree_id__get"];
-        /** Update Tree */
-        put: operations["update_tree_api_trees__tree_id__put"];
-        post?: never;
-        /** Delete Tree */
-        delete: operations["delete_tree_api_trees__tree_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/trees/import": {
+    "/api/auth/signup": {
         parameters: {
             query?: never;
             header?: never;
@@ -138,198 +84,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Import Tree */
-        post: operations["import_tree_api_trees_import_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/trees/{tree_id}/export": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Export Tree */
-        post: operations["export_tree_api_trees__tree_id__export_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/trees/{tree_id}/ai-feedback": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Ai Feedback */
-        post: operations["ai_feedback_api_trees__tree_id__ai_feedback_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/trees/{tree_id}/nodes": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create Node */
-        post: operations["create_node_api_trees__tree_id__nodes_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/trees/{tree_id}/nodes/{node_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Delete Node */
-        delete: operations["delete_node_api_trees__tree_id__nodes__node_id__delete"];
-        options?: never;
-        head?: never;
-        /** Update Node */
-        patch: operations["update_node_api_trees__tree_id__nodes__node_id__patch"];
-        trace?: never;
-    };
-    "/api/trees/{tree_id}/relations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create Relation */
-        post: operations["create_relation_api_trees__tree_id__relations_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/trees/{tree_id}/relations/{relation_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Delete Relation */
-        delete: operations["delete_relation_api_trees__tree_id__relations__relation_id__delete"];
-        options?: never;
-        head?: never;
-        /** Update Relation */
-        patch: operations["update_relation_api_trees__tree_id__relations__relation_id__patch"];
-        trace?: never;
-    };
-    "/api/trees/{tree_id}/versions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Versions */
-        get: operations["list_versions_api_trees__tree_id__versions_get"];
-        put?: never;
-        /** Create Version */
-        post: operations["create_version_api_trees__tree_id__versions_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/trees/{tree_id}/versions/{version_id}/restore": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Restore Version */
-        post: operations["restore_version_api_trees__tree_id__versions__version_id__restore_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/trees/{tree_id}/versions/{version_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Delete Version */
-        delete: operations["delete_version_api_trees__tree_id__versions__version_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/trees/{tree_id}/validate/{node_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Validate Node */
-        post: operations["validate_node_api_trees__tree_id__validate__node_id__post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/trees/{tree_id}/nodes/{node_id}/validation-history": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Validation History */
-        get: operations["get_validation_history_api_trees__tree_id__nodes__node_id__validation_history_get"];
-        put?: never;
-        post?: never;
+        /** Signup */
+        post: operations["signup_api_auth_signup_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -370,23 +126,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/brain-dump-operations/{operation_id}/transcript": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Append Brain Dump Transcript */
-        post: operations["append_brain_dump_transcript_api_brain_dump_operations__operation_id__transcript_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/brain-dump-operations/{operation_id}/audio/{chunk_number}": {
         parameters: {
             query?: never;
@@ -398,23 +137,6 @@ export interface paths {
         /** Upload Brain Dump Audio Chunk */
         put: operations["upload_brain_dump_audio_chunk_api_brain_dump_operations__operation_id__audio__chunk_number__put"];
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/brain-dump-operations/{operation_id}/seal": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Seal Brain Dump Operation */
-        post: operations["seal_brain_dump_operation_api_brain_dump_operations__operation_id__seal_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -436,6 +158,40 @@ export interface paths {
         head?: never;
         /** Update Brain Dump Proposal */
         patch: operations["update_brain_dump_proposal_api_brain_dump_operations__operation_id__proposals__proposal_id__patch"];
+        trace?: never;
+    };
+    "/api/brain-dump-operations/{operation_id}/seal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Seal Brain Dump Operation */
+        post: operations["seal_brain_dump_operation_api_brain_dump_operations__operation_id__seal_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/brain-dump-operations/{operation_id}/transcript": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Append Brain Dump Transcript */
+        post: operations["append_brain_dump_transcript_api_brain_dump_operations__operation_id__transcript_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/brain-dump-operations/{operation_id}/{action}": {
@@ -545,6 +301,24 @@ export interface paths {
         patch: operations["update_tag_api_tags__tag_id__patch"];
         trace?: never;
     };
+    "/api/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Tasks */
+        get: operations["list_tasks_api_tasks_get"];
+        put?: never;
+        /** Create Task */
+        post: operations["create_task_api_tasks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tasks/smart-add": {
         parameters: {
             query?: never;
@@ -578,6 +352,40 @@ export interface paths {
         head?: never;
         /** Update Task */
         patch: operations["update_task_api_tasks__task_id__patch"];
+        trace?: never;
+    };
+    "/api/tasks/{task_id}/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Comment */
+        post: operations["create_comment_api_tasks__task_id__comments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{task_id}/comments/{comment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Comment */
+        patch: operations["update_comment_api_tasks__task_id__comments__comment_id__patch"];
         trace?: never;
     };
     "/api/tasks/{task_id}/subtasks": {
@@ -631,40 +439,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/tasks/{task_id}/comments": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create Comment */
-        post: operations["create_comment_api_tasks__task_id__comments_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tasks/{task_id}/comments/{comment_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /** Update Comment */
-        patch: operations["update_comment_api_tasks__task_id__comments__comment_id__patch"];
-        trace?: never;
-    };
     "/api/tasks/{task_id}/transitions": {
         parameters: {
             query?: never;
@@ -682,18 +456,244 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/tasks": {
+    "/api/trees": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** List Tasks */
-        get: operations["list_tasks_api_tasks_get"];
+        /** List Trees */
+        get: operations["list_trees_api_trees_get"];
         put?: never;
-        /** Create Task */
-        post: operations["create_task_api_tasks_post"];
+        /** Create Tree */
+        post: operations["create_tree_api_trees_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/trees/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import Tree */
+        post: operations["import_tree_api_trees_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/trees/{tree_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Tree */
+        get: operations["get_tree_api_trees__tree_id__get"];
+        /** Update Tree */
+        put: operations["update_tree_api_trees__tree_id__put"];
+        post?: never;
+        /** Delete Tree */
+        delete: operations["delete_tree_api_trees__tree_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/trees/{tree_id}/ai-feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ai Feedback */
+        post: operations["ai_feedback_api_trees__tree_id__ai_feedback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/trees/{tree_id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Export Tree */
+        post: operations["export_tree_api_trees__tree_id__export_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/trees/{tree_id}/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Node */
+        post: operations["create_node_api_trees__tree_id__nodes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/trees/{tree_id}/nodes/{node_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Node */
+        delete: operations["delete_node_api_trees__tree_id__nodes__node_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Node */
+        patch: operations["update_node_api_trees__tree_id__nodes__node_id__patch"];
+        trace?: never;
+    };
+    "/api/trees/{tree_id}/nodes/{node_id}/validation-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Validation History */
+        get: operations["get_validation_history_api_trees__tree_id__nodes__node_id__validation_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/trees/{tree_id}/relations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Relation */
+        post: operations["create_relation_api_trees__tree_id__relations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/trees/{tree_id}/relations/{relation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Relation */
+        delete: operations["delete_relation_api_trees__tree_id__relations__relation_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Relation */
+        patch: operations["update_relation_api_trees__tree_id__relations__relation_id__patch"];
+        trace?: never;
+    };
+    "/api/trees/{tree_id}/validate/{node_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Validate Node */
+        post: operations["validate_node_api_trees__tree_id__validate__node_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/trees/{tree_id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Versions */
+        get: operations["list_versions_api_trees__tree_id__versions_get"];
+        put?: never;
+        /** Create Version */
+        post: operations["create_version_api_trees__tree_id__versions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/trees/{tree_id}/versions/{version_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Version */
+        delete: operations["delete_version_api_trees__tree_id__versions__version_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/trees/{tree_id}/versions/{version_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore Version */
+        post: operations["restore_version_api_trees__tree_id__versions__version_id__restore_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -751,6 +751,16 @@ export interface components {
          */
         AiFeedbackResponse: {
             /**
+             * Recommendations
+             * @description Actionable recommendations from the AI.
+             */
+            recommendations?: string[];
+            /**
+             * Request Id
+             * @description Echoed request identifier when provided.
+             */
+            request_id?: string | null;
+            /**
              * Status
              * @description Status of the AI feedback request.
              * @enum {string}
@@ -761,16 +771,67 @@ export interface components {
              * @description AI-generated summary of the tree.
              */
             summary?: string | null;
+        };
+        /** BrainDumpActionReceiptResponse */
+        BrainDumpActionReceiptResponse: {
+            /** Child Idempotency Key */
+            child_idempotency_key: string;
             /**
-             * Recommendations
-             * @description Actionable recommendations from the AI.
+             * Confidence
+             * @default unknown
+             * @constant
              */
-            recommendations?: string[];
+            confidence: "unknown";
             /**
-             * Request Id
-             * @description Echoed request identifier when provided.
+             * Confirmed At
+             * Format: date-time
              */
-            request_id?: string | null;
+            confirmed_at: string;
+            /** Confirmed By Actor Id */
+            confirmed_by_actor_id?: string | null;
+            /** Confirmed Title Sha256 */
+            confirmed_title_sha256?: string | null;
+            /**
+             * Decision
+             * @default create_native_inbox_task
+             * @constant
+             */
+            decision: "create_native_inbox_task";
+            /** Id */
+            id: string;
+            /** Proposal Id */
+            proposal_id: string;
+            /** Proposal Patch Ids */
+            proposal_patch_ids?: string[];
+            /** Proposal Revision */
+            proposal_revision?: number | null;
+            /** Reconciliation Model */
+            reconciliation_model?: string | null;
+            /** Reconciliation Provider */
+            reconciliation_provider?: string | null;
+            /**
+             * Reconciliation Quality
+             * @default none
+             * @enum {string}
+             */
+            reconciliation_quality: "none" | "provisional_only" | "accurate" | "conflicted";
+            /** Reconciliation Run Id */
+            reconciliation_run_id?: string | null;
+            /** Reconciliation Template Version */
+            reconciliation_template_version?: string | null;
+            /** Source Manifest Hash */
+            source_manifest_hash?: string | null;
+            /** Source Operation Id */
+            source_operation_id?: string | null;
+            /** Source Segment Ids */
+            source_segment_ids?: string[];
+            /** Task Id */
+            task_id: string;
+            /**
+             * User Edited
+             * @default false
+             */
+            user_edited: boolean;
         };
         /** BrainDumpAudioChunkResponse */
         BrainDumpAudioChunkResponse: {
@@ -783,22 +844,28 @@ export interface components {
         };
         /** BrainDumpConsentRequest */
         BrainDumpConsentRequest: {
-            /** Microphone */
-            microphone: boolean;
             /**
              * External Processing Allowed
              * @default false
              */
             external_processing_allowed: boolean;
+            /** Language Hints */
+            language_hints?: string[];
+            /** Microphone */
+            microphone: boolean;
             /** Provider */
             provider?: string | null;
+            /** Vocabulary */
+            vocabulary?: string[];
         };
         /** BrainDumpConsentResponse */
         BrainDumpConsentResponse: {
-            /** Microphone */
-            microphone: boolean;
             /** External Processing Allowed */
             external_processing_allowed: boolean;
+            /** Language Hints */
+            language_hints?: string[];
+            /** Microphone */
+            microphone: boolean;
             /** Provider */
             provider?: string | null;
             /**
@@ -806,54 +873,80 @@ export interface components {
              * Format: date-time
              */
             recorded_at: string;
+            /** Vocabulary */
+            vocabulary?: string[];
         };
         /** BrainDumpOperationResponse */
         BrainDumpOperationResponse: {
-            /** Id */
-            id: string;
-            /** Owner Id */
-            owner_id: string;
-            /**
-             * Kind
-             * @constant
-             */
-            kind: "voice_brain_dump";
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "recording" | "paused" | "sealing" | "fast_processing" | "accurate_transcribing" | "reconciling" | "retryable_error" | "terminal_error" | "awaiting_confirmation" | "committing" | "completed" | "cancelled";
-            consent: components["schemas"]["BrainDumpConsentResponse"];
-            /** Segments */
-            segments?: components["schemas"]["BrainDumpTranscriptSegmentResponse"][];
-            /** Proposals */
-            proposals?: components["schemas"]["BrainDumpProposalResponse"][];
-            /** Media Ref */
-            media_ref?: string | null;
+            /** Action Receipts */
+            action_receipts?: components["schemas"]["BrainDumpActionReceiptResponse"][];
             /** Audio Chunks */
             audio_chunks?: components["schemas"]["BrainDumpAudioChunkResponse"][];
-            /** Sealed Manifest Hash */
-            sealed_manifest_hash?: string | null;
-            /** Provider Runs */
-            provider_runs?: components["schemas"]["BrainDumpProviderRunResponse"][];
-            /** Proposal Patches */
-            proposal_patches?: components["schemas"]["BrainDumpProposalPatchResponse"][];
-            /** Status History */
-            status_history?: ("recording" | "paused" | "sealing" | "fast_processing" | "accurate_transcribing" | "reconciling" | "retryable_error" | "terminal_error" | "awaiting_confirmation" | "committing" | "completed" | "cancelled")[];
+            /** Available Recovery Actions */
+            available_recovery_actions?: ("retry" | "review_provisional" | "cancel")[];
+            /**
+             * Committable
+             * @default false
+             */
+            committable: boolean;
             /** Committed Task Ids */
             committed_task_ids?: string[];
+            consent: components["schemas"]["BrainDumpConsentResponse"];
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "voice_brain_dump";
+            /** Media Ref */
+            media_ref?: string | null;
+            /** Owner Id */
+            owner_id: string;
+            /** Proposal Patches */
+            proposal_patches?: components["schemas"]["BrainDumpProposalPatchResponse"][];
+            /** Proposals */
+            proposals?: components["schemas"]["BrainDumpProposalResponse"][];
+            /** Provider Runs */
+            provider_runs?: components["schemas"]["BrainDumpProviderRunResponse"][];
+            /** Raw Audio Expires At */
+            raw_audio_expires_at?: string | null;
+            /**
+             * Raw Audio Present
+             * @default false
+             */
+            raw_audio_present: boolean;
+            /**
+             * Reconciliation Quality
+             * @default none
+             * @enum {string}
+             */
+            reconciliation_quality: "none" | "provisional_only" | "accurate" | "conflicted";
+            /** Revision */
+            revision: number;
+            /** Sealed Manifest Hash */
+            sealed_manifest_hash?: string | null;
+            /** Segments */
+            segments?: components["schemas"]["BrainDumpTranscriptSegmentResponse"][];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "recording" | "paused" | "sealing" | "fast_processing" | "accurate_transcribing" | "reconciling" | "retryable_error" | "terminal_error" | "awaiting_confirmation" | "committing" | "completed" | "cancelled";
+            /** Status History */
+            status_history?: ("recording" | "paused" | "sealing" | "fast_processing" | "accurate_transcribing" | "reconciling" | "retryable_error" | "terminal_error" | "awaiting_confirmation" | "committing" | "completed" | "cancelled")[];
             /**
              * Updated At
              * Format: date-time
              */
             updated_at: string;
-            /** Revision */
-            revision: number;
+            /** Working Artifacts Expires At */
+            working_artifacts_expires_at?: string | null;
         };
         /** BrainDumpOperationStartRequest */
         BrainDumpOperationStartRequest: {
@@ -861,12 +954,10 @@ export interface components {
         };
         /** BrainDumpProposalConflictResponse */
         BrainDumpProposalConflictResponse: {
-            /** Field */
-            field: string;
             /** Current Value */
             current_value?: string | null;
-            /** Suggested Value */
-            suggested_value?: string | null;
+            /** Field */
+            field: string;
             /**
              * Producer
              * @enum {string}
@@ -874,81 +965,117 @@ export interface components {
             producer: "fast" | "accurate" | "reconciler" | "user";
             /** Source Segment Ids */
             source_segment_ids?: string[];
+            /** Suggested Value */
+            suggested_value?: string | null;
         };
         /** BrainDumpProposalPatchResponse */
         BrainDumpProposalPatchResponse: {
+            /** Base Revision */
+            base_revision?: number | null;
             /** Id */
             id: string;
-            /** Sequence */
-            sequence: number;
+            /** Locked Fields */
+            locked_fields?: string[];
             /**
              * Operation
              * @enum {string}
              */
             operation: "add" | "update" | "split" | "merge" | "remove" | "supersede";
-            /** Proposal Id */
-            proposal_id: string;
+            /** Predecessor Ids */
+            predecessor_ids?: string[];
             /**
              * Producer
              * @enum {string}
              */
             producer: "fast" | "accurate" | "reconciler" | "user";
-            /** Title */
-            title?: string | null;
+            /** Proposal Id */
+            proposal_id: string;
+            /** Sequence */
+            sequence: number;
             /** Source Segment Ids */
             source_segment_ids?: string[];
-            /** Predecessor Ids */
-            predecessor_ids?: string[];
             /** Successor Ids */
             successor_ids?: string[];
-            /** Locked Fields */
-            locked_fields?: string[];
-            /** Base Revision */
-            base_revision?: number | null;
+            /** Title */
+            title?: string | null;
         };
         /** BrainDumpProposalResponse */
         BrainDumpProposalResponse: {
+            /** Conflicts */
+            conflicts?: components["schemas"]["BrainDumpProposalConflictResponse"][];
+            /** Deleted */
+            deleted: boolean;
             /** Id */
             id: string;
+            /** Locked Fields */
+            locked_fields?: string[];
             /** Ordinal */
             ordinal: number;
-            /** Title */
-            title: string;
+            /** Predecessor Ids */
+            predecessor_ids?: string[];
+            /** Revision */
+            revision: number;
+            /** Source Segment Ids */
+            source_segment_ids?: string[];
             /**
              * Status
              * @enum {string}
              */
             status: "provisional" | "wording_changing" | "ready_to_review" | "user_edited" | "reconciled" | "conflicted";
-            /** Source Segment Ids */
-            source_segment_ids?: string[];
-            /** Predecessor Ids */
-            predecessor_ids?: string[];
             /** Successor Ids */
             successor_ids?: string[];
-            /** Locked Fields */
-            locked_fields?: string[];
-            /** Conflicts */
-            conflicts?: components["schemas"]["BrainDumpProposalConflictResponse"][];
-            /** Deleted */
-            deleted: boolean;
+            /** Title */
+            title: string;
             /** User Edited */
             user_edited: boolean;
-            /** Revision */
-            revision: number;
         };
         /** BrainDumpProposalUpdateRequest */
         BrainDumpProposalUpdateRequest: {
-            /** Title */
-            title?: string | null;
+            /** Conflict Resolution */
+            conflict_resolution?: ("keep" | "accept") | null;
             /** Deleted */
             deleted?: boolean | null;
             /** Expected Revision */
             expected_revision: number;
+            /** Title */
+            title?: string | null;
         };
         /** BrainDumpProviderRunResponse */
         BrainDumpProviderRunResponse: {
+            /** Attempt */
+            attempt: number;
+            /**
+             * Checkpoint
+             * @enum {string}
+             */
+            checkpoint: "sealed" | "accurate_transcribed" | "reconciled";
+            /**
+             * Consumed Cost Usd
+             * @default 0
+             */
+            consumed_cost_usd: number;
+            /** Error */
+            error?: string | null;
+            /** Error Code */
+            error_code?: string | null;
+            /**
+             * Estimated Cost Usd
+             * @default 0
+             */
+            estimated_cost_usd: number;
             /** Id */
             id: string;
+            /** Model */
+            model?: string | null;
+            /** Provider */
+            provider?: string | null;
+            /** Recovery Count */
+            recovery_count: number;
+            /**
+             * Reserved Cost Usd
+             * @default 0
+             */
+            reserved_cost_usd: number;
             /**
              * Role
              * @enum {string}
@@ -959,24 +1086,15 @@ export interface components {
              * @enum {string}
              */
             status: "pending" | "running" | "succeeded" | "retryable_error" | "terminal_error";
-            /**
-             * Checkpoint
-             * @enum {string}
-             */
-            checkpoint: "sealed" | "accurate_transcribed" | "reconciled";
-            /** Attempt */
-            attempt: number;
-            /** Recovery Count */
-            recovery_count: number;
-            /** Error */
-            error?: string | null;
+            /** Template Version */
+            template_version?: string | null;
         };
         /** BrainDumpSealRequest */
         BrainDumpSealRequest: {
-            /** Expected Revision */
-            expected_revision: number;
             /** Expected Chunks */
             expected_chunks: number;
+            /** Expected Revision */
+            expected_revision: number;
             /** Manifest Hash */
             manifest_hash: string;
         };
@@ -989,23 +1107,41 @@ export interface components {
         BrainDumpTranscriptSegmentRequest: {
             /** Sequence */
             sequence: number;
-            /** Text */
-            text: string;
             /**
              * Stability
              * @default stable
              * @enum {string}
              */
             stability: "interim" | "stable";
+            /** Text */
+            text: string;
         };
         /** BrainDumpTranscriptSegmentResponse */
         BrainDumpTranscriptSegmentResponse: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * End Ms
+             * @default 1
+             */
+            end_ms: number;
             /** Id */
             id: string;
+            /** Model */
+            model?: string | null;
+            /** Provider */
+            provider?: string | null;
+            /**
+             * Provider Role
+             * @default browser_preview
+             * @enum {string}
+             */
+            provider_role: "browser_preview" | "fast" | "accurate";
             /** Sequence */
             sequence: number;
-            /** Text */
-            text: string;
             /**
              * Stability
              * @enum {string}
@@ -1016,28 +1152,10 @@ export interface components {
              * @default 0
              */
             start_ms: number;
-            /**
-             * End Ms
-             * @default 1
-             */
-            end_ms: number;
-            /**
-             * Provider Role
-             * @default browser_preview
-             * @enum {string}
-             */
-            provider_role: "browser_preview" | "fast" | "accurate";
-            /** Provider */
-            provider?: string | null;
-            /** Model */
-            model?: string | null;
             /** Supersedes Segment Ids */
             supersedes_segment_ids?: string[];
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
+            /** Text */
+            text: string;
         };
         /**
          * ErrorResponse
@@ -1045,15 +1163,15 @@ export interface components {
          */
         ErrorResponse: {
             /**
-             * Message
-             * @description Human-friendly error message.
-             */
-            message: string;
-            /**
              * Detail
              * @description Optional structured error details.
              */
             detail?: unknown | null;
+            /**
+             * Message
+             * @description Human-friendly error message.
+             */
+            message: string;
             /**
              * Reference Id
              * @description Optional correlation/reference identifier for support or debugging.
@@ -1088,15 +1206,15 @@ export interface components {
          */
         MeResponse: {
             /**
-             * Id
-             * @description User identifier.
-             */
-            id: string;
-            /**
              * Email
              * @description Normalized email address.
              */
             email: string;
+            /**
+             * Id
+             * @description User identifier.
+             */
+            id: string;
         };
         /**
          * NodeCreateRequest
@@ -1104,18 +1222,31 @@ export interface components {
          */
         NodeCreateRequest: {
             /**
+             * Highlight State
+             * @description Current highlight state for the node.
+             * @default none
+             * @enum {string}
+             */
+            highlight_state: "none" | "cause_candidate" | "effect_spanning";
+            /**
              * Label
              * @description Node label displayed in the UI.
              */
             label: string;
+            /** @description Canvas position for the new node. */
+            position: components["schemas"]["Position"];
             /**
              * Type
              * @description Node type describing its role in the tree.
              * @enum {string}
              */
             type: "parent" | "child";
-            /** @description Canvas position for the new node. */
-            position: components["schemas"]["Position"];
+        };
+        /**
+         * NodeResponse
+         * @description Full node representation returned by API endpoints.
+         */
+        NodeResponse: {
             /**
              * Highlight State
              * @description Current highlight state for the node.
@@ -1123,12 +1254,6 @@ export interface components {
              * @enum {string}
              */
             highlight_state: "none" | "cause_candidate" | "effect_spanning";
-        };
-        /**
-         * NodeResponse
-         * @description Full node representation returned by API endpoints.
-         */
-        NodeResponse: {
             /**
              * Id
              * @description Node identifier.
@@ -1139,23 +1264,16 @@ export interface components {
              * @description Node label.
              */
             label: string;
+            /** @description Canvas position. */
+            position: components["schemas"]["Position"];
+            /** @description Counts of upstream (source_node_id) and downstream (target_node_id) relations. */
+            relation_counts?: components["schemas"]["RelationCounts"];
             /**
              * Type
              * @description Node type describing its role in the tree.
              * @enum {string}
              */
             type: "parent" | "child";
-            /** @description Canvas position. */
-            position: components["schemas"]["Position"];
-            /**
-             * Highlight State
-             * @description Current highlight state for the node.
-             * @default none
-             * @enum {string}
-             */
-            highlight_state: "none" | "cause_candidate" | "effect_spanning";
-            /** @description Counts of upstream (source_node_id) and downstream (target_node_id) relations. */
-            relation_counts?: components["schemas"]["RelationCounts"];
         };
         /**
          * NodeUpdateRequest
@@ -1163,22 +1281,22 @@ export interface components {
          */
         NodeUpdateRequest: {
             /**
+             * Highlight State
+             * @description Updated highlight state.
+             */
+            highlight_state?: ("none" | "cause_candidate" | "effect_spanning") | null;
+            /**
              * Label
              * @description Updated node label.
              */
             label?: string | null;
+            /** @description Updated canvas position. */
+            position?: components["schemas"]["Position"] | null;
             /**
              * Type
              * @description Updated node type.
              */
             type?: ("parent" | "child") | null;
-            /** @description Updated canvas position. */
-            position?: components["schemas"]["Position"] | null;
-            /**
-             * Highlight State
-             * @description Updated highlight state.
-             */
-            highlight_state?: ("none" | "cause_candidate" | "effect_spanning") | null;
         };
         /**
          * Position
@@ -1198,40 +1316,40 @@ export interface components {
         };
         /** ProjectCreateRequest */
         ProjectCreateRequest: {
-            /** Name */
-            name: string;
             /** Color */
             color?: string | null;
+            /** Name */
+            name: string;
         };
         /** ProjectResponse */
         ProjectResponse: {
+            /** Color */
+            color?: string | null;
             /** Id */
             id: string;
             /** Name */
             name: string;
-            /** Color */
-            color?: string | null;
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "active" | "archived";
-            /** Revision */
-            revision: number;
             /**
              * Open Task Count
              * @default 0
              */
             open_task_count: number;
+            /** Revision */
+            revision: number;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "active" | "archived";
         };
         /** ProjectUpdateRequest */
         ProjectUpdateRequest: {
-            /** Name */
-            name?: string | null;
             /** Color */
             color?: string | null;
             /** Expected Revision */
             expected_revision: number;
+            /** Name */
+            name?: string | null;
         };
         /**
          * RelationCounts
@@ -1239,17 +1357,17 @@ export interface components {
          */
         RelationCounts: {
             /**
-             * Up Count
-             * @description Relations where this node is the source (source_node_id).
-             * @default 0
-             */
-            up_count: number;
-            /**
              * Down Count
              * @description Relations where this node is the target (target_node_id).
              * @default 0
              */
             down_count: number;
+            /**
+             * Up Count
+             * @description Relations where this node is the source (source_node_id).
+             * @default 0
+             */
+            up_count: number;
         };
         /**
          * RelationCreateRequest
@@ -1257,6 +1375,13 @@ export interface components {
          */
         RelationCreateRequest: {
             /**
+             * Kind
+             * @description Relation kind (only 'why' is supported).
+             * @default why
+             * @constant
+             */
+            kind: "why";
+            /**
              * Source Node Id
              * @description Cause node identifier (lower node).
              */
@@ -1266,13 +1391,6 @@ export interface components {
              * @description Effect node identifier (upper node).
              */
             target_node_id: string;
-            /**
-             * Kind
-             * @description Relation kind (only 'why' is supported).
-             * @default why
-             * @constant
-             */
-            kind: "why";
         };
         /**
          * RelationResponse
@@ -1280,10 +1398,23 @@ export interface components {
          */
         RelationResponse: {
             /**
+             * Created At
+             * Format: date-time
+             * @description Timestamp when the relation was created.
+             */
+            created_at: string;
+            /**
              * Id
              * @description Relation identifier.
              */
             id: string;
+            /**
+             * Kind
+             * @description Relation kind (only 'why' is supported).
+             * @default why
+             * @constant
+             */
+            kind: "why";
             /**
              * Source Node Id
              * @description Cause node identifier (lower node).
@@ -1294,25 +1425,17 @@ export interface components {
              * @description Effect node identifier (upper node).
              */
             target_node_id: string;
-            /**
-             * Kind
-             * @description Relation kind (only 'why' is supported).
-             * @default why
-             * @constant
-             */
-            kind: "why";
-            /**
-             * Created At
-             * Format: date-time
-             * @description Timestamp when the relation was created.
-             */
-            created_at: string;
         };
         /**
          * RelationUpdateRequest
          * @description Patch payload for updating a relation.
          */
         RelationUpdateRequest: {
+            /**
+             * Kind
+             * @description Updated relation kind.
+             */
+            kind?: "why" | null;
             /**
              * Source Node Id
              * @description Updated cause node identifier (lower node).
@@ -1323,17 +1446,17 @@ export interface components {
              * @description Updated effect node identifier (upper node).
              */
             target_node_id?: string | null;
-            /**
-             * Kind
-             * @description Updated relation kind.
-             */
-            kind?: "why" | null;
         };
         /**
          * SessionCredentialResponse
          * @description One-time mobile transport for an existing server-owned Session.
          */
         SessionCredentialResponse: {
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
             /**
              * Session Token
              * @description Opaque session credential.
@@ -1344,11 +1467,6 @@ export interface components {
              * @default Bearer
              */
             token_type: string;
-            /**
-             * Expires At
-             * Format: date-time
-             */
-            expires_at: string;
             user: components["schemas"]["MeResponse"];
         };
         /**
@@ -1363,15 +1481,15 @@ export interface components {
              */
             email: string;
             /**
-             * Password
-             * @description Password for the new account.
-             */
-            password: string;
-            /**
              * Invite Code
              * @description Invite code unlocking signup.
              */
             invite_code: string;
+            /**
+             * Password
+             * @description Password for the new account.
+             */
+            password: string;
         };
         /** SmartAddClassificationRef */
         SmartAddClassificationRef: {
@@ -1392,18 +1510,8 @@ export interface components {
          * @description Create a task and classify inline Smart Add refs atomically.
          */
         SmartAddTaskCreateRequest: {
-            /** Title */
-            title: string;
             /** Details */
             details?: string | null;
-            /**
-             * State
-             * @default inbox
-             * @enum {string}
-             */
-            state: "inbox" | "next" | "waiting" | "someday";
-            /** Waiting For */
-            waiting_for?: string | null;
             /** Due Date */
             due_date?: string | null;
             /**
@@ -1413,16 +1521,26 @@ export interface components {
              */
             priority: "none" | "low" | "medium" | "high";
             project?: components["schemas"]["SmartAddClassificationRef"] | null;
+            /**
+             * State
+             * @default inbox
+             * @enum {string}
+             */
+            state: "inbox" | "next" | "waiting" | "someday";
             /** Tags */
             tags?: components["schemas"]["SmartAddClassificationRef"][];
+            /** Title */
+            title: string;
+            /** Waiting For */
+            waiting_for?: string | null;
         };
         /** SmartAddTaskResponse */
         SmartAddTaskResponse: {
-            task: components["schemas"]["TaskResponse"];
+            created: components["schemas"]["SmartAddCreatedResponse"];
             project?: components["schemas"]["ProjectResponse"] | null;
             /** Tags */
             tags?: components["schemas"]["TagResponse"][];
-            created: components["schemas"]["SmartAddCreatedResponse"];
+            task: components["schemas"]["TaskResponse"];
         };
         /** TagCreateRequest */
         TagCreateRequest: {
@@ -1436,24 +1554,24 @@ export interface components {
             /** Name */
             name: string;
             /**
-             * State
-             * @enum {string}
-             */
-            state: "active" | "deleted";
-            /** Revision */
-            revision: number;
-            /**
              * Open Task Count
              * @default 0
              */
             open_task_count: number;
+            /** Revision */
+            revision: number;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "active" | "deleted";
         };
         /** TagUpdateRequest */
         TagUpdateRequest: {
-            /** Name */
-            name?: string | null;
             /** Expected Revision */
             expected_revision: number;
+            /** Name */
+            name?: string | null;
         };
         /** TaskCommentCreateRequest */
         TaskCommentCreateRequest: {
@@ -1462,12 +1580,10 @@ export interface components {
         };
         /** TaskCommentResponse */
         TaskCommentResponse: {
-            /** Id */
-            id: string;
-            /** Body */
-            body: string;
             /** Actor Id */
             actor_id: string;
+            /** Body */
+            body: string;
             /**
              * Created At
              * Format: date-time
@@ -1475,6 +1591,8 @@ export interface components {
             created_at: string;
             /** Edited At */
             edited_at?: string | null;
+            /** Id */
+            id: string;
             /** Revision */
             revision: number;
         };
@@ -1491,109 +1609,109 @@ export interface components {
             inbox: number;
             /** Next */
             next: number;
-            /** Waiting */
-            waiting: number;
             /** Someday */
             someday: number;
+            /** Waiting */
+            waiting: number;
         };
         /**
          * TaskCreateRequest
          * @description Create a task in one of the supported lists.
          */
         TaskCreateRequest: {
-            /** Title */
-            title: string;
             /** Details */
             details?: string | null;
+            /** Due Date */
+            due_date?: string | null;
+            /**
+             * Priority
+             * @default none
+             * @enum {string}
+             */
+            priority: "none" | "low" | "medium" | "high";
+            /** Project Id */
+            project_id?: string | null;
+            /** Source Capture Ids */
+            source_capture_ids?: string[];
             /**
              * State
              * @default inbox
              * @enum {string}
              */
             state: "inbox" | "next" | "waiting" | "someday";
-            /** Project Id */
-            project_id?: string | null;
             /** Tag Ids */
             tag_ids?: string[];
-            /** Due Date */
-            due_date?: string | null;
-            /**
-             * Priority
-             * @default none
-             * @enum {string}
-             */
-            priority: "none" | "low" | "medium" | "high";
+            /** Title */
+            title: string;
             /** Waiting For */
             waiting_for?: string | null;
-            /** Source Capture Ids */
-            source_capture_ids?: string[];
         };
         /** TaskListResponse */
         TaskListResponse: {
+            counts_by_state: components["schemas"]["TaskCounts"];
+            /** Has More */
+            has_more: boolean;
             /** Items */
             items?: components["schemas"]["TaskResponse"][];
             /** Next Cursor */
             next_cursor?: string | null;
-            /** Has More */
-            has_more: boolean;
-            counts_by_state: components["schemas"]["TaskCounts"];
         };
         /**
          * TaskResponse
          * @description Public task projection returned by task endpoints.
          */
         TaskResponse: {
-            /** Id */
-            id: string;
-            /** Title */
-            title: string;
+            /** Cancelled At */
+            cancelled_at?: string | null;
+            /** Comments */
+            comments?: components["schemas"]["TaskCommentResponse"][];
+            /** Completed At */
+            completed_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
             /** Details */
             details?: string | null;
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "inbox" | "next" | "waiting" | "someday" | "completed" | "cancelled";
-            /** Project Id */
-            project_id?: string | null;
-            /** Tag Ids */
-            tag_ids?: string[];
             /** Due Date */
             due_date?: string | null;
+            /** Id */
+            id: string;
+            /** Order Key */
+            order_key: number;
             /**
              * Priority
              * @default none
              * @enum {string}
              */
             priority: "none" | "low" | "medium" | "high";
-            /** Waiting For */
-            waiting_for?: string | null;
-            /** Waiting Since */
-            waiting_since?: string | null;
-            /** Order Key */
-            order_key: number;
+            /** Project Id */
+            project_id?: string | null;
+            /** Revision */
+            revision: number;
             /** Source Capture Ids */
             source_capture_ids?: string[];
             /**
-             * Created At
-             * Format: date-time
+             * State
+             * @enum {string}
              */
-            created_at: string;
+            state: "inbox" | "next" | "waiting" | "someday" | "completed" | "cancelled";
+            /** Subtasks */
+            subtasks?: components["schemas"]["TaskSubtaskResponse"][];
+            /** Tag Ids */
+            tag_ids?: string[];
+            /** Title */
+            title: string;
             /**
              * Updated At
              * Format: date-time
              */
             updated_at: string;
-            /** Completed At */
-            completed_at?: string | null;
-            /** Cancelled At */
-            cancelled_at?: string | null;
-            /** Revision */
-            revision: number;
-            /** Subtasks */
-            subtasks?: components["schemas"]["TaskSubtaskResponse"][];
-            /** Comments */
-            comments?: components["schemas"]["TaskCommentResponse"][];
+            /** Waiting For */
+            waiting_for?: string | null;
+            /** Waiting Since */
+            waiting_since?: string | null;
         };
         /** TaskSubtaskCreateRequest */
         TaskSubtaskCreateRequest: {
@@ -1604,17 +1722,17 @@ export interface components {
         TaskSubtaskResponse: {
             /** Id */
             id: string;
-            /** Title */
-            title: string;
+            /** Order Key */
+            order_key: number;
+            /** Revision */
+            revision: number;
             /**
              * State
              * @enum {string}
              */
             state: "open" | "completed" | "cancelled";
-            /** Order Key */
-            order_key: number;
-            /** Revision */
-            revision: number;
+            /** Title */
+            title: string;
         };
         /** TaskSubtaskTransitionRequest */
         TaskSubtaskTransitionRequest: {
@@ -1628,10 +1746,10 @@ export interface components {
         };
         /** TaskSubtaskUpdateRequest */
         TaskSubtaskUpdateRequest: {
-            /** Title */
-            title?: string | null;
             /** Expected Revision */
             expected_revision: number;
+            /** Title */
+            title?: string | null;
         };
         /** TaskTransitionRequest */
         TaskTransitionRequest: {
@@ -1640,54 +1758,54 @@ export interface components {
              * @enum {string}
              */
             action: "move" | "complete" | "reopen" | "cancel";
+            /** Expected Revision */
+            expected_revision: number;
             /** To State */
             to_state?: ("inbox" | "next" | "waiting" | "someday") | null;
             /** Waiting For */
             waiting_for?: string | null;
-            /** Expected Revision */
-            expected_revision: number;
         };
         /** TaskUpdateRequest */
         TaskUpdateRequest: {
-            /** Title */
-            title?: string | null;
             /** Details */
             details?: string | null;
+            /** Due Date */
+            due_date?: string | null;
+            /** Expected Revision */
+            expected_revision: number;
+            /** Priority */
+            priority?: ("none" | "low" | "medium" | "high") | null;
             /** Project Id */
             project_id?: string | null;
             /** Tag Ids */
             tag_ids?: string[] | null;
-            /** Due Date */
-            due_date?: string | null;
-            /** Priority */
-            priority?: ("none" | "low" | "medium" | "high") | null;
+            /** Title */
+            title?: string | null;
             /** Waiting For */
             waiting_for?: string | null;
-            /** Expected Revision */
-            expected_revision: number;
         };
         /**
          * TreeCreateRequest
          * @description Payload for creating a new tree.
          */
         TreeCreateRequest: {
+            /** @description Optional metadata overrides. */
+            metadata?: components["schemas"]["TreeMetadata"] | null;
             /**
              * Name
              * @description Name for the tree.
              */
             name: string;
             /**
-             * Owner Id
-             * @description Optional owner identifier.
-             */
-            owner_id?: string | null;
-            /** @description Optional metadata overrides. */
-            metadata?: components["schemas"]["TreeMetadata"] | null;
-            /**
              * Nodes
              * @description Optional starting nodes.
              */
             nodes?: components["schemas"]["NodeResponse"][];
+            /**
+             * Owner Id
+             * @description Optional owner identifier.
+             */
+            owner_id?: string | null;
             /**
              * Relations
              * @description Optional starting relations.
@@ -1704,28 +1822,28 @@ export interface components {
              * @description Tree identifier.
              */
             id: string;
+            /** @description Metadata describing the tree payload. */
+            metadata: components["schemas"]["TreeMetadata"];
             /**
              * Name
              * @description Tree name.
              */
             name: string;
-            /** @description Metadata describing the tree payload. */
-            metadata: components["schemas"]["TreeMetadata"];
             /**
              * Nodes
              * @description Collection of nodes for this tree.
              */
             nodes?: components["schemas"]["NodeResponse"][];
             /**
-             * Relations
-             * @description Collection of relations for this tree.
-             */
-            relations?: components["schemas"]["RelationResponse"][];
-            /**
              * Owner Id
              * @description Optional owner identifier.
              */
             owner_id?: string | null;
+            /**
+             * Relations
+             * @description Collection of relations for this tree.
+             */
+            relations?: components["schemas"]["RelationResponse"][];
         };
         /**
          * TreeDetailResponse
@@ -1737,28 +1855,28 @@ export interface components {
              * @description Tree identifier.
              */
             id: string;
+            /** @description Metadata describing the tree payload. */
+            metadata: components["schemas"]["TreeMetadata"];
             /**
              * Name
              * @description Tree name.
              */
             name: string;
-            /** @description Metadata describing the tree payload. */
-            metadata: components["schemas"]["TreeMetadata"];
             /**
              * Nodes
              * @description Collection of nodes for this tree.
              */
             nodes?: components["schemas"]["NodeResponse"][];
             /**
-             * Relations
-             * @description Collection of relations for this tree.
-             */
-            relations?: components["schemas"]["RelationResponse"][];
-            /**
              * Owner Id
              * @description Optional owner identifier.
              */
             owner_id?: string | null;
+            /**
+             * Relations
+             * @description Collection of relations for this tree.
+             */
+            relations?: components["schemas"]["RelationResponse"][];
         };
         /**
          * TreeExportResponse
@@ -1792,16 +1910,16 @@ export interface components {
              */
             name: string;
             /**
+             * Owner Id
+             * @description Optional owner identifier.
+             */
+            owner_id?: string | null;
+            /**
              * Updated At
              * Format: date-time
              * @description Timestamp of most recent modification.
              */
             updated_at: string;
-            /**
-             * Owner Id
-             * @description Optional owner identifier.
-             */
-            owner_id?: string | null;
         };
         /**
          * TreeMetadata
@@ -1809,23 +1927,11 @@ export interface components {
          */
         TreeMetadata: {
             /**
-             * Version
-             * @description Schema version for the tree payload.
-             * @default 1
-             */
-            version: number;
-            /**
              * Created At
              * Format: date-time
              * @description Timestamp when the tree was created.
              */
             created_at: string;
-            /**
-             * Updated At
-             * Format: date-time
-             * @description Timestamp when the tree was last updated.
-             */
-            updated_at: string;
             /**
              * Layout
              * @description Optional layout or viewport metadata.
@@ -1838,34 +1944,46 @@ export interface components {
              * @description Optional identifier for the owning user/session.
              */
             owner_id?: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             * @description Timestamp when the tree was last updated.
+             */
+            updated_at: string;
+            /**
+             * Version
+             * @description Schema version for the tree payload.
+             * @default 1
+             */
+            version: number;
         };
         /**
          * TreeUpdateRequest
          * @description Payload for replacing a tree's state.
          */
         TreeUpdateRequest: {
+            /** @description Updated metadata block for the tree. */
+            metadata: components["schemas"]["TreeMetadata"];
             /**
              * Name
              * @description Updated tree name.
              */
             name: string;
-            /** @description Updated metadata block for the tree. */
-            metadata: components["schemas"]["TreeMetadata"];
             /**
              * Nodes
              * @description Updated nodes.
              */
             nodes?: components["schemas"]["NodeResponse"][];
             /**
-             * Relations
-             * @description Updated relations.
-             */
-            relations?: components["schemas"]["RelationResponse"][];
-            /**
              * Owner Id
              * @description Updated owner identifier.
              */
             owner_id?: string | null;
+            /**
+             * Relations
+             * @description Updated relations.
+             */
+            relations?: components["schemas"]["RelationResponse"][];
         };
         /**
          * ValidationHistoryResponse
@@ -1884,23 +2002,34 @@ export interface components {
          */
         ValidationRequest: {
             /**
-             * Provider
-             * @description Preferred provider identifier to execute validation.
-             */
-            provider?: string | null;
-            /**
              * Prompt Overrides
              * @description Overrides forwarded to provider prompt template.
              */
             prompt_overrides?: {
                 [key: string]: unknown;
             } | null;
+            /**
+             * Provider
+             * @description Preferred provider identifier to execute validation.
+             */
+            provider?: string | null;
         };
         /**
          * ValidationResponse
          * @description Response payload returned after validation completes.
          */
         ValidationResponse: {
+            /**
+             * Checked At
+             * Format: date-time
+             * @description Timestamp when validation ran.
+             */
+            checked_at: string;
+            /**
+             * Confidence
+             * @description Confidence score from provider.
+             */
+            confidence: number;
             /**
              * Node Id
              * @description Identifier of the validated node.
@@ -1912,21 +2041,10 @@ export interface components {
              */
             provider: string;
             /**
-             * Confidence
-             * @description Confidence score from provider.
-             */
-            confidence: number;
-            /**
              * Summary
              * @description Brief summary returned by provider.
              */
             summary: string;
-            /**
-             * Checked At
-             * Format: date-time
-             * @description Timestamp when validation ran.
-             */
-            checked_at: string;
         };
         /**
          * VersionCreateRequest
@@ -1934,15 +2052,15 @@ export interface components {
          */
         VersionCreateRequest: {
             /**
-             * Label
-             * @description Optional label for the snapshot.
-             */
-            label?: string | null;
-            /**
              * Author
              * @description Optional author metadata for the snapshot.
              */
             author?: string | null;
+            /**
+             * Label
+             * @description Optional label for the snapshot.
+             */
+            label?: string | null;
             /**
              * Notes
              * @description Optional notes providing context for the snapshot.
@@ -1960,36 +2078,55 @@ export interface components {
              */
             nodes_added: number;
             /**
-             * Nodes Removed
-             * @description Number of nodes removed since the previous snapshot.
-             */
-            nodes_removed: number;
-            /**
              * Nodes Modified
              * @description Number of nodes with structural updates since the previous snapshot.
              */
             nodes_modified: number;
+            /**
+             * Nodes Removed
+             * @description Number of nodes removed since the previous snapshot.
+             */
+            nodes_removed: number;
             /**
              * Relations Added
              * @description Number of relations added since the previous snapshot.
              */
             relations_added: number;
             /**
-             * Relations Removed
-             * @description Number of relations removed since the previous snapshot.
-             */
-            relations_removed: number;
-            /**
              * Relations Modified
              * @description Number of relations whose endpoints or metadata changed.
              */
             relations_modified: number;
+            /**
+             * Relations Removed
+             * @description Number of relations removed since the previous snapshot.
+             */
+            relations_removed: number;
         };
         /**
          * VersionListItem
          * @description List response item describing a version snapshot.
          */
         VersionListItem: {
+            /**
+             * Author
+             * @description Recorded author for the snapshot.
+             */
+            author?: string | null;
+            /**
+             * Conflict Count
+             * @description Number of conflicts detected for the snapshot.
+             * @default 0
+             */
+            conflict_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             * @description Timestamp when the version was created.
+             */
+            created_at: string;
+            /** @description Summary of changes compared to the previous snapshot. */
+            diff_summary?: components["schemas"]["VersionDiffSummary"] | null;
             /**
              * Id
              * @description Version identifier.
@@ -2001,29 +2138,10 @@ export interface components {
              */
             label: string;
             /**
-             * Created At
-             * Format: date-time
-             * @description Timestamp when the version was created.
-             */
-            created_at: string;
-            /**
-             * Author
-             * @description Recorded author for the snapshot.
-             */
-            author?: string | null;
-            /**
              * Notes
              * @description Optional notes attached to the snapshot.
              */
             notes?: string | null;
-            /** @description Summary of changes compared to the previous snapshot. */
-            diff_summary?: components["schemas"]["VersionDiffSummary"] | null;
-            /**
-             * Conflict Count
-             * @description Number of conflicts detected for the snapshot.
-             * @default 0
-             */
-            conflict_count: number;
         };
     };
     responses: never;
@@ -2034,57 +2152,6 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    signup_api_auth_signup_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SignupRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MeResponse"];
-                };
-            };
-            /** @description The command violates a domain invariant. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request conflicts with the current resource state. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request path, query, or body does not match the API schema. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
     login_api_auth_login_post: {
         parameters: {
             query?: never;
@@ -2105,57 +2172,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MeResponse"];
-                };
-            };
-            /** @description Authentication is required or the session is invalid. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request path, query, or body does not match the API schema. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Too many requests were made within the configured limit. */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    create_mobile_session_api_auth_mobile_sessions_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LoginRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SessionCredentialResponse"];
                 };
             };
             /** @description Authentication is required or the session is invalid. */
@@ -2243,45 +2259,7 @@ export interface operations {
             };
         };
     };
-    list_trees_api_trees_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TreeListItem"][];
-                };
-            };
-            /** @description Authentication is required or the session is invalid. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request path, query, or body does not match the API schema. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    create_tree_api_trees_post: {
+    create_mobile_session_api_auth_mobile_sessions_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -2290,7 +2268,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TreeCreateRequest"];
+                "application/json": components["schemas"]["LoginRequest"];
             };
         };
         responses: {
@@ -2300,16 +2278,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TreeDetailResponse-Output"];
-                };
-            };
-            /** @description The command violates a domain invariant. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["SessionCredentialResponse"];
                 };
             };
             /** @description Authentication is required or the session is invalid. */
@@ -2330,30 +2299,8 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-        };
-    };
-    get_tree_api_trees__tree_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tree_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TreeDetailResponse-Output"];
-                };
-            };
-            /** @description Authentication is required or the session is invalid. */
-            401: {
+            /** @description Too many requests were made within the configured limit. */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2361,17 +2308,8 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The requested resource is absent or belongs to another owner. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request path, query, or body does not match the API schema. */
-            422: {
+            /** @description The persistence layer is temporarily unavailable. */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2381,50 +2319,30 @@ export interface operations {
             };
         };
     };
-    update_tree_api_trees__tree_id__put: {
+    signup_api_auth_signup_post: {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                tree_id: string;
-            };
+            path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TreeUpdateRequest"];
+                "application/json": components["schemas"]["SignupRequest"];
             };
         };
         responses: {
             /** @description Successful Response */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TreeDetailResponse-Output"];
+                    "application/json": components["schemas"]["MeResponse"];
                 };
             };
             /** @description The command violates a domain invariant. */
             400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Authentication is required or the session is invalid. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The requested resource is absent or belongs to another owner. */
-            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2450,860 +2368,8 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-        };
-    };
-    delete_tree_api_trees__tree_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tree_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Authentication is required or the session is invalid. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The requested resource is absent or belongs to another owner. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request path, query, or body does not match the API schema. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    import_tree_api_trees_import_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TreeImportRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TreeDetailResponse-Output"];
-                };
-            };
-            /** @description The command violates a domain invariant. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Authentication is required or the session is invalid. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request path, query, or body does not match the API schema. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    export_tree_api_trees__tree_id__export_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tree_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TreeExportResponse"];
-                };
-            };
-            /** @description Authentication is required or the session is invalid. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The requested resource is absent or belongs to another owner. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request path, query, or body does not match the API schema. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    ai_feedback_api_trees__tree_id__ai_feedback_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tree_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AiFeedbackRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AiFeedbackResponse"];
-                };
-            };
-            /** @description The command violates a domain invariant. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Authentication is required or the session is invalid. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The requested resource is absent or belongs to another owner. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request path, query, or body does not match the API schema. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    create_node_api_trees__tree_id__nodes_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tree_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["NodeCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["NodeResponse"];
-                };
-            };
-            /** @description Authentication is required or the session is invalid. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The requested resource is absent or belongs to another owner. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request path, query, or body does not match the API schema. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    delete_node_api_trees__tree_id__nodes__node_id__delete: {
-        parameters: {
-            query?: {
-                cascade?: boolean;
-            };
-            header?: never;
-            path: {
-                tree_id: string;
-                node_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description The command violates a domain invariant. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Authentication is required or the session is invalid. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The requested resource is absent or belongs to another owner. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request path, query, or body does not match the API schema. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    update_node_api_trees__tree_id__nodes__node_id__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tree_id: string;
-                node_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["NodeUpdateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["NodeResponse"];
-                };
-            };
-            /** @description Authentication is required or the session is invalid. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The requested resource is absent or belongs to another owner. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request path, query, or body does not match the API schema. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    create_relation_api_trees__tree_id__relations_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tree_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RelationCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RelationResponse"];
-                };
-            };
-            /** @description The command violates a domain invariant. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Authentication is required or the session is invalid. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The requested resource is absent or belongs to another owner. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request path, query, or body does not match the API schema. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    delete_relation_api_trees__tree_id__relations__relation_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tree_id: string;
-                relation_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Authentication is required or the session is invalid. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The requested resource is absent or belongs to another owner. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request path, query, or body does not match the API schema. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    update_relation_api_trees__tree_id__relations__relation_id__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tree_id: string;
-                relation_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RelationUpdateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RelationResponse"];
-                };
-            };
-            /** @description The command violates a domain invariant. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Authentication is required or the session is invalid. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The requested resource is absent or belongs to another owner. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request path, query, or body does not match the API schema. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    list_versions_api_trees__tree_id__versions_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tree_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VersionListItem"][];
-                };
-            };
-            /** @description Authentication is required or the session is invalid. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The requested resource is absent or belongs to another owner. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request path, query, or body does not match the API schema. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    create_version_api_trees__tree_id__versions_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tree_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["VersionCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VersionListItem"];
-                };
-            };
-            /** @description Authentication is required or the session is invalid. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The requested resource is absent or belongs to another owner. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request path, query, or body does not match the API schema. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    restore_version_api_trees__tree_id__versions__version_id__restore_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tree_id: string;
-                version_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TreeDetailResponse-Output"];
-                };
-            };
-            /** @description Authentication is required or the session is invalid. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The requested resource is absent or belongs to another owner. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request path, query, or body does not match the API schema. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    delete_version_api_trees__tree_id__versions__version_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tree_id: string;
-                version_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Authentication is required or the session is invalid. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The requested resource is absent or belongs to another owner. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request path, query, or body does not match the API schema. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    validate_node_api_trees__tree_id__validate__node_id__post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tree_id: string;
-                node_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ValidationRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ValidationResponse"];
-                };
-            };
-            /** @description The command violates a domain invariant. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Authentication is required or the session is invalid. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The requested resource is absent or belongs to another owner. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request path, query, or body does not match the API schema. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    get_validation_history_api_trees__tree_id__nodes__node_id__validation_history_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tree_id: string;
-                node_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ValidationHistoryResponse"];
-                };
-            };
-            /** @description Authentication is required or the session is invalid. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The requested resource is absent or belongs to another owner. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request path, query, or body does not match the API schema. */
-            422: {
+            /** @description The persistence layer is temporarily unavailable. */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3424,22 +2490,19 @@ export interface operations {
             };
         };
     };
-    append_brain_dump_transcript_api_brain_dump_operations__operation_id__transcript_post: {
+    upload_brain_dump_audio_chunk_api_brain_dump_operations__operation_id__audio__chunk_number__put: {
         parameters: {
             query?: never;
             header?: {
-                "Idempotency-Key"?: string | null;
+                "X-Content-SHA256"?: string | null;
             };
             path: {
                 operation_id: string;
+                chunk_number: number;
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BrainDumpTranscriptAppendRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -3497,19 +2560,23 @@ export interface operations {
             };
         };
     };
-    upload_brain_dump_audio_chunk_api_brain_dump_operations__operation_id__audio__chunk_number__put: {
+    update_brain_dump_proposal_api_brain_dump_operations__operation_id__proposals__proposal_id__patch: {
         parameters: {
             query?: never;
             header?: {
-                "X-Content-SHA256"?: string | null;
+                "Idempotency-Key"?: string | null;
             };
             path: {
                 operation_id: string;
-                chunk_number: number;
+                proposal_id: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BrainDumpProposalUpdateRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -3640,7 +2707,7 @@ export interface operations {
             };
         };
     };
-    update_brain_dump_proposal_api_brain_dump_operations__operation_id__proposals__proposal_id__patch: {
+    append_brain_dump_transcript_api_brain_dump_operations__operation_id__transcript_post: {
         parameters: {
             query?: never;
             header?: {
@@ -3648,13 +2715,12 @@ export interface operations {
             };
             path: {
                 operation_id: string;
-                proposal_id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["BrainDumpProposalUpdateRequest"];
+                "application/json": components["schemas"]["BrainDumpTranscriptAppendRequest"];
             };
         };
         responses: {
@@ -4358,6 +3424,148 @@ export interface operations {
             };
         };
     };
+    list_tasks_api_tasks_get: {
+        parameters: {
+            query?: {
+                state?: ("inbox" | "next" | "waiting" | "someday" | "completed" | "cancelled") | null;
+                project_id?: string | null;
+                tag_id?: string | null;
+                unassigned_project?: boolean;
+                include_completed?: boolean;
+                include_cancelled?: boolean;
+                q?: string | null;
+                priority?: ("none" | "low" | "medium" | "high")[] | null;
+                due_before?: string | null;
+                due_on?: string | null;
+                due_after?: string | null;
+                sort?: "manual" | "due" | "priority" | "title";
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskListResponse"];
+                };
+            };
+            /** @description The command violates a domain invariant. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested resource is absent or belongs to another owner. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_task_api_tasks_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskResponse"];
+                };
+            };
+            /** @description The command violates a domain invariant. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested resource is absent or belongs to another owner. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request conflicts with the current resource state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     smart_add_task_api_tasks_smart_add_post: {
         parameters: {
             query?: never;
@@ -4502,6 +3710,153 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskResponse"];
+                };
+            };
+            /** @description The command violates a domain invariant. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested resource is absent or belongs to another owner. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request conflicts with the current resource state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_comment_api_tasks__task_id__comments_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskCommentCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskCommentResponse"];
+                };
+            };
+            /** @description The command violates a domain invariant. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested resource is absent or belongs to another owner. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request conflicts with the current resource state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_comment_api_tasks__task_id__comments__comment_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                task_id: string;
+                comment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskCommentUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskCommentResponse"];
                 };
             };
             /** @description The command violates a domain invariant. */
@@ -4772,153 +4127,6 @@ export interface operations {
             };
         };
     };
-    create_comment_api_tasks__task_id__comments_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "Idempotency-Key"?: string | null;
-            };
-            path: {
-                task_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TaskCommentCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TaskCommentResponse"];
-                };
-            };
-            /** @description The command violates a domain invariant. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Authentication is required or the session is invalid. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The requested resource is absent or belongs to another owner. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request conflicts with the current resource state. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request path, query, or body does not match the API schema. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    update_comment_api_tasks__task_id__comments__comment_id__patch: {
-        parameters: {
-            query?: never;
-            header?: {
-                "Idempotency-Key"?: string | null;
-            };
-            path: {
-                task_id: string;
-                comment_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TaskCommentUpdateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TaskCommentResponse"];
-                };
-            };
-            /** @description The command violates a domain invariant. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Authentication is required or the session is invalid. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The requested resource is absent or belongs to another owner. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request conflicts with the current resource state. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request path, query, or body does not match the API schema. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
     transition_task_api_tasks__task_id__transitions_post: {
         parameters: {
             query?: never;
@@ -4992,24 +4200,9 @@ export interface operations {
             };
         };
     };
-    list_tasks_api_tasks_get: {
+    list_trees_api_trees_get: {
         parameters: {
-            query?: {
-                state?: ("inbox" | "next" | "waiting" | "someday" | "completed" | "cancelled") | null;
-                project_id?: string | null;
-                tag_id?: string | null;
-                unassigned_project?: boolean;
-                include_completed?: boolean;
-                include_cancelled?: boolean;
-                q?: string | null;
-                priority?: ("none" | "low" | "medium" | "high")[] | null;
-                due_before?: string | null;
-                due_on?: string | null;
-                due_after?: string | null;
-                sort?: "manual" | "due" | "priority" | "title";
-                cursor?: string | null;
-                limit?: number;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -5022,7 +4215,320 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TaskListResponse"];
+                    "application/json": components["schemas"]["TreeListItem"][];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_tree_api_trees_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TreeCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TreeDetailResponse-Output"];
+                };
+            };
+            /** @description The command violates a domain invariant. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    import_tree_api_trees_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TreeImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TreeDetailResponse-Output"];
+                };
+            };
+            /** @description The command violates a domain invariant. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_tree_api_trees__tree_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tree_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TreeDetailResponse-Output"];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested resource is absent or belongs to another owner. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_tree_api_trees__tree_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tree_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TreeUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TreeDetailResponse-Output"];
+                };
+            };
+            /** @description The command violates a domain invariant. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested resource is absent or belongs to another owner. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request conflicts with the current resource state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_tree_api_trees__tree_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tree_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested resource is absent or belongs to another owner. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    ai_feedback_api_trees__tree_id__ai_feedback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tree_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiFeedbackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiFeedbackResponse"];
                 };
             };
             /** @description The command violates a domain invariant. */
@@ -5063,18 +4569,67 @@ export interface operations {
             };
         };
     };
-    create_task_api_tasks_post: {
+    export_tree_api_trees__tree_id__export_post: {
         parameters: {
             query?: never;
-            header?: {
-                "Idempotency-Key"?: string | null;
+            header?: never;
+            path: {
+                tree_id: string;
             };
-            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TreeExportResponse"];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested resource is absent or belongs to another owner. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_node_api_trees__tree_id__nodes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tree_id: string;
+            };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TaskCreateRequest"];
+                "application/json": components["schemas"]["NodeCreateRequest"];
             };
         };
         responses: {
@@ -5084,7 +4639,223 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TaskResponse"];
+                    "application/json": components["schemas"]["NodeResponse"];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested resource is absent or belongs to another owner. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_node_api_trees__tree_id__nodes__node_id__delete: {
+        parameters: {
+            query?: {
+                cascade?: boolean;
+            };
+            header?: never;
+            path: {
+                tree_id: string;
+                node_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The command violates a domain invariant. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested resource is absent or belongs to another owner. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_node_api_trees__tree_id__nodes__node_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tree_id: string;
+                node_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NodeUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeResponse"];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested resource is absent or belongs to another owner. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_validation_history_api_trees__tree_id__nodes__node_id__validation_history_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tree_id: string;
+                node_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationHistoryResponse"];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested resource is absent or belongs to another owner. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_relation_api_trees__tree_id__relations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tree_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RelationCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RelationResponse"];
                 };
             };
             /** @description The command violates a domain invariant. */
@@ -5114,8 +4885,373 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The request conflicts with the current resource state. */
-            409: {
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_relation_api_trees__tree_id__relations__relation_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tree_id: string;
+                relation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested resource is absent or belongs to another owner. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_relation_api_trees__tree_id__relations__relation_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tree_id: string;
+                relation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RelationUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RelationResponse"];
+                };
+            };
+            /** @description The command violates a domain invariant. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested resource is absent or belongs to another owner. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    validate_node_api_trees__tree_id__validate__node_id__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tree_id: string;
+                node_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ValidationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationResponse"];
+                };
+            };
+            /** @description The command violates a domain invariant. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested resource is absent or belongs to another owner. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_versions_api_trees__tree_id__versions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tree_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionListItem"][];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested resource is absent or belongs to another owner. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_version_api_trees__tree_id__versions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tree_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VersionCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionListItem"];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested resource is absent or belongs to another owner. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_version_api_trees__tree_id__versions__version_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tree_id: string;
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested resource is absent or belongs to another owner. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request path, query, or body does not match the API schema. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    restore_version_api_trees__tree_id__versions__version_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tree_id: string;
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TreeDetailResponse-Output"];
+                };
+            };
+            /** @description Authentication is required or the session is invalid. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The requested resource is absent or belongs to another owner. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -30,17 +30,27 @@ export class MobileApiClient {
 
   async me(): Promise<User> { return this.request<User>("/auth/me"); }
   async tasks(state: Exclude<TaskState, "completed" | "cancelled">, cursor?: string): Promise<TaskList> {
-    const query = new URLSearchParams({ state, ...(cursor ? { cursor } : {}) });
+    // The canonical Inbox projection is state=inbox AND project_id IS NULL (docs/projectless-inbox-contract.md).
+    // Every other state query is a raw lifecycle-state list and must not carry unassigned_project.
+    const query = new URLSearchParams({
+      state,
+      ...(state === "inbox" ? { unassigned_project: "true" } : {}),
+      ...(cursor ? { cursor } : {}),
+    });
     return this.request<TaskList>(`/tasks?${query.toString()}`);
   }
   async task(taskId: string): Promise<Task> { return this.request<Task>(`/tasks/${encodeURIComponent(taskId)}`); }
-  async createTask(body: CreateTaskInput): Promise<Task> {
-    return this.request<Task>("/tasks", { method: "POST", body, idempotencyKey: crypto.randomUUID() });
+  async createTask(body: CreateTaskInput, idempotencyKey: string): Promise<Task> {
+    return this.request<Task>("/tasks", { method: "POST", body, idempotencyKey });
   }
   async projects(): Promise<Project[]> { return this.request<Project[]>("/projects"); }
   async tags(): Promise<Tag[]> { return this.request<Tag[]>("/tags"); }
-  async transition(taskId: string, body: { action: "complete" | "reopen"; expected_revision: number; to_state?: "inbox" | "next" | "waiting" | "someday" }): Promise<Task> {
-    return this.request<Task>(`/tasks/${encodeURIComponent(taskId)}/transitions`, { method: "POST", body, idempotencyKey: crypto.randomUUID() });
+  async transition(
+    taskId: string,
+    body: { action: "complete" | "reopen"; expected_revision: number; to_state?: "inbox" | "next" | "waiting" | "someday" },
+    idempotencyKey: string,
+  ): Promise<Task> {
+    return this.request<Task>(`/tasks/${encodeURIComponent(taskId)}/transitions`, { method: "POST", body, idempotencyKey });
   }
   async logout(token?: string): Promise<void> { await this.request<void>("/auth/logout", { method: "POST", token }); }
 

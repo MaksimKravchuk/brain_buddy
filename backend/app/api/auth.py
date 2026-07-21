@@ -57,7 +57,7 @@ def _clear_session_cookie(response: Response, config: AppConfig) -> None:
     "/signup",
     response_model=MeResponse,
     status_code=status.HTTP_201_CREATED,
-    responses=error_responses(400, 409, 422),
+    responses=error_responses(400, 409, 422, 503),
 )
 def signup(
     payload: SignupRequest,
@@ -86,7 +86,7 @@ def signup(
 
 
 @router.post(
-    "/login", response_model=MeResponse, responses=error_responses(401, 422, 429)
+    "/login", response_model=MeResponse, responses=error_responses(401, 422, 429, 503)
 )
 def login(
     payload: LoginRequest,

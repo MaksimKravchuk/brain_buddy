@@ -7,9 +7,11 @@ replayed back as a valid cookie.
 
 from __future__ import annotations
 
-from contextlib import suppress
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
+from app.exceptions import StorageUnavailableError
 from app.schemas.auth import Session
 from app.utils.file_ops import ensure_directory
 from app.utils.time import utcnow
@@ -17,6 +19,24 @@ from app.utils.time import utcnow
 from .base import BaseRepository
 
 SESSIONS_DIRNAME = "sessions"
+
+
+@contextmanager
+def _file_guard() -> Iterator[None]:
+    """Translate raw filesystem failures into the app's domain exceptions.
+
+    Mirrors the sqlite guard used by the SQLite-backed repositories: an
+    ``OSError`` here (disk full, permission denied, unavailable mount) is a
+    transient persistence outage, not a bug, so mobile/browser session
+    creation can surface a correlated 503 instead of an opaque 500.
+    """
+
+    try:
+        yield
+    except OSError as exc:
+        raise StorageUnavailableError(
+            "Session storage is temporarily unavailable; retry the request."
+        ) from exc
 
 
 class SessionRepository(BaseRepository):
@@ -30,7 +50,8 @@ class SessionRepository(BaseRepository):
         return self.sessions_dir / f"{token_hash}.json"
 
     def create(self, session: Session) -> None:
-        self.dump_model(self._session_path(session.token_hash), session)
+        with _file_guard():
+            self.dump_model(self._session_path(session.token_hash), session)
 
     def get(self, token_hash: str) -> Session | None:
         """Return the session if valid, deleting it lazily if expired."""
@@ -38,7 +59,8 @@ class SessionRepository(BaseRepository):
         path = self._session_path(token_hash)
         if not path.exists():
             return None
-        session = self.load_model(path, Session)
+        with _file_guard():
+            session = self.load_model(path, Session)
         if session.expires_at <= utcnow():
             # Expired — clean up and behave as if missing.
             with suppress(FileNotFoundError):  # pragma: no cover - race
@@ -48,5 +70,5 @@ class SessionRepository(BaseRepository):
 
     def delete(self, token_hash: str) -> None:
         path = self._session_path(token_hash)
-        with suppress(FileNotFoundError):
+        with _file_guard(), suppress(FileNotFoundError):
             path.unlink()

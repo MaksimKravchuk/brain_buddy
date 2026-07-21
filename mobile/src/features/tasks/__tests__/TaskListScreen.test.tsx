@@ -33,7 +33,9 @@ function makeTask(id: string, overrides: Partial<Task> = {}): Task {
 
 async function renderScreen(state: "inbox" | "next" | "waiting" | "someday", api: Record<string, unknown>) {
   mockUseAuth.mockReturnValue({ api, signOut: jest.fn() });
-  const client = new QueryClient({ defaultOptions: { queries: { gcTime: 0, retry: false } } });
+  const client = new QueryClient({
+    defaultOptions: { queries: { gcTime: 0, retry: false }, mutations: { gcTime: 0, retry: false } },
+  });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
@@ -57,7 +59,41 @@ describe("TaskListScreen quick capture", () => {
           await fireEvent.press(screen.getByLabelText("Add task"));
 
           await waitFor(() => expect(createTask).toHaveBeenCalledTimes(1));
-          expect(createTask).toHaveBeenCalledWith({ title: "Call the plumber", state: "inbox" });
+          expect(createTask).toHaveBeenCalledWith(
+            { title: "Call the plumber", state: "inbox" },
+            expect.any(String),
+          );
+        },
+      );
+    },
+  );
+
+  it(
+    mobileAllure.tasks("a failed capture shows a recoverable error and retries with the same command key").title,
+    async () => {
+      await withAllure(
+        mobileAllure.tasks("a failed capture shows a recoverable error and retries with the same command key"),
+        async () => {
+          const emptyPage: TaskList = { items: [], next_cursor: null, has_more: false, counts_by_state: counts };
+          const createTask = jest.fn()
+            .mockRejectedValueOnce(new Error("temporary failure"))
+            .mockResolvedValueOnce(makeTask("t1", { state: "inbox" }));
+          const api = { tasks: jest.fn().mockResolvedValue(emptyPage), createTask };
+          const screen = await renderScreen("inbox", api);
+
+          await fireEvent.changeText(screen.getByLabelText("Capture a task"), "Call the plumber");
+          await fireEvent.press(screen.getByLabelText("Add task"));
+
+          await waitFor(() => expect(screen.getByText("Task capture failed.")).toBeTruthy());
+          expect(screen.getByLabelText("Capture a task").props.value).toBe("Call the plumber");
+
+          await fireEvent.press(screen.getByLabelText("Retry capture"));
+
+          await waitFor(() => expect(createTask).toHaveBeenCalledTimes(2));
+          const [firstBody, firstKey] = createTask.mock.calls[0];
+          const [secondBody, secondKey] = createTask.mock.calls[1];
+          expect(secondKey).toBe(firstKey);
+          expect(secondBody).toEqual(firstBody);
         },
       );
     },
