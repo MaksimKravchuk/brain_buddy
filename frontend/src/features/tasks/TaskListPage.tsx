@@ -30,6 +30,7 @@ const dateViewLabels = {
 const emptyCounts: TaskCounts = { inbox: 0, next: 0, waiting: 0, someday: 0 };
 const emptyProjects: ProjectResponse[] = [];
 const emptyTags: TagResponse[] = [];
+const emptyTasks: TaskResponse[] = [];
 const openStateOptions: OpenTaskState[] = ["inbox", "next", "waiting", "someday"];
 
 function idempotencyKey(action: string): string {
@@ -136,11 +137,14 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   // from the DOM (e.g. completing a task filters it out of "Next actions"),
   // focus drops to document.body and the rescue effect redirects it to a
   // genuinely useful, visible target instead.
-  const pendingListFocusRescueRef = useRef(false);
+  // Record the mutated row's identity and revision. Detail, paged-list, and
+  // grouped all-pages refetches can settle in any order; only the active list
+  // projection can prove that this row mutation has reached the DOM.
+  const pendingListFocusRescueRef = useRef<{ taskId: string; revision: number } | null>(null);
   const listHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const previousTaskIdRef = useRef<string | undefined>(undefined);
-  const requestListFocusRescue = useCallback(() => {
-    pendingListFocusRescueRef.current = true;
+  const requestListFocusRescue = useCallback((task: TaskResponse) => {
+    pendingListFocusRescueRef.current = { taskId: task.id, revision: task.revision };
   }, []);
   const registerRowLink = (rowTaskId: string, el: HTMLAnchorElement | null) => {
     if (el) {
@@ -195,7 +199,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const clearPendingDetailFocus = useCallback(() => {
     pendingDetailFocusKeyRef.current = null;
     pendingDetailFocusRef.current = null;
-    pendingListFocusRescueRef.current = false;
+    pendingListFocusRescueRef.current = null;
   }, []);
 
   const sort = parseTaskSort(searchParams.get("sort"));
@@ -245,11 +249,14 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
 
   const projects = projectsQuery.data ?? emptyProjects;
   const tags = tagsQuery.data ?? emptyTags;
-  const tasks = taskQuery.data?.items ?? [];
+  const tasks = taskQuery.data?.items ?? emptyTasks;
   const counts = groupByProject
     ? allTasksQuery.data?.counts_by_state ?? emptyCounts
     : taskQuery.data?.counts_by_state ?? emptyCounts;
-  const activeProjectionTasks = groupByProject ? allTasksQuery.data?.items ?? [] : tasks;
+  const activeProjectionTasks = useMemo(
+    () => (groupByProject ? allTasksQuery.data?.items ?? emptyTasks : tasks),
+    [allTasksQuery.data?.items, groupByProject, tasks]
+  );
   const detailIsInProjection = Boolean(taskId && activeProjectionTasks.some((task) => task.id === taskId));
 
   const requestDetailFocusRestore = useCallback((task: TaskResponse, focusKey: string) => {
@@ -284,13 +291,20 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   // never useful -- fall back to the detail or list heading.
   useEffect(() => {
     const pendingDetailFocus = pendingDetailFocusKeyRef.current;
-    const rescueListFocus = pendingListFocusRescueRef.current;
+    const pendingListFocus = pendingListFocusRescueRef.current;
     const detailMutationSettled = Boolean(
       pendingDetailFocus &&
       detailQuery.data?.id === pendingDetailFocus.taskId &&
       detailQuery.data.revision !== pendingDetailFocus.revision
     );
-    if (!detailMutationSettled && !rescueListFocus) {
+    const projectionTask = pendingListFocus
+      ? activeProjectionTasks.find((task) => task.id === pendingListFocus.taskId)
+      : undefined;
+    const listMutationSettled = Boolean(
+      pendingListFocus &&
+      (!projectionTask || projectionTask.revision !== pendingListFocus.revision)
+    );
+    if (!detailMutationSettled && !listMutationSettled) {
       return;
     }
     if (detailMutationSettled && pendingDetailFocus) {
@@ -303,7 +317,9 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
         return;
       }
     }
-    pendingListFocusRescueRef.current = false;
+    if (listMutationSettled) {
+      pendingListFocusRescueRef.current = null;
+    }
     if (document.activeElement === document.body || document.activeElement === null) {
       if (taskId) {
         detailHeadingRef.current?.focus();
@@ -311,7 +327,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
         listHeadingRef.current?.focus();
       }
     }
-  }, [detailIsInProjection, isDesktop, taskId, detailQuery.data, taskQuery.data, allTasksQuery.data]);
+  }, [activeProjectionTasks, detailIsInProjection, isDesktop, taskId, detailQuery.data, taskQuery.data, allTasksQuery.data]);
 
   const invalidateTasks = () => queryClient.invalidateQueries({ queryKey: ["tasks"] });
   const listPath = projectId
@@ -377,7 +393,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       void invalidateTasks();
     },
     onError: (caught: unknown) => {
-      pendingListFocusRescueRef.current = false;
+      pendingListFocusRescueRef.current = null;
       setMutationError(getErrorMessage(caught));
     }
   });
@@ -390,7 +406,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       void invalidateTasks();
     },
     onError: (caught: unknown) => {
-      pendingListFocusRescueRef.current = false;
+      pendingListFocusRescueRef.current = null;
       setMutationError(getErrorMessage(caught));
     }
   });
@@ -583,16 +599,16 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       setEditingTitle("");
     },
     onComplete: (task: TaskResponse) => {
-      requestListFocusRescue();
+      requestListFocusRescue(task);
       transitionMutation.mutate({ task, action: "complete" });
     },
     onEditTitle: (title: string) => setEditingTitle(title),
     onMoveToNext: (task: TaskResponse) => {
-      requestListFocusRescue();
+      requestListFocusRescue(task);
       transitionMutation.mutate({ task, action: "move", toState: "next" });
     },
     onSaveEdit: (task: TaskResponse) => {
-      requestListFocusRescue();
+      requestListFocusRescue(task);
       updateMutation.mutate({ task, payload: { title: editingTitle.trim() } });
     },
     expandedTaskId: taskId,
@@ -772,6 +788,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
 
         {taskId && (!isDesktop || !detailIsInProjection) ? (
           <TaskDetailPanel
+            key={detailQuery.data?.id ?? taskId}
             task={detailQuery.data}
             projects={projects}
             tags={tags}
@@ -947,6 +964,7 @@ function TaskList({
           >
             {isExpanded ? (
               <TaskDetailPanel
+                key={task.id}
                 task={detailTask}
                 projects={projects}
                 tags={tags}
