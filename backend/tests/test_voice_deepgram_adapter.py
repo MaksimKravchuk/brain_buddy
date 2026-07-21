@@ -9,7 +9,10 @@ import pytest
 
 from app.exceptions import ProviderRetryableError, ProviderTerminalError
 from app.workflows.voice_brain_dump.adapters.deepgram_stt import DeepgramAccurateStt
-from app.workflows.voice_brain_dump.providers import AccurateSttRequest
+from app.workflows.voice_brain_dump.providers import (
+    AccurateSttRequest,
+    sniff_audio_container,
+)
 
 
 def _request(
@@ -34,6 +37,20 @@ def _success_response(transcript: str = "Починить BrainBuddy") -> httpx.
             "metadata": {"duration": 12.5},
         },
     )
+
+
+@pytest.mark.parametrize(
+    "unauthorized_model", ["nova-3-medical", "nova-3-general", "nova-2", ""]
+)
+def test_deepgram_adapter_rejects_any_nova_3_variant_at_construction(
+    unauthorized_model: str,
+) -> None:
+    """Defense in depth beyond the container's allow-list: even a direct,
+    manually-constructed adapter instance must never be able to send
+    credentials/audio to Deepgram under an unmeasured Nova-3 variant."""
+
+    with pytest.raises(ValueError, match="Unauthorized Deepgram accurate STT model"):
+        DeepgramAccurateStt(api_key="secret-test-key", model=unauthorized_model)
 
 
 def test_deepgram_adapter_sends_sealed_binary_audio_never_utf8_decoded() -> None:
@@ -89,6 +106,56 @@ def test_deepgram_adapter_sends_keyterms_for_vocabulary() -> None:
     assert keyterms == ["BrainBuddy", "production smoke"]
 
 
+def test_deepgram_adapter_never_logs_provider_request_details_at_production_log_level() -> (
+    None
+):
+    """Regression: httpx's own logger unconditionally emits the full request
+    URL -- including Deepgram's query-parameter vocabulary/keyterms -- as an
+    INFO log line (see ``httpx._client``). At production's default INFO app
+    log level this would otherwise leak provider URLs, vocabulary, and
+    language hints into ordinary logs. Capping the httpx/httpcore loggers
+    below INFO (``app.core.logging.build_logging_dict``) must mean no such
+    record is ever *created*, not merely filtered by a downstream handler."""
+
+    import logging.config
+
+    from app.core.logging import build_logging_dict
+
+    logging.config.dictConfig(build_logging_dict("INFO"))
+
+    captured_records: list[logging.LogRecord] = []
+
+    class _CollectingHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            captured_records.append(record)
+
+    httpx_logger = logging.getLogger("httpx")
+    collector = _CollectingHandler(level=logging.DEBUG)
+    httpx_logger.addHandler(collector)
+    try:
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return _success_response("Секретная задача про BrainBuddy")
+
+        provider = DeepgramAccurateStt(
+            api_key="top-secret-deepgram-key",
+            model="nova-3",
+            timeout_seconds=12,
+            max_retries=0,
+            retry_backoff_seconds=(),
+            transport=httpx.MockTransport(handler),
+        )
+
+        result = provider.transcribe_sealed_audio(
+            _request(language_hints=["ru", "en"])
+        )
+    finally:
+        httpx_logger.removeHandler(collector)
+
+    assert result.segments[0].text
+    assert captured_records == []
+
+
 def test_deepgram_adapter_uses_single_declared_language_hint() -> None:
     captured_params: dict[str, str] = {}
 
@@ -127,6 +194,58 @@ def test_deepgram_adapter_sends_admitted_ogg_as_ogg_content_type() -> None:
 
     assert captured["content_type"] == "audio/ogg"
     assert captured["body"] == ogg_audio
+
+
+def test_deepgram_adapter_sends_mp4_with_a_leading_free_box() -> None:
+    """A valid ISO-BMFF leading ``free`` box must not strand admitted MP4 audio.
+
+    Media admission accepts this shape via PyAV. The egress sniffer therefore
+    has to recognize it too, so sealing cannot make the recording impossible
+    to send to the authorized accurate-STT provider.
+    """
+
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["content_type"] = request.headers["Content-Type"]
+        captured["body"] = request.read()
+        return _success_response()
+
+    audio = b"\x00\x00\x00\x08free\x00\x00\x00\x10ftypM4A m4a-audio"
+    provider = DeepgramAccurateStt(
+        api_key="secret-test-key",
+        max_retries=0,
+        transport=httpx.MockTransport(handler),
+    )
+
+    provider.transcribe_sealed_audio(_request(audio))
+
+    assert captured["content_type"] == "audio/mp4"
+    assert captured["body"] == audio
+
+
+@pytest.mark.parametrize(
+    "audio",
+    [
+        b"\x00\x00\x00\x01free",
+        b"\x00\x00\x00\x00free",
+        b"\x00\x00\x00\x07free",
+        b"\x00\x00\x00\x08free" * 8,
+    ],
+)
+def test_mp4_leading_box_sniffer_rejects_truncated_or_invalid_box_layout(audio: bytes) -> None:
+    with pytest.raises(ProviderTerminalError, match="STT_AUDIO_FORMAT_UNSUPPORTED"):
+        sniff_audio_container(audio)
+
+
+def test_mp4_leading_box_sniffer_supports_an_extended_size_box() -> None:
+    audio = (
+        b"\x00\x00\x00\x01free"
+        + (16).to_bytes(8, "big")
+        + b"\x00\x00\x00\x10ftypM4A "
+    )
+
+    assert sniff_audio_container(audio) == ("recording.m4a", "audio/mp4")
 
 
 def test_deepgram_adapter_rejects_unknown_binary_before_network() -> None:

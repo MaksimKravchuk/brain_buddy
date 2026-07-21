@@ -37,6 +37,44 @@ def redacted_provider_usage(value: object) -> dict[str, float]:
     }
 
 
+# Bounds the ISO-BMFF leading-box walk below so arbitrary/malicious input
+# can never force an expensive or unbounded scan.
+_MAX_LEADING_ISO_BMFF_BOXES_SCANNED = 8
+
+
+def _has_leading_iso_bmff_ftyp_box(audio: bytes) -> bool:
+    """Walk leading ISO-BMFF boxes looking for ``ftyp``.
+
+    A conforming MP4/M4A file starts with ``ftyp``, but some encoders and
+    muxers emit a leading ``free`` (or ``skip``) placeholder box first. This
+    walk is total: it never raises and never loops past a small, fixed
+    number of leading boxes, so it is safe to call on arbitrary bytes.
+    """
+
+    offset = 0
+    length = len(audio)
+    for _ in range(_MAX_LEADING_ISO_BMFF_BOXES_SCANNED):
+        if offset + 8 > length:
+            return False
+        box_size = int.from_bytes(audio[offset : offset + 4], "big")
+        box_type = audio[offset + 4 : offset + 8]
+        if box_type == b"ftyp":
+            return True
+        header_size = 8
+        if box_size == 1:
+            if offset + 16 > length:
+                return False
+            box_size = int.from_bytes(audio[offset + 8 : offset + 16], "big")
+            header_size = 16
+        elif box_size == 0:
+            # Box extends to the end of the stream; no further box follows.
+            return False
+        if box_size < header_size:
+            return False
+        offset += box_size
+    return False
+
+
 def sniff_audio_container(audio: bytes) -> tuple[str, str]:
     """Sniff supported container signatures instead of trusting upload metadata."""
 
@@ -46,7 +84,7 @@ def sniff_audio_container(audio: bytes) -> tuple[str, str]:
         return "recording.ogg", "audio/ogg"
     if audio.startswith(b"RIFF") and audio[8:12] == b"WAVE":
         return "recording.wav", "audio/wav"
-    if len(audio) >= 12 and audio[4:8] == b"ftyp":
+    if _has_leading_iso_bmff_ftyp_box(audio):
         return "recording.m4a", "audio/mp4"
     if len(audio) >= 2 and audio[0] == 0xFF and audio[1] & 0xF0 == 0xF0:
         return "recording.aac", "audio/aac"
