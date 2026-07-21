@@ -24,7 +24,9 @@ jobs:
         run: python3 -m unittest scripts/test_validate_brain_buddy_design_skill.py -v
 
       - name: Validate mobile privacy evidence scanner
-        run: python3 -m unittest scripts/test_validate_mobile_privacy_evidence.py -v
+        run: |
+          python3 -m unittest scripts/test_validate_mobile_privacy_evidence.py -v
+          python3 -m unittest scripts/test_sanitize_privacy_evidence.py -v
 
       - name: Validate CI artifact contract meta-tests
         run: python3 -m unittest scripts/test_validate_ci_artifacts.py -v
@@ -97,6 +99,14 @@ jobs:
         working-directory: .
         run: python3 scripts/validate_allure_taxonomy.py --path backend/allure-results --label backend-pytest
 
+      - name: Sanitize backend Allure evidence for privacy leaks
+        if: always()
+        working-directory: .
+        run: |
+          python3 scripts/sanitize_privacy_evidence.py \
+            --path backend/allure-results \
+            --label backend-evidence
+
       - name: Scan backend Allure evidence for privacy leaks
         id: backend_privacy_scan
         if: always()
@@ -160,6 +170,14 @@ jobs:
         if: always()
         working-directory: .
         run: python3 scripts/validate_allure_taxonomy.py --path frontend/allure-results/vitest --label frontend-vitest
+
+      - name: Sanitize frontend Allure evidence for privacy leaks
+        if: always()
+        working-directory: .
+        run: |
+          python3 scripts/sanitize_privacy_evidence.py \
+            --path frontend/allure-results/vitest \
+            --label frontend-evidence
 
       - name: Scan frontend Allure evidence for privacy leaks
         id: frontend_privacy_scan
@@ -262,6 +280,19 @@ jobs:
       - name: Export Expo web bundle
         working-directory: mobile
         run: npx expo export --platform web
+
+      - name: Sanitize publishable mobile evidence for privacy leaks
+        if: always()
+        working-directory: mobile
+        run: |
+          python3 ../scripts/sanitize_privacy_evidence.py \
+            --path dist \
+            --path allure-results \
+            --path logs \
+            --path screenshots \
+            --path crash-artifacts \
+            --path build \
+            --label mobile-evidence
 
       - name: Scan publishable mobile evidence for privacy leaks
         id: mobile_privacy_scan
@@ -368,6 +399,15 @@ jobs:
         run: |
           python3 scripts/validate_ci_artifacts.py results --path frontend/allure-results/playwright --label playwright-e2e --since-file frontend/allure-results/playwright/.run-started-at
           python3 scripts/validate_ci_artifacts.py product-e2e-results --path frontend/allure-results/playwright
+
+      - name: Sanitize Playwright evidence for privacy leaks
+        if: always()
+        run: |
+          python3 scripts/sanitize_privacy_evidence.py \
+            --path frontend/allure-results/playwright \
+            --path frontend/playwright-report \
+            --path frontend/test-results \
+            --label playwright-evidence
 
       - name: Scan Playwright Allure evidence for privacy leaks
         id: playwright_privacy_scan

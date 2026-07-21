@@ -1078,6 +1078,241 @@ jobs:
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("unexpected raw upload step Alternate raw upload", completed.stderr)
 
+    def write_mutated_ci_workflow(self, tmp: str, mutated_text: str) -> Path:
+        workflow = Path(tmp) / ".github" / "workflows" / "ci.yml"
+        workflow.parent.mkdir(parents=True)
+        workflow.write_text(mutated_text, encoding="utf-8")
+        return workflow
+
+    def real_ci_workflow_text(self) -> str:
+        return (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    def real_aggregate_gate_step_text(self, source: str) -> str:
+        start = source.index("      - name: Require explicit privacy scan success for all layers")
+        end = source.index("      - name: Download Allure results")
+        return source[start:end]
+
+    def test_workflow_rejects_aggregate_gate_moved_to_full_ci_job(self) -> None:
+        # Mutation: the aggregate privacy gate step is moved out of
+        # allure-report and into the downstream full-ci job, where it can no
+        # longer prevent the aggregate report from being downloaded,
+        # generated, uploaded, or published.
+        source = self.real_ci_workflow_text()
+        gate_step = self.real_aggregate_gate_step_text(source)
+        mutated = source.replace(gate_step, "")
+        full_ci_steps_marker = "    steps:\n      - name: Require successful CI, Docker, E2E, and Allure report"
+        self.assertIn(full_ci_steps_marker, mutated)
+        mutated = mutated.replace(
+            full_ci_steps_marker,
+            "    steps:\n" + gate_step + "      - name: Require successful CI, Docker, E2E, and Allure report",
+            1,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("aggregate Allure report publication gate on backend", completed.stderr)
+        self.assertIn("aggregate Allure report publication gate on mobile", completed.stderr)
+
+    def test_workflow_rejects_aggregate_gate_moved_after_publication_steps(self) -> None:
+        # Mutation: the gate step stays inside allure-report but is moved
+        # past the download/generate/upload/publish steps it is supposed to
+        # protect, so it never actually stops the aggregate report from
+        # being published.
+        source = self.real_ci_workflow_text()
+        gate_step = self.real_aggregate_gate_step_text(source)
+        mutated = source.replace(gate_step, "")
+        after_publish_marker = "      - name: Post PR Allure report link"
+        self.assertIn(after_publish_marker, mutated)
+        mutated = mutated.replace(after_publish_marker, gate_step + after_publish_marker, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "aggregate Allure report privacy gate must run before the allure-report job's "
+            "download/generate/upload/publication steps",
+            completed.stderr,
+        )
+
+    def test_workflow_rejects_clean_root_scan_with_required_root_only_in_trailing_comment(
+        self,
+    ) -> None:
+        # Mutation: the scan step is retargeted at an already-clean
+        # directory, and the real required --path arguments are pushed into
+        # a trailing inline shell comment on the same line rather than a
+        # dedicated full-line comment.
+        source = self.real_ci_workflow_text()
+        old = (
+            "        run: |\n"
+            "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "            --path frontend/allure-results/playwright \\\n"
+            "            --path frontend/playwright-report \\\n"
+            "            --path frontend/test-results \\\n"
+            "            --label playwright-evidence\n"
+        )
+        self.assertIn(old, source)
+        new = (
+            "        run: |\n"
+            "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "            --path frontend/already-clean-dir \\\n"
+            "            --label playwright-evidence # --path frontend/allure-results/playwright "
+            "--path frontend/playwright-report --path frontend/test-results\n"
+        )
+        mutated = source.replace(old, new, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("playwright layer privacy scan step", completed.stderr)
+        self.assertIn("frontend/allure-results/playwright", completed.stderr)
+
+    def test_workflow_rejects_clean_root_scan_when_required_root_is_only_a_hyphenated_superset(
+        self,
+    ) -> None:
+        # Mutation: the scan step is retargeted at an unrelated directory
+        # whose name happens to start with the required root followed by a
+        # hyphen (e.g. backend/allure-results-clean), which a plain `\b`
+        # word-boundary check would wrongly credit as the required root.
+        source = self.real_ci_workflow_text()
+        old = (
+            "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence\n"
+        )
+        self.assertIn(old, source)
+        new = (
+            "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "            --path backend/allure-results-clean \\\n"
+            "            --label backend-evidence\n"
+        )
+        mutated = source.replace(old, new, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("backend layer privacy scan step", completed.stderr)
+        self.assertIn("backend/allure-results", completed.stderr)
+
+    def test_workflow_rejects_raw_evidence_copied_to_an_innocent_upload_path(self) -> None:
+        # Mutation: raw Playwright evidence is copied/renamed to a
+        # non-evidence-shaped directory name and uploaded unconditionally,
+        # bypassing a path-spelling-based ("allure"/"playwright"/etc.)
+        # detection heuristic entirely.
+        source = self.real_ci_workflow_text()
+        insertion_point = (
+            "      - name: Upload Playwright failure artifacts and Compose logs\n"
+            "        if: steps.playwright_privacy_scan.outcome == 'success'\n"
+            "        uses: actions/upload-artifact@v4\n"
+            "        with:\n"
+            "          name: playwright-test-results\n"
+            "          path: frontend/test-results\n"
+            "          if-no-files-found: warn\n"
+            "          retention-days: 30\n"
+        )
+        self.assertIn(insertion_point, source)
+        extra_steps = (
+            "      - name: Stage extra evidence\n"
+            "        if: always()\n"
+            "        run: cp -r frontend/test-results frontend/evidence-cache\n\n"
+            "      - name: Upload extra evidence\n"
+            "        if: always()\n"
+            "        uses: actions/upload-artifact@v4\n"
+            "        with:\n"
+            "          name: playwright-extra-evidence\n"
+            "          path: frontend/evidence-cache\n"
+            "          if-no-files-found: warn\n"
+            "          retention-days: 30\n"
+        )
+        mutated = source.replace(insertion_point, insertion_point + extra_steps, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("unexpected raw upload step Upload extra evidence", completed.stderr)
+        self.assertIn("frontend/evidence-cache", completed.stderr)
+
+    def test_workflow_rejects_nameless_upload_artifact_step_for_raw_evidence(self) -> None:
+        # Mutation: an extra actions/upload-artifact step for a raw
+        # Playwright root is added without a step-level `name:` key at all,
+        # bypassing a `- name:`-only step parser entirely.
+        source = self.real_ci_workflow_text()
+        insertion_point = (
+            "      - name: Upload Playwright failure artifacts and Compose logs\n"
+            "        if: steps.playwright_privacy_scan.outcome == 'success'\n"
+            "        uses: actions/upload-artifact@v4\n"
+            "        with:\n"
+            "          name: playwright-test-results\n"
+            "          path: frontend/test-results\n"
+            "          if-no-files-found: warn\n"
+            "          retention-days: 30\n"
+        )
+        self.assertIn(insertion_point, source)
+        extra_step = (
+            "      - if: always()\n"
+            "        uses: actions/upload-artifact@v4\n"
+            "        with:\n"
+            "          name: playwright-nameless-evidence\n"
+            "          path: frontend/test-results\n"
+            "          if-no-files-found: warn\n"
+            "          retention-days: 30\n"
+        )
+        mutated = source.replace(insertion_point, insertion_point + extra_step, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("unexpected raw upload step <nameless step>", completed.stderr)
+        self.assertIn("frontend/test-results", completed.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
