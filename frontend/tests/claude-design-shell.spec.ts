@@ -367,7 +367,10 @@ test("mobile pushed task detail uses its own summary-first topbar and exposes 44
     await route.fulfill({
       json: {
         ...taskResponse.items[1],
-        subtasks: [{ id: "subtask-1", title: "Confirm the reproduction", state: "open", revision: 1 }]
+        subtasks: [
+          { id: "subtask-1", title: "Confirm the reproduction", state: "open", revision: 1 },
+          { id: "subtask-2", title: "Write the regression test", state: "open", revision: 1 }
+        ]
       }
     });
   });
@@ -439,6 +442,20 @@ test("mobile pushed task detail uses its own summary-first topbar and exposes 44
       throw new Error(`Expected a >=44px mobile subtask target, received ${JSON.stringify(box)}`);
     }
   });
+
+  await test.step("keep adjacent 44px subtask hit targets from overlapping each other", async () => {
+    const [firstBox, secondBox] = await Promise.all([
+      page.getByRole("button", { name: "Complete Confirm the reproduction" }).boundingBox(),
+      page.getByRole("button", { name: "Complete Write the regression test" }).boundingBox()
+    ]);
+    if (!firstBox || !secondBox) {
+      throw new Error("Expected geometry for both adjacent subtask hit targets");
+    }
+    const verticallyOverlaps = firstBox.y < secondBox.y + secondBox.height && firstBox.y + firstBox.height > secondBox.y;
+    if (verticallyOverlaps) {
+      throw new Error(`Expected adjacent 44px subtask targets not to overlap, received ${JSON.stringify({ firstBox, secondBox })}`);
+    }
+  });
 });
 
 test.describe("mobile task shell at the canonical 375x812 viewport", () => {
@@ -472,6 +489,30 @@ test.describe("mobile task shell at the canonical 375x812 viewport", () => {
       if (targets.some((box) => !box || box.width < 44 || box.height < 44)) {
         throw new Error(`Expected >=44px drawer option targets, received ${JSON.stringify(targets)}`);
       }
+    });
+    await test.step("Keep enabled project and tag Add actions at or above the 44px mobile target", async () => {
+      const drawer = page.getByRole("dialog", { name: "Task navigation" });
+      await drawer.getByRole("button", { name: "New project" }).click();
+      const projectDialog = drawer.getByRole("dialog", { name: "Create project" });
+      await projectDialog.getByRole("textbox", { name: "New project name" }).fill("Mobile target project");
+      const projectAdd = projectDialog.getByRole("button", { name: "Add" });
+      await expect(projectAdd).toBeEnabled();
+      const projectAddBox = await projectAdd.boundingBox();
+      if (!projectAddBox || projectAddBox.height < 44) {
+        throw new Error(`Expected a >=44px enabled project Add target, received ${JSON.stringify(projectAddBox)}`);
+      }
+      await drawer.getByRole("button", { name: "New project" }).click();
+
+      await drawer.getByRole("button", { name: "New tag" }).click();
+      const tagDialog = drawer.getByRole("dialog", { name: "Create tag" });
+      await tagDialog.getByRole("textbox", { name: "New tag name" }).fill("Mobile target tag");
+      const tagAdd = tagDialog.getByRole("button", { name: "Add" });
+      await expect(tagAdd).toBeEnabled();
+      const tagAddBox = await tagAdd.boundingBox();
+      if (!tagAddBox || tagAddBox.height < 44) {
+        throw new Error(`Expected a >=44px enabled tag Add target, received ${JSON.stringify(tagAddBox)}`);
+      }
+      await drawer.getByRole("button", { name: "New tag" }).click();
     });
     await test.step("Keep wrapped mobile tag actions inside the drawer", async () => {
       const drawer = page.getByRole("dialog", { name: "Task navigation" });

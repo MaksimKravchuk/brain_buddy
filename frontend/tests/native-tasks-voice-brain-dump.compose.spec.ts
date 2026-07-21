@@ -76,6 +76,17 @@ function assertCondition(condition: unknown, message: string): asserts condition
   }
 }
 
+async function assertFocusIsNotBody(page: Page, phase: string): Promise<void> {
+  // Keep this as a real browser evaluation rather than a raw Playwright
+  // `expect(...).toBe(...)`: a sub-millisecond matcher becomes an Allure
+  // zero-duration no-op and is rightly rejected by the taxonomy gate.
+  const activeElement = await page.evaluate(async () => {
+    await new Promise((resolve) => window.setTimeout(resolve, 10));
+    return document.activeElement?.tagName ?? "none";
+  });
+  assertCondition(activeElement !== "BODY", `${phase}: focus must not fall back to document.body`);
+}
+
 function assertArrayLength<T>(items: T[], expected: number, label: string): void {
   assertCondition(items.length === expected, `${label}: expected ${expected}, received ${items.length}`);
 }
@@ -800,5 +811,66 @@ test("owner isolation hides tasks, brain dump operations, drafts and committed l
     await expect(secondPage.getByText("Owner A private task")).toHaveCount(0);
     await expect(secondPage.getByText(committedTask.title)).toHaveCount(0);
     await secondPage.close();
+  });
+});
+
+test("task detail focus survives Save, Complete, Reopen, Move and Cancel against real backend query races, including inline/standalone projection swaps", async ({ page }) => {
+  await productLabels("Task detail focus preservation across real mutations");
+  await signup(page, unique("focus-races"));
+  await createTask(page, "Focus regression task", { state: "next" });
+
+  await page.setViewportSize({ width: 1240, height: 800 });
+  await page.goto("/tasks/next");
+  await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
+
+  await test.step("open the task inline, inside the active Next projection", async () => {
+    await page.getByRole("link", { name: "Focus regression task" }).click();
+    await expect(page.getByRole("heading", { name: "Task detail" })).toBeVisible();
+    await expect(page.locator('[role="listitem"]', { has: page.getByRole("heading", { name: "Task detail" }) })).toHaveCount(1);
+  });
+
+  // Every step below drives a real Save/Complete/Reopen/Move/Cancel mutation
+  // against the live backend, then waits on the genuinely refetched list and
+  // detail queries -- their arrival order is whatever the real network
+  // produces, not a scripted mock -- and asserts focus never lands on
+  // document.body once those queries settle.
+  await test.step("Save keeps focus on the Save action while the task stays in the Next projection", async () => {
+    await page.getByLabel("Title", { exact: true }).fill("Focus regression task (edited)");
+    await page.getByRole("button", { name: "Save task detail" }).click();
+    await expect(page.getByRole("link", { name: "Focus regression task (edited)" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Save task detail" })).toBeFocused();
+  });
+
+  await test.step("Complete removes the task from Next, swaps to the standalone panel, and never leaves focus on body", async () => {
+    await page.getByRole("button", { name: "Complete", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Reopen to Next" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Focus regression task (edited)" })).toHaveCount(0);
+    await assertFocusIsNotBody(page, "after Complete");
+    await expect(page.getByRole("heading", { name: "Task detail" })).toBeFocused();
+  });
+
+  await test.step("Reopen to Next returns the task to the projection, swaps back to the inline panel, and never leaves focus on body", async () => {
+    await page.getByRole("button", { name: "Reopen to Next" }).click();
+    await expect(page.getByRole("button", { name: "Complete", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Focus regression task (edited)" })).toBeVisible();
+    await assertFocusIsNotBody(page, "after Reopen");
+    await expect(page.getByRole("heading", { name: "Task detail" })).toBeFocused();
+  });
+
+  await test.step("Move to Waiting removes the task from Next again and never leaves focus on body", async () => {
+    await page.getByLabel("Waiting for", { exact: true }).fill("Ada from finance");
+    await page.getByRole("button", { name: "Move to Waiting for" }).click();
+    await expect(page.getByRole("button", { name: "Move to Waiting for" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Move to Next" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Focus regression task (edited)" })).toHaveCount(0);
+    await assertFocusIsNotBody(page, "after Move to Waiting");
+    await expect(page.getByRole("heading", { name: "Task detail" })).toBeFocused();
+  });
+
+  await test.step("Cancel makes the task terminal and never leaves focus on body", async () => {
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Reopen to Inbox" })).toBeVisible();
+    await assertFocusIsNotBody(page, "after Cancel");
+    await expect(page.getByRole("heading", { name: "Task detail" })).toBeFocused();
   });
 });

@@ -867,6 +867,136 @@ describe("AppRoutes", () => {
     expect(screen.getByRole("heading", { name: "Next actions" })).toHaveFocus();
   });
 
+  it("falls back to a visible focus target, never document.body, when a desktop-to-mobile viewport swap hides the originally focused detail control", async () => {
+    // Simulates the real browser media-query flip (desktop -> collapsed
+    // mobile) that remounts the detail panel from its inline desktop form to
+    // the standalone mobile form. On mobile the Properties disclosure starts
+    // collapsed (hidden), so a control that was focused on desktop (the
+    // Title field, inside Properties) is no longer visible in the new panel.
+    // The swap must never leave focus on document.body.
+    let changeListener: (() => void) | null = null;
+    let matches = true;
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      get matches() {
+        return matches;
+      },
+      media: query,
+      addEventListener: (_event: string, listener: () => void) => {
+        changeListener = listener;
+      },
+      removeEventListener: () => {
+        changeListener = null;
+      },
+      addListener: () => {},
+      removeListener: () => {}
+    }));
+
+    renderRoutes("/tasks/next/task-1");
+
+    const titleInput = await screen.findByLabelText("Title");
+    titleInput.focus();
+    expect(titleInput).toHaveFocus();
+
+    matches = false;
+    act(() => {
+      changeListener?.();
+    });
+
+    await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+    expect(titleInput).not.toHaveFocus();
+    expect(screen.getByRole("heading", { name: "Task detail" })).toHaveFocus();
+  });
+
+  it("does not let a failed task A transition steal focus onto task B's matching action after switching tasks", async () => {
+    const user = userEvent.setup();
+    const secondTask = taskFixture("task-2", "Second task title", "next");
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/tasks/task-1/transitions") && method === "POST") {
+        // The completion is rejected (e.g. a stale revision conflict); the
+        // pending focus-restore intent recorded before this mutate() call
+        // must not survive to affect a later, unrelated task.
+        return Promise.resolve(jsonResponse({ detail: "Conflict" }, 409));
+      }
+      if (url.endsWith("/tasks/task-1")) {
+        return Promise.resolve(jsonResponse(taskResponse.items[0]));
+      }
+      if (url.endsWith("/tasks/task-2")) {
+        return Promise.resolve(jsonResponse(secondTask));
+      }
+      if (url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse({
+          items: [taskResponse.items[0], secondTask],
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 0, next: 2, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/next/task-1");
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Task detail" })).toHaveFocus());
+    await user.click(await screen.findByRole("button", { name: "Complete" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Conflict");
+
+    await user.click(screen.getByRole("link", { name: "Second task title" }));
+
+    await waitFor(() => expect(screen.getByDisplayValue("Second task title")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Task detail" })).toHaveFocus());
+    expect(screen.getByRole("button", { name: "Complete" })).not.toHaveFocus();
+  });
+
+  it("never leaves focus on document.body after a row-level Complete removes the focused row from the list", async () => {
+    const user = userEvent.setup();
+
+    let completed = false;
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/tasks/task-1/transitions") && method === "POST") {
+        completed = true;
+        return Promise.resolve(jsonResponse({ ...taskResponse.items[0], state: "completed", revision: 2 }));
+      }
+      if (url.includes("/tasks?")) {
+        // Completing the only Next task removes it from this filtered
+        // projection once the mutation's refetch lands -- the row (and the
+        // Complete button the click just focused) disappears from the DOM.
+        return Promise.resolve(jsonResponse(
+          completed
+            ? { items: [], next_cursor: null, has_more: false, counts_by_state: { inbox: 0, next: 0, waiting: 0, someday: 0 } }
+            : taskResponse
+        ));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/next");
+
+    const completeButton = await screen.findByRole("button", { name: "Complete Fix onboarding drop-off" });
+    await user.click(completeButton);
+
+    await waitFor(() => expect(screen.getByText("Next actions is clear")).toBeInTheDocument());
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "Next actions" })).toHaveFocus();
+  });
+
   it("shows an honest, noninteractive Agent placeholder in task detail", async () => {
     renderRoutes("/tasks/next/task-1");
     await screen.findByRole("heading", { name: "Task detail" });
@@ -1074,6 +1204,47 @@ describe("AppRoutes", () => {
     renderRoutes("/projects/project-onboarding");
     await screen.findByRole("heading", { name: "Onboarding drop-off" });
     expect(screen.queryByRole("button", { name: "Group by project" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a grouped task visible in an accessible fallback group when its project is missing from the fetched active projects (archived or a refetch race)", async () => {
+    const launchTask = { ...taskFixture("group-1", "Ship v2 changelog", "next"), project_id: "project-launch" };
+    const orphanedTask = { ...taskFixture("group-orphan", "Ship orphaned task", "next"), project_id: "project-archived-or-racing" };
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse({
+          items: [launchTask, orphanedTask],
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 0, next: 2, waiting: 0, someday: 0 }
+        }));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/next?group=project");
+
+    const groupedList = await screen.findByTestId("grouped-task-list");
+    await within(groupedList).findByText("Ship v2 changelog");
+    // The task's project_id ("project-archived-or-racing") is not present in
+    // the fetched active projects list -- it could be archived, or the
+    // projects query could still be settling on a refetch. Either way the
+    // task must never silently disappear from the grouped view; it belongs
+    // in an accurate, accessible fallback group distinct from "No project"
+    // (which means the task genuinely has no project_id at all).
+    expect(await within(groupedList).findByText("Ship orphaned task")).toBeInTheDocument();
+    expect(within(groupedList).getByRole("list", { name: /unavailable project/i })).toBeInTheDocument();
+    const headings = within(groupedList).getAllByRole("heading", { level: 2 });
+    expect(headings.map((heading) => heading.textContent)).toEqual(
+      expect.arrayContaining([expect.stringContaining("Unavailable project")])
+    );
   });
 
   it("reports the complete drained count on a direct grouped Tag route instead of the disabled first-page total", async () => {
