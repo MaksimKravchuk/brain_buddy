@@ -339,10 +339,14 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   // on those.
   const rejectAfterConflictRefetch = async (caught: unknown, taskId: string): Promise<never> => {
     if (caught instanceof ApiError && caught.status === 409) {
-      const refreshed = await queryClient.fetchQuery({
-        queryKey: taskKeys.detail(taskId),
-        queryFn: ({ signal }) => apiClient.getTask(taskId, signal)
-      });
+      // queryClient.fetchQuery would dedupe onto any refetch already in
+      // flight for this query key (e.g. a background refetch some earlier,
+      // unrelated invalidation kicked off) and hand back whatever *that*
+      // pre-conflict request resolves to. Call the API directly so this is
+      // always a genuinely new request issued after the conflict, then
+      // publish it into the cache by hand.
+      const refreshed = await apiClient.getTask(taskId);
+      queryClient.setQueryData(taskKeys.detail(taskId), refreshed);
       (caught as ApiError & { conflictRevision?: number }).conflictRevision = refreshed.revision;
     }
     throw caught;
@@ -428,12 +432,23 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     }
   });
 
+  // On success, publish the server's authoritative TaskResponse straight
+  // into the owner-scoped detail cache before the list invalidation below
+  // even runs. A detail mutation/transition can move the task out of (or
+  // into) the active list projection, which remounts TaskDetailPanel --
+  // either swapping standalone <-> in-row, or the same panel type reading
+  // fresh cache on remount. That new mount must never read a stale,
+  // pre-mutation revision while waiting on invalidateTasks()'s background
+  // refetch to eventually land.
+  const publishDetail = (data: TaskResponse) => queryClient.setQueryData(taskKeys.detail(data.id), data);
+
   const detailUpdateMutation = useMutation({
     mutationFn: ({ task, payload }: { task: TaskResponse; payload: Parameters<typeof apiClient.updateTask>[1] }) =>
       apiClient
         .updateTask(task.id, payload, idempotencyKey("detail-edit"))
         .catch((caught: unknown) => rejectAfterConflictRefetch(caught, task.id)),
-    onSuccess: () => {
+    onSuccess: (data) => {
+      publishDetail(data);
       setMutationError(null);
       void invalidateTasks();
     },
@@ -452,7 +467,8 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
           idempotencyKey(`detail-${action}`)
         )
         .catch((caught: unknown) => rejectAfterConflictRefetch(caught, task.id)),
-    onSuccess: () => {
+    onSuccess: (data) => {
+      publishDetail(data);
       setMutationError(null);
       void invalidateTasks();
     },
