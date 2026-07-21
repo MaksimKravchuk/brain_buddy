@@ -411,22 +411,39 @@ PRIVACY_SCAN_LAYERS: tuple[dict[str, object], ...] = (
 )
 
 
-def _strip_full_line_comments(text: str) -> str:
-    """Blank out lines that are entirely a YAML or shell comment.
+def _strip_comments(text: str) -> str:
+    """Blank out YAML/shell comments, both full-line and inline trailing.
 
     A structural check that only verifies a required snippet appears
     *somewhere* in the workflow can be satisfied by hiding that snippet in a
     comment while the executed step actually does something else — e.g. it
     scans a different, already-clean root but leaves the expected `--path`
-    sitting inert in a `#`-prefixed line nearby. Blanking comment-only lines
-    before any pattern matching closes that gap without needing a full
-    YAML/shell parser. Line count (and therefore reported positions) is
-    preserved.
+    sitting inert in a `#`-prefixed line nearby, or even trailing on the same
+    line as the real (different) command. Blanking every comment, not just
+    full-line ones, before any pattern matching closes both gaps without
+    needing a full YAML/shell parser. A `#` only starts a comment when it is
+    unquoted and preceded by whitespace or the start of the line, so this
+    does not clip `${var#pattern}`-style shell substitutions or `#`
+    characters inside quoted strings. Line count (and therefore reported
+    positions) is preserved.
     """
 
-    return "\n".join(
-        "" if line.lstrip().startswith("#") else line for line in text.split("\n")
-    )
+    stripped_lines = []
+    for line in text.split("\n"):
+        in_single = False
+        in_double = False
+        cut = None
+        for index, char in enumerate(line):
+            if char == "'" and not in_double:
+                in_single = not in_single
+            elif char == '"' and not in_single:
+                in_double = not in_double
+            elif char == "#" and not in_single and not in_double:
+                if index == 0 or line[index - 1].isspace():
+                    cut = index
+                    break
+        stripped_lines.append(line[:cut] if cut is not None else line)
+    return "\n".join(stripped_lines)
 
 
 def _job_block(workflow_text: str, job_name: str) -> str | None:
@@ -460,11 +477,16 @@ def _step_block_pattern(step_id: str, scan_paths: tuple[str, ...]) -> re.Pattern
     missing one, and prevents a scan of a different (clean) root from being
     accepted just because the right `--path` string appears elsewhere in the
     block (e.g. a duplicate raw upload path only mentioned as a comment).
+    Each path must not be immediately followed by another word character or
+    hyphen, not just a `\b` word boundary: a hyphen is itself a non-word
+    character, so `\b` alone would let `--path backend/allure-results-clean`
+    (an unrelated, already-clean directory) satisfy a required
+    `backend/allure-results` argument as a same-boundary prefix match.
     """
 
     step_boundary = r"(?:(?!\n\s*- name:).)*?"
     path_clauses = "".join(
-        step_boundary + r"--path\s+" + re.escape(path) + r"\b" for path in scan_paths
+        step_boundary + r"--path\s+" + re.escape(path) + r"(?![\w-])" for path in scan_paths
     )
     return re.compile(
         r"id:\s*" + re.escape(step_id) + r"\s*\n\s*if:\s*always\(\)"
@@ -475,36 +497,112 @@ def _step_block_pattern(step_id: str, scan_paths: tuple[str, ...]) -> re.Pattern
     )
 
 
+def _sanitize_step_position(job_text: str, scan_paths: tuple[str, ...]) -> int | None:
+    """Return the start offset of the layer's sanitize step, or None if absent.
+
+    A step qualifies only if it runs with `if: always()` and calls
+    `sanitize_privacy_evidence.py` against every one of the layer's exact
+    scan paths — mirroring the privacy scan's own exact-path requirement, so
+    a sanitize call scoped to a different (or partial) root cannot be
+    credited as covering this layer. Generated evidence carries real
+    credential/email/absolute-path/audio-transcript/task-content leaks by
+    default; this step must exist and run before the privacy scan step so
+    that scan can actually pass on freshly generated evidence instead of
+    perpetually failing closed (ADR-0008).
+    """
+
+    for start, body in _split_job_steps(job_text):
+        if "sanitize_privacy_evidence.py" not in body:
+            continue
+        if not re.search(r"^\s*if:\s*always\(\)\s*$", body, re.MULTILINE):
+            continue
+        if all(
+            re.search(r"--path\s+" + re.escape(path) + r"(?![\w-])", body)
+            for path in scan_paths
+        ):
+            return start
+    return None
+
+
 def _output_pattern(step_id: str) -> re.Pattern[str]:
     return re.compile(
         r"privacy_scan_outcome:\s*\$\{\{\s*steps\." + re.escape(step_id) + r"\.outcome\s*\}\}"
     )
 
 
-def _upload_artifact_steps(job_text: str) -> list[tuple[str, str | None, str | None, int]]:
-    """Return (name, condition, path, position) for each upload step in a job."""
+def _split_job_steps(job_text: str) -> list[tuple[int, str]]:
+    """Return (start_offset, step_text) for every top-level step in a job body.
 
-    steps: list[tuple[str, str | None, str | None, int]] = []
-    step_boundary = r"(?:(?!\n\s*- name:).)*"
-    for match in re.finditer(
-        r"-\s*name:\s*(?P<name>[^\n]+)\n(?P<body>" + step_boundary + r")(?=\n\s*- name:|\Z)",
-        job_text,
-        re.DOTALL,
-    ):
-        body = match.group("body")
+    A step boundary is a line whose leading whitespace matches the first
+    `- ` in the job's `steps:` list — not specifically `- name:`. Parsing only
+    `- name:`-prefixed steps is what let a nameless step (`- if: always()`
+    with `uses:`/`with:` on following lines, and no step-level `name:` at
+    all) hide an `actions/upload-artifact` step from the upload contract
+    checks entirely, since it was never even recognized as a step. Restricting
+    parsing to the `steps:` list prevents unrelated job-level lists such as
+    `needs:` from being mistaken for steps; matching on indentation then stops
+    at nested `with:`/`env:` mapping keys, which sit deeper than the step's
+    own `- ` marker.
+    """
+
+    steps_match = re.search(r"^[ \t]*steps:[ \t]*$", job_text, re.MULTILINE)
+    if steps_match is None:
+        return []
+    steps_text = job_text[steps_match.end() :]
+    starts = [
+        match
+        for match in re.finditer(r"^([ \t]*)-[ \t]", steps_text, re.MULTILINE)
+    ]
+    if not starts:
+        return []
+    indent = starts[0].group(1)
+    boundaries = [match for match in starts if match.group(1) == indent]
+    steps: list[tuple[int, str]] = []
+    for index, match in enumerate(boundaries):
+        start = match.start()
+        end = boundaries[index + 1].start() if index + 1 < len(boundaries) else len(steps_text)
+        steps.append((steps_match.end() + start, steps_text[start:end]))
+    return steps
+
+
+def _upload_artifact_steps(job_text: str) -> list[tuple[str | None, str | None, str | None, int]]:
+    """Return (name, condition, path, position) for each upload step in a job.
+
+    `name` is the step's own display name (its top-level `name:` key, found
+    before any nested `with:` mapping so the artifact's own `with: name:`
+    value is never mistaken for it) and is `None` for a nameless step.
+    """
+
+    steps: list[tuple[str | None, str | None, str | None, int]] = []
+    for start, body in _split_job_steps(job_text):
         if "actions/upload-artifact" not in body:
             continue
+        top_part = re.split(r"^[ \t]*with:[ \t]*$", body, maxsplit=1, flags=re.MULTILINE)[0]
+        name_match = re.search(r"^[ \t]*-?[ \t]*name:[ \t]*(.+?)[ \t]*$", top_part, re.MULTILINE)
         if_match = re.search(r"^\s*if:\s*(.+?)\s*$", body, re.MULTILINE)
         path_match = re.search(r"^\s*path:\s*(\S+)\s*$", body, re.MULTILINE)
         steps.append(
             (
-                match.group("name").strip(),
+                name_match.group(1).strip() if name_match else None,
                 if_match.group(1) if if_match else None,
                 path_match.group(1) if path_match else None,
-                match.start(),
+                start,
             )
         )
     return steps
+
+
+# Non-evidence upload-artifact steps that legitimately coexist with the
+# privacy-gated evidence uploads in an evidence-producing job (e.g. code
+# coverage reports, which are not capture/attachment evidence and are not
+# in scope for the ADR-0008 scan). Every other upload-artifact step in one
+# of these jobs must be one of its PRIVACY_SCAN_LAYERS `uploads` entries.
+_NON_EVIDENCE_UPLOADS: dict[str, tuple[tuple[str, str], ...]] = {
+    "backend": (("Upload coverage artifact", "backend/coverage.xml"),),
+    "frontend": (("Upload coverage artifact", "frontend/coverage/lcov.info"),),
+    "e2e": (),
+    "mobile": (),
+}
 
 
 def _upload_contract_errors(
@@ -512,6 +610,7 @@ def _upload_contract_errors(
     scan_position: int | None,
     label: str,
     step_id: str,
+    job_name: str,
     uploads: tuple[tuple[str, str], ...],
 ) -> list[str]:
     """Require exact, scan-gated raw uploads after their scanner.
@@ -521,7 +620,12 @@ def _upload_contract_errors(
     Requiring the exact name/path/condition tuple and scanner-before-upload
     order closes both routes. Any extra upload-artifact step in one of these
     raw evidence jobs is rejected as an alternate publication path rather
-    than assumed safe because its path spelling differs.
+    than assumed safe — including a step that copies/renames the raw
+    evidence to an innocent-looking path first (an evidence-shaped-path
+    heuristic would miss the rename) and a nameless step (`- if:
+    always()` / `- uses: ...` with no step-level `name:`), which is why the
+    allowlist check below matches on the exact (name, path) tuple rather
+    than guessing from path spelling.
     """
 
     expected_condition = f"steps.{step_id}.outcome == 'success'"
@@ -554,15 +658,12 @@ def _upload_contract_errors(
                 f"the privacy scan gate ({expected_condition}) (ADR-0008)"
             )
 
-    expected_uploads = set(uploads)
+    allowlist = set(uploads) | set(_NON_EVIDENCE_UPLOADS.get(job_name, ()))
     for name, _condition, path, _position in steps:
-        is_raw_evidence_path = path is not None and any(
-            marker in path
-            for marker in ("allure", "playwright", "test-results", "screenshots", "crash-artifacts")
-        )
-        if is_raw_evidence_path and (name, path) not in expected_uploads:
+        if name is None or path is None or (name, path) not in allowlist:
+            display_name = name if name is not None else "<nameless step>"
             errors.append(
-                f"unexpected raw upload step {name} ({path}) bypasses the declared "
+                f"unexpected raw upload step {display_name} ({path}) bypasses the declared "
                 f"privacy publication contract (ADR-0008)"
             )
     return errors
@@ -572,23 +673,33 @@ def _missing_mobile_privacy_gate_errors(workflow_text: str) -> list[str]:
     """Guard the ADR-0008 privacy scan publication contract for every layer.
 
     Each raw publishable Allure layer (backend, frontend Vitest, Playwright,
-    mobile) must independently, within its own job: run the scanner against
-    every one of its own exact publishable roots with `if: always()` under a
-    unique step id, expose that step's outcome as a job output, and gate
-    every one of its raw uploads on that outcome — including the Playwright
+    mobile) must independently, within its own job: run
+    sanitize_privacy_evidence.py against every one of its own exact
+    publishable roots with `if: always()` before its privacy scan step (so
+    freshly generated evidence — which routinely carries real
+    credential/email/absolute-path/audio-transcript/task-content leaks — is
+    redacted in place instead of perpetually failing the scan), then run the
+    scanner against those same roots with `if: always()` under a unique step
+    id, expose that step's outcome as a job output, and gate every one of its
+    raw uploads on that outcome — including the Playwright
     job's raw `playwright-report`/`test-results` siblings, not just its
     Allure root. The aggregate Allure report job must additionally refuse to
     proceed unless ALL FOUR layer outputs explicitly equal 'success', with
     that condition not weakened by an extra `&&` clause — checking mobile's
     outcome alone is not sufficient (aggregate-only scanning previously left
-    backend/frontend/Playwright evidence unscanned).
+    backend/frontend/Playwright evidence unscanned). That gate must also live
+    inside the allure-report job itself (not, say, the downstream full-ci
+    job, where it can no longer prevent the aggregate report from being
+    downloaded/generated/uploaded/published) and must run — and hard-fail —
+    before every one of that job's aggregate download/generate/upload/
+    publication steps, not after them.
     """
 
     errors: list[str] = []
     if "validate_mobile_privacy_evidence.py" not in workflow_text:
         return errors
 
-    workflow_text = _strip_full_line_comments(workflow_text)
+    workflow_text = _strip_comments(workflow_text)
 
     for layer in PRIVACY_SCAN_LAYERS:
         label = cast(str, layer["key"])
@@ -615,6 +726,20 @@ def _missing_mobile_privacy_gate_errors(workflow_text: str) -> list[str]:
                 f"and call validate_mobile_privacy_evidence.py against {path_args} "
                 "so its outcome is captured even after upstream step failures (ADR-0008)"
             )
+
+        sanitize_pos = _sanitize_step_position(job_text, scan_paths)
+        if sanitize_pos is None:
+            errors.append(
+                f"{label} layer must run sanitize_privacy_evidence.py against {path_args} "
+                "with if: always() before its privacy scan step, so freshly generated "
+                "evidence is redacted rather than perpetually failing the scan (ADR-0008)"
+            )
+        elif scan_match is not None and sanitize_pos > scan_match.start():
+            errors.append(
+                f"{label} layer sanitize_privacy_evidence.py step must run before its "
+                "privacy scan step, not after it (ADR-0008)"
+            )
+
         if not _output_pattern(step_id).search(job_text):
             errors.append(
                 f"missing {label} job output privacy_scan_outcome sourced from "
@@ -626,24 +751,79 @@ def _missing_mobile_privacy_gate_errors(workflow_text: str) -> list[str]:
                 scan_match.start() if scan_match is not None else None,
                 label,
                 step_id,
+                job_name,
                 uploads,
             )
         )
 
+    # Scoped to the allure-report job itself: a needs-condition living
+    # anywhere else in the document (e.g. moved to the downstream full-ci
+    # job) can no longer prevent that job's own download/generate/upload/
+    # publication steps from running, so it must not be credited here.
+    report_job_text = _job_block(workflow_text, "allure-report") or ""
+    # The earliest position of any aggregate download/generate/upload/
+    # publication step in that job — the gate must run (and hard-fail)
+    # before all of them, not merely exist somewhere in the same job.
+    publication_positions = [
+        pos
+        for pos in (
+            report_job_text.find("actions/download-artifact"),
+            report_job_text.find("allure generate"),
+            report_job_text.find("actions/upload-artifact"),
+            report_job_text.find("actions/github-script"),
+        )
+        if pos != -1
+    ]
+    earliest_publication_pos = min(publication_positions) if publication_positions else None
+
+    gate_positions: list[int] = []
+    all_layers_clean = True
     for layer in PRIVACY_SCAN_LAYERS:
         needs_expr = f"needs.{layer['job']}.outputs.privacy_scan_outcome != 'success'"
-        line = next((candidate for candidate in workflow_text.split("\n") if needs_expr in candidate), None)
-        if line is None:
+        line_match = next(
+            (
+                match
+                for match in re.finditer(r"^.*$", report_job_text, re.MULTILINE)
+                if needs_expr in match.group(0)
+            ),
+            None,
+        )
+        if line_match is None:
             errors.append(
                 f"missing aggregate Allure report publication gate on {layer['key']} privacy "
-                f"scan outcome: {needs_expr} (ADR-0008)"
+                f"scan outcome: {needs_expr}, evaluated inside the allure-report job before its "
+                "download/generate/upload/publication steps (ADR-0008)"
             )
-        elif "&&" in line:
+            all_layers_clean = False
+            continue
+        if "&&" in line_match.group(0):
             errors.append(
                 f"aggregate Allure report publication gate on {layer['key']} privacy scan "
                 f"outcome must not be weakened with an additional '&&' condition: {needs_expr} "
                 "(ADR-0008)"
             )
+            all_layers_clean = False
+            continue
+        gate_positions.append(line_match.start())
+
+    if all_layers_clean and gate_positions:
+        gate_pos = min(gate_positions)
+        if earliest_publication_pos is not None and gate_pos > earliest_publication_pos:
+            errors.append(
+                "aggregate Allure report privacy gate must run before the allure-report job's "
+                "download/generate/upload/publication steps, not after them (ADR-0008)"
+            )
+        step_body_match = re.match(
+            r"(?:(?!\n\s*- name:).)*", report_job_text[gate_pos:], re.DOTALL
+        )
+        step_body = step_body_match.group(0) if step_body_match else ""
+        if "exit 1" not in step_body:
+            errors.append(
+                "aggregate Allure report privacy gate must hard-fail the job (e.g. exit 1) "
+                "when a layer privacy scan outcome is not explicitly 'success', not merely "
+                "record it (ADR-0008)"
+            )
+
     return errors
 
 

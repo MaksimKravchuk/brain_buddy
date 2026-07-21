@@ -47,17 +47,22 @@ _AUDIO_PATH = re.compile(
 )
 # Any non-empty value under a transcript-shaped key is a leak signal: real
 # voice brain-dump transcripts are ordinary short sentences ("buy milk"), not
-# just long free text, so this must not require a minimum length.
+# just long free text, so this must not require a minimum length. The name
+# tuple is exposed (not just the compiled pattern) so sanitize_privacy_evidence.py
+# can redact by the same field names instead of duplicating this list.
+_TRANSCRIPT_FIELD_NAMES = ("transcript", "transcriptText", "rawTranscript")
 _TRANSCRIPT_FIELD = re.compile(
-    r"\"(?:transcript|transcriptText|rawTranscript)\"\s*:\s*\"(?:[^\"\\]|\\.)+\""
+    r"\"(?:" + "|".join(_TRANSCRIPT_FIELD_NAMES) + r")\"\s*:\s*\"(?:[^\"\\]|\\.)+\""
 )
 
 # Real Task/TaskComment wire field names (backend/app/schemas/tasks.py:
 # title, details; TaskCommentDocument.body). These keys are distinctive
 # enough on their own that even an ordinary short value ("buy milk") is a
-# leak signal, not just a long one.
+# leak signal, not just a long one. Exposed as a name tuple for the same
+# reason as _TRANSCRIPT_FIELD_NAMES above.
+_TASK_CONTENT_FIELD_NAMES = ("title", "details", "body")
 _TASK_CONTENT_FIELD = re.compile(
-    r"\"(?:title|details|body)\"\s*:\s*\"(?:[^\"\\]|\\.)+\""
+    r"\"(?:" + "|".join(_TASK_CONTENT_FIELD_NAMES) + r")\"\s*:\s*\"(?:[^\"\\]|\\.)+\""
 )
 
 # Developer/device home directories, not the shared GitHub-hosted runner
