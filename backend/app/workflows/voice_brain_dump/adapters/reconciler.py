@@ -18,6 +18,7 @@ from typing import Any, Literal
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from app.core.config import MVP_RECONCILER_ENDPOINT
 from app.exceptions import (
     ProviderRetryableError,
     ProviderTerminalError,
@@ -29,7 +30,6 @@ from app.workflows.voice_brain_dump.providers import (
     ReconcileTextRequest,
 )
 
-_DEFAULT_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 _Operation = Literal["add", "update", "split", "merge", "remove", "supersede"]
 
 
@@ -128,7 +128,7 @@ class OpenAITextReconciler:
     api_key: str = field(repr=False)
     model: str = "gpt-4o"
     template_version: str = "product-operation-v1"
-    endpoint: str = _DEFAULT_ENDPOINT
+    endpoint: str = MVP_RECONCILER_ENDPOINT
     timeout_seconds: float = 30.0
     max_retries: int = 2
     retry_backoff_seconds: Sequence[float] = (1.0, 2.0)
@@ -139,6 +139,23 @@ class OpenAITextReconciler:
     complete: Completion | None = None
     provider_id: str = "openai"
     requires_external_processing: bool = True
+
+    def __post_init__(self) -> None:
+        # Defense in depth beyond the container's allow-list: even a direct,
+        # manually-constructed adapter instance (bypassing
+        # ``app.container._build_text_reconciler`` entirely) must never be
+        # able to send a Bearer-authenticated reconciliation payload to an
+        # endpoint other than the exact centrally authorized OpenAI
+        # chat-completions URL. Literal comparison, not strip()/casefold():
+        # the unmodified raw value is what would be forwarded to httpx, so a
+        # normalized check here would authorize a value that is not
+        # byte-for-byte the measured, approved endpoint.
+        if self.endpoint != MVP_RECONCILER_ENDPOINT:
+            raise ValueError(
+                f"Unauthorized reconciler endpoint {self.endpoint!r}; only the "
+                f"exact authorized {MVP_RECONCILER_ENDPOINT!r} endpoint may be "
+                "used."
+            )
 
     def reconcile(self, request: ReconcileTextRequest) -> ReconcileResult:
         payload = self._payload(request)
