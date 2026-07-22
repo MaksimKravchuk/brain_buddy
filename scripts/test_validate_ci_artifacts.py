@@ -2257,6 +2257,299 @@ jobs:
         self.assertIn("unexpected raw upload step <nameless step>", completed.stderr)
         self.assertIn("frontend/test-results", completed.stderr)
 
+    def test_workflow_rejects_scanner_step_masked_by_exit_trap(self) -> None:
+        # Mutation: the scan step keeps its exact id/if: always()/--path
+        # arguments and its scanner invocation as the final statement, but
+        # registers `trap 'exit 0' EXIT` first. actionlint accepts this; bash
+        # runs the trap handler on every exit path (including a failing
+        # scanner) and lets it force the step's final exit code to 0
+        # regardless of what the scanner actually reported.
+        source = self.real_ci_workflow_text()
+        old = (
+            "        run: |\n"
+            "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence\n"
+        )
+        self.assertIn(old, source)
+        new = (
+            "        run: |\n"
+            "          trap 'exit 0' EXIT\n"
+            "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence\n"
+        )
+        mutated = source.replace(old, new, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "backend layer privacy scan step must set id: backend_privacy_scan",
+            completed.stderr,
+        )
+
+    def test_workflow_rejects_sanitizer_step_masked_by_exit_trap(self) -> None:
+        # Mutation: same EXIT-trap masking, applied to the sanitize step
+        # instead of the scan step.
+        source = self.real_ci_workflow_text()
+        old = (
+            "        run: |\n"
+            "          python3 scripts/sanitize_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence\n"
+        )
+        self.assertIn(old, source)
+        new = (
+            "        run: |\n"
+            "          trap 'exit 0' EXIT\n"
+            "          python3 scripts/sanitize_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence\n"
+        )
+        mutated = source.replace(old, new, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "backend layer must run sanitize_privacy_evidence.py", completed.stderr
+        )
+
+    def test_workflow_rejects_aggregate_gate_masked_by_exit_trap(self) -> None:
+        # Mutation: the aggregate gate step keeps its exact required
+        # predicate and a lexical `exit 1`, but first registers
+        # `trap 'exit 0' EXIT`, which bash runs on every exit path
+        # (including the explicit `exit 1`) and can force the job to report
+        # success regardless.
+        source = self.real_ci_workflow_text()
+        old = (
+            "        run: |\n"
+            "          echo \"::error::One or more layer privacy scans did not explicitly succeed "
+            "(backend=${{ needs.backend.outputs.privacy_scan_outcome }}, "
+            "frontend=${{ needs.frontend.outputs.privacy_scan_outcome }}, "
+            "playwright=${{ needs.e2e.outputs.privacy_scan_outcome }}, "
+            "mobile=${{ needs.mobile.outputs.privacy_scan_outcome }}); refusing to download, "
+            "generate, upload, or publish the aggregate Allure report (ADR-0008).\" >&2\n"
+            "          exit 1\n"
+        )
+        self.assertIn(old, source)
+        new = (
+            "        run: |\n"
+            "          trap 'exit 0' EXIT\n"
+            "          echo \"::error::One or more layer privacy scans did not explicitly succeed "
+            "(backend=${{ needs.backend.outputs.privacy_scan_outcome }}, "
+            "frontend=${{ needs.frontend.outputs.privacy_scan_outcome }}, "
+            "playwright=${{ needs.e2e.outputs.privacy_scan_outcome }}, "
+            "mobile=${{ needs.mobile.outputs.privacy_scan_outcome }}); refusing to download, "
+            "generate, upload, or publish the aggregate Allure report (ADR-0008).\" >&2\n"
+            "          exit 1\n"
+        )
+        mutated = source.replace(old, new, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("aggregate Allure report privacy gate must hard-fail", completed.stderr)
+
+    def test_workflow_rejects_scanner_invocation_preceded_by_unconditional_early_exit(
+        self,
+    ) -> None:
+        # Mutation: the scanner invocation is untouched and remains the
+        # final top-level statement, but an unconditional `exit 0` is
+        # inserted as an earlier top-level statement in the same run body.
+        # actionlint accepts this; bash terminates the script at that
+        # `exit 0` and never reaches the scanner call at all, yet the
+        # current last-statement check does not notice the required command
+        # is dead code.
+        source = self.real_ci_workflow_text()
+        old = (
+            "        run: |\n"
+            "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence\n"
+        )
+        self.assertIn(old, source)
+        new = (
+            "        run: |\n"
+            "          exit 0\n"
+            "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence\n"
+        )
+        mutated = source.replace(old, new, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "backend layer privacy scan step must set id: backend_privacy_scan",
+            completed.stderr,
+        )
+
+    def test_workflow_rejects_scanner_invocation_masked_by_reachable_conditional_early_exit(
+        self,
+    ) -> None:
+        # Mutation: the scanner invocation is untouched and remains the
+        # final top-level statement, but is preceded by an
+        # actionlint-valid `if true; then exit 0; fi` block. Unlike
+        # `if false; then <required command>; fi` (already rejected), this
+        # conditional's branch is always taken at runtime, so bash exits 0
+        # before the scanner call ever executes -- yet the current control
+        # flow tracker only inspects statements at depth zero and never
+        # flags a masking `exit` sitting inside an (always-taken) block.
+        source = self.real_ci_workflow_text()
+        old = (
+            "        run: |\n"
+            "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence\n"
+        )
+        self.assertIn(old, source)
+        new = (
+            "        run: |\n"
+            "          if true; then\n"
+            "            exit 0\n"
+            "          fi\n"
+            "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence\n"
+        )
+        mutated = source.replace(old, new, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "backend layer privacy scan step must set id: backend_privacy_scan",
+            completed.stderr,
+        )
+
+    def test_workflow_rejects_sanitizer_invocation_preceded_by_unconditional_early_exit(
+        self,
+    ) -> None:
+        # Mutation: same early-`exit 0`-before-the-required-command bypass,
+        # applied to the sanitize step instead of the scan step.
+        source = self.real_ci_workflow_text()
+        old = (
+            "        run: |\n"
+            "          python3 scripts/sanitize_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence\n"
+        )
+        self.assertIn(old, source)
+        new = (
+            "        run: |\n"
+            "          exit 0\n"
+            "          python3 scripts/sanitize_privacy_evidence.py \\\n"
+            "            --path backend/allure-results \\\n"
+            "            --label backend-evidence\n"
+        )
+        mutated = source.replace(old, new, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "backend layer must run sanitize_privacy_evidence.py", completed.stderr
+        )
+
+    def test_workflow_rejects_aggregate_exit_one_preceded_by_unconditional_early_exit(
+        self,
+    ) -> None:
+        # Mutation: the aggregate gate step keeps its exact required
+        # predicate and its lexical `exit 1` as the final statement, but an
+        # unconditional bare `exit` is inserted right after the `echo`
+        # line. Bash terminates there (propagating the `echo`'s own zero
+        # exit status), so the job reports success and the real `exit 1`
+        # never runs -- even though "exit 1" is still textually present in
+        # the run body.
+        source = self.real_ci_workflow_text()
+        old = (
+            "        run: |\n"
+            "          echo \"::error::One or more layer privacy scans did not explicitly succeed "
+            "(backend=${{ needs.backend.outputs.privacy_scan_outcome }}, "
+            "frontend=${{ needs.frontend.outputs.privacy_scan_outcome }}, "
+            "playwright=${{ needs.e2e.outputs.privacy_scan_outcome }}, "
+            "mobile=${{ needs.mobile.outputs.privacy_scan_outcome }}); refusing to download, "
+            "generate, upload, or publish the aggregate Allure report (ADR-0008).\" >&2\n"
+            "          exit 1\n"
+        )
+        self.assertIn(old, source)
+        new = (
+            "        run: |\n"
+            "          echo \"::error::One or more layer privacy scans did not explicitly succeed "
+            "(backend=${{ needs.backend.outputs.privacy_scan_outcome }}, "
+            "frontend=${{ needs.frontend.outputs.privacy_scan_outcome }}, "
+            "playwright=${{ needs.e2e.outputs.privacy_scan_outcome }}, "
+            "mobile=${{ needs.mobile.outputs.privacy_scan_outcome }}); refusing to download, "
+            "generate, upload, or publish the aggregate Allure report (ADR-0008).\" >&2\n"
+            "          exit\n"
+            "          exit 1\n"
+        )
+        mutated = source.replace(old, new, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("aggregate Allure report privacy gate must hard-fail", completed.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

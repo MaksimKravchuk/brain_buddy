@@ -733,6 +733,48 @@ def _run_body_has_error_suppression_directive(run_body: str) -> bool:
     return bool(_ERROR_SUPPRESSION_DIRECTIVE_RE.search(run_body))
 
 
+_EXIT_TRAP_DIRECTIVE_RE = re.compile(r"(?m)^\s*trap\b.*\b(?:EXIT|0)\s*$")
+
+
+def _run_body_has_exit_trap_directive(run_body: str) -> bool:
+    """Return True if the script registers an EXIT (or numeric-0) trap.
+
+    A `trap ... EXIT` (bash also accepts the POSIX pseudo-signal number `0`
+    for the same hook) always runs when the shell exits, regardless of the
+    exit code of the step's own commands, and can force success (e.g.
+    `trap 'exit 0' EXIT`) no matter what the required scanner/sanitizer/
+    hard-fail command actually reported. We cannot evaluate what a trap
+    handler does, so any EXIT trap registration anywhere in the run body is
+    treated as unsafe (ADR-0008 fail-closed) — this mirrors the `set +e`
+    check above, which is unsafe for the identical reason: it changes
+    whether a later command's own exit status can still stop the script.
+    """
+
+    return bool(_EXIT_TRAP_DIRECTIVE_RE.search(run_body))
+
+
+_EARLY_SUCCESS_EXIT_RE = re.compile(r"(?m)^\s*exit(?:\s+0)?\s*$")
+
+
+def _run_body_has_early_success_exit(run_body: str) -> bool:
+    """Return True if the script contains a bare `exit` or explicit `exit 0`.
+
+    An unconditional `exit` (implicitly propagating the previous command's
+    own exit status) or explicit `exit 0`, placed ahead of the required
+    scanner/sanitizer/hard-fail command, ends the script successfully
+    before that command ever runs — whether it sits at the run body's top
+    level or is nested inside an actionlint-valid `if`/`for`/`while`/`case`
+    block whose condition is statically always taken (e.g.
+    `if true; then exit 0; fi`), which `_shell_top_level_statements`
+    deliberately does not surface as a top-level statement at all. We
+    cannot verify shell control-flow reachability with a regex, so any such
+    statement anywhere in the run body — nested or not — is treated as an
+    unsafe early-success bypass (ADR-0008 fail-closed).
+    """
+
+    return bool(_EARLY_SUCCESS_EXIT_RE.search(run_body))
+
+
 def _statement_has_disallowed_shell_wrapping(statement: str) -> bool:
     """Return True if a statement is anything but a single trivial command.
 
@@ -782,6 +824,10 @@ def _has_required_top_level_command(run_body: str, pattern: re.Pattern[str]) -> 
     """
 
     if _run_body_has_error_suppression_directive(run_body):
+        return False
+    if _run_body_has_exit_trap_directive(run_body):
+        return False
+    if _run_body_has_early_success_exit(run_body):
         return False
 
     statements = _shell_top_level_statements(run_body)
@@ -1083,9 +1129,15 @@ def _missing_mobile_privacy_gate_errors(workflow_text: str) -> list[str]:
                 "download/generate/upload/publication steps, not after them (ADR-0008)"
             )
         run_body = _step_run_body(step_body)
-        if run_body is None or not any(
+        has_required_exit_one = run_body is not None and any(
             re.fullmatch(r"exit\s+1", statement)
             for statement in _shell_top_level_statements(run_body)
+        )
+        if (
+            run_body is None
+            or not has_required_exit_one
+            or _run_body_has_exit_trap_directive(run_body)
+            or _run_body_has_early_success_exit(run_body)
         ):
             errors.append(
                 "aggregate Allure report privacy gate must hard-fail the job (e.g. exit 1) "
