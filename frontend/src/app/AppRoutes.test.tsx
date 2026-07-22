@@ -183,6 +183,21 @@ describe("AppRoutes", () => {
     expect(screen.getAllByText(/#deep-work/).length).toBeGreaterThanOrEqual(2);
   });
 
+  it("aligns task rows and the add-task affordance with the canonical design tokens", async () => {
+    renderRoutes("/tasks/next");
+
+    const rowTitle = await screen.findByText("Fix onboarding drop-off");
+    const row = rowTitle.closest("article");
+    expect(row).not.toBeNull();
+    expect(row).toHaveClass("rounded-[12px]", "px-4", "py-3", "shadow-soft", "transition-shadow", "duration-200", "ease-smooth");
+
+    const projectLabel = within(row as HTMLElement).getByText("Onboarding drop-off");
+    expect(projectLabel).toHaveClass("text-slate-400");
+
+    const addTaskForm = screen.getByLabelText("New task title").closest("form");
+    expect(addTaskForm).toHaveClass("rounded-[12px]", "border-dashed");
+  });
+
   it("accepts a Smart Add suggestion by keyboard before submitting the clean classified task", async () => {
     const user = userEvent.setup();
     vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
