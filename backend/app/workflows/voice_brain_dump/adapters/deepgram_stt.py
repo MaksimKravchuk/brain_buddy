@@ -23,10 +23,18 @@ from app.workflows.voice_brain_dump.providers import (
     AccurateSttRequest,
     SttResult,
     redacted_provider_usage,
+    require_valid_retry_and_cost_fields,
     sniff_audio_container,
 )
 
 DEEPGRAM_LISTEN_URL = "https://api.deepgram.com/v1/listen"
+# Independent of the module attribute above: bound once, at import time, to
+# its own name. Reassigning the public ``DEEPGRAM_LISTEN_URL`` attribute
+# (e.g. by other code holding a reference to this module) rebinds only that
+# name to a new string object and cannot retroactively change what this
+# name already points to, so it stays the sole source of truth this adapter
+# ever transmits to or authorizes against.
+_AUTHORIZED_LISTEN_URL = DEEPGRAM_LISTEN_URL
 _RETRYABLE_STATUS_CODES = {408, 409, 429, 500, 502, 503, 504}
 # Nova-3 multilingual code-switch mode. This is a fixed, non-private query
 # control, never derived from caller-supplied language hints: those hints
@@ -59,9 +67,25 @@ class DeepgramAccurateStt:
     # this identity.
     model: str = field(default=MVP_ACCURATE_STT_MODEL, init=False)
     provider_name: str = field(default="deepgram", init=False)
+    # Authorization-sensitive transport identity, same defense-in-depth as
+    # ``model``/``provider_name`` above: fixed, never constructor-controlled,
+    # and re-validated immediately before every request. Without this, the
+    # HTTP call previously read the *mutable module-level* ``DEEPGRAM_LISTEN_URL``
+    # name directly at transmit time, so mutating that global -- e.g.
+    # ``deepgram_stt.DEEPGRAM_LISTEN_URL = "https://evil.example"`` -- would
+    # silently redirect the Deepgram ``Token`` credential and private sealed
+    # audio to an attacker-controlled endpoint for every adapter instance,
+    # including ones already constructed.
+    listen_url: str = field(default=_AUTHORIZED_LISTEN_URL, init=False)
     requires_external_processing: bool = field(default=True, init=False)
 
     def __post_init__(self) -> None:
+        require_valid_retry_and_cost_fields(
+            max_retries=self.max_retries,
+            max_cost_usd_per_operation=self.max_cost_usd_per_operation,
+            estimated_cost_usd_per_megabyte=self.estimated_cost_usd_per_megabyte,
+            error_prefix="Deepgram accurate STT",
+        )
         self._require_authorized_identity()
 
     def _require_authorized_identity(self) -> None:
@@ -82,6 +106,7 @@ class DeepgramAccurateStt:
         for value, authorized, label in (
             (self.provider_name, "deepgram", "provider"),
             (self.model, MVP_ACCURATE_STT_MODEL, "model"),
+            (self.listen_url, _AUTHORIZED_LISTEN_URL, "endpoint"),
         ):
             if type(value) is not str or value != authorized:  # noqa: E721
                 raise ValueError(
@@ -183,7 +208,7 @@ class DeepgramAccurateStt:
                     transport=self.transport,
                 ) as client:
                     response = client.post(
-                        DEEPGRAM_LISTEN_URL,
+                        self.listen_url,
                         params=params,
                         headers={
                             "Authorization": f"Token {self.api_key}",

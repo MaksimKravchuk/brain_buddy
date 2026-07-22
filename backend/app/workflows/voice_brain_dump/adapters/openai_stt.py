@@ -1,4 +1,13 @@
-"""OpenAI accurate-STT adapter over sealed original audio."""
+"""OpenAI accurate-STT adapter over sealed original audio.
+
+ADR-0002 authorizes only Deepgram Nova-3 for the production ``accurate_stt``
+role; ``app.container`` never wires this adapter into production (it always
+resolves to Deepgram or an explicit disabled/deterministic path). This class
+exists solely as narrowly-scoped, explicit test support for exercising the
+OpenAI transcription HTTP contract; see ``acknowledge_test_only_direct_
+construction`` below. It is intentionally excluded from ``adapters/
+__init__.py``'s exported/production surface.
+"""
 
 from __future__ import annotations
 
@@ -19,6 +28,17 @@ from app.workflows.voice_brain_dump.providers import (
 )
 
 OPENAI_TRANSCRIPTIONS_URL = "https://api.openai.com/v1/audio/transcriptions"
+# Independent of the module attribute above: bound once, at import time, to
+# its own name, exactly like ``deepgram_stt._AUTHORIZED_LISTEN_URL``.
+# Reassigning the public ``OPENAI_TRANSCRIPTIONS_URL`` attribute cannot
+# retroactively change what this name already points to, so it stays the
+# sole source of truth this adapter ever transmits to or authorizes against.
+_AUTHORIZED_ENDPOINT = OPENAI_TRANSCRIPTIONS_URL
+# This adapter is test-only, but even explicit test support must not expose a
+# caller-selectable provider/model/endpoint tuple. Keeping one exact built-in
+# model makes every other tuple fail before a Bearer-authenticated audio body
+# can be constructed or transmitted.
+_TEST_ONLY_OPENAI_MODEL = "gpt-4o-mini-transcribe"
 _RETRYABLE_STATUS_CODES = {408, 409, 429, 500, 502, 503, 504}
 _LANGUAGE_ALIASES = {
     "en": "en",
@@ -29,12 +49,20 @@ _LANGUAGE_ALIASES = {
 }
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class OpenAiAccurateStt:
-    """Transcribe sealed audio with OpenAI without logging provider payloads."""
+    """Transcribe sealed audio with OpenAI without logging provider payloads.
+
+    Test-only: not authorized for production accurate STT (ADR-0002
+    authorizes only Deepgram Nova-3), never wired by ``app.container``, and
+    excluded from ``adapters/__init__.py``'s production-facing surface.
+    Construction requires the explicit
+    ``acknowledge_test_only_direct_construction=True`` keyword; omitting it,
+    supplying a non-exact-``bool`` value, or later mutating it away (even via
+    ``object.__setattr__``) fails closed with zero transport calls.
+    """
 
     api_key: str = field(repr=False)
-    model: str = "gpt-4o-mini-transcribe"
     timeout_seconds: float = 60.0
     max_retries: int = 2
     retry_backoff_seconds: Sequence[float] = (1.0, 2.0)
@@ -42,12 +70,67 @@ class OpenAiAccurateStt:
     estimated_cost_usd_per_megabyte: float = 0.01
     transport: httpx.BaseTransport | None = None
     sleep: Callable[[float], None] = time.sleep
+    acknowledge_test_only_direct_construction: bool = field(
+        default=False, kw_only=True
+    )
+    # Authorization-sensitive identity: never accepted from the constructor
+    # and never reassignable post-construction (the dataclass is frozen).
+    # Defense in depth: even a direct, manually-constructed adapter instance
+    # must never be able to send credentials/audio to a different provider
+    # endpoint. No runtime configuration -- env var, caller kwarg, or
+    # post-construction mutation -- may decide this identity.
+    model: str = field(default=_TEST_ONLY_OPENAI_MODEL, init=False)
     provider_name: str = field(default="openai", init=False)
+    endpoint: str = field(default=_AUTHORIZED_ENDPOINT, init=False)
     requires_external_processing: bool = field(default=True, init=False)
+
+    def __post_init__(self) -> None:
+        self._require_authorized_identity()
+
+    def _require_authorized_identity(self) -> None:
+        """Re-validate identity fields immediately before every use.
+
+        ``frozen=True`` blocks ordinary attribute reassignment, but a caller
+        could still force a spoofed value onto a constructed instance (e.g.
+        ``object.__setattr__``) or -- since Python performs no runtime
+        generic-checking -- substitute a ``str`` subclass whose overridden
+        ``__eq__``/``__ne__`` lies about matching the authorized constant
+        while carrying a different actual value. ``type(value) is str`` plus
+        exact literal equality closes both for ``provider_name``/
+        ``endpoint``; it is checked once at construction and again
+        immediately before every network transmit and retry, so a value that
+        only becomes wrong after ``__post_init__`` still cannot reach the
+        wire. ``bool`` cannot be subclassed in Python, so ``type(value) is
+        bool`` plus ``value is True`` (the singleton) is already immune to
+        the analogous forgery for the test-only acknowledgment.
+        """
+
+        for value, authorized, label in (
+            (self.provider_name, "openai", "provider"),
+            (self.model, _TEST_ONLY_OPENAI_MODEL, "model"),
+            (self.endpoint, _AUTHORIZED_ENDPOINT, "endpoint"),
+        ):
+            if type(value) is not str or value != authorized:  # noqa: E721
+                raise ValueError(
+                    f"Unauthorized OpenAI accurate STT {label} {value!r}; only "
+                    f"the exact authorized {authorized!r} {label} may be used."
+                )
+        acknowledgement = self.acknowledge_test_only_direct_construction
+        if type(acknowledgement) is not bool or acknowledgement is not True:  # noqa: E721
+            raise ValueError(
+                "OpenAI accurate STT direct construction is test-only and "
+                "requires the exact acknowledge_test_only_direct_construction="
+                "True keyword; ADR-0002 authorizes only Deepgram Nova-3 for "
+                "production accurate STT."
+            )
 
     def transcribe_sealed_audio(self, request: AccurateSttRequest) -> SttResult:
         if not request.sealed_audio:
             raise ProviderTerminalError("STT_AUDIO_MISSING")
+        # Keep the authorization failure distinct from provider-response
+        # parsing failures below, while the identical check in the retry loop
+        # remains the final guard immediately before each HTTP transmit.
+        self._require_authorized_identity()
         # Conservatively scaled by the adapter's own bounded retry budget: a
         # single logical call may itself cost the provider once per internal
         # transport attempt, so both the admission check and any recorded
@@ -105,13 +188,14 @@ class OpenAiAccurateStt:
         filename, content_type = sniff_audio_container(request.sealed_audio)
         attempt = 0
         while True:
+            self._require_authorized_identity()
             try:
                 with httpx.Client(
                     timeout=self.timeout_seconds,
                     transport=self.transport,
                 ) as client:
                     response = client.post(
-                        OPENAI_TRANSCRIPTIONS_URL,
+                        self.endpoint,
                         headers={"Authorization": f"Bearer {self.api_key}"},
                         data=self._form_fields(request),
                         files={

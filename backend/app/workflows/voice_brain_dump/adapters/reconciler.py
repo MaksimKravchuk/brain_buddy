@@ -33,6 +33,7 @@ from app.workflows.voice_brain_dump.domain import ProposalPatch, ReconciledPropo
 from app.workflows.voice_brain_dump.providers import (
     ReconcileResult,
     ReconcileTextRequest,
+    require_valid_retry_and_cost_fields,
 )
 
 _Operation = Literal["add", "update", "split", "merge", "remove", "supersede"]
@@ -156,6 +157,12 @@ class OpenAITextReconciler:
     requires_external_processing: bool = field(default=True, init=False)
 
     def __post_init__(self) -> None:
+        require_valid_retry_and_cost_fields(
+            max_retries=self.max_retries,
+            max_cost_usd_per_operation=self.max_cost_usd_per_operation,
+            estimated_cost_usd_per_megabyte=self.estimated_cost_usd_per_megabyte,
+            error_prefix="Reconciler",
+        )
         self._require_authorized_identity()
 
     def _require_authorized_identity(self) -> None:

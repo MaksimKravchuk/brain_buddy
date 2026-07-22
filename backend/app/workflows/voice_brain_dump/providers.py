@@ -3,12 +3,51 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Protocol
 
 from app.exceptions import ProviderRetryableError, ProviderTerminalError
 from app.workflows.voice_brain_dump.domain import ProposalPatch, TranscriptHypothesis
+
+
+def require_valid_retry_and_cost_fields(
+    *,
+    max_retries: object,
+    max_cost_usd_per_operation: object,
+    estimated_cost_usd_per_megabyte: object,
+    error_prefix: str,
+) -> None:
+    """Reject unusable bounded-retry/cost-budget construction inputs.
+
+    Exact numeric validation, not truthy/duck-typed: ``bool`` is a subclass
+    of ``int`` in Python, so ``type(...) is int``/``type(...) in (int,
+    float)`` rejects ``True``/``False`` explicitly rather than silently
+    treating them as ``1``/``0``. Zero is a valid, non-rejected cost value --
+    only negative, non-finite (``nan``/``inf``), and non-numeric inputs are
+    unusable. This must run at construction, before any cost estimate or
+    provider call can be computed from a poisoned budget.
+    """
+
+    if type(max_retries) is not int or max_retries < 0:  # noqa: E721
+        raise ValueError(
+            f"{error_prefix} max_retries must be a non-negative int, "
+            f"got {max_retries!r}."
+        )
+    for name, value in (
+        ("max_cost_usd_per_operation", max_cost_usd_per_operation),
+        ("estimated_cost_usd_per_megabyte", estimated_cost_usd_per_megabyte),
+    ):
+        if (
+            type(value) not in (int, float)  # noqa: E721
+            or not math.isfinite(value)  # type: ignore[arg-type]
+            or value < 0  # type: ignore[operator]
+        ):
+            raise ValueError(
+                f"{error_prefix} {name} must be a finite non-negative number, "
+                f"got {value!r}."
+            )
 
 SAFE_PROVIDER_USAGE_FIELDS = frozenset(
     {
