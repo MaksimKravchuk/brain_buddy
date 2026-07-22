@@ -1,7 +1,11 @@
 # ADR-0003: Gate autonomous delivery through auditable previews and the normal release path
 
 Date: 2026-07-12
-Status: Proposed
+Status: Proposed; partially superseded by
+[ADR-0008](0008-verified-trunk-serial-landing.md), which replaces the PR-mandatory
+release path and PR-preview trigger surface for SHIP/SHOW changes while keeping this
+ADR's identity, least-privilege, evidence, bounded-retry, exact-SHA deployment, and
+cost-control requirements in force. ASK-class changes still follow the PR path below.
 Decision owner: BrainBuddy
 Related: ADR-0001, ADR-0002, `docs/autonomous-delivery-runbook.md`, Kanban task
 `t_ad20c33d`

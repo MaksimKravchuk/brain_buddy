@@ -1,37 +1,298 @@
 name: Deploy Fly Production
 
+# ADR-0008: this DEFAULT-BRANCH workflow owns both trunk landing and the
+# production deploy. workflow_run events always execute the workflow
+# definition from the default branch, so a trunk candidate that edits CI or
+# workflow files can never grant itself the power to land: candidate-
+# controlled ci.yml holds no write permission at all, and promotion happens
+# only here, in the `land` job below.
+#
+# - land (read-only token; `landing` environment SSH deploy key): for a
+#   successful trunk-candidate/** push CI run it verifies one fresh parent on
+#   the current origin/main, re-runs the trusted origin/main path-risk
+#   classifier over the NUL-separated changed paths, fast-forwards main with
+#   a plain (never force) push of the exact tested SHA, and best-effort
+#   deletes the candidate ref. For a successful main push CI run it pushes
+#   nothing. In both cases it ends by proving origin/main equals the tested
+#   SHA — the deterministic landing proof.
+# - deploy (contents: read, production environment + Fly secrets): runs only
+#   after `land` succeeds, re-verifies origin/main equals the tested SHA
+#   before any Fly mutation, then captures rollback images, stages the smoke
+#   identity, deploys, smokes, and rolls back verified on failure.
+#
+# Bootstrap (ASK): until this default-branch workflow exists on main, a
+# candidate CI run can be fully successful yet nothing will auto-promote it.
+# Changes to the delivery machinery itself land only via a reviewed PR or an
+# explicitly authorized exact-SHA manual high-risk landing (see the runbook).
+#
+# There is deliberately no manual dispatch trigger: a manual deploy has no
+# deterministic proof that the deployed SHA passed the exact required CI.
 on:
   workflow_run:
     workflows: ["CI"]
     types: [completed]
-    branches: ["main"]
-  workflow_dispatch:
+    branches: ["main", "trunk-candidate/**"]
 
 permissions:
   contents: read
 
+# Safety serialization, not a FIFO queue: GitHub concurrency runs at most one
+# landing+deploy at a time and keeps at most one further run pending —
+# additional pending runs may be cancelled by GitHub rather than queued. That
+# is fail-closed here: a cancelled run lands and deploys nothing (resubmit
+# the candidate), and any run that does execute proves the tested SHA is
+# still the exact origin/main head before mutating anything.
 concurrency:
   group: fly-production-deploy
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  # Landing and landing proof. This job must never receive production
+  # secrets or the production environment, and it holds NO GITHUB_TOKEN
+  # write scope: its token permissions stay read-only, and the fast-forward
+  # push authenticates exclusively with the dedicated SSH deploy key held as
+  # the TRUNK_LANDING_SSH_KEY secret of the GitHub `landing` environment.
+  # That environment's deployment branch policy MUST restrict it to `main`:
+  # workflow_run runs execute on the default branch, so only this
+  # default-branch workflow can read the key, while candidate-controlled
+  # push CI (running with the candidate ref, read-only) never can. The main
+  # ruleset MUST enable restrict_updates with this deploy key as the only
+  # bypass actor, so the default GITHUB_TOKEN cannot push main at all and
+  # force pushes and deletions stay rejected; no PAT secret exists.
+  land:
+    name: Land candidate and prove main
     if: >-
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
-      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'main')
+      (github.event.workflow_run.head_branch == 'main' ||
+      startsWith(github.event.workflow_run.head_branch, 'trunk-candidate/'))
     runs-on: ubuntu-latest
+    environment: landing
+    permissions:
+      contents: read
+    steps:
+      # fetch-depth: 0 so the parent chain and origin/main are available for
+      # the freshness verification and the trusted classifier below. The
+      # ssh-key input makes checkout configure the origin remote over SSH
+      # with the landing deploy key and persist it, so every git fetch/push
+      # below authenticates as the dedicated landing identity, never as the
+      # (read-only) workflow token.
+      - name: Check out the CI-tested revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          ssh-key: ${{ secrets.TRUNK_LANDING_SSH_KEY }}
+          persist-credentials: true
+
+      - name: Verify one fresh candidate commit on current main
+        if: startsWith(github.event.workflow_run.head_branch, 'trunk-candidate/')
+        env:
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin +refs/heads/main:refs/remotes/origin/main
+          MAIN_SHA=$(git rev-parse origin/main)
+          PARENT_COUNT=$(($(git rev-list --parents -n 1 "${TESTED_SHA}" | wc -w) - 1))
+          if [ "${PARENT_COUNT}" -ne 1 ]; then
+            echo "Candidate ${TESTED_SHA} must have exactly one parent (no merge commits)." >&2
+            exit 1
+          fi
+          PARENT_SHA=$(git rev-parse "${TESTED_SHA}^")
+          if [ "${PARENT_SHA}" != "${MAIN_SHA}" ]; then
+            echo "Stale candidate: parent ${PARENT_SHA} is not the current origin/main ${MAIN_SHA}." >&2
+            echo "Rebase/squash onto the new main and resubmit; nothing was promoted." >&2
+            exit 1
+          fi
+
+      # Mechanical Ship/Show/Ask enforcement (ADR-0008): a PR-less candidate
+      # must not touch ASK-class surfaces (CI/workflows, delivery scripts,
+      # Fly/Docker/deploy config, auth/session/user/invite code, migrations
+      # and destructive persistence, secrets/permissions). The gate runs the
+      # trusted origin/main copy of the classifier so a candidate cannot
+      # weaken the gate on itself, and it fails closed BEFORE main is
+      # mutated. Paths are listed NUL-separated with --no-renames so quoted
+      # or non-ASCII names classify on their real bytes and a rename away
+      # from an ASK path still surfaces as its deletion.
+      - name: Enforce SHIP/SHOW-only candidate paths
+        if: startsWith(github.event.workflow_run.head_branch, 'trunk-candidate/')
+        env:
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin +refs/heads/main:refs/remotes/origin/main
+          git show refs/remotes/origin/main:scripts/classify_path_risk.py \
+            > "${RUNNER_TEMP}/classify_path_risk.py"
+          git diff --no-renames --name-only -z "${TESTED_SHA}^" "${TESTED_SHA}" \
+            | python3 "${RUNNER_TEMP}/classify_path_risk.py" --null
+
+      - name: Fast-forward main to the exact tested SHA
+        if: startsWith(github.event.workflow_run.head_branch, 'trunk-candidate/')
+        env:
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          # A plain (non-force) push can only fast-forward. If main moved
+          # after the verification above, this push is rejected and the
+          # landing fails closed without mutating main.
+          git push origin "${TESTED_SHA}:refs/heads/main"
+
+      # Cleanup, not a gate: main has already been fast-forwarded above, so
+      # a failed deletion must never fail this job and thereby suppress the
+      # production deploy of an already-landed SHA. Leftover
+      # trunk-candidate/<sha> refs are inert (re-running a landing on them
+      # fails the fresh-parent check) and are cleaned up manually per
+      # docs/autonomous-delivery-runbook.md.
+      - name: Delete this candidate ref (best-effort cleanup)
+        if: startsWith(github.event.workflow_run.head_branch, 'trunk-candidate/')
+        continue-on-error: true
+        env:
+          CANDIDATE_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          case "${CANDIDATE_BRANCH}" in
+            trunk-candidate/*) ;;
+            *)
+              echo "Refusing to delete non-candidate branch ${CANDIDATE_BRANCH}." >&2
+              exit 1
+              ;;
+          esac
+          git push origin --delete "${CANDIDATE_BRANCH}"
+
+      # Runs for EVERY consumed run — candidate AND main — and must never be
+      # branch-gated. For candidates it proves the fast-forward above landed;
+      # for main runs (which push nothing here) it proves the tested SHA is
+      # still the exact main head, so a stale main CI run that completes
+      # late fails closed and never reaches the deploy job.
+      - name: Prove origin/main equals the tested revision
+        env:
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin +refs/heads/main:refs/remotes/origin/main
+          MAIN_SHA=$(git rev-parse origin/main)
+          if [ "${MAIN_SHA}" != "${TESTED_SHA}" ]; then
+            echo "origin/main is ${MAIN_SHA}, not the tested revision ${TESTED_SHA}." >&2
+            echo "Either the candidate did not land, or this run was superseded by a" >&2
+            echo "newer landing; failing closed with nothing deployed." >&2
+            exit 1
+          fi
+
+  deploy:
+    name: Deploy to Fly
+    needs: land
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
     steps:
       - name: Check out the CI-tested revision
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      # The production smoke identity is the seeded admin account
+      # (create-or-rotate on backend startup). The unit-tested preflight
+      # mirrors backend startup validation — email-shaped admin and cohort
+      # entries, the 12–128 character password policy, and case-insensitive
+      # cohort membership — so a deploy that could only fail AFTER mutating
+      # production fails closed here instead. It prints variable names only,
+      # never values.
+      - name: Fail closed on a missing or non-internal smoke identity
+        env:
+          BRAIN_BUDDY_ADMIN_EMAIL: ${{ secrets.BRAIN_BUDDY_ADMIN_EMAIL }}
+          BRAIN_BUDDY_ADMIN_PASSWORD: ${{ secrets.BRAIN_BUDDY_ADMIN_PASSWORD }}
+          BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS: ${{ secrets.BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS }}
+        run: python3 scripts/check_smoke_identity_cohort.py
+
+      # Re-verified here, immediately before the first Fly mutation, even
+      # though the land job already proved it: the landing proof and the
+      # deploy run at different times, and this step must never be gated to
+      # one branch.
+      - name: Verify the tested revision is the exact current main head
+        env:
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin +refs/heads/main:refs/remotes/origin/main
+          MAIN_SHA=$(git rev-parse origin/main)
+          if [ "${MAIN_SHA}" != "${TESTED_SHA}" ]; then
+            echo "origin/main is ${MAIN_SHA}, not the tested revision ${TESTED_SHA}." >&2
+            echo "Either the candidate did not land, or this run was superseded by a" >&2
+            echo "newer landing; failing closed before any remote mutation." >&2
+            exit 1
+          fi
 
       - name: Set up Flyctl
         uses: superfly/flyctl-actions/setup-flyctl@v1
+
+      - name: Capture previous release images for rollback
+        id: capture
+        shell: bash
+        run: |
+          set -euo pipefail
+          backend_app=$(awk -F"'" '/^app = / { print $2; exit }' fly.backend.toml)
+          frontend_app=$(awk -F"'" '/^app = / { print $2; exit }' fly.frontend.toml)
+
+          # Documented form: the image ref is included via --image and parsed
+          # by the unit-tested helper, which tolerates Fly's JSON field
+          # casings but accepts only registry.fly.io/ references.
+          capture_image() {
+            flyctl releases --app "$1" --image --json \
+              | python3 scripts/capture_fly_release_image.py
+          }
+
+          previous_backend_image=$(capture_image "${backend_app}")
+          previous_frontend_image=$(capture_image "${frontend_app}")
+
+          if [ -z "${previous_backend_image}" ] || [ -z "${previous_frontend_image}" ]; then
+            echo "Could not capture verifiable previous release images (expected registry.fly.io/ refs)." >&2
+            echo "Failing closed BEFORE any deploy mutation: without a captured rollback target," >&2
+            echo "recovery would be guesswork. See docs/autonomous-delivery-runbook.md for the" >&2
+            echo "manual bounded recovery path." >&2
+            exit 1
+          fi
+
+          {
+            echo "PREVIOUS_BACKEND_IMAGE=${previous_backend_image}"
+            echo "PREVIOUS_FRONTEND_IMAGE=${previous_frontend_image}"
+            echo "BACKEND_APP=${backend_app}"
+            echo "FRONTEND_APP=${frontend_app}"
+          } >> "${GITHUB_ENV}"
+          echo "Captured rollback images for ${backend_app} and ${frontend_app}."
+
+      # Stage (no immediate restart) the smoke identity and the internal
+      # canary rollout so the deploy release below applies them: the backend
+      # seeds/rotates the admin account on startup and marks it internal.
+      # Values come only from GitHub production environment secrets and are
+      # never printed; an unchanged secret set is tolerated so redeploys of
+      # the same configuration stay idempotent.
+      - name: Stage the smoke identity and internal canary rollout
+        shell: bash
+        env:
+          BRAIN_BUDDY_ADMIN_EMAIL: ${{ secrets.BRAIN_BUDDY_ADMIN_EMAIL }}
+          BRAIN_BUDDY_ADMIN_PASSWORD: ${{ secrets.BRAIN_BUDDY_ADMIN_PASSWORD }}
+          BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS: ${{ secrets.BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS }}
+        run: |
+          set -euo pipefail
+          status=0
+          output=$(flyctl secrets set --stage --app "${BACKEND_APP}" \
+            BRAIN_BUDDY_ADMIN_EMAIL="${BRAIN_BUDDY_ADMIN_EMAIL}" \
+            BRAIN_BUDDY_ADMIN_PASSWORD="${BRAIN_BUDDY_ADMIN_PASSWORD}" \
+            BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS="${BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS}" \
+            BRAIN_BUDDY_FEATURE_FLAGS="delivery_canary=internal" 2>&1) \
+            || status=$?
+          if [ "${status}" -ne 0 ] \
+            && ! printf '%s\n' "${output}" | grep -qi "no change"; then
+            # flyctl output names secrets but never their values; GitHub
+            # additionally masks secret values in logs.
+            printf '%s\n' "${output}" >&2
+            echo "Staging the smoke identity secrets failed (exit ${status})." >&2
+            exit "${status}"
+          fi
+          echo "Staged smoke identity and delivery_canary=internal for ${BACKEND_APP}."
 
       - name: Deploy backend
         run: flyctl deploy --config fly.backend.toml --remote-only
@@ -39,24 +300,59 @@ jobs:
       - name: Deploy frontend
         run: flyctl deploy --config fly.frontend.toml --remote-only
 
-      - name: Smoke test production
+      - name: Reachability smoke test
+        id: reach
         shell: bash
         run: |
           set -euo pipefail
-          backend_app=$(awk -F"'" '/^app = / { print $2; exit }' fly.backend.toml)
-          frontend_app=$(awk -F"'" '/^app = / { print $2; exit }' fly.frontend.toml)
-
           curl --fail --retry 20 --retry-all-errors --retry-delay 3 \
-            "https://${backend_app}.fly.dev/health"
+            "https://${BACKEND_APP}.fly.dev/health"
           curl --fail --retry 20 --retry-all-errors --retry-delay 3 \
-            "https://${frontend_app}.fly.dev/" >/dev/null
+            "https://${FRONTEND_APP}.fly.dev/" >/dev/null
 
           status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
             --retry 20 --retry-all-errors --retry-delay 3 \
-            "https://${frontend_app}.fly.dev/api/trees")
+            "https://${FRONTEND_APP}.fly.dev/api/trees")
           test "$status" = "401"
 
           status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
             --retry 20 --retry-all-errors --retry-delay 3 \
-            "https://${frontend_app}.fly.dev/api/tasks")
+            "https://${FRONTEND_APP}.fly.dev/api/tasks")
           test "$status" = "401"
+
+      # The smoke identity is the admin account staged above; the script also
+      # asserts delivery_canary is effectively TRUE for this internal user.
+      - name: Authenticated production smoke
+        id: smoke
+        shell: bash
+        env:
+          BRAIN_BUDDY_SMOKE_EMAIL: ${{ secrets.BRAIN_BUDDY_ADMIN_EMAIL }}
+          BRAIN_BUDDY_SMOKE_PASSWORD: ${{ secrets.BRAIN_BUDDY_ADMIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          SMOKE_BASE_URL="https://${FRONTEND_APP}.fly.dev" ./scripts/production_smoke.sh
+
+      # Runs only when something failed after the rollback images were
+      # captured (staging, deploy, reachability, or authenticated smoke). It
+      # restores the captured images frontend-first so the frontend is never
+      # newer than the backend, re-verifies health, and leaves the workflow
+      # failed — a rollback is loud containment, not success.
+      - name: Roll back to the captured images and verify
+        if: failure() && steps.capture.outcome == 'success'
+        shell: bash
+        env:
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          echo "Post-deploy verification failed; rolling back to captured images." >&2
+          flyctl deploy --config fly.frontend.toml --app "${FRONTEND_APP}" \
+            --image "${PREVIOUS_FRONTEND_IMAGE}"
+          flyctl deploy --config fly.backend.toml --app "${BACKEND_APP}" \
+            --image "${PREVIOUS_BACKEND_IMAGE}"
+
+          curl --fail --retry 20 --retry-all-errors --retry-delay 3 \
+            "https://${BACKEND_APP}.fly.dev/health"
+          curl --fail --retry 20 --retry-all-errors --retry-delay 3 \
+            "https://${FRONTEND_APP}.fly.dev/" >/dev/null
+          echo "Rollback deployed and basic health re-verified. The workflow stays failed" >&2
+          echo "because the new revision ${TESTED_SHA} did not pass post-deploy smoke." >&2
