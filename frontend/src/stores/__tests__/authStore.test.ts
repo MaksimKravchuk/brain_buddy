@@ -236,6 +236,24 @@ describe("authStore", () => {
     expect(useAuthStore.getState().epoch).toBe(epochAfterClear);
   });
 
+  it("clearSession aborts a pending login before its response can set a stale browser credential", async () => {
+    let loginSignal: AbortSignal | undefined;
+    vi.spyOn(authApi, "login").mockImplementation((_payload, signal) => {
+      loginSignal = signal;
+      return new Promise<AuthUser>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new Error("login aborted")), { once: true });
+      });
+    });
+
+    const loginPromise = useAuthStore.getState().login({ email: "a@b.c", password: "x" });
+    useAuthStore.getState().clearSession();
+
+    expect(loginSignal?.aborted).toBe(true);
+    await expect(loginPromise).rejects.toThrow("login aborted");
+    expect(useAuthStore.getState().status).toBe("anon");
+    expect(useAuthStore.getState().user).toBeNull();
+  });
+
   it("an old logout that settles after a later login does not clobber the newer session", async () => {
     useAuthStore.setState({ user: { id: "u0", email: "old@b.c" }, status: "authed" });
     const logoutDeferred = createDeferred<void>();

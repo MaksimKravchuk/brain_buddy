@@ -48,16 +48,18 @@ async function authRequest<T>(path: string, init: RequestInit): Promise<T> {
 }
 
 export const authApi = {
-  signup(payload: SignupPayload) {
+  signup(payload: SignupPayload, signal?: AbortSignal) {
     return authRequest<AuthUser>("/auth/signup", {
       method: "POST",
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal
     });
   },
-  login(payload: LoginPayload) {
+  login(payload: LoginPayload, signal?: AbortSignal) {
     return authRequest<AuthUser>("/auth/login", {
       method: "POST",
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal
     });
   },
   logout() {
