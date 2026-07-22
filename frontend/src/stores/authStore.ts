@@ -35,9 +35,11 @@ let authOperationGeneration = 0;
 
 // Login and signup are the only auth requests that can install an HttpOnly
 // credential in the browser. Generation fencing protects Zustand publication,
-// but cannot stop a stale Set-Cookie response. Abort superseded credential-
-// issuing requests before their response reaches the browser, so clearSession
-// and a newer explicit auth intent also protect the cookie plane.
+// but cannot stop a stale Set-Cookie response. Every operation that
+// supersedes credential issuance -- a newer login/signup, logout,
+// clearSession, and hydrate -- must abort any still-pending credential-
+// issuing request before its response reaches the browser, so the cookie
+// plane stays fenced the same way Zustand publication already is.
 const credentialIssuingControllers = new Set<AbortController>();
 
 function beginAuthOperation(): number {
@@ -89,6 +91,12 @@ export const useAuthStore = create<AuthStoreState>((set, get) => {
     async hydrate() {
       const generation = beginAuthOperation();
       const epochAtStart = get().epoch;
+      // hydrate can win Zustand publication over a held login/signup via
+      // generation fencing alone, but that fencing is JS-state-only -- it
+      // does nothing to the network response already in flight. Without
+      // this, a stale login/signup could still install its Set-Cookie after
+      // hydrate has already published anon.
+      cancelCredentialIssuingOperations();
 
       try {
         const me = await authApi.me();
