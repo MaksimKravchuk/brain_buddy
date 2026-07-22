@@ -33,8 +33,29 @@ interface AuthStoreState {
 // operations can both capture the same epoch before either has published.
 let authOperationGeneration = 0;
 
+// Login and signup are the only auth requests that can install an HttpOnly
+// credential in the browser. Generation fencing protects Zustand publication,
+// but cannot stop a stale Set-Cookie response. Abort superseded credential-
+// issuing requests before their response reaches the browser, so clearSession
+// and a newer explicit auth intent also protect the cookie plane.
+const credentialIssuingControllers = new Set<AbortController>();
+
 function beginAuthOperation(): number {
   return ++authOperationGeneration;
+}
+
+function cancelCredentialIssuingOperations(): void {
+  for (const controller of credentialIssuingControllers) {
+    controller.abort();
+  }
+  credentialIssuingControllers.clear();
+}
+
+function beginCredentialIssuingOperation(): AbortController {
+  cancelCredentialIssuingOperations();
+  const controller = new AbortController();
+  credentialIssuingControllers.add(controller);
+  return controller;
 }
 
 export const useAuthStore = create<AuthStoreState>((set, get) => {
@@ -80,8 +101,9 @@ export const useAuthStore = create<AuthStoreState>((set, get) => {
     async login(payload) {
       const generation = beginAuthOperation();
       const epochAtStart = get().epoch;
+      const controller = beginCredentialIssuingOperation();
       try {
-        const user = await authApi.login(payload);
+        const user = await authApi.login(payload, controller.signal);
         publishIfCurrent(generation, epochAtStart, { user, status: "authed" });
       } catch (error) {
         // A failed explicit login is itself a resolution, not a non-event --
@@ -94,24 +116,30 @@ export const useAuthStore = create<AuthStoreState>((set, get) => {
         // needs the rejection to show an error, so it is rethrown.
         publishIfCurrent(generation, epochAtStart, { user: null, status: "anon" });
         throw error;
+      } finally {
+        credentialIssuingControllers.delete(controller);
       }
     },
 
     async signup(payload) {
       const generation = beginAuthOperation();
       const epochAtStart = get().epoch;
+      const controller = beginCredentialIssuingOperation();
       try {
-        const user = await authApi.signup(payload);
+        const user = await authApi.signup(payload, controller.signal);
         publishIfCurrent(generation, epochAtStart, { user, status: "authed" });
       } catch (error) {
         publishIfCurrent(generation, epochAtStart, { user: null, status: "anon" });
         throw error;
+      } finally {
+        credentialIssuingControllers.delete(controller);
       }
     },
 
     async logout() {
       const generation = beginAuthOperation();
       const epochAtStart = get().epoch;
+      cancelCredentialIssuingOperations();
       // Always clear local state, even if the network call fails — the user
       // asked to sign out and we shouldn't block them on a transient error.
       try {
@@ -125,6 +153,7 @@ export const useAuthStore = create<AuthStoreState>((set, get) => {
     clearSession() {
       const generation = beginAuthOperation();
       const epochAtStart = get().epoch;
+      cancelCredentialIssuingOperations();
       publishIfCurrent(generation, epochAtStart, { user: null, status: "anon" });
     }
   };
