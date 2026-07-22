@@ -67,10 +67,6 @@ describe("mobile OpenAPI operation allowlist", () => {
               "/api/brain-dump-operations/{operation_id}/audio/delete": {
                 post: op("delete raw audio"),
               },
-              "/api/brain-dump-operations/{operation_id}/{action}": {
-                post: op("cancel/retry/review-provisional command"),
-              },
-
               // Excluded: web-only auth (mobile never uses cookie login/signup).
               "/api/auth/login": { post: op("web login") },
               "/api/auth/signup": { post: op("web signup") },
@@ -88,6 +84,16 @@ describe("mobile OpenAPI operation allowlist", () => {
               },
               "/api/brain-dump-operations/{operation_id}/commit": {
                 post: op("deprecated commit alias"),
+              },
+
+              // Excluded: the generic action-command dispatcher. Its `action`
+              // path parameter is an untyped string with no enum constraint, so
+              // allowlisting it would hand mobile an `action: string` request
+              // shape that can dispatch any command string on this substrate --
+              // including the deprecated finish/commit aliases above -- not just
+              // the cancel/retry/review-provisional commands it is meant for.
+              "/api/brain-dump-operations/{operation_id}/{action}": {
+                post: op("cancel/retry/review-provisional command"),
               },
 
               // Excluded: explicitly out of the first slice (mobile-api.md "Task subset").
@@ -132,7 +138,6 @@ describe("mobile OpenAPI operation allowlist", () => {
             ["post", "/api/brain-dump-operations/{operation_id}/confirm"],
             ["post", "/api/brain-dump-operations/{operation_id}/consent-decisions"],
             ["post", "/api/brain-dump-operations/{operation_id}/audio/delete"],
-            ["post", "/api/brain-dump-operations/{operation_id}/{action}"],
           ];
           for (const [method, requestPath] of includedOperations) {
             expect(filtered.paths[requestPath]?.[method]).toBeDefined();
@@ -148,6 +153,7 @@ describe("mobile OpenAPI operation allowlist", () => {
             "/api/brain-dump-operations/{operation_id}/proposals/{proposal_id}",
             "/api/brain-dump-operations/{operation_id}/finish",
             "/api/brain-dump-operations/{operation_id}/commit",
+            "/api/brain-dump-operations/{operation_id}/{action}",
             "/api/tasks/smart-add",
             "/api/tasks/{task_id}/comments",
             "/api/projects/{project_id}/archive",
@@ -191,13 +197,24 @@ describe("mobile OpenAPI operation allowlist", () => {
           expect(
             filtered.paths["/api/brain-dump-operations/{operation_id}/seal"]?.post,
           ).toBeDefined();
-          expect(
-            filtered.paths["/api/brain-dump-operations/{operation_id}/{action}"]?.post,
-          ).toBeDefined();
 
           // Deprecated direct proposal PATCH alias is excluded even though it exists today.
           expect(
             filtered.paths["/api/brain-dump-operations/{operation_id}/proposals/{proposal_id}"],
+          ).toBeUndefined();
+
+          // The generic action-command dispatcher is excluded: its untyped
+          // `action` string could dispatch any command on this substrate,
+          // including the deprecated finish/commit aliases below, not just the
+          // cancel/retry/review-provisional commands it is meant for.
+          expect(
+            filtered.paths["/api/brain-dump-operations/{operation_id}/{action}"],
+          ).toBeUndefined();
+          expect(
+            filtered.paths["/api/brain-dump-operations/{operation_id}/finish"],
+          ).toBeUndefined();
+          expect(
+            filtered.paths["/api/brain-dump-operations/{operation_id}/commit"],
           ).toBeUndefined();
 
           // Unrelated web-only and tree canvas operations are excluded.

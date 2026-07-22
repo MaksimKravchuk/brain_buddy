@@ -126,23 +126,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/brain-dump-operations/{operation_id}/{action}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Command Brain Dump Operation */
-        post: operations["command_brain_dump_operation_api_brain_dump_operations__operation_id___action__post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/projects": {
         parameters: {
             query?: never;
@@ -2009,80 +1992,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["BrainDumpSealRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BrainDumpOperationResponse"];
-                };
-            };
-            /** @description The command violates a domain invariant. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Authentication is required or the session is invalid. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The requested resource is absent or belongs to another owner. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request conflicts with the current resource state. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The request path, query, or body does not match the API schema. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    command_brain_dump_operation_api_brain_dump_operations__operation_id___action__post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "Idempotency-Key"?: string | null;
-            };
-            path: {
-                operation_id: string;
-                action: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ExpectedRevisionRequest"];
             };
         };
         responses: {
