@@ -254,6 +254,46 @@ describe("authStore", () => {
     expect(useAuthStore.getState().user).toBeNull();
   });
 
+  it("a newer hydrate aborts a held login before its response can set a stale browser credential", async () => {
+    let loginSignal: AbortSignal | undefined;
+    vi.spyOn(authApi, "login").mockImplementation((_payload, signal) => {
+      loginSignal = signal;
+      return new Promise<AuthUser>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new Error("login aborted")), { once: true });
+      });
+    });
+    vi.spyOn(authApi, "me").mockResolvedValue(null);
+
+    const loginPromise = useAuthStore.getState().login({ email: "a@b.c", password: "x" });
+    await useAuthStore.getState().hydrate();
+
+    expect(loginSignal?.aborted).toBe(true);
+    await expect(loginPromise).rejects.toThrow("login aborted");
+    expect(useAuthStore.getState().status).toBe("anon");
+    expect(useAuthStore.getState().user).toBeNull();
+  });
+
+  it("a newer hydrate aborts a held signup before its response can set a stale browser credential", async () => {
+    let signupSignal: AbortSignal | undefined;
+    vi.spyOn(authApi, "signup").mockImplementation((_payload, signal) => {
+      signupSignal = signal;
+      return new Promise<AuthUser>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new Error("signup aborted")), { once: true });
+      });
+    });
+    vi.spyOn(authApi, "me").mockResolvedValue(null);
+
+    const signupPromise = useAuthStore
+      .getState()
+      .signup({ email: "new@example.com", password: "secret", invite_code: "invite" });
+    await useAuthStore.getState().hydrate();
+
+    expect(signupSignal?.aborted).toBe(true);
+    await expect(signupPromise).rejects.toThrow("signup aborted");
+    expect(useAuthStore.getState().status).toBe("anon");
+    expect(useAuthStore.getState().user).toBeNull();
+  });
+
   it("an old logout that settles after a later login does not clobber the newer session", async () => {
     useAuthStore.setState({ user: { id: "u0", email: "old@b.c" }, status: "authed" });
     const logoutDeferred = createDeferred<void>();
