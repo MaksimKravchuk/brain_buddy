@@ -1,3 +1,5 @@
+import assert from "node:assert/strict";
+
 import { type APIResponse, type Page, type Route, type TestInfo } from "@playwright/test";
 
 import { test, expect } from "../allure.fixtures";
@@ -8,10 +10,10 @@ async function signup(page: Page, testInfo: TestInfo): Promise<{ email: string; 
   const response = await page.request.post(`${backendUrl}/api/auth/signup`, {
     data: { email, password, invite_code: await mintInvite() }
   });
-  expect(response.status(), await response.text()).toBe(201);
+  assert.equal(response.status(), 201, await response.text());
 
   const cookie = (await page.context().cookies(backendUrl)).find((item) => item.name === "brainbuddy_session");
-  expect(cookie?.value).toBeTruthy();
+  assert.ok(cookie?.value);
   return { email, predecessorToken: cookie!.value };
 }
 
@@ -50,7 +52,7 @@ test("E2E-AUTH-03 delayed predecessor logout preserves the successor browser ses
 
   await test.step("hold logout A before its response can affect the cookie jar", async () => {
     await logoutHeld;
-    expect(logoutRequestCookie).toContain(`brainbuddy_session=${predecessorToken}`);
+    assert.ok(logoutRequestCookie.includes(`brainbuddy_session=${predecessorToken}`));
   });
 
   let successorToken = "";
@@ -67,31 +69,31 @@ test("E2E-AUTH-03 delayed predecessor logout preserves the successor browser ses
       },
       { email: account.email, loginPassword: password }
     );
-    expect(login.status).toBe(200);
-    expect(login.user).toMatchObject({ email: expect.stringContaining("@example.com") });
+    assert.equal(login.status, 200);
+    assert.match(String(login.user.email), /@example\.com/);
 
     const successorCookie = (await page.context().cookies(backendUrl)).find(
       (item) => item.name === "brainbuddy_session"
     );
-    expect(successorCookie?.value).toBeTruthy();
-    expect(successorCookie?.value).not.toBe(predecessorToken);
+    assert.ok(successorCookie?.value);
+    assert.notEqual(successorCookie?.value, predecessorToken);
     successorToken = successorCookie!.value;
   });
 
   await test.step("release logout A and prove its response cannot delete B", async () => {
     await heldLogout!.fulfill({ response: heldLogoutResponse! });
-    await expect(logoutCompletion).resolves.toBe(204);
+    assert.equal(await logoutCompletion, 204);
 
     const survivingCookie = (await page.context().cookies(backendUrl)).find(
       (item) => item.name === "brainbuddy_session"
     );
-    expect(survivingCookie?.value).toBe(successorToken);
+    assert.equal(survivingCookie?.value, successorToken);
 
     const me = await page.evaluate(async () => {
       const response = await fetch("/api/auth/me", { credentials: "include" });
       return { status: response.status, user: await response.json() };
     });
-    expect(me.status).toBe(200);
-    expect(me.user).toMatchObject({ email: expect.stringContaining("@example.com") });
+    assert.equal(me.status, 200);
+    assert.match(String(me.user.email), /@example\.com/);
   });
 });
