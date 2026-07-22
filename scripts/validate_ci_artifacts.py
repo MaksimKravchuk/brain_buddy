@@ -764,8 +764,72 @@ def _run_body_has_exit_trap_directive(run_body: str) -> bool:
 # the structural privacy check bypassable. Quoted `"0"` and `'00'` are the
 # direct case: Bash removes the quotes before processing the successful
 # numeric-zero argument.
-_EXIT_STATEMENT_RE = re.compile(r"^exit(?:\s+(?P<argument>.*))?$")
+#
+# `builtin` and `command` are themselves bash builtins whose entire purpose
+# is to force invocation of another builtin by its real name, bypassing any
+# same-named shell function (and, for `builtin`, alias) that might otherwise
+# intercept a bare call. `builtin exit 0` and `command exit 0` therefore
+# terminate the script with status 0 exactly like a bare `exit 0` does, and
+# actionlint accepts all three identically -- so a statement wrapped in
+# either prefix must be recognized as the same `exit` statement the
+# nonzero-literal check below evaluates, not silently treated as some
+# unrelated, harmless statement. A leading backslash (`\exit 0`, `\builtin
+# exit 0`, `\command exit 0`) is the equivalent single-word spelling of the
+# same interception-defeat idiom (Bash accepts a backslash-escaped word as
+# the literal, unaliased builtin/command name) and is folded in for the
+# same reason -- confirmed at the shell: `bash -c '\exit 0'`,
+# `bash -c '\builtin exit 0'`, and `bash -c '\command exit 0'` all exit 0
+# without ever reaching a following statement.
+#
+# These two wrappers also compose, and each accepts a narrow, real option
+# grammar without ceasing to reach `exit`: `command` accepts a leading `-p`
+# (use the default PATH) and/or a trailing `--` (end of options); `builtin`
+# accepts only a trailing `--` (it defines no other options, but still
+# honors `--` as bash's generic end-of-options marker). All of the
+# following are confirmed at the shell to exit 0 before a following
+# statement, and each is actionlint-valid: `builtin command exit 0`,
+# `command builtin exit 0`, `command -p exit 0`, `builtin -- exit 0`,
+# `command -- exit 0`, `command -p -- exit 0`, `command -p builtin exit 0`.
+# Stripping wrapper layers in a loop (below) rather than matching a single
+# fixed prefix is what recognizes this unbounded nesting without emulating
+# arbitrary shell: each layer is one of a closed, enumerated set of static
+# spellings, and the loop only ever shortens the statement, so it always
+# terminates.
+#
+# `command -v`/`command -V` are deliberately excluded from the wrapper
+# grammar: they *describe* a command (print its name/type) rather than
+# execute it, so `command -v exit 1` never actually exits -- treating it as
+# an exit wrapper would be a false positive, not a closed bypass, and is
+# out of scope for this fail-closed check.
+_EXIT_BUILTIN_WRAPPER_RE = re.compile(r"^\\?builtin(?:\s+--)?\s+")
+_EXIT_COMMAND_WRAPPER_RE = re.compile(r"^\\?command(?:\s+-p)?(?:\s+--)?\s+")
+_EXIT_WRAPPER_PATTERNS = (_EXIT_BUILTIN_WRAPPER_RE, _EXIT_COMMAND_WRAPPER_RE)
+_EXIT_STATEMENT_RE = re.compile(r"^\\?exit(?:\s+(?P<argument>.*))?$")
 _DEFINITELY_NONZERO_EXIT_ARGUMENT_RE = re.compile(r"^[+-]?[1-9][0-9]*$")
+
+
+def _strip_exit_builtin_wrapper_prefixes(statement: str) -> str:
+    """Strip zero or more leading `builtin`/`command` wrapper prefixes.
+
+    Each iteration removes exactly one static wrapper layer recognized by
+    `_EXIT_WRAPPER_PATTERNS`; looping until neither pattern matches is what
+    catches arbitrarily nested combinations such as `command -p builtin
+    exit 0` or `builtin command exit 0` without hardcoding a fixed nesting
+    depth. Every match consumes at least one wrapper keyword plus trailing
+    whitespace, so the statement strictly shortens each pass and the loop
+    is guaranteed to terminate.
+    """
+
+    changed = True
+    while changed:
+        changed = False
+        for pattern in _EXIT_WRAPPER_PATTERNS:
+            match = pattern.match(statement)
+            if match:
+                statement = statement[match.end() :]
+                changed = True
+                break
+    return statement
 
 _INLINE_BLOCK_KEYWORDS = ("then", "do", "else")
 
@@ -827,6 +891,16 @@ def _run_body_has_early_success_exit(run_body: str) -> bool:
     matched `exit`/`exit 0` sitting alone on its own line, so `if true; then
     exit 0; fi` — actionlint-valid, and unconditionally reached — passed
     through undetected.
+
+    A statement is also stripped of zero or more leading `builtin`/`command`
+    wrapper layers (each optionally backslash-escaped and carrying its own
+    narrow, real option grammar — `builtin --`, `command -p`, `command --`,
+    `command -p --`) before the `exit` match is attempted, so
+    `if true; then builtin exit 0; fi`, `if true; then command -p exit 0;
+    fi`, and nested forms like `if true; then builtin command exit 0; fi`
+    — all actionlint-valid, and all direct invocations of the same Bash
+    exit builtin as bare `exit 0` — are recognized instead of falling
+    through as an unrecognized, uninspected statement.
     """
 
     for logical_line in _join_shell_line_continuations(run_body):
@@ -834,6 +908,7 @@ def _run_body_has_early_success_exit(run_body: str) -> bool:
             statement = _strip_leading_inline_block_keywords(segment)
             if not statement:
                 continue
+            statement = _strip_exit_builtin_wrapper_prefixes(statement)
             match = _EXIT_STATEMENT_RE.fullmatch(statement)
             if match and not _DEFINITELY_NONZERO_EXIT_ARGUMENT_RE.fullmatch(
                 match.group("argument") or ""

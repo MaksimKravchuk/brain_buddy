@@ -1,3 +1,4 @@
+import importlib.util
 import shutil
 import subprocess
 import sys
@@ -18,6 +19,26 @@ MUTATION_EVIDENCE_SCRIPT = REPO_ROOT / "scripts" / "create_mutation_allure_evide
 # structural validator, and that narrowing is reported via stderr so it is
 # visible in CI/test output rather than silently skipped.
 ACTIONLINT_BIN = shutil.which("actionlint")
+
+
+def _load_validate_ci_artifacts_module():
+    """Import validate_ci_artifacts.py by path for direct unit-level checks.
+
+    The module guards its CLI behind ``if __name__ == "__main__":``, so
+    importing it here (rather than shelling out via `run_validator`) is safe
+    and lets the grammar matrix below call `_run_body_has_early_success_exit`
+    directly -- fast, table-driven coverage of the wrapper grammar itself,
+    distinct from the slower end-to-end mutation tests that prove the same
+    grammar against the real ci.yml through the full CLI/actionlint/runtime
+    path.
+    """
+
+    spec = importlib.util.spec_from_file_location(
+        "validate_ci_artifacts_under_test", SCRIPT
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class ValidateCiArtifactsTests(unittest.TestCase):
@@ -2957,6 +2978,188 @@ jobs:
             self.INLINE_UNCONDITIONAL_EARLY_EXIT_DYNAMIC_ZERO,
             self.AGGREGATE_EXPECTED_ERROR,
         )
+
+    # The QA-reproduced regression: `builtin` forces Bash to invoke the real
+    # `exit` builtin directly, bypassing any same-named shell function or
+    # alias that might otherwise intercept a bare call. It terminates the
+    # script with status 0 exactly like `exit 0` does, and actionlint
+    # accepts it identically -- but a regex matching only the literal word
+    # `exit` at the start of the statement never saw it: `builtin exit 0`
+    # starts with `builtin`, not `exit`, so the pre-fix matcher silently
+    # treated it as some unrelated, harmless statement instead of the same
+    # successful-zero exit it actually is.
+    INLINE_UNCONDITIONAL_EARLY_EXIT_BUILTIN_WRAPPED = (
+        "          if true; then builtin exit 0; fi\n"
+    )
+
+    def test_workflow_rejects_scanner_invocation_masked_by_builtin_wrapped_early_exit(
+        self,
+    ) -> None:
+        self.assert_early_exit_mutation_rejected(
+            self.SCANNER_RUN_BODY,
+            self.INLINE_UNCONDITIONAL_EARLY_EXIT_BUILTIN_WRAPPED,
+            self.SCANNER_EXPECTED_ERROR,
+        )
+
+    def test_workflow_rejects_sanitizer_invocation_masked_by_builtin_wrapped_early_exit(
+        self,
+    ) -> None:
+        self.assert_early_exit_mutation_rejected(
+            self.SANITIZER_RUN_BODY,
+            self.INLINE_UNCONDITIONAL_EARLY_EXIT_BUILTIN_WRAPPED,
+            self.SANITIZER_EXPECTED_ERROR,
+        )
+
+    def test_workflow_rejects_aggregate_exit_one_masked_by_builtin_wrapped_early_exit(
+        self,
+    ) -> None:
+        self.assert_early_exit_mutation_rejected(
+            self.AGGREGATE_RUN_BODY,
+            self.INLINE_UNCONDITIONAL_EARLY_EXIT_BUILTIN_WRAPPED,
+            self.AGGREGATE_EXPECTED_ERROR,
+        )
+
+    # Two closely equivalent single-layer wrappers, each checked end-to-end
+    # against the real ci.yml on one representative route (scanner); the
+    # broader nested/`-p`/`--` grammar and the safe-nonzero-through-wrapper
+    # cases are covered exhaustively, for all three routes' worth of
+    # semantics, by the concise direct grammar matrix below instead of
+    # multiplying full actionlint/runtime/validator mutation tests per
+    # variant per route.
+    INLINE_UNCONDITIONAL_EARLY_EXIT_COMMAND_WRAPPED = (
+        "          if true; then command exit 0; fi\n"
+    )
+    INLINE_UNCONDITIONAL_EARLY_EXIT_BACKSLASH_ESCAPED = (
+        "          if true; then \\exit 0; fi\n"
+    )
+
+    def test_workflow_rejects_scanner_invocation_masked_by_command_wrapped_early_exit(
+        self,
+    ) -> None:
+        # `command` forces Bash to skip shell function lookup for the
+        # following word, same as `builtin`, and still reaches the real
+        # `exit` builtin underneath (there being no external `exit` command
+        # on PATH to shadow it). `command exit 0` therefore exits 0 exactly
+        # like `builtin exit 0` and bare `exit 0` do, and actionlint accepts
+        # it identically.
+        self.assert_early_exit_mutation_rejected(
+            self.SCANNER_RUN_BODY,
+            self.INLINE_UNCONDITIONAL_EARLY_EXIT_COMMAND_WRAPPED,
+            self.SCANNER_EXPECTED_ERROR,
+        )
+
+    def test_workflow_rejects_scanner_invocation_masked_by_backslash_escaped_early_exit(
+        self,
+    ) -> None:
+        # A leading backslash is the single-word spelling of the same
+        # alias/function-defeat idiom as `builtin`/`command` -- Bash accepts
+        # a backslash-escaped word as the literal, unaliased builtin name.
+        # `\exit 0` exits 0 exactly like the unescaped forms above,
+        # confirmed at the shell (`bash -c '\exit 0'` exits 0 without
+        # reaching a following statement), and actionlint accepts it
+        # identically.
+        self.assert_early_exit_mutation_rejected(
+            self.SCANNER_RUN_BODY,
+            self.INLINE_UNCONDITIONAL_EARLY_EXIT_BACKSLASH_ESCAPED,
+            self.SCANNER_EXPECTED_ERROR,
+        )
+
+    # Concise, direct grammar matrix: calls the bounded wrapper-stripping
+    # matcher itself (no CLI/actionlint/ci.yml round trip) over every
+    # runtime-proven `builtin`/`command` exit-wrapper bypass reported by
+    # owner verification, plus their safe (proven-nonzero) counterparts and
+    # the `command -v`/`-V` describe-only forms that must stay unflagged
+    # because they never execute. Every "unsafe" case below was confirmed
+    # at the shell (`bash -c '<form>; echo reached'`) to exit before
+    # `reached` ever printed; every "safe" case was confirmed to either
+    # print `reached` (falls through) or actually exit nonzero.
+    UNSAFE_EXIT_WRAPPER_GRAMMAR = (
+        "builtin exit 0",
+        "command exit 0",
+        "\\exit 0",
+        "\\builtin exit 0",
+        "\\command exit 0",
+        "\\builtin \\command exit 0",
+        "builtin command exit 0",
+        "command builtin exit 0",
+        "command -p exit 0",
+        "builtin -- exit 0",
+        "command -- exit 0",
+        "command -p -- exit 0",
+        "command -p builtin exit 0",
+        "builtin command -p exit 0",
+    )
+    SAFE_NONZERO_EXIT_WRAPPER_GRAMMAR = (
+        "builtin exit 1",
+        "command exit 1",
+        "\\exit 1",
+        "builtin command exit 1",
+        "command builtin exit 1",
+        "command -p exit 1",
+        "builtin -- exit 1",
+        "command -- exit 1",
+        "command -p -- exit 2",
+        "command -p builtin exit 3",
+    )
+    INERT_DESCRIBE_ONLY_FORMS = (
+        "command -v exit",
+        "command -V exit",
+    )
+
+    def test_early_success_exit_matcher_covers_wrapper_grammar_matrix(self) -> None:
+        module = _load_validate_ci_artifacts_module()
+        detector = module._run_body_has_early_success_exit
+
+        for form in self.UNSAFE_EXIT_WRAPPER_GRAMMAR:
+            run_body = f"if true; then {form}; fi"
+            with self.subTest(form=form, expect="unsafe"):
+                self.assertTrue(
+                    detector(run_body),
+                    f"must flag {form!r} as an early-success exit bypass",
+                )
+
+        for form in self.SAFE_NONZERO_EXIT_WRAPPER_GRAMMAR:
+            run_body = f"if true; then {form}; fi"
+            with self.subTest(form=form, expect="safe-nonzero"):
+                self.assertFalse(
+                    detector(run_body),
+                    f"must not flag proven-nonzero {form!r}",
+                )
+
+        for form in self.INERT_DESCRIBE_ONLY_FORMS:
+            run_body = f"if true; then {form}; fi"
+            with self.subTest(form=form, expect="inert"):
+                self.assertFalse(
+                    detector(run_body),
+                    f"must not flag describe-only {form!r}, it never executes",
+                )
+
+    def test_early_success_exit_wrapper_grammar_bypasses_are_shell_proven(
+        self,
+    ) -> None:
+        """Prove every UNSAFE_EXIT_WRAPPER_GRAMMAR entry actually exits 0.
+
+        This is the runtime leg of the matrix: it demonstrates in a real
+        Bash process, independent of the structural validator, that each
+        form the matcher must flag really does terminate the script before
+        a following statement runs -- so the matrix above isn't asserting
+        against a form nobody can reproduce.
+        """
+
+        for form in self.UNSAFE_EXIT_WRAPPER_GRAMMAR:
+            with self.subTest(form=form):
+                completed = subprocess.run(
+                    ["bash", "-c", f"{form}\necho reached\n"],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(completed.returncode, 0)
+                self.assertNotIn(
+                    "reached",
+                    completed.stdout,
+                    f"{form!r} must exit before the following statement runs",
+                )
 
 
 if __name__ == "__main__":
