@@ -542,6 +542,14 @@ test.describe("mobile task shell at the canonical 375x812 viewport", () => {
       await drawer.getByRole("button", { name: `Tag options ${tagName}` }).click();
       await expect(dialog).toHaveCount(0);
     });
+    await test.step("reset the drawer scroll position to the top before the screenshot", async () => {
+      const drawer = page.getByRole("dialog", { name: "Task navigation" });
+      const scroller = drawer.locator(".overflow-y-auto");
+      await scroller.evaluate((element) => {
+        element.scrollTop = 0;
+      });
+      await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBe(0);
+    });
     await expect(page.locator("body")).toHaveScreenshot("claude-design-shell-mobile-375x812.png", {
       animations: "disabled",
       maxDiffPixelRatio: 0.02
