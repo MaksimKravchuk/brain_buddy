@@ -2830,6 +2830,134 @@ jobs:
             self.AGGREGATE_EXPECTED_ERROR,
         )
 
+    # A fourth actionlint-valid early-exit form: the same statically-
+    # always-taken inline `if`, but the zero argument is quoted rather than
+    # bare. Bash strips a simple word's own quoting before `exit` sees the
+    # value, so `exit "0"` and `exit '00'` terminate the script with status
+    # 0 exactly like `exit 0`/`exit 00` do, before the required command
+    # ever runs -- and actionlint accepts both identically. A validator
+    # whose early-exit regex only recognized unquoted zero spellings let
+    # these same-value quoted spellings regress through undetected even
+    # though every unquoted form above was caught.
+    INLINE_UNCONDITIONAL_EARLY_EXIT_DOUBLE_QUOTED_ZERO = (
+        '          if true; then exit "0"; fi\n'
+    )
+    INLINE_UNCONDITIONAL_EARLY_EXIT_SINGLE_QUOTED_ZERO_PADDED = (
+        "          if true; then exit '00'; fi\n"
+    )
+
+    def test_workflow_rejects_scanner_invocation_masked_by_inline_double_quoted_zero_early_exit(
+        self,
+    ) -> None:
+        # Mutation: identical unconditional-early-exit masking to
+        # `test_workflow_rejects_scanner_invocation_masked_by_inline_unconditional_early_exit`,
+        # but spelled `exit "0"`. Bash takes the `if true` branch
+        # unconditionally and exits 0 there -- the scanner call is dead
+        # code -- yet a regex matching only unquoted zero spellings would
+        # let this equivalent quoted successful-zero spelling through.
+        self.assert_early_exit_mutation_rejected(
+            self.SCANNER_RUN_BODY,
+            self.INLINE_UNCONDITIONAL_EARLY_EXIT_DOUBLE_QUOTED_ZERO,
+            self.SCANNER_EXPECTED_ERROR,
+        )
+
+    def test_workflow_rejects_sanitizer_invocation_masked_by_inline_double_quoted_zero_early_exit(
+        self,
+    ) -> None:
+        # Mutation: identical `exit "0"` masking, applied to the sanitize
+        # step instead of the scan step.
+        self.assert_early_exit_mutation_rejected(
+            self.SANITIZER_RUN_BODY,
+            self.INLINE_UNCONDITIONAL_EARLY_EXIT_DOUBLE_QUOTED_ZERO,
+            self.SANITIZER_EXPECTED_ERROR,
+        )
+
+    def test_workflow_rejects_aggregate_exit_one_masked_by_inline_double_quoted_zero_early_exit(
+        self,
+    ) -> None:
+        # Mutation: the aggregate gate step keeps its exact required
+        # predicate and its lexical `exit 1` as the final statement, but an
+        # inline `if true; then exit "0"; fi` is inserted right after the
+        # `echo`, unconditionally short-circuiting the job to (bash-true)
+        # success before the real `exit 1` ever runs.
+        self.assert_early_exit_mutation_rejected(
+            self.AGGREGATE_RUN_BODY,
+            self.INLINE_UNCONDITIONAL_EARLY_EXIT_DOUBLE_QUOTED_ZERO,
+            self.AGGREGATE_EXPECTED_ERROR,
+        )
+
+    def test_workflow_rejects_scanner_invocation_masked_by_inline_single_quoted_zero_padded_early_exit(
+        self,
+    ) -> None:
+        # Mutation: same route as the double-quoted case above, but spelled
+        # `exit '00'` -- proves both quote styles and zero-padding combine
+        # to still be recognized as the same bounded zero grammar.
+        self.assert_early_exit_mutation_rejected(
+            self.SCANNER_RUN_BODY,
+            self.INLINE_UNCONDITIONAL_EARLY_EXIT_SINGLE_QUOTED_ZERO_PADDED,
+            self.SCANNER_EXPECTED_ERROR,
+        )
+
+    def test_workflow_rejects_sanitizer_invocation_masked_by_inline_single_quoted_zero_padded_early_exit(
+        self,
+    ) -> None:
+        # Mutation: identical `exit '00'` masking, applied to the sanitize
+        # step instead of the scan step.
+        self.assert_early_exit_mutation_rejected(
+            self.SANITIZER_RUN_BODY,
+            self.INLINE_UNCONDITIONAL_EARLY_EXIT_SINGLE_QUOTED_ZERO_PADDED,
+            self.SANITIZER_EXPECTED_ERROR,
+        )
+
+    def test_workflow_rejects_aggregate_exit_one_masked_by_inline_single_quoted_zero_padded_early_exit(
+        self,
+    ) -> None:
+        # Mutation: the aggregate gate step keeps its exact required
+        # predicate and its lexical `exit 1` as the final statement, but an
+        # inline `if true; then exit '00'; fi` is inserted right after the
+        # `echo`, unconditionally short-circuiting the job to (bash-true)
+        # success before the real `exit 1` ever runs.
+        self.assert_early_exit_mutation_rejected(
+            self.AGGREGATE_RUN_BODY,
+            self.INLINE_UNCONDITIONAL_EARLY_EXIT_SINGLE_QUOTED_ZERO_PADDED,
+            self.AGGREGATE_EXPECTED_ERROR,
+        )
+
+    # An actionlint-valid dynamic argument must fail closed too. Its runtime
+    # value is shell-dependent, and this common default expansion exits 0
+    # when EXIT_STATUS is absent; accepting it would let a workflow author
+    # reintroduce the bypass without another lexical zero spelling.
+    INLINE_UNCONDITIONAL_EARLY_EXIT_DYNAMIC_ZERO = (
+        '          if true; then exit "${EXIT_STATUS:-0}"; fi\n'
+    )
+
+    def test_workflow_rejects_scanner_invocation_masked_by_dynamic_zero_early_exit(
+        self,
+    ) -> None:
+        self.assert_early_exit_mutation_rejected(
+            self.SCANNER_RUN_BODY,
+            self.INLINE_UNCONDITIONAL_EARLY_EXIT_DYNAMIC_ZERO,
+            self.SCANNER_EXPECTED_ERROR,
+        )
+
+    def test_workflow_rejects_sanitizer_invocation_masked_by_dynamic_zero_early_exit(
+        self,
+    ) -> None:
+        self.assert_early_exit_mutation_rejected(
+            self.SANITIZER_RUN_BODY,
+            self.INLINE_UNCONDITIONAL_EARLY_EXIT_DYNAMIC_ZERO,
+            self.SANITIZER_EXPECTED_ERROR,
+        )
+
+    def test_workflow_rejects_aggregate_exit_one_masked_by_dynamic_zero_early_exit(
+        self,
+    ) -> None:
+        self.assert_early_exit_mutation_rejected(
+            self.AGGREGATE_RUN_BODY,
+            self.INLINE_UNCONDITIONAL_EARLY_EXIT_DYNAMIC_ZERO,
+            self.AGGREGATE_EXPECTED_ERROR,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
