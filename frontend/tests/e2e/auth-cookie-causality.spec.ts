@@ -1,4 +1,4 @@
-import { type Page, type Route, type TestInfo } from "@playwright/test";
+import { type APIResponse, type Page, type Route, type TestInfo } from "@playwright/test";
 
 import { test, expect } from "../allure.fixtures";
 import { backendUrl, mintInvite, password, uniqueEmail } from "./gtdHelpers";
@@ -17,6 +17,7 @@ async function signup(page: Page, testInfo: TestInfo): Promise<{ email: string; 
 
 test("E2E-AUTH-03 delayed predecessor logout preserves the successor browser session", async ({ page }, testInfo) => {
   let heldLogout: Route | undefined;
+  let heldLogoutResponse: APIResponse | undefined;
   let logoutRequestCookie = "";
   let account!: { email: string; predecessorToken: string };
   let releaseLogout!: () => void;
@@ -33,8 +34,12 @@ test("E2E-AUTH-03 delayed predecessor logout preserves the successor browser ses
   const predecessorToken = account.predecessorToken;
 
   await page.route("**/api/auth/logout", async (route) => {
-    heldLogout = route;
     logoutRequestCookie = route.request().headers().cookie ?? "";
+    // Send A to the server now, then hold only its response. Holding the
+    // request itself lets Playwright recompute Cookie at continue time and can
+    // incorrectly turn this into a logout of successor B.
+    heldLogoutResponse = await route.fetch();
+    heldLogout = route;
     releaseLogout();
   });
 
@@ -74,7 +79,7 @@ test("E2E-AUTH-03 delayed predecessor logout preserves the successor browser ses
   });
 
   await test.step("release logout A and prove its response cannot delete B", async () => {
-    await heldLogout!.continue();
+    await heldLogout!.fulfill({ response: heldLogoutResponse! });
     await expect(logoutCompletion).resolves.toBe(204);
 
     const survivingCookie = (await page.context().cookies(backendUrl)).find(
