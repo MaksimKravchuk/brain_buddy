@@ -129,6 +129,17 @@ Evidence for a bootstrap landing must include: the candidate CI run URL proving 
 exact SHA passed the full required job set, the authorization (actor, scope, expiry),
 and the resulting release workflow run URL.
 
+### Activation canary record (2026-07-22)
+
+Bootstrap SHA `938abd4cbf9fe73ad234d4247d40fb780d0db5a6` passed exact-SHA
+candidate CI run `29961113907`, was explicitly fast-forwarded during the bounded
+bootstrap window, and passed main CI run `29961801317` plus production release and
+authenticated smoke run `29962336315`. The ruleset and environment checks in step 5
+were verified immediately afterward. The docs-only commit containing this activation
+record is the required first end-to-end automatic candidate: its successful release
+run is the canonical evidence that the dedicated deploy key can land a fresh SHIP
+candidate while ordinary workflow tokens remain unable to update `main`.
+
 ### Required `main` protection, landing identity, and production environment (maintainer, ASK)
 
 Configure the repository so `main` accepts only verified landings. These are GitHub
