@@ -52,9 +52,7 @@ def test_openai_reconciler_materializes_only_schema_valid_server_owned_patches()
             ]
         }
 
-    reconciler = OpenAITextReconciler(
-        api_key="test-key", model="gpt-4o", complete=complete
-    )
+    reconciler = OpenAITextReconciler(api_key="test-key", complete=complete)
     segment = TranscriptHypothesis(
         id="segment_accurate",
         sequence=1,
@@ -88,7 +86,9 @@ def test_openai_reconciler_materializes_only_schema_valid_server_owned_patches()
     assert result.patches[1].proposal_id.startswith("proposal_")
     assert result.patches[1].proposal_id != "proposal_existing"
     assert all(patch.producer == "reconciler" for patch in result.patches)
-    assert captured[0]["model"] == "gpt-4o"
+    from app.core.config import MVP_RECONCILER_MODEL
+
+    assert captured[0]["model"] == MVP_RECONCILER_MODEL
     assert captured[0]["response_format"] == {
         "type": "json_schema",
         "json_schema": captured[0]["response_format"]["json_schema"],  # type: ignore[index]
@@ -175,7 +175,6 @@ def test_openai_reconciler_rejects_invalid_or_untrusted_operations(
 
     reconciler = OpenAITextReconciler(
         api_key="test-key",
-        model="gpt-4o",
         complete=lambda _payload: {"operations": [operation]},
     )
     segment = TranscriptHypothesis(
@@ -777,22 +776,53 @@ def test_openai_reconciler_prompt_prohibits_inventing_unsupported_tasks() -> Non
     assert "source_segment_ids" in system_prompt
 
 
-def test_openai_reconciler_fails_closed_at_construction_for_unauthorized_endpoint() -> None:
-    """Defense in depth beyond the container's allow-list: even a directly
-    constructed adapter instance (bypassing ``app.container._build_text_reconciler``
-    entirely) must never be able to send a Bearer-authenticated reconciliation
-    payload to an endpoint other than the exact centrally authorized OpenAI
-    chat-completions URL."""
-    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+class _LyingStr(str):
+    """A ``str`` subclass whose ``__eq__``/``__ne__`` always lie.
 
-    with pytest.raises(ValueError, match="Unauthorized reconciler endpoint"):
-        OpenAITextReconciler(
-            api_key="test-key",
-            endpoint="https://attacker.example.com/v1/chat/completions",
-        )
+    Proves the authorization check cannot be satisfied by matching
+    ``==``/``!=`` alone: it must reject any non-exact-``str`` type outright,
+    because a subclass can report equality with the authorized constant
+    while its actual value -- what httpx would literally put on the wire --
+    is something else entirely.
+    """
+
+    def __eq__(self, other: object) -> bool:
+        return True
+
+    def __ne__(self, other: object) -> bool:
+        return False
+
+    def __hash__(self) -> int:
+        return str.__hash__(self)
 
 
-def test_openai_reconciler_never_sends_a_request_to_an_unauthorized_endpoint() -> None:
+@pytest.mark.parametrize(
+    ("field_name", "attempted_value"),
+    [
+        ("endpoint", "https://attacker.example.com/v1/chat/completions"),
+        ("endpoint", "https://api.openai.com/v1/chat/completions"),
+        ("model", "gpt-4o"),
+        ("model", "gpt-5.6-terra"),
+        ("model", "gpt-5.6-sol"),
+        ("model", "gpt-5.6-fable"),
+        ("model", "gpt-5.6-luna"),
+        ("template_version", "legacy-v0"),
+        ("template_version", "product-operation-v1"),
+        ("provider_id", "anthropic"),
+        ("provider_id", "openai"),
+    ],
+)
+def test_openai_reconciler_rejects_authorization_identity_as_a_constructor_argument(
+    field_name: str, attempted_value: str
+) -> None:
+    """Authorization-sensitive identity (``endpoint``/``model``/
+    ``template_version``/``provider_id``) is never accepted from the
+    constructor -- not even the correct authorized value -- since accepting
+    runtime-supplied identity configuration at all is itself the egress-
+    authorization gap. Regression for a defense-in-depth gap: previously the
+    constructor accepted an arbitrary value for each of these fields and
+    only ``endpoint`` was ever re-validated in ``__post_init__``."""
+
     from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
 
     calls = 0
@@ -805,11 +835,95 @@ def test_openai_reconciler_never_sends_a_request_to_an_unauthorized_endpoint() -
             json={"choices": [{"message": {"content": {"operations": []}}}]},
         )
 
-    with pytest.raises(ValueError, match="Unauthorized reconciler endpoint"):
+    with pytest.raises(TypeError, match=f"unexpected keyword argument '{field_name}'"):
         OpenAITextReconciler(
             api_key="test-key",
-            endpoint="https://attacker.example.com/v1/chat/completions",
             transport=httpx.MockTransport(handler),
+            **{field_name: attempted_value},
+        )
+
+    assert calls == 0
+
+
+@pytest.mark.parametrize(
+    ("field_name", "attempted_value"),
+    [
+        ("endpoint", "https://attacker.example.com/v1/chat/completions"),
+        ("model", "gpt-4o"),
+        ("template_version", "legacy-v0"),
+        ("provider_id", "anthropic"),
+    ],
+)
+def test_openai_reconciler_identity_fields_cannot_be_reassigned_after_construction(
+    field_name: str, attempted_value: str
+) -> None:
+    """The identity fields are frozen: a manually-constructed adapter
+    instance handed to other code cannot have its authorized identity
+    swapped out from under it before a later call transmits."""
+
+    import dataclasses
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": {"operations": []}}}]},
+        )
+
+    reconciler = OpenAITextReconciler(
+        api_key="test-key", transport=httpx.MockTransport(handler)
+    )
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        setattr(reconciler, field_name, attempted_value)
+
+    assert calls == 0
+
+
+@pytest.mark.parametrize(
+    "field_name", ["endpoint", "model", "template_version", "provider_id"]
+)
+def test_openai_reconciler_rejects_a_lying_str_subclass_forced_onto_identity(
+    field_name: str,
+) -> None:
+    """Even if ``frozen=True`` is bypassed via ``object.__setattr__`` -- e.g.
+    by other code holding a reference to a constructed instance -- a spoofed
+    identity must never reach the wire. The re-check immediately before
+    every transmit must reject a deceptive ``str`` subclass whose overridden
+    equality lies about matching the authorized constant."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": {"operations": []}}}]},
+        )
+
+    reconciler = OpenAITextReconciler(
+        api_key="test-key", transport=httpx.MockTransport(handler)
+    )
+    spoofed = _LyingStr("attacker-controlled-value")
+    assert spoofed == getattr(reconciler, field_name)  # the lie
+    object.__setattr__(reconciler, field_name, spoofed)
+    error_label = "provider" if field_name == "provider_id" else field_name
+
+    with pytest.raises(ValueError, match=f"Unauthorized reconciler {error_label}"):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id="operation_1",
+                transcript_segments=[],
+                active_proposals=[],
+            )
         )
 
     assert calls == 0

@@ -18,7 +18,12 @@ from typing import Any, Literal
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from app.core.config import MVP_RECONCILER_ENDPOINT
+from app.core.config import (
+    MVP_RECONCILER_ENDPOINT,
+    MVP_RECONCILER_MODEL,
+    MVP_RECONCILER_PROVIDER,
+    MVP_RECONCILER_TEMPLATE_VERSION,
+)
 from app.exceptions import (
     ProviderRetryableError,
     ProviderTerminalError,
@@ -121,14 +126,11 @@ def _strict_response_schema(
 Completion = Callable[[dict[str, object]], dict[str, object]]
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class OpenAITextReconciler:
     """Call a current OpenAI text model using strict structured output."""
 
     api_key: str = field(repr=False)
-    model: str = "gpt-4o"
-    template_version: str = "product-operation-v1"
-    endpoint: str = MVP_RECONCILER_ENDPOINT
     timeout_seconds: float = 30.0
     max_retries: int = 2
     retry_backoff_seconds: Sequence[float] = (1.0, 2.0)
@@ -137,25 +139,51 @@ class OpenAITextReconciler:
     transport: httpx.BaseTransport | None = None
     sleep: Callable[[float], None] = time.sleep
     complete: Completion | None = None
-    provider_id: str = "openai"
-    requires_external_processing: bool = True
+    # Authorization-sensitive identity: never accepted from the constructor
+    # and never reassignable post-construction (the dataclass is frozen).
+    # Defense in depth beyond the container's allow-list: even a direct,
+    # manually-constructed adapter instance (bypassing
+    # ``app.container._build_text_reconciler`` entirely) must never be able
+    # to send a Bearer-authenticated reconciliation payload under a
+    # provider/model/template other than the exact centrally authorized MVP
+    # tuple, or to an endpoint other than the exact authorized OpenAI
+    # chat-completions URL. No runtime configuration -- env var, caller
+    # kwarg, or post-construction mutation -- may decide this identity.
+    provider_id: str = field(default=MVP_RECONCILER_PROVIDER, init=False)
+    model: str = field(default=MVP_RECONCILER_MODEL, init=False)
+    template_version: str = field(default=MVP_RECONCILER_TEMPLATE_VERSION, init=False)
+    endpoint: str = field(default=MVP_RECONCILER_ENDPOINT, init=False)
+    requires_external_processing: bool = field(default=True, init=False)
 
     def __post_init__(self) -> None:
-        # Defense in depth beyond the container's allow-list: even a direct,
-        # manually-constructed adapter instance (bypassing
-        # ``app.container._build_text_reconciler`` entirely) must never be
-        # able to send a Bearer-authenticated reconciliation payload to an
-        # endpoint other than the exact centrally authorized OpenAI
-        # chat-completions URL. Literal comparison, not strip()/casefold():
-        # the unmodified raw value is what would be forwarded to httpx, so a
-        # normalized check here would authorize a value that is not
-        # byte-for-byte the measured, approved endpoint.
-        if self.endpoint != MVP_RECONCILER_ENDPOINT:
-            raise ValueError(
-                f"Unauthorized reconciler endpoint {self.endpoint!r}; only the "
-                f"exact authorized {MVP_RECONCILER_ENDPOINT!r} endpoint may be "
-                "used."
-            )
+        self._require_authorized_identity()
+
+    def _require_authorized_identity(self) -> None:
+        """Re-validate identity fields immediately before every use.
+
+        ``frozen=True`` blocks ordinary attribute reassignment, but a caller
+        could still force a spoofed value onto a constructed instance (e.g.
+        ``object.__setattr__``) or -- since Python performs no runtime
+        generic-checking -- substitute a ``str`` subclass whose overridden
+        ``__eq__``/``__ne__`` lies about matching the authorized constant
+        while carrying a different actual value. ``type(value) is str`` plus
+        exact literal equality closes both: it is checked once at
+        construction and again immediately before every network transmit and
+        retry, so a value that only becomes wrong after ``__post_init__``
+        still cannot reach the wire.
+        """
+
+        for value, authorized, label in (
+            (self.provider_id, MVP_RECONCILER_PROVIDER, "provider"),
+            (self.model, MVP_RECONCILER_MODEL, "model"),
+            (self.template_version, MVP_RECONCILER_TEMPLATE_VERSION, "template_version"),
+            (self.endpoint, MVP_RECONCILER_ENDPOINT, "endpoint"),
+        ):
+            if type(value) is not str or value != authorized:  # noqa: E721
+                raise ValueError(
+                    f"Unauthorized reconciler {label} {value!r}; only the "
+                    f"exact authorized {authorized!r} {label} may be used."
+                )
 
     def reconcile(self, request: ReconcileTextRequest) -> ReconcileResult:
         payload = self._payload(request)
@@ -277,6 +305,7 @@ class OpenAITextReconciler:
     def _post_with_retries(self, payload: dict[str, object]) -> httpx.Response:
         attempt = 0
         while True:
+            self._require_authorized_identity()
             try:
                 with httpx.Client(
                     timeout=self.timeout_seconds, transport=self.transport

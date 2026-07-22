@@ -104,7 +104,6 @@ def _build_accurate_stt(config: AppConfig) -> AccurateSttPort:
             return DisabledAccurateStt("STT_PROVIDER_CREDENTIALS_MISSING")
         return DeepgramAccurateStt(
             api_key=api_key,
-            model=settings.model,
             timeout_seconds=settings.timeout_seconds,
             max_retries=settings.max_retries,
             retry_backoff_seconds=settings.retry_backoff_seconds,
@@ -178,9 +177,6 @@ def _build_text_reconciler(config: AppConfig) -> TextReconcilerPort:
             return DisabledTextReconciler("RECONCILER_PROVIDER_CREDENTIALS_MISSING")
         return OpenAITextReconciler(
             api_key=api_key,
-            model=settings.model,
-            template_version=settings.template_version,
-            endpoint=settings.endpoint,
             timeout_seconds=settings.timeout_seconds,
             max_retries=settings.max_retries,
             retry_backoff_seconds=settings.retry_backoff_seconds,
