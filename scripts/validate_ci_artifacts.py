@@ -58,6 +58,9 @@ E2E_CI_REQUIREMENTS = (
     ),
     ("native product E2E Allure validator", "product-e2e-results"),
 )
+PR_SCOPED_CANCEL_EXPRESSION = "${{ github.event_name == 'pull_request' }}"
+PR_SCOPED_RETENTION_EXPRESSION = "${{ github.event_name == 'pull_request' && 7 || 30 }}"
+REQUIRED_STATUS_CONTEXTS = ("Docker Images",)
 NATIVE_PRODUCT_E2E_STORIES = (
     "Native task shell navigation",
     "Minimal native task management",
@@ -348,6 +351,52 @@ def _missing_mobile_ci_errors(workflow_text: str) -> list[str]:
             "mobile job must install backend contract dependencies via 'uv sync --locked', "
             "not an unlocked pip install"
         )
+    return errors
+
+
+def _concurrency_errors(workflow_text: str) -> list[str]:
+    errors: list[str] = []
+    match = re.search(r"(?m)^concurrency:\n((?:^ {2}.+\n?)+)", workflow_text)
+    if not match:
+        errors.append(
+            "missing top-level concurrency block that cancels superseded pull_request runs"
+        )
+        return errors
+
+    block = match.group(1)
+    if "github.event.pull_request.number" not in block or "pull_request" not in block:
+        errors.append(
+            "concurrency group must be scoped per pull request number so unrelated runs "
+            "are never grouped together"
+        )
+    if f"cancel-in-progress: {PR_SCOPED_CANCEL_EXPRESSION}" not in block:
+        errors.append(
+            "cancel-in-progress must cancel only pull_request runs: expected exactly "
+            f"cancel-in-progress: {PR_SCOPED_CANCEL_EXPRESSION}"
+        )
+    return errors
+
+
+def _retention_errors(workflow_text: str) -> list[str]:
+    retention_values = [value.strip() for value in re.findall(r"retention-days:\s*(.+)", workflow_text)]
+    if not retention_values:
+        return ["missing artifact retention configuration"]
+
+    non_conforming = sorted({value for value in retention_values if value != PR_SCOPED_RETENTION_EXPRESSION})
+    if non_conforming:
+        return [
+            "all artifact retention-days must use the PR-scoped expression "
+            f"{PR_SCOPED_RETENTION_EXPRESSION} (7 days on pull_request, 30 on push/main); "
+            f"found non-conforming value(s): {non_conforming}"
+        ]
+    return []
+
+
+def _status_context_errors(workflow_text: str) -> list[str]:
+    errors: list[str] = []
+    for context in REQUIRED_STATUS_CONTEXTS:
+        if f"name: {context}" not in workflow_text:
+            errors.append(f"missing required {context} status context job name: {context}")
     return errors
 
 
@@ -1070,8 +1119,9 @@ def validate_workflow(
         errors.extend(_missing_mobile_ci_errors(workflow_text))
         errors.extend(_missing_mobile_privacy_gate_errors(workflow_text))
         errors.extend(_missing_e2e_ci_errors(workflow_text))
-        if "retention-days: 30" not in workflow_text:
-            errors.append("missing 30-day artifact retention")
+        errors.extend(_concurrency_errors(workflow_text))
+        errors.extend(_retention_errors(workflow_text))
+        errors.extend(_status_context_errors(workflow_text))
         if "if: always()" not in workflow_text:
             errors.append("missing if: always() artifact upload guard")
         if "validate_allure_taxonomy.py" not in workflow_text:
@@ -1127,6 +1177,79 @@ def validate_mutation_workflow(workflow: Path) -> int:
     return 0
 
 
+PREVIEW_LABEL = "preview:visual"
+PREVIEW_CONCURRENCY_GROUP = (
+    "preview-${{ github.repository_id }}-${{ github.event.pull_request.number }}"
+)
+PRODUCTION_APP_NAMES = ("brain-buddy-frontend", "brain-buddy-backend")
+PREVIEW_TRIGGER_TYPES = (
+    "opened",
+    "synchronize",
+    "reopened",
+    "labeled",
+    "unlabeled",
+    "closed",
+)
+
+
+def validate_preview_workflow(workflow: Path) -> int:
+    """Fail closed unless the Fly preview workflow matches ADR-0003's label-gated policy."""
+
+    if not workflow.is_file():
+        return _fail(f"preview workflow does not exist: {workflow}")
+
+    workflow_text = workflow.read_text(encoding="utf-8")
+    errors: list[str] = []
+
+    if PREVIEW_LABEL not in workflow_text:
+        errors.append(
+            f"missing explicit {PREVIEW_LABEL} label trigger; paths or events alone must "
+            "never authorize a deploy"
+        )
+    for trigger in PREVIEW_TRIGGER_TYPES:
+        if trigger not in workflow_text:
+            errors.append(f"missing pull_request trigger type: {trigger}")
+
+    if PREVIEW_CONCURRENCY_GROUP not in workflow_text:
+        errors.append(f"missing per-PR concurrency group {PREVIEW_CONCURRENCY_GROUP}")
+    if "cancel-in-progress: true" not in workflow_text:
+        errors.append(
+            "missing cancel-in-progress: true for the per-PR preview concurrency group"
+        )
+
+    if "fork" not in workflow_text.lower():
+        errors.append("missing same-repository/fork guard before any secret-bearing mutation")
+
+    for app_name in PRODUCTION_APP_NAMES:
+        if app_name not in workflow_text:
+            errors.append(f"missing hard exclusion of production app target: {app_name}")
+
+    if "secrets.FLY_PREVIEW_API_TOKEN" not in workflow_text:
+        errors.append(
+            "deploy and cleanup must use a preview-only credential "
+            "(secrets.FLY_PREVIEW_API_TOKEN), not the production Fly token"
+        )
+
+    if "CURRENT_HEAD_SHA" not in workflow_text:
+        errors.append(
+            "missing immediate pre-mutation head sha re-verification against the event head sha"
+        )
+
+    if "smoke" not in workflow_text.lower():
+        errors.append("missing smoke verification step for the deployed preview")
+
+    if "|| true" in workflow_text:
+        errors.append("cleanup/destroy must never be masked with an unconditional `|| true`")
+
+    if errors:
+        for error in errors:
+            print(f"error: {error}", file=sys.stderr)
+        return 1
+
+    print(f"preview-workflow validation passed: {workflow}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -1166,6 +1289,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     product_e2e_results.add_argument("--path", type=Path, required=True)
 
+    preview_workflow = subparsers.add_parser(
+        "preview-workflow",
+        help="validate the ADR-0003 label-gated Fly preview workflow",
+    )
+    preview_workflow.add_argument("--workflow", type=Path, required=True)
+
     return parser
 
 
@@ -1179,6 +1308,8 @@ def main(argv: list[str] | None = None) -> int:
         return validate_mutation_workflow(args.workflow)
     if args.command == "product-e2e-results":
         return validate_native_product_e2e_results(args.path)
+    if args.command == "preview-workflow":
+        return validate_preview_workflow(args.workflow)
     raise AssertionError(f"unknown command: {args.command}")
 
 
