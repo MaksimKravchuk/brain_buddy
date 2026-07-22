@@ -14,11 +14,22 @@
 // `paths` object (method lowercase, path exactly as written, including the `/api`
 // prefix). An allowlist entry for an operation the current backend does not yet
 // expose as a distinct route (e.g. the canonical proposal-batches/confirm/
-// consent-decisions/audio-delete/processing-policy routes mobile-api.md names,
-// which this PR's backend still serves through the generic
-// `/brain-dump-operations/{operation_id}/{action}` command dispatcher) is
-// harmless: filtering is a lookup against whatever paths are actually present in
-// the input document, so an unmatched allowlist entry simply contributes nothing.
+// consent-decisions/audio-delete/processing-policy routes mobile-api.md names)
+// is harmless: filtering is a lookup against whatever paths are actually present
+// in the input document, so an unmatched allowlist entry simply contributes
+// nothing.
+//
+// The generic `/brain-dump-operations/{operation_id}/{action}` command
+// dispatcher this PR's backend uses for cancel/retry/review-provisional is
+// deliberately NOT allowlisted, even though it is the only route those three
+// commands currently reach: its `action` path parameter is an untyped OpenAPI
+// string with no enum constraint, so generating it hands the mobile client an
+// `action: string` request shape that can dispatch ANY backend command string
+// on this substrate, including the deprecated `finish`/`commit` verbs, not just
+// the three intended ones. Only explicitly approved, narrowly-typed operations
+// belong here (ADR-0008); a future dedicated cancel/retry/review-provisional
+// route (or an enum-constrained `action`) can be allowlisted once the backend
+// exposes one.
 const ALLOWED_OPERATIONS = new Set([
   // Mobile session establishment (mobile-api.md "Mobile session establishment").
   "post /api/auth/mobile/sessions",
@@ -46,14 +57,6 @@ const ALLOWED_OPERATIONS = new Set([
   "post /api/brain-dump-operations/{operation_id}/confirm",
   "post /api/brain-dump-operations/{operation_id}/consent-decisions",
   "post /api/brain-dump-operations/{operation_id}/audio/delete",
-  // The canonical cancel/retry/review-provisional commands are dispatched
-  // through this generic action-command substrate on the current backend (the
-  // canonical routes named above do not exist as separate paths yet). It must
-  // stay allowed so mobile can generate types for the commands it is already
-  // allowed to send; mobile-api.md's excluded `/finish` and `/commit`
-  // compatibility aliases are literal, separate legacy routes this dispatcher
-  // does not expose, not action values carried through it.
-  "post /api/brain-dump-operations/{operation_id}/{action}",
 ]);
 
 const HTTP_METHODS = new Set([

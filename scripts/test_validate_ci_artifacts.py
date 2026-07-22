@@ -1,3 +1,4 @@
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -9,6 +10,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "validate_ci_artifacts.py"
 MUTATION_EVIDENCE_SCRIPT = REPO_ROOT / "scripts" / "create_mutation_allure_evidence.py"
+
+# Used by the inline-early-exit mutation tests below to additionally prove
+# each mutation is actionlint-valid, not just structurally rejected by our own
+# validator. actionlint is an external tool this repo does not vendor, so its
+# absence must not fail the suite -- it only narrows coverage to the
+# structural validator, and that narrowing is reported via stderr so it is
+# visible in CI/test output rather than silently skipped.
+ACTIONLINT_BIN = shutil.which("actionlint")
 
 
 class ValidateCiArtifactsTests(unittest.TestCase):
@@ -2549,6 +2558,194 @@ jobs:
 
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("aggregate Allure report privacy gate must hard-fail", completed.stderr)
+
+    def assert_actionlint_valid_if_available(self, workflow_path: Path) -> None:
+        """Prove a mutation is actionlint-valid where actionlint is available.
+
+        Structural rejection of an actionlint-valid mutation is the whole
+        point of these tests -- if actionlint itself would already reject
+        the mutated workflow, our validator catching it too proves nothing
+        about the fail-closed gap being tested. When actionlint is not
+        installed, this narrows to testing the structural validator alone
+        and reports that narrowing on stderr so it stays visible instead of
+        silently skipped.
+        """
+
+        if ACTIONLINT_BIN is None:
+            print(
+                "warning: actionlint not found on PATH; verifying only the "
+                f"structural validator's rejection of {workflow_path.name}",
+                file=sys.stderr,
+            )
+            return
+
+        completed = subprocess.run(
+            [ACTIONLINT_BIN, str(workflow_path)],
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            "mutation must remain actionlint-valid so the structural rejection "
+            f"below is meaningful: {completed.stdout}{completed.stderr}",
+        )
+
+    def assert_early_exit_mutation_rejected(
+        self,
+        old_run_body: str,
+        inserted_line: str,
+        expected_error: str,
+    ) -> None:
+        """Insert `inserted_line` as the run body's first statement and
+        assert the mutated real workflow is both actionlint-valid (where
+        actionlint is available) and rejected by the structural validator
+        with `expected_error`.
+        """
+
+        source = self.real_ci_workflow_text()
+        self.assertIn(old_run_body, source)
+        marker = "        run: |\n"
+        self.assertIn(marker, old_run_body)
+        new_run_body = old_run_body.replace(marker, marker + inserted_line, 1)
+        mutated = source.replace(old_run_body, new_run_body, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = self.write_mutated_ci_workflow(tmp, mutated)
+            self.assert_actionlint_valid_if_available(workflow)
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(expected_error, completed.stderr)
+
+    # Real run-body text for each of the three privacy-gate routes this
+    # module must fail closed on, paired with the structural error each
+    # mutation must still surface. Declared once and shared by every inline
+    # early-exit mutation test below (both forms x all three routes).
+    SCANNER_RUN_BODY = (
+        "        run: |\n"
+        "          python3 scripts/validate_mobile_privacy_evidence.py \\\n"
+        "            --path backend/allure-results \\\n"
+        "            --label backend-evidence\n"
+    )
+    SCANNER_EXPECTED_ERROR = "backend layer privacy scan step must set id: backend_privacy_scan"
+
+    SANITIZER_RUN_BODY = (
+        "        run: |\n"
+        "          python3 scripts/sanitize_privacy_evidence.py \\\n"
+        "            --path backend/allure-results \\\n"
+        "            --label backend-evidence\n"
+    )
+    SANITIZER_EXPECTED_ERROR = "backend layer must run sanitize_privacy_evidence.py"
+
+    AGGREGATE_RUN_BODY = (
+        "        run: |\n"
+        "          echo \"::error::One or more layer privacy scans did not explicitly succeed "
+        "(backend=${{ needs.backend.outputs.privacy_scan_outcome }}, "
+        "frontend=${{ needs.frontend.outputs.privacy_scan_outcome }}, "
+        "playwright=${{ needs.e2e.outputs.privacy_scan_outcome }}, "
+        "mobile=${{ needs.mobile.outputs.privacy_scan_outcome }}); refusing to download, "
+        "generate, upload, or publish the aggregate Allure report (ADR-0008).\" >&2\n"
+        "          exit 1\n"
+    )
+    AGGREGATE_EXPECTED_ERROR = "aggregate Allure report privacy gate must hard-fail"
+
+    # The two actionlint-valid early-exit forms the structural validator
+    # previously missed: a statically-always-taken inline `if`, and an
+    # inline conditional bare `exit` -- both packed onto one
+    # semicolon-separated physical line rather than actionlint's
+    # already-covered multi-line `if ...; then\n  exit 0\nfi` shape.
+    INLINE_UNCONDITIONAL_EARLY_EXIT = "          if true; then exit 0; fi\n"
+    INLINE_CONDITIONAL_BARE_EARLY_EXIT = (
+        '          if [ -z "${PRIVACY_SCANNER_ENABLED:-}" ]; then exit; fi\n'
+    )
+
+    def test_workflow_rejects_scanner_invocation_masked_by_inline_unconditional_early_exit(
+        self,
+    ) -> None:
+        # Mutation: the scanner invocation is untouched and remains the
+        # final top-level statement, but is preceded by an actionlint-valid,
+        # single-line `if true; then exit 0; fi`. Bash takes this branch
+        # unconditionally and exits 0 before the scanner call ever executes.
+        # Splitting only on whole physical lines (the pre-fix behavior)
+        # never detects this: `exit 0` never sits alone on its own line
+        # here, it is packed onto the same line as `if true; then` and `;
+        # fi`.
+        self.assert_early_exit_mutation_rejected(
+            self.SCANNER_RUN_BODY,
+            self.INLINE_UNCONDITIONAL_EARLY_EXIT,
+            self.SCANNER_EXPECTED_ERROR,
+        )
+
+    def test_workflow_rejects_scanner_invocation_masked_by_inline_conditional_bare_exit(
+        self,
+    ) -> None:
+        # Mutation: same masking route, but the guard is a real
+        # (non-statically-true) condition and the exit is bare (no explicit
+        # `0`). We cannot evaluate whether `PRIVACY_SCAN_OVERRIDE` is set at
+        # validation time, so this must be treated as unsafe regardless
+        # (ADR-0008 fail-closed).
+        self.assert_early_exit_mutation_rejected(
+            self.SCANNER_RUN_BODY,
+            self.INLINE_CONDITIONAL_BARE_EARLY_EXIT,
+            self.SCANNER_EXPECTED_ERROR,
+        )
+
+    def test_workflow_rejects_sanitizer_invocation_masked_by_inline_unconditional_early_exit(
+        self,
+    ) -> None:
+        # Mutation: identical inline `if true; then exit 0; fi` masking,
+        # applied to the sanitize step instead of the scan step.
+        self.assert_early_exit_mutation_rejected(
+            self.SANITIZER_RUN_BODY,
+            self.INLINE_UNCONDITIONAL_EARLY_EXIT,
+            self.SANITIZER_EXPECTED_ERROR,
+        )
+
+    def test_workflow_rejects_sanitizer_invocation_masked_by_inline_conditional_bare_exit(
+        self,
+    ) -> None:
+        # Mutation: identical inline conditional bare `exit` masking,
+        # applied to the sanitize step instead of the scan step.
+        self.assert_early_exit_mutation_rejected(
+            self.SANITIZER_RUN_BODY,
+            self.INLINE_CONDITIONAL_BARE_EARLY_EXIT,
+            self.SANITIZER_EXPECTED_ERROR,
+        )
+
+    def test_workflow_rejects_aggregate_exit_one_masked_by_inline_unconditional_early_exit(
+        self,
+    ) -> None:
+        # Mutation: the aggregate gate step keeps its exact required
+        # predicate and its lexical `exit 1` as the final statement, but an
+        # inline `if true; then exit 0; fi` is inserted right after the
+        # `echo`, unconditionally short-circuiting the job to success before
+        # the real `exit 1` ever runs.
+        self.assert_early_exit_mutation_rejected(
+            self.AGGREGATE_RUN_BODY,
+            self.INLINE_UNCONDITIONAL_EARLY_EXIT,
+            self.AGGREGATE_EXPECTED_ERROR,
+        )
+
+    def test_workflow_rejects_aggregate_exit_one_masked_by_inline_conditional_bare_exit(
+        self,
+    ) -> None:
+        # Mutation: same aggregate route, guarded by a real
+        # (non-statically-true) condition and a bare `exit` instead of
+        # `exit 0`.
+        self.assert_early_exit_mutation_rejected(
+            self.AGGREGATE_RUN_BODY,
+            self.INLINE_CONDITIONAL_BARE_EARLY_EXIT,
+            self.AGGREGATE_EXPECTED_ERROR,
+        )
 
 
 if __name__ == "__main__":

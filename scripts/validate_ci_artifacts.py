@@ -753,7 +753,35 @@ def _run_body_has_exit_trap_directive(run_body: str) -> bool:
     return bool(_EXIT_TRAP_DIRECTIVE_RE.search(run_body))
 
 
-_EARLY_SUCCESS_EXIT_RE = re.compile(r"(?m)^\s*exit(?:\s+0)?\s*$")
+_EARLY_SUCCESS_EXIT_STATEMENT_RE = re.compile(r"^exit(?:\s+0)?$")
+
+_INLINE_BLOCK_KEYWORDS = ("then", "do", "else")
+
+
+def _strip_leading_inline_block_keywords(statement: str) -> str:
+    """Strip a leading ``then``/``do``/``else`` keyword from one statement.
+
+    actionlint accepts a control-flow keyword and its guarded command on the
+    very same semicolon-separated segment (`if true; then exit 0; fi`, `if
+    [ -z "$X" ]; then exit; fi`). Splitting purely on `;` leaves `then exit
+    0` as a single segment, which never equals the bare `exit`/`exit 0`
+    statement text on its own — this peels the keyword off so the guarded
+    command underneath can still be recognized. Looping handles the rare
+    case of more than one keyword landing on the same segment.
+    """
+
+    remainder = statement.strip()
+    changed = True
+    while changed:
+        changed = False
+        for keyword in _INLINE_BLOCK_KEYWORDS:
+            if remainder == keyword:
+                return ""
+            if remainder.startswith(keyword + " "):
+                remainder = remainder[len(keyword) :].strip()
+                changed = True
+                break
+    return remainder
 
 
 def _run_body_has_early_success_exit(run_body: str) -> bool:
@@ -765,14 +793,27 @@ def _run_body_has_early_success_exit(run_body: str) -> bool:
     before that command ever runs — whether it sits at the run body's top
     level or is nested inside an actionlint-valid `if`/`for`/`while`/`case`
     block whose condition is statically always taken (e.g.
-    `if true; then exit 0; fi`), which `_shell_top_level_statements`
-    deliberately does not surface as a top-level statement at all. We
-    cannot verify shell control-flow reachability with a regex, so any such
-    statement anywhere in the run body — nested or not — is treated as an
-    unsafe early-success bypass (ADR-0008 fail-closed).
+    `if true; then exit 0; fi`) or merely conditional (e.g. `if [ -z
+    "${VAR:-}" ]; then exit; fi`). We cannot verify shell control-flow
+    reachability with a regex, so any such statement anywhere in the run
+    body — nested or not, on its own physical line or packed onto one
+    semicolon-separated inline compound statement — is treated as an unsafe
+    early-success bypass (ADR-0008 fail-closed).
+
+    Splitting every logical line (after joining backslash continuations) on
+    `;` and stripping a leading block keyword from each resulting segment is
+    what catches the inline forms: a whole-physical-line regex only ever
+    matched `exit`/`exit 0` sitting alone on its own line, so `if true; then
+    exit 0; fi` — actionlint-valid, and unconditionally reached — passed
+    through undetected.
     """
 
-    return bool(_EARLY_SUCCESS_EXIT_RE.search(run_body))
+    for logical_line in _join_shell_line_continuations(run_body):
+        for segment in logical_line.split(";"):
+            statement = _strip_leading_inline_block_keywords(segment)
+            if statement and _EARLY_SUCCESS_EXIT_STATEMENT_RE.match(statement):
+                return True
+    return False
 
 
 def _statement_has_disallowed_shell_wrapping(statement: str) -> bool:
