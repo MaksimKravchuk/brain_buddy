@@ -807,6 +807,35 @@ _EXIT_WRAPPER_PATTERNS = (_EXIT_BUILTIN_WRAPPER_RE, _EXIT_COMMAND_WRAPPER_RE)
 _EXIT_STATEMENT_RE = re.compile(r"^\\?exit(?:\s+(?P<argument>.*))?$")
 _DEFINITELY_NONZERO_EXIT_ARGUMENT_RE = re.compile(r"^[+-]?[1-9][0-9]*$")
 
+# A statement that does not fullmatch the direct/wrapper `exit` grammar above
+# is *not* automatically safe: it may still be a compound, `eval`, or
+# execution construct whose reachable exit code we cannot evaluate, e.g.
+# `{ exit 0; }` (a brace group — actionlint-valid, and its own `;`-separated
+# segment is `{ exit 0`, which never fullmatches the bare `exit` grammar
+# because of the leading `{`), `eval 'exit 0'` (a quoted argument to `eval`,
+# evaluated in the *current* shell — so the literal `exit 0` inside the
+# string really does terminate the script with status 0), or `exec bash -c
+# 'exit 0'` (`exec` replaces the current process image with a command whose
+# own exit status becomes the script's). Enumerating every such wrapper is
+# an unbounded task; instead, any occurrence of the bare word `exit` in a
+# statement we did not already recognize and prove safe is treated as an
+# ambiguous, unproven exit and fails closed (ADR-0008) — narrower coverage
+# here is not an option for a privacy gate. `(?<![\w-])`/`(?![\w-])` (rather
+# than `\b`) keep this from also matching `exit` as a same-token substring,
+# e.g. `--exit-code`, where the hyphen would otherwise still count as a word
+# boundary.
+_AMBIGUOUS_EXIT_TOKEN_RE = re.compile(r"(?<![\w-])exit(?![\w-])")
+
+# `command -v exit`/`command -V exit` (see the describe-only carve-out above
+# `_EXIT_COMMAND_WRAPPER_RE`) legitimately mention the bare word `exit` — that
+# is the whole point, they print information *about* the `exit` builtin
+# without invoking it — so they must be recognized and skipped before the
+# ambiguous-token fallback runs, not merely before the wrapper-prefix
+# stripping: `_strip_exit_builtin_wrapper_prefixes` does not touch `-v`/`-V`
+# (they are not one of its own recognized options), so the statement reaches
+# the fallback unstripped, still lexically containing `exit`.
+_DESCRIBE_ONLY_EXIT_REFERENCE_RE = re.compile(r"^\\?command\s+-[vV]\s+exit\s*$")
+
 
 def _strip_exit_builtin_wrapper_prefixes(statement: str) -> str:
     """Strip zero or more leading `builtin`/`command` wrapper prefixes.
@@ -901,6 +930,20 @@ def _run_body_has_early_success_exit(run_body: str) -> bool:
     — all actionlint-valid, and all direct invocations of the same Bash
     exit builtin as bare `exit 0` — are recognized instead of falling
     through as an unrecognized, uninspected statement.
+
+    Finally, a statement that still does not fullmatch the direct/wrapper
+    grammar after that stripping is never assumed safe merely because it
+    isn't literally `exit ...`: if it contains the bare word `exit` at all
+    (see `_AMBIGUOUS_EXIT_TOKEN_RE`) it is an unrecognized shell
+    compound/`eval`/execution construct we cannot prove reachable-safe —
+    `if true; then { exit 0; }; fi`, `if true; then eval 'exit 0'; fi`, and
+    `if true; then exec bash -c 'exit 0'; fi` are all actionlint-valid and
+    all really do end the script successfully before a following required
+    command, so each fails closed here rather than silently passing through
+    as "not a match". `command -v exit`/`command -V exit` are checked and
+    excluded first (before wrapper-prefix stripping, which cannot see past
+    their `-v`/`-V`) because they legitimately mention `exit` without ever
+    invoking it.
     """
 
     for logical_line in _join_shell_line_continuations(run_body):
@@ -908,11 +951,17 @@ def _run_body_has_early_success_exit(run_body: str) -> bool:
             statement = _strip_leading_inline_block_keywords(segment)
             if not statement:
                 continue
+            if _DESCRIBE_ONLY_EXIT_REFERENCE_RE.match(statement):
+                continue
             statement = _strip_exit_builtin_wrapper_prefixes(statement)
             match = _EXIT_STATEMENT_RE.fullmatch(statement)
-            if match and not _DEFINITELY_NONZERO_EXIT_ARGUMENT_RE.fullmatch(
-                match.group("argument") or ""
-            ):
+            if match:
+                if not _DEFINITELY_NONZERO_EXIT_ARGUMENT_RE.fullmatch(
+                    match.group("argument") or ""
+                ):
+                    return True
+                continue
+            if _AMBIGUOUS_EXIT_TOKEN_RE.search(statement):
                 return True
     return False
 

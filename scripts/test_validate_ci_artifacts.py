@@ -3064,6 +3064,48 @@ jobs:
             self.SCANNER_EXPECTED_ERROR,
         )
 
+    # Owner-adversarial-verification regression: a brace *group* (not a
+    # subshell) wraps the early exit. `{ exit 0; }` runs `exit 0` in the
+    # *current* shell -- unlike `( exit 0 )`, which forks a subshell whose
+    # own `exit` never reaches the parent script -- so it exits the whole
+    # script with status 0 exactly like a bare `exit 0` does, and
+    # actionlint accepts it identically. The pre-fix matcher only ever
+    # recognized a segment that, after keyword/wrapper stripping, was
+    # *exactly* `exit ...`; the leading `{` here left `{ exit 0` (this
+    # segment's own text once split on `;`) unmatched, so it silently fell
+    # through as an unrecognized, uninspected statement instead of the same
+    # successful-zero exit it actually is.
+    INLINE_UNCONDITIONAL_EARLY_EXIT_BRACE_GROUP_WRAPPED = (
+        "          if true; then { exit 0; }; fi\n"
+    )
+
+    def test_workflow_rejects_scanner_invocation_masked_by_brace_group_wrapped_early_exit(
+        self,
+    ) -> None:
+        self.assert_early_exit_mutation_rejected(
+            self.SCANNER_RUN_BODY,
+            self.INLINE_UNCONDITIONAL_EARLY_EXIT_BRACE_GROUP_WRAPPED,
+            self.SCANNER_EXPECTED_ERROR,
+        )
+
+    def test_workflow_rejects_sanitizer_invocation_masked_by_brace_group_wrapped_early_exit(
+        self,
+    ) -> None:
+        self.assert_early_exit_mutation_rejected(
+            self.SANITIZER_RUN_BODY,
+            self.INLINE_UNCONDITIONAL_EARLY_EXIT_BRACE_GROUP_WRAPPED,
+            self.SANITIZER_EXPECTED_ERROR,
+        )
+
+    def test_workflow_rejects_aggregate_exit_one_masked_by_brace_group_wrapped_early_exit(
+        self,
+    ) -> None:
+        self.assert_early_exit_mutation_rejected(
+            self.AGGREGATE_RUN_BODY,
+            self.INLINE_UNCONDITIONAL_EARLY_EXIT_BRACE_GROUP_WRAPPED,
+            self.AGGREGATE_EXPECTED_ERROR,
+        )
+
     # Concise, direct grammar matrix: calls the bounded wrapper-stripping
     # matcher itself (no CLI/actionlint/ci.yml round trip) over every
     # runtime-proven `builtin`/`command` exit-wrapper bypass reported by
@@ -3073,6 +3115,22 @@ jobs:
     # at the shell (`bash -c '<form>; echo reached'`) to exit before
     # `reached` ever printed; every "safe" case was confirmed to either
     # print `reached` (falls through) or actually exit nonzero.
+    #
+    # `eval 'exit 0'` and `exec bash -c 'exit 0'` are a second round of
+    # owner-adversarial-verification regressions, of a different shape than
+    # the builtin/command prefix wrappers above: neither is a recognized
+    # `exit` invocation at all under the direct/wrapper grammar (`eval` and
+    # `exec` are their own distinct commands, taking the exit text as a
+    # *quoted argument*, not a wrapper prefix immediately before the word
+    # `exit`), so the matcher cannot and does not try to parse what they
+    # do -- it instead falls back to flagging any statement it does not
+    # already recognize as safe that still contains the bare word `exit`
+    # (`_AMBIGUOUS_EXIT_TOKEN_RE`). `eval` runs its quoted argument as shell
+    # code in the *current* shell, so the literal `exit 0` inside really
+    # does terminate the script; `exec` replaces the current process image
+    # with its argument command, so that command's own exit status becomes
+    # the script's. Both are confirmed at the shell to exit 0 before a
+    # following statement runs, and both are actionlint-valid.
     UNSAFE_EXIT_WRAPPER_GRAMMAR = (
         "builtin exit 0",
         "command exit 0",
@@ -3088,6 +3146,10 @@ jobs:
         "command -p -- exit 0",
         "command -p builtin exit 0",
         "builtin command -p exit 0",
+        "{ exit 0; }",
+        "eval 'exit 0'",
+        "eval \"exit 0\"",
+        "exec bash -c 'exit 0'",
     )
     SAFE_NONZERO_EXIT_WRAPPER_GRAMMAR = (
         "builtin exit 1",
