@@ -27,26 +27,12 @@ from app.workflows.voice_brain_dump.providers import (
 
 DEEPGRAM_LISTEN_URL = "https://api.deepgram.com/v1/listen"
 _RETRYABLE_STATUS_CODES = {408, 409, 429, 500, 502, 503, 504}
-_LANGUAGE_ALIASES = {
-    "en": "en",
-    "en-us": "en",
-    "en-gb": "en",
-    "ru": "ru",
-    "ru-ru": "ru",
-}
-
-
-def _deepgram_language_param(language_hints: Sequence[str]) -> str:
-    """Nova-3 multilingual code-switch mode unless exactly one hint is declared."""
-
-    normalized = {
-        _LANGUAGE_ALIASES.get(hint.strip().casefold(), hint.strip().split("-", 1)[0].casefold())
-        for hint in language_hints
-        if hint.strip()
-    }
-    if len(normalized) == 1:
-        return next(iter(normalized))
-    return "multi"
+# Nova-3 multilingual code-switch mode. This is a fixed, non-private query
+# control, never derived from caller-supplied language hints: those hints
+# must not be reflected into the third-party request URL, which (unlike the
+# request body) is far more likely to be captured by intermediary
+# proxy/CDN/access logs outside this app's own logging.
+_DEEPGRAM_LANGUAGE_PARAM = "multi"
 
 
 @dataclass(slots=True)
@@ -157,7 +143,7 @@ class DeepgramAccurateStt:
 
     def _post_with_retries(self, request: AccurateSttRequest) -> httpx.Response:
         _filename, content_type = sniff_audio_container(request.sealed_audio)
-        params = self._query_params(request)
+        params = self._query_params()
         attempt = 0
         while True:
             try:
@@ -197,16 +183,15 @@ class DeepgramAccurateStt:
                 raise ProviderTerminalError("STT_AUDIO_TOO_LARGE")
             raise ProviderTerminalError("STT_PROVIDER_REJECTED_REQUEST")
 
-    def _query_params(
-        self, request: AccurateSttRequest
-    ) -> list[tuple[str, str | int | float | bool | None]]:
-        params: list[tuple[str, str | int | float | bool | None]] = [
+    def _query_params(self) -> list[tuple[str, str | int | float | bool | None]]:
+        # Fixed, non-private query controls only. Caller-supplied vocabulary
+        # (``keyterm``) and language hints must never be reflected into this
+        # third-party request URL; see ``_DEEPGRAM_LANGUAGE_PARAM``.
+        return [
             ("model", self.model),
-            ("language", _deepgram_language_param(request.language_hints)),
+            ("language", _DEEPGRAM_LANGUAGE_PARAM),
             ("smart_format", "true"),
         ]
-        params.extend(("keyterm", term) for term in request.vocabulary)
-        return params
 
     def _backoff(self, attempt: int) -> None:
         if not self.retry_backoff_seconds:

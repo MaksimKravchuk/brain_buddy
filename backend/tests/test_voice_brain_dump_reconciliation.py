@@ -777,6 +777,55 @@ def test_openai_reconciler_prompt_prohibits_inventing_unsupported_tasks() -> Non
     assert "source_segment_ids" in system_prompt
 
 
+def test_openai_reconciler_fails_closed_at_construction_for_unauthorized_endpoint() -> None:
+    """Defense in depth beyond the container's allow-list: even a directly
+    constructed adapter instance (bypassing ``app.container._build_text_reconciler``
+    entirely) must never be able to send a Bearer-authenticated reconciliation
+    payload to an endpoint other than the exact centrally authorized OpenAI
+    chat-completions URL."""
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    with pytest.raises(ValueError, match="Unauthorized reconciler endpoint"):
+        OpenAITextReconciler(
+            api_key="test-key",
+            endpoint="https://attacker.example.com/v1/chat/completions",
+        )
+
+
+def test_openai_reconciler_never_sends_a_request_to_an_unauthorized_endpoint() -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": {"operations": []}}}]},
+        )
+
+    with pytest.raises(ValueError, match="Unauthorized reconciler endpoint"):
+        OpenAITextReconciler(
+            api_key="test-key",
+            endpoint="https://attacker.example.com/v1/chat/completions",
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert calls == 0
+
+
+def test_openai_reconciler_default_endpoint_matches_the_central_authorization_constant() -> (
+    None
+):
+    from app.core.config import MVP_RECONCILER_ENDPOINT
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    reconciler = OpenAITextReconciler(api_key="test-key")
+
+    assert reconciler.endpoint == MVP_RECONCILER_ENDPOINT
+
+
 def test_openai_reconciler_retries_only_retryable_failures_with_a_bounded_budget() -> None:
     from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
 

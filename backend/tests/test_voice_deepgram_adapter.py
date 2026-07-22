@@ -86,12 +86,16 @@ def test_deepgram_adapter_sends_sealed_binary_audio_never_utf8_decoded() -> None
     assert result.provider_usage == {"duration_seconds": 12.5}
 
 
-def test_deepgram_adapter_sends_keyterms_for_vocabulary() -> None:
-    captured_params: list[tuple[str, str]] = []
+def test_deepgram_adapter_never_sends_vocabulary_keyterms_in_the_request_url() -> None:
+    """User-supplied vocabulary must never be reflected into the third-party
+    request URL: query strings are far more likely than a request body to be
+    captured by intermediary proxy/CDN/access logs outside this app's own
+    (already-capped) logging, so keyterm boosting cannot be sent this way."""
+
+    captured_urls: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal captured_params
-        captured_params = list(request.url.params.multi_items())
+        captured_urls.append(str(request.url))
         return _success_response()
 
     provider = DeepgramAccurateStt(
@@ -99,11 +103,23 @@ def test_deepgram_adapter_sends_keyterms_for_vocabulary() -> None:
         max_retries=0,
         transport=httpx.MockTransport(handler),
     )
+    sentinel_vocabulary = ["sentinel-vocab-CanaryWord447", "another canary term"]
+    request = AccurateSttRequest(
+        operation_id="operation_1",
+        media_ref="media_1",
+        language_hints=["ru", "en"],
+        vocabulary=sentinel_vocabulary,
+        supersedes_segment_ids=["preview_1"],
+        sealed_audio=b"\x1aE\xdf\xa3webm-audio",
+    )
 
-    provider.transcribe_sealed_audio(_request())
+    provider.transcribe_sealed_audio(request)
 
-    keyterms = [value for key, value in captured_params if key == "keyterm"]
-    assert keyterms == ["BrainBuddy", "production smoke"]
+    assert len(captured_urls) == 1
+    url = captured_urls[0]
+    assert "keyterm" not in url
+    for term in sentinel_vocabulary:
+        assert term not in url
 
 
 def test_deepgram_adapter_never_logs_provider_request_details_at_production_log_level() -> (
@@ -156,12 +172,16 @@ def test_deepgram_adapter_never_logs_provider_request_details_at_production_log_
     assert captured_records == []
 
 
-def test_deepgram_adapter_uses_single_declared_language_hint() -> None:
-    captured_params: dict[str, str] = {}
+def test_deepgram_adapter_never_sends_language_hints_in_the_request_url() -> None:
+    """User-supplied language hints must never be reflected into the
+    third-party request URL: only the fixed Nova-3 multilingual code-switch
+    control is an allowable, non-private query value regardless of what
+    hints the caller declares."""
+
+    captured_urls: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal captured_params
-        captured_params = dict(request.url.params)
+        captured_urls.append(str(request.url))
         return _success_response()
 
     provider = DeepgramAccurateStt(
@@ -169,10 +189,16 @@ def test_deepgram_adapter_uses_single_declared_language_hint() -> None:
         max_retries=0,
         transport=httpx.MockTransport(handler),
     )
+    sentinel_language = "sentinel-lang-xyz"
 
-    provider.transcribe_sealed_audio(_request(language_hints=["ru"]))
+    provider.transcribe_sealed_audio(_request(language_hints=[sentinel_language]))
 
-    assert captured_params["language"] == "ru"
+    assert len(captured_urls) == 1
+    url = captured_urls[0]
+    assert sentinel_language not in url
+    assert "sentinel" not in url
+    parsed_params = dict(httpx.URL(url).params)
+    assert parsed_params == {"model": "nova-3", "language": "multi", "smart_format": "true"}
 
 
 def test_deepgram_adapter_sends_admitted_ogg_as_ogg_content_type() -> None:
