@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
+from app.core.config import MVP_ACCURATE_STT_MODEL
 from app.exceptions import ProviderRetryableError, ProviderTerminalError
 from app.workflows.voice_brain_dump.domain import TranscriptHypothesis
 from app.workflows.voice_brain_dump.providers import (
@@ -35,12 +36,11 @@ _RETRYABLE_STATUS_CODES = {408, 409, 429, 500, 502, 503, 504}
 _DEEPGRAM_LANGUAGE_PARAM = "multi"
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class DeepgramAccurateStt:
     """Transcribe sealed audio with Deepgram without logging provider payloads."""
 
     api_key: str = field(repr=False)
-    model: str = "nova-3"
     timeout_seconds: float = 60.0
     max_retries: int = 2
     retry_backoff_seconds: Sequence[float] = (1.0, 2.0)
@@ -48,24 +48,54 @@ class DeepgramAccurateStt:
     estimated_cost_usd_per_megabyte: float = 0.01
     transport: httpx.BaseTransport | None = None
     sleep: Callable[[float], None] = time.sleep
+    # Authorization-sensitive identity: never accepted from the constructor
+    # and never reassignable post-construction (the dataclass is frozen).
+    # Defense in depth beyond the container's allow-list: even a direct,
+    # manually-constructed adapter instance (bypassing
+    # ``app.container._build_accurate_stt`` entirely) must never be able to
+    # send credentials/audio to Deepgram under an unmeasured Nova-3 variant
+    # (e.g. "nova-3-medical", "nova-3-general"). No runtime configuration --
+    # env var, caller kwarg, or post-construction mutation -- may decide
+    # this identity.
+    model: str = field(default=MVP_ACCURATE_STT_MODEL, init=False)
     provider_name: str = field(default="deepgram", init=False)
     requires_external_processing: bool = field(default=True, init=False)
 
     def __post_init__(self) -> None:
-        # Defense in depth beyond the container's allow-list: even a direct,
-        # manually-constructed adapter instance (bypassing
-        # ``app.container._build_accurate_stt`` entirely) must never be able
-        # to send credentials/audio to Deepgram under an unmeasured Nova-3
-        # variant (e.g. "nova-3-medical", "nova-3-general").
-        if self.model != "nova-3":
-            raise ValueError(
-                f"Unauthorized Deepgram accurate STT model {self.model!r}; only "
-                "the exact authorized 'nova-3' multilingual model may be used."
-            )
+        self._require_authorized_identity()
+
+    def _require_authorized_identity(self) -> None:
+        """Re-validate identity fields immediately before every use.
+
+        ``frozen=True`` blocks ordinary attribute reassignment, but a caller
+        could still force a spoofed value onto a constructed instance (e.g.
+        ``object.__setattr__``) or -- since Python performs no runtime
+        generic-checking -- substitute a ``str`` subclass whose overridden
+        ``__eq__``/``__ne__`` lies about matching the authorized constant
+        while carrying a different actual value. ``type(value) is str`` plus
+        exact literal equality closes both: it is checked once at
+        construction and again immediately before every network transmit and
+        retry, so a value that only becomes wrong after ``__post_init__``
+        still cannot reach the wire.
+        """
+
+        for value, authorized, label in (
+            (self.provider_name, "deepgram", "provider"),
+            (self.model, MVP_ACCURATE_STT_MODEL, "model"),
+        ):
+            if type(value) is not str or value != authorized:  # noqa: E721
+                raise ValueError(
+                    f"Unauthorized Deepgram accurate STT {label} {value!r}; only "
+                    f"the exact authorized {authorized!r} {label} may be used."
+                )
 
     def transcribe_sealed_audio(self, request: AccurateSttRequest) -> SttResult:
         if not request.sealed_audio:
             raise ProviderTerminalError("STT_AUDIO_MISSING")
+        # Keep the authorization failure distinct from provider-response
+        # parsing failures below, while the identical check in the retry loop
+        # remains the final guard immediately before each HTTP transmit.
+        self._require_authorized_identity()
         # Conservatively scaled by the adapter's own bounded retry budget: a
         # single logical call may itself cost the provider once per internal
         # transport attempt, so both the admission check and any recorded
@@ -146,6 +176,7 @@ class DeepgramAccurateStt:
         params = self._query_params()
         attempt = 0
         while True:
+            self._require_authorized_identity()
             try:
                 with httpx.Client(
                     timeout=self.timeout_seconds,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 
 import httpx
@@ -13,6 +14,26 @@ from app.workflows.voice_brain_dump.providers import (
     AccurateSttRequest,
     sniff_audio_container,
 )
+
+
+class _LyingStr(str):
+    """A ``str`` subclass whose ``__eq__``/``__ne__`` always lie.
+
+    Used to prove the adapter's authorization check cannot be satisfied by
+    matching ``==``/``!=`` alone: it must reject any non-exact-``str`` type
+    outright, because a subclass can report equality with the authorized
+    constant while its actual value -- what httpx would literally put on the
+    wire -- is something else entirely.
+    """
+
+    def __eq__(self, other: object) -> bool:
+        return True
+
+    def __ne__(self, other: object) -> bool:
+        return False
+
+    def __hash__(self) -> int:
+        return str.__hash__(self)
 
 
 def _request(
@@ -40,17 +61,100 @@ def _success_response(transcript: str = "Починить BrainBuddy") -> httpx.
 
 
 @pytest.mark.parametrize(
-    "unauthorized_model", ["nova-3-medical", "nova-3-general", "nova-2", ""]
+    "attempted_model",
+    ["nova-3-medical", "nova-3-general", "nova-2", "", "nova-3"],
 )
-def test_deepgram_adapter_rejects_any_nova_3_variant_at_construction(
-    unauthorized_model: str,
+def test_deepgram_adapter_rejects_model_as_a_constructor_argument(
+    attempted_model: str,
 ) -> None:
-    """Defense in depth beyond the container's allow-list: even a direct,
-    manually-constructed adapter instance must never be able to send
-    credentials/audio to Deepgram under an unmeasured Nova-3 variant."""
+    """``model`` is authorization-sensitive identity: it is fixed to the
+    single authorized Nova-3 multilingual value and is never accepted as a
+    constructor argument -- not even the correct value -- since accepting
+    runtime-supplied model configuration at all is itself the egress-
+    authorization gap. This is a regression for a defense-in-depth gap:
+    previously the constructor accepted an arbitrary ``model=`` and only
+    validated it once in ``__post_init__``."""
 
-    with pytest.raises(ValueError, match="Unauthorized Deepgram accurate STT model"):
-        DeepgramAccurateStt(api_key="secret-test-key", model=unauthorized_model)
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return _success_response()
+
+    with pytest.raises(TypeError, match="unexpected keyword argument 'model'"):
+        DeepgramAccurateStt(
+            api_key="secret-test-key",
+            model=attempted_model,
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert calls == 0
+
+
+@pytest.mark.parametrize(
+    ("field_name", "attempted_value"),
+    [("model", "nova-3-medical"), ("provider_name", "other-provider")],
+)
+def test_deepgram_adapter_identity_fields_cannot_be_reassigned_after_construction(
+    field_name: str, attempted_value: str
+) -> None:
+    """Identity fields are frozen: even a manually-constructed adapter
+    instance handed to other code cannot have its authorized provider/model
+    swapped out from under it before a later call transmits."""
+
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return _success_response()
+
+    provider = DeepgramAccurateStt(
+        api_key="secret-test-key",
+        max_retries=0,
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        setattr(provider, field_name, attempted_value)
+
+    assert calls == 0
+    assert provider.model == "nova-3"
+    assert provider.provider_name == "deepgram"
+
+
+@pytest.mark.parametrize("field_name", ["model", "provider_name"])
+def test_deepgram_adapter_rejects_a_lying_str_subclass_forced_onto_identity(
+    field_name: str,
+) -> None:
+    """Even if ``frozen=True`` is bypassed via ``object.__setattr__`` --
+    e.g. by other code holding a reference to a constructed instance -- a
+    spoofed model must never reach the wire. The re-check immediately before
+    every transmit must reject a deceptive ``str`` subclass whose overridden
+    equality lies about matching the authorized constant."""
+
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return _success_response()
+
+    provider = DeepgramAccurateStt(
+        api_key="secret-test-key",
+        max_retries=0,
+        transport=httpx.MockTransport(handler),
+    )
+    spoofed = _LyingStr("attacker-controlled-value")
+    assert spoofed == getattr(provider, field_name)  # the lie
+    object.__setattr__(provider, field_name, spoofed)
+    error_label = "provider" if field_name == "provider_name" else field_name
+
+    with pytest.raises(ValueError, match=f"Unauthorized Deepgram accurate STT {error_label}"):
+        provider.transcribe_sealed_audio(_request())
+
+    assert calls == 0
 
 
 def test_deepgram_adapter_sends_sealed_binary_audio_never_utf8_decoded() -> None:
@@ -65,7 +169,6 @@ def test_deepgram_adapter_sends_sealed_binary_audio_never_utf8_decoded() -> None
 
     provider = DeepgramAccurateStt(
         api_key="secret-test-key",
-        model="nova-3",
         timeout_seconds=12,
         max_retries=0,
         retry_backoff_seconds=(),
@@ -155,7 +258,6 @@ def test_deepgram_adapter_never_logs_provider_request_details_at_production_log_
 
         provider = DeepgramAccurateStt(
             api_key="top-secret-deepgram-key",
-            model="nova-3",
             timeout_seconds=12,
             max_retries=0,
             retry_backoff_seconds=(),

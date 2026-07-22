@@ -149,15 +149,21 @@ class FastSttPort(Protocol):
 
 
 class AccurateSttPort(Protocol):
-    provider_name: str
-    requires_external_processing: bool
+    @property
+    def provider_name(self) -> str: ...
+
+    @property
+    def requires_external_processing(self) -> bool: ...
 
     def transcribe_sealed_audio(self, request: AccurateSttRequest) -> SttResult: ...
 
 
 class TextReconcilerPort(Protocol):
-    provider_id: str
-    requires_external_processing: bool
+    @property
+    def provider_id(self) -> str: ...
+
+    @property
+    def requires_external_processing(self) -> bool: ...
 
     def reconcile(self, request: ReconcileTextRequest) -> ReconcileResult: ...
 

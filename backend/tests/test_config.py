@@ -547,7 +547,7 @@ def test_reconciler_never_sends_a_temperature_parameter() -> None:
     from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
     from app.workflows.voice_brain_dump.providers import ReconcileTextRequest
 
-    reconciler = OpenAITextReconciler(api_key="test-key", model="gpt-5.6-luna")
+    reconciler = OpenAITextReconciler(api_key="test-key")
     payload = reconciler._payload(  # noqa: SLF001 - contract check, not a public API
         ReconcileTextRequest(
             operation_id="op_1",

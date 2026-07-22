@@ -3792,7 +3792,7 @@ def test_brain_dump_capability_reports_the_complete_category_set_for_a_mixed_ven
 
     container = api_client.app.state.container
     container.voice_brain_dump_service.accurate_stt = DeepgramAccurateStt(
-        api_key="test-key", model="nova-3"
+        api_key="test-key"
     )
 
     response = api_client.get("/api/brain-dump-capability")
@@ -3868,7 +3868,6 @@ def test_brain_dump_capability_never_exposes_credentials_or_payloads(
     container = api_client.app.state.container
     container.voice_brain_dump_service.accurate_stt = DeepgramAccurateStt(
         api_key="super-secret-deepgram-key",
-        model="nova-3",
     )
 
     response = api_client.get("/api/brain-dump-capability")
@@ -3910,7 +3909,6 @@ def _wire_mixed_vendor_pipeline(container) -> None:
 
     container.voice_brain_dump_service.accurate_stt = DeepgramAccurateStt(
         api_key="test-key",
-        model="nova-3",
         max_retries=0,
         transport=httpx.MockTransport(handler),
     )
