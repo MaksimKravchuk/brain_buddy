@@ -753,7 +753,7 @@ def _run_body_has_exit_trap_directive(run_body: str) -> bool:
     return bool(_EXIT_TRAP_DIRECTIVE_RE.search(run_body))
 
 
-_EARLY_SUCCESS_EXIT_STATEMENT_RE = re.compile(r"^exit(?:\s+0)?$")
+_EARLY_SUCCESS_EXIT_STATEMENT_RE = re.compile(r"^exit(?:\s+[+-]?0+)?$")
 
 _INLINE_BLOCK_KEYWORDS = ("then", "do", "else")
 
@@ -785,20 +785,30 @@ def _strip_leading_inline_block_keywords(statement: str) -> str:
 
 
 def _run_body_has_early_success_exit(run_body: str) -> bool:
-    """Return True if the script contains a bare `exit` or explicit `exit 0`.
+    """Return True if the script contains a bare `exit` or a numeric-zero `exit`.
 
     An unconditional `exit` (implicitly propagating the previous command's
-    own exit status) or explicit `exit 0`, placed ahead of the required
-    scanner/sanitizer/hard-fail command, ends the script successfully
-    before that command ever runs — whether it sits at the run body's top
-    level or is nested inside an actionlint-valid `if`/`for`/`while`/`case`
-    block whose condition is statically always taken (e.g.
-    `if true; then exit 0; fi`) or merely conditional (e.g. `if [ -z
-    "${VAR:-}" ]; then exit; fi`). We cannot verify shell control-flow
+    own exit status) or an explicit successful-zero `exit`, placed ahead of
+    the required scanner/sanitizer/hard-fail command, ends the script
+    successfully before that command ever runs — whether it sits at the run
+    body's top level or is nested inside an actionlint-valid
+    `if`/`for`/`while`/`case` block whose condition is statically always
+    taken (e.g. `if true; then exit 0; fi`) or merely conditional (e.g. `if
+    [ -z "${VAR:-}" ]; then exit; fi`). We cannot verify shell control-flow
     reachability with a regex, so any such statement anywhere in the run
     body — nested or not, on its own physical line or packed onto one
     semicolon-separated inline compound statement — is treated as an unsafe
     early-success bypass (ADR-0008 fail-closed).
+
+    "Numeric-zero" is not just the single spelling `0`: bash's `exit`
+    builtin accepts any run of `0` digits, with an optional leading `+`/`-`
+    sign, as the argument and exits 0 for every one of them (`exit 00`,
+    `exit 000`, `exit +0`, `exit -0` all succeed exactly like `exit 0`).
+    Matching only the literal text `0` left every other same-value spelling
+    of zero as an undetected bypass — `_EARLY_SUCCESS_EXIT_STATEMENT_RE`
+    therefore matches the whole `[+-]?0+` grammar rather than one lexical
+    spelling, so equivalent zero spellings fail closed together instead of
+    needing to be enumerated one at a time.
 
     Splitting every logical line (after joining backslash continuations) on
     `;` and stripping a leading block keyword from each resulting segment is
