@@ -22,72 +22,95 @@ interface AuthStoreState {
   clearSession: () => void;
 }
 
-// Counts hydrate() invocations (not resolutions). Lets an in-flight hydrate
-// tell whether a *newer* hydrate call has since started -- which happens
-// when React StrictMode (or any caller) fires hydrate() twice back-to-back.
-// Distinct from `epoch`: epoch only advances on publish, so two overlapping
-// hydrate calls can both capture the same epoch before either has published.
-let hydrateGeneration = 0;
+// Counts auth-operation invocations (not resolutions), shared across
+// hydrate, login, signup, logout, and clearSession. Lets an in-flight
+// operation tell whether a *newer* auth operation of any kind has since
+// started -- which happens both when React StrictMode (or any caller) fires
+// hydrate() twice back-to-back, and when e.g. a slow login is still in
+// flight when the user (or the 401 handler) triggers clearSession, or a
+// slow logout is still in flight when a fresh login completes. Distinct
+// from `epoch`: epoch only advances on publish, so two overlapping
+// operations can both capture the same epoch before either has published.
+let authOperationGeneration = 0;
 
-export const useAuthStore = create<AuthStoreState>((set, get) => ({
-  user: null,
-  status: "loading",
-  epoch: 0,
+function beginAuthOperation(): number {
+  return ++authOperationGeneration;
+}
 
-  async hydrate() {
-    const generation = ++hydrateGeneration;
-    const epochAtStart = get().epoch;
-    const publish = (patch: { user: AuthUser | null; status: AuthStatus }) => {
-      // A newer hydrate() call has started since this one -- it is the
-      // current call now, so this stale result must not publish.
-      if (generation !== hydrateGeneration) {
-        return;
+export const useAuthStore = create<AuthStoreState>((set, get) => {
+  // Publishes `patch` only if no newer auth operation has started since
+  // `generation` was captured, and no other transition has advanced the
+  // epoch since `epochAtStart` was captured. Either condition failing means
+  // a later auth intent has already won; this result must not overwrite it,
+  // advance epoch again, or touch its successor. Later auth intent wins
+  // regardless of response ordering.
+  const publishIfCurrent = (
+    generation: number,
+    epochAtStart: number,
+    patch: { user: AuthUser | null; status: AuthStatus }
+  ) => {
+    if (generation !== authOperationGeneration) {
+      return;
+    }
+    set((state) => {
+      if (state.epoch !== epochAtStart) {
+        return state;
       }
-      set((state) => {
-        // A login/signup/logout/clearSession (or a hydrate that already won
-        // the race above) advanced the epoch while this call was in flight.
-        // That later transition must win; this stale result must not
-        // overwrite it, advance epoch again, or touch its successor.
-        if (state.epoch !== epochAtStart) {
-          return state;
-        }
-        return { ...patch, epoch: state.epoch + 1 };
-      });
-    };
+      return { ...patch, epoch: state.epoch + 1 };
+    });
+  };
 
-    try {
-      const me = await authApi.me();
-      publish(me ? { user: me, status: "authed" } : { user: null, status: "anon" });
-    } catch {
-      publish({ user: null, status: "anon" });
+  return {
+    user: null,
+    status: "loading",
+    epoch: 0,
+
+    async hydrate() {
+      const generation = beginAuthOperation();
+      const epochAtStart = get().epoch;
+
+      try {
+        const me = await authApi.me();
+        publishIfCurrent(generation, epochAtStart, me ? { user: me, status: "authed" } : { user: null, status: "anon" });
+      } catch {
+        publishIfCurrent(generation, epochAtStart, { user: null, status: "anon" });
+      }
+    },
+
+    async login(payload) {
+      const generation = beginAuthOperation();
+      const epochAtStart = get().epoch;
+      const user = await authApi.login(payload);
+      publishIfCurrent(generation, epochAtStart, { user, status: "authed" });
+    },
+
+    async signup(payload) {
+      const generation = beginAuthOperation();
+      const epochAtStart = get().epoch;
+      const user = await authApi.signup(payload);
+      publishIfCurrent(generation, epochAtStart, { user, status: "authed" });
+    },
+
+    async logout() {
+      const generation = beginAuthOperation();
+      const epochAtStart = get().epoch;
+      // Always clear local state, even if the network call fails — the user
+      // asked to sign out and we shouldn't block them on a transient error.
+      try {
+        await authApi.logout();
+      } catch {
+        /* swallow: local state is the source of truth for logout UX */
+      }
+      publishIfCurrent(generation, epochAtStart, { user: null, status: "anon" });
+    },
+
+    clearSession() {
+      const generation = beginAuthOperation();
+      const epochAtStart = get().epoch;
+      publishIfCurrent(generation, epochAtStart, { user: null, status: "anon" });
     }
-  },
-
-  async login(payload) {
-    const user = await authApi.login(payload);
-    set((state) => ({ user, status: "authed", epoch: state.epoch + 1 }));
-  },
-
-  async signup(payload) {
-    const user = await authApi.signup(payload);
-    set((state) => ({ user, status: "authed", epoch: state.epoch + 1 }));
-  },
-
-  async logout() {
-    // Always clear local state, even if the network call fails — the user
-    // asked to sign out and we shouldn't block them on a transient error.
-    try {
-      await authApi.logout();
-    } catch {
-      /* swallow: local state is the source of truth for logout UX */
-    }
-    set((state) => ({ user: null, status: "anon", epoch: state.epoch + 1 }));
-  },
-
-  clearSession() {
-    set((state) => ({ user: null, status: "anon", epoch: state.epoch + 1 }));
-  }
-}));
+  };
+});
 
 export function getAuthEpoch(): number {
   return useAuthStore.getState().epoch;

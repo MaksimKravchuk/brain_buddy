@@ -189,4 +189,115 @@ describe("authStore", () => {
     expect(useAuthStore.getState().user?.id).toBe("u-second");
     expect(useAuthStore.getState().status).toBe("authed");
   });
+
+  it("an old login that settles after a later clearSession does not resurrect the session", async () => {
+    // The shared auth-operation generation must fence *every* operation
+    // type against every other, not just hydrate-vs-hydrate. clearSession is
+    // synchronous, so it advances the generation and publishes anon before
+    // the earlier, still in-flight login ever gets a chance to settle.
+    const loginDeferred = createDeferred<AuthUser>();
+    vi.spyOn(authApi, "login").mockReturnValue(loginDeferred.promise);
+
+    const loginPromise = useAuthStore.getState().login({ email: "a@b.c", password: "x" });
+
+    useAuthStore.getState().clearSession();
+    const epochAfterClear = useAuthStore.getState().epoch;
+    expect(useAuthStore.getState().status).toBe("anon");
+    expect(useAuthStore.getState().user).toBeNull();
+
+    loginDeferred.resolve({ id: "u1", email: "a@b.c" });
+    await loginPromise;
+
+    expect(useAuthStore.getState().status).toBe("anon");
+    expect(useAuthStore.getState().user).toBeNull();
+    expect(useAuthStore.getState().epoch).toBe(epochAfterClear);
+  });
+
+  it("an old logout that settles after a later login does not clobber the newer session", async () => {
+    useAuthStore.setState({ user: { id: "u0", email: "old@b.c" }, status: "authed" });
+    const logoutDeferred = createDeferred<void>();
+    vi.spyOn(authApi, "logout").mockReturnValue(logoutDeferred.promise);
+    vi.spyOn(authApi, "login").mockResolvedValue({ id: "u1", email: "new@b.c" });
+
+    const logoutPromise = useAuthStore.getState().logout();
+
+    // A later, faster login wins the race while the older logout call is
+    // still waiting on its network response.
+    await useAuthStore.getState().login({ email: "new@b.c", password: "x" });
+    const epochAfterLogin = useAuthStore.getState().epoch;
+    expect(useAuthStore.getState().status).toBe("authed");
+    expect(useAuthStore.getState().user?.id).toBe("u1");
+
+    logoutDeferred.resolve();
+    await logoutPromise;
+
+    expect(useAuthStore.getState().status).toBe("authed");
+    expect(useAuthStore.getState().user?.id).toBe("u1");
+    expect(useAuthStore.getState().epoch).toBe(epochAfterLogin);
+  });
+
+  it("a stale signup that resolves after a later clearSession does not resurrect the session", async () => {
+    const signupDeferred = createDeferred<AuthUser>();
+    vi.spyOn(authApi, "signup").mockReturnValue(signupDeferred.promise);
+
+    const signupPromise = useAuthStore
+      .getState()
+      .signup({ email: "new@example.com", password: "secret", invite_code: "invite" });
+
+    useAuthStore.getState().clearSession();
+    const epochAfterClear = useAuthStore.getState().epoch;
+
+    signupDeferred.resolve({ id: "u2", email: "new@example.com" });
+    await signupPromise;
+
+    expect(useAuthStore.getState().status).toBe("anon");
+    expect(useAuthStore.getState().user).toBeNull();
+    expect(useAuthStore.getState().epoch).toBe(epochAfterClear);
+  });
+
+  it("of two concurrent explicit auth operations, only the later one's result publishes", async () => {
+    // Two calls with no synchronous transition between them -- e.g. a login
+    // form double-submit racing an unrelated signup flow. Whichever call
+    // started later must win regardless of which network response returns
+    // first.
+    const firstLoginDeferred = createDeferred<AuthUser>();
+    const secondLoginDeferred = createDeferred<AuthUser>();
+    const loginMock = vi.spyOn(authApi, "login");
+    loginMock.mockReturnValueOnce(firstLoginDeferred.promise);
+    loginMock.mockReturnValueOnce(secondLoginDeferred.promise);
+
+    const firstLogin = useAuthStore.getState().login({ email: "first@b.c", password: "x" });
+    const secondLogin = useAuthStore.getState().login({ email: "second@b.c", password: "x" });
+
+    // The stale, earlier call settles first and must not publish.
+    firstLoginDeferred.resolve({ id: "u-first", email: "first@b.c" });
+    await firstLogin;
+    expect(useAuthStore.getState().status).toBe("loading");
+    expect(useAuthStore.getState().user).toBeNull();
+
+    // The later (current) call settles last and must win.
+    secondLoginDeferred.resolve({ id: "u-second", email: "second@b.c" });
+    await secondLogin;
+
+    expect(useAuthStore.getState().user?.id).toBe("u-second");
+    expect(useAuthStore.getState().status).toBe("authed");
+  });
+
+  it("a stale hydrate outcome does not publish once a later explicit logout has already run", async () => {
+    useAuthStore.setState({ user: { id: "u0", email: "old@b.c" }, status: "authed" });
+    const meDeferred = createDeferred<AuthUser | null>();
+    vi.spyOn(authApi, "me").mockReturnValue(meDeferred.promise);
+    vi.spyOn(authApi, "logout").mockResolvedValue(undefined);
+
+    const hydratePromise = useAuthStore.getState().hydrate();
+    await useAuthStore.getState().logout();
+    const epochAfterLogout = useAuthStore.getState().epoch;
+
+    meDeferred.resolve({ id: "u0", email: "old@b.c" });
+    await hydratePromise;
+
+    expect(useAuthStore.getState().status).toBe("anon");
+    expect(useAuthStore.getState().user).toBeNull();
+    expect(useAuthStore.getState().epoch).toBe(epochAfterLogout);
+  });
 });
