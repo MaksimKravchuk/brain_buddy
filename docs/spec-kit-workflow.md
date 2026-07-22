@@ -80,8 +80,8 @@ For every new or materially changed BrainBuddy feature:
    executing implementation in Spec Kit.
 9. Amend the spec/plan/tasks first whenever implementation intent changes.
 
-For Claude Code in this repository, Spec Kit is installed as skills, so the
-invocation names use hyphens:
+For Claude Code and Hermes Agent in this repository, Spec Kit is installed as
+skills, so the invocation names use hyphens:
 
 ```text
 /speckit-constitution
@@ -91,14 +91,16 @@ invocation names use hyphens:
 /speckit-checklist
 /speckit-tasks
 /speckit-analyze
-/speckit-converge
 ```
 
-`/speckit-implement` is installed only as a disabled compatibility stub in this
-repository. It must not run implementation tasks, hooks, commits, or source
-edits. Implementation starts only when Hermes Kanban dispatches the owning
-specialist profile into an isolated worktree with TDD, review, CI, PR, and
-release gates.
+The Claude integration keeps `/speckit-implement` only as a disabled
+compatibility stub. The Hermes architect profile receives only the planning
+skills listed above through `/speckit-analyze`; it does not receive
+`speckit-implement` or `speckit-taskstoissues`. Neither command may run
+implementation tasks, publish one issue/card per task line, execute hooks,
+commit, or edit product source. Implementation starts only when Hermes Kanban
+dispatches the owning specialist profile into an isolated worktree with TDD,
+review, CI, PR, and release gates.
 
 ## Architect-owned Kanban path
 
@@ -107,16 +109,20 @@ architect profile owns the Spec Kit planning lane before implementation begins.
 The runnable Kanban path is:
 
 1. Create or claim an architect-owned Kanban card for spec authoring/planning.
-2. In that card's worktree, run the canonical Spec Kit sequence through Claude
-   Code skills: `/speckit-specify`, `/speckit-clarify`, `/speckit-plan`,
-   `/speckit-checklist`, and `/speckit-tasks`.
+2. In that card's worktree, run the canonical sequence through the official
+   Hermes Spec Kit skills: `/speckit-specify`, `/speckit-clarify`,
+   `/speckit-plan`, `/speckit-checklist`, `/speckit-tasks`, and
+   `/speckit-analyze`. Claude Code may still be delegated bounded architecture
+   analysis, but Hermes owns the planning lane and artifact handoff.
 3. In `/speckit-plan`, the architect profile owns technical planning,
    architecture boundaries, module ownership, contracts, ADR alignment, data
    handling, observability, and release gates.
 4. If an architecture decision changes, update or add the relevant ADR before
    handing implementation to another profile.
-5. Create implementation Kanban cards from `tasks.md` with the spec directory,
-   plan path, owning specialist profile, review gate, and required checks.
+5. Hand one compact execution summary to the canonical outcome root with the
+   spec, plan, and tasks paths; coarse independent lanes; risk; integration
+   evidence; and release policy. Native Hermes decomposition creates 2-6
+   execution lanes. Never publish one Kanban card per `tasks.md` line.
 6. Implementation agents consume those artifacts; they do not invent module
    boundaries or architecture that conflicts with the architect handoff.
 
