@@ -80,15 +80,33 @@ export const useAuthStore = create<AuthStoreState>((set, get) => {
     async login(payload) {
       const generation = beginAuthOperation();
       const epochAtStart = get().epoch;
-      const user = await authApi.login(payload);
-      publishIfCurrent(generation, epochAtStart, { user, status: "authed" });
+      try {
+        const user = await authApi.login(payload);
+        publishIfCurrent(generation, epochAtStart, { user, status: "authed" });
+      } catch (error) {
+        // A failed explicit login is itself a resolution, not a non-event --
+        // if it's still the current operation, the store must settle to a
+        // truthful anon/non-loading state (advancing epoch monotonically)
+        // rather than leaving whatever loading/stale state preceded it. This
+        // also fences out any hydrate that started earlier: hydrate's own
+        // generation is now stale, so it can never overwrite this failure
+        // once it eventually settles. The caller (e.g. the login form) still
+        // needs the rejection to show an error, so it is rethrown.
+        publishIfCurrent(generation, epochAtStart, { user: null, status: "anon" });
+        throw error;
+      }
     },
 
     async signup(payload) {
       const generation = beginAuthOperation();
       const epochAtStart = get().epoch;
-      const user = await authApi.signup(payload);
-      publishIfCurrent(generation, epochAtStart, { user, status: "authed" });
+      try {
+        const user = await authApi.signup(payload);
+        publishIfCurrent(generation, epochAtStart, { user, status: "authed" });
+      } catch (error) {
+        publishIfCurrent(generation, epochAtStart, { user: null, status: "anon" });
+        throw error;
+      }
     },
 
     async logout() {
@@ -112,6 +130,17 @@ export const useAuthStore = create<AuthStoreState>((set, get) => {
   };
 });
 
-export function getAuthEpoch(): number {
-  return useAuthStore.getState().epoch;
+// A request-start causal auth context: both the epoch in effect and the
+// shared auth-operation generation at the moment it was captured. Consumers
+// outside this module (the API client's 401 handler) must fence on *both* --
+// epoch alone cannot detect "a newer auth operation has begun but not yet
+// published", which is exactly the window an outgoing request's 401 can land
+// in. See client.ts's setAuthCausalityProvider wiring.
+export interface AuthCausality {
+  epoch: number;
+  generation: number;
+}
+
+export function getAuthCausality(): AuthCausality {
+  return { epoch: useAuthStore.getState().epoch, generation: authOperationGeneration };
 }
