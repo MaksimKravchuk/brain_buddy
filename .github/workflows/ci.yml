@@ -9,6 +9,14 @@ on:
 permissions:
   contents: read
 
+# Cancel a superseded pull_request run so a new push to the same PR does not
+# keep paying for stale runs. The group falls back to github.ref for push
+# events, and cancel-in-progress is false there, so main push CI is never
+# cancelled by a later push queuing behind it.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   workflow-lint:
     name: Workflow lint
@@ -39,6 +47,8 @@ jobs:
             --disallow-workflow frontend/.github/workflows/playwright.yml
           python3 scripts/validate_ci_artifacts.py mutation-workflow \
             --workflow .github/workflows/mutation-quality.yml
+          python3 scripts/validate_ci_artifacts.py preview-workflow \
+            --workflow .github/workflows/fly-review-frontend.yml
 
   spec-kit:
     name: Spec Kit artifacts
@@ -123,7 +133,7 @@ jobs:
           name: backend-allure-results
           path: backend/allure-results
           if-no-files-found: error
-          retention-days: 30
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
       - name: Upload coverage artifact
         if: always()
@@ -132,7 +142,7 @@ jobs:
           name: backend-coverage
           path: backend/coverage.xml
           if-no-files-found: error
-          retention-days: 30
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
   frontend:
     name: Frontend
@@ -195,7 +205,7 @@ jobs:
           name: frontend-allure-results
           path: frontend/allure-results/vitest
           if-no-files-found: error
-          retention-days: 30
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
       - name: Build frontend bundle
         run: npm run build
@@ -207,7 +217,7 @@ jobs:
           name: frontend-coverage
           path: frontend/coverage/lcov.info
           if-no-files-found: error
-          retention-days: 30
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
   mobile:
     name: Expo mobile
@@ -330,7 +340,7 @@ jobs:
           name: mobile-allure-results
           path: mobile/allure-results
           if-no-files-found: error
-          retention-days: 30
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
   docker:
     name: Docker Images
@@ -426,7 +436,7 @@ jobs:
           name: playwright-allure-results
           path: frontend/allure-results/playwright
           if-no-files-found: error
-          retention-days: 30
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
       - name: Upload Playwright HTML report
         if: steps.playwright_privacy_scan.outcome == 'success'
@@ -435,7 +445,7 @@ jobs:
           name: playwright-html-report
           path: frontend/playwright-report
           if-no-files-found: error
-          retention-days: 30
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
       - name: Upload Playwright failure artifacts and Compose logs
         if: steps.playwright_privacy_scan.outcome == 'success'
@@ -444,7 +454,7 @@ jobs:
           name: playwright-test-results
           path: frontend/test-results
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
   allure-report:
     name: Allure Report
@@ -500,7 +510,7 @@ jobs:
           name: allure-report-html
           path: allure-report
           if-no-files-found: error
-          retention-days: 30
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
       - name: Post PR Allure report link
         if: github.event_name == 'pull_request'
