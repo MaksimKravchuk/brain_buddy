@@ -753,7 +753,19 @@ def _run_body_has_exit_trap_directive(run_body: str) -> bool:
     return bool(_EXIT_TRAP_DIRECTIVE_RE.search(run_body))
 
 
-_EARLY_SUCCESS_EXIT_STATEMENT_RE = re.compile(r"^exit(?:\s+[+-]?0+)?$")
+# An early `exit` is safe only when its argument is an unquoted, canonical,
+# nonzero decimal literal. This deliberately narrow accepted grammar is
+# `[+-]?[1-9][0-9]*`: `exit 1`, `exit +2`, and `exit -3` cannot turn a
+# required failure into success. Every other `exit` form is fail-closed,
+# including bare exits; zero and zero-padded literals; quoted literals; and
+# shell expressions or dynamic arguments such as `exit "$STATUS"`,
+# `exit $((0))`, and `exit "$(command)"`. Their value cannot be established
+# without evaluating the shell and may be zero, so accepting them would make
+# the structural privacy check bypassable. Quoted `"0"` and `'00'` are the
+# direct case: Bash removes the quotes before processing the successful
+# numeric-zero argument.
+_EXIT_STATEMENT_RE = re.compile(r"^exit(?:\s+(?P<argument>.*))?$")
+_DEFINITELY_NONZERO_EXIT_ARGUMENT_RE = re.compile(r"^[+-]?[1-9][0-9]*$")
 
 _INLINE_BLOCK_KEYWORDS = ("then", "do", "else")
 
@@ -785,7 +797,7 @@ def _strip_leading_inline_block_keywords(statement: str) -> str:
 
 
 def _run_body_has_early_success_exit(run_body: str) -> bool:
-    """Return True if the script contains a bare `exit` or a numeric-zero `exit`.
+    """Return True if the script contains an early exit not proven nonzero.
 
     An unconditional `exit` (implicitly propagating the previous command's
     own exit status) or an explicit successful-zero `exit`, placed ahead of
@@ -800,15 +812,14 @@ def _run_body_has_early_success_exit(run_body: str) -> bool:
     semicolon-separated inline compound statement — is treated as an unsafe
     early-success bypass (ADR-0008 fail-closed).
 
-    "Numeric-zero" is not just the single spelling `0`: bash's `exit`
-    builtin accepts any run of `0` digits, with an optional leading `+`/`-`
-    sign, as the argument and exits 0 for every one of them (`exit 00`,
-    `exit 000`, `exit +0`, `exit -0` all succeed exactly like `exit 0`).
-    Matching only the literal text `0` left every other same-value spelling
-    of zero as an undetected bypass — `_EARLY_SUCCESS_EXIT_STATEMENT_RE`
-    therefore matches the whole `[+-]?0+` grammar rather than one lexical
-    spelling, so equivalent zero spellings fail closed together instead of
-    needing to be enumerated one at a time.
+    The accepted grammar is deliberately narrower than Bash's full argument
+    syntax: only an unquoted canonical nonzero decimal literal is proven
+    unable to succeed. All other forms fail closed because a structural
+    validator cannot evaluate shell quoting, expansion, arithmetic, or
+    command substitution safely. That rejects every numeric-zero spelling
+    (`0`, `00`, `+0`, `-0`, `"0"`, `'00'`) and dynamic forms which could
+    evaluate to zero, while permitting only explicit nonzero exits such as
+    `exit 1` and `exit +2`.
 
     Splitting every logical line (after joining backslash continuations) on
     `;` and stripping a leading block keyword from each resulting segment is
@@ -821,7 +832,12 @@ def _run_body_has_early_success_exit(run_body: str) -> bool:
     for logical_line in _join_shell_line_continuations(run_body):
         for segment in logical_line.split(";"):
             statement = _strip_leading_inline_block_keywords(segment)
-            if statement and _EARLY_SUCCESS_EXIT_STATEMENT_RE.match(statement):
+            if not statement:
+                continue
+            match = _EXIT_STATEMENT_RE.fullmatch(statement)
+            if match and not _DEFINITELY_NONZERO_EXIT_ARGUMENT_RE.fullmatch(
+                match.group("argument") or ""
+            ):
                 return True
     return False
 
