@@ -57,15 +57,19 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
   onUnauthorized = handler;
 }
 
-// Injected by App.tsx (see setAuthEpochProvider) rather than imported
+// Injected by App.tsx (see setAuthCausalityProvider) rather than imported
 // directly, so this module never has to depend on the auth store -- auth.ts
 // already imports ApiError from here, so importing the store here too would
 // create a cycle back through it.
-type AuthEpochProvider = () => number;
-let authEpochProvider: AuthEpochProvider = () => 0;
+export interface AuthCausality {
+  epoch: number;
+  generation: number;
+}
+type AuthCausalityProvider = () => AuthCausality;
+let authCausalityProvider: AuthCausalityProvider = () => ({ epoch: 0, generation: 0 });
 
-export function setAuthEpochProvider(provider: AuthEpochProvider | null) {
-  authEpochProvider = provider ?? (() => 0);
+export function setAuthCausalityProvider(provider: AuthCausalityProvider | null) {
+  authCausalityProvider = provider ?? (() => ({ epoch: 0, generation: 0 }));
 }
 
 function normalizeRelationCreate(payload: RelationCreateRequest): RelationCreateRequest {
@@ -129,7 +133,7 @@ async function request<T>(path: string, options: JsonRequestOptions = {}): Promi
   }
 
   const startMs = nowMs();
-  const requestEpoch = authEpochProvider();
+  const requestCausality = authCausalityProvider();
   let response: Response;
   try {
     response = await fetch(buildUrl(path), {
@@ -152,11 +156,24 @@ async function request<T>(path: string, options: JsonRequestOptions = {}): Promi
     throw error;
   }
 
-  // Only clear the session for a 401 that still belongs to the epoch it was
-  // issued under. A request sent before a logout/login can resolve after the
-  // session has already moved on -- that outgoing 401 must not clear the new
-  // session it knows nothing about.
-  if (response.status === 401 && onUnauthorized && requestEpoch === authEpochProvider()) {
+  // Only clear the session for a 401 that still belongs to the causal context
+  // it was issued under. A request sent before a logout/login can resolve
+  // after the session has already moved on -- that outgoing 401 must not
+  // clear a new session it knows nothing about. Epoch alone isn't enough: a
+  // later login/signup advances the shared generation the instant it starts,
+  // well before it publishes (and therefore before epoch changes), so a
+  // stale 401 landing in that window would otherwise still see the old epoch
+  // and incorrectly clear a session that is already mid-transition --
+  // discarding that login/signup's eventual, successful publish. Comparing
+  // generation too closes that window: any auth operation starting after
+  // this request began -- published or not -- fences the clear.
+  const currentCausality = authCausalityProvider();
+  if (
+    response.status === 401 &&
+    onUnauthorized &&
+    requestCausality.epoch === currentCausality.epoch &&
+    requestCausality.generation === currentCausality.generation
+  ) {
     onUnauthorized();
   }
 

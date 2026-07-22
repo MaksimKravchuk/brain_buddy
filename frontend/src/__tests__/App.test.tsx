@@ -7,19 +7,19 @@ const state = vi.hoisted(() => ({
   hydrate: vi.fn(),
   clearSession: vi.fn(),
   unauthorizedHandler: undefined as (() => void) | null | undefined,
-  epochProvider: undefined as (() => number) | null | undefined
+  causalityProvider: undefined as (() => { epoch: number; generation: number }) | null | undefined
 }));
 
 vi.mock("../stores/authStore", () => ({
   useAuthStore: (selector: (store: typeof state) => unknown) => selector(state),
-  getAuthEpoch: () => 0
+  getAuthCausality: () => ({ epoch: 0, generation: 0 })
 }));
 vi.mock("../api/client", () => ({
   setUnauthorizedHandler: (handler: (() => void) | null) => {
     state.unauthorizedHandler = handler;
   },
-  setAuthEpochProvider: (provider: (() => number) | null) => {
-    state.epochProvider = provider;
+  setAuthCausalityProvider: (provider: (() => { epoch: number; generation: number }) | null) => {
+    state.causalityProvider = provider;
   }
 }));
 vi.mock("../app/AppRoutes", () => ({ AppRoutes: () => <div>App routes</div> }));
@@ -29,7 +29,7 @@ describe("App", () => {
     state.hydrate.mockReset();
     state.clearSession.mockReset();
     state.unauthorizedHandler = undefined;
-    state.epochProvider = undefined;
+    state.causalityProvider = undefined;
     window.history.pushState({}, "", "/login");
   });
 
@@ -44,11 +44,11 @@ describe("App", () => {
 
     state.unauthorizedHandler?.();
     expect(state.clearSession).toHaveBeenCalledOnce();
-    expect(state.epochProvider).toBeTypeOf("function");
+    expect(state.causalityProvider).toBeTypeOf("function");
 
     unmount();
     expect(state.unauthorizedHandler).toBeNull();
-    expect(state.epochProvider).toBeNull();
+    expect(state.causalityProvider).toBeNull();
   });
 
   it("delegates route selection to AppRoutes", () => {

@@ -16,6 +16,29 @@ function createDeferred<T>() {
   return { promise, resolve, reject };
 }
 
+async function assertFailedSignupFencesEarlierHydrate(
+  settleHydrate: (deferred: ReturnType<typeof createDeferred<AuthUser | null>>) => void
+) {
+  const meDeferred = createDeferred<AuthUser | null>();
+  vi.spyOn(authApi, "me").mockReturnValue(meDeferred.promise);
+  vi.spyOn(authApi, "signup").mockRejectedValue(new Error("invite code invalid"));
+
+  const hydratePromise = useAuthStore.getState().hydrate();
+  await expect(
+    useAuthStore.getState().signup({ email: "new@b.c", password: "secret", invite_code: "bad" })
+  ).rejects.toThrow();
+  const epochAfterFailedSignup = useAuthStore.getState().epoch;
+  expect(useAuthStore.getState().status).toBe("anon");
+
+  settleHydrate(meDeferred);
+  await hydratePromise;
+
+  expect(useAuthStore.getState().status).toBe("anon");
+  expect(useAuthStore.getState().status).not.toBe("loading");
+  expect(useAuthStore.getState().user).toBeNull();
+  expect(useAuthStore.getState().epoch).toBe(epochAfterFailedSignup);
+}
+
 describe("authStore", () => {
   beforeEach(() => {
     useAuthStore.setState({ user: null, status: "loading", epoch: 0 });
@@ -299,5 +322,138 @@ describe("authStore", () => {
     expect(useAuthStore.getState().status).toBe("anon");
     expect(useAuthStore.getState().user).toBeNull();
     expect(useAuthStore.getState().epoch).toBe(epochAfterLogout);
+  });
+
+  describe("a failed current explicit login/signup settles the store truthfully", () => {
+    it("login rejects for the caller but still settles the store out of loading", async () => {
+      // LoginPage relies solely on the rejection to show an error message --
+      // it never reads status/user for failure detection -- so the store
+      // must both rethrow AND publish a truthful non-loading state.
+      const failure = new Error("invalid credentials");
+      vi.spyOn(authApi, "login").mockRejectedValue(failure);
+      const epoch0 = useAuthStore.getState().epoch;
+
+      await expect(useAuthStore.getState().login({ email: "a@b.c", password: "wrong" })).rejects.toBe(failure);
+
+      expect(useAuthStore.getState().status).toBe("anon");
+      expect(useAuthStore.getState().user).toBeNull();
+      expect(useAuthStore.getState().epoch).toBeGreaterThan(epoch0);
+    });
+
+    it("signup rejects for the caller but still settles the store out of loading", async () => {
+      const failure = new Error("invite code invalid");
+      vi.spyOn(authApi, "signup").mockRejectedValue(failure);
+      const epoch0 = useAuthStore.getState().epoch;
+
+      await expect(
+        useAuthStore.getState().signup({ email: "new@b.c", password: "secret", invite_code: "bad" })
+      ).rejects.toBe(failure);
+
+      expect(useAuthStore.getState().status).toBe("anon");
+      expect(useAuthStore.getState().user).toBeNull();
+      expect(useAuthStore.getState().epoch).toBeGreaterThan(epoch0);
+    });
+
+    it("a startup hydrate that later resolves with a user cannot overwrite an already-failed later login", async () => {
+      const meDeferred = createDeferred<AuthUser | null>();
+      vi.spyOn(authApi, "me").mockReturnValue(meDeferred.promise);
+      vi.spyOn(authApi, "login").mockRejectedValue(new Error("invalid credentials"));
+
+      const hydratePromise = useAuthStore.getState().hydrate();
+      // The later login starts and fails while hydrate is still pending.
+      await expect(useAuthStore.getState().login({ email: "a@b.c", password: "wrong" })).rejects.toThrow();
+      const epochAfterFailedLogin = useAuthStore.getState().epoch;
+      expect(useAuthStore.getState().status).toBe("anon");
+
+      // The stale hydrate resolves afterward with a real user.
+      meDeferred.resolve({ id: "u0", email: "old@b.c" });
+      await hydratePromise;
+
+      expect(useAuthStore.getState().status).toBe("anon");
+      expect(useAuthStore.getState().user).toBeNull();
+      expect(useAuthStore.getState().epoch).toBe(epochAfterFailedLogin);
+    });
+
+    it("a startup hydrate that later resolves null cannot overwrite an already-failed later login", async () => {
+      const meDeferred = createDeferred<AuthUser | null>();
+      vi.spyOn(authApi, "me").mockReturnValue(meDeferred.promise);
+      vi.spyOn(authApi, "login").mockRejectedValue(new Error("invalid credentials"));
+
+      const hydratePromise = useAuthStore.getState().hydrate();
+      await expect(useAuthStore.getState().login({ email: "a@b.c", password: "wrong" })).rejects.toThrow();
+      const epochAfterFailedLogin = useAuthStore.getState().epoch;
+
+      meDeferred.resolve(null);
+      await hydratePromise;
+
+      expect(useAuthStore.getState().status).toBe("anon");
+      expect(useAuthStore.getState().user).toBeNull();
+      expect(useAuthStore.getState().epoch).toBe(epochAfterFailedLogin);
+    });
+
+    it("a startup hydrate that later resolves with a user cannot overwrite an already-failed later signup", async () => {
+      await assertFailedSignupFencesEarlierHydrate((deferred) => {
+        deferred.resolve({ id: "u0", email: "old@b.c" });
+      });
+    });
+
+    it("a startup hydrate that later resolves null cannot overwrite an already-failed later signup", async () => {
+      await assertFailedSignupFencesEarlierHydrate((deferred) => {
+        deferred.resolve(null);
+      });
+    });
+
+    it("a startup hydrate that later rejects cannot overwrite an already-failed later signup", async () => {
+      await assertFailedSignupFencesEarlierHydrate((deferred) => {
+        deferred.reject(new Error("network down"));
+      });
+    });
+
+    it("a startup hydrate that later rejects cannot overwrite an already-failed later login, and never leaves the store loading", async () => {
+      const meDeferred = createDeferred<AuthUser | null>();
+      vi.spyOn(authApi, "me").mockReturnValue(meDeferred.promise);
+      vi.spyOn(authApi, "login").mockRejectedValue(new Error("invalid credentials"));
+
+      const hydratePromise = useAuthStore.getState().hydrate();
+      await expect(useAuthStore.getState().login({ email: "a@b.c", password: "wrong" })).rejects.toThrow();
+      const epochAfterFailedLogin = useAuthStore.getState().epoch;
+      expect(useAuthStore.getState().status).not.toBe("loading");
+
+      meDeferred.reject(new Error("network down"));
+      await hydratePromise;
+
+      expect(useAuthStore.getState().status).toBe("anon");
+      expect(useAuthStore.getState().status).not.toBe("loading");
+      expect(useAuthStore.getState().user).toBeNull();
+      expect(useAuthStore.getState().epoch).toBe(epochAfterFailedLogin);
+    });
+
+    it("later-intent-wins still holds when a failed login is itself superseded by a later successful signup", async () => {
+      const meDeferred = createDeferred<AuthUser | null>();
+      vi.spyOn(authApi, "me").mockReturnValue(meDeferred.promise);
+      const loginDeferred = createDeferred<AuthUser>();
+      vi.spyOn(authApi, "login").mockReturnValue(loginDeferred.promise);
+      vi.spyOn(authApi, "signup").mockResolvedValue({ id: "u-signup", email: "new@b.c" });
+
+      const hydratePromise = useAuthStore.getState().hydrate();
+      const loginPromise = useAuthStore.getState().login({ email: "a@b.c", password: "wrong" });
+      // A later signup starts (and will succeed) before the login settles.
+      await useAuthStore.getState().signup({ email: "new@b.c", password: "secret", invite_code: "good" });
+      const epochAfterSignup = useAuthStore.getState().epoch;
+      expect(useAuthStore.getState().status).toBe("authed");
+      expect(useAuthStore.getState().user?.id).toBe("u-signup");
+
+      // The stale login now fails -- it must not clobber the newer signup.
+      loginDeferred.reject(new Error("invalid credentials"));
+      await expect(loginPromise).rejects.toThrow();
+
+      // The even-staler hydrate resolves last -- it must not clobber it either.
+      meDeferred.resolve({ id: "u0", email: "old@b.c" });
+      await hydratePromise;
+
+      expect(useAuthStore.getState().status).toBe("authed");
+      expect(useAuthStore.getState().user?.id).toBe("u-signup");
+      expect(useAuthStore.getState().epoch).toBe(epochAfterSignup);
+    });
   });
 });

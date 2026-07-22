@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { apiClient, setAuthEpochProvider, setUnauthorizedHandler } from "../client";
+import { apiClient, setAuthCausalityProvider, setUnauthorizedHandler } from "../client";
 import type { RelationCreateRequest, TreeMetadata } from "../types";
 
 const metadata: TreeMetadata = {
@@ -24,13 +24,13 @@ describe("apiClient", () => {
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
     setUnauthorizedHandler(null);
-    setAuthEpochProvider(null);
+    setAuthCausalityProvider(null);
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
     setUnauthorizedHandler(null);
-    setAuthEpochProvider(null);
+    setAuthCausalityProvider(null);
   });
 
   it("preserves form bodies and omits absent relation update fields", async () => {
@@ -227,7 +227,8 @@ describe("apiClient", () => {
     const onUnauthorized = vi.fn();
     setUnauthorizedHandler(onUnauthorized);
     let epoch = 0;
-    setAuthEpochProvider(() => epoch);
+    const generation = 0;
+    setAuthCausalityProvider(() => ({ epoch, generation }));
 
     let resolveFetch!: (value: Response) => void;
     fetchMock.mockImplementation(
@@ -247,10 +248,41 @@ describe("apiClient", () => {
     expect(onUnauthorized).not.toHaveBeenCalled();
   });
 
-  it("still clears the session for a 401 belonging to the currently active epoch", async () => {
+  it("does not clear the session for a 401 from a request issued before a later auth operation has started, even though epoch has not changed yet", async () => {
+    // A login/signup advances the shared auth-operation generation the
+    // instant it starts, well before it publishes (and therefore before
+    // epoch itself changes). A stale 401 landing in that window must be
+    // fenced by generation, not just epoch -- otherwise it would clear a
+    // session that is already mid-transition and discard the pending
+    // login/signup's eventual, successful publish.
     const onUnauthorized = vi.fn();
     setUnauthorizedHandler(onUnauthorized);
-    setAuthEpochProvider(() => 3);
+    const epoch = 0;
+    let generation = 0;
+    setAuthCausalityProvider(() => ({ epoch, generation }));
+
+    let resolveFetch!: (value: Response) => void;
+    fetchMock.mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveFetch = resolve;
+        })
+    );
+
+    const pending = apiClient.listTrees();
+    // A later login begins -- generation advances immediately, but epoch
+    // does not change until the login actually publishes.
+    generation += 1;
+    resolveFetch(response({ detail: "expired" }, 401));
+
+    await expect(pending).rejects.toMatchObject({ status: 401 });
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it("still clears the session for a 401 belonging to the currently active epoch and generation", async () => {
+    const onUnauthorized = vi.fn();
+    setUnauthorizedHandler(onUnauthorized);
+    setAuthCausalityProvider(() => ({ epoch: 3, generation: 7 }));
     fetchMock.mockResolvedValue(response({ detail: "expired" }, 401));
 
     await expect(apiClient.listTrees()).rejects.toMatchObject({ status: 401 });
