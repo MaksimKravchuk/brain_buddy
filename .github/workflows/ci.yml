@@ -2,7 +2,14 @@ name: CI
 
 on:
   push:
-    branches: ["main"]
+    # trunk-candidate/** refs run the same required full CI as main. This
+    # workflow definition is candidate-controlled (it runs from the pushed
+    # ref), so it deliberately holds NO write permission and never promotes:
+    # landing (fast-forwarding main) is owned exclusively by the
+    # default-branch deploy-fly-production.yml workflow, which consumes this
+    # run's completion via workflow_run (ADR-0008). A candidate that edits
+    # this file therefore cannot grant itself the power to land.
+    branches: ["main", "trunk-candidate/**"]
   pull_request:
     branches: ["main"]
 
@@ -41,6 +48,19 @@ jobs:
             --workflow .github/workflows/mutation-quality.yml
           python3 scripts/validate_ci_artifacts.py preview-workflow \
             --workflow .github/workflows/fly-review-frontend.yml
+
+      - name: Validate verified-trunk delivery contract
+        run: |
+          python3 -m unittest scripts/test_validate_trunk_delivery.py -v
+          python3 -m unittest scripts/test_submit_to_trunk.py -v
+          python3 -m unittest scripts/test_production_smoke.py -v
+          python3 -m unittest scripts/test_capture_fly_release_image.py -v
+          python3 -m unittest scripts/test_classify_path_risk.py -v
+          python3 -m unittest scripts/test_check_smoke_identity_cohort.py -v
+          python3 scripts/validate_trunk_delivery.py trunk-ci \
+            --ci .github/workflows/ci.yml
+          python3 scripts/validate_trunk_delivery.py deploy \
+            --workflow .github/workflows/deploy-fly-production.yml
 
   spec-kit:
     name: Spec Kit artifacts
@@ -348,8 +368,12 @@ jobs:
     steps:
       - name: Require successful CI, Docker, E2E, and Allure report
         run: |
-          if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ] || [ "${{ contains(needs.*.result, 'cancelled') }}" = "true" ]; then
-            echo "One or more required CI jobs failed or were cancelled." >&2
+          # A skipped required job must fail too: with `if: always()` here, a
+          # skipped dependency would otherwise let Full CI pass vacuously.
+          if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ] \
+            || [ "${{ contains(needs.*.result, 'cancelled') }}" = "true" ] \
+            || [ "${{ contains(needs.*.result, 'skipped') }}" = "true" ]; then
+            echo "One or more required CI jobs failed, were cancelled, or were skipped." >&2
             exit 1
           fi
           echo "Full CI passed."

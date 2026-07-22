@@ -71,6 +71,13 @@ class MeResponse(StrictBaseModel):
 
     id: str = Field(description="User identifier.")
     email: str = Field(description="Normalized email address.")
+    feature_flags: dict[str, bool] = Field(
+        default_factory=dict,
+        description=(
+            "Effective server-owned feature flags for this user. Only the "
+            "resolved boolean is exposed — never rollout stages or cohorts."
+        ),
+    )
 
 
 __all__ = [
