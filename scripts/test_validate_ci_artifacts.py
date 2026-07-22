@@ -2593,6 +2593,35 @@ jobs:
             f"below is meaningful: {completed.stdout}{completed.stderr}",
         )
 
+    def assert_early_exit_bypasses_required_runtime_failure(
+        self, inserted_line: str
+    ) -> None:
+        """Prove the proposed shell mutation would hide a later hard failure.
+
+        The structural validator is the control that must reject these
+        actionlint-valid workflow mutations before they can run. Executing
+        the inserted shell statement ahead of ``exit 1`` demonstrates the
+        runtime consequence it prevents: bash exits successfully and never
+        reaches the required failing command. Calling this from the shared
+        mutation helper proves that behavior for every scanner, sanitizer,
+        and aggregate route rather than relying on comments about shell
+        semantics.
+        """
+
+        completed = subprocess.run(
+            ["bash", "-c", inserted_line.strip() + "\nexit 1\n"],
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            "early-success mutation must demonstrate that it bypasses the "
+            f"required runtime failure: {completed.stdout}{completed.stderr}",
+        )
+
     def assert_early_exit_mutation_rejected(
         self,
         old_run_body: str,
@@ -2615,6 +2644,7 @@ jobs:
         with tempfile.TemporaryDirectory() as tmp:
             workflow = self.write_mutated_ci_workflow(tmp, mutated)
             self.assert_actionlint_valid_if_available(workflow)
+            self.assert_early_exit_bypasses_required_runtime_failure(inserted_line)
             completed = self.run_validator(
                 "workflow",
                 "--ci",
@@ -2744,6 +2774,59 @@ jobs:
         self.assert_early_exit_mutation_rejected(
             self.AGGREGATE_RUN_BODY,
             self.INLINE_CONDITIONAL_BARE_EARLY_EXIT,
+            self.AGGREGATE_EXPECTED_ERROR,
+        )
+
+    # A third actionlint-valid early-exit form: the same statically-always-
+    # taken inline `if`, but spelled `exit 00` instead of `exit 0`. Bash's
+    # `exit` builtin treats any run of `0` digits (optionally signed) as a
+    # successful exit -- `exit 00` terminates the script with status 0
+    # exactly like `exit 0` does, before the required command ever runs --
+    # and actionlint accepts it identically. A validator whose early-exit
+    # regex only recognized the literal text `0` let this same-value
+    # spelling regress through undetected even though the two already-
+    # covered forms above (bare `exit`, exact `exit 0`) were both caught.
+    INLINE_UNCONDITIONAL_EARLY_EXIT_ZERO_PADDED = (
+        "          if true; then exit 00; fi\n"
+    )
+
+    def test_workflow_rejects_scanner_invocation_masked_by_inline_zero_padded_early_exit(
+        self,
+    ) -> None:
+        # Mutation: identical unconditional-early-exit masking to
+        # `test_workflow_rejects_scanner_invocation_masked_by_inline_unconditional_early_exit`,
+        # but spelled `exit 00`. Bash takes the `if true` branch
+        # unconditionally and exits 0 there -- the scanner call is dead code
+        # -- yet a regex matching only the exact text `0` would let this
+        # equivalent successful-zero spelling through.
+        self.assert_early_exit_mutation_rejected(
+            self.SCANNER_RUN_BODY,
+            self.INLINE_UNCONDITIONAL_EARLY_EXIT_ZERO_PADDED,
+            self.SCANNER_EXPECTED_ERROR,
+        )
+
+    def test_workflow_rejects_sanitizer_invocation_masked_by_inline_zero_padded_early_exit(
+        self,
+    ) -> None:
+        # Mutation: identical `exit 00` masking, applied to the sanitize
+        # step instead of the scan step.
+        self.assert_early_exit_mutation_rejected(
+            self.SANITIZER_RUN_BODY,
+            self.INLINE_UNCONDITIONAL_EARLY_EXIT_ZERO_PADDED,
+            self.SANITIZER_EXPECTED_ERROR,
+        )
+
+    def test_workflow_rejects_aggregate_exit_one_masked_by_inline_zero_padded_early_exit(
+        self,
+    ) -> None:
+        # Mutation: the aggregate gate step keeps its exact required
+        # predicate and its lexical `exit 1` as the final statement, but an
+        # inline `if true; then exit 00; fi` is inserted right after the
+        # `echo`, unconditionally short-circuiting the job to (bash-true)
+        # success before the real `exit 1` ever runs.
+        self.assert_early_exit_mutation_rejected(
+            self.AGGREGATE_RUN_BODY,
+            self.INLINE_UNCONDITIONAL_EARLY_EXIT_ZERO_PADDED,
             self.AGGREGATE_EXPECTED_ERROR,
         )
 
