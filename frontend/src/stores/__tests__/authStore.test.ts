@@ -1,11 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { authApi } from "../../api/auth";
+import { authApi, type AuthUser } from "../../api/auth";
 import { useAuthStore } from "../authStore";
+
+// Controllable promise so tests can decide exactly when an in-flight
+// authApi.me() call settles, relative to other store transitions --
+// without relying on real timers or resolution-order luck.
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
 
 describe("authStore", () => {
   beforeEach(() => {
-    useAuthStore.setState({ user: null, status: "loading" });
+    useAuthStore.setState({ user: null, status: "loading", epoch: 0 });
   });
 
   afterEach(() => {
@@ -88,5 +101,92 @@ describe("authStore", () => {
     expect(useAuthStore.getState().user?.id).toBe("u1");
     expect(epochAfterSecondLogin).toBeGreaterThan(epochAfterClear);
     expect(epochAfterSecondLogin).toBeGreaterThan(epochAfterFirstLogin);
+  });
+
+  it("a stale startup hydrate that resolves null after a later login does not overwrite the login", async () => {
+    const meDeferred = createDeferred<AuthUser | null>();
+    vi.spyOn(authApi, "me").mockReturnValue(meDeferred.promise);
+    vi.spyOn(authApi, "login").mockResolvedValue({ id: "u1", email: "login@b.c" });
+
+    const hydratePromise = useAuthStore.getState().hydrate();
+    // A later, faster login wins the race while the startup hydrate is still pending.
+    await useAuthStore.getState().login({ email: "login@b.c", password: "x" });
+    const epochAfterLogin = useAuthStore.getState().epoch;
+
+    meDeferred.resolve(null);
+    await hydratePromise;
+
+    expect(useAuthStore.getState().status).toBe("authed");
+    expect(useAuthStore.getState().user?.id).toBe("u1");
+    expect(useAuthStore.getState().epoch).toBe(epochAfterLogin);
+  });
+
+  it("a stale startup hydrate that rejects after a later login does not overwrite the login", async () => {
+    const meDeferred = createDeferred<AuthUser | null>();
+    vi.spyOn(authApi, "me").mockReturnValue(meDeferred.promise);
+    vi.spyOn(authApi, "login").mockResolvedValue({ id: "u1", email: "login@b.c" });
+
+    const hydratePromise = useAuthStore.getState().hydrate();
+    await useAuthStore.getState().login({ email: "login@b.c", password: "x" });
+    const epochAfterLogin = useAuthStore.getState().epoch;
+
+    meDeferred.reject(new Error("network down"));
+    await hydratePromise;
+
+    expect(useAuthStore.getState().status).toBe("authed");
+    expect(useAuthStore.getState().user?.id).toBe("u1");
+    expect(useAuthStore.getState().epoch).toBe(epochAfterLogin);
+  });
+
+  it("an older concurrent hydrate response cannot overwrite a later concurrent hydrate's result", async () => {
+    // React StrictMode-style double invocation: two overlapping hydrate()
+    // calls in flight at once. The second call is the "current" one; the
+    // first must never be allowed to win, even if it settles last.
+    const firstDeferred = createDeferred<AuthUser | null>();
+    const secondDeferred = createDeferred<AuthUser | null>();
+    const meMock = vi.spyOn(authApi, "me");
+    meMock.mockReturnValueOnce(firstDeferred.promise);
+    meMock.mockReturnValueOnce(secondDeferred.promise);
+
+    const firstHydrate = useAuthStore.getState().hydrate();
+    const secondHydrate = useAuthStore.getState().hydrate();
+
+    // The later (current) hydrate settles first with its own identity.
+    secondDeferred.resolve({ id: "u-second", email: "second@b.c" });
+    await secondHydrate;
+    const epochAfterSecond = useAuthStore.getState().epoch;
+    expect(useAuthStore.getState().user?.id).toBe("u-second");
+
+    // The stale, earlier hydrate settles afterward with a different identity.
+    firstDeferred.resolve({ id: "u-first", email: "first@b.c" });
+    await firstHydrate;
+
+    expect(useAuthStore.getState().user?.id).toBe("u-second");
+    expect(useAuthStore.getState().status).toBe("authed");
+    expect(useAuthStore.getState().epoch).toBe(epochAfterSecond);
+  });
+
+  it("the later concurrent hydrate call still publishes when it is the one that settles last", async () => {
+    const firstDeferred = createDeferred<AuthUser | null>();
+    const secondDeferred = createDeferred<AuthUser | null>();
+    const meMock = vi.spyOn(authApi, "me");
+    meMock.mockReturnValueOnce(firstDeferred.promise);
+    meMock.mockReturnValueOnce(secondDeferred.promise);
+
+    const firstHydrate = useAuthStore.getState().hydrate();
+    const secondHydrate = useAuthStore.getState().hydrate();
+
+    // The stale, earlier hydrate settles first and must not publish.
+    firstDeferred.resolve({ id: "u-first", email: "first@b.c" });
+    await firstHydrate;
+    expect(useAuthStore.getState().user).toBeNull();
+    expect(useAuthStore.getState().status).toBe("loading");
+
+    // The later (current) hydrate settles last and must win.
+    secondDeferred.resolve({ id: "u-second", email: "second@b.c" });
+    await secondHydrate;
+
+    expect(useAuthStore.getState().user?.id).toBe("u-second");
+    expect(useAuthStore.getState().status).toBe("authed");
   });
 });

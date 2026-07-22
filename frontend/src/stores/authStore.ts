@@ -22,21 +22,44 @@ interface AuthStoreState {
   clearSession: () => void;
 }
 
-export const useAuthStore = create<AuthStoreState>((set) => ({
+// Counts hydrate() invocations (not resolutions). Lets an in-flight hydrate
+// tell whether a *newer* hydrate call has since started -- which happens
+// when React StrictMode (or any caller) fires hydrate() twice back-to-back.
+// Distinct from `epoch`: epoch only advances on publish, so two overlapping
+// hydrate calls can both capture the same epoch before either has published.
+let hydrateGeneration = 0;
+
+export const useAuthStore = create<AuthStoreState>((set, get) => ({
   user: null,
   status: "loading",
   epoch: 0,
 
   async hydrate() {
+    const generation = ++hydrateGeneration;
+    const epochAtStart = get().epoch;
+    const publish = (patch: { user: AuthUser | null; status: AuthStatus }) => {
+      // A newer hydrate() call has started since this one -- it is the
+      // current call now, so this stale result must not publish.
+      if (generation !== hydrateGeneration) {
+        return;
+      }
+      set((state) => {
+        // A login/signup/logout/clearSession (or a hydrate that already won
+        // the race above) advanced the epoch while this call was in flight.
+        // That later transition must win; this stale result must not
+        // overwrite it, advance epoch again, or touch its successor.
+        if (state.epoch !== epochAtStart) {
+          return state;
+        }
+        return { ...patch, epoch: state.epoch + 1 };
+      });
+    };
+
     try {
       const me = await authApi.me();
-      if (me) {
-        set((state) => ({ user: me, status: "authed", epoch: state.epoch + 1 }));
-      } else {
-        set((state) => ({ user: null, status: "anon", epoch: state.epoch + 1 }));
-      }
+      publish(me ? { user: me, status: "authed" } : { user: null, status: "anon" });
     } catch {
-      set((state) => ({ user: null, status: "anon", epoch: state.epoch + 1 }));
+      publish({ user: null, status: "anon" });
     }
   },
 

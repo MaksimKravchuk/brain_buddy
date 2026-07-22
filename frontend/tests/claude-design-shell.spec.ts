@@ -545,10 +545,14 @@ test.describe("mobile task shell at the canonical 375x812 viewport", () => {
     await test.step("reset the drawer scroll position to the top before the screenshot", async () => {
       const drawer = page.getByRole("dialog", { name: "Task navigation" });
       const scroller = drawer.locator(".overflow-y-auto");
-      await scroller.evaluate((element) => {
+      const scrollTop = await scroller.evaluate((element) => {
         element.scrollTop = 0;
+        return element.scrollTop;
       });
-      await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBe(0);
+      await attachment("Drawer scrollTop after reset", `scrollTop: ${scrollTop}px`, ContentType.TEXT);
+      if (scrollTop !== 0) {
+        throw new Error(`Expected drawer scroller reset to scrollTop 0, received ${scrollTop}`);
+      }
     });
     await expect(page.locator("body")).toHaveScreenshot("claude-design-shell-mobile-375x812.png", {
       animations: "disabled",
