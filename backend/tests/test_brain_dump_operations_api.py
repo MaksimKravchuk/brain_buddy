@@ -17,7 +17,7 @@ from app.exceptions import (
     ProviderTerminalError,
     ValidationFailure,
 )
-from app.workflows.voice_brain_dump.adapters import OpenAiAccurateStt
+from app.workflows.voice_brain_dump.adapters.openai_stt import OpenAiAccurateStt
 
 
 def _start_operation(
@@ -68,8 +68,8 @@ def _wav_audio(*, duration_seconds: float = 1.0, sample_rate: int = 8_000) -> by
 
 def _real_adapter(transport: httpx.BaseTransport) -> OpenAiAccurateStt:
     return OpenAiAccurateStt(
+        acknowledge_test_only_direct_construction=True,
         api_key="test-key",
-        model="gpt-4o-mini-transcribe",
         timeout_seconds=1,
         max_retries=0,
         retry_backoff_seconds=(),
@@ -527,6 +527,7 @@ def test_operation_admission_rejects_next_call_when_worst_case_would_exceed_cap(
     task_service = api_client.app.state.container.voice_brain_dump_service
     task_service.max_cumulative_cost_usd_per_operation = 1.0
     task_service.accurate_stt = OpenAiAccurateStt(
+        acknowledge_test_only_direct_construction=True,
         api_key="test-key",
         max_retries=0,
         retry_backoff_seconds=(),
@@ -955,6 +956,7 @@ def test_external_stt_consent_is_bound_to_the_named_provider(api_client) -> None
         return httpx.Response(200, json={"text": "must not be called"})
 
     api_client.app.state.container.voice_brain_dump_service.accurate_stt = OpenAiAccurateStt(
+        acknowledge_test_only_direct_construction=True,
         api_key="test-key", transport=httpx.MockTransport(handler), sleep=lambda _: None
     )
     response = api_client.post(

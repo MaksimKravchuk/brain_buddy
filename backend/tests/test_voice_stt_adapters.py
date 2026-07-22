@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 
 import httpx
@@ -15,6 +16,26 @@ from app.workflows.voice_brain_dump.providers import (
 )
 
 
+class _LyingStr(str):
+    """A ``str`` subclass whose ``__eq__``/``__ne__`` always lie.
+
+    Used to prove the adapter's authorization check cannot be satisfied by
+    matching ``==``/``!=`` alone: it must reject any non-exact-``str`` type
+    outright, because a subclass can report equality with the authorized
+    constant while its actual value -- what httpx would literally put on the
+    wire -- is something else entirely.
+    """
+
+    def __eq__(self, other: object) -> bool:
+        return True
+
+    def __ne__(self, other: object) -> bool:
+        return False
+
+    def __hash__(self) -> int:
+        return str.__hash__(self)
+
+
 def _request(audio: bytes = b"\x1aE\xdf\xa3webm-audio") -> AccurateSttRequest:
     return AccurateSttRequest(
         operation_id="operation_1",
@@ -24,6 +45,235 @@ def _request(audio: bytes = b"\x1aE\xdf\xa3webm-audio") -> AccurateSttRequest:
         supersedes_segment_ids=["preview_1"],
         sealed_audio=audio,
     )
+
+
+def test_openai_adapter_is_not_exported_from_the_production_adapters_package() -> None:
+    """ADR-0002 authorizes only Deepgram Nova-3 for accurate STT. OpenAI's
+    accurate-STT adapter must not be part of the ``adapters`` package's
+    production-facing surface -- it is reachable only via its own submodule
+    for narrowly-scoped, explicit test support."""
+
+    import app.workflows.voice_brain_dump.adapters as adapters_package
+
+    assert "OpenAiAccurateStt" not in adapters_package.__all__
+    assert not hasattr(adapters_package, "OpenAiAccurateStt")
+
+
+def test_openai_adapter_direct_construction_without_test_acknowledgement_is_unusable() -> (
+    None
+):
+    """Direct construction of ``OpenAiAccurateStt`` -- bypassing the
+    container, which never wires this adapter into production -- must never
+    be able to transmit a private-audio request, regardless of what
+    model/endpoint/credentials are supplied. Omitting the explicit test-only
+    acknowledgment must fail closed at construction, before any call."""
+
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"text": "must not be called"})
+
+    with pytest.raises(ValueError, match="test-only"):
+        OpenAiAccurateStt(
+            api_key="secret-test-key",
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert calls == 0
+
+
+def test_openai_adapter_rejects_an_unapproved_model_before_any_transport_call() -> None:
+    """The test-only adapter must not turn explicit test acknowledgement into
+    a caller-selectable model escape hatch. Even test support uses one exact
+    built-in model, so a direct fable-tier construction cannot transmit audio.
+    """
+
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"text": "must not be called"})
+
+    with pytest.raises(TypeError, match="unexpected keyword argument 'model'"):
+        OpenAiAccurateStt(
+            acknowledge_test_only_direct_construction=True,
+            api_key="secret-test-key",
+            model="gpt-5.6-fable",
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert calls == 0
+
+
+@pytest.mark.parametrize("attempted_value", [1, "True", "true", 1.0, "yes"])
+def test_openai_adapter_rejects_a_non_exact_bool_test_acknowledgement(
+    attempted_value: object,
+) -> None:
+    """A deceptive non-``bool`` truthy value must not satisfy the explicit
+    test-only acknowledgment: only the exact ``True`` singleton, of exact
+    type ``bool``, is accepted."""
+
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"text": "must not be called"})
+
+    with pytest.raises(ValueError, match="test-only"):
+        OpenAiAccurateStt(
+            api_key="secret-test-key",
+            acknowledge_test_only_direct_construction=attempted_value,  # type: ignore[arg-type]
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert calls == 0
+
+
+@pytest.mark.parametrize(
+    ("field_name", "attempted_value"),
+    [
+        ("model", "gpt-5.6-fable"),
+        ("provider_name", "other-provider"),
+        ("endpoint", "https://evil.example/v1/audio/transcriptions"),
+        ("acknowledge_test_only_direct_construction", False),
+    ],
+)
+def test_openai_adapter_identity_fields_cannot_be_reassigned_after_construction(
+    field_name: str, attempted_value: object
+) -> None:
+    """Identity fields are frozen: even a manually-constructed adapter
+    instance handed to other code cannot have its authorized provider/
+    endpoint/test-acknowledgment swapped out from under it before a later
+    call transmits."""
+
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"text": "must not be called"})
+
+    provider = OpenAiAccurateStt(
+        acknowledge_test_only_direct_construction=True,
+        api_key="secret-test-key",
+        max_retries=0,
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        setattr(provider, field_name, attempted_value)
+
+    assert calls == 0
+    assert provider.provider_name == "openai"
+    assert provider.acknowledge_test_only_direct_construction is True
+
+
+@pytest.mark.parametrize("field_name", ["model", "provider_name", "endpoint"])
+def test_openai_adapter_rejects_a_lying_str_subclass_forced_onto_identity(
+    field_name: str,
+) -> None:
+    """Even if ``frozen=True`` is bypassed via ``object.__setattr__`` -- e.g.
+    by other code holding a reference to a constructed instance -- a spoofed
+    provider/endpoint must never reach the wire. The re-check immediately
+    before every transmit must reject a deceptive ``str`` subclass whose
+    overridden equality lies about matching the authorized constant."""
+
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"text": "must not be called"})
+
+    provider = OpenAiAccurateStt(
+        acknowledge_test_only_direct_construction=True,
+        api_key="secret-test-key",
+        max_retries=0,
+        transport=httpx.MockTransport(handler),
+    )
+    spoofed = _LyingStr("attacker-controlled-value")
+    assert spoofed == getattr(provider, field_name)  # the lie
+    object.__setattr__(provider, field_name, spoofed)
+    error_label = "provider" if field_name == "provider_name" else field_name
+
+    with pytest.raises(ValueError, match=f"Unauthorized OpenAI accurate STT {error_label}"):
+        provider.transcribe_sealed_audio(_request())
+
+    assert calls == 0
+
+
+def test_openai_adapter_object_setattr_mutation_of_test_acknowledgement_yields_zero_calls() -> (
+    None
+):
+    """A legitimately test-acknowledged instance whose acknowledgment is
+    flipped off via ``object.__setattr__`` after construction (bypassing
+    ``frozen=True``) must still be rejected before any transmit."""
+
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"text": "must not be called"})
+
+    provider = OpenAiAccurateStt(
+        acknowledge_test_only_direct_construction=True,
+        api_key="secret-test-key",
+        max_retries=0,
+        transport=httpx.MockTransport(handler),
+    )
+    object.__setattr__(provider, "acknowledge_test_only_direct_construction", False)
+
+    with pytest.raises(ValueError, match="test-only"):
+        provider.transcribe_sealed_audio(_request())
+
+    assert calls == 0
+
+
+def test_openai_adapter_mutation_during_retry_backoff_stops_further_transmission() -> None:
+    """A mutation that happens *between* retry attempts -- not just before
+    the first call -- must still be caught by the re-check at the top of the
+    retry loop, so a spoofed identity that only becomes wrong mid-flight can
+    never place a second (or later) transmit."""
+
+    calls = 0
+    provider_holder: list[OpenAiAccurateStt] = []
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        # Simulate an identity compromise that occurs concurrently with the
+        # first attempt's retryable failure, before the adapter's own retry
+        # loop re-checks authorization ahead of its next attempt.
+        object.__setattr__(provider_holder[0], "endpoint", "https://evil.example/v1")
+        return httpx.Response(503)
+
+    provider = OpenAiAccurateStt(
+        acknowledge_test_only_direct_construction=True,
+        api_key="secret-test-key",
+        max_retries=2,
+        retry_backoff_seconds=(0.0, 0.0),
+        transport=httpx.MockTransport(handler),
+        sleep=lambda _delay: None,
+    )
+    provider_holder.append(provider)
+
+    # The retry loop's authorization re-check raises inside the same
+    # ``try`` block that maps a malformed/unparseable provider response to
+    # ``STT_PROVIDER_INVALID_RESPONSE``, so the authorization ``ValueError``
+    # surfaces wrapped as a ``ProviderTerminalError`` with the original
+    # ``ValueError`` chained as its cause. The security-relevant invariant is
+    # that no second transmit ever happens, not the wrapper's exact type.
+    with pytest.raises(ProviderTerminalError, match="STT_PROVIDER_INVALID_RESPONSE") as caught:
+        provider.transcribe_sealed_audio(_request())
+
+    assert isinstance(caught.value.__cause__, ValueError)
+    assert "Unauthorized OpenAI accurate STT endpoint" in str(caught.value.__cause__)
+    assert calls == 1
 
 
 def test_openai_adapter_sends_sealed_binary_audio_and_multilingual_context() -> None:
@@ -48,8 +298,8 @@ def test_openai_adapter_sends_sealed_binary_audio_and_multilingual_context() -> 
         )
 
     provider = OpenAiAccurateStt(
+        acknowledge_test_only_direct_construction=True,
         api_key="secret-test-key",
-        model="gpt-4o-mini-transcribe",
         timeout_seconds=12,
         max_retries=0,
         retry_backoff_seconds=(),
@@ -82,7 +332,9 @@ def test_openai_adapter_sends_sealed_binary_audio_and_multilingual_context() -> 
 
 
 def test_openai_adapter_repr_redacts_api_key() -> None:
-    provider = OpenAiAccurateStt(api_key="sensitive-test-key")
+    provider = OpenAiAccurateStt(
+        acknowledge_test_only_direct_construction=True, api_key="sensitive-test-key"
+    )
 
     assert "sensitive-test-key" not in repr(provider)
 
@@ -108,6 +360,7 @@ def test_openai_adapter_sniffs_audio_format_for_matching_multipart_metadata(
         return httpx.Response(200, json={"text": "Ready"})
 
     provider = OpenAiAccurateStt(
+        acknowledge_test_only_direct_construction=True,
         api_key="secret-test-key",
         max_retries=0,
         transport=httpx.MockTransport(handler),
@@ -135,6 +388,7 @@ def test_openai_adapter_rejects_unknown_binary_before_network() -> None:
         return httpx.Response(200, json={"text": "must not be called"})
 
     provider = OpenAiAccurateStt(
+        acknowledge_test_only_direct_construction=True,
         api_key="secret-test-key",
         transport=httpx.MockTransport(handler),
     )
@@ -157,8 +411,8 @@ def test_openai_adapter_retries_only_retryable_failures_with_a_bounded_budget() 
         return httpx.Response(200, json={"text": "Готово"})
 
     provider = OpenAiAccurateStt(
+        acknowledge_test_only_direct_construction=True,
         api_key="secret-test-key",
-        model="gpt-4o-transcribe",
         timeout_seconds=5,
         max_retries=2,
         retry_backoff_seconds=(0.1, 0.2),
@@ -183,8 +437,8 @@ def test_openai_adapter_redacts_provider_payloads_and_credentials_from_errors() 
         )
 
     provider = OpenAiAccurateStt(
+        acknowledge_test_only_direct_construction=True,
         api_key="secret-test-key",
-        model="gpt-4o-mini-transcribe",
         timeout_seconds=5,
         max_retries=0,
         retry_backoff_seconds=(),
@@ -210,8 +464,8 @@ def test_openai_adapter_rejects_requests_over_cost_budget_before_network() -> No
         return httpx.Response(200, json={"text": "must not be called"})
 
     provider = OpenAiAccurateStt(
+        acknowledge_test_only_direct_construction=True,
         api_key="secret-test-key",
-        model="gpt-4o-mini-transcribe",
         timeout_seconds=5,
         max_retries=0,
         retry_backoff_seconds=(),
@@ -235,8 +489,8 @@ def test_disabled_provider_is_an_explicit_safe_state() -> None:
 
 def test_openai_adapter_exhausts_transport_retries_as_retryable_error() -> None:
     provider = OpenAiAccurateStt(
+        acknowledge_test_only_direct_construction=True,
         api_key="secret-test-key",
-        model="gpt-4o-mini-transcribe",
         timeout_seconds=0.1,
         max_retries=1,
         retry_backoff_seconds=(0.0,),
@@ -253,7 +507,9 @@ def test_openai_adapter_exhausts_transport_retries_as_retryable_error() -> None:
 
 
 def test_openai_adapter_rejects_missing_audio_before_network() -> None:
-    provider = OpenAiAccurateStt(api_key="secret-test-key")
+    provider = OpenAiAccurateStt(
+        acknowledge_test_only_direct_construction=True, api_key="secret-test-key"
+    )
 
     with pytest.raises(ProviderTerminalError, match="STT_AUDIO_MISSING"):
         provider.transcribe_sealed_audio(_request(b""))
@@ -272,6 +528,7 @@ def test_openai_adapter_maps_terminal_responses_to_redacted_codes(
     response: httpx.Response, expected_code: str
 ) -> None:
     provider = OpenAiAccurateStt(
+        acknowledge_test_only_direct_construction=True,
         api_key="secret-test-key",
         max_retries=0,
         transport=httpx.MockTransport(lambda _request: response),
@@ -283,6 +540,7 @@ def test_openai_adapter_maps_terminal_responses_to_redacted_codes(
 
 def test_openai_adapter_exhausts_retryable_http_status_without_backoff() -> None:
     provider = OpenAiAccurateStt(
+        acknowledge_test_only_direct_construction=True,
         api_key="secret-test-key",
         max_retries=0,
         retry_backoff_seconds=(),
@@ -302,6 +560,7 @@ def test_openai_adapter_tags_retryable_failure_with_conservative_estimated_cost(
 
     audio = _request().sealed_audio
     provider = OpenAiAccurateStt(
+        acknowledge_test_only_direct_construction=True,
         api_key="secret-test-key",
         max_retries=2,
         retry_backoff_seconds=(0.0, 0.0),
@@ -320,6 +579,7 @@ def test_openai_adapter_tags_retryable_failure_with_conservative_estimated_cost(
 
 def test_openai_adapter_tags_terminal_failure_with_estimated_cost_after_a_real_call() -> None:
     provider = OpenAiAccurateStt(
+        acknowledge_test_only_direct_construction=True,
         api_key="secret-test-key",
         max_retries=0,
         estimated_cost_usd_per_megabyte=1.0,
@@ -347,6 +607,7 @@ def test_openai_adapter_never_tags_cost_when_admission_refuses_the_call() -> Non
         return httpx.Response(200, json={"text": "must not be called"})
 
     provider = OpenAiAccurateStt(
+        acknowledge_test_only_direct_construction=True,
         api_key="secret-test-key",
         max_cost_usd_per_operation=0.001,
         estimated_cost_usd_per_megabyte=1.0,
@@ -369,6 +630,7 @@ def test_openai_adapter_omits_optional_hint_fields_when_they_are_empty() -> None
         return httpx.Response(200, json={"text": "Ready"})
 
     provider = OpenAiAccurateStt(
+        acknowledge_test_only_direct_construction=True,
         api_key="secret-test-key",
         max_retries=0,
         transport=httpx.MockTransport(handler),
@@ -398,6 +660,7 @@ def test_openai_adapter_skips_sleep_when_retry_backoff_is_empty() -> None:
         return httpx.Response(200, json={"text": "Recovered"})
 
     provider = OpenAiAccurateStt(
+        acknowledge_test_only_direct_construction=True,
         api_key="secret-test-key",
         max_retries=1,
         retry_backoff_seconds=(),

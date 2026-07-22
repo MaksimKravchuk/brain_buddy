@@ -94,14 +94,18 @@ def test_deepgram_adapter_rejects_model_as_a_constructor_argument(
 
 @pytest.mark.parametrize(
     ("field_name", "attempted_value"),
-    [("model", "nova-3-medical"), ("provider_name", "other-provider")],
+    [
+        ("model", "nova-3-medical"),
+        ("provider_name", "other-provider"),
+        ("listen_url", "https://evil.example/listen"),
+    ],
 )
 def test_deepgram_adapter_identity_fields_cannot_be_reassigned_after_construction(
     field_name: str, attempted_value: str
 ) -> None:
     """Identity fields are frozen: even a manually-constructed adapter
-    instance handed to other code cannot have its authorized provider/model
-    swapped out from under it before a later call transmits."""
+    instance handed to other code cannot have its authorized provider/model/
+    endpoint swapped out from under it before a later call transmits."""
 
     calls = 0
 
@@ -122,17 +126,19 @@ def test_deepgram_adapter_identity_fields_cannot_be_reassigned_after_constructio
     assert calls == 0
     assert provider.model == "nova-3"
     assert provider.provider_name == "deepgram"
+    assert provider.listen_url == "https://api.deepgram.com/v1/listen"
 
 
-@pytest.mark.parametrize("field_name", ["model", "provider_name"])
+@pytest.mark.parametrize("field_name", ["model", "provider_name", "listen_url"])
 def test_deepgram_adapter_rejects_a_lying_str_subclass_forced_onto_identity(
     field_name: str,
 ) -> None:
     """Even if ``frozen=True`` is bypassed via ``object.__setattr__`` --
     e.g. by other code holding a reference to a constructed instance -- a
-    spoofed model must never reach the wire. The re-check immediately before
-    every transmit must reject a deceptive ``str`` subclass whose overridden
-    equality lies about matching the authorized constant."""
+    spoofed model/provider/endpoint must never reach the wire. The re-check
+    immediately before every transmit must reject a deceptive ``str``
+    subclass whose overridden equality lies about matching the authorized
+    constant."""
 
     calls = 0
 
@@ -149,10 +155,196 @@ def test_deepgram_adapter_rejects_a_lying_str_subclass_forced_onto_identity(
     spoofed = _LyingStr("attacker-controlled-value")
     assert spoofed == getattr(provider, field_name)  # the lie
     object.__setattr__(provider, field_name, spoofed)
-    error_label = "provider" if field_name == "provider_name" else field_name
+    error_label = {"provider_name": "provider", "listen_url": "endpoint"}.get(
+        field_name, field_name
+    )
 
     with pytest.raises(ValueError, match=f"Unauthorized Deepgram accurate STT {error_label}"):
         provider.transcribe_sealed_audio(_request())
+
+    assert calls == 0
+
+
+def test_deepgram_adapter_rejects_listen_url_as_a_constructor_argument() -> None:
+    """``listen_url`` is authorization-sensitive transport identity: it is
+    fixed to the single authorized Deepgram endpoint and is never accepted as
+    a constructor argument."""
+
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return _success_response()
+
+    with pytest.raises(TypeError, match="unexpected keyword argument 'listen_url'"):
+        DeepgramAccurateStt(
+            api_key="secret-test-key",
+            listen_url="https://evil.example/listen",
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert calls == 0
+
+
+def test_deepgram_adapter_ignores_mutation_of_the_module_level_listen_url_constant() -> None:
+    """Regression: the transport call must never read the mutable
+    module-level ``DEEPGRAM_LISTEN_URL`` name directly at request time. Prior
+    behavior read that global fresh on every request, so mutating it (e.g.
+    ``deepgram_stt.DEEPGRAM_LISTEN_URL = "https://evil.example"``) would
+    silently redirect Deepgram Token credentials and private sealed audio to
+    an attacker-controlled endpoint for every adapter instance, including
+    ones already constructed. The authorized endpoint must instead be a
+    per-instance, construction-time-fixed value that is independently
+    re-validated before every transmit."""
+
+    from app.workflows.voice_brain_dump.adapters import deepgram_stt as module
+
+    captured_urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_urls.append(str(request.url))
+        return _success_response()
+
+    original = module.DEEPGRAM_LISTEN_URL
+    try:
+        module.DEEPGRAM_LISTEN_URL = "https://evil.example/listen"
+
+        provider = DeepgramAccurateStt(
+            api_key="secret-test-key",
+            max_retries=0,
+            transport=httpx.MockTransport(handler),
+        )
+        result = provider.transcribe_sealed_audio(_request())
+    finally:
+        module.DEEPGRAM_LISTEN_URL = original
+
+    assert len(captured_urls) == 1
+    assert captured_urls[0].startswith("https://api.deepgram.com/v1/listen")
+    assert "evil.example" not in captured_urls[0]
+    assert result.provider == "deepgram"
+
+
+def test_deepgram_adapter_retry_time_endpoint_mutation_stops_unauthorized_egress() -> None:
+    """An object.__setattr__ endpoint mutation after a retryable first
+    response must be caught before retry transport, leaving the one original
+    authorized request as the only call and sending no Token/audio to the
+    mutated endpoint."""
+
+    calls = 0
+    provider_holder: list[DeepgramAccurateStt] = []
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        object.__setattr__(
+            provider_holder[0], "listen_url", "https://evil.example/v1/listen"
+        )
+        return httpx.Response(503)
+
+    provider = DeepgramAccurateStt(
+        api_key="secret-test-key",
+        max_retries=2,
+        retry_backoff_seconds=(0.0, 0.0),
+        transport=httpx.MockTransport(handler),
+        sleep=lambda _delay: None,
+    )
+    provider_holder.append(provider)
+
+    with pytest.raises(ProviderTerminalError, match="STT_PROVIDER_INVALID_RESPONSE") as caught:
+        provider.transcribe_sealed_audio(_request())
+
+    assert isinstance(caught.value.__cause__, ValueError)
+    assert "Unauthorized Deepgram accurate STT endpoint" in str(caught.value.__cause__)
+    assert calls == 1
+
+
+@pytest.mark.parametrize("max_retries", [-1, -2, True, False, "0", 1.0])
+def test_deepgram_adapter_rejects_invalid_max_retries_at_construction(
+    max_retries: object,
+) -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return _success_response()
+
+    with pytest.raises(ValueError, match="max_retries"):
+        DeepgramAccurateStt(
+            api_key="secret-test-key",
+            max_retries=max_retries,  # type: ignore[arg-type]
+            max_cost_usd_per_operation=0.0001,
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert calls == 0
+
+
+@pytest.mark.parametrize("field_name", ["max_cost_usd_per_operation", "estimated_cost_usd_per_megabyte"])
+@pytest.mark.parametrize(
+    "invalid_value",
+    [-0.01, float("nan"), float("inf"), float("-inf"), True, False, "0.5"],
+)
+def test_deepgram_adapter_rejects_invalid_cost_fields_at_construction(
+    field_name: str, invalid_value: object
+) -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return _success_response()
+
+    kwargs = {
+        "api_key": "secret-test-key",
+        "transport": httpx.MockTransport(handler),
+        field_name: invalid_value,
+    }
+
+    with pytest.raises(ValueError, match=field_name):
+        DeepgramAccurateStt(**kwargs)  # type: ignore[arg-type]
+
+    assert calls == 0
+
+
+@pytest.mark.parametrize("field_name", ["max_cost_usd_per_operation", "estimated_cost_usd_per_megabyte"])
+def test_deepgram_adapter_allows_zero_cost_fields(field_name: str) -> None:
+    kwargs = {
+        "api_key": "secret-test-key",
+        "max_retries": 0,
+        field_name: 0.0,
+        "transport": httpx.MockTransport(lambda _request: _success_response()),
+    }
+
+    provider = DeepgramAccurateStt(**kwargs)  # type: ignore[arg-type]
+
+    assert getattr(provider, field_name) == 0.0
+
+
+def test_deepgram_adapter_negative_max_retries_cannot_yield_a_usable_adapter_even_with_tiny_budget() -> (
+    None
+):
+    """A negative ``max_retries`` must fail closed at construction: it must
+    never construct an adapter that could later compute a negative cost
+    estimate or place any transport call, even paired with a vanishingly
+    small cost budget."""
+
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return _success_response()
+
+    with pytest.raises(ValueError):
+        DeepgramAccurateStt(
+            api_key="secret-test-key",
+            max_retries=-2,
+            max_cost_usd_per_operation=0.0000001,
+            estimated_cost_usd_per_megabyte=0.0000001,
+            transport=httpx.MockTransport(handler),
+        )
 
     assert calls == 0
 

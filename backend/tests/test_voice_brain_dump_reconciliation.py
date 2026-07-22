@@ -940,6 +940,120 @@ def test_openai_reconciler_default_endpoint_matches_the_central_authorization_co
     assert reconciler.endpoint == MVP_RECONCILER_ENDPOINT
 
 
+@pytest.mark.parametrize("max_retries", [-1, -2, True, False, "0", 1.0])
+def test_openai_reconciler_rejects_invalid_max_retries_at_construction(
+    max_retries: object,
+) -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": {"operations": []}}}]},
+        )
+
+    with pytest.raises(ValueError, match="max_retries"):
+        OpenAITextReconciler(
+            api_key="test-key",
+            max_retries=max_retries,  # type: ignore[arg-type]
+            max_cost_usd_per_operation=0.0001,
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert calls == 0
+
+
+@pytest.mark.parametrize(
+    "field_name", ["max_cost_usd_per_operation", "estimated_cost_usd_per_megabyte"]
+)
+@pytest.mark.parametrize(
+    "invalid_value",
+    [-0.01, float("nan"), float("inf"), float("-inf"), True, False, "0.5"],
+)
+def test_openai_reconciler_rejects_invalid_cost_fields_at_construction(
+    field_name: str, invalid_value: object
+) -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": {"operations": []}}}]},
+        )
+
+    kwargs = {
+        "api_key": "test-key",
+        "transport": httpx.MockTransport(handler),
+        field_name: invalid_value,
+    }
+
+    with pytest.raises(ValueError, match=field_name):
+        OpenAITextReconciler(**kwargs)  # type: ignore[arg-type]
+
+    assert calls == 0
+
+
+@pytest.mark.parametrize(
+    "field_name", ["max_cost_usd_per_operation", "estimated_cost_usd_per_megabyte"]
+)
+def test_openai_reconciler_allows_zero_cost_fields(field_name: str) -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    kwargs = {
+        "api_key": "test-key",
+        "max_retries": 0,
+        field_name: 0.0,
+        "transport": httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200, json={"choices": [{"message": {"content": {"operations": []}}}]}
+            )
+        ),
+    }
+
+    reconciler = OpenAITextReconciler(**kwargs)  # type: ignore[arg-type]
+
+    assert getattr(reconciler, field_name) == 0.0
+
+
+def test_openai_reconciler_negative_max_retries_cannot_yield_a_usable_reconciler_even_with_tiny_budget() -> (
+    None
+):
+    """A negative ``max_retries`` must fail closed at construction, before
+    any cost estimate is computed or any transport call is placed -- even
+    paired with a vanishingly small cost budget."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": {"operations": []}}}]},
+        )
+
+    with pytest.raises(ValueError):
+        OpenAITextReconciler(
+            api_key="test-key",
+            max_retries=-2,
+            max_cost_usd_per_operation=0.0000001,
+            estimated_cost_usd_per_megabyte=0.0000001,
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert calls == 0
+
+
 def test_openai_reconciler_retries_only_retryable_failures_with_a_bounded_budget() -> None:
     from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
 
