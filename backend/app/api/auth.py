@@ -39,14 +39,6 @@ def _set_session_cookie(response: Response, raw_token: str, config: AppConfig) -
     )
 
 
-def _clear_session_cookie(response: Response, config: AppConfig) -> None:
-    session_cfg = config.session
-    response.delete_cookie(
-        key=session_cfg.cookie_name,
-        path="/",
-    )
-
-
 @router.post(
     "/signup",
     response_model=MeResponse,
@@ -115,9 +107,13 @@ def logout(
 ) -> Response:
     raw_token = request.cookies.get(config.session.cookie_name)
     auth_service.logout(raw_token)
-    response = Response(status_code=status.HTTP_204_NO_CONTENT)
-    _clear_session_cookie(response, config)
-    return response
+    # Logout's security boundary is server-side revocation of the token that
+    # authenticated this request. A response-level delete_cookie is unsafe:
+    # an old logout response may reach the browser after a newer login has
+    # installed a different token under the same cookie name, and would then
+    # erase that newer credential. Retaining an invalidated old token client
+    # side is harmless because every protected route resolves it server-side.
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/me", response_model=MeResponse, responses=error_responses(401))

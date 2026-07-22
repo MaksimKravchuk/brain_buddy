@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from httpx import Cookies
 
 from app.container import Container
 from app.core import get_config
@@ -100,6 +101,96 @@ def test_login_and_logout_flow(tmp_path, monkeypatch) -> None:
 
     me_after = client.get("/api/auth/me")
     assert me_after.status_code == 401
+
+
+def test_held_logout_response_cannot_clear_a_successor_login_cookie(
+    tmp_path, monkeypatch
+) -> None:
+    """A late logout response must not remove a successor session cookie."""
+    client, _, code = _bootstrap(tmp_path, monkeypatch, subdir="logout_response_race")
+    signup = client.post(
+        "/api/auth/signup",
+        json={
+            "email": "user@example.com",
+            "password": "very-long-password",
+            "invite_code": code,
+        },
+    )
+    session_a = signup.cookies["brainbuddy_session"]
+
+    # Model a browser explicitly applying real Set-Cookie response headers. The
+    # logout response is held while its authenticated A request still revokes A.
+    browser_cookies = Cookies()
+    browser_cookies.extract_cookies(signup)
+    held_logout = client.post(
+        "/api/auth/logout",
+        headers={"Cookie": f"brainbuddy_session={session_a}"},
+    )
+    assert held_logout.status_code == 204
+    assert "set-cookie" not in held_logout.headers
+
+    login_b = client.post(
+        "/api/auth/login",
+        json={"email": "user@example.com", "password": "very-long-password"},
+    )
+    assert login_b.status_code == 200
+    browser_cookies.extract_cookies(login_b)
+    session_b = browser_cookies["brainbuddy_session"]
+    assert session_b != session_a
+
+    # Deliver the older response only after B has been installed. Without a
+    # Set-Cookie deletion in that real response, B remains the browser token.
+    browser_cookies.extract_cookies(held_logout)
+    assert browser_cookies["brainbuddy_session"] == session_b
+
+    me_as_b = client.get(
+        "/api/auth/me", headers={"Cookie": f"brainbuddy_session={session_b}"}
+    )
+    assert me_as_b.status_code == 200
+    assert me_as_b.json()["email"] == "user@example.com"
+
+
+def test_failed_newer_login_then_held_logout_response_is_anonymous(
+    tmp_path, monkeypatch
+) -> None:
+    """A revoked old token cannot authenticate after a failed successor login."""
+    client, _, code = _bootstrap(
+        tmp_path, monkeypatch, subdir="failed_login_logout_race"
+    )
+    signup = client.post(
+        "/api/auth/signup",
+        json={
+            "email": "user@example.com",
+            "password": "very-long-password",
+            "invite_code": code,
+        },
+    )
+    session_a = signup.cookies["brainbuddy_session"]
+    browser_cookies = Cookies()
+    browser_cookies.extract_cookies(signup)
+
+    # The server processes logout A, but the browser has not received that
+    # response before the newer login attempt fails.
+    held_logout = client.post(
+        "/api/auth/logout",
+        headers={"Cookie": f"brainbuddy_session={session_a}"},
+    )
+    failed_login = client.post(
+        "/api/auth/login",
+        json={"email": "user@example.com", "password": "wrong-password"},
+    )
+    assert failed_login.status_code == 401
+
+    browser_cookies.extract_cookies(failed_login)
+    browser_cookies.extract_cookies(held_logout)
+    assert browser_cookies["brainbuddy_session"] == session_a
+
+    # The old cookie may remain in the browser, but its server-side session was
+    # revoked by logout, so the resulting authorization truth is anonymous.
+    me_as_old_session = client.get(
+        "/api/auth/me", headers={"Cookie": f"brainbuddy_session={session_a}"}
+    )
+    assert me_as_old_session.status_code == 401
 
 
 def test_login_wrong_password_returns_401(tmp_path, monkeypatch) -> None:
