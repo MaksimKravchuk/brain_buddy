@@ -1376,6 +1376,10 @@ class VoiceBrainDumpService:
                             "attempt": attempt,
                             "recovery_count": recovery_count,
                             "provider": self.text_reconciler.provider_id,
+                            "model": getattr(self.text_reconciler, "model", None),
+                            "template_version": getattr(
+                                self.text_reconciler, "template_version", None
+                            ),
                             "estimated_cost_usd": reconciler_cost,
                             "reserved_cost_usd": 0.0,
                             "consumed_cost_usd": reconciler_cost,
@@ -2985,6 +2989,11 @@ class VoiceBrainDumpService:
                             "error_code": (
                                 error_code if error_code is not None else error
                             )[:100],
+                            "provider": self.text_reconciler.provider_id,
+                            "model": getattr(self.text_reconciler, "model", None),
+                            "template_version": getattr(
+                                self.text_reconciler, "template_version", None
+                            ),
                             "estimated_cost_usd": estimated_cost_usd,
                             "reserved_cost_usd": 0.0,
                             "consumed_cost_usd": estimated_cost_usd,

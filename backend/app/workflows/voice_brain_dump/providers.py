@@ -213,6 +213,11 @@ class DeterministicTextReconciler:
 
     provider_id = "deterministic"
     requires_external_processing = False
+    # No real model/prompt template is invoked; there is nothing safe and
+    # configured to report, so audit provenance stays explicitly unset
+    # rather than inventing a value.
+    model: str | None = None
+    template_version: str | None = None
 
     def reconcile(self, request: ReconcileTextRequest) -> ReconcileResult:
         patches: list[ProposalPatch] = []
@@ -241,6 +246,8 @@ class DisabledTextReconciler:
 
     provider_id = "disabled"
     requires_external_processing = True
+    model: str | None = None
+    template_version: str | None = None
 
     def reconcile(self, request: ReconcileTextRequest) -> ReconcileResult:
         del request
