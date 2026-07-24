@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import logging
 import wave
 from datetime import timedelta
 
@@ -387,6 +388,128 @@ def test_seal_persists_semantic_reconciler_failures_for_recovery(
     assert str(provider_error) not in sealed.text
 
 
+def test_provider_failure_redacts_sensitive_values_from_logs_and_run_envelope(
+    api_client, caplog: pytest.LogCaptureFixture
+) -> None:
+    """T057/F3: provider failures expose only an allowlisted redacted code.
+
+    The sentinels represent each privacy-sensitive value the operation carries.
+    The persisted provider-run projection is the emitted failure envelope; it
+    and captured logs must not contain raw audio/text, vocabulary, provider
+    payloads, credentials, or a local path.
+    """
+
+    raw_audio = b"raw-audio-sentinel-7c1f"
+    raw_text = "raw-transcript-sentinel-7c1f"
+    vocabulary = "vocabulary-sentinel-7c1f"
+    provider_payload = "provider-payload-sentinel-7c1f"
+    credential = "credential-sentinel-7c1f"
+    local_path = "/private/voice/sentinel-7c1f.webm"
+
+    class FailingAccurateStt:
+        provider_name = "openai"
+        requires_external_processing = True
+        max_cost_usd_per_operation = 0.0
+
+        def transcribe_sealed_audio(self, request) -> None:  # type: ignore[no-untyped-def]
+            assert request.sealed_audio == raw_audio
+            assert request.vocabulary == [vocabulary]
+            raise ProviderTerminalError(
+                " | ".join(
+                    [
+                        raw_audio.decode(),
+                        raw_text,
+                        vocabulary,
+                        provider_payload,
+                        credential,
+                        local_path,
+                    ]
+                )
+            )
+
+    operation = _start_operation(
+        api_client,
+        key="start-provider-redaction-envelope",
+        external_processing_allowed=True,
+        vocabulary=[vocabulary],
+    )
+    api_client.app.state.container.voice_brain_dump_service.accurate_stt = (
+        FailingAccurateStt()
+    )
+
+    with caplog.at_level(logging.INFO):
+        sealed = _upload_and_seal(
+            api_client,
+            operation,
+            raw_audio,
+            "seal-provider-redaction-envelope",
+        )
+
+    assert sealed.status_code == 200, sealed.text
+    body = sealed.json()
+    provider_run_envelope = json.dumps(
+        {
+            "status": body["status"],
+            "provider_runs": body["provider_runs"],
+            "available_recovery_actions": body["available_recovery_actions"],
+        },
+        sort_keys=True,
+    )
+    assert body["provider_runs"][-1]["error_code"] == "PROVIDER_ERROR_UNSPECIFIED"
+    for sensitive_value in (
+        raw_audio.decode(),
+        raw_text,
+        vocabulary,
+        provider_payload,
+        credential,
+        local_path,
+    ):
+        assert sensitive_value not in provider_run_envelope
+        assert sensitive_value not in caplog.text
+
+
+def test_reconciler_failure_persists_the_configured_model_and_template_version(
+    api_client,
+) -> None:
+    """T064/F1: a failed reconciler attempt still made a real, billable/
+    audited call against a specific configured model and prompt template.
+    That identity must be persisted on the provider run even on failure, not
+    only on success, so ADR-0002 audit provenance is inspectable for every
+    terminal/retryable outcome."""
+
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    operation = _start_operation(
+        api_client,
+        key="start-reconciler-failure-model-version",
+        external_processing_allowed=True,
+    )
+
+    def fail(_payload: dict[str, object]) -> dict[str, object]:
+        raise ProviderRetryableError("temporary outage")
+
+    service = api_client.app.state.container.voice_brain_dump_service
+    service.text_reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        model="gpt-4o-audit-fixture",
+        template_version="brain-dump-reconciler-test-v2",
+        complete=fail,
+    )
+    sealed = _upload_and_seal(
+        api_client,
+        operation,
+        b"reconciler failure model version",
+        "seal-reconciler-failure-model-version",
+    )
+
+    assert sealed.status_code == 200, sealed.text
+    persisted_run = sealed.json()["provider_runs"][-1]
+    assert persisted_run["role"] == "reconciler"
+    assert persisted_run["status"] == "retryable_error"
+    assert persisted_run["model"] == "gpt-4o-audit-fixture"
+    assert persisted_run["template_version"] == "brain-dump-reconciler-test-v2"
+
+
 def test_terminal_accurate_stt_failure_allows_explicit_provisional_review(
     api_client,
 ) -> None:
@@ -507,6 +630,102 @@ def test_reconciler_success_records_its_estimated_cost_in_the_operation(
         run for run in sealed.json()["provider_runs"] if run["role"] == "reconciler"
     )
     assert reconciler_run["estimated_cost_usd"] > 0
+
+
+def test_reconciler_success_persists_the_configured_model_and_template_version(
+    api_client,
+) -> None:
+    """T064/F1: a successful reconciler run must persist the configured
+    model and prompt-template-version identifiers on the provider run so
+    ADR-0002 model/prompt audit provenance is inspectable rather than
+    silently dropped."""
+
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    operation = _start_operation(
+        api_client,
+        key="start-reconciler-success-model-version",
+        external_processing_allowed=True,
+    )
+    api_client.app.state.container.voice_brain_dump_service.text_reconciler = (
+        OpenAITextReconciler(
+            api_key="test-key",
+            model="gpt-4o-audit-fixture",
+            template_version="brain-dump-reconciler-test-v2",
+            complete=lambda _payload: {"operations": []},
+        )
+    )
+    sealed = _upload_and_seal(
+        api_client,
+        operation,
+        b"Buy milk",
+        "seal-reconciler-success-model-version",
+    )
+
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["status"] == "awaiting_confirmation"
+    reconciler_run = next(
+        run for run in sealed.json()["provider_runs"] if run["role"] == "reconciler"
+    )
+    assert reconciler_run["model"] == "gpt-4o-audit-fixture"
+    assert reconciler_run["template_version"] == "brain-dump-reconciler-test-v2"
+
+
+def test_commit_receipt_projects_the_reconciler_model_and_template_version(
+    api_client,
+) -> None:
+    """T064/F1: the immutable confirmation receipt must project the same
+    configured model/template-version identifiers recorded on the
+    succeeded reconciler run, so committed-task provenance remains
+    inspectable after working artifacts are later purged."""
+
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    operation = _start_operation(
+        api_client,
+        key="start-receipt-model-version",
+        external_processing_allowed=True,
+    )
+
+    def complete(payload: dict[str, object]) -> dict[str, object]:
+        context = json.loads(payload["messages"][1]["content"])  # type: ignore[index]
+        segment_id = context["transcript_segments"][0]["id"]
+        return {
+            "operations": [
+                {
+                    "operation": "add",
+                    "proposal_id": None,
+                    "title": "Buy milk",
+                    "source_segment_ids": [segment_id],
+                    "predecessor_ids": [],
+                    "base_revision": None,
+                }
+            ]
+        }
+
+    api_client.app.state.container.voice_brain_dump_service.text_reconciler = (
+        OpenAITextReconciler(
+            api_key="test-key",
+            model="gpt-4o-audit-fixture",
+            template_version="brain-dump-reconciler-test-v2",
+            complete=complete,
+        )
+    )
+    sealed = _upload_and_seal(
+        api_client, operation, b"Buy milk", "seal-receipt-model-version"
+    )
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["status"] == "awaiting_confirmation"
+
+    committed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/commit",
+        headers={"Idempotency-Key": "commit-receipt-model-version"},
+        json={"expected_revision": sealed.json()["revision"]},
+    )
+    assert committed.status_code == 200, committed.text
+    receipt = committed.json()["action_receipts"][0]
+    assert receipt["reconciliation_model"] == "gpt-4o-audit-fixture"
+    assert receipt["reconciliation_template_version"] == "brain-dump-reconciler-test-v2"
 
 
 def test_operation_admission_rejects_next_call_when_worst_case_would_exceed_cap(

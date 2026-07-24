@@ -127,6 +127,14 @@ class OpenAITextReconciler:
 
     api_key: str = field(repr=False)
     model: str = "gpt-4o"
+    template_version: str = "brain-dump-reconciler-v1"
+    """Safe, configured identifier for the system prompt in ``_payload``.
+
+    Bump this whenever the system/response-schema prompt text materially
+    changes, so persisted provider runs and receipts (ADR-0002 audit
+    provenance) can distinguish output produced under different prompt
+    versions without persisting the prompt text itself.
+    """
     endpoint: str = _DEFAULT_ENDPOINT
     timeout_seconds: float = 30.0
     max_retries: int = 2
