@@ -8,12 +8,35 @@ the expected failure, implement the minimum change, then rerun the focused and
 affected suites.
 
 **Execution boundary**: This file is planning input. Hermes Kanban task
-dependencies, isolated worktrees, independent review, CI, PR, merge, deploy, and
+dependencies, isolated worktrees, independent review, exact-head CI,
+Ship/Show/Ask classification, verified-trunk or ASK review/landing, deploy, and
 smoke evidence remain the authoritative delivery workflow. `/speckit-implement`
 is disabled; implementation starts only when the Kanban dispatcher spawns the
 owning specialist profile.
 
 ## Format: `[ID] [P?] [Story] Description`
+
+## 2026-07-24 implementation re-verification
+
+Re-verified at `origin/main` `77fe9aa`. Completed task descriptions below retain
+their intent, while the shipped modular-monolith layout is authoritative:
+
+- operation orchestration, due-run scanning, leases, confirmation coordination,
+  and provider invocation live in
+  `backend/app/workflows/voice_brain_dump/service.py`;
+- the explicit canonical Task boundary lives in
+  `backend/app/workflows/voice_brain_dump/task_port.py` and
+  `confirmation.py`; workflow code does not import Task repositories;
+- recovery and persistence coverage lives in
+  `backend/tests/test_voice_brain_dump_recovery.py` and
+  `test_voice_operation_repository_coverage.py`; there is no separate
+  `runner.py` or `test_voice_brain_dump_runner.py`;
+- real-adapter and real-audio harness coverage lives in
+  `backend/tests/test_voice_stt_adapters.py` and
+  `test_voice_real_audio_evaluation.py`.
+
+The remaining implementation and credentialed acceptance work is summarized in
+`implementation-readiness.md`.
 
 ## Phase 1: Contract and deterministic-test foundation (preserve)
 
@@ -26,11 +49,12 @@ owning specialist profile.
   `backend/tests/test_voice_brain_dump_reconciliation.py`.
 - [x] T003 [P] Add failing schema/state/segment-projection tests for OP-01,
   OP-02, PV-03, and PV-04 in
-  `backend/tests/test_voice_brain_dump_domain.py`.
+  `backend/tests/test_voice_brain_dump_reconciliation.py` and
+  `backend/tests/test_brain_dump_operations_api.py`.
 - [x] T004 [P] Add failing v1 import/idempotency/lease tests for PV-06,
   RC-01–RC-04, and MG-01–MG-03 in
-  `backend/tests/test_voice_brain_dump_repository.py` and
-  `backend/tests/test_voice_brain_dump_runner.py`.
+  `backend/tests/test_voice_operation_repository_coverage.py` and
+  `backend/tests/test_voice_brain_dump_recovery.py`.
 - [x] T005 Add schema-v2 domain records and pure projection/validation
   functions in `backend/app/workflows/voice_brain_dump/domain.py`; expose
   public types from `backend/app/workflows/voice_brain_dump/__init__.py`.
@@ -47,7 +71,8 @@ without HTTP, React, a paid provider, or canonical task writes.
 - [x] T007 Add failing repository tests for owner-scoped
   operation/chunk/nested-artifact reads, append revision conflicts,
   duplicate/conflicting chunks, and exact missing manifest gaps in
-  `backend/tests/test_voice_brain_dump_repository.py` (UP-01–UP-05, TR-07).
+  `backend/tests/test_voice_operation_repository_coverage.py` and
+  `backend/tests/test_brain_dump_operations_api.py` (UP-01–UP-05, TR-07).
 - [x] T008 Implement schema-v2 operation payload/history, opaque media refs,
   chunk manifests, compare-and-set leases, provider-run lookup, and one-time
   v1 import in `backend/app/workflows/voice_brain_dump/repository.py`.
@@ -57,9 +82,10 @@ without HTTP, React, a paid provider, or canonical task writes.
 - [x] T010 Add failing runner tests for due-run claim, deadline, retry delay,
   expired-lease restart, successful input-hash reuse, cancellation, and
   terminal recovery budget in
-  `backend/tests/test_voice_brain_dump_runner.py`.
+  `backend/tests/test_voice_brain_dump_recovery.py`.
 - [x] T011 Implement the bounded scanner/lease runner in
-  `backend/app/workflows/voice_brain_dump/runner.py`.
+  `backend/app/workflows/voice_brain_dump/service.py` and schedule it from
+  `backend/app/main.py`.
 - [x] T012 Wire workflow repository, ports, service shell, and runner through
   `backend/app/container.py`; add startup/shutdown lifecycle in
   `backend/app/main.py` and a resolver in
@@ -163,32 +189,32 @@ produces no inferred metadata or duplicate tasks.
 These tasks replace the deterministic-fake production default with real
 adapters behind the same ports. They are the core of the 2026-07-19 amendment.
 
-- [ ] T039 [P] [US4] Add failing tests for PV-08 (no UTF-8 audio decoding),
+- [x] T039 [P] [US4] Add failing tests for PV-08 (no UTF-8 audio decoding),
   PV-09 (no deterministic default in production), and PV-10 (browser locale
   from declared hints) in
   `backend/tests/test_voice_brain_dump_reconciliation.py` and
   `frontend/src/features/brain-dump/BrainDumpRoute.test.tsx`.
-- [ ] T040 [US4] Add `language_hints` and `vocabulary` fields to
+- [x] T040 [US4] Add `language_hints` and `vocabulary` fields to
   `BrainDumpConsentRequest`, `BrainDumpConsent`, and
   `BrainDumpOperationStartRequest` in `backend/app/schemas/tasks.py` and
-  `backend/app/modules/tasks/domain.py`; propagate them to
+  `backend/app/workflows/voice_brain_dump/domain.py`; propagate them to
   `AccurateSttRequest` in
   `backend/app/workflows/voice_brain_dump/providers.py` and to every STT
   and reconciler invocation in
-  `backend/app/modules/tasks/service.py`.
-- [ ] T041 [US4] Correct browser preview locale in
+  `backend/app/workflows/voice_brain_dump/service.py`.
+- [x] T041 [US4] Correct browser preview locale in
   `frontend/src/features/brain-dump/BrainDumpRoute.tsx`: set
   `recognition.lang` from declared `language_hints` rather than
   `navigator.language`; update `frontend/src/api/client.ts` to send
   `language_hints`/`vocabulary` in the start request.
-- [ ] T042 [US4] Add `voice.*` configuration section to
+- [x] T042 [US4] Add `voice.*` configuration section to
   `backend/app/core/config.py`: `accurate_stt.provider`,
   `accurate_stt.model`, `accurate_stt.api_key_env`,
   `accurate_stt.timeout_seconds`, `accurate_stt.max_retries`,
   `accurate_stt.retry_backoff_seconds`, `accurate_stt.max_cost_usd_per_operation`,
   same shape for `fast_stt` and `reconciler`, and `retention.*`; add focused
   config tests.
-- [ ] T043 [US4] Create `backend/app/workflows/voice_brain_dump/adapters/`
+- [x] T043 [US4] Create `backend/app/workflows/voice_brain_dump/adapters/`
   with `openai_stt.py` implementing `AccurateSttPort` over
   `gpt-4o-mini-transcribe`/`gpt-4o-transcribe` using `httpx`; pass sealed
   audio bytes as multipart audio, NOT `bytes.decode("utf-8")`; enforce
@@ -198,14 +224,14 @@ adapters behind the same ports. They are the core of the 2026-07-19 amendment.
   (ElevenLabs Scribe v2 or Deepgram Nova-3) behind the same `AccurateSttPort`;
   record metrics in the evaluation report; do not lock the provider until
   corpus evidence justifies it.
-- [ ] T045 [US5] Wire real adapters vs deterministic fakes by config + consent
+- [x] T045 [US5] Wire real adapters vs deterministic fakes by config + consent
   in `backend/app/container.py`; refuse
   `DeterministicAccurateStt` at production startup unconditionally; missing
   credentials/consent surface as `provider: "disabled"`.
-- [ ] T046 [US5] Remove `DeterministicAccurateStt` default from
-  `backend/app/modules/tasks/service.py:116`; the container injects the
-  configured adapter.
-- [ ] T047 [P] [US5] Add failing tests for PR-07 (language hints propagate),
+- [x] T046 [US5] Keep `backend/app/modules/tasks/service.py` free of STT
+  dependencies; `backend/app/container.py` injects the configured adapter into
+  the workflow service.
+- [x] T047 [P] [US5] Add failing tests for PR-07 (language hints propagate),
   PR-08 (cost limit reached), PR-09 (missing credentials disabled state),
   and UP-08 (no external consent) in
   `backend/tests/test_brain_dump_operations_api.py`.
@@ -219,25 +245,26 @@ deterministic fakes.
 These tasks replace regex/hardcoded fixture extraction with a structured
 text-model reconciler emitting schema-valid operations.
 
-- [ ] T048 [US4] Add failing tests for PA-17 (schema-valid operations only)
+- [x] T048 [US4] Add failing tests for PA-17 (schema-valid operations only)
   and PA-18 (no regex in production path) in
   `backend/tests/test_voice_brain_dump_reconciliation.py`; assert the
   production reconciler path contains no `_extract_titles` regex calls.
-- [ ] T049 [US4] Create
+- [x] T049 [US4] Create
   `backend/app/workflows/voice_brain_dump/adapters/reconciler.py`
   implementing `TextReconcilerPort.reconcile` using a current text model
   (e.g. `gpt-4o`) through the existing model-routing configuration; emit
   only schema-valid `add/update/split/merge/remove/supersede` patches;
   preserve transcript provenance, user locks, and conflicts; never infer
   metadata.
-- [ ] T050 [US4] Wire the real reconciler in
+- [x] T050 [US4] Wire the real reconciler in
   `backend/app/container.py` by config + consent; remove
   `_extract_titles` from the production decision path in
-  `backend/app/modules/tasks/service.py`; keep
+  `backend/app/workflows/voice_brain_dump/service.py`; keep
   `DeterministicTextReconciler` for CI state-machine tests only.
-- [ ] T051 [US4] Add transcript provenance link: native Inbox tasks link the
+- [x] T051 [US4] Add transcript provenance link: native Inbox tasks link the
   operation action receipt and proposal ID through their source reference in
-  `backend/app/modules/tasks/domain.py` and `repository.py`.
+  `backend/app/workflows/voice_brain_dump/confirmation.py` and
+  `backend/app/modules/tasks/domain.py`.
 
 **Checkpoint**: The production reconciler is a structured semantic process;
 regex/hardcoded fixtures are CI-only.
@@ -247,7 +274,7 @@ regex/hardcoded fixtures are CI-only.
 These tasks separate STT accuracy from extraction accuracy and establish
 corpus-based release gates.
 
-- [ ] T052 [P] [US4] Amend
+- [x] T052 [P] [US4] Amend
   `backend/app/workflows/voice_brain_dump/evaluation.py` to separate STT
   metrics (CER, WER, critical-term recall, omission/hallucination counts,
   latency) from extraction metrics (task-count accuracy, boundary
@@ -257,10 +284,10 @@ corpus-based release gates.
   by language and provider/model version.
 - [ ] T053 [US4] Add credentialed-track tests for SA-01–SA-05 (STT accuracy)
   and EA-01–EA-07 (extraction accuracy) in
-  `backend/tests/test_voice_brain_dump_evaluation.py`; skip with explicit
+  `backend/tests/test_voice_real_audio_evaluation.py`; skip with explicit
   disabled-state report when credentials/consent are absent; never commit
   recordings or ground-truth transcripts to the repo.
-- [ ] T054 [US4] Remove synthetic-tone frequency validation and injected
+- [x] T054 [US4] Remove synthetic-tone frequency validation and injected
   expected transcripts from the production evaluation path; synthetic
   fixtures remain valid only for ordinary state-machine CI.
 - [ ] T055 [US4] Establish a measured CER/WER threshold from the first
@@ -272,34 +299,41 @@ release gates are corpus-backed.
 
 ## Phase 9: Integrated quality, privacy, and release gates (amended)
 
-- [ ] T056 Extend `frontend/tests/native-tasks-voice-brain-dump.compose.spec.ts`
+- [x] T056 Extend `frontend/tests/native-tasks-voice-brain-dump.compose.spec.ts`
   with the exact deterministic journey: provisional mixed-language list ->
   processing stages -> accurate correction/split/merge -> edit/delete/conflict
   -> explicit Save -> reload/relogin Inbox.
 - [ ] T057 [P] Add redaction/retention/consent-withdrawal tests for PR-01–PR-09
-  in `backend/tests/test_voice_brain_dump_repository.py` and API tests;
+  in `backend/tests/test_voice_operation_repository_coverage.py`,
+  `backend/tests/test_brain_dump_operations_api.py`, and adapter tests;
   inspect captured logs/events to prove no content leakage.
-- [ ] T058 [P] Add architecture/import test proving the workflow does not
-  import task repositories and Weekly Review has no second voice engine.
-- [ ] T059 Run focused backend tests, full `make ci-backend`, frontend focused
-  tests, `make ci-frontend`, `make test-e2e`, and
+- [ ] T058 [P] Add `backend/tests/test_voice_workflow_architecture.py` proving
+  the workflow does not import task repositories and Weekly Review has no
+  second voice engine.
+- [x] T059 Run focused backend tests, full backend/frontend CI-equivalent
+  entry points, Compose Playwright E2E, and
   `python3 scripts/check_spec_kit_specs.py`; record real counts/results in
-  the PR.
+  `implementation-readiness.md` and exact-head delivery evidence.
 - [ ] T060 Run the versioned multilingual evaluation (deterministic ML-01–ML-06
   for CI, real-audio corpus for credentialed track) and attach aggregate
   metrics (no raw user content) to the PR; block release on SC-001–SC-009 or
   any safety invariant failure.
 - [ ] T061 Update `.env.example` and operator docs for provider selection,
-  timeout/retention configuration, consent, and disabled/fallback behavior;
-  document provider-disabled state without secrets.
+  every retry/cost/lease/audio-limit/retention knob, consent, and
+  disabled/fallback behavior; document provider-disabled state without
+  secrets.
 - [ ] T062 Add credentialed full-stack E2E using genuine spoken audio
   (gated track, not ordinary CI): record -> real STT -> real reconciler ->
   Review -> Save -> reload/relogin Inbox.
-- [ ] T063 Hand the immutable PR head to independent Product QA and AI-QA;
-  after approval and green exact-head CI, merge through the normal path,
-  verify main CI/automatic Fly deploy, and run authenticated production-safe
-  smoke. The credentialed real-phone Russian journey is the final
-  acceptance step.
+- [ ] T063 Hand the immutable candidate head to independent Product QA and
+  AI-QA; after approval and green exact-head CI, classify Ship/Show/Ask and use
+  ADR-0008 verified-trunk landing for SHIP/SHOW or its audited ASK path. Verify
+  main CI/automatic Fly deploy and run authenticated production-safe smoke.
+  The credentialed real-phone Russian journey is the final acceptance step.
+- [ ] T064 Persist reconciler `provider`, `model`, and `template_version` in
+  `BrainDumpProviderRunDocument` and immutable action receipts from
+  `backend/app/workflows/voice_brain_dump/service.py`; add focused assertions
+  in `backend/tests/test_brain_dump_operations_api.py`.
 
 ## Dependencies and parallel opportunities
 
@@ -311,7 +345,7 @@ release gates are corpus-backed.
   needs the consent/hint propagation and provider config from Phase 6.
 - Phase 7 blocks Phase 8 (T052–T055) because the evaluation harness measures
   the real adapters and real reconciler.
-- Phase 8 blocks Phase 9 (T056–T063) because release gates depend on
+- Phase 8 blocks Phase 9 (T056–T064) because release gates depend on
   corpus-backed metrics.
 - Tasks marked `[P]` touch distinct files or test surfaces and may run in
   parallel after their phase dependency, but every implementation follows its
@@ -319,3 +353,7 @@ release gates are corpus-backed.
 - The founder corpus (t_24d29290) is a separate Kanban track; Phase 8 tasks
   that require real audio are blocked until the corpus is available. Phases
   6–7 do not depend on the corpus and may proceed in parallel.
+- Voice Brain Dump creates canonical Inbox tasks only. It performs no downstream
+  external task side effect. Any future task executor is a separate feature and
+  MUST require explicit action-specific user confirmation plus an idempotent
+  execution receipt; it cannot be smuggled into T063 rollout work.

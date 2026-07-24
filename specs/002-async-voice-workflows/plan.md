@@ -1,6 +1,6 @@
 # Implementation Plan: Real, friend-demo-ready Voice Brain Dump
 
-**Branch**: `feat/voice-brain-dump-real-product` | **Amended**: 2026-07-19
+**Branch**: historical `feat/voice-brain-dump-real-product` | **Amended**: 2026-07-24
 **Spec**: `specs/002-async-voice-workflows/spec.md`
 **Architecture**: [ADR-0002](../../docs/decisions/0002-async-voice-operation-substrate.md)
 
@@ -21,9 +21,11 @@ deterministic CI contract are preserved. The amendment targets the five
 verified root causes: browser locale, UTF-8 audio decoding, regex extraction,
 synthetic-tone evaluation, and consent/hint propagation.
 
-## Root cause re-verification against origin/main (2026-07-19)
+## Historical root-cause baseline and current disposition
 
-All five stated root causes are confirmed against `origin/main` `c0c12b0`:
+The following five root causes were confirmed against `origin/main` `c0c12b0`
+on 2026-07-19. They are retained as the causal record, not as claims about the
+current implementation:
 
 1. **Browser locale**: `frontend/src/features/brain-dump/BrainDumpRoute.tsx:139`
    sets `recognition.lang = navigator.language || "en-US"`. Russian speech on
@@ -50,6 +52,15 @@ All five stated root causes are confirmed against `origin/main` `c0c12b0`:
    `language_hints` or `vocabulary` (both default to empty list in
    `providers.py:18-20`). Browser locale is the only language signal.
 
+Re-verification on 2026-07-24 at `origin/main` `77fe9aa` found all five root
+causes fixed in the shipped code: declared hints drive browser locale; the
+OpenAI adapter sends sealed bytes as multipart audio; deterministic STT is
+test-only; regex extraction is limited to non-committable preview/CI paths; the
+real-audio harness separates STT from extraction metrics; and consent, hints,
+and vocabulary reach every external provider call. Remaining work is recorded
+in `tasks.md` T044, T053, T055, T057–T058, T060–T064 and summarized in
+`implementation-readiness.md`.
+
 ## Technical context
 
 **Language/Version**: Python 3.11 (backend); TypeScript strict + React (frontend).
@@ -62,10 +73,11 @@ benchmarked before locking. The real text reconciler uses a current text model
 through the existing model-routing configuration; no new SDK is introduced into
 the production decision path unless benchmarks require it.
 
-**Storage**: Existing `backend/data/tasks.sqlite3` owner-partitioned deployment.
-Raw audio remains under the configured data root behind opaque owner-scoped
-media references and retention cleanup. No new database, broker, or worker
-service is introduced in this slice.
+**Storage**: Canonical tasks remain in `backend/data/tasks.sqlite3`. Voice
+operations, idempotency records, and the migration ledger are owner-scoped in
+`voice_operations.sqlite3`; raw audio chunks remain under the configured data
+root behind opaque owner-scoped media references and retention cleanup. No new
+external database, broker, or worker service is introduced in this slice.
 
 **Testing**: pytest/FastAPI TestClient, Vitest + Testing Library, Playwright
 Compose E2E, deterministic labelled audio/text fixtures for state-machine CI,
@@ -150,16 +162,18 @@ backend/app/workflows/voice_brain_dump/
 ├── domain.py         # schema-v2 operation, runs, segment versions, patches/conflicts
 ├── providers.py      # FastSttPort, AccurateSttPort, TextReconcilerPort + deterministic CI fakes
 ├── evaluation.py     # real-audio evaluation harness (STT vs extraction quality)
-├── adapters/         # real provider adapters (new)
+├── audio_media.py    # admitted media inspection and canonical MIME handling
+├── confirmation.py   # confirmation orchestration across the TaskPort
+├── task_port.py      # explicit canonical Task application boundary
+├── adapters/         # real provider adapters
 │   ├── __init__.py
 │   ├── openai_stt.py     # OpenAI gpt-4o-mini-transcribe / gpt-4o-transcribe
 │   └── reconciler.py    # structured semantic text-model reconciler
 ├── repository.py     # owner-scoped payload/history, leases, media refs, v1 import
-├── service.py        # commands, projections, patch validation, freeze/confirm coordination
-└── runner.py         # in-process due-run scan, leases, deadlines, bounded recovery
+└── service.py        # commands, projections, patches, due-run leases/recovery
 ```
 
-The `adapters/` subpackage is new. Adapters implement the same ports
+The shipped `adapters/` subpackage implements the same ports
 (`AccurateSttPort`, `TextReconcilerPort`) as the deterministic fakes; they are
 wired by dependency injection in `backend/app/container.py` based on
 configuration. A provider change must not change operation, transcript,
@@ -170,12 +184,14 @@ proposal, or confirmation contracts.
 ```text
 backend/app/core/config.py                    # voice provider selection, credentials, deadlines, retention, cost limits
 backend/app/container.py                      # wire real adapters vs deterministic fakes by config + consent
-backend/app/main.py                           # runner startup/shutdown lifecycle (unchanged shape)
+backend/app/main.py                           # due-run/retention sweep lifecycle
 backend/app/api/dependencies.py               # resolve VoiceBrainDumpService with configured providers
 backend/app/api/tasks.py                      # add language_hints/vocabulary to start request; unchanged route family
 backend/app/schemas/tasks.py                  # BrainDumpConsentRequest + BrainDumpOperationStartRequest: language_hints, vocabulary
-backend/app/modules/tasks/domain.py           # BrainDumpConsent: add language_hints, vocabulary; native task source link (unchanged)
-backend/app/modules/tasks/service.py         # title-only create port; remove DeterministicAccurateStt default; pass hints/vocabulary
+backend/app/modules/tasks/domain.py           # canonical native Task source link only
+backend/app/modules/tasks/service.py          # title-only idempotent Inbox create command only
+backend/app/workflows/voice_brain_dump/domain.py # BrainDumpConsent hints/vocabulary and operation records
+backend/app/workflows/voice_brain_dump/service.py # consent/hint propagation and provider orchestration
 backend/app/workflows/voice_brain_dump/providers.py  # contract guard: accurate_stt must not decode audio as UTF-8; extract fakes to CI-only
 backend/app/workflows/voice_brain_dump/evaluation.py # real-audio harness: STT CER/WER separate from extraction metrics
 frontend/src/features/brain-dump/BrainDumpRoute.tsx   # recognition.lang from declared language hints, not navigator.language
@@ -200,8 +216,8 @@ voice:
     retry_backoff_seconds: [2, 4, 8]
     max_cost_usd_per_operation: 0.50
   fast_stt:
-    provider: "deterministic" | "openai" | "disabled"
-    # ... same shape
+    provider: "disabled"  # current MVP; same schema retained for a measured adapter
+    # ... same shape; do not enable without corpus evidence
   reconciler:
     provider: "openai" | "deterministic" | "disabled"
     model: "gpt-4o"
@@ -430,22 +446,24 @@ The evaluation harness separates the two quality dimensions:
 
 - `DeterministicAccurateStt` is moved to a CI-only import path. Production
   startup refuses it unconditionally.
-- `TaskService.__init__` no longer defaults to `DeterministicAccurateStt()`.
-  The container wires the configured real adapter; missing
+- The canonical `TaskService` has no STT dependency. The container wires the
+  configured real adapter into `VoiceBrainDumpService`; missing
   credentials/consent surface as `provider: "disabled"`.
-- `_extract_titles` regex logic is removed from `service.py` production path;
-  it remains only inside `DeterministicTextReconciler` for CI state-machine
-  tests, clearly labelled as non-production.
+- `_extract_titles` fixture logic is absent from the committable reconciliation
+  path; it remains only inside `DeterministicTextReconciler` for CI
+  state-machine tests. The workflow service's separate local title heuristic
+  feeds visibly provisional, non-committable browser-preview proposals only.
 
 ## Contracts and flow
 
 1. `POST /api/brain-dump-operations` records consent, `language_hints`, and
    `vocabulary`; returns schema-v2 `recording` projection.
 2. `MediaRecorder` uploads monotonic audio chunks with capture-clock spans and
-   content hash. Fast STT processes contiguous acknowledged windows; text
-   extraction emits validated proposal patches. Browser Web Speech posts
-   preview segments labelled `browser_preview` with corrected locale from
-   declared hints.
+   content hash. Browser Web Speech posts preview segments labelled
+   `browser_preview` with corrected locale from declared hints. The current MVP
+   uses a local heuristic only to render non-committable provisional proposals;
+   the server `fast_stt` provider role remains disabled until corpus evidence
+   justifies an adapter.
 3. Stop posts `seal` with expected count/manifest hash. The persisted runner
    advances `sealing -> fast_processing -> accurate_transcribing -> reconciling`.
 4. Accurate STT receives the sealed opaque media reference (not fast text),
@@ -460,8 +478,9 @@ The evaluation harness separates the two quality dimensions:
 7. `confirm` calls the native Task port once per selected active proposal with
    deterministic child key and title only. The Task port supplies
    Inbox/default fields and returns one stable task ID.
-8. GET projection and optional ordered events expose equivalent state.
-   Reconnect/poll never depends on client-held transcript/proposal state.
+8. GET projection plus polling exposes the persisted state. Reconnect never
+   depends on client-held transcript/proposal state; no SSE/WebSocket control
+   plane is required for correctness.
 
 ## Test and evaluation strategy
 
@@ -492,20 +511,21 @@ The evaluation harness separates the two quality dimensions:
 
 ## Rollout and release
 
-1. Land storage/contracts/provider config dark; schema-v1 remains
-   default-compatible; deterministic fakes remain CI-only.
-2. Enable real STT adapter for credentialed local/preview environments with
-   consent; benchmark at least one alternative provider before locking.
+1. Storage/contracts/OpenAI adapter/reconciler are shipped; schema-v1 remains
+   default-compatible and deterministic fakes remain CI-only.
+2. Keep production provider use disabled until explicit consent, credentials,
+   provider audit metadata, and corpus-backed baseline gates are present;
+   benchmark at least one credible alternative before locking.
 3. Run exact-head backend/frontend/Compose E2E and labelled evaluation gates;
    real-audio corpus gates run in a credentialed track, not ordinary CI.
 4. Enable configured real providers only with consent, credentials,
    deadlines, and budget; provider absence is an explicit disabled/fallback
    state.
-5. Independent Product QA and AI-QA review the same immutable head before
-   merge.
-6. Merge through normal PR, automatic Fly deploy, main CI, and authenticated
-   production-safe smoke. The credentialed real-phone Russian journey is the
-   final acceptance step.
+5. Independent Product QA and AI-QA review the same immutable candidate head.
+6. Classify the change under ADR-0008. SHIP/SHOW uses verified-trunk serial
+   landing; ASK uses its explicit approval and audited temporary-ruleset path.
+   Then verify automatic Fly deploy, main CI, authenticated production-safe
+   smoke, and the final credentialed real-phone Russian journey.
 
 ## Complexity tracking
 

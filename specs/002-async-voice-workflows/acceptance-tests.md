@@ -191,7 +191,7 @@ measure extraction quality independently from STT quality.
 
 | ID | Scenario | Required assertion |
 |---|---|---|
-| UI-01 | stop and process | Stop leaves recording and visibly renders `Finishing upload`, `Improving transcript`, then `Reconciling tasks`; editable Review appears only at `awaiting_confirmation` |
+| UI-01 | stop and process | Stop leaves recording and visibly renders `Sealing audio`, `Improving transcript`, then `Reconciling tasks`; editable Review appears only at `awaiting_confirmation` |
 | UI-02 | progressive list | stable proposal IDs are React keys; numbered active proposals grow without repainting user-edited titles; hidden tombstones do not renumber identity |
 | UI-03 | conflict review | Review shows mine/suggestion values and blocks Save until every open conflict is explicitly kept or accepted |
 | UI-04 | leave/resume without events | polling restores exact stage, authoritative transcript quality, active proposals, locks, conflicts, and last sequence |
