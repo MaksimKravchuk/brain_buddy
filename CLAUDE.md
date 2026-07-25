@@ -55,12 +55,12 @@ docker compose down --volumes
 
 ### Spec Kit feature authoring (mandatory)
 
-Use GitHub Spec Kit v0.12.17 for every new or materially changed feature spec.
+Use GitHub Spec Kit v0.14.2 for every new or materially changed feature spec.
 Install or refresh the CLI with isolated uv tooling, never pip inside Hermes:
 
 ```bash
-uv tool install specify-cli --force --from git+https://github.com/github/spec-kit.git@v0.12.17
-specify --version          # expect: specify 0.12.17
+uv tool install specify-cli --force --from git+https://github.com/github/spec-kit.git@v0.14.2
+specify --version          # expect: specify 0.14.2
 specify check              # verifies Claude Code and other agent prerequisites
 specify integration list   # confirms claude is available/installed
 ```

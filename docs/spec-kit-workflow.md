@@ -3,8 +3,8 @@
 BrainBuddy uses the official GitHub Spec Kit as the mandatory authoring workflow
 for every new or materially changed feature specification.
 
-- Spec Kit version: `github/spec-kit` `v0.12.17`
-- Verified release date: 2026-07-16
+- Spec Kit version: `github/spec-kit` `v0.14.2`
+- Verified release date: 2026-07-24
 - Installed integration: Claude Code skills under `.claude/skills/`
 - Scope: feature specification and planning artifacts under `specs/`
 - Non-scope: execution orchestration, code review, CI, merge, release, or deploy
@@ -15,7 +15,7 @@ Use isolated uv tooling. Do not install Spec Kit with pip inside the Hermes
 runtime or the application backend/frontend environments.
 
 ```bash
-uv tool install specify-cli --force --from git+https://github.com/github/spec-kit.git@v0.12.17
+uv tool install specify-cli --force --from git+https://github.com/github/spec-kit.git@v0.14.2
 specify --version
 specify check
 specify integration list
@@ -24,7 +24,7 @@ specify integration list
 Expected version output:
 
 ```text
-specify 0.12.17
+specify 0.14.2
 ```
 
 `specify check` should show Claude Code as available for the Claude workflow.
@@ -32,20 +32,31 @@ If the CLI needs to be refreshed without modifying the global uv tool install,
 use the same pinned release through `uvx`:
 
 ```bash
-uvx --from git+https://github.com/github/spec-kit.git@v0.12.17 specify --version
+uvx --from git+https://github.com/github/spec-kit.git@v0.14.2 specify --version
 ```
 
 ## Refreshing Spec Kit in this repository
 
-This repository was safely refreshed from the official pinned release with:
+This repository is refreshed from the official pinned release with the
+manifest-aware upgrade path:
 
 ```bash
-uvx --from git+https://github.com/github/spec-kit.git@v0.12.17 specify init --here --integration claude --force
+specify integration status --json
+specify integration upgrade claude --force
+# If reviewed extensions are installed, update each pinned extension explicitly:
+# specify extension update <extension-id>
 ```
 
-The command preserves the existing constitution file, installs the v0.12.17
-shared scripts/templates/workflow metadata under `.specify/`, and installs
-Claude Code skills under `.claude/skills/`.
+Do not run an unscoped `specify extension update`: community extensions have
+independent versions and require their own source review. No extensions were
+installed during the v0.14.2 refresh.
+
+Before the forced integration refresh, preserve the BrainBuddy-specific disabled
+`speckit-implement` stub and the four customized templates. Restore them after
+the refresh, inspect `git diff`, and accept the expected integration-status
+warning for those five deliberate overrides. The current refresh installs
+v0.14.2 shared assets under `.specify/` and Claude Code skills under
+`.claude/skills/`.
 
 After any future refresh:
 
@@ -71,8 +82,8 @@ For every new or materially changed BrainBuddy feature:
 4. Use `/speckit-clarify` to resolve ambiguous requirements before planning.
 5. Use `/speckit-plan` to describe architecture, module ownership, contracts,
    tests, data handling, observability, mobile/resilience, and release gates.
-6. Use `/speckit-checklist` after `/speckit-plan`. Upstream v0.12.17 checklist
-   setup calls `.specify/scripts/bash/check-prerequisites.sh --json`, which
+6. Use `/speckit-checklist` after `/speckit-plan`. Under the pinned v0.14.2
+   workflow, checklist setup calls the prerequisites script, which
    requires `plan.md`; do not document or run checklist as a pre-plan command.
 7. Use `/speckit-tasks` to generate implementation tasks grouped by independently
    testable user story.
@@ -154,7 +165,7 @@ Existing history is preserved rather than regenerated blindly.
 
 - `specs/001-relation-linking-refactor/` already contains a complete historical
   Spec Kit-style artifact set and remains valid.
-- `specs/002-async-voice-workflows/` predates this v0.12.17 adoption and is
+- `specs/002-async-voice-workflows/` predates the initial v0.12.17 adoption and is
   grandfathered with `spec.md` plus `acceptance-tests.md`. Its acceptance tests
   are normative for ADR-0002. Do not fabricate missing generated files unless
   the feature is materially changed.

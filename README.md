@@ -114,7 +114,7 @@ See `docs/api_usage.md` for request/response details and examples.
 - Continuous improvement scripts live in the root `Makefile` (`make test-backend`, `make test-frontend`).
 
 ## Feature Specs
-GitHub Spec Kit v0.12.17 is the mandatory workflow for new or materially changed
+GitHub Spec Kit v0.14.2 is the mandatory workflow for new or materially changed
 feature specs: constitution → `/speckit-specify` → `/speckit-clarify` →
 `/speckit-plan` → `/speckit-checklist` → `/speckit-tasks` → Hermes Kanban
 handoff. See
