@@ -116,8 +116,8 @@ See `docs/api_usage.md` for request/response details and examples.
 ## Feature Specs
 GitHub Spec Kit v0.14.2 is the mandatory workflow for new or materially changed
 feature specs: constitution → `/speckit-specify` → `/speckit-clarify` →
-`/speckit-plan` → `/speckit-checklist` → `/speckit-tasks` → Hermes Kanban
-handoff. See
+`/speckit-plan` → bounded read-only planning review → `/speckit-checklist` →
+`/speckit-tasks` → `/speckit-analyze` → validated Hermes Kanban handoff. See
 `docs/spec-kit-workflow.md` for the exact Claude Code commands, uv/uvx setup,
 historical spec grandfathering, and the boundary between Spec Kit planning and
 Hermes Kanban execution/review.

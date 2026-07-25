@@ -82,14 +82,17 @@ For every new or materially changed BrainBuddy feature:
 4. Use `/speckit-clarify` to resolve ambiguous requirements before planning.
 5. Use `/speckit-plan` to describe architecture, module ownership, contracts,
    tests, data handling, observability, mobile/resilience, and release gates.
-6. Use `/speckit-checklist` after `/speckit-plan`. Under the pinned v0.14.2
-   workflow, checklist setup calls the prerequisites script, which
-   requires `plan.md`; do not document or run checklist as a pre-plan command.
-7. Use `/speckit-tasks` to generate implementation tasks grouped by independently
-   testable user story.
-8. Hand the resulting artifacts to Hermes Kanban implementation cards instead of
-   executing implementation in Spec Kit.
-9. Amend the spec/plan/tasks first whenever implementation intent changes.
+6. Run the bounded planning-review workflow after `plan.md`; the Architect resolves
+   technical findings and uses a Kanban `needs_input` block only for product
+   decisions.
+7. Use `/speckit-checklist` after review. Under the pinned v0.14.2 workflow,
+   checklist setup requires `plan.md`; do not run checklist as a pre-plan command.
+8. Use `/speckit-tasks` to generate logical implementation tasks grouped by
+   independently testable user story, then run `/speckit-analyze`.
+9. Create and validate `hermes-handoff.json`; hand its 1–6 coarse lanes to the
+   Kanban Orchestrator instead of executing implementation in Spec Kit.
+10. Amend spec/plan/tasks and rerun affected review/validation whenever
+    implementation intent changes.
 
 For Claude Code and Hermes Agent in this repository, Spec Kit is installed as
 skills, so the invocation names use hyphens:
@@ -116,26 +119,62 @@ review, CI, PR, and release gates.
 ## Architect-owned Kanban path
 
 When a BrainBuddy architecture or feature spec is new or materially changed, the
-architect profile owns the Spec Kit planning lane before implementation begins.
-The runnable Kanban path is:
+architect profile owns the full planning lane before implementation begins:
 
-1. Create or claim an architect-owned Kanban card for spec authoring/planning.
-2. In that card's worktree, run the canonical sequence through the official
-   Hermes Spec Kit skills: `/speckit-specify`, `/speckit-clarify`,
-   `/speckit-plan`, `/speckit-checklist`, `/speckit-tasks`, and
-   `/speckit-analyze`. Claude Code may still be delegated bounded architecture
-   analysis, but Hermes owns the planning lane and artifact handoff.
-3. In `/speckit-plan`, the architect profile owns technical planning,
-   architecture boundaries, module ownership, contracts, ADR alignment, data
-   handling, observability, and release gates.
-4. If an architecture decision changes, update or add the relevant ADR before
-   handing implementation to another profile.
-5. Hand one compact execution summary to the canonical outcome root with the
-   spec, plan, and tasks paths; coarse independent lanes; risk; integration
-   evidence; and release policy. Native Hermes decomposition creates 2-6
-   execution lanes. Never publish one Kanban card per `tasks.md` line.
-6. Implementation agents consume those artifacts; they do not invent module
-   boundaries or architecture that conflicts with the architect handoff.
+1. Create or claim one architect-owned Kanban card. In that card's isolated
+   worktree, use the official Hermes Spec Kit skills for constitution,
+   `/speckit-specify`, `/speckit-clarify`, and `/speckit-plan`. The current
+   Architect session is the authoritative writer; Workflow Engine must not spawn
+   a nested Architect or a competing implementation agent.
+2. After `spec.md` and `plan.md` exist, run the repository workflow:
+
+   ```bash
+   SPECIFY_FEATURE_DIRECTORY=specs/NNN-feature \
+     specify workflow run .specify/workflows/speckit/workflow.yml \
+     -i risk=standard --json
+   ```
+
+   Use `risk=high` for auth/privacy, destructive data/schema, public-contract,
+   security, migration, concurrency, or irreversible changes. Standard mode runs
+   three isolated Codex review sessions (`requirements-consistency`,
+   `architecture-consistency`, and `testability-evidence`) with an enforced
+   read-only sandbox. High-risk mode additionally requires a Fable adversarial
+   review in plan mode with only `Read,Grep,Glob`; unavailable quota or malformed
+   output fails closed.
+3. Read
+   `.specify/workflows/runs/<run-id>/planning-review-summary.json`. Reviewers
+   cannot edit product or planning files. The Architect resolves technical
+   findings itself and may rerun the bounded campaign once. Framework, database,
+   API shape, module boundaries, test strategy, and migration mechanics are
+   technical decisions and never user escalations.
+4. If the summary says `product-decision-required`, block only the owning
+   Architect Kanban card with `needs_input`. Ask only about scope, UX, priority,
+   privacy, permissions, pricing, safety/compliance, or observable acceptance
+   behavior. Record the answer in the spec and final handoff, then rerun reviews.
+   Workflow run state stays local and is ignored by Git; Kanban remains the
+   durable user-conversation and execution state.
+5. When review status is `approved`, run `/speckit-checklist`, `/speckit-tasks`,
+   and `/speckit-analyze`, then create
+   `specs/NNN-feature/hermes-handoff.json` conforming to
+   `.specify/workflows/speckit/handoff.schema.json`. Validate it with:
+
+   ```bash
+   SPECIFY_FEATURE_DIRECTORY=specs/NNN-feature \
+     python3 scripts/spec_kit_planning_review.py validate-handoff
+   ```
+
+6. The handoff contains one root outcome and 1–6 coarse, acyclic, independently
+   mergeable lanes with task references, dependency order, exclusive writer
+   scopes, and acceptance evidence. The Orchestrator compiles these lanes into
+   Hermes cards in waves with at most four writable lanes active. Never publish
+   one card per `tasks.md` line.
+7. Commit only versioned planning artifacts and the validated handoff. Hermes
+   Kanban remains authoritative for claims, worktrees, retries, implementation,
+   review, CI, landing, deploy, and release evidence.
+
+The Workflow Engine is therefore a persistent **planning-review scheduler**, not
+a second Kanban. It owns bounded fan-out/fan-in and local run state; the Architect
+owns semantic decisions and artifact edits; Hermes owns writable execution.
 
 ## Artifact minimum for new specs
 
@@ -147,6 +186,7 @@ spec.md
 checklists/requirements.md
 plan.md
 tasks.md
+hermes-handoff.json
 ```
 
 Additional Spec Kit artifacts such as `research.md`, `data-model.md`,
@@ -163,12 +203,17 @@ make check-specs
 
 Existing history is preserved rather than regenerated blindly.
 
-- `specs/001-relation-linking-refactor/` already contains a complete historical
-  Spec Kit-style artifact set and remains valid.
-- `specs/002-async-voice-workflows/` predates the initial v0.12.17 adoption and is
-  grandfathered with `spec.md` plus `acceptance-tests.md`. Its acceptance tests
-  are normative for ADR-0002. Do not fabricate missing generated files unless
-  the feature is materially changed.
+- `specs/001-relation-linking-refactor/` and
+  `specs/003-smart-add-classification/` contain complete pre-ADR-0009 Spec Kit
+  packages. Their normative planning files are hash-pinned and remain valid
+  without a fabricated `hermes-handoff.json`; any material change invalidates
+  that grandfathering and requires the current workflow.
+- `specs/002-async-voice-workflows/` began before the initial v0.12.17
+  adoption and was materially completed before ADR-0009 with acceptance,
+  checklist, plan, tasks, and readiness evidence. Its current normative package
+  is hash-pinned; a later material change requires the current handoff workflow.
+- `specs/004-verified-trunk-delivery/` is likewise a complete pre-ADR-0009
+  package with a hash-pinned planning baseline.
 - `requirements/` remains historical context. Where it conflicts with the
   current constitution, ADRs, auth docs, live schemas, or `specs/`, the latter
   sources win.

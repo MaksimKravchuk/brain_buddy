@@ -21,22 +21,59 @@ REQUIRED_FILES = (
     "checklists/requirements.md",
     "plan.md",
     "tasks.md",
+    "hermes-handoff.json",
 )
 
 GRANDFATHERED = {
-    "002-async-voice-workflows": {
+    "001-relation-linking-refactor": {
         "reason": (
-            "Pre-v0.12.17 adoption ADR/spec package; acceptance-tests.md is "
-            "its normative checklist. Do not fabricate missing generated "
-            "artifacts unless this feature is materially changed."
+            "Complete pre-ADR-0009 Spec Kit package; do not fabricate a review "
+            "handoff unless the feature is materially changed."
         ),
         "baseline_sha256": {
-            "spec.md": (
-                "31ea73d70afb6cf2c1172d094f235e7a91994174883b05f74a93dd46adfae49d"
-            ),
-            "acceptance-tests.md": (
-                "db5b58eb61638e435b1c3b6764f6d599f4a9339a6cff5c6e0224804d1cbf3ea2"
-            ),
+            "spec.md": "f07bc74f166155c8ff98d4bd3ae7d637d0b15ee26ba73950311d67e718c677fe",
+            "checklists/requirements.md": "eca9a2ef68d93344959e0a56798bda832e6319d23cb394eb00f62c270827e746",
+            "plan.md": "305f8f62d09c914952180f4c4d8bb08840e8eb2c743e67264c0b552d57d8f6a8",
+            "tasks.md": "0c4918899412a43b66c532610eb18e578846807f19640bf4ff0e4e93e191bdc8",
+        },
+    },
+    "002-async-voice-workflows": {
+        "reason": (
+            "Materially completed before ADR-0009 with acceptance, plan, checklist, "
+            "tasks, and readiness evidence; do not fabricate a review handoff unless "
+            "the feature changes again."
+        ),
+        "baseline_sha256": {
+            "spec.md": "79d8a2b0b8e84e7e1e3f0c576ee7a54b09d5e2028912bb4973fb43c4f7ecbe91",
+            "acceptance-tests.md": "b1cc305eea3dd81357d26b0e3aca43b12ad42d158f362313b3f1d44d9b918556",
+            "checklists/requirements.md": "9cee75287ac022fc50eb379d9f918c82e420e4f44953f000960c1d20ed17f4ed",
+            "plan.md": "e1c4629de5a9316032729f6b39d356d0ae8d13b0f22efb25ff98035728d65d31",
+            "tasks.md": "e87914c6810904fe4603da1ec83771674ec12eaf282a60f270e27db5312d302b",
+            "implementation-readiness.md": "551769b166e847544e7b699352ae5fc647baf68cd905af097121bb47a2296563",
+        },
+    },
+    "003-smart-add-classification": {
+        "reason": (
+            "Complete pre-ADR-0009 Spec Kit package; do not fabricate a review "
+            "handoff unless the feature is materially changed."
+        ),
+        "baseline_sha256": {
+            "spec.md": "6f206e0fb577bb8576b0e7d988b769e620825c4b3bb92189cdba1747a0ae042f",
+            "checklists/requirements.md": "5833882f1430c7bb96a445d40938c8cb038011e9b497034f1b4df334fea29122",
+            "plan.md": "c987593bc068de5246264f33a270a7e7f760a44d96bcd8dec18b34a3ab1d77b4",
+            "tasks.md": "505d99644d93df15abca0d9bfd0cc42d525e7689732f9602de4720faf3afdb16",
+        },
+    },
+    "004-verified-trunk-delivery": {
+        "reason": (
+            "Complete pre-ADR-0009 delivery spec; do not fabricate a review "
+            "handoff unless the feature is materially changed."
+        ),
+        "baseline_sha256": {
+            "spec.md": "a7cd154d6ff9cb94ba403e1726c8328676e4b7776b38ac0601151e34a5a1852d",
+            "checklists/requirements.md": "011d5b92f61665c240338fcddc5e695d14efd37f28a3c5fc869470b82cc6e20e",
+            "plan.md": "29ab1115aa95251e08027fdf24e11845ea7ac0ea48b40a2c28b1bded1705358b",
+            "tasks.md": "90b86a53c634d1643bdec4028a43e0360d14c2044645a0cf6234433e44bdab88",
         },
     },
 }
@@ -141,7 +178,8 @@ def main() -> int:
         print(
             "\nNew or materially changed features must follow: constitution -> "
             "/speckit-specify -> /speckit-clarify -> /speckit-plan -> "
-            "/speckit-checklist -> /speckit-tasks -> Hermes Kanban handoff.",
+            "bounded planning review -> /speckit-checklist -> /speckit-tasks -> "
+            "/speckit-analyze -> validated Hermes Kanban handoff.",
             file=sys.stderr,
         )
         return 1

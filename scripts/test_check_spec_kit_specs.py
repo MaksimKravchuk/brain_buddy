@@ -89,6 +89,20 @@ class CheckSpecKitSpecsTests(unittest.TestCase):
         self.assertIn("missing tasks.md", stderr)
         self.assertIn("/speckit-checklist -> /speckit-tasks", stderr)
 
+    def test_new_feature_requires_validated_handoff_artifact(self) -> None:
+        check_spec_kit_specs.GRANDFATHERED = {}
+        feature = self.specs_dir / "004-new-feature"
+        (feature / "checklists").mkdir(parents=True)
+        (feature / "spec.md").write_text("# Spec\n")
+        (feature / "checklists" / "requirements.md").write_text("# Checklist\n")
+        (feature / "plan.md").write_text("# Plan\n")
+        (feature / "tasks.md").write_text("# Tasks\n")
+
+        result, _stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 1)
+        self.assertIn("missing hermes-handoff.json", stderr)
+
     def test_directory_shaped_required_artifact_fails(self) -> None:
         check_spec_kit_specs.GRANDFATHERED = {}
         feature = self.specs_dir / "003-new-feature"
