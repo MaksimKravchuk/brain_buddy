@@ -72,8 +72,11 @@ Claude Code uses the skills installed under `.claude/skills/`:
 /speckit-specify <what and why, not implementation>
 /speckit-clarify
 /speckit-plan <how and architecture>
+# run .specify/workflows/speckit/workflow.yml (read-only planning reviews)
 /speckit-checklist
 /speckit-tasks
+/speckit-analyze
+# validate specs/NNN-feature/hermes-handoff.json
 ```
 
 Read `docs/spec-kit-workflow.md` before authoring specs. Spec Kit maintains

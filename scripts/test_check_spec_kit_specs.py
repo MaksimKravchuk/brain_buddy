@@ -4,6 +4,7 @@ import contextlib
 import hashlib
 import importlib.util
 import io
+import json
 import sys
 import tempfile
 import unittest
@@ -23,6 +24,53 @@ def _sha256_text(content: str) -> str:
     return hashlib.sha256(content.encode()).hexdigest()
 
 
+def _valid_handoff() -> dict[str, Any]:
+    return {
+        "schema_version": "speckit-hermes-handoff/v1",
+        "root_outcome": "Deliver a reviewed planning change.",
+        "artifacts": {
+            "spec": "specs/005-new-feature/spec.md",
+            "plan": "specs/005-new-feature/plan.md",
+            "tasks": "specs/005-new-feature/tasks.md",
+            "checklist": "specs/005-new-feature/checklists/requirements.md",
+            "adrs": [],
+        },
+        "planning_review": {
+            "run_id": "run123",
+            "risk": "standard",
+            "status": "approved",
+            "reviewers": [
+                "requirements-consistency",
+                "architecture-consistency",
+                "testability-evidence",
+            ],
+        },
+        "product_decisions": [],
+        "lanes": [
+            {
+                "id": "backend-contract",
+                "outcome": "Implement the backend contract.",
+                "depends_on": [],
+                "task_refs": ["T001"],
+                "scope_paths": ["backend/app/example.py"],
+                "exclusive_writer_scope": ["backend/app/example.py"],
+                "acceptance_evidence": ["Targeted backend tests pass."],
+            },
+            {
+                "id": "frontend-flow",
+                "outcome": "Implement the frontend flow.",
+                "depends_on": ["backend-contract"],
+                "task_refs": ["T002"],
+                "scope_paths": ["frontend/src/example.tsx"],
+                "exclusive_writer_scope": ["frontend/src/example.tsx"],
+                "acceptance_evidence": ["Targeted frontend tests pass."],
+            },
+        ],
+        "risks": [],
+        "non_goals": ["No deployment change."],
+    }
+
+
 class CheckSpecKitSpecsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -31,8 +79,12 @@ class CheckSpecKitSpecsTests(unittest.TestCase):
         self.specs_dir.mkdir()
         check_spec_kit_specs.REPO_ROOT = self.repo_root
         check_spec_kit_specs.SPECS_DIR = self.specs_dir
+        self._validator_path = check_spec_kit_specs.HANDOFF_VALIDATOR_PATH
+        self._validator_module = check_spec_kit_specs.HANDOFF_VALIDATOR_MODULE
 
     def tearDown(self) -> None:
+        check_spec_kit_specs.HANDOFF_VALIDATOR_PATH = self._validator_path
+        check_spec_kit_specs.HANDOFF_VALIDATOR_MODULE = self._validator_module
         self.temp_dir.cleanup()
 
     def _run_check(self) -> tuple[int, str, str]:
@@ -88,6 +140,149 @@ class CheckSpecKitSpecsTests(unittest.TestCase):
         self.assertIn("missing plan.md", stderr)
         self.assertIn("missing tasks.md", stderr)
         self.assertIn("/speckit-checklist -> /speckit-tasks", stderr)
+
+    def test_new_feature_requires_validated_handoff_artifact(self) -> None:
+        check_spec_kit_specs.GRANDFATHERED = {}
+        feature = self.specs_dir / "004-new-feature"
+        (feature / "checklists").mkdir(parents=True)
+        (feature / "spec.md").write_text("# Spec\n")
+        (feature / "checklists" / "requirements.md").write_text("# Checklist\n")
+        (feature / "plan.md").write_text("# Plan\n")
+        (feature / "tasks.md").write_text("# Tasks\n")
+
+        result, _stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 1)
+        self.assertIn("missing hermes-handoff.json", stderr)
+
+    def _write_feature_with_handoff(self, handoff_text: str) -> Path:
+        check_spec_kit_specs.GRANDFATHERED = {}
+        feature = self.specs_dir / "005-new-feature"
+        (feature / "checklists").mkdir(parents=True)
+        (feature / "spec.md").write_text("# Spec\n")
+        (feature / "checklists" / "requirements.md").write_text("# Checklist\n")
+        (feature / "plan.md").write_text("# Plan\n")
+        (feature / "tasks.md").write_text("# Tasks\n")
+        (feature / "hermes-handoff.json").write_text(handoff_text)
+        return feature
+
+    def test_valid_handoff_passes(self) -> None:
+        self._write_feature_with_handoff(json.dumps(_valid_handoff()))
+
+        result, stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 0, stderr)
+        self.assertIn("Spec Kit artifact check passed.", stdout)
+
+    def test_malformed_handoff_json_fails(self) -> None:
+        self._write_feature_with_handoff("{not json\n")
+
+        result, _stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 1)
+        self.assertIn("specs/005-new-feature/hermes-handoff.json: invalid JSON", stderr)
+
+    def test_empty_handoff_object_fails(self) -> None:
+        self._write_feature_with_handoff("{}\n")
+
+        result, _stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 1)
+        self.assertIn(
+            "specs/005-new-feature/hermes-handoff.json: invalid Hermes handoff "
+            "(unsupported handoff schema_version)",
+            stderr,
+        )
+
+    def test_handoff_json_array_fails(self) -> None:
+        self._write_feature_with_handoff("[]\n")
+
+        result, _stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 1)
+        self.assertIn("handoff must be a JSON object", stderr)
+
+    def test_unapproved_planning_review_status_fails(self) -> None:
+        handoff = _valid_handoff()
+        handoff["planning_review"]["status"] = "technical-changes-required"
+        self._write_feature_with_handoff(json.dumps(handoff))
+
+        result, _stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 1)
+        self.assertIn("planning_review.status must be approved", stderr)
+
+    def test_missing_required_reviewer_role_fails(self) -> None:
+        handoff = _valid_handoff()
+        handoff["planning_review"]["reviewers"] = [
+            "requirements-consistency",
+            "architecture-consistency",
+            "some-other-role",
+        ]
+        self._write_feature_with_handoff(json.dumps(handoff))
+
+        result, _stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 1)
+        self.assertIn(
+            "planning_review.reviewers missing ['testability-evidence']", stderr
+        )
+
+    def test_high_risk_handoff_requires_adversarial_reviewer(self) -> None:
+        handoff = _valid_handoff()
+        handoff["planning_review"]["risk"] = "high"
+        self._write_feature_with_handoff(json.dumps(handoff))
+
+        result, _stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 1)
+        self.assertIn(
+            "high-risk handoff requires adversarial-high-risk reviewer", stderr
+        )
+
+    def test_lane_dependency_cycle_fails(self) -> None:
+        handoff = _valid_handoff()
+        handoff["lanes"][0]["depends_on"] = ["frontend-flow"]
+        self._write_feature_with_handoff(json.dumps(handoff))
+
+        result, _stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 1)
+        self.assertIn("lane dependency cycle detected", stderr)
+
+    def test_unknown_lane_dependency_fails(self) -> None:
+        handoff = _valid_handoff()
+        handoff["lanes"][1]["depends_on"] = ["missing-lane"]
+        self._write_feature_with_handoff(json.dumps(handoff))
+
+        result, _stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 1)
+        self.assertIn(
+            "lane frontend-flow has unknown dependencies: ['missing-lane']", stderr
+        )
+
+    def test_overlapping_exclusive_writer_scope_fails(self) -> None:
+        handoff = _valid_handoff()
+        handoff["lanes"][1]["exclusive_writer_scope"] = ["backend/app/example.py"]
+        self._write_feature_with_handoff(json.dumps(handoff))
+
+        result, _stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 1)
+        self.assertIn("exclusive writer scope reused across lanes", stderr)
+
+    def test_missing_handoff_validator_fails_closed(self) -> None:
+        check_spec_kit_specs.HANDOFF_VALIDATOR_PATH = (
+            self.repo_root / "scripts" / "does_not_exist.py"
+        )
+        check_spec_kit_specs.HANDOFF_VALIDATOR_MODULE = "absent_handoff_validator"
+        self._write_feature_with_handoff(json.dumps(_valid_handoff()))
+
+        result, _stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 1)
+        self.assertIn("handoff validator unavailable", stderr)
 
     def test_directory_shaped_required_artifact_fails(self) -> None:
         check_spec_kit_specs.GRANDFATHERED = {}

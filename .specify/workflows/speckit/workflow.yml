@@ -1,85 +1,63 @@
 schema_version: "1.0"
 workflow:
   id: "speckit"
-  name: "Spec Kit Planning Cycle"
-  version: "1.0.0"
-  author: "GitHub + BrainBuddy"
-  description: "Runs specify → clarify → plan → checklist → tasks, then stops for Hermes Kanban handoff"
+  name: "BrainBuddy Architect Planning Review"
+  version: "2.0.0"
+  author: "BrainBuddy"
+  description: "Runs bounded read-only reviews after Architect authors spec.md and plan.md; Hermes Kanban remains the sole execution runtime"
 
 requires:
-  # 0.8.5 is the first release with engine-side resolution of the
-  # ``integration: "auto"`` default. Older versions would treat "auto"
-  # as a literal integration key and fail at dispatch.
-  speckit_version: ">=0.8.5"
-  integrations:
-    # BrainBuddy intentionally uses Spec Kit for authoring/planning only.
-    # Implement commands are not referenced here; implementation resumes only
-    # through Hermes Kanban cards, isolated worktrees, PR review, and CI gates.
-    any:
-      - "claude"
-      - "copilot"
-      - "gemini"
-      - "opencode"
+  speckit_version: ">=0.14.2"
 
 inputs:
-  spec:
+  risk:
     type: string
-    required: true
-    prompt: "Describe what you want to build"
-  integration:
-    type: string
-    default: "auto"
-    prompt: "Integration to use (e.g. claude, copilot, gemini; 'auto' uses the project's initialized integration)"
-  scope:
-    type: string
-    default: "full"
-    enum: ["full", "backend-only", "frontend-only"]
+    default: "standard"
+    enum: ["standard", "high"]
+    prompt: "Planning risk: standard or high"
 
 steps:
-  - id: specify
-    command: speckit.specify
-    integration: "{{ inputs.integration }}"
-    input:
-      args: "{{ inputs.spec }}"
+  - id: planning-preflight
+    type: shell
+    run: >-
+      python3 scripts/spec_kit_planning_review.py preflight
+      --run-id "{{ context.run_id }}"
 
-  - id: review-spec
-    type: gate
-    message: "Review the generated spec before planning."
-    options: [approve, reject]
-    on_reject: abort
+  - id: planning-reviews
+    type: fan-out
+    items:
+      - "requirements-consistency"
+      - "architecture-consistency"
+      - "testability-evidence"
+    max_concurrency: 3
+    step:
+      id: run-read-only-review
+      type: shell
+      run: >-
+        python3 scripts/spec_kit_planning_review.py review
+        --run-id "{{ context.run_id }}"
+        --role "{{ item }}"
 
-  - id: clarify
-    command: speckit.clarify
-    integration: "{{ inputs.integration }}"
-    input:
-      args: "{{ inputs.spec }}"
+  - id: high-risk-review
+    type: if
+    condition: "{{ inputs.risk == 'high' }}"
+    then:
+      - id: run-fable-adversarial-review
+        type: shell
+        run: >-
+          python3 scripts/spec_kit_planning_review.py review
+          --run-id "{{ context.run_id }}"
+          --role "adversarial-high-risk"
+    else: []
 
-  - id: plan
-    command: speckit.plan
-    integration: "{{ inputs.integration }}"
-    input:
-      args: "{{ inputs.spec }}"
+  - id: collect-reviews
+    type: fan-in
+    wait_for: ["planning-reviews", "high-risk-review"]
+    output:
+      campaign_statuses: "{{ fan_in.results }}"
 
-  - id: review-plan
-    type: gate
-    message: "Review the plan before generating tasks."
-    options: [approve, reject]
-    on_reject: abort
-
-  - id: checklist
-    command: speckit.checklist
-    integration: "{{ inputs.integration }}"
-    input:
-      args: "requirements quality and implementation readiness for {{ inputs.spec }}"
-
-  - id: tasks
-    command: speckit.tasks
-    integration: "{{ inputs.integration }}"
-    input:
-      args: "{{ inputs.spec }}"
-
-  - id: kanban-handoff
-    type: gate
-    message: "Stop here. Open or update Hermes Kanban implementation cards from tasks.md; do not execute implementation in this Spec Kit workflow."
-    options: [handoff-recorded, abort]
-    on_reject: abort
+  - id: summarize-reviews
+    type: shell
+    run: >-
+      python3 scripts/spec_kit_planning_review.py summarize
+      --run-id "{{ context.run_id }}"
