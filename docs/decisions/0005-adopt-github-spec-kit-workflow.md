@@ -2,7 +2,7 @@
 
 Date: 2026-07-16
 Status: Accepted
-Amended: 2026-07-25 — repository pin upgraded from `v0.12.17` to `v0.14.2`
+Amended: 2026-07-25 — repository pin upgraded from `v0.12.17` to `v0.14.2`; ADR-0009 adds the Architect-owned planning review control plane
 Decision owner: BrainBuddy
 Related: `.specify/`, `.claude/skills/`, official Hermes Spec Kit skills,
 `specs/`, `docs/spec-kit-workflow.md`, ADR-0001, ADR-0002, Kanban task
@@ -33,7 +33,7 @@ architect profile. Preserve existing specs, ADRs, and constitution history.
 The canonical path for new or materially changed feature specs is:
 
 ```text
-constitution -> /speckit-specify -> /speckit-clarify -> /speckit-plan -> /speckit-checklist -> /speckit-tasks -> Hermes Kanban handoff
+constitution -> /speckit-specify -> /speckit-clarify -> /speckit-plan -> bounded planning review -> /speckit-checklist -> /speckit-tasks -> /speckit-analyze -> validated Hermes Kanban handoff
 ```
 
 Spec Kit owns versioned planning artifacts under `specs/` and project workflow
@@ -136,8 +136,10 @@ What future agents must preserve:
 - `hermes --profile architect skills list` exposes constitution, specify,
   clarify, plan, checklist, tasks, and analyze, but not implement or
   taskstoissues.
-- The local `.specify/workflows/speckit/workflow.yml` ends at tasks plus Hermes
-  Kanban handoff and does not call `speckit.implement`.
+- The local `.specify/workflows/speckit/workflow.yml` runs only bounded,
+  sandboxed planning reviews and does not call `speckit.implement`,
+  `taskstoissues`, or publish runtime cards. The validated
+  `hermes-handoff.json` is compiled only by the Hermes Kanban Orchestrator.
 - `python3 scripts/check_spec_kit_specs.py` validates required new-spec artifacts,
   regular nonempty files, and documented grandfathering baselines.
 - `python3 -m unittest scripts/test_check_spec_kit_specs.py -v` covers missing
