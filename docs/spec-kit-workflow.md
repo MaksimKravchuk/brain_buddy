@@ -199,6 +199,12 @@ python3 scripts/check_spec_kit_specs.py
 make check-specs
 ```
 
+The check does not merely assert that `hermes-handoff.json` exists: it validates
+its contents with the same `validate_handoff` contract used by
+`scripts/spec_kit_planning_review.py validate-handoff`, so an unparseable,
+schema-violating, unapproved, under-reviewed, or cyclic-lane handoff fails the
+mandatory CI spec gate.
+
 ## Historical grandfathering
 
 Existing history is preserved rather than regenerated blindly.

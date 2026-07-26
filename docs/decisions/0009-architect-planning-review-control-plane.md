@@ -102,5 +102,9 @@ Tradeoffs:
 - An engine smoke run with deterministic reviewer stand-ins must complete three
   parallel reviews, preserve the nested `inputs.json` envelope, write an
   `approved` summary, and leave `.specify/feature.json` absent.
-- `python3 scripts/check_spec_kit_specs.py` and its existing unit suite remain
-  green.
+- `python3 scripts/check_spec_kit_specs.py` and its unit suite remain green. That
+  mandatory CI gate loads `validate_handoff` from
+  `scripts/spec_kit_planning_review.py` and fails closed on malformed JSON, an
+  empty object, a wrong schema version, a non-`approved` planning-review status,
+  a missing required reviewer role, or a cyclic/overlapping lane DAG — a present
+  `hermes-handoff.json` is never accepted on file existence alone.

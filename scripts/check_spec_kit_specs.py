@@ -4,24 +4,39 @@
 This check is intentionally deterministic and offline. It does not regenerate
 Spec Kit output; it only rejects new feature-spec directories that omit the
 minimum artifacts BrainBuddy requires after adopting github/spec-kit v0.12.17.
+
+Present `hermes-handoff.json` files are additionally validated against the
+canonical contract in `scripts/spec_kit_planning_review.py` (schema version,
+approved planning-review status, required reviewer roles, and the acyclic lane
+DAG), so the mandatory CI spec gate fails closed on an unreviewed handoff.
 """
 
 from __future__ import annotations
 
 import hashlib
+import importlib.util
+import json
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SPECS_DIR = REPO_ROOT / "specs"
+
+# Resolved from this file rather than REPO_ROOT so tests may retarget the specs
+# tree without detaching the canonical handoff validator.
+HANDOFF_VALIDATOR_PATH = Path(__file__).resolve().with_name("spec_kit_planning_review.py")
+HANDOFF_VALIDATOR_MODULE = "spec_kit_planning_review"
+HANDOFF_ARTIFACT = "hermes-handoff.json"
 
 REQUIRED_FILES = (
     "spec.md",
     "checklists/requirements.md",
     "plan.md",
     "tasks.md",
-    "hermes-handoff.json",
+    HANDOFF_ARTIFACT,
 )
 
 GRANDFATHERED = {
@@ -102,9 +117,59 @@ def _require_regular_nonempty(path: Path, failures: list[str], label: str) -> bo
     return True
 
 
+def _load_handoff_validator() -> Callable[[object], dict[str, Any]]:
+    """Load the canonical handoff validator by path, without touching sys.path.
+
+    The module is cached under its own name so repeated loads (and suites that
+    already imported it) reuse one module object instead of re-executing it.
+    """
+    module = sys.modules.get(HANDOFF_VALIDATOR_MODULE)
+    if module is None:
+        spec = importlib.util.spec_from_file_location(
+            HANDOFF_VALIDATOR_MODULE, HANDOFF_VALIDATOR_PATH
+        )
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"cannot load validator from {HANDOFF_VALIDATOR_PATH}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[HANDOFF_VALIDATOR_MODULE] = module
+        try:
+            spec.loader.exec_module(module)
+        except BaseException:
+            del sys.modules[HANDOFF_VALIDATOR_MODULE]
+            raise
+    validate_handoff = getattr(module, "validate_handoff", None)
+    if not callable(validate_handoff):
+        raise RuntimeError(f"{HANDOFF_VALIDATOR_PATH} does not expose validate_handoff")
+    return validate_handoff
+
+
+def _validate_handoff_contents(path: Path, failures: list[str]) -> None:
+    """Fail closed unless the handoff satisfies the canonical contract."""
+    try:
+        validate_handoff = _load_handoff_validator()
+    except Exception as exc:  # noqa: BLE001 - any load failure must fail closed
+        failures.append(f"{_relative(path)}: handoff validator unavailable ({exc})")
+        return
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        failures.append(f"{_relative(path)}: invalid JSON ({exc})")
+        return
+
+    try:
+        validate_handoff(payload)
+    except (ValueError, KeyError, TypeError) as exc:
+        failures.append(f"{_relative(path)}: invalid Hermes handoff ({exc})")
+
+
 def _validate_required_files(spec_dir: Path, failures: list[str]) -> None:
     for required_file in REQUIRED_FILES:
-        _require_regular_nonempty(spec_dir / required_file, failures, required_file)
+        present = _require_regular_nonempty(
+            spec_dir / required_file, failures, required_file
+        )
+        if present and required_file == HANDOFF_ARTIFACT:
+            _validate_handoff_contents(spec_dir / required_file, failures)
 
 
 def _grandfathered_baseline_matches(spec_dir: Path, failures: list[str]) -> bool:
