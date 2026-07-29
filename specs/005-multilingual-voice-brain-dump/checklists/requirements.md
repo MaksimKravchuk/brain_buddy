@@ -32,13 +32,16 @@
 ## Notes
 
 - Founder-only INTERNAL increment. Core (US1-US3), FR-016, the hardening lane
-  (T029-T037), the commit-concurrency/audio-deletion fixes (T038/T039, cac5a27),
-  the commit_batch/committing retention fixes (T040/T041, c979621), and the live
-  evidence report (T042) are delivered at HEAD c979621 (994 backend, 97.24% cov /
-  452 frontend green). Live report (900eeb8): SC-001/003/007 pass; SC-002 74.4% and
-  SC-004 2 splits are below the PUBLIC-ON gates and founder-accepted. Release-closure
-  T043 (full-stack tests) and T044 (partial-commit UX) remain open-important (not
-  blocking); final approval pends the fresh high-risk campaign on the committed SHA.
+  (T029-T037), the commit-concurrency/audio-deletion fixes (T038/T039), the
+  commit_batch/committing retention fixes (T040/T041), and the final5feb fix round
+  (T045-T048: idempotency-snapshot scrub, flag-OFF privacy reachability, cancel-race,
+  committing hard-maximum) are delivered at HEAD 317aca5 (1000 backend, 97.22% cov /
+  452 frontend green). The live evidence report re-ran ON 317aca5 (committed 166b9a3):
+  SC-001 (25 committed)/SC-003 (0/44)/SC-007 pass; SC-002 74.4% and SC-004 2 splits
+  are exactly at the founder-INTERNAL no-regression floor (below the PUBLIC-ON gates);
+  ADR-0008 exact-SHA evidence satisfied. The 3 decisions are recorded. Release-closure
+  T043/T044 + T049-T055 (Architect tracked follow-ups) remain open (important/follow-up,
+  not blocking). Final approval pends a fresh high-risk campaign on the committed SHA.
 - Vendor names (specific STT/reconciliation companies) appear only in
   assumptions/evidence context, never as requirements; requirements are stated
   vendor-agnostically per template guidance.

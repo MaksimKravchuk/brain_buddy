@@ -9,11 +9,12 @@ plus the live-verification evidence recorded there (reference RU/EN corpus, real
 
 **Note**: This is a retroactive plan describing the architecture the delivered
 implementation satisfies. The work is **committed on the feature branch
-`005-multilingual-voice-brain-dump`** at HEAD `c979621` — the US1-US3 core
+`005-multilingual-voice-brain-dump`** at HEAD `317aca5` — the US1-US3 core
 (`000c2f8`, `f6cd066`), the FR-016 grounding lane, the planning-review hardening
 lane (`889a956`…`2c3e4ec`), the commit-concurrency/audio-deletion fixes
-(`cac5a27`), the live evidence harness + report (`900eeb8`, `0b0d166`), and the
-commit_batch/committing retention fixes (`c979621`) —
+(`cac5a27`), the live evidence harness + report (`900eeb8`, `0b0d166`), the
+commit_batch/committing retention fixes (`c979621`), and the final5feb fix round
+(`317aca5`, with the live report re-run committed at `166b9a3`) —
 **not yet merged to `main` and not yet deployed**. Live observations (the 4-minute
 recording drive) are experimental evidence, kept separate from landed/deployed
 acceptance evidence (see the Evidence manifest). It introduces no new
@@ -41,7 +42,7 @@ substrate, adding no new persistence store and no new domain module:
    unverifiable proposal, preserving every anti-hallucination guarantee.
 3. **Multi-vendor consent** — the operation consent record carries an explicit
    named `providers` list; every pipeline stage checks its own vendor against
-   that set and fails closed before audio leaves the device; the recording UI
+   that set and fails closed before persistence or external-provider egress (first-party boundary); the recording UI
    discovers the real configured vendor names from a new
    `GET /api/brain-dump-providers` endpoint.
 4. **Test hermeticity** — the backend test environment scrubs real
@@ -58,7 +59,7 @@ deletion, frozen-batch phased-saga commit, ADR-0008 rollout flag, operational
 evidence report, ADR-0006 copy, title-shape invariant) plus the
 commit-concurrency/deletion fixes, the commit_batch/committing retention fixes, and
 the live evidence report are delivered at
-HEAD `c979621` (994 backend / 452 frontend green — see "Hardening lane (delivered)").
+HEAD `317aca5` (1000 backend / 452 frontend green — see "Hardening lane (delivered)").
 
 ## Technical Context
 
@@ -103,11 +104,11 @@ corpus ~50 utterances / ~30 actionable cold-start creations.
 
 ## Constitution Check
 
-*GATE: met at HEAD `c979621` (for founder-only INTERNAL exposure). The US1-US3 core, FR-016, and the hardening lane
+*GATE: met at HEAD `317aca5` (for founder-only INTERNAL exposure). The US1-US3 core, FR-016, and the hardening lane
 (Phase 6, T029-T037) that closed the high-risk-review gaps (consent egress
 boundary, review-screen provenance, consent-withdrawal deletion, frozen-batch
 phased-saga commit, ADR-0008 default-OFF rollout flag, corpus evidence) are all
-delivered and verified (994 backend / 452 frontend green). Final confirmation is
+delivered and verified (1000 backend / 452 frontend green). Final confirmation is
 the approved planning-review campaign against `2c3e4ec`.*
 
 - **Spec workflow**: `spec.md` and `checklists/requirements.md` are current and
@@ -125,9 +126,9 @@ the approved planning-review campaign against `2c3e4ec`.*
   audio/transcript/credentials/paths/fingerprints stay out of logs, metrics,
   events, and fixtures; the test env scrubs `OPENAI_API_KEY`/`DEEPGRAM_API_KEY`
   so real keys and the reference recording never enter CI. **Consent egress
-  boundary (hardened, delivered)**: the pre-upload guard now requires the
+  boundary (hardened, delivered)**: the pre-persistence guard now requires the
   *complete* configured vendor set (`889a956`), so a consent naming only the
-  reconciler vendor fails closed before audio leaves the device; provider
+  reconciler vendor fails closed before persistence or external-provider egress (first-party boundary); provider
   discovery is a fail-closed prerequisite for recording with the hardcoded
   fallback removed, and FR-012 vendor names are rendered (`2420c96`). See the
   "Hardening lane (delivered)" section.
@@ -136,7 +137,7 @@ the approved planning-review campaign against `2c3e4ec`.*
   skip, consent-mismatch fail-closed, hermeticity) and frontend Vitest
   (provider discovery, consent payload). Edge cases cover invalid/oversized/
   malformed provider responses, timeouts, quota exhaustion, consent denial,
-  idempotent replay, and partial failure. Full suites: 994 backend / 452
+  idempotent replay, and partial failure. Full suites: 1000 backend / 452
   frontend green with the feature active at HEAD `2c3e4ec` (SC-008).
 - **Contracts (Principle III / ADR-0001, ADR-0002)**: The consent
   `providers: list[str]` field and the `GET /api/brain-dump-providers`
@@ -262,7 +263,7 @@ module, store, or top-level package was introduced.
    ADR-0002).** The consent record gains `providers: list[str]` (bounded,
    `max_length=5`) alongside the legacy single `provider` for migration.
    `service.py` guards each stage: the stage's own configured vendor must be in
-   the consented set before audio or derived text leaves the device; a mismatch
+   the consented set before persistence or external-provider egress (first-party boundary); a mismatch
    fails closed with an explicit consent-mismatch error and no upload. The
    recording UI must show the *real* configured vendor names, so
    `GET /api/brain-dump-providers` returns them from deployment config and
@@ -343,20 +344,25 @@ it (the T035 report/run artifacts) are committable. This codifies the delivered
 posture (the corpus is the sole committed place utterance text lives) rather than
 the blanket "never committed" phrasing.
 
-**Retention (delivered)**: the retention posture now matches the provenance
+**Retention**: the posture matches the provenance decision and the hard-maximum
 decision. (1) Frozen `commit_batch` action titles are reduced to their SHA-256
-(identical to receipts' `confirmed_title_sha256`) by
-`purge_expired_working_artifacts` for terminal/withdrawal-finalized operations
-past the window, so no plaintext derived-title text outlives the retention window
-(`c979621`, T040); resume-capable `committing` operations keep their titles because
-resume needs them and they are inside their window by definition; no schema change,
-rollback-safe. (2) `committing` is no longer an unbounded resting state — the sweep
-duty `recover_committing_operations` resumes stranded mid-commit operations through
-the standard commit path with recovery idempotency keys (`c979621`, T041), so an
-abandoned commit does not retain audio/text indefinitely; a runbook note lives in
-`docs/voice-stt.md`. (3) Raw-audio deletion is fail-closed: a verified-absence
-outcome with a sweep retry replaces the former `ignore_errors=True`, and metadata
-is not cleared until absence is confirmed (`cac5a27`, T039).
+(= receipts' `confirmed_title_sha256`) by `purge_expired_working_artifacts` for
+terminal/withdrawal-finalized operations past the window, so no plaintext
+derived-title text outlives the window (`c979621`, T040). (2)
+`recover_committing_operations` resumes stranded mid-commit operations through the
+standard commit path with recovery idempotency keys (`c979621`, T041). (3) The
+retention window is a **hard maximum** (product decision): a `committing` operation
+still unfinished at its working-artifact deadline is finalized terminal and its
+exact transcript/proposal/title text is purged (completed tasks/receipts preserved
+as IDs/hashes). Delivered (`317aca5`, **T048**): a past-deadline `committing` op is
+finalized to `cancelled`, preserving `committed_task_ids` and a reduced ledger with
+a full exact-text scrub — closing the reviewed gap where a persistently failing
+`TaskPort` kept a `committing` op and its plaintext indefinitely. (4) Idempotency
+snapshots: the periodic sweep scrub-overwrites operation idempotency snapshots
+(SQLite + JSON sidecar) with a redacted post-purge snapshot at the deadline, so
+full-operation text does not survive retention (`317aca5`, **T045**). (5) Raw-audio
+deletion is fail-closed: a verified-absence outcome with a sweep retry replaces the
+former `ignore_errors=True` (`cac5a27`, T039).
 
 **ADR-0001/0002 raw-media ownership — bounded migration exception.** ADR-0001
 assigns raw-input media to Capture; here the `voice_brain_dump` workflow's own
@@ -422,8 +428,8 @@ behavior. Closing the UI never cancels; reopening resumes by operation ID.
   (task-count accuracy, boundary precision, zero translations, zero conjunction
   splits), reported separately from the unit suites.
 
-Delivered evidence: 994 backend (97.23% coverage, incl. 334 reconciliation) + 452
-frontend green at HEAD `c979621`, including the delivered vendor-B-only
+Delivered evidence: 1000 backend (97.23% coverage, incl. 334 reconciliation) + 452
+frontend green at HEAD `317aca5`, including the delivered vendor-B-only
 no-persistence consent test. The live evidence report ran at `900eeb8`
 (`run_key e8cb406f…`): SC-001 (19 committed), SC-003 (0/45 translated), SC-007
 (21.1 s) pass; SC-002 74.4% (32/43 strict) and SC-004 2 splits are below the
@@ -449,24 +455,33 @@ the deploy key as sole `restrict_updates` bypass). It must not ride the SHIP/SHO
 auto-landing path. Fly production release follows the verified-trunk deploy after
 that ASK landing.
 
-**Exposure gate (product decision, 2026-07-29).** BrainBuddy is currently a
+**Exposure gate (product decisions, 2026-07-29).** BrainBuddy is currently a
 single-user (founder-only) product. Code lands and deploys with the
 `voice_brain_dump` flag **OFF**. An explicit **founder-only INTERNAL** experiment
-below ADR-0002's release targets is approved (~88% corpus accuracy is accepted for
-the founder's own use). **Public ON is blocked** until the ADR-0002 targets
-(≥95% task-count/boundary precision-recall, 100% critical-term preservation on an
-approved corpus) pass, or an accepted ADR supersedes them — which only becomes
-relevant if the product gains other users. So "stable/delivered" means stable for
-founder-only INTERNAL use, not a public release.
+is approved against a **no-regression floor**: SC-002 ≥ 74.4% strict-oracle and
+conjunction splits ≤ 2 (the authoritative 900eeb8 baseline; the earlier ~88% was a
+superseded loose-oracle figure). Regression below the floor requires a new
+decision. **Public ON is blocked** until the ADR-0002 targets (≥95%
+task-count/boundary precision-recall, 100% critical-term preservation) pass, or an
+accepted ADR supersedes them — the acceptance tiers are explicit: the MUST-level
+conjunction-split (FR-003) and required-term (FR-006) rules are public-ON-tier,
+the founder-INTERNAL tier is the floor, and consent/anti-hallucination guarantees
+are unconditional at both. So "stable/delivered" means stable for founder-only
+INTERNAL use, not a public release. (Follow-up: a short ADR-0002 annotation
+recording the OFF→INTERNAL→ON ladder — release-closure T054.)
 
-**Flag is exposure control, not a kill switch (ADR-0008).** With
-`voice_brain_dump` OFF the routes 404 (after auth), but the unconditional
-background sweep continues advancing already-sealed in-flight provider runs, so
-external egress for in-flight operations drains to completion; and owner-initiated
-withdrawal/deletion commands are unreachable while OFF (automatic retention sweeps
-still apply). The real emergency stop for external egress is **unsetting the
-provider configuration** (which swaps in fail-closed Disabled adapters). Operators
-must use that, not the flag, to halt in-flight egress.
+**Flag-OFF privacy controls (product decision, 2026-07-29).** The exposure flag is
+exposure control, never authorization. For an owner's *existing* operations,
+read/status, consent withdrawal, cancel, and raw-audio deletion **remain reachable
+regardless of the flag** — only new-capture surfaces are flag-gated — and the
+background runner **pauses advancing provider work** for an OFF owner (so external
+egress does not drain past an OFF flag). This corrects the reviewed behavior where
+OFF 404'd the withdrawal/deletion routes while the runner kept advancing;
+**delivered** (`317aca5`, T046): `{withdraw_consent, cancel, delete_raw_audio}` plus
+GET read/status bypass the gate, all new-capture actions and provider discovery stay
+gated, and the runner skips OFF owners via a container-wired predicate. Unsetting the
+provider configuration (fail-closed Disabled adapters) remains the operator-level
+containment for external egress.
 
 ## FR-016 grounding-tolerance lane (delivered)
 
@@ -494,7 +509,7 @@ durability, and evidence gaps between the reviewed code and the spec's promises.
 The full hardening lane (tasks T029–T037) landed test-first on the ASK-class
 paths in commits `889a956`, `2ca19f0`, `2420c96`, `b670856`, `2c3e4ec`:
 
-1. **Consent pre-upload boundary** — the complete configured vendor set is
+1. **Consent pre-persistence boundary** — the complete configured vendor set is
    required at the egress boundary (`889a956`), with an authoritative `providers`
    list and `AUDIO_UPLOAD_PROVIDER_CONSENT_CONFLICT` on conflicting dual-field
    precedence plus a no-persistence negative test (`2ca19f0`). SC-006 re-anchors
@@ -513,23 +528,30 @@ paths in commits `889a956`, `2ca19f0`, `2420c96`, `b670856`, `2c3e4ec`:
    copy (`2c3e4ec`), and a script-based language-fidelity title invariant distinct
    from FR-008 grounding (`b670856`).
 
-Integrated verification at HEAD `2c3e4ec`: 994 backend (97.23% coverage) / 452
-frontend green, build green, ruff + mypy clean, plus a live e2e drive (flag ON,
-phased saga) yielding 19 committed proposals. **Known non-gating leftovers**:
-Playwright visual baselines need regeneration, and the live T035 operational
-report on the final release SHA is still to be produced by the thin harness.
+Integrated verification: full suite 1000 backend (97.22% cov) / 452 frontend green,
+build/ruff/mypy clean, plus a live e2e drive yielding 25 committed proposals.
+**SHA provenance** (distinct roles, do not conflate): the hardening lane completed
+at `2c3e4ec`; commit concurrency/deletion at `cac5a27`; commit_batch/committing
+retention at `c979621`; the **final5feb fix round at `317aca5` — the frozen
+implementation SHA**; the live evidence report **re-ran ON `317aca5`**
+(`run_key bfd2defe…`, committed `166b9a3`); the planning-artifact HEAD is the docs
+commit (docs only, no code). **Exact-SHA evidence is now satisfied**: per ADR-0008
+the report ran on the exact reviewed implementation SHA, and docs-only commits
+after it do not touch code, so `317aca5` is the tested code SHA that governs the
+landing evidence. **Known non-gating leftover**: Playwright visual baselines need
+regeneration.
 
 ## Evidence manifest
 
 Acceptance evidence is anchored to the branch, privacy-safe (no raw recording or
 transcript — aggregate metrics and named tests only):
 
-- **Source**: branch `005-multilingual-voice-brain-dump`, HEAD `c979621`
+- **Source**: branch `005-multilingual-voice-brain-dump`, HEAD `317aca5`
   (US1-US3 core `000c2f8`/`f6cd066`, FR-016 grounding, hardening lane `889a956`/
   `2ca19f0`/`2420c96`/`b670856`/`2c3e4ec`, concurrency/deletion `cac5a27`, live
   evidence `900eeb8`/`0b0d166`, commit_batch/committing retention `c979621`, and
   the spec package), pending ASK-class landing.
-- **Automated suites**: 994 backend (pytest, 97.23% coverage, incl. 334
+- **Automated suites**: 1000 backend (pytest, 97.23% coverage, incl. 334
   reconciliation) + 452 frontend (Vitest) green with the feature active — this
   supersedes the earlier 875/907 backend figures.
 - **SC → evidence**: SC-002/003/004 map to the reconciliation grounding/shaping
@@ -588,13 +610,18 @@ all four new structures:
    the frontend must not be newer than the backend; define backend-first
    deployment order.
 
-Rollback procedure: stop accepting new capture; resume/cancel all `committing`
-operations; drain withdrawal purges; then restore the older backend. Deploy
-backend before frontend. Completed operations are immutable and unaffected. State
-explicitly that old-backend rewrites permanently erase `commit_batch` and
-`consent_withdrawn_at`. Exercise this (new-client/old-backend and
-old-backend/newly-stored-operation combinations) before any rollback. Whether to
-add code-level mitigation (e.g., a rollback-safe ledger) is the Architect's call.
+Deployment order differs by direction: **forward** deploy is backend-first (so the
+new backend accepts `providers` before the new client sends it); **rollback** is
+**old-frontend-first**, then the old backend only after preconditions are met —
+stop accepting new capture; drain every `committing` operation to completion (do
+not cancel a partially committed batch — see the partial-commit finding below);
+let withdrawal-triggered purges complete. Completed operations are immutable and
+unaffected. Old-backend rewrites permanently erase `commit_batch` and
+`consent_withdrawn_at`, so these preconditions are mandatory. This rollback drill
+(with executable pre-checks for zero remaining `committing` operations and due
+withdrawal cleanup, and a `docs/voice-stt.md` runbook step) is tracked as
+release-closure **T053**, not left as prose; code-level mitigation (e.g., a
+rollback-safe ledger encoding) remains the Architect's call.
 
 ## Complexity Tracking
 
@@ -602,7 +629,10 @@ add code-level mitigation (e.g., a rollback-safe ledger) is the Architect's call
 |------|-----------|--------------------------------------|
 | Raw-media owned by the workflow repository rather than a Capture-owned port | Single-owner MVP slice; media exposed only via opaque `media_ref` with owner scoping | A Capture port/repository is the correct target but not required before Capture extraction; tracked as a bounded exception with exit criteria (see Data handling) |
 
-No other constitution violations require justification. The feature adds no new
-project, module, persistence store, service, or broker; it hardens adapters and
-adds one additive consent field and one read-only discovery endpoint inside the
-existing ADR-0001/0002 contracts.
+The feature adds no new project, module, persistence store, service, or broker; it
+hardens adapters and adds one additive consent field and one read-only discovery
+endpoint. It does **not** yet fully satisfy the ADR-0001 media-ownership boundary:
+raw media is workflow-owned, a documented exception that requires either a
+Capture-owned port or an accepted ADR amendment before the claim of ADR
+compliance holds — tracked as release-closure **T050**. This plan does not assert
+ADR-0001/0002 compliance while that exception is unresolved.

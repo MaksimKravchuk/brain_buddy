@@ -231,7 +231,7 @@ than guess (FR-009 preserved).
 found between the spec's promises and the delivered code. Landed test-first on the
 ASK-class paths, Kanban-dispatched, in commits `889a956`, `2ca19f0`, `2420c96`,
 `b670856`, `2c3e4ec`. Integrated verification at hardening completion: 969 backend
-(97.23% coverage) / 452 frontend green (now 994 backend at HEAD `c979621` with the
+(97.23% coverage) / 452 frontend green (now 1000 backend at HEAD `c979621` with the
 release-closure fixes), build green, ruff + mypy clean, plus a
 live e2e drive through the hardened pipeline (flag ON, phased commit saga): real
 4-minute recording → 19 proposals (up from 15) → committed per-action → tasks in
@@ -270,7 +270,7 @@ tracker.
   (proven by a grounding-neutralized test), so a translated/ungrounded title
   FR-006 prohibits cannot be accepted.
 
-**Checkpoint**: all Phase 6 items delivered with tests; suites green (994 backend
+**Checkpoint**: all Phase 6 items delivered with tests; suites green (1000 backend
 / 452 frontend at HEAD `c979621`). Known non-gating leftover: Playwright
 visual baselines need regeneration; the live T035 report on the release SHA is
 still to be produced. The final high-risk campaign runs against `2c3e4ec`.
@@ -300,9 +300,9 @@ campaign runs with those two open in the lane.
   `purge_expired_working_artifacts` reduces frozen `commit_batch` action titles to
   their SHA-256 (identical to receipts' `confirmed_title_sha256`) for
   terminal/withdrawal-finalized operations past the window; resume-capable
-  `committing` ops keep titles (resume needs them, and they are inside their window
-  by definition). No schema change, rollback-safe; 3 tests.
-  *(adversarial important: privacy-data-retention — closed)*
+  `committing` ops keep titles only until the retention hard-maximum (T048), when a
+  still-committing op is finalized terminal and purged. No schema change,
+  rollback-safe; 3 tests. *(privacy-data-retention; residual stuck-commit case → T048)*
 - [X] T041 [CLOSE] `committing` recovery (backend, `c979621`): a new sweep duty
   `recover_committing_operations` resumes stranded `committing` ops through the
   standard commit path with recovery idempotency keys (safe no-op on concurrent
@@ -324,10 +324,65 @@ campaign runs with those two open in the lane.
   persisted partial results from a `committing` operation and retry the frozen
   batch to completion without duplicating actions. *(requirements important)*
 
-**Checkpoint**: T038/T039/T040/T041/T042 delivered at HEAD `c979621` (994 backend
-green, 97.24% cov; live report committed). T043/T044 remain open (important, not
-blocking). The final high-risk campaign runs against `c979621` for an approved
-aggregate with those two open in the lane.
+### final5feb fix round (dispatched to `fix-concurrency`) — code, gating
+
+- [X] T045 [CLOSE] Idempotency-snapshot plaintext purge (backend, `317aca5`): the
+  periodic sweep scrub-overwrites operation idempotency snapshots (SQLite + JSON
+  sidecar) with a redacted post-purge snapshot at the working-artifact deadline, so
+  full-operation transcript/proposal text does not survive past retention without a
+  later owner command; replay stays coherent. *(architecture blocking: privacy-retention — closed)*
+- [X] T046 [CLOSE] Flag-OFF privacy-control reachability (backend, `317aca5`):
+  `{withdraw_consent, cancel, delete_raw_audio}` plus GET read/status bypass the
+  `voice_brain_dump` gate; all new-capture actions and provider discovery stay
+  gated; the runner skips OFF owners via a container-wired predicate. *(architecture
+  blocking privacy-control-boundary + requirements rollout-off — closed)*
+- [X] T047 [CLOSE] Partial-commit cancel-race (backend, `317aca5`): per-action
+  status re-check under the owner lock with a finalize guard (`status == committing`),
+  so cancel during commit cannot start not-yet-started actions while preserving
+  completed receipts. *(architecture blocking: partial-commit-failure-handling — closed)*
+- [X] T048 [CLOSE] Committing retention hard-maximum (backend, `317aca5`): a
+  `committing` operation past its working-artifact deadline is finalized to
+  `cancelled` — preserving `committed_task_ids` and a reduced ledger, with a full
+  exact-text scrub — so completion never overrides retention. *(requirements
+  blocking: retention-window-contradiction — closed)*
+
+### Architect-owned tracked follow-ups (anchors for the "tracked" claims)
+
+- [ ] T049 [CLOSE] Deepgram terminal-quota detection: classify a Deepgram permanent
+  insufficient-quota signal as terminal (or narrow FR-013 to providers that
+  distinguish it), so it does not burn the retry budget. *(adversarial traceability; FR-013 gap)*
+- [ ] T050 [CLOSE] Raw-media ownership remediation: route raw media through a
+  Capture-owned port/repository OR author the accepted ADR-0001 amendment naming the
+  temporary owner; update the plan conclusion. *(architecture module-boundary-adr)*
+- [ ] T051 [CLOSE] Transcript-segment provenance contract: persist per-segment
+  language codes, confidence, and a full content hash; carry them through the
+  projection; retain an immutable segment-ID→content-hash map in redacted provenance
+  after text purge (not the title/manifest hash). *(architecture provenance-contract)*
+- [ ] T052 [CLOSE] Reconciler skip observability: persist a coarse
+  skipped-operation count + allowlisted reason-code counts on the successful
+  `ProviderRun` (no titles/reasons), so per-op fail-closed behavior is durably
+  auditable. *(architecture observability-contract)*
+- [ ] T053 [CLOSE] Rollback drill + pre-checks: convert the pre-rollback procedure
+  (old-frontend-first; zero remaining `committing` ops; drained withdrawal purges)
+  into executable checks + a `docs/voice-stt.md` runbook step referenced from the
+  handoff. *(adversarial data-loss-rollback; migration-rollback)*
+- [ ] T054 [CLOSE] ADR-0002 exposure-ladder annotation: record a short ADR-0002
+  annotation encoding the OFF→INTERNAL→ON exposure ladder against the release
+  targets, so the ADR matches the practiced gate. Docs-only. *(adversarial governance-adr-alignment)*
+- [ ] T055 [CLOSE] Abandoned non-terminal-op retention clock (flagged by
+  `fix-concurrency`, verbatim): "abandoned non-terminal ops — e.g. an op left in
+  `awaiting_confirmation`/`recording` — never start their working-artifact retention
+  clock under ADR-0002's completion-anchored wording; whether abandonment should
+  start a purge clock is a future product decision." Tracked open for a product
+  decision; not implemented this round. *(follow-up: privacy-retention)*
+
+**Checkpoint**: T038-T042 (through `c979621`) and T045-T048 (fix round, `317aca5`)
+are delivered; the live report re-ran on the frozen implementation SHA `317aca5`
+(committed `166b9a3`): SC-001 25 committed, SC-003 0/44, SC-007 21.1s pass; SC-002
+74.4% and SC-004 2/22 exactly at the founder-INTERNAL floor. Suite 1000 backend /
+452 frontend green. OPEN and gating the approved handoff: T043/T044
+(acceptance/client evidence) + T049-T055 (Architect-owned tracked follow-ups). The
+fresh high-risk campaign runs against `317aca5` (plus the docs commit).
 
 ---
 
@@ -355,9 +410,10 @@ aggregate with those two open in the lane.
 
 ## Notes
 
-- Phases 1-6 (T001-T037) plus release-closure T038/T039/T040/T041/T042 are
-  delivered at HEAD `c979621` (994 backend / 452 frontend green); release-closure
-  T043/T044 remain open. Known non-gating leftovers: Playwright visual baselines
+- Phases 1-6 (T001-T037) plus release-closure T038-T042 are delivered at HEAD
+  `c979621` (1000 backend / 452 frontend green); release-closure T043/T044 and the
+  final5feb items T045-T054 (fix round + tracked follow-ups) remain open and gate
+  the approved handoff. Known non-gating leftover: Playwright visual baselines
   need regeneration; the live T035 operational report on the release SHA is still
   to be produced by the thin harness.
 - Generated tasks.md is planning input only. It does not bypass Hermes Kanban
