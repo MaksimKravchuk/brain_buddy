@@ -11,6 +11,7 @@ import pytest
 
 from app.workflows.voice_brain_dump import evaluation, providers
 from app.workflows.voice_brain_dump.domain import (
+    BrainDumpAudioChunkDocument,
     BrainDumpConsent,
     BrainDumpOperationDocument,
     BrainDumpProposalDocument,
@@ -31,19 +32,26 @@ from app.workflows.voice_brain_dump.language_fidelity import (
     title_is_language_faithful,
 )
 from app.workflows.voice_brain_dump.operational_evidence import (
+    MODE_TEXT_RECONCILER,
+    build_full_recording_run,
+    build_run_artifact,
     build_run_artifact_from_operations,
+    build_utterance_run,
     compute_operational_evidence,
     load_reference_corpus,
     run_artifact_from_dict,
     run_artifact_to_dict,
+    seal_manifest_hash,
+    titled_sources_from_operation_response,
 )
+from app.workflows.voice_brain_dump.service import VoiceBrainDumpService
 
 _CORPUS_ROOT = (
     Path(__file__).parent / "fixtures" / "voice_brain_dump" / "reference_corpus"
 )
 _CORPUS_PATH = _CORPUS_ROOT / "founder_ru_reading_script.v1.json"
-_RECORDED_ARTIFACT_PATH = _CORPUS_ROOT / "recorded_run_artifact.v1.json"
-_EXAMPLE_REPORT_PATH = _CORPUS_ROOT / "example_report.redacted.v1.json"
+_RECORDED_ARTIFACT_PATH = _CORPUS_ROOT / "recorded_run_artifact.v2.json"
+_EXAMPLE_REPORT_PATH = _CORPUS_ROOT / "example_report.redacted.v2.json"
 
 
 def test_labelled_multilingual_text_and_audio_release_metrics_meet_fixed_gates() -> (
@@ -347,9 +355,10 @@ def test_operational_evidence_report_from_recorded_artifact() -> None:
     assert report.all_passed
     assert report.criterion("SC-001").detail["committed_task_count"] == 17
     sc002 = report.criterion("SC-002").detail
-    assert sc002["single_correct_hits"] == 35
+    assert sc002["correct_hits"] == 38
     assert sc002["task_yielding_total"] == 43
-    assert sc002["ratio"] == 0.814
+    assert sc002["ratio"] == 0.8837
+    assert sc002["miss_breakdown"]["count_mismatch"] == 5
     assert report.criterion("SC-003").detail["translated_titles"] == 0
     sc004 = report.criterion("SC-004").detail
     assert sc004["conjunction_false_splits"] == 0
@@ -357,6 +366,11 @@ def test_operational_evidence_report_from_recorded_artifact() -> None:
     assert (
         report.criterion("SC-007").detail["seal_to_awaiting_confirmation_seconds"]
         == 41.2
+    )
+    # Every criterion is stamped with the real pipeline that produced it.
+    assert all(
+        result.detail["evidence_mode"] == "sealed_audio_pipeline"
+        for result in report.criteria
     )
     assert report.coverage == {"utterances_scored": 50, "utterances_in_corpus": 50}
 
@@ -424,7 +438,7 @@ def test_run_artifact_round_trips_through_dict() -> None:
 
 def test_run_artifact_from_dict_rejects_unknown_schema_version() -> None:
     raw = _load_recorded_artifact()
-    raw["schema_version"] = 2
+    raw["schema_version"] = 99
     with pytest.raises(ValueError, match="schema version"):
         run_artifact_from_dict(raw)
 
@@ -591,3 +605,165 @@ def test_seal_latency_defaults_to_zero_and_criterion_lookup_is_strict() -> None:
     )
     with pytest.raises(KeyError):
         report.criterion("SC-999")
+
+
+# --- Strengthened SC-002 correctness oracle (T035 follow-up) ----------------
+
+
+def test_sc002_oracle_rejects_translated_ungrounded_and_missing_terms() -> None:
+    corpus = load_reference_corpus(_CORPUS_PATH)
+    by_number = {utterance.n: utterance for utterance in corpus.utterances}
+
+    def utterance_run(n: int, titled_sources: list[tuple[str, str]]):
+        return build_utterance_run(
+            utterance_n=n,
+            operation_id=f"op-{n}",
+            titled_sources=titled_sources,
+            corpus_utterance=by_number[n],
+        )
+
+    utterances = [
+        # A correct, grounded, faithful single task -> hit.
+        utterance_run(
+            5, [("Отметить договор", "Отметь задачу про договор выполненной")]
+        ),
+        # Right count, but the title was translated out of Russian -> miss.
+        utterance_run(2, [("Call Anna", "Напомни мне завтра позвонить Анне")]),
+        # Right count and faithful, but the title shares no grounded content -> miss.
+        utterance_run(
+            1, [("Позвонить дедушке", "Добавь задачу проверить почту сегодня вечером")]
+        ),
+        # Right count and grounded, but the required embedded term is dropped -> miss.
+        utterance_run(
+            3,
+            [
+                (
+                    "Создать проект запуск",
+                    "Создай проект Запуск BrainBuddy и поставь высокий приоритет",
+                )
+            ],
+        ),
+    ]
+    artifact = build_run_artifact(
+        git_sha="test-sha",
+        corpus=corpus,
+        provider_config={"reconciler_provider": "openai"},
+        full_recording=None,
+        utterances=utterances,
+        evidence_modes={"utterances": MODE_TEXT_RECONCILER},
+    )
+
+    sc002 = compute_operational_evidence(artifact, corpus).criterion("SC-002").detail
+    assert sc002["correct_hits"] == 1
+    assert sc002["task_yielding_total"] == 4
+    assert sc002["miss_breakdown"] == {
+        "count_mismatch": 0,
+        "translated": 1,
+        "ungrounded": 1,
+        "missing_required_terms": 1,
+    }
+    # Per-section provenance is surfaced on the criterion.
+    assert sc002["evidence_mode"] == MODE_TEXT_RECONCILER
+
+
+def test_sc002_oracle_credits_correctly_split_multi_utterance() -> None:
+    corpus = load_reference_corpus(_CORPUS_PATH)
+    by_number = {utterance.n: utterance for utterance in corpus.utterances}
+    # Utterance 43 is a genuine three-task utterance; the right outcome is three
+    # grounded proposals, which the oracle credits (unlike a naive "exactly one").
+    run = build_utterance_run(
+        utterance_n=43,
+        operation_id="op-43",
+        titled_sources=[
+            ("Созвон с командой", "созвон с командой"),
+            ("Подготовить demo", "подготовить demo"),
+            ("Проверить backup", "проверить backup"),
+        ],
+        corpus_utterance=by_number[43],
+    )
+    assert run.proposal_count == 3
+    artifact = build_run_artifact(
+        git_sha="test-sha",
+        corpus=corpus,
+        provider_config={},
+        full_recording=None,
+        utterances=[run],
+        evidence_modes={"utterances": MODE_TEXT_RECONCILER},
+    )
+    sc002 = compute_operational_evidence(artifact, corpus).criterion("SC-002").detail
+    assert sc002["correct_hits"] == 1
+    assert sc002["miss_breakdown"]["count_mismatch"] == 0
+
+
+# --- Harness pure helpers (live report) -------------------------------------
+
+
+def test_seal_manifest_hash_matches_service_formula() -> None:
+    now = datetime(2026, 7, 29, tzinfo=UTC)
+    chunks = [
+        BrainDumpAudioChunkDocument(
+            chunk_number=1, sha256="b" * 64, size_bytes=222, received_at=now
+        ),
+        BrainDumpAudioChunkDocument(
+            chunk_number=0, sha256="a" * 64, size_bytes=111, received_at=now
+        ),
+    ]
+    expected = VoiceBrainDumpService._brain_dump_manifest_hash(chunks)
+    computed = seal_manifest_hash(
+        [
+            {"chunk_number": 1, "sha256": "b" * 64, "size_bytes": 222},
+            {"chunk_number": 0, "sha256": "a" * 64, "size_bytes": 111},
+        ]
+    )
+    assert computed == expected
+
+
+def test_titled_sources_from_operation_response_selects_active_proposals() -> None:
+    response = {
+        "segments": [
+            {"id": "seg1", "text": "Купить молоко"},
+            {"id": "seg2", "text": "Позвонить Анне"},
+        ],
+        "proposals": [
+            {
+                "title": "Купить молоко",
+                "source_segment_ids": ["seg1"],
+                "deleted": False,
+            },
+            {
+                "title": "Позвонить Анне",
+                "source_segment_ids": ["seg2"],
+                "deleted": True,
+            },
+            {
+                "title": "Superseded",
+                "source_segment_ids": ["seg1"],
+                "deleted": False,
+                "successor_ids": ["p9"],
+            },
+        ],
+    }
+    assert titled_sources_from_operation_response(response) == [
+        ("Купить молоко", "Купить молоко")
+    ]
+
+
+def test_observe_titles_marks_a_title_without_content_words_as_ungrounded() -> None:
+    from app.workflows.voice_brain_dump.operational_evidence import observe_titles
+
+    _count, observations, _preserved = observe_titles([("ok go", "Добавь задачу")])
+    assert observations[0].grounded_in_source is False
+
+
+def test_build_full_recording_run_counts_active_titles() -> None:
+    full = build_full_recording_run(
+        operation_id="op-full",
+        titled_sources=[("Купить молоко", "купить молоко"), ("Позвонить", "позвонить")],
+        committed_task_count=16,
+        seal_to_awaiting_confirmation_seconds=44.0,
+        seal_to_commit_seconds=60.0,
+    )
+    assert full.proposal_count == 2
+    assert full.committed_task_count == 16
+    assert full.seal_to_awaiting_confirmation_seconds == 44.0
+    assert len(full.operation_ref) == 16

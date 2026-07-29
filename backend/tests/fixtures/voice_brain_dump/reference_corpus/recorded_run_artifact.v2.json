@@ -1,16 +1,20 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "run_identity": {
     "git_sha": "RECORDED_FIXTURE_NOT_A_REAL_SHA",
     "corpus_id": "founder_ru_reading_script",
     "corpus_digest": "16e22c085bbcede0f78f70a20edc55a609547fdd34d4fffa4cf3b9f91b89248f",
     "provider_config": {
       "stt_provider": "deepgram",
-      "stt_model": "nova-2-general",
+      "stt_model": "nova-3",
       "reconciler_provider": "openai",
       "reconciler_model": "gpt-4o",
       "reconciler_template_version": "brain-dump-reconciler-v2"
     }
+  },
+  "evidence_modes": {
+    "full_recording": "sealed_audio_pipeline",
+    "utterances": "sealed_audio_pipeline"
   },
   "full_recording": {
     "operation_ref": "f25093986071a530",
@@ -29,15 +33,18 @@
           "title_sha256": "8c5a17855817d891bb6d63a66475536273f7de8eb2fb2acac30b456f7ba2e7bc",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         },
         {
           "title_sha256": "29ef6cd2820c769c164e5dc0f9cdcfa8d97964ea41efaa67face6667de35d3b8",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 2,
@@ -48,15 +55,18 @@
           "title_sha256": "7b6318c0da67243810ab93e35836e16878a5724bd2c90d246a7aafd243ec6afb",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         },
         {
           "title_sha256": "4ddb8454e61f3dba5b60c644e798ed6c53d703530993bf37c2669c49c40a33c7",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 3,
@@ -67,15 +77,18 @@
           "title_sha256": "6dfeca28ff5202ad0cd4476ea767cdbf28207cde2ec5f31b406b9d80f6d63b3c",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 4,
       "operation_ref": "402827b8d3e2527d",
       "proposal_count": 0,
-      "proposals": []
+      "proposals": [],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 5,
@@ -86,15 +99,18 @@
           "title_sha256": "5c5ac5ab3b743c01ca61ef6689c77c91265d53ca2e57daa8b596e3394b157e87",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         },
         {
           "title_sha256": "7bc33bf9c74f734ca672b3f27e3f61c2c85cbf6591f7842333296a17efbd4025",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 6,
@@ -105,15 +121,18 @@
           "title_sha256": "fd4c4213c138461ed372ae171bcc8855efac2deaf4179b5efa6abb5929c53a91",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         },
         {
           "title_sha256": "c6a83c9cfd0bfd1415d014f3a35ac2ac3181ed95ea48b8b6299ff0f5175957b0",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 7,
@@ -124,15 +143,18 @@
           "title_sha256": "942cd7c5264f7a0f93fa3cac4db7dd90783fc9abc1e39785d7f04d40f288b48b",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         },
         {
           "title_sha256": "04ddfe69cb9af1f681b0f1e213c5e9afac5794adfcdbcb8ef3ac73b107781cad",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 8,
@@ -143,9 +165,11 @@
           "title_sha256": "b64c4a21a51c531d051dcb6daf4399fb3d39716aadf5302264629866178087b0",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 9,
@@ -156,15 +180,18 @@
           "title_sha256": "26df6ad41af3c47b883e6b79a6b87579fb8c27bbdc79cac890dad824dd9d9fc1",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 10,
       "operation_ref": "47d9c11cf5f99a8d",
       "proposal_count": 0,
-      "proposals": []
+      "proposals": [],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 11,
@@ -175,9 +202,11 @@
           "title_sha256": "11f921a7435151a0c8d96b971cef30355da561e7881953062fa4a5aed73015fc",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 12,
@@ -188,15 +217,18 @@
           "title_sha256": "a7bc6ea084d543b5b280436d83a163bfaa4f3e39bf2648268e33e91e730c7414",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 13,
       "operation_ref": "8815971bf4e64b0b",
       "proposal_count": 0,
-      "proposals": []
+      "proposals": [],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 14,
@@ -207,9 +239,11 @@
           "title_sha256": "e159c33150e165ad0c684a24d28e10dc8a16986a4890c0fa2dc5037989f1c232",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 15,
@@ -220,9 +254,11 @@
           "title_sha256": "adde63f2fcff4e5232270524c60cacd812af21903eff3b039d9599ec73e2e105",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 16,
@@ -233,9 +269,11 @@
           "title_sha256": "01815dbf60d95e1735f801e6eccd846f4f6d78f817a7e208d00ad25ceb1733a2",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 17,
@@ -246,9 +284,11 @@
           "title_sha256": "fe56d5b1ba63ab85e799d44e48ec916a7dd1fe1696e99e18402a15600ebca3c4",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 18,
@@ -259,9 +299,11 @@
           "title_sha256": "ac282648ad79c734d020f8db917d3907fb6bc386d311dd2e7661f482e849d654",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 19,
@@ -272,15 +314,18 @@
           "title_sha256": "2192b7f0826686e94fd72baed2ccc814cd37bfeb03cfe63f6703a704704df8b4",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 20,
       "operation_ref": "7f1954fcb73779c6",
       "proposal_count": 0,
-      "proposals": []
+      "proposals": [],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 21,
@@ -291,9 +336,11 @@
           "title_sha256": "7bc1345c96ff4f48ffdc8e556adbd2c23586dc8f4e37bae838b03de1bc33e966",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 22,
@@ -304,15 +351,18 @@
           "title_sha256": "0ad7af0b6a455f7e9c190fb0dfbd02fd0152140393a808164fe5e0b4475dc460",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         },
         {
           "title_sha256": "971872dc3f7a651602037acc51b8b51635757c0562ab748f25c2109758301334",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 23,
@@ -323,9 +373,11 @@
           "title_sha256": "7cbf639d70143fb0160f56832887917408f93e30e48e1e862d44c75856de894b",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 24,
@@ -336,9 +388,11 @@
           "title_sha256": "132ecbd46e52d90c1ac284e4ece4ba0b6b2ad8f0b6ecd726b2535090c3b46f42",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 25,
@@ -349,15 +403,18 @@
           "title_sha256": "3a465efa66963e174a8753df472d30450602f6f9cb215b506832395186ccdef1",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 26,
       "operation_ref": "808d72cf1cd48389",
       "proposal_count": 0,
-      "proposals": []
+      "proposals": [],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 27,
@@ -368,9 +425,11 @@
           "title_sha256": "aba0c983e00f2bb2bf2e46425cb18f6ac91130d900b5700cf5f484c854614142",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 28,
@@ -381,9 +440,11 @@
           "title_sha256": "5055a2bda5c895b6740a960d8ed4feae684e15f96d7faeaa1e6795fd4f2e3014",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 29,
@@ -394,9 +455,11 @@
           "title_sha256": "6cc6727fe3f3d3441c2f3cc73a1367c0b3d0fbb657a83d369e2f2bb7390e66b9",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 30,
@@ -407,9 +470,11 @@
           "title_sha256": "addb2be089aeb4ca12e33c385b7c87c15e2915415fd37f5635fce57c17ba87e8",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 31,
@@ -420,9 +485,11 @@
           "title_sha256": "3d38052d1542c9c61b84940e2ea11fa5961245c67fdcc6872f3917a1685e77b5",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 32,
@@ -433,9 +500,11 @@
           "title_sha256": "df486aee515892747961ddf90713fb524c30cda036f42bf184e1931533ba4ee7",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 33,
@@ -446,9 +515,11 @@
           "title_sha256": "df5ccbb0172b8077501413278e5311cd4734aa1de647301ff9b54bf6bcc9129d",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 34,
@@ -459,9 +530,11 @@
           "title_sha256": "f13139ee7dd1f9efd667c5eaaf43ff2e3899fc5d89992b234f18c10b282bec34",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 35,
@@ -472,9 +545,11 @@
           "title_sha256": "f32a390f360f5b4a4dfb5570fea2663cc2504f73d097d1f5219b5c988e1a9c3c",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 36,
@@ -485,9 +560,11 @@
           "title_sha256": "bd48b572ce0c7724d84ddf487ec0ae215b7c445aa837c6be6df148c6c04eaaed",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 37,
@@ -498,15 +575,18 @@
           "title_sha256": "f1d50b47d3542a37ad3e0459f02148ecb5f03b83ef802b46fbb4de3d9587687e",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 38,
       "operation_ref": "db49b329dce1aed7",
       "proposal_count": 0,
-      "proposals": []
+      "proposals": [],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 39,
@@ -517,9 +597,11 @@
           "title_sha256": "6b833a1043fed43e9c73ca18b9a598bd9018e29246794e91d23cc12ca492c58e",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 40,
@@ -530,9 +612,11 @@
           "title_sha256": "d32f176faf0842ee7a61311ae37c38d3746b1d5f2e8b747b1e787d19815ed1e3",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 41,
@@ -543,9 +627,11 @@
           "title_sha256": "4f27b0507d2ba5e839f889bad83d797e441b37b3f653a053084b9dad54adb08b",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 42,
@@ -556,9 +642,11 @@
           "title_sha256": "f88cb3f91f27536577b7e3e2e5fb4f9d0a7454c879ca57b7181ec9ed841faaff",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 43,
@@ -569,27 +657,32 @@
           "title_sha256": "31fc285cb1761356d03f4246398393f8d22d74ef8103b2db3fb1bf1cb1c0b0cf",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         },
         {
           "title_sha256": "ea8bf16ee2d08e64f51aa48d44c562e6befb01eb147a306b3872d6140b83936c",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         },
         {
           "title_sha256": "70c0efd2128a03ffb35c497317cb9d2a596823d4c6a38faccc67be264172eac6",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 44,
       "operation_ref": "b6d09a39b31efb32",
       "proposal_count": 0,
-      "proposals": []
+      "proposals": [],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 45,
@@ -600,9 +693,11 @@
           "title_sha256": "6fbb71b5b3a813ea9c36ba81475cac8220811295a0ae5585afb18147d0bf1d1a",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 46,
@@ -613,21 +708,25 @@
           "title_sha256": "ed43e645505caf4af6ade47a0f15e6184722678488507fe53974ac236da8bcf9",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         },
         {
           "title_sha256": "9383686d12390f0a31ffeabd5fe09618cb819ef48de35abae4c4882a73648b8c",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         },
         {
           "title_sha256": "08a68fd3d8050b89cccc81a99a7d83f844d09e0256b34554736764c55eb91b9d",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 47,
@@ -638,9 +737,11 @@
           "title_sha256": "251a8db8106341910e8deac5c3f0d1fe8e9b1d141e0ab747cabcfd6de54b9830",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 48,
@@ -651,9 +752,11 @@
           "title_sha256": "ef8d33ecc67830fa860f2574d6a2bc14f190217b20623488450007452183278b",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 49,
@@ -664,9 +767,11 @@
           "title_sha256": "aa4241c0973e2dce2bf0503ac215f8ceac4c37300c1809a405d08a6717962d0a",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     },
     {
       "utterance_n": 50,
@@ -677,9 +782,11 @@
           "title_sha256": "e56232752990ede1cab973675954bcb73e4f02f12dfc2040d5ab376354a0616a",
           "source_script": "cyrillic",
           "title_script": "cyrillic",
-          "fidelity": "faithful"
+          "fidelity": "faithful",
+          "grounded_in_source": true
         }
-      ]
+      ],
+      "required_terms_preserved": true
     }
   ]
 }
