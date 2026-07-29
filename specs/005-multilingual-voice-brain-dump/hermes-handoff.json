@@ -1,6 +1,6 @@
 {
   "schema_version": "speckit-hermes-handoff/v1",
-  "root_outcome": "Stable multilingual voice brain dump: a real multi-minute Russian/English code-switched recording becomes individually reviewable, correctly split, language-faithful task proposals with full transcript provenance, consent that names every configured vendor, and per-proposal grounding that never poisons the batch — with FR-016 grounding tolerance as the single remaining lane.",
+  "root_outcome": "Stable multilingual voice brain dump: a real multi-minute Russian/English code-switched recording becomes individually reviewable, correctly split, language-faithful task proposals with full transcript provenance, consent that names every configured vendor, and per-proposal grounding that never poisons the batch. The US1-US3 core and the FR-016 grounding-tolerance lane are delivered; a planning-review hardening lane (consent pre-upload boundary, provider-discovery prerequisite, review-screen citations, consent-withdrawal deletion, frozen-batch partial commit, ADR-0008 rollout flag, corpus evidence report, ADR-0006 copy, title-shape invariant) remains OPEN and gates the approved handoff and the ASK-class landing.",
   "artifacts": {
     "spec": "specs/005-multilingual-voice-brain-dump/spec.md",
     "plan": "specs/005-multilingual-voice-brain-dump/plan.md",
@@ -8,13 +8,15 @@
     "checklist": "specs/005-multilingual-voice-brain-dump/checklists/requirements.md",
     "adrs": [
       "docs/decisions/0001-vnext-modular-monolith-and-workflow-contracts.md",
-      "docs/decisions/0002-async-voice-operation-substrate.md"
+      "docs/decisions/0002-async-voice-operation-substrate.md",
+      "docs/decisions/0006-native-gtd-lifecycle-and-capability-baseline.md",
+      "docs/decisions/0008-verified-trunk-serial-landing.md"
     ]
   },
   "planning_review": {
-    "run_id": "manual005",
+    "run_id": "rerun0729",
     "risk": "high",
-    "status": "blocked",
+    "status": "technical-changes-required",
     "reviewers": [
       "requirements-consistency",
       "architecture-consistency",
@@ -24,43 +26,47 @@
   },
   "product_decisions": [
     {
-      "category": "privacy",
-      "question": "When transcription and reconciliation are handled by different vendors, what must external-processing consent name?",
-      "answer": "Consent must name every configured vendor (consent.providers), and each pipeline stage re-verifies its own vendor is in the consented set and fails closed before data leaves the device; the recording UI shows the real configured vendor names discovered from GET /api/brain-dump-providers, never a hardcoded label.",
-      "evidence_ref": "spec.md FR-011/FR-012, US2; constitution Principle I; plan.md decision 5; verified SC-006"
-    },
-    {
-      "category": "scope",
-      "question": "Should reconciliation batch multiple utterances per model call to raise proposal yield?",
-      "answer": "No. Windowed/batched reconciliation was tested live 2026-07-29 and rejected: +3 proposals for +21% cost and a reintroduced translation regression. The full-list single reconciler feed with per-proposal grounding is retained.",
-      "evidence_ref": "spec.md Out of Scope; plan.md 'Remaining work'; tasks.md Notes"
+      "category": "acceptance-behavior",
+      "question": "If task creation fails partway through a reviewed batch, should already-created tasks remain and the remainder retry, or must the batch be all-or-nothing?",
+      "answer": "Per-action durable: already-created tasks stay and a retry idempotently completes only the remaining actions (ADR-0002 per-action commit semantics, not whole-batch rollback). FR-015 and US1 acceptance scenario 4 amended. NOTE: the durable frozen-batch/per-action ledger this requires is not yet implemented - tracked as hardening task T033.",
+      "evidence_ref": "spec.md Clarifications (2026-07-29), FR-015, US1 scenario 4; ADR-0002 sections 485-519; tasks.md T033"
     },
     {
       "category": "acceptance-behavior",
-      "question": "Until FR-016 lands, how should proposals that need multi-clause modifier, self-correction, or garbled-proper-noun tolerance behave?",
-      "answer": "They fail closed rather than guess (measured cost ≈ one third of real-dump proposals). Anti-hallucination grounding (FR-009) is never weakened to raise yield; FR-016 is deferred to its own lane.",
-      "evidence_ref": "spec.md FR-016, Edge Cases; plan.md FR-016 lane; tasks.md Phase 5"
+      "question": "Is a correctly transcribed proper noun mandatory, or is dropping a task with a garbled proper noun acceptable until follow-up tolerance?",
+      "answer": "Fail-closed omission accepted. FR-001 narrowed: proper-noun preservation is best-effort; heavily garbled nouns are not guessed and dependent proposals fail closed (FR-016 tolerance recovers close mishears). Edge Cases and success criteria aligned.",
+      "evidence_ref": "spec.md Clarifications (2026-07-29), FR-001, FR-016, proper-noun Edge Case"
+    },
+    {
+      "category": "acceptance-behavior",
+      "question": "What is the canonical title-fidelity rule for generated task proposals (given code-switched utterances and multi-language evidence)?",
+      "answer": "Language-faithful rewrites: titles preserve the source language, intent, proper nouns, and embedded foreign terms; grammatical inflection and grounded rewording are allowed (not necessarily a verbatim subsequence); omission of non-core details for conciseness is allowed; translation is prohibited. The extractive-subsequence option was declined (it would contradict delivered FR-008 morphology tolerance). FR-006/FR-007/FR-008 rewritten to separate title-generation from grounding tolerance; a title-shape invariant is tracked as hardening task T037.",
+      "evidence_ref": "spec.md Clarifications (2026-07-29), FR-006, FR-007, FR-008, US1 scenario 1, SC-003; tasks.md T037"
     }
   ],
   "lanes": [
     {
       "id": "delivered-core",
-      "outcome": "Multilingual STT + morphology-tolerant grounding + per-proposal skip + multi-vendor consent + test hermeticity, delivered and live-verified 2026-07-29 (covers US1, US2, US3).",
+      "outcome": "US1-US3 core (multilingual STT, morphology-tolerant grounding, per-proposal skip, multi-vendor consent, test hermeticity) plus the FR-016 grounding-tolerance lane, delivered on branch 005-multilingual-voice-brain-dump.",
       "depends_on": [],
       "task_refs": [
         "T001", "T002", "T003",
         "T004", "T005", "T006", "T007", "T008", "T009", "T010", "T011", "T012", "T013",
         "T014", "T015", "T016", "T017", "T018", "T019",
-        "T020", "T021", "T022", "T023"
+        "T020", "T021", "T022", "T023",
+        "T024", "T025", "T026", "T027", "T028"
       ],
       "scope_paths": [
         "backend/app/workflows/voice_brain_dump/domain.py",
         "backend/app/workflows/voice_brain_dump/service.py",
         "backend/app/workflows/voice_brain_dump/confirmation.py",
         "backend/app/workflows/voice_brain_dump/providers.py",
+        "backend/app/workflows/voice_brain_dump/repository.py",
+        "backend/app/workflows/voice_brain_dump/task_port.py",
         "backend/app/workflows/voice_brain_dump/adapters/deepgram_stt.py",
         "backend/app/workflows/voice_brain_dump/adapters/openai_stt.py",
         "backend/app/workflows/voice_brain_dump/adapters/reconciler.py",
+        "backend/app/workflows/voice_brain_dump/evaluation.py",
         "backend/app/core/config.py",
         "backend/app/container.py",
         "backend/app/api/tasks.py",
@@ -70,63 +76,77 @@
         "frontend/src/features/brain-dump/BrainDumpRoute.tsx"
       ],
       "exclusive_writer_scope": [
-        "backend/app/workflows/voice_brain_dump/domain.py",
-        "backend/app/workflows/voice_brain_dump/service.py",
-        "backend/app/workflows/voice_brain_dump/confirmation.py",
         "backend/app/workflows/voice_brain_dump/providers.py",
+        "backend/app/workflows/voice_brain_dump/repository.py",
+        "backend/app/workflows/voice_brain_dump/task_port.py",
         "backend/app/workflows/voice_brain_dump/adapters/deepgram_stt.py",
         "backend/app/workflows/voice_brain_dump/adapters/openai_stt.py",
-        "backend/app/core/config.py",
         "backend/app/container.py",
-        "backend/app/api/tasks.py",
         "backend/tests/conftest.py",
         "frontend/src/api/taskHooks.ts",
-        "frontend/src/api/client.ts",
-        "frontend/src/features/brain-dump/BrainDumpRoute.tsx"
+        "frontend/src/api/client.ts"
       ],
       "acceptance_evidence": [
-        "SC-001: reference 4-minute RU/EN recording yields 15 committed tasks (prior: 0)",
-        "SC-002: ≈82% of actionable utterances yield exactly one correct proposal (prior ~33%)",
-        "SC-003: zero translated titles on the reference corpus (prior 9 of 50)",
-        "SC-004: zero conjunction false-splits",
-        "SC-005: batch with an unverifiable proposal still delivers every verified sibling",
-        "SC-006: consent omitting the transcription vendor fails closed with no upload",
-        "SC-007: 4-minute recording processed in ~30s (target <2 min)",
-        "SC-008: 875 backend / 443 frontend tests green with the feature active",
-        "Live e2e 2026-07-29: real 4-min m4a -> 62 utterance segments -> 15 committed tasks"
+        "SC-002/003/004 covered by reconciliation grounding/shaping tests in backend/tests/test_voice_brain_dump_reconciliation.py",
+        "SC-005 covered by per-op skip tests; provider hardening by backend/tests/test_voice_stt_adapters.py; hermeticity by backend/tests/conftest.py",
+        "FR-016 delivered: reconciler _grounding_clauses/_correction_clauses/_entities_equivalent + named tests (334 reconciliation / 907 backend green) with documented fail-closed residue",
+        "SC-001/SC-007 (15 tasks / ~30s) are labelled experimental observations pending the T035 operational-evidence report; the SC-006 pre-upload boundary is NOT verified at HEAD 9bd3ab9 and re-anchors to T029 (hardening lane)"
       ]
     },
     {
-      "id": "fr016-grounding-tolerance",
-      "outcome": "Extend semantic verification to tolerate multi-clause modifier grounding within one cited utterance, mid-utterance self-corrections (prefer the corrected value), and transcription-garbled proper nouns, without weakening FR-009 anti-hallucination guarantees.",
+      "id": "hardening",
+      "outcome": "Close the code-vs-spec gaps the high-risk planning review (rerun0729) found; each item lands test-first on ASK-class paths and gates the approved handoff and ASK landing.",
       "depends_on": ["delivered-core"],
-      "task_refs": ["T024", "T025", "T026", "T027", "T028"],
+      "task_refs": ["T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037"],
       "scope_paths": [
+        "backend/app/workflows/voice_brain_dump/service.py",
+        "backend/app/workflows/voice_brain_dump/confirmation.py",
+        "backend/app/workflows/voice_brain_dump/domain.py",
         "backend/app/workflows/voice_brain_dump/adapters/reconciler.py",
-        "backend/app/workflows/voice_brain_dump/evaluation.py"
+        "backend/app/workflows/voice_brain_dump/evaluation.py",
+        "backend/app/core/config.py",
+        "backend/app/api/tasks.py",
+        "frontend/src/features/brain-dump/BrainDumpRoute.tsx",
+        "backend/tests/test_brain_dump_operations_api.py",
+        "backend/tests/test_voice_brain_dump_reconciliation.py",
+        "frontend/src/features/brain-dump/BrainDumpRoute.test.tsx"
       ],
       "exclusive_writer_scope": [
+        "backend/app/workflows/voice_brain_dump/service.py",
+        "backend/app/workflows/voice_brain_dump/confirmation.py",
+        "backend/app/workflows/voice_brain_dump/domain.py",
         "backend/app/workflows/voice_brain_dump/adapters/reconciler.py",
-        "backend/app/workflows/voice_brain_dump/evaluation.py"
+        "backend/app/workflows/voice_brain_dump/evaluation.py",
+        "backend/app/core/config.py",
+        "backend/app/api/tasks.py",
+        "frontend/src/features/brain-dump/BrainDumpRoute.tsx",
+        "backend/tests/test_brain_dump_operations_api.py",
+        "backend/tests/test_voice_brain_dump_reconciliation.py",
+        "frontend/src/features/brain-dump/BrainDumpRoute.test.tsx"
       ],
       "acceptance_evidence": [
-        "FR-016 fixtures for the three shapes ground and commit while the FR-009 rejection matrix (T021) stays fully green",
-        "Reference-corpus evaluation harness records a positive recovered-proposal delta with zero new translations and zero new false splits",
-        "No regression in SC-003/SC-004 or the anti-hallucination rejection tests before release"
+        "T029: complete-vendor-set pre-upload boundary + vendor-B-only negative test (no upload/persist/provider call); one providers-vs-legacy precedence rule; SC-006 re-anchored to the resulting SHA",
+        "T030/T031: frontend fails closed until provider discovery loads (no hardcoded openai fallback), renders real vendor names (FR-012), and renders each proposal's cited utterance (FR-002); client privacy-boundary test proves capture/upload cannot start pre-discovery",
+        "T032/T033: consent withdrawal schedules deletion and is sweep-eligible (retention test); frozen batch + per-action ledger with fault-injection partial-commit tests (FR-015/ADR-0002)",
+        "T034/T035: ADR-0008 default-OFF rollout flag (OFF/INTERNAL/ON); privacy-safe SHA-keyed operational report computing SC-001..004/007",
+        "T036/T037: ADR-0006 provisional/confirmation copy; title-shape invariant separating FR-006 output from FR-008 grounding; full suites re-run green on the final candidate SHA before the campaign rerun"
       ]
     }
   ],
   "risks": [
-    "Real-provider dependence (Deepgram nova-3, OpenAI gpt-4o): provider outage, quota exhaustion, or contract drift degrades capture; mitigated by terminal-vs-retryable classification, bounded retries, checkpoint resume, and deterministic CI providers.",
-    "Grounding tolerance (FR-016) must not erode FR-009: any loosening risks admitting hallucinated or recombined proposals; the FR-009 rejection matrix is a standing gate on the fr016 lane.",
-    "Split-vendor consent correctness is privacy-critical: a stage that skips its per-vendor guard would upload without consent; enforced fail-closed per stage and covered by consent-mismatch tests.",
-    "Reference-corpus overfitting: metrics are from one founder-read 50-utterance corpus; broader multilingual capture may shift boundary precision and translation rates."
+    "Handoff is NOT approved: the rerun0729 high-risk campaign returned ~11 blocking technical findings across all four reviewers (status reads product-decision-required only because the one product decision outranks blocking findings in aggregation). Most require code/test changes (the hardening lane); a campaign rerun cannot reach approved until they land.",
+    "Real-provider dependence (Deepgram nova-3, OpenAI gpt-4o): outage, quota, or contract drift degrades capture; mitigated by terminal-vs-retryable classification, bounded retries, checkpoint resume, and deterministic CI providers.",
+    "Privacy egress: until T029/T030 land, a degraded provider-discovery path can egress audio under consent that displayed no vendor name (OpenAI-only deployment), and consent withdrawal does not yet schedule deletion of uncommitted transcripts (T032).",
+    "Commit durability: FR-015 per-action durable semantics are specified but not yet backed by a frozen batch / per-action ledger (T033); a mid-batch failure is currently untested.",
+    "ADR-0002 release targets (>=95% task-count accuracy/boundary, 100% critical-term) are not met by this below-gate experimental dogfood slice (~82%); documented, not a delivered ADR-0002 acceptance.",
+    "Reference-corpus overfitting: metrics come from one founder-read 50-utterance corpus; broader capture may shift boundary precision and translation rates."
   ],
   "non_goals": [
     "Windowed/batched reconciliation calls (tested and rejected 2026-07-29: +21% cost, translation regression).",
     "Inferring structured fields (due dates, tags, projects, priority) from speech.",
     "Live streaming transcription vendor changes for the provisional preview track.",
-    "Consent UX copy and first-class structured task fields.",
-    "Any change to the AsyncOperation state machine, chunk-upload manifest identity, or freeze/confirm idempotency contract."
+    "On-device provisional preview without external consent (recording does not start without consent).",
+    "Meeting ADR-0002's >=95% release targets in this slice (explicitly a below-gate experimental dogfood increment).",
+    "A no-consent finish-to-review path for newly created operations."
   ]
 }

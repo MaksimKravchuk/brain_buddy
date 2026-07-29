@@ -7,11 +7,18 @@
 plus the live-verification evidence recorded there (reference RU/EN corpus, real
 4-minute recording, fail-closed consent probes).
 
-**Note**: This is a retroactive plan. It describes the architecture the delivered
-implementation already satisfies (verified live 2026-07-29) as the plan that was
-executed, and calls out the single open follow-up lane (FR-016 grounding
-tolerance) as remaining work. It does not introduce new architecture; where it
-states a decision, the decision is already in `main`.
+**Note**: This is a retroactive plan describing the architecture the delivered
+implementation satisfies. The work is **committed on the feature branch
+`005-multilingual-voice-brain-dump`** (HEAD `9bd3ab9`, four feature commits:
+`000c2f8` cross-language grounding + per-op skip, `f6cd066` multi-provider
+consent + per-utterance pipeline, plus the FR-016 grounding lane and this spec
+package) — it is **not yet merged to `main` and not yet deployed**. Live
+observations (the 4-minute recording drive) are experimental evidence from that
+branch, kept separate from landed/deployed acceptance evidence (see the Evidence
+manifest). A small set of follow-up hardening fixes is landing on the branch (see
+"Follow-up hardening in flight"). It introduces no new architecture; where it
+states a decision, that decision is realized in the branch, pending ASK-class
+landing (see Release gates).
 
 ## Summary
 
@@ -41,9 +48,16 @@ substrate, adding no new persistence store and no new domain module:
    provider credentials so a developer `.env` cannot change deterministic
    test-provider selection.
 
-Everything above is delivered. FR-016 (multi-clause modifier grounding,
-self-correction tolerance, garbled-proper-noun tolerance) is the one remaining
-lane; until it lands, those proposal shapes fail closed rather than guess.
+All four changes are delivered on the branch, and FR-016 (multi-clause modifier
+grounding, self-correction tolerance, garbled-proper-noun tolerance) has since
+landed in `reconciler.py` (334 reconciliation / 907 backend tests green) with a
+documented fail-closed residue (pronoun-binding self-correction, edit-distance-3
+proper-noun garbles, one paraphrase class) that still fails closed rather than
+guessing. A small group of privacy/UX hardening fixes surfaced by planning review
+— the pre-upload consent boundary, FR-012 vendor-name rendering, the no-consent
+local-preview path, and FR-007 title cleanliness — is landing as follow-up
+commits before this reaches an approved handoff (see "Follow-up hardening in
+flight").
 
 ## Technical Context
 
@@ -85,24 +99,36 @@ corpus ~50 utterances / ~30 actionable cold-start creations.
 
 ## Constitution Check
 
-*GATE: satisfied by the delivered implementation; re-checked against the shipped
-code for this retroactive plan.*
+*GATE: partially satisfied. The delivered US1-US3 core + FR-016 meet most of the
+constitution, but the high-risk planning review (rerun0729) found gating gaps
+(consent egress boundary, review-screen provenance, consent-withdrawal deletion,
+frozen-batch partial commit, ADR-0008 rollout flag, corpus evidence) that are
+NOT yet satisfied — see the hardening lane. This gate is met only when Phase 6
+(T029-T037) lands and the campaign is re-run to approved.*
 
 - **Spec workflow**: `spec.md` and `checklists/requirements.md` are current and
-  reflect the live-verified behavior; this plan follows them. Clarification is
-  not open — the spec has no `[NEEDS CLARIFICATION]` markers. Remaining scope
-  (FR-016) is explicitly bounded in the spec's Out of Scope and carried as one
-  open lane here.
+  reflect the delivered behavior; this plan follows them. The spec has no
+  `[NEEDS CLARIFICATION]` markers, and the three planning-review product
+  decisions (partial-batch commit semantics, garbled-proper-noun handling,
+  code-switched title language) are recorded in the spec's Clarifications section
+  (2026-07-29) and in the handoff. FR-016 is delivered; the open scope is the
+  planning-review hardening lane (Phase 6, T029-T037), which gates the approved
+  handoff and ASK landing.
 - **Consent & Safety (Principle I)**: External processing requires current
-  consent that names *every* configured vendor (`consent.providers`), and each
-  stage re-verifies its own vendor before uploading (fail-closed
-  `CONSENT_PROVIDER_NOT_ALLOWED`). No-consent recordings stay on-device
-  provisional only. Provisional model output stays in the operation workspace
-  until explicit confirmation applies frozen title-only actions through
-  `TaskPort` (ADR-0002 contract preserved). Raw audio/transcript/credentials/
-  paths/fingerprints stay out of logs, metrics, events, and fixtures; the test
-  env scrubs `OPENAI_API_KEY`/`DEEPGRAM_API_KEY` so real keys and the reference
-  recording never enter CI.
+  consent naming the configured vendors (`consent.providers`); provisional model
+  output stays in the operation workspace until explicit confirmation applies
+  frozen title-only actions through `TaskPort` (ADR-0002 contract preserved). Raw
+  audio/transcript/credentials/paths/fingerprints stay out of logs, metrics,
+  events, and fixtures; the test env scrubs `OPENAI_API_KEY`/`DEEPGRAM_API_KEY`
+  so real keys and the reference recording never enter CI. **Known hardening in
+  flight** (planning-review findings): the pre-upload guard as reviewed accepted
+  any consented subset of the configured vendors, so a consent naming only the
+  reconciler vendor could pass the egress boundary with the STT-vendor mismatch
+  caught only at execution; the follow-up commit makes the *complete* configured
+  vendor set a fail-closed pre-upload prerequisite. The no-external-consent
+  local-preview path and FR-012 vendor-name rendering are being finalized in the
+  same follow-up. These are tracked in "Follow-up hardening in flight" and gate
+  the approved handoff.
 - **Tests (Principle II)**: Behavior changes shipped with failing-then-passing
   backend pytest (adapter contracts, grounding accept/reject matrix, per-op
   skip, consent-mismatch fail-closed, hermeticity) and frontend Vitest
@@ -210,8 +236,10 @@ module, store, or top-level package was introduced.
    action/target recombination, restoration of user-deleted proposals, and
    destructive removals lacking explicit destructive language (FR-009). The
    `brain-dump-reconciler-v2` prompt (`template_version =
-   "brain-dump-reconciler-v2"`) carries language-lock (titles in the source
-   language, never translated — FR-006), segment-boundary (one intent = one
+   "brain-dump-reconciler-v2"`) carries language-lock (titles preserve the source
+   wording as spoken — mixed languages and embedded foreign terms kept verbatim,
+   never translated or normalized to one language — FR-006), segment-boundary
+   (one intent = one
    task; a simple «и»/"and" conjunction never splits — FR-003), accounting
    (no separate utterances merged unless the same action — FR-004), and
    conciseness (core action + object; no inferred deadlines/tags/projects —
@@ -271,9 +299,16 @@ module, store, or top-level package was introduced.
 - **Reconciler `template_version = "brain-dump-reconciler-v2"`** — audit
   provenance for the prompt generation (ADR-0002); the prompt text itself is not
   persisted.
+- **Commit semantics (product decision, 2026-07-29)** — commit is **per-action
+  durable, idempotent under replay**, not whole-batch atomic. A failure partway
+  through a reviewed batch keeps the already-created tasks; a retry completes only
+  the remaining actions, each exactly once via the deterministic child key
+  (ADR-0002 §492–519). FR-015 and US1 acceptance scenario 4 are amended from
+  "atomically" to this per-action durable definition; the plan and its tests use
+  the same definition (partial-failure resumes, never rolls back siblings).
 - **No change** to the `AsyncOperation` state machine, chunk-upload manifest
   identity, freeze/confirm idempotency keys, or the title-only
-  `create_native_inbox_task` commit action.
+  `create_native_inbox_task` commit action shape.
 
 ## Data handling and privacy
 
@@ -288,6 +323,19 @@ stage names, and allowlisted error codes only — never audio, transcript/task
 text, language vocabulary, provider responses, emails, or credentials. The
 reference recording and its transcript are treated as real user data and are
 never committed; the eval harness reports aggregate metrics, not content.
+
+**ADR-0001/0002 raw-media ownership — bounded migration exception.** ADR-0001
+assigns raw-input media to Capture and ADR-0002 keeps `AsyncOperation` in the
+application layer with audio Capture-private. In the current implementation the
+`voice_brain_dump` workflow's own `repository.py` persists the raw audio chunks
+(`save/load/delete_brain_dump_audio_chunks`) rather than delegating to a
+Capture-owned port, so the workflow is both orchestrator and media owner. This is
+recorded here as a **bounded, documented migration exception**, not full boundary
+compliance: it is acceptable for the single-owner MVP slice because the module
+still exposes media only through an opaque `media_ref` (never bytes or paths) and
+enforces owner scoping. **Exit criteria**: route raw-media persistence through a
+Capture-owned port/repository before Capture is extracted or a second writer of
+operation media appears. Until then, no other module reads or writes this store.
 
 ## Observability
 
@@ -325,8 +373,11 @@ behavior. Closing the UI never cancels; reopening resumes by operation ID.
   the unverifiable one; all-unverifiable batch raises explicit validation error;
   structural violations fail the whole batch.
 - **Consent** — split-vendor consent names both vendors; consent omitting the
-  transcription vendor fails closed with no upload; no-consent yields on-device
-  provisional only.
+  transcription vendor fails closed with no upload (the exact vendor-B-only
+  pre-upload negative path is hardening task T029); no external consent means
+  recording does not start — there is no on-device provisional path (US2
+  scenario 3 / Out of Scope). A client-side privacy-boundary test (T030) must
+  prove capture/upload cannot begin before provider discovery resolves.
 - **Idempotency** — commit replay creates each reviewed task exactly once.
 - **Hermeticity** — deterministic providers hold with `OPENAI_API_KEY`/
   `DEEPGRAM_API_KEY` present in the ambient environment.
@@ -336,37 +387,125 @@ behavior. Closing the UI never cancels; reopening resumes by operation ID.
   (task-count accuracy, boundary precision, zero translations, zero conjunction
   splits), reported separately from the unit suites.
 
-Delivered evidence: 875 backend + 443 frontend green; live e2e 2026-07-29 drove a
-real 4-minute m4a → 62 utterance segments → 15 committed tasks; SC-001..SC-008
-verified in `spec.md`.
+Delivered evidence: 907 backend (incl. 334 reconciliation) + 443 frontend green
+on the branch; the 2026-07-29 real-recording drive (4-minute m4a → 62 utterance
+segments → 15 committed tasks) is a labelled experimental observation. See the
+Evidence manifest for the SC → test/observation mapping keyed to HEAD `9bd3ab9`;
+the exact vendor-B-only consent negative path is added by follow-up hardening.
 
 ## Release gates
 
-Standard BrainBuddy gates apply and remain Hermes-owned: backend lint
+Standard BrainBuddy CI gates apply and remain Hermes-owned: backend lint
 (`ruff`) / format (`black`) / type (`mypy`) / pytest + coverage, frontend Vitest
 + build, Docker image builds, and the CI spec gate
 (`python3 scripts/check_spec_kit_specs.py`). Real providers are enabled only
 behind configured credentials and consent; deterministic providers remain the CI
-default. Fly release follows the verified-trunk path (ADR-0008).
+default.
 
-## Remaining work — FR-016 grounding-tolerance lane (open)
+**Delivery class: ASK (ADR-0008), not standard verified-trunk.** This feature
+changes external-processing privacy/consent behavior and modifies
+`backend/app/api/tasks.py`, both of which ADR-0008 classifies as ASK paths and
+explicitly excludes from automatic candidate promotion. Landing therefore
+requires the ADR-0008 ASK procedure: a recorded human approval, green CI on the
+exact tested SHA, and an audited ASK landing (temporary ruleset intervention with
+the deploy key as sole `restrict_updates` bypass). It must not ride the SHIP/SHOW
+auto-landing path. Fly production release follows the verified-trunk deploy after
+that ASK landing.
 
-FR-016 is the only unbuilt scope. It extends semantic verification to tolerate,
-without weakening FR-009: (a) titles that draw modifier details from multiple
-clauses of the *same* cited utterance; (b) mid-utterance self-corrections
-(«в восемь, ой, лучше в восемь тридцать»), preferring the corrected value; and
-(c) transcription-garbled proper nouns («BrainBuddy» → «BrentBuddy»). Until it
-lands, these shapes fail closed rather than guess — a measured cost of roughly
-one third of real-dump proposals. Explicitly rejected alternatives stay out of
-scope: windowed/batched reconciliation (tested 2026-07-29: +3 proposals for +21%
-cost and a reintroduced translation regression) and inferring structured fields
-from speech. The lane touches only `reconciler.py` grounding internals plus its
-tests and is dispatched through Hermes Kanban with the same anti-hallucination
-gates.
+## FR-016 grounding-tolerance lane (delivered)
+
+FR-016 extends semantic verification to tolerate, without weakening FR-009:
+(a) titles that draw modifier details from multiple clauses of the *same* cited
+utterance; (b) mid-utterance self-corrections («в восемь, ой, лучше в восемь
+тридцать»), preferring the corrected value; and (c) transcription-garbled proper
+nouns («BrainBuddy» → «BrentBuddy»). **Delivered 2026-07-29** in `reconciler.py`
+(`_grounding_clauses`, `_correction_clauses`, `_entities_equivalent` /
+within-segment adjunct grounding), covered by
+`test_openai_reconciler_grounds_within_segment_multi_clause_aggregation`,
+`test_openai_reconciler_grounds_self_corrected_utterances`, and
+`test_openai_reconciler_tolerates_stt_garbled_proper_noun` (334 reconciliation /
+907 backend tests green). A **documented fail-closed residue** remains — the
+pronoun-binding self-correction case, edit-distance-3 proper-noun garbles, and
+one paraphrase class — which still fails closed rather than guessing, so FR-009 is
+preserved. Explicitly rejected alternatives stay out of scope: windowed/batched
+reconciliation (tested 2026-07-29: +3 proposals for +21% cost and a reintroduced
+translation regression) and inferring structured fields from speech.
+
+## Follow-up hardening in flight
+
+Planning review (run `c6003348`, risk=high) surfaced four privacy/UX gaps between
+the reviewed code and the spec's promises; these are being closed as follow-up
+commits on the branch before the approved handoff:
+
+1. **Consent pre-upload boundary** — enforce the *complete* configured vendor set
+   (not merely a consented subset) at the egress boundary in
+   `service.py::_assert_external_provider_consent`, so a consent omitting the
+   configured STT vendor fails closed with no upload (SC-006/FR-011).
+2. **FR-012 vendor-name rendering** — render the discovered vendor names in the
+   consent surface (`BrainDumpRoute.tsx`), not merely place them in the payload.
+3. **No-consent behavior (decided)** — the spec resolved this: without external
+   consent, recording does not start and there is no on-device provisional path
+   (US2 scenario 3 / Out of Scope). Remaining work (T030) aligns the frontend
+   tests to assert refusal and removes any stale no-consent finish-to-review path
+   for newly created operations.
+4. **FR-007 title cleanliness** — remove the grounding "meaningless-title"
+   exception that admits deadlines/contexts/projects into titles, with
+   extraction-level fixtures asserting clean titles (spec-truth item).
+
+Until these land, the retroactive "delivered/verified" claims for the consent
+egress boundary, FR-012 display, and the no-consent path are qualified as above.
+
+## Evidence manifest
+
+Acceptance evidence is anchored to the branch, privacy-safe (no raw recording or
+transcript — aggregate metrics and named tests only):
+
+- **Source**: branch `005-multilingual-voice-brain-dump`, HEAD `9bd3ab9`
+  (commits `000c2f8`, `f6cd066`, the FR-016 grounding commit, and the spec
+  package), pending ASK-class landing to `main`.
+- **Automated suites**: 907 backend (pytest, incl. 334 reconciliation) + 443
+  frontend (Vitest) green with the feature active — this supersedes the
+  pre-FR-016 875-backend figure quoted in `spec.md` SC-008.
+- **SC → evidence**: SC-002/003/004 map to the reconciliation grounding/shaping
+  tests in `backend/tests/test_voice_brain_dump_reconciliation.py`; SC-005 to the
+  per-op skip tests; SC-006 to the split-vendor consent tests in
+  `backend/tests/test_brain_dump_operations_api.py` (the exact vendor-B-only
+  negative path is added by follow-up hardening item 1); provider hardening to
+  `backend/tests/test_voice_stt_adapters.py`; hermeticity to
+  `backend/tests/conftest.py`.
+- **SC-001/SC-007 (15 committed tasks, ~30 s)**: recorded operational
+  observations from the 2026-07-29 real-recording drive on this branch, labelled
+  experimental (not a landed/deployed CI artifact); the real-audio harness
+  (`evaluation.py`, `scripts/evaluate_voice_stt.py`) reports STT/extraction
+  aggregates only and does not itself drive capture-to-commit. Hardening task
+  T035 replaces this with a SHA-keyed capture→review→commit report.
+- **ADR-0002 release-gate posture**: this slice does **not** meet ADR-0002's
+  release targets (>=95% exact task-count accuracy, >=95% boundary
+  precision/recall, 100% critical-term preservation on the approved corpus). At
+  ~82% isolation accuracy with best-effort proper nouns, it is an explicitly
+  **below-gate experimental dogfood increment** that stabilizes the pipeline; it
+  does not claim satisfied ADR-0002 release acceptance. Meeting those targets is
+  out of scope for this feature.
+
+## Migration and rollback (version skew)
+
+The additive `consent.providers` field is forward-readable, but the legacy single
+`consent.provider` carries only the accurate-STT vendor. On rollback to a backend
+that ignores `providers` (unknown stored fields are dropped by
+`StorageBaseModel`), an in-flight split-vendor operation would compare the single
+legacy `provider` against the differently-configured reconciler and fail. Rollback
+procedure for active operations: stop accepting new capture, then drain, cancel,
+or forward-fix in-flight split-vendor operations before restoring an older
+backend; completed operations are unaffected (immutable). This must be exercised
+before any rollback of a split-vendor deployment.
 
 ## Complexity Tracking
 
-No constitution violations require justification. The feature adds no new
+| Item | Why needed | Simpler alternative rejected because |
+|------|-----------|--------------------------------------|
+| Raw-media owned by the workflow repository rather than a Capture-owned port | Single-owner MVP slice; media exposed only via opaque `media_ref` with owner scoping | A Capture port/repository is the correct target but not required before Capture extraction; tracked as a bounded exception with exit criteria (see Data handling) |
+
+No other constitution violations require justification. The feature adds no new
 project, module, persistence store, service, or broker; it hardens adapters and
 adds one additive consent field and one read-only discovery endpoint inside the
 existing ADR-0001/0002 contracts.

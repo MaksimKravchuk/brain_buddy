@@ -31,10 +31,11 @@
 
 ## Notes
 
-- Retroactive spec: success criteria cite live verification evidence from
-  2026-07-29 (reference corpus + real recording, full e2e drive, fail-closed
-  probes). FR-016 is the single open follow-up scope item and is explicitly
-  bounded in Out of Scope.
+- Retroactive spec: success criteria cite 2026-07-29 evidence (reference corpus
+  + real recording drive), some labelled experimental pending the SHA-anchored
+  operational report (tasks.md T035). FR-016 grounding tolerance is delivered
+  (not open). The open work is the planning-review hardening lane (tasks.md
+  Phase 6, T029-T037), which gates the approved handoff and ASK landing.
 - Vendor names (specific STT/reconciliation companies) appear only in
   assumptions/evidence context, never as requirements; requirements are stated
   vendor-agnostically per template guidance.

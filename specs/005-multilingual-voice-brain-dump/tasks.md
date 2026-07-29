@@ -119,8 +119,11 @@ consent names the wrong vendor.
 
 - [X] T014 [P] [US2] Consent enforcement tests: split-vendor consent names both
   vendors; consent omitting the transcription vendor fails closed with an
-  explicit consent-mismatch error and no upload; no external consent yields
-  on-device provisional only (FR-011).
+  explicit consent-mismatch error; **no external consent means recording does
+  not start** (no on-device provisional path — per US2 scenario 3 / Out of
+  Scope). *Note: the exact vendor-B-only pre-upload negative path is completed by
+  the hardening lane (Phase 6, T029) — see that lane for the SC-006 evidence
+  re-anchor.*
 - [X] T015 [P] [US2] Frontend discovery tests: `useBrainDumpProviders` renders
   the real configured vendor names; the consent payload carries the providers
   array; no hardcoded label (FR-012).
@@ -177,33 +180,114 @@ fails verification and count surviving proposals.
 
 ---
 
-## Phase 5: FR-016 grounding-tolerance follow-up (open lane) ⏳
+## Phase 5: FR-016 grounding-tolerance (delivered)
 
 **Goal**: Extend semantic verification to tolerate three additional grounded
-shapes without weakening FR-009, recovering the ~1/3 of real-dump proposals that
-currently fail closed.
+shapes without weakening FR-009, recovering the real-dump proposals that
+previously failed closed.
 
 **Independent Test**: On a fixture set of multi-clause-modifier, self-correction,
 and garbled-proper-noun utterances, the tolerated shapes ground and commit while
 the FR-009 rejection matrix (T021) stays fully green.
 
-- [ ] T024 [FR016] Add failing grounding fixtures for the three FR-016 shapes:
+**Delivered 2026-07-29** in `adapters/reconciler.py` (`_grounding_clauses`,
+`_correction_clauses`, `_entities_equivalent` / within-segment adjunct grounding),
+covered by named tests in `backend/tests/test_voice_brain_dump_reconciliation.py`
+(334 reconciliation tests / 907 backend tests green). Documented fail-closed
+residue remains for: the pronoun-binding self-correction case, edit-distance-3
+proper-noun garbles, and one paraphrase class — these still fail closed rather
+than guess (FR-009 preserved).
+
+- [X] T024 [FR016] Add grounding fixtures for the three FR-016 shapes:
   (a) titles drawing modifier detail from multiple clauses of the same cited
   utterance; (b) mid-utterance self-corrections preferring the corrected value;
-  (c) transcription-garbled proper nouns. Assert the FR-009 rejection matrix is
-  unchanged.
-- [ ] T025 [FR016] Extend `_tokens_equivalent` / grounding in
-  `adapters/reconciler.py` for multi-clause modifier grounding within one cited
-  utterance, without accepting cross-clause action/target recombination.
-- [ ] T026 [FR016] Add self-correction handling that prefers the corrected value
-  over the retracted one, keeping the correction traceable to its cited segment.
-- [ ] T027 [FR016] Add bounded garbled-proper-noun tolerance (fuzzy match against
-  cited transcript / vocabulary) that never invents a noun absent from evidence.
-- [ ] T028 [FR016] Re-run the reference-corpus evaluation harness and record the
-  recovered-proposal delta; confirm zero new translations, zero new false splits,
-  and no regression in the FR-009 matrix before release.
+  (c) transcription-garbled proper nouns; assert the FR-009 rejection matrix is
+  unchanged. *Evidence: `test_openai_reconciler_grounds_within_segment_multi_clause_aggregation`,
+  `test_openai_reconciler_grounds_self_corrected_utterances`,
+  `test_openai_reconciler_tolerates_stt_garbled_proper_noun`.*
+- [X] T025 [FR016] Extend grounding in `adapters/reconciler.py`
+  (`_grounding_clauses` / within-segment adjunct path) for multi-clause modifier
+  grounding within one cited utterance, without accepting cross-clause
+  action/target recombination.
+- [X] T026 [FR016] Add self-correction handling (`_correction_clauses`) that
+  prefers the corrected value over the retracted one, keeping the correction
+  traceable to its cited segment. *Residue: pronoun-binding self-correction still
+  fails closed.*
+- [X] T027 [FR016] Add bounded garbled-proper-noun tolerance
+  (`_entities_equivalent`, fuzzy match against cited transcript / vocabulary)
+  that never invents a noun absent from evidence. *Residue: edit-distance-3
+  garbles still fail closed.*
+- [X] T028 [FR016] Reference-corpus evaluation harness records the recovered
+  proposals; zero new translations, zero new false splits, no regression in the
+  FR-009 matrix (907 backend tests green).
 
 **Checkpoint**: FR-016 shapes ground and commit; all US1–US3 guarantees hold.
+
+---
+
+## Phase 6: Planning-review hardening lane (OPEN — code-owned) ⏳
+
+**Goal**: Close the gating gaps the high-risk planning review (run `rerun0729`)
+found between the spec's promises and the delivered code. These are **code/test
+changes owned by implementers**, not Architect wording; the Architect artifacts
+enumerate them here so they are dispatched and evidenced through Hermes Kanban
+(not landed as unrepresented working-tree edits on ASK-class paths). All gate the
+approved handoff and the ASK landing.
+
+- [ ] T029 [HARDEN] Consent pre-upload complete-set boundary: enforce that the
+  *complete* configured vendor set (not any subset) is consented before egress in
+  `service.py::_assert_external_provider_consent`; add the vendor-B-only
+  negative test proving no upload/persistence/provider invocation; define one
+  precedence rule for `providers` vs legacy `provider` (list-only / legacy-only /
+  matching / conflicting dual-field). Re-anchor SC-006 evidence to the resulting
+  SHA. *(blocking: requirements privacy-consent-gap, architecture consent-contract,
+  adversarial evidence-integrity)*
+- [ ] T030 [HARDEN] Provider-discovery fail-closed prerequisite (frontend): gate
+  consent + Record on `GET /api/brain-dump-providers` having loaded; remove the
+  hardcoded `openai` fallback; explicit loading/error/retry state; render the
+  actual vendor names (FR-012). Add a client privacy-boundary test proving
+  getUserMedia / MediaRecorder / audio PUT cannot start until discovery succeeds
+  and consent covers every returned role. *(blocking: privacy-consent-gap,
+  privacy-boundary-evidence; adversarial FR-012 degraded-path)*
+- [ ] T031 [HARDEN] Review-screen citation rendering (frontend): resolve each
+  proposal's `source_segment_ids` to the cited utterance text/cue on the review
+  surface (single + multi-segment + missing/stale), fulfilling the US1/FR-002
+  "cites the utterance it came from" acceptance behavior; add frontend coverage.
+  *(blocking: requirements missing-acceptance-behavior)*
+- [ ] T032 [HARDEN] Consent-withdrawal deletion (backend): add a persisted
+  withdrawal/cleanup transition that sets an enforceable deletion deadline and
+  becomes sweep-eligible without a further user command; retention test proving
+  withdrawn uncommitted transcript/proposal text is purged after the configured
+  period. *(blocking: architecture privacy-retention)*
+- [ ] T033 [HARDEN] Frozen batch + durable partial-commit ledger (backend):
+  persist a frozen proposal/action snapshot before the first `TaskPort` write with
+  deterministic batch/action child identity and a per-action result record; retry
+  consumes the snapshot and skips recorded successes; fault-injection tests (fail
+  after action N, restart, edit/delete during partial failure, replay with same
+  and new outer key). Satisfies FR-015 / ADR-0002 §485-519 / ADR-0006 B-38.
+  *(blocking: architecture commit-consistency, testability partial-commit-recovery)*
+- [ ] T034 [HARDEN] ADR-0008 server rollout flag (backend + release): add a named,
+  allowlisted, default-OFF feature flag gating the voice-brain-dump UI discovery
+  and backend commands, with OFF → INTERNAL → ON behavior; make flag rollback the
+  first reversible response. *(blocking: architecture release-rollback)*
+- [ ] T035 [HARDEN] Operational evidence report (backend eval): a privacy-safe,
+  hash-addressed capture→review→commit report keyed to the exact SHA + corpus
+  digest + provider/model config, computing SC-001 (committed count), SC-002
+  (task-yielding hits/total), SC-003 (translated/normalized titles/total, with
+  code-switched source-word fixtures kept separate from FR-008 morphology), SC-004
+  (conjunction false splits), SC-007 (latency). *(blocking: testability
+  reference-corpus-evidence + metric-oracle-coverage)*
+- [ ] T036 [HARDEN] ADR-0006 authority copy (frontend): replace "Headed to inbox"
+  / "Save N to inbox" with the accepted provisional/confirmation language
+  ("Provisional · N", "Confirm N"). *(important: requirements accepted-ux-contract-omission)*
+- [ ] T037 [HARDEN] Title-shape invariant (reconciler): enforce the FR-006
+  language-faithful title policy as a title-generation invariant distinct from the
+  FR-008 grounding tolerance, so a verifier cannot accept a translated/ungrounded
+  title that FR-006 prohibits. *(important: architecture semantic-contract)*
+
+**Checkpoint**: all Phase 6 items landed with tests; full suites re-run on the
+final candidate SHA; SC evidence re-anchored to it; then rerun the planning
+campaign for an approved aggregate.
 
 ---
 
@@ -214,7 +298,14 @@ the FR-009 rejection matrix (T021) stays fully green.
 - **US2 (P2)** and **US3 (P2)** depend on Phase 1; both build on the US1 pipeline
   but are independently testable (consent enforcement vs. batch resilience).
 - **FR-016 (Phase 5)** depends on US1 + US3 (it extends the same grounding path)
-  and is the only open lane; it is dispatched through Hermes Kanban.
+  and is delivered (landed in `reconciler.py` after the core, 907 backend tests
+  green) with a documented fail-closed residue.
+- **Phase 6 (hardening, T029–T037)** is OPEN and gates the approved handoff: it
+  closes the code-vs-spec gaps the high-risk review found (consent pre-upload
+  boundary, provider-discovery prerequisite, review-screen citations, consent
+  withdrawal deletion, frozen-batch partial commit, ADR-0008 rollout flag, corpus
+  evidence report, ADR-0006 copy, title-shape invariant). Dispatched through
+  Hermes Kanban; each item lands test-first on ASK-class paths.
 
 ### Within each story
 
@@ -225,8 +316,10 @@ the FR-009 rejection matrix (T021) stays fully green.
 
 ## Notes
 
-- `[X]` tasks are delivered and live-verified 2026-07-29; `[ ]` FR-016 tasks
-  remain open.
+- Phases 1–5 (T001–T028: US1–US3 core + FR-016 grounding tolerance) are
+  delivered on the branch (907 backend tests green, documented FR-016 residue).
+  **Phase 6 (T029–T037) is OPEN** — the planning-review hardening lane, code-owned
+  and gating the approved handoff and ASK landing.
 - Generated tasks.md is planning input only. It does not bypass Hermes Kanban
   ownership, isolated worktrees, TDD, independent review, CI, PR, merge, or Fly
   release gates.
