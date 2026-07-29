@@ -455,7 +455,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
           <div className="mt-3 flex justify-center">
             <button
               type="button"
-              className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 shadow-soft transition hover:border-sky-200 hover:text-brand-primary disabled:cursor-not-allowed disabled:opacity-60"
+              className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 shadow-soft transition-colors duration-200 ease-smooth hover:border-sky-200 hover:text-brand-primary disabled:cursor-not-allowed disabled:opacity-60"
               onClick={() => void taskQuery.fetchNextPage()}
               disabled={taskQuery.isFetchingNextPage}
             >
@@ -645,7 +645,7 @@ function TaskRow({
 
   return (
     <article
-      className={`group flex flex-col gap-2 rounded-[12px] border px-3 py-4 shadow-soft transition hover:shadow-raised ${
+      className={`group flex flex-col gap-2 rounded-[12px] border px-4 py-3 shadow-soft transition-shadow duration-200 ease-smooth hover:shadow-raised ${
         isTerminal ? "border-emerald-100 bg-emerald-50/50" : isExpanded ? "border-slate-200 bg-white shadow-raised" : "border-slate-200 bg-white"
       }`}
       role="listitem"
@@ -732,7 +732,7 @@ function TaskRow({
           <Chip key={tag.id} variant="neutral">{tagLabel(tag)}</Chip>
         ))}
         {project ? (
-          <span className="shrink-0 truncate text-[11px] text-slate-500 sm:ml-auto lg:max-w-[160px]">{project.name}</span>
+          <span className="shrink-0 truncate text-right text-[11px] text-slate-400 sm:ml-auto lg:max-w-[160px]">{project.name}</span>
         ) : null}
       </div>
       {children}
@@ -1092,7 +1092,7 @@ function TaskCreator({
   return (
     <div className="mt-3 space-y-3">
       <form
-        className="flex flex-col gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/70 p-3 sm:flex-row sm:items-center"
+        className="flex flex-col gap-2 rounded-[12px] border border-dashed border-slate-200 bg-slate-50/70 p-3 sm:flex-row sm:items-center"
         onSubmit={(event) => {
           event.preventDefault();
           submitDraft();
@@ -1205,7 +1205,7 @@ function LoadingState({ label }: { label: string }): JSX.Element {
   return (
     <div className="space-y-2" aria-label={`Loading ${label}`}>
       {[0, 1, 2, 3].map((item) => (
-        <div key={item} className="h-12 animate-pulse rounded-xl border border-slate-200 bg-white" />
+        <div key={item} className="h-12 animate-pulse rounded-[12px] border border-slate-200 bg-white" />
       ))}
     </div>
   );

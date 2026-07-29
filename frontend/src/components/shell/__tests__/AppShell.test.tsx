@@ -63,6 +63,20 @@ describe("AppShell canonical sidebar", () => {
     expect(within(inbox).queryByText("0")).not.toBeInTheDocument();
   });
 
+  it("applies the canonical brand easing to nav row hover/active transitions", () => {
+    renderShell();
+    const sidebar = screen.getByRole("navigation", { name: "Task navigation" });
+    const next = within(sidebar).getByRole("link", { name: /Next actions/ });
+    expect(next).toHaveClass("transition-colors", "duration-200", "ease-smooth");
+  });
+
+  it("keeps the mobile header labels from wrapping inside the fixed-height chrome", () => {
+    renderShell();
+
+    expect(screen.getByRole("link", { name: "Brain Buddy" })).toHaveClass("shrink-0", "whitespace-nowrap");
+    expect(screen.getByRole("button", { name: "Brain dump" })).toHaveClass("shrink-0", "whitespace-nowrap", "px-3", "sm:px-4");
+  });
+
   it("returns to the Inbox route after Weekly review without retaining the in-shell placeholder", async () => {
     const user = userEvent.setup();
     renderShell();
