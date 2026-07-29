@@ -423,7 +423,7 @@ test("Brain Dump recording and review surfaces use source-derived mobile geometr
 
   await page.getByRole("button", { name: "Stop & review" }).click();
   await expect(page.getByRole("heading", { name: "Review 9 tasks" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Save 9 to inbox" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Confirm 9 additions" })).toBeVisible();
   await expect(page.locator("body")).toHaveScreenshot("claude-design-brain-dump-review-402x874.png", {
     animations: "disabled",
     maxDiffPixelRatio: 0.08
