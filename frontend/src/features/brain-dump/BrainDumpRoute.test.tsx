@@ -325,6 +325,36 @@ describe("BrainDumpRoute", () => {
     expect(startBody?.consent.providers).toEqual(["deepgram", "openai"]);
   });
 
+  it("names only the speech-to-text vendor when no separate reconciler is configured", async () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(["brain-dump-providers"], { accurate_stt: "openai", reconciler: null });
+    let startBody: { consent: { provider: string | null; providers: string[] } } | undefined;
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain-dump-providers")) {
+        return jsonResponse({ accurate_stt: "openai", reconciler: null });
+      }
+      if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
+        startBody = JSON.parse(String(init.body));
+        return jsonResponse(operation(), 201);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/new", queryClient);
+
+    expect(
+      await screen.findByText(
+        "Allow secure cloud processing: speech-to-text by openai. Audio is not sent without this consent."
+      )
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+
+    // The null reconciler is filtered out — the consent names only the real vendor.
+    expect(startBody?.consent.provider).toBe("openai");
+    expect(startBody?.consent.providers).toEqual(["openai"]);
+  });
+
   it("gates consent and Record while provider discovery is still loading, never touching the mic", async () => {
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
@@ -2204,5 +2234,79 @@ describe("BrainDumpRoute", () => {
     expect(within(card).getByText("Source utterance no longer available")).toBeInTheDocument();
     // The proposal itself still renders — one bad citation never breaks review.
     expect(within(card).getByDisplayValue("Buy oat milk")).toBeInTheDocument();
+  });
+
+  it("omits the citation block entirely for a proposal with no cited utterances", async () => {
+    const captured = consentedOperation({
+      id: "brain_dump_no_citation",
+      status: "awaiting_confirmation",
+      revision: 4,
+      segments: [{ id: "seg_1", sequence: 1, text: "Book the dentist", stability: "stable", created_at: "2026-07-16T00:00:00Z" }],
+      proposals: [proposal("proposal_1", 1, "Book the dentist", { source_segment_ids: [] })]
+    });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_no_citation") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(captured);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_no_citation/review");
+
+    const review = await screen.findByRole("main", { name: "Review brain dump proposals" });
+    expect(within(review).getByDisplayValue("Book the dentist")).toBeInTheDocument();
+    expect(within(review).queryByText("Cited from what you said")).not.toBeInTheDocument();
+  });
+
+  it("notes the raw-audio privacy expiry generically when the exact expiry is unknown", async () => {
+    const captured = consentedOperation({
+      id: "brain_dump_audio_no_expiry",
+      status: "awaiting_confirmation",
+      revision: 4,
+      raw_audio_present: true,
+      raw_audio_expires_at: null,
+      proposals: [proposal("proposal_1", 1, "Renew car insurance")]
+    });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_audio_no_expiry") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(captured);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_audio_no_expiry/review");
+
+    expect(await screen.findByText(/Raw audio is retained until its privacy expiry\./)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete audio now" })).toBeInTheDocument();
+  });
+
+  it("keeps blank or unchanged review title edits local without issuing a PATCH", async () => {
+    const captured = consentedOperation({
+      id: "brain_dump_local_edit",
+      status: "awaiting_confirmation",
+      revision: 4,
+      proposals: [proposal("proposal_1", 1, "Renew car insurance")]
+    });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_local_edit") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(captured);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_local_edit/review");
+
+    const titleInput = await screen.findByRole("textbox", { name: "Task title #1" });
+    // Blank edit -> ignored (no PATCH).
+    await userEvent.clear(titleInput);
+    await userEvent.tab();
+    // Unchanged edit -> ignored (no PATCH).
+    await userEvent.type(titleInput, "Renew car insurance");
+    await userEvent.tab();
+
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/proposals/proposal_1"), expect.anything());
   });
 });

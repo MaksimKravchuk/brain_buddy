@@ -357,21 +357,19 @@ export function BrainDumpRoute(): JSX.Element {
     try {
       stream = await probeMicrophone();
       const vocabulary = vocabularyText.split(",").map((value) => value.trim()).filter(Boolean);
-      // Consent names every external provider the configured pipeline uses so a
+      // Consent reached here only past the fail-closed guards above, so external
+      // processing is allowed and `accurate_stt` is a resolved vendor name. We
+      // name every external provider the configured pipeline uses so a
       // mixed-vendor setup (e.g. Deepgram STT + OpenAI reconciler) is authorized
-      // per role. `provider` stays the accurate-STT name for legacy compatibility.
-      const externalProviderNames = externalProcessingAllowed
-        ? Array.from(
-            new Set(
-              [brainDumpProviders?.accurate_stt, brainDumpProviders?.reconciler].filter(
-                (name): name is string => Boolean(name)
-              )
-            )
+      // per role; `provider` stays the accurate-STT name for legacy compatibility.
+      const externalProviderNames = Array.from(
+        new Set(
+          [brainDumpProviders.accurate_stt, brainDumpProviders.reconciler].filter(
+            (name): name is string => Boolean(name)
           )
-        : [];
-      const legacyProvider = externalProcessingAllowed
-        ? brainDumpProviders?.accurate_stt ?? externalProviderNames[0] ?? null
-        : null;
+        )
+      );
+      const legacyProvider = brainDumpProviders.accurate_stt;
       const started = operationRef.current ?? (await apiClient.startBrainDump({
         consent: {
           microphone: true,
@@ -1009,7 +1007,9 @@ function ReviewSurface({
           </div>
         ) : null}
         <div className="flex flex-col gap-2.5">
-          {proposals.map((proposal) => (
+          {proposals.map((proposal) => {
+            const predecessors = proposal.predecessor_ids ?? [];
+            return (
             <article key={proposal.id} className="rounded-[14px] border border-slate-200 bg-white px-3.5 py-3 shadow-soft">
               <div className="flex items-start gap-2.5">
                 <span className="mt-1 text-xs font-semibold text-slate-500">#{proposal.ordinal}</span>
@@ -1022,10 +1022,10 @@ function ReviewSurface({
                     {(proposal.locked_fields ?? []).map((field) => (
                       <span key={field} className="rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-700">Locked: {field}</span>
                     ))}
-                    {(proposal.predecessor_ids ?? []).length > 0 ? (
+                    {predecessors.length > 0 ? (
                       <span className="rounded-full bg-violet-50 px-2.5 py-1 text-xs text-violet-700">
-                        {(proposal.predecessor_ids ?? []).length > 1
-                          ? `Merged from ${(proposal.predecessor_ids ?? []).length} tasks`
+                        {predecessors.length > 1
+                          ? `Merged from ${predecessors.length} tasks`
                           : "Split from an earlier task"}
                       </span>
                     ) : null}
@@ -1048,7 +1048,8 @@ function ReviewSurface({
                 </button>
               </div>
             </article>
-          ))}
+            );
+          })}
         </div>
       </main>
 

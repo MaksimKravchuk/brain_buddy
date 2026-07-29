@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ShieldCheck, Trash2 } from "lucide-react";
 import { useParams } from "react-router-dom";
 
@@ -45,12 +45,6 @@ export function BrainDumpPrivacyControls(): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(Boolean(operationId));
   const [busyAction, setBusyAction] = useState<string | null>(null);
-  const operationRef = useRef<BrainDumpOperationResponse | null>(null);
-
-  const applyOperation = useCallback((next: BrainDumpOperationResponse) => {
-    operationRef.current = next;
-    setOperation(next);
-  }, []);
 
   useEffect(() => {
     if (!operationId) {
@@ -61,7 +55,7 @@ export function BrainDumpPrivacyControls(): JSX.Element {
     apiClient
       .getBrainDump(operationId, controller.signal)
       .then((next) => {
-        applyOperation(next);
+        setOperation(next);
         setIsLoading(false);
       })
       .catch((caught: unknown) => {
@@ -71,27 +65,24 @@ export function BrainDumpPrivacyControls(): JSX.Element {
         }
       });
     return () => controller.abort();
-  }, [applyOperation, operationId]);
+  }, [operationId]);
 
-  const runCommand = useCallback(
-    async (action: "withdraw_consent" | "delete_raw_audio" | "cancel") => {
-      const current = operationRef.current;
-      if (!current || busyAction) {
-        return;
-      }
-      setBusyAction(action);
-      setError(null);
-      try {
-        const updated = await apiClient.commandBrainDump(current.id, action, current.revision, privacyIdempotencyKey(action));
-        applyOperation(updated);
-      } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "That privacy action could not be completed.");
-      } finally {
-        setBusyAction(null);
-      }
-    },
-    [applyOperation, busyAction]
-  );
+  // The command buttons only render for a loaded operation and are disabled
+  // while a command is in flight, so the caller always passes a current
+  // operation and never overlaps commands — `current` carries the freshest
+  // revision each time (state re-renders between awaited commands).
+  const runCommand = useCallback(async (action: "withdraw_consent" | "delete_raw_audio" | "cancel", current: BrainDumpOperationResponse) => {
+    setBusyAction(action);
+    setError(null);
+    try {
+      const updated = await apiClient.commandBrainDump(current.id, action, current.revision, privacyIdempotencyKey(action));
+      setOperation(updated);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "That privacy action could not be completed.");
+    } finally {
+      setBusyAction(null);
+    }
+  }, []);
 
   const isTerminal = operation ? terminalStatuses.has(operation.status) : false;
   const canWithdrawConsent = Boolean(operation?.consent.external_processing_allowed) && !isTerminal;
@@ -133,7 +124,7 @@ export function BrainDumpPrivacyControls(): JSX.Element {
                   type="button"
                   className="h-11 rounded-xl border border-amber-200 bg-white px-4 text-sm font-semibold text-amber-800 disabled:opacity-50"
                   disabled={busyAction !== null}
-                  onClick={() => void runCommand("withdraw_consent")}
+                  onClick={() => void runCommand("withdraw_consent", operation)}
                 >
                   Withdraw cloud-processing consent
                 </button>
@@ -143,7 +134,7 @@ export function BrainDumpPrivacyControls(): JSX.Element {
                   type="button"
                   className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-white px-4 text-sm font-semibold text-rose-700 disabled:opacity-50"
                   disabled={busyAction !== null}
-                  onClick={() => void runCommand("delete_raw_audio")}
+                  onClick={() => void runCommand("delete_raw_audio", operation)}
                 >
                   <Trash2 className="h-4 w-4" aria-hidden />
                   Delete raw audio now
@@ -154,7 +145,7 @@ export function BrainDumpPrivacyControls(): JSX.Element {
                   type="button"
                   className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 disabled:opacity-50"
                   disabled={busyAction !== null}
-                  onClick={() => void runCommand("cancel")}
+                  onClick={() => void runCommand("cancel", operation)}
                 >
                   Discard recording
                 </button>
