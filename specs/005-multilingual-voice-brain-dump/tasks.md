@@ -225,69 +225,109 @@ than guess (FR-009 preserved).
 
 ---
 
-## Phase 6: Planning-review hardening lane (OPEN — code-owned) ⏳
+## Phase 6: Planning-review hardening lane (DELIVERED)
 
 **Goal**: Close the gating gaps the high-risk planning review (run `rerun0729`)
-found between the spec's promises and the delivered code. These are **code/test
-changes owned by implementers**, not Architect wording; the Architect artifacts
-enumerate them here so they are dispatched and evidenced through Hermes Kanban
-(not landed as unrepresented working-tree edits on ASK-class paths). All gate the
-approved handoff and the ASK landing.
+found between the spec's promises and the delivered code. Landed test-first on the
+ASK-class paths, Kanban-dispatched, in commits `889a956`, `2ca19f0`, `2420c96`,
+`b670856`, `2c3e4ec`. Integrated verification at hardening completion: 969 backend
+(97.23% coverage) / 452 frontend green (now 994 backend at HEAD `c979621` with the
+release-closure fixes), build green, ruff + mypy clean, plus a
+live e2e drive through the hardened pipeline (flag ON, phased commit saga): real
+4-minute recording → 19 proposals (up from 15) → committed per-action → tasks in
+tracker.
 
-- [ ] T029 [HARDEN] Consent pre-upload complete-set boundary: enforce that the
-  *complete* configured vendor set (not any subset) is consented before egress in
-  `service.py::_assert_external_provider_consent`; add the vendor-B-only
-  negative test proving no upload/persistence/provider invocation; define one
-  precedence rule for `providers` vs legacy `provider` (list-only / legacy-only /
-  matching / conflicting dual-field). Re-anchor SC-006 evidence to the resulting
-  SHA. *(blocking: requirements privacy-consent-gap, architecture consent-contract,
-  adversarial evidence-integrity)*
-- [ ] T030 [HARDEN] Provider-discovery fail-closed prerequisite (frontend): gate
-  consent + Record on `GET /api/brain-dump-providers` having loaded; remove the
-  hardcoded `openai` fallback; explicit loading/error/retry state; render the
-  actual vendor names (FR-012). Add a client privacy-boundary test proving
-  getUserMedia / MediaRecorder / audio PUT cannot start until discovery succeeds
-  and consent covers every returned role. *(blocking: privacy-consent-gap,
-  privacy-boundary-evidence; adversarial FR-012 degraded-path)*
-- [ ] T031 [HARDEN] Review-screen citation rendering (frontend): resolve each
-  proposal's `source_segment_ids` to the cited utterance text/cue on the review
-  surface (single + multi-segment + missing/stale), fulfilling the US1/FR-002
-  "cites the utterance it came from" acceptance behavior; add frontend coverage.
-  *(blocking: requirements missing-acceptance-behavior)*
-- [ ] T032 [HARDEN] Consent-withdrawal deletion (backend): add a persisted
-  withdrawal/cleanup transition that sets an enforceable deletion deadline and
-  becomes sweep-eligible without a further user command; retention test proving
-  withdrawn uncommitted transcript/proposal text is purged after the configured
-  period. *(blocking: architecture privacy-retention)*
-- [ ] T033 [HARDEN] Frozen batch + durable partial-commit ledger (backend):
-  persist a frozen proposal/action snapshot before the first `TaskPort` write with
-  deterministic batch/action child identity and a per-action result record; retry
-  consumes the snapshot and skips recorded successes; fault-injection tests (fail
-  after action N, restart, edit/delete during partial failure, replay with same
-  and new outer key). Satisfies FR-015 / ADR-0002 §485-519 / ADR-0006 B-38.
-  *(blocking: architecture commit-consistency, testability partial-commit-recovery)*
-- [ ] T034 [HARDEN] ADR-0008 server rollout flag (backend + release): add a named,
-  allowlisted, default-OFF feature flag gating the voice-brain-dump UI discovery
-  and backend commands, with OFF → INTERNAL → ON behavior; make flag rollback the
-  first reversible response. *(blocking: architecture release-rollback)*
-- [ ] T035 [HARDEN] Operational evidence report (backend eval): a privacy-safe,
-  hash-addressed capture→review→commit report keyed to the exact SHA + corpus
-  digest + provider/model config, computing SC-001 (committed count), SC-002
-  (task-yielding hits/total), SC-003 (translated/normalized titles/total, with
-  code-switched source-word fixtures kept separate from FR-008 morphology), SC-004
-  (conjunction false splits), SC-007 (latency). *(blocking: testability
-  reference-corpus-evidence + metric-oracle-coverage)*
-- [ ] T036 [HARDEN] ADR-0006 authority copy (frontend): replace "Headed to inbox"
-  / "Save N to inbox" with the accepted provisional/confirmation language
-  ("Provisional · N", "Confirm N"). *(important: requirements accepted-ux-contract-omission)*
-- [ ] T037 [HARDEN] Title-shape invariant (reconciler): enforce the FR-006
-  language-faithful title policy as a title-generation invariant distinct from the
-  FR-008 grounding tolerance, so a verifier cannot accept a translated/ungrounded
-  title that FR-006 prohibits. *(important: architecture semantic-contract)*
+- [X] T029 [HARDEN] Consent pre-upload complete-set boundary: `service.py`
+  requires the *complete* configured vendor set before egress (`889a956`); an
+  authoritative `providers` list with `AUDIO_UPLOAD_PROVIDER_CONSENT_CONFLICT` on
+  conflicting dual-field precedence, plus the vendor-B-only negative test proving
+  no persistence (`2ca19f0`). *SC-006 re-anchored to HEAD.*
+- [X] T030 [HARDEN] Provider-discovery fail-closed prerequisite (frontend,
+  `2420c96`): hardcoded `openai` fallback removed; mic/upload provably gated on
+  discovery having loaded, with an explicit retry state; real vendor names
+  rendered (FR-012).
+- [X] T031 [HARDEN] Review-screen citation rendering (frontend, `2420c96`): each
+  proposal's cited utterance is rendered with stale-id degradation (US1/FR-002).
+- [X] T032 [HARDEN] Consent-withdrawal deletion (backend, `2ca19f0`): withdrawal
+  sets a deletion deadline and makes active operations sweep-eligible (existing
+  retention variable), with a retention test.
+- [X] T033 [HARDEN] Frozen batch + durable per-action ledger (backend,
+  `2ca19f0`): commit is a phased saga (status `committing`) with a per-action
+  ledger and a fault-injection suite (fail after action N, restart, replay). Meets
+  FR-015 / ADR-0002 §485-519 / ADR-0006 B-38.
+- [X] T034 [HARDEN] ADR-0008 `voice_brain_dump` rollout flag (backend + frontend,
+  `2ca19f0` flag + `2420c96` gate): OFF/INTERNAL/ON, 404 fail-closed on all 8
+  routes, `/api/auth/me` exposure, TEST-env ON in `conftest.py`, frontend
+  `BrainDumpGate`.
+- [X] T035 [HARDEN] Operational evidence report (backend eval, `b670856`):
+  hash-addressed, live + recorded modes, corpus fixture v1, golden report, no raw
+  text — computes SC-001..004/007. *(Non-gating leftover: the live report on the
+  final release SHA is still to be produced by the thin harness.)*
+- [X] T036 [HARDEN] ADR-0006 authority copy (frontend + e2e, `2c3e4ec`):
+  provisional/confirmation language replaces the prohibited "Headed to inbox".
+- [X] T037 [HARDEN] Title-shape invariant (reconciler, `b670856`): a script-based
+  language-fidelity classifier with per-op skip, distinct from FR-008 grounding
+  (proven by a grounding-neutralized test), so a translated/ungrounded title
+  FR-006 prohibits cannot be accepted.
 
-**Checkpoint**: all Phase 6 items landed with tests; full suites re-run on the
-final candidate SHA; SC evidence re-anchored to it; then rerun the planning
-campaign for an approved aggregate.
+**Checkpoint**: all Phase 6 items delivered with tests; suites green (994 backend
+/ 452 frontend at HEAD `c979621`). Known non-gating leftover: Playwright
+visual baselines need regeneration; the live T035 report on the release SHA is
+still to be produced. The final high-risk campaign runs against `2c3e4ec`.
+
+---
+
+## Phase 7: Release-closure lane (mostly delivered)
+
+**Goal**: Close the remaining final0729 blocking/important gaps before the ASK
+landing and the approved final campaign. **Delivered**: T038/T039 (commit
+concurrency + fail-closed audio deletion, `cac5a27`), T042 (live evidence report,
+`900eeb8`/`0b0d166`), and T040/T041 (commit_batch title purge + committing
+recovery, `c979621`). **Still OPEN** (important-severity, not blocking): T043
+(full-stack acceptance-coverage tests) and T044 (partial-commit retry UX). The
+campaign runs with those two open in the lane.
+
+- [X] T038 [CLOSE] Commit idempotency/concurrency (backend, `cac5a27`):
+  `create_native_inbox_task` is owner-serialized with an atomic task/idempotency
+  write, CAS ledger recording, and a purge exemption preserving child identity for
+  the frozen batch's lifetime; concurrent-duplicate/crash/retry tests added.
+  *(architecture blocking — VERIFIED and fixed; 10 new tests, suite 988)*
+- [X] T039 [CLOSE] Raw-audio deletion verified outcome (backend, `cac5a27`):
+  verified-absence deletion with a sweep retry replaces the fail-open
+  `ignore_errors=True`; metadata is not cleared until absence is confirmed.
+  *(architecture blocking — VERIFIED and fixed)*
+- [X] T040 [CLOSE] Commit_batch title retention (backend, `c979621`):
+  `purge_expired_working_artifacts` reduces frozen `commit_batch` action titles to
+  their SHA-256 (identical to receipts' `confirmed_title_sha256`) for
+  terminal/withdrawal-finalized operations past the window; resume-capable
+  `committing` ops keep titles (resume needs them, and they are inside their window
+  by definition). No schema change, rollback-safe; 3 tests.
+  *(adversarial important: privacy-data-retention — closed)*
+- [X] T041 [CLOSE] `committing` recovery (backend, `c979621`): a new sweep duty
+  `recover_committing_operations` resumes stranded `committing` ops through the
+  standard commit path with recovery idempotency keys (safe no-op on concurrent
+  state moves), plus an observability line and a `docs/voice-stt.md` runbook note;
+  3 tests. *(adversarial important: privacy-resilience — closed)*
+- [X] T042 [CLOSE] Live operational evidence report (backend, `900eeb8`,
+  committed `0b0d166`): ran on the real pipeline (`run_key e8cb406f…`, strict
+  4-signal oracle). SC-001 (19 committed), SC-003 (0/45 translated), SC-007
+  (21.1 s) pass; SC-002 74.4% (32/43) and SC-004 2/22 splits are below the
+  PUBLIC-ON gates and founder-accepted. *(testability blocking — delivered)*
+- [ ] T043 [CLOSE] Acceptance-coverage evidence: full-stack A+B / consent-only-B
+  browser test asserting the client sends no audio request (first-party
+  boundary) with the backend no-persistence guard as defense-in-depth; a
+  deterministic 30/5 mixed-batch test (survivor count, order, provenance,
+  rejection accounting); explicit no-task (query/filler/"don't add") and
+  cross-utterance no-merge criteria. *(testability blocking privacy-evidence +
+  important acceptance-coverage)*
+- [ ] T044 [CLOSE] Partial-commit UI retry path: a supported client can observe
+  persisted partial results from a `committing` operation and retry the frozen
+  batch to completion without duplicating actions. *(requirements important)*
+
+**Checkpoint**: T038/T039/T040/T041/T042 delivered at HEAD `c979621` (994 backend
+green, 97.24% cov; live report committed). T043/T044 remain open (important, not
+blocking). The final high-risk campaign runs against `c979621` for an approved
+aggregate with those two open in the lane.
 
 ---
 
@@ -300,12 +340,11 @@ campaign for an approved aggregate.
 - **FR-016 (Phase 5)** depends on US1 + US3 (it extends the same grounding path)
   and is delivered (landed in `reconciler.py` after the core, 907 backend tests
   green) with a documented fail-closed residue.
-- **Phase 6 (hardening, T029–T037)** is OPEN and gates the approved handoff: it
-  closes the code-vs-spec gaps the high-risk review found (consent pre-upload
-  boundary, provider-discovery prerequisite, review-screen citations, consent
-  withdrawal deletion, frozen-batch partial commit, ADR-0008 rollout flag, corpus
-  evidence report, ADR-0006 copy, title-shape invariant). Dispatched through
-  Hermes Kanban; each item lands test-first on ASK-class paths.
+- **Phase 6 (hardening, T029–T037)** is delivered (commits `889a956`, `2ca19f0`,
+  `2420c96`, `b670856`, `2c3e4ec`): consent pre-upload boundary, provider-discovery
+  prerequisite, review-screen citations, consent-withdrawal deletion, frozen-batch
+  phased-saga commit, ADR-0008 rollout flag, corpus evidence report, ADR-0006 copy,
+  and the title-shape invariant, each landed test-first on the ASK-class paths.
 
 ### Within each story
 
@@ -316,10 +355,11 @@ campaign for an approved aggregate.
 
 ## Notes
 
-- Phases 1–5 (T001–T028: US1–US3 core + FR-016 grounding tolerance) are
-  delivered on the branch (907 backend tests green, documented FR-016 residue).
-  **Phase 6 (T029–T037) is OPEN** — the planning-review hardening lane, code-owned
-  and gating the approved handoff and ASK landing.
+- Phases 1-6 (T001-T037) plus release-closure T038/T039/T040/T041/T042 are
+  delivered at HEAD `c979621` (994 backend / 452 frontend green); release-closure
+  T043/T044 remain open. Known non-gating leftovers: Playwright visual baselines
+  need regeneration; the live T035 operational report on the release SHA is still
+  to be produced by the thin harness.
 - Generated tasks.md is planning input only. It does not bypass Hermes Kanban
   ownership, isolated worktrees, TDD, independent review, CI, PR, merge, or Fly
   release gates.

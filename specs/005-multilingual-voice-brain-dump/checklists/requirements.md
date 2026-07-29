@@ -31,11 +31,14 @@
 
 ## Notes
 
-- Retroactive spec: success criteria cite 2026-07-29 evidence (reference corpus
-  + real recording drive), some labelled experimental pending the SHA-anchored
-  operational report (tasks.md T035). FR-016 grounding tolerance is delivered
-  (not open). The open work is the planning-review hardening lane (tasks.md
-  Phase 6, T029-T037), which gates the approved handoff and ASK landing.
+- Founder-only INTERNAL increment. Core (US1-US3), FR-016, the hardening lane
+  (T029-T037), the commit-concurrency/audio-deletion fixes (T038/T039, cac5a27),
+  the commit_batch/committing retention fixes (T040/T041, c979621), and the live
+  evidence report (T042) are delivered at HEAD c979621 (994 backend, 97.24% cov /
+  452 frontend green). Live report (900eeb8): SC-001/003/007 pass; SC-002 74.4% and
+  SC-004 2 splits are below the PUBLIC-ON gates and founder-accepted. Release-closure
+  T043 (full-stack tests) and T044 (partial-commit UX) remain open-important (not
+  blocking); final approval pends the fresh high-risk campaign on the committed SHA.
 - Vendor names (specific STT/reconciliation companies) appear only in
   assumptions/evidence context, never as requirements; requirements are stated
   vendor-agnostically per template guidance.
