@@ -188,6 +188,21 @@ def build_container(config: AppConfig) -> Container:
         },
     )
     task_service = TaskService(task_repo)
+
+    def _voice_enabled_for_owner(owner_id: str) -> bool:
+        """Whether ``voice_brain_dump`` is effective for the operation's owner.
+
+        Used by the background runner so external provider work never advances
+        for an owner whose exposure flag is OFF. A missing user fails closed.
+        """
+
+        user = user_repo.get_by_id(owner_id)
+        if user is None:
+            return False
+        return config.feature_flags.effective_flags(user.email).get(
+            "voice_brain_dump", False
+        )
+
     voice_brain_dump_service = VoiceBrainDumpService(
         voice_operation_repo,
         accurate_stt=_build_accurate_stt(config),
@@ -211,6 +226,7 @@ def build_container(config: AppConfig) -> Container:
         ),
         audio_limits=config.voice.audio_limits,
         task_port=InProcessTaskPort(task_service.create_native_inbox_task),
+        voice_enabled_for_owner=_voice_enabled_for_owner,
     )
     auth_service = AuthService(
         user_repo=user_repo,

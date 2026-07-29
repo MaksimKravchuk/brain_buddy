@@ -110,17 +110,19 @@ def test_off_blocks_provider_discovery_for_everyone(
     assert resp.status_code == 404, resp.text
 
 
-def test_off_blocks_operation_command_path(
+def test_off_blocks_gated_operation_command_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Even the generic ``{action}`` command route is closed when OFF."""
+    """A forward/new-capture action on the generic ``{action}`` route is closed
+    when OFF (privacy controls -- withdraw/cancel/delete -- stay reachable and
+    are covered separately)."""
 
     client = _signed_up_client(
         tmp_path, monkeypatch, email=OUTSIDER_EMAIL, flags="voice_brain_dump=off"
     )
     resp = client.post(
-        "/api/brain-dump-operations/does-not-exist/cancel",
-        headers={"Idempotency-Key": "flag-cancel"},
+        "/api/brain-dump-operations/does-not-exist/commit",
+        headers={"Idempotency-Key": "flag-commit"},
         json={"expected_revision": 1},
     )
     assert resp.status_code == 404, resp.text

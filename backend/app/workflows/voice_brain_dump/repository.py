@@ -624,6 +624,55 @@ class OperationRepository(BaseRepository):
             )
         BaseRepository.dump_model(self.idempotency_path(owner_id, record.key), record)
 
+    def scrub_idempotency_snapshots(
+        self, *, owner_id: str, operation_id: str, response_body: dict[str, object]
+    ) -> int:
+        """Redact an operation's text-bearing snapshots from its command log.
+
+        Every voice command records the full operation as its replay result, so
+        transcript/proposal text lives in the idempotency records too -- a
+        plaintext copy outside the operation table. When the working-artifact
+        purge clears an operation's text, this overwrites every command record
+        for that operation (SQLite row + JSON sidecar) with the already-redacted
+        snapshot, so no text outlives the retention window. Replay stays coherent
+        (an old key returns the current text-free operation) and the redacted
+        snapshot carries the operation's post-purge revision, so reconciling it
+        never resurrects text.
+        """
+
+        payload = json.dumps(response_body, sort_keys=True)
+        with self._connection() as conn, _sqlite_guard("Idempotency-Key", operation_id):
+            rows = conn.execute(
+                """
+                SELECT key, command, request_hash, created_at
+                FROM idempotency_records
+                WHERE owner_id = ? AND resource_id = ?
+                """,
+                (owner_id, operation_id),
+            ).fetchall()
+            if not rows:
+                return 0
+            conn.execute(
+                """
+                UPDATE idempotency_records SET response_body = ?
+                WHERE owner_id = ? AND resource_id = ?
+                """,
+                (payload, owner_id, operation_id),
+            )
+        for row in rows:
+            BaseRepository.dump_model(
+                self.idempotency_path(owner_id, row["key"]),
+                IdempotencyRecord(
+                    key=row["key"],
+                    command=row["command"],
+                    request_hash=row["request_hash"],
+                    resource_id=operation_id,
+                    response_body=response_body,
+                    created_at=row["created_at"],
+                ),
+            )
+        return len(rows)
+
     def purge_expired_idempotency(self, *, owner_id: str, now: datetime) -> int:
         """Drop idempotency records past retention so history stays bounded."""
 

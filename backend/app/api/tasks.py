@@ -6,15 +6,18 @@ from collections.abc import Sequence
 from datetime import date
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Header, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 
 from app.api.contracts import error_responses
 from app.api.dependencies import (
+    get_config_dep,
     get_current_user,
     get_task_service,
     get_voice_brain_dump_service,
     require_voice_brain_dump_enabled,
+    voice_brain_dump_enabled,
 )
+from app.core.config import AppConfig
 from app.exceptions import ValidationFailure
 from app.modules.tasks import TaskService
 from app.modules.tasks.domain import (
@@ -82,6 +85,13 @@ from app.workflows.voice_brain_dump.service import (
 
 router = APIRouter(tags=["tasks"])
 
+# Privacy controls over an existing operation that stay reachable when the
+# ``voice_brain_dump`` exposure flag is OFF (ADR-0002 reversible authority). All
+# other operation commands are new-capture/forward surfaces and stay gated.
+_VOICE_OFF_REACHABLE_ACTIONS = frozenset(
+    {"withdraw_consent", "cancel", "delete_raw_audio"}
+)
+
 
 def _require_idempotency_key(idempotency_key: str | None) -> str:
     if not idempotency_key:
@@ -147,9 +157,12 @@ def get_brain_dump_providers(
 )
 def get_brain_dump_operation(
     operation_id: str,
-    current_user: User = Depends(require_voice_brain_dump_enabled),
+    current_user: User = Depends(get_current_user),
     voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
+    # Read/status of an existing operation stays reachable with the flag OFF:
+    # exposure control must not remove an owner's ability to see the operation
+    # they still hold privacy controls over.
     return _to_brain_dump_response(
         voice_brain_dump_service.get_brain_dump_operation(operation_id, owner_id=current_user.id)
     )
@@ -298,9 +311,21 @@ def command_brain_dump_operation(
     action: str,
     payload: ExpectedRevisionRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    current_user: User = Depends(require_voice_brain_dump_enabled),
+    current_user: User = Depends(get_current_user),
+    config: AppConfig = Depends(get_config_dep),
     voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
+    # Privacy authority over an existing operation stays reachable with the flag
+    # OFF (ADR-0002 reversible withdrawal/deletion): withdraw consent, cancel,
+    # and delete raw audio are never gated. Every forward/new-capture action is,
+    # returning the same fail-closed 404 the gated routes do.
+    if action not in _VOICE_OFF_REACHABLE_ACTIONS and not voice_brain_dump_enabled(
+        current_user, config
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Voice brain dump is not available.",
+        )
     idempotency = _require_idempotency_key(idempotency_key)
     if action == "commit":
         operation = voice_brain_dump_service.commit_brain_dump_operation(

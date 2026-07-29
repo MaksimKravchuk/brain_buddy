@@ -155,6 +155,7 @@ class VoiceBrainDumpService:
         task_port: TaskPort,
         runner_wake: Callable[[], None] | None = None,
         audio_limits: VoiceAudioLimits | None = None,
+        voice_enabled_for_owner: Callable[[str], bool] | None = None,
     ) -> None:
         self.operation_repo = operation_repo
         self.accurate_stt = accurate_stt or DisabledAccurateStt()
@@ -168,6 +169,14 @@ class VoiceBrainDumpService:
         self.provider_run_lease_seconds = provider_run_lease_seconds
         self.runner_wake = runner_wake or (lambda: None)
         self.audio_limits = audio_limits or VoiceAudioLimits()
+        # Exposure control is also a privacy boundary: the background runner
+        # must not advance external provider work (accurate STT / reconciler)
+        # for an owner whose ``voice_brain_dump`` flag is OFF. Privacy/purge
+        # duties keep running regardless. Defaults to always-enabled so isolated
+        # tests need not wire the flag; the container supplies the real check.
+        self.voice_enabled_for_owner = voice_enabled_for_owner or (
+            lambda _owner_id: True
+        )
         # ADR-0001: voice confirmation crosses the Tasks module boundary
         # through this explicit, injected ``TaskPort`` -- never by treating
         # a Tasks service instance as its own adapter. There is deliberately
@@ -485,9 +494,13 @@ class VoiceBrainDumpService:
         completed operation keeps forever and must not depend on the raw
         ``segments``/``proposals``/``proposal_patches`` this purge clears.
 
-        It also reduces the frozen ``commit_batch`` action titles to hashes in
-        the same pass, so no plaintext derived text (transcript, proposals, or
-        ledger titles) outlives the working-artifact window (ADR-0002).
+        It also reduces the frozen ``commit_batch`` action titles to hashes and
+        redacts the operation's idempotency command snapshots in the same pass,
+        so no plaintext derived text (transcript, proposals, ledger titles, or a
+        replay snapshot) outlives the working-artifact window (ADR-0002). As a
+        hard maximum, an operation still ``committing`` past its deadline -- the
+        recovery driver's whole window has elapsed -- is finalized terminal and
+        purged too, preserving the tasks it already created.
         """
 
         current_time = now or utcnow()
@@ -499,28 +512,38 @@ class VoiceBrainDumpService:
                 operation = self.get_brain_dump_operation(
                     candidate.id, owner_id=candidate.owner_id
                 )
-                is_terminal = (
-                    operation.status in self._TERMINAL_PURGE_ELIGIBLE_STATUSES
-                )
-                withdrawn = operation.consent_withdrawn_at is not None
-                if not is_terminal and not withdrawn:
-                    continue
                 if operation.schema_version == 1:
                     # Terminal schema-v1 rows are historical, byte-immutable
                     # audit records (ADR-0002 migration rule 1): never
                     # rewrite them via a retention sweep.
                     continue
+                is_terminal = (
+                    operation.status in self._TERMINAL_PURGE_ELIGIBLE_STATUSES
+                )
+                withdrawn = operation.consent_withdrawn_at is not None
                 expires_at = (
                     operation.working_artifacts_expires_at
                     or operation.updated_at + self.working_artifacts_retention
                 )
-                if (
-                    current_time < expires_at
-                    or (
-                        not operation.segments
-                        and not operation.proposals
-                        and not operation.proposal_patches
-                    )
+                # Hard-maximum retention for a stuck commit: the recovery driver
+                # gets the whole working-artifact window to finish; once past the
+                # deadline privacy wins, so a still-``committing`` operation is
+                # finalized to a terminal state and purged like any other,
+                # preserving the tasks already created (ADR-0002 / FR-002).
+                committing_past_deadline = (
+                    operation.status == "committing" and current_time >= expires_at
+                )
+                if not is_terminal and not withdrawn and not committing_past_deadline:
+                    continue
+                # Skip once there is nothing left to purge, so text/title
+                # reduction runs exactly once per operation. A text-less
+                # committing operation past its deadline is the exception: it
+                # still needs finalizing to a terminal state.
+                if current_time < expires_at or (
+                    not operation.segments
+                    and not operation.proposals
+                    and not operation.proposal_patches
+                    and not committing_past_deadline
                 ):
                     continue
                 purge_update: dict[str, object] = {
@@ -555,7 +578,22 @@ class VoiceBrainDumpService:
                             ]
                         }
                     )
-                if withdrawn and not is_terminal:
+                if committing_past_deadline:
+                    # Preserve the tasks already created (their ids) and the
+                    # ledger identity, but stop the unresolved commit and settle
+                    # terminal so privacy purge applies like any other operation.
+                    batch = operation.commit_batch
+                    purge_update["status"] = "cancelled"
+                    purge_update["status_history"] = [
+                        *operation.status_history,
+                        "cancelled",
+                    ]
+                    purge_update["committed_task_ids"] = [
+                        action.task_id
+                        for action in (batch.actions if batch else [])
+                        if action.status == "succeeded" and action.task_id
+                    ]
+                elif withdrawn and not is_terminal:
                     # Finalize a withdrawn, still non-terminal operation as the
                     # sweep deletes its derived text so it stops presenting a
                     # resumable/committable surface and its history records the
@@ -565,8 +603,15 @@ class VoiceBrainDumpService:
                         *operation.status_history,
                         "cancelled",
                     ]
-                self.operation_repo.save_brain_dump_operation(
-                    operation.model_copy(update=purge_update)
+                purged_operation = operation.model_copy(update=purge_update)
+                self.operation_repo.save_brain_dump_operation(purged_operation)
+                # Redact the same plaintext from this operation's idempotency
+                # command records, the only other place a full operation snapshot
+                # (transcript + proposals) is persisted.
+                self.operation_repo.scrub_idempotency_snapshots(
+                    owner_id=purged_operation.owner_id,
+                    operation_id=purged_operation.id,
+                    response_body=purged_operation.model_dump(mode="json"),
                 )
                 purged += 1
         return purged
@@ -1070,6 +1115,11 @@ class VoiceBrainDumpService:
         for candidate in self.operation_repo.list_in_flight_provider_run_operations():
             if advanced >= limit:
                 break
+            if not self.voice_enabled_for_owner(candidate.owner_id):
+                # Exposure OFF for this owner: pause external provider work
+                # (it stays pending and resumes when the flag is ON again).
+                # Privacy/purge duties run unconditionally elsewhere.
+                continue
             with self.operation_repo.command_lock(candidate.owner_id):
                 # The claim time is read here, inside this candidate's owner
                 # lock, not once before the up-to-`limit` candidate loop. A
@@ -2694,6 +2744,19 @@ class VoiceBrainDumpService:
         for action in operation.commit_batch.actions:
             if action.status == "succeeded":
                 continue
+            # Re-check the live status under the owner lock BEFORE starting a new
+            # action's TaskPort write. Cancel is accepted from ``committing``
+            # (ADR-0002 partial-cancel), and the loop iterates a pre-loaded
+            # snapshot, so without this a concurrent cancel would not stop
+            # not-yet-started actions. On cancel we break: already-created tasks
+            # stay durable, and the finalize block settles the operation
+            # coherently without minting further canonical tasks.
+            with self.operation_repo.command_lock(owner_id):
+                operation = self.get_brain_dump_operation(
+                    operation.id, owner_id=owner_id
+                )
+                if operation.status != "committing":
+                    break
             confirmed = confirm_native_inbox_action(
                 operation_id=operation.id,
                 owner_id=owner_id,
@@ -2707,14 +2770,19 @@ class VoiceBrainDumpService:
                 operation = self.get_brain_dump_operation(
                     operation.id, owner_id=owner_id
                 )
+                # The task was created (idempotently); record it so the ledger
+                # reflects the durable write even if a cancel raced in during the
+                # TaskPort call, then stop before any further action.
                 operation = self._record_commit_action_result(
                     operation,
                     proposal_id=action.proposal_id,
                     task_id=confirmed.task_id,
                 )
+                if operation.status != "committing":
+                    break
         with self.operation_repo.command_lock(owner_id):
             operation = self.get_brain_dump_operation(operation.id, owner_id=owner_id)
-            if operation.status != "completed":
+            if operation.status == "committing":
                 operation = self._finalize_committed_operation(
                     operation, owner_id=owner_id
                 )
