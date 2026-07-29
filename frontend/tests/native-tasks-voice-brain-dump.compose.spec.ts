@@ -484,9 +484,11 @@ test("Voice Brain Dump records provisional cards, reviews edits/deletes and save
     await page.keyboard.press("Tab");
     await expect(page.getByText("Edited", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Delete Call dentist" }).click();
-    await expect(page.getByText("Call dentist")).toHaveCount(0);
+    // The deleted card is gone; its words may legitimately survive inside a
+    // sibling card's cited-utterance quote, so assert on the card, not the page.
+    await expect(page.getByRole("button", { name: "Delete Call dentist" })).toHaveCount(0);
     await page.getByRole("button", { name: "Delete Untranscribed sealed audio" }).click();
-    await expect(page.getByText("Untranscribed sealed audio")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Delete Untranscribed sealed audio" })).toHaveCount(0);
     const beforeSave = await listInboxTasks(page);
     assertArrayLength(beforeSave, 0, "Inbox should remain empty before saving reviewed drafts");
   });
