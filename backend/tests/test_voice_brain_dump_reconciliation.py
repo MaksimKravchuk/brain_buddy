@@ -28,7 +28,9 @@ from app.workflows.voice_brain_dump.providers import (
 )
 
 
-def test_openai_reconciler_materializes_only_schema_valid_server_owned_patches() -> None:
+def test_openai_reconciler_materializes_only_schema_valid_server_owned_patches() -> (
+    None
+):
     from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
 
     captured: list[dict[str, object]] = []
@@ -680,9 +682,12 @@ def test_openai_reconciler_accepts_string_or_object_structured_content(
             return Response()
 
     monkeypatch.setattr(httpx, "Client", Client)
-    assert OpenAITextReconciler(api_key="test-key").reconcile(
-        _minimal_reconcile_request()
-    ).patches == []
+    assert (
+        OpenAITextReconciler(api_key="test-key")
+        .reconcile(_minimal_reconcile_request())
+        .patches
+        == []
+    )
 
 
 @pytest.mark.parametrize("content", ["{", [], None])
@@ -716,9 +721,7 @@ def test_openai_reconciler_rejects_malformed_provider_content(
 
     monkeypatch.setattr(httpx, "Client", Client)
     with pytest.raises(ProviderTerminalError, match="INVALID_RESPONSE"):
-        OpenAITextReconciler(api_key="test-key").reconcile(
-            _minimal_reconcile_request()
-        )
+        OpenAITextReconciler(api_key="test-key").reconcile(_minimal_reconcile_request())
 
 
 def test_openai_reconciler_maps_provider_timeout_to_retryable(
@@ -754,7 +757,7 @@ def test_production_reconciler_module_has_no_regex_or_fixture_extractor() -> Non
     source = inspect.getsource(reconciler)
     assert "_extract_titles" not in source
     assert "re.split" not in source
-    assert "brainbuddy\" in lower" not in source.casefold()
+    assert 'brainbuddy" in lower' not in source.casefold()
 
 
 def test_openai_reconciler_prompt_prohibits_inventing_unsupported_tasks() -> None:
@@ -777,7 +780,9 @@ def test_openai_reconciler_prompt_prohibits_inventing_unsupported_tasks() -> Non
     assert "source_segment_ids" in system_prompt
 
 
-def test_openai_reconciler_retries_only_retryable_failures_with_a_bounded_budget() -> None:
+def test_openai_reconciler_retries_only_retryable_failures_with_a_bounded_budget() -> (
+    None
+):
     from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
 
     attempts = 0
@@ -876,7 +881,9 @@ def test_openai_reconciler_reserves_budget_for_every_bounded_retry() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         nonlocal calls
         calls += 1
-        return httpx.Response(200, json={"choices": [{"message": {"content": {"operations": []}}}]})
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": {"operations": []}}}]}
+        )
 
     reconciler = OpenAITextReconciler(
         api_key="test-key",
@@ -928,7 +935,9 @@ def test_openai_reconciler_tags_a_retryable_failure_with_its_estimated_cost() ->
     assert caught.value.estimated_cost_usd > 0
 
 
-def test_openai_reconciler_tags_an_invalid_envelope_failure_with_its_estimated_cost() -> None:
+def test_openai_reconciler_tags_an_invalid_envelope_failure_with_its_estimated_cost() -> (
+    None
+):
     from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
 
     reconciler = OpenAITextReconciler(
@@ -972,7 +981,9 @@ def test_dual_stt_roles_keep_accurate_audio_input_separate_from_fast_text() -> N
     assert accurate.calls[-1].fast_text is None
     assert accurate_result.segments[0].text == "починить BrainBuddy"
     assert accurate_result.segments[0].provider_role == "accurate"
-    assert accurate_result.segments[0].supersedes_segment_ids == [fast_result.segments[0].id]
+    assert accurate_result.segments[0].supersedes_segment_ids == [
+        fast_result.segments[0].id
+    ]
 
 
 def test_invalid_provider_output_rejects_missing_or_negative_audio_spans() -> None:
@@ -1066,7 +1077,10 @@ def test_reconciler_emits_stable_lineage_patches_without_positional_identity() -
         "Сделать production smoke",
         "Написать Наташе",
     ]
-    assert all(proposal.source_segment_ids == ["segment_ml_01"] for proposal in projection.active)
+    assert all(
+        proposal.source_segment_ids == ["segment_ml_01"]
+        for proposal in projection.active
+    )
     assert all(proposal.id.startswith("proposal_") for proposal in projection.active)
 
 
@@ -1098,7 +1112,9 @@ def test_locked_user_title_surfaces_conflict_instead_of_overwrite() -> None:
     assert projection.active[0].conflicts[0].suggested_value == "Починить BrainBuddy"
 
 
-def test_projection_preserves_lineage_for_merge_split_remove_and_unlocked_updates() -> None:
+def test_projection_preserves_lineage_for_merge_split_remove_and_unlocked_updates() -> (
+    None
+):
     base = ReconciledProposal(
         id="proposal_original",
         title="Починить brain body",
@@ -1185,7 +1201,12 @@ def test_projection_rejects_malformed_unknown_and_unsupported_patches() -> None:
 
     with pytest.raises(ValidationFailure, match="requires a title"):
         apply_proposal_patches(
-            [], [ProposalPatch(operation="add", proposal_id="proposal_new", producer="fast")]
+            [],
+            [
+                ProposalPatch(
+                    operation="add", proposal_id="proposal_new", producer="fast"
+                )
+            ],
         )
 
     with pytest.raises(ValidationFailure, match="Unknown proposal ID"):
@@ -1267,7 +1288,9 @@ def test_deterministic_reconciler_extracts_known_split_and_fallback_titles(
     assert _extract_titles(text) == expected
 
 
-def test_openai_reconciler_retries_remote_protocol_errors_with_bounded_backoff() -> None:
+def test_openai_reconciler_retries_remote_protocol_errors_with_bounded_backoff() -> (
+    None
+):
     from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
 
     attempts = 0
@@ -1293,7 +1316,9 @@ def test_openai_reconciler_retries_remote_protocol_errors_with_bounded_backoff()
     assert delays == [0.1, 0.2]
 
 
-def test_openai_reconciler_rejects_a_provenance_bearing_invented_task_identity() -> None:
+def test_openai_reconciler_rejects_a_provenance_bearing_invented_task_identity() -> (
+    None
+):
     from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
 
     segment = TranscriptHypothesis(
@@ -2547,7 +2572,9 @@ def test_openai_reconciler_accepts_a_removal_with_explicit_destructive_language(
         "Не надо удалять хлеб, молоко, и яйца",
     ],
 )
-def test_openai_reconciler_rejects_a_negated_destructive_removal(source_text: str) -> None:
+def test_openai_reconciler_rejects_a_negated_destructive_removal(
+    source_text: str,
+) -> None:
     """'Do not delete Buy milk' must never authorize removing 'Buy milk':
     a negation marker scopes over the destructive term it precedes, so a
     negated/scoped destructive phrase must fail closed exactly like
@@ -2859,3 +2886,830 @@ def test_openai_reconciler_rejects_single_clause_material_action_invention(
                 user_locks={},
             )
         )
+
+
+def _add_op(title: str, segment_id: str = "segment_accurate") -> dict[str, object]:
+    return {
+        "operation": "add",
+        "proposal_id": None,
+        "title": title,
+        "source_segment_ids": [segment_id],
+        "predecessor_ids": [],
+        "base_revision": None,
+        "confidence": 0.9,
+    }
+
+
+@pytest.mark.parametrize(
+    ("source_text", "title"),
+    [
+        # Imperative -> infinitive verb inflection in the identity anchor and
+        # action checks ("Создай"/"Создать", "Добавь"/"Добавить",
+        # "Напомни"/"Напомнить", "Перенеси"/"Перенести").
+        (
+            "Добавь тег mobile к проекту BrainBuddy.",
+            "Добавить тег mobile к проекту BrainBuddy",
+        ),
+        (
+            "Напомни Лене про demo в Google Meet завтра в десять тридцать.",
+            "Напомнить Лене про demo в Google Meet завтра в 10:30",
+        ),
+        (
+            "Я в метро, связь пропадает, напомни перезвонить Илье через сорок минут.",
+            "Напомнить перезвонить Илье через сорок минут",
+        ),
+        (
+            "Создай задачу написать Илье и добавь контекст «Телефон».",
+            "Написать Илье и добавить контекст «Телефон»",
+        ),
+        # A single command fragmented by a comma into adjunct phrases: no one
+        # clause holds every entity, but every title fragment still grounds.
+        (
+            "Перенеси встречу с Максимом на пятницу, на три часа дня.",
+            "Перенести встречу с Максимом на пятницу, на три часа дня",
+        ),
+        (
+            "Напомни мне отправить invoice, когда я открою контекст Office.",
+            "Напомни мне отправить invoice, когда я открою контекст Office.",
+        ),
+        (
+            "Эм, добавь задачу… проверить, работает ли микрофон в мобильном браузере.",
+            "Проверить, работает ли микрофон в мобильном браузере",
+        ),
+        (
+            "Добавь встречу на тридцать первое декабря в двадцать три тридцать, "
+            "но без повторения.",
+            "Добавь встречу на тридцать первое декабря в двадцать три тридцать, "
+            "но без повторения.",
+        ),
+        # A single command fragmented by a coordinating conjunction ("и"): the
+        # title reproduces both conjuncts faithfully, so it must ground.
+        (
+            "Найди задачи без срока и назначь им низкий приоритет.",
+            "Найди задачи без срока и назначь им низкий приоритет",
+        ),
+        (
+            "Добавь молоко и хлеб в список покупок и не создавай два разных проекта.",
+            "Добавить молоко и хлеб в список покупок",
+        ),
+        (
+            "Добавь задачу проверить API и UI в одном проходе, не разбивай её на две.",
+            "Проверить API и UI в одном проходе",
+        ),
+        (
+            "Тут шумно, но запиши задачу — проверить запись с телефона и "
+            "загрузить один audio file.",
+            "Проверить запись с телефона и загрузить один audio file",
+        ),
+    ],
+)
+def test_openai_reconciler_grounds_inflected_and_fragmented_russian_commands(
+    source_text: str, title: str
+) -> None:
+    """Real Russian voice commands were rejected by English-centric heuristics:
+    imperative->infinitive inflection broke exact-token identity/action
+    matching, and comma/conjunction clause fragmentation left no single clause
+    holding every title entity. Morphology-tolerant matching plus per-fragment
+    grounding must now materialize these correct single-task proposals (derived
+    from the live 50-utterance Russian eval)."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=3000,
+        text=source_text,
+        stability="stable",
+        provider_role="accurate",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {"operations": [_add_op(title)]},
+    )
+
+    result = reconciler.reconcile(
+        ReconcileTextRequest(
+            operation_id="operation_inflected_fragmented",
+            transcript_segments=[segment],
+            active_proposals=[],
+            user_locks={},
+        )
+    )
+
+    assert [patch.title for patch in result.patches] == [title]
+    assert result.skipped_operations == []
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "equivalent"),
+    [
+        ("создай", "создать", True),
+        ("перенеси", "перенести", True),
+        ("добавь", "добавить", True),
+        ("задачу", "задачи", True),
+        ("молоко", "молока", True),
+        ("call", "cancel", False),
+        ("milk", "milkshake", False),
+        ("просмотр", "проспект", False),
+    ],
+)
+def test_openai_reconciler_tokens_equivalent_tolerates_only_inflection(
+    first: str, second: str, equivalent: bool
+) -> None:
+    """Morphology tolerance must unify inflected forms of one lemma without
+    conflating distinct words that merely share a short prefix."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    assert OpenAITextReconciler._tokens_equivalent(first, second) is equivalent
+    assert OpenAITextReconciler._tokens_equivalent(second, first) is equivalent
+
+
+def test_openai_reconciler_skips_one_ungrounded_op_and_keeps_its_valid_sibling() -> (
+    None
+):
+    """A single hallucinated/ungrounded operation must be dropped on its own,
+    leaving well-formed sibling operations to materialize, with the drop
+    recorded in ``skipped_operations`` and confidence still mapped correctly to
+    the survivor."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=2000,
+        text="Купить молоко и позвонить Анне",
+        stability="stable",
+        provider_role="accurate",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                _add_op("Купить молоко"),
+                {**_add_op("Купить яхту"), "confidence": 0.5},
+            ]
+        },
+    )
+
+    result = reconciler.reconcile(
+        ReconcileTextRequest(
+            operation_id="operation_partial_skip",
+            transcript_segments=[segment],
+            active_proposals=[],
+            user_locks={},
+        )
+    )
+
+    assert [patch.title for patch in result.patches] == ["Купить молоко"]
+    assert len(result.skipped_operations) == 1
+    assert "unsupported task identity" in result.skipped_operations[0]
+    # Confidence must follow the surviving patch, not the dropped operation.
+    assert list(result.confidences.values()) == [0.9]
+
+
+def test_openai_reconciler_skips_a_tombstone_restore_but_keeps_a_valid_sibling() -> (
+    None
+):
+    """Restoring a user-deleted proposal is a per-operation grounding failure:
+    it drops just that operation while a valid sibling still materializes."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=2000,
+        text="Купить молоко и позвонить Анне",
+        stability="stable",
+        provider_role="accurate",
+    )
+    deleted = ReconciledProposal(
+        id="proposal_deleted",
+        title="Позвонить Анне",
+        source_segment_ids=["segment_fast"],
+        status="provisional",
+        tombstoned=True,
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                _add_op("Купить молоко"),
+                _add_op("Позвонить Анне"),
+            ]
+        },
+    )
+
+    result = reconciler.reconcile(
+        ReconcileTextRequest(
+            operation_id="operation_tombstone_sibling",
+            transcript_segments=[segment],
+            active_proposals=[deleted],
+            user_locks={},
+        )
+    )
+
+    assert [patch.title for patch in result.patches] == ["Купить молоко"]
+    assert any("cannot restore" in reason for reason in result.skipped_operations)
+
+
+def test_openai_reconciler_raises_when_every_operation_is_skipped() -> None:
+    """If no operation survives but at least one was dropped as ungrounded, the
+    whole call fails closed rather than returning an empty success."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text="Купить молоко",
+        stability="stable",
+        provider_role="accurate",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {"operations": [_add_op("Позвонить президенту")]},
+    )
+
+    with pytest.raises(ValidationFailure, match="unsupported task identity"):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id="operation_all_skipped",
+                transcript_segments=[segment],
+                active_proposals=[],
+                user_locks={},
+            )
+        )
+
+
+def test_openai_reconciler_raises_whole_call_on_a_protocol_violation_sibling() -> None:
+    """A protocol violation (here: a server-owned ID supplied on an add) means
+    the model is malfunctioning, so the entire call must fail closed even when a
+    sibling operation is perfectly grounded -- it is never silently skipped."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text="Купить молоко",
+        stability="stable",
+        provider_role="accurate",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                _add_op("Купить молоко"),
+                {**_add_op("Купить молоко"), "proposal_id": "client_owned_id"},
+            ]
+        },
+    )
+
+    with pytest.raises(ValidationFailure, match="server-owned"):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id="operation_protocol_sibling",
+                transcript_segments=[segment],
+                active_proposals=[],
+                user_locks={},
+            )
+        )
+
+
+def test_openai_reconciler_does_not_ground_an_english_translation_of_russian_source() -> (
+    None
+):
+    """A title translated out of the transcript's language shares no tokens with
+    its cited Russian segment, so it cannot ground. The fix for translations is
+    the prompt language-lock at generation time; at validation time a translated
+    title is dropped as ungrounded, never accepted."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=1000,
+        text="Отметь задачу про договор выполненной.",
+        stability="stable",
+        provider_role="accurate",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [_add_op("Mark the task about the contract as completed")]
+        },
+    )
+
+    with pytest.raises(ValidationFailure, match="not grounded in cited transcript"):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id="operation_translation",
+                transcript_segments=[segment],
+                active_proposals=[],
+                user_locks={},
+            )
+        )
+
+
+def test_openai_reconciler_v2_prompt_locks_language_and_bumps_template_version() -> (
+    None
+):
+    """The v2 prompt must instruct titles to stay in the transcript's language,
+    and the template version must be bumped so persisted runs distinguish it."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    captured: dict[str, object] = {}
+
+    def complete(payload: dict[str, object]) -> dict[str, object]:
+        captured.update(payload)
+        return {"operations": []}
+
+    reconciler = OpenAITextReconciler(api_key="test-key", complete=complete)
+    assert reconciler.template_version == "brain-dump-reconciler-v2"
+    reconciler.reconcile(_minimal_reconcile_request())
+
+    messages = captured["messages"]
+    assert isinstance(messages, list)
+    system_prompt = str(messages[0]["content"]).casefold()
+    assert "same language" in system_prompt
+    assert "never translate" in system_prompt
+    # Conciseness lock: titles must not accrete deadlines/tags/contexts/etc.
+    assert "keep each title concise" in system_prompt
+    assert "do not append" in system_prompt
+
+
+def _grounds_single_add(source_text: str, title: str):
+    """Reconcile a single grounded add and return the surviving titles."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=3000,
+        text=source_text,
+        stability="stable",
+        provider_role="accurate",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {"operations": [_add_op(title)]},
+    )
+    return reconciler.reconcile(
+        ReconcileTextRequest(
+            operation_id="operation_relaxation",
+            transcript_segments=[segment],
+            active_proposals=[],
+            user_locks={},
+        )
+    )
+
+
+def _rejects_single_add(source_text: str, title: str) -> None:
+    """Assert a single add fails closed as ungrounded."""
+
+    with pytest.raises(ValidationFailure, match="unsupported task identity"):
+        _grounds_single_add(source_text, title)
+
+
+@pytest.mark.parametrize(
+    ("source_text", "title"),
+    [
+        # A single command whose title aggregates its action-object plus adjuncts
+        # (context, due-date) drawn from sibling comma clauses of ONE segment.
+        (
+            "Создай задачу написать отчёт, добавь контекст «Ноутбук», "
+            "а срок поставь на вечер пятницы.",
+            "Написать отчёт, добавить контекст «Ноутбук», срок на вечер пятницы",
+        ),
+        # The action ("отложить") stays bound to its own object ("задачу про
+        # landing page") while a project-scope reference is pulled from the
+        # sibling (negated) clause.
+        (
+            "Не закрывай проект BrainBuddy, просто отложи задачу про landing page.",
+            "Отложить задачу про landing page в проекте BrainBuddy",
+        ),
+        # A shared time prefix ("на завтра") distributed across each enumerated
+        # command of the same segment.
+        (
+            "Короче, на завтра: созвон с командой, подготовить demo и "
+            "проверить backup.",
+            "Созвон с командой на завтра",
+        ),
+        (
+            "Короче, на завтра: созвон с командой, подготовить demo и "
+            "проверить backup.",
+            "Подготовить demo на завтра",
+        ),
+        (
+            "Короче, на завтра: созвон с командой, подготовить demo и "
+            "проверить backup.",
+            "Проверить backup на завтра",
+        ),
+    ],
+)
+def test_openai_reconciler_grounds_within_segment_multi_clause_aggregation(
+    source_text: str, title: str
+) -> None:
+    """CLASS 1: a single spoken command whose title legitimately aggregates
+    entities from sibling clauses of ONE cited segment must ground, provided
+    the action stays bound to its own primary target inside one clause. Derived
+    from the live Russian eval (utterances 28, 35, 43)."""
+
+    result = _grounds_single_add(source_text, title)
+    assert [patch.title for patch in result.patches] == [title]
+    assert result.skipped_operations == []
+
+
+@pytest.mark.parametrize(
+    ("source_text", "rebound_title", "grounded_title"),
+    [
+        # Cross-sibling-clause primary-target rebinding inside ONE segment: the
+        # relaxation must never let a clause's verb adopt another clause's direct
+        # object, even though both entities are present in the segment.
+        ("Email team and fire Bob", "Fire team", "Fire Bob"),
+        (
+            "Отправь письмо команде и уволь Бориса",
+            "Уволь команду",
+            "Уволь Бориса",
+        ),
+        ("Schedule meeting and call dentist", "Schedule dentist", "Call dentist"),
+    ],
+)
+def test_openai_reconciler_rejects_cross_sibling_clause_primary_rebinding(
+    source_text: str, rebound_title: str, grounded_title: str
+) -> None:
+    """The CLASS 1 aggregation relaxation must not open a primary-target
+    rebinding: an action recombined with a different sibling clause's direct
+    object finds no single clause carrying both and is rejected, while the
+    genuine command that keeps its own object still grounds."""
+
+    _rejects_single_add(source_text, rebound_title)
+    assert _grounds_single_add(source_text, grounded_title).patches[0].title == (
+        grounded_title
+    )
+
+
+def test_openai_reconciler_adjunct_fallback_cannot_launder_an_out_of_source_entity() -> (
+    None
+):
+    """The trailing-adjunct fallback only relocates tokens that already cleared
+    the segment-level identity check; a non-head fragment that introduces an
+    entity absent from the transcript is still rejected as a different concrete
+    identity (the fallback never sees it)."""
+
+    with pytest.raises(ValidationFailure, match="different concrete identity"):
+        _grounds_single_add(
+            "Написать отчёт на ноутбуке",
+            "Написать отчёт, украсть деньги",
+        )
+
+
+@pytest.mark.parametrize(
+    ("source_text", "title"),
+    [
+        # False start + em-dash restatement: "Так, нет, не на сегодня —" is
+        # discarded, and the restated command grounds without the spurious
+        # negation leaking from "не на сегодня".
+        (
+            "Так, нет, не на сегодня — перенеси оплату подписки на завтра.",
+            "Перенести оплату подписки на завтра",
+        ),
+        # Self-correction of a value ("в восемь" -> "в восемь тридцать"): the
+        # corrected reading is an acceptable source for the title.
+        (
+            "Напомни мне в восемь, ой, лучше в восемь тридцать, отправить "
+            "презентацию.",
+            "Напомни мне в восемь тридцать отправить презентацию",
+        ),
+    ],
+)
+def test_openai_reconciler_grounds_self_corrected_utterances(
+    source_text: str, title: str
+) -> None:
+    """CLASS 2: an explicit self-correction marker (or an em-dash false start)
+    means the restated command supersedes what preceded it; the corrected
+    reading is an acceptable grounding source. Derived from the live Russian
+    eval (utterances 32, 34)."""
+
+    result = _grounds_single_add(source_text, title)
+    assert [patch.title for patch in result.patches] == [title]
+    assert result.skipped_operations == []
+
+
+def test_openai_reconciler_correction_false_start_negation_never_authorizes_removal() -> (
+    None
+):
+    """The «Так, нет, не на сегодня» false start must not become deletion
+    authority: correction variants are withheld from the destructive path, and
+    the raw clause carries no affirmative destructive term, so a remove of the
+    proposal fails closed."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=2000,
+        text="Так, нет, не на сегодня — перенеси оплату подписки на завтра.",
+        stability="stable",
+        provider_role="accurate",
+    )
+    existing = ReconciledProposal(
+        id="proposal_existing",
+        title="Оплата подписки",
+        source_segment_ids=[segment.id],
+        status="provisional",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": "remove",
+                    "proposal_id": "proposal_existing",
+                    "source_segment_ids": [segment.id],
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(
+        ValidationFailure,
+        match="one cited transcript clause|no explicit destructive or",
+    ):
+        reconciler.reconcile(
+            ReconcileTextRequest(
+                operation_id="operation_correction_removal",
+                transcript_segments=[segment],
+                active_proposals=[existing],
+                user_locks={},
+            )
+        )
+
+
+def test_openai_reconciler_correction_pool_does_not_launder_a_rebinding() -> None:
+    """A restated command still binds its own action to its own target: after a
+    correction marker, calling "напиши Борису" cannot become "Позвони Борису" —
+    no clause (raw or corrected) carries that verb next to that target."""
+
+    _rejects_single_add("Позвони Анне, ой, нет, напиши Борису", "Позвони Борису")
+
+
+def test_openai_reconciler_ambiguous_reassignment_correction_stays_failing() -> None:
+    """A correction that reorders and pronoun-drops ("задачу для Анны… хотя нет,
+    назначь её Максиму" -> title "Назначь задачу Максиму") cannot be grounded by
+    structural rules without order-independent matching that would reopen
+    in-correction rebinding; it deliberately fails closed as a conflict for the
+    user to resolve rather than a committed guess (documented residual)."""
+
+    _rejects_single_add(
+        "Создай, пожалуйста, задачу для Анны… хотя нет, назначь её Максиму.",
+        "Назначь задачу Максиму",
+    )
+
+
+@pytest.mark.parametrize(
+    ("source_text", "title"),
+    [
+        # Prefix garble (first phoneme misheard) breaks the shared-stem check
+        # but is within the conservative edit-distance tolerance for long names.
+        ("Создай проект grainbuddy launch.", "Создать проект BrainBuddy launch"),
+        (
+            "Добавь тег mobile к проекту Brianbuddy.",
+            "Добавить тег mobile к проекту BrainBuddy",
+        ),
+    ],
+)
+def test_openai_reconciler_tolerates_stt_garbled_proper_noun(
+    source_text: str, title: str
+) -> None:
+    """CLASS 3: a long identity token garbled by STT within a small edit
+    distance ("grainbuddy"/"Brianbuddy" -> "BrainBuddy") grounds via the
+    conservative near-match, so the model's normalized proper noun is accepted."""
+
+    assert _grounds_single_add(source_text, title).patches[0].title == title
+
+
+@pytest.mark.parametrize(
+    ("source_text", "title"),
+    [
+        # Distance-3 garble exceeds the conservative bound: loosening far enough
+        # to admit it would risk conflating distinct names, so it stays failing.
+        (
+            "Отложи задачу про landing page в проекте BrentBuddy.",
+            "Отложить задачу про landing page в проекте BrainBuddy",
+        ),
+        # Short names never qualify for garble tolerance -- a distinct concrete
+        # target must stay exact.
+        ("Позвонить Ивану", "Позвонить Игорю"),
+        ("Call Alice", "Call Bruce"),
+    ],
+)
+def test_openai_reconciler_rejects_distinct_identity_beyond_garble_tolerance(
+    source_text: str, title: str
+) -> None:
+    """CLASS 3 safety: the near-match must not launder a genuinely different
+    concrete identity -- distance-3 garbles and all short names fail closed."""
+
+    with pytest.raises(ValidationFailure, match="different concrete identity"):
+        _grounds_single_add(source_text, title)
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "equivalent"),
+    [
+        ("brainbuddy", "brianbuddy", True),  # adjacent transposition
+        ("brainbuddy", "grainbuddy", True),  # single prefix substitution
+        ("brainbuddy", "brentbuddy", False),  # distance 3
+        ("alice", "bruce", False),  # distinct 5-char names, distance > 25%
+        ("bob", "alan", False),  # too short to qualify
+        ("анне", "максиму", False),  # too short (and distinct) to qualify
+        ("создать", "создай", True),  # ordinary inflection still matches
+    ],
+)
+def test_openai_reconciler_entities_equivalent_tolerates_only_conservative_garble(
+    first: str, second: str, equivalent: bool
+) -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    assert OpenAITextReconciler._entities_equivalent(first, second) is equivalent
+    assert OpenAITextReconciler._entities_equivalent(second, first) is equivalent
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "distance"),
+    [
+        ("brainbuddy", "brainbuddy", 0),
+        ("brainbuddy", "brianbuddy", 1),  # one adjacent transposition
+        ("brainbuddy", "grainbuddy", 1),  # one substitution
+        ("brainbuddy", "brentbuddy", 3),
+        ("", "abc", 3),
+        ("abc", "", 3),
+    ],
+)
+def test_openai_reconciler_damerau_levenshtein_distance(
+    first: str, second: str, distance: int
+) -> None:
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    assert OpenAITextReconciler._damerau_levenshtein(first, second) == distance
+
+
+# --- FR-006 language-faithful title invariant (T037) -----------------------
+#
+# The reconciler enforces the FR-006 title-generation rule as an invariant
+# distinct from FR-008 grounding tolerance: a title translated out of its cited
+# segment's language is dropped into the same ``_SemanticGroundingFailure`` skip
+# taxonomy (one operation dropped, siblings kept), never silently accepted.
+
+
+def _reconcile_single_segment(
+    source_text: str,
+    operations: list[dict[str, object]],
+    *,
+    active_proposals: list[object] | None = None,
+):
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=3000,
+        text=source_text,
+        stability="stable",
+        provider_role="accurate",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {"operations": operations},
+    )
+    return reconciler.reconcile(
+        ReconcileTextRequest(
+            operation_id="operation_language_faithful",
+            transcript_segments=[segment],
+            active_proposals=active_proposals or [],
+            user_locks={},
+        )
+    )
+
+
+def test_language_faithful_invariant_drops_translated_title_even_if_grounding_accepts(
+    monkeypatch,
+) -> None:
+    """The invariant is independent of grounding: with semantic grounding
+    neutralized (standing in for any grounding path that would tolerate the
+    title's meaning -- a shared proper noun, a normalized/loanword verb), a
+    title translated out of the Russian source's language is still dropped as a
+    single ungrounded operation while its faithful sibling survives."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    monkeypatch.setattr(
+        OpenAITextReconciler,
+        "_assert_semantic_support",
+        staticmethod(lambda *args, **kwargs: None),
+    )
+
+    result = _reconcile_single_segment(
+        "Купить молоко и позвонить Анне",
+        [_add_op("Купить молоко"), _add_op("Call Anna")],
+    )
+
+    assert [patch.title for patch in result.patches] == ["Купить молоко"]
+    assert len(result.skipped_operations) == 1
+    assert "translated out of the cited transcript's language" in (
+        result.skipped_operations[0]
+    )
+
+
+def test_language_faithful_invariant_fails_closed_when_every_title_is_translated(
+    monkeypatch,
+) -> None:
+    """If the only operations are translated titles, the whole call fails closed
+    (never an empty success) -- the language rule reuses the ungrounded-drop
+    fail-closed contract."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    monkeypatch.setattr(
+        OpenAITextReconciler,
+        "_assert_semantic_support",
+        staticmethod(lambda *args, **kwargs: None),
+    )
+
+    with pytest.raises(ValidationFailure, match="ungrounded"):
+        _reconcile_single_segment(
+            "Купить молоко и позвонить Анне",
+            [_add_op("Buy milk"), _add_op("Call Anna")],
+        )
+
+
+def test_language_faithful_invariant_accepts_russian_title_with_latin_proper_nouns() -> (
+    None
+):
+    """A Russian title that embeds a Latin-script proper noun is faithful, not a
+    translation: the invariant is about the dominant language matching, not
+    script purity, so ``Починить BrainBuddy`` grounds and materializes."""
+
+    result = _reconcile_single_segment(
+        "Надо починить BrainBuddy и написать Наташе",
+        [_add_op("Починить BrainBuddy"), _add_op("Написать Наташе")],
+    )
+
+    assert [patch.title for patch in result.patches] == [
+        "Починить BrainBuddy",
+        "Написать Наташе",
+    ]
+    assert result.skipped_operations == []
+
+
+def test_language_faithful_invariant_accepts_english_title_from_english_source() -> (
+    None
+):
+    """A Latin-only utterance yields a Latin-script title; same-language English
+    output is never flagged as a translation."""
+
+    result = _reconcile_single_segment(
+        "please deploy the BrainBuddy release and test the smoke suite",
+        [_add_op("Deploy the BrainBuddy release"), _add_op("Test the smoke suite")],
+    )
+
+    assert [patch.title for patch in result.patches] == [
+        "Deploy the BrainBuddy release",
+        "Test the smoke suite",
+    ]
+    assert result.skipped_operations == []
+
+
+def test_language_faithful_invariant_accepts_mixed_code_switched_title() -> None:
+    """A code-switched Russian/English utterance yields a code-switched title
+    (Cyrillic action verbs plus embedded Latin technical terms), which the
+    invariant accepts rather than normalizing to a single language."""
+
+    result = _reconcile_single_segment(
+        "потом протестировать production smoke на staging",
+        [_add_op("Протестировать production smoke на staging")],
+    )
+
+    assert [patch.title for patch in result.patches] == [
+        "Протестировать production smoke на staging"
+    ]
+    assert result.skipped_operations == []

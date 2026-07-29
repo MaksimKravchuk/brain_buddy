@@ -81,10 +81,28 @@ const brainDumpProposals = Array.from({ length: 9 }, (_, index) => ({
     "Cancel unused SaaS subscriptions"
   ][index],
   status: index === 0 ? "ready_to_review" : index === 1 ? "wording_changing" : "provisional",
-  source_segment_ids: ["segment-1"],
+  source_segment_ids: [`segment-${index + 1}`],
   deleted: false,
   user_edited: false,
   revision: 1
+}));
+
+const brainDumpSegments = [
+  "I really need to renew the car insurance before it lapses",
+  "oh and reply to Anna about the offsite she pinged me yesterday",
+  "book the flights to Lisbon while they're still cheap",
+  "the pricing page copy needs an update after the plan change",
+  "prepare interview questions for Vlad on Thursday",
+  "call the dentist to move Monday's appointment",
+  "take the car in for the flat tire",
+  "draft the launch announcement post for v2",
+  "cancel the SaaS subscriptions we don't use anymore"
+].map((text, index) => ({
+  id: `segment-${index + 1}`,
+  sequence: index + 1,
+  text,
+  stability: "stable",
+  provider_role: "accurate"
 }));
 
 const brainDumpRecordingResponse = {
@@ -106,6 +124,7 @@ const brainDumpReviewResponse = {
   status: "awaiting_confirmation",
   committable: true,
   reconciliation_quality: "accurate",
+  segments: brainDumpSegments,
   proposals: brainDumpProposals,
   revision: 2
 };
@@ -118,7 +137,13 @@ test.beforeEach(async ({ page }) => {
       return;
     }
     if (url.pathname.includes("/auth/me")) {
-      await route.fulfill({ json: { id: "user-1", email: "max@example.test" } });
+      await route.fulfill({
+        json: { id: "user-1", email: "max@example.test", feature_flags: { voice_brain_dump: true } }
+      });
+      return;
+    }
+    if (url.pathname === "/api/brain-dump-providers") {
+      await route.fulfill({ json: { accurate_stt: "openai", reconciler: "openai" } });
       return;
     }
     const taskDetailMatch = url.pathname.match(/\/tasks\/(task-\d+)$/);
@@ -423,7 +448,7 @@ test("Brain Dump recording and review surfaces use source-derived mobile geometr
 
   await page.getByRole("button", { name: "Stop & review" }).click();
   await expect(page.getByRole("heading", { name: "Review 9 tasks" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Save 9 to inbox" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Confirm 9 additions" })).toBeVisible();
   await expect(page.locator("body")).toHaveScreenshot("claude-design-brain-dump-review-402x874.png", {
     animations: "disabled",
     maxDiffPixelRatio: 0.08

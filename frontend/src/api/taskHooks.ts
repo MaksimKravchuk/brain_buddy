@@ -9,8 +9,22 @@ export const taskKeys = {
   list: (filters: TaskListFilters) => [...taskKeys.all, "list", filters] as const,
   detail: (taskId: string) => [...taskKeys.all, "detail", taskId] as const,
   projects: () => [...taskKeys.all, "projects"] as const,
-  tags: () => [...taskKeys.all, "tags"] as const
+  tags: () => [...taskKeys.all, "tags"] as const,
+  brainDumpProviders: () => ["brain-dump-providers"] as const
 };
+
+export function useBrainDumpProviders(enabled: boolean) {
+  // The configured external voice providers are static server config, so this
+  // is fetched once (never retried on error) and only while the fresh-recording
+  // screen is shown, where its result seeds the consent the user grants.
+  return useQuery({
+    enabled,
+    queryKey: taskKeys.brainDumpProviders(),
+    queryFn: ({ signal }) => apiClient.getBrainDumpProviders(signal),
+    retry: false,
+    staleTime: Infinity
+  });
+}
 
 export function useTaskList(filters: TaskListFilters) {
   const query = useInfiniteQuery({

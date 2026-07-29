@@ -40,7 +40,12 @@ class AppEnvironment(str, Enum):
 # Explicit allow-list of server-owned feature flags. A flag must be declared
 # here before configuration may reference it; anything else fails closed at
 # startup. Flags gate exposure/rollout only — they are never authorization.
-KNOWN_FEATURE_FLAGS: tuple[str, ...] = ("delivery_canary",)
+#
+# ``voice_brain_dump`` (ADR-0008) gates the native voice Brain Dump feature:
+# the backend brain-dump commands and provider discovery, plus the frontend
+# route (which reads the effective flag from ``/api/auth/me``). It ships
+# default OFF and rolls out OFF → INTERNAL → ON like every other flag.
+KNOWN_FEATURE_FLAGS: tuple[str, ...] = ("delivery_canary", "voice_brain_dump")
 
 
 class FeatureFlagState(str, Enum):
@@ -371,16 +376,25 @@ def _build_config() -> AppConfig:
         ).split(",")
         if value.strip()
     )
+    # Provider-specific defaults: Deepgram (multilingual STT) uses the nova-3
+    # model and a DEEPGRAM_API_KEY credential; OpenAI keeps its transcribe
+    # model and OPENAI_API_KEY. Either default is overridable via the explicit
+    # env vars below.
+    accurate_stt_is_deepgram = accurate_provider == "deepgram"
+    default_accurate_model = (
+        "nova-3" if accurate_stt_is_deepgram else "gpt-4o-mini-transcribe"
+    )
+    default_accurate_api_key_env = (
+        "DEEPGRAM_API_KEY" if accurate_stt_is_deepgram else "OPENAI_API_KEY"
+    )
     accurate_stt = VoiceProviderSettings(
         provider=accurate_provider,
-        model=os.getenv(
-            "BRAIN_BUDDY_VOICE_ACCURATE_STT_MODEL", "gpt-4o-mini-transcribe"
-        ),
+        model=os.getenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_MODEL", default_accurate_model),
         api_key_env=os.getenv(
-            "BRAIN_BUDDY_VOICE_ACCURATE_STT_API_KEY_ENV", "OPENAI_API_KEY"
+            "BRAIN_BUDDY_VOICE_ACCURATE_STT_API_KEY_ENV", default_accurate_api_key_env
         ),
         timeout_seconds=float(
-            os.getenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_TIMEOUT_SECONDS", "60")
+            os.getenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_TIMEOUT_SECONDS", "180")
         ),
         max_retries=int(
             os.getenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_MAX_RETRIES", "2")

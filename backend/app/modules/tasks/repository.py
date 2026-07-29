@@ -568,7 +568,15 @@ class TaskRepository(BaseRepository):
         BaseRepository.dump_model(self.idempotency_path(owner_id, record.key), record)
 
     def purge_expired_idempotency(self, *, owner_id: str, now: datetime) -> int:
-        """Drop idempotency records past retention so history stays bounded."""
+        """Drop idempotency records past retention so history stays bounded.
+
+        ``create_native_inbox_task`` records are exempt: a brain-dump commit
+        action's deterministic child key is the durable "at most one task"
+        dedup record, and an unresolved ``committing`` batch can outlive the
+        generic 24h retention. Purging it early could let a later resume mint a
+        duplicate canonical task, so those identities are retained for the
+        (unbounded) lifetime of their frozen batch rather than by wall clock.
+        """
 
         cutoff = (now - IDEMPOTENCY_RETENTION).isoformat()
         with self._connection() as conn, _sqlite_guard("Idempotency-Key", owner_id):
@@ -576,13 +584,18 @@ class TaskRepository(BaseRepository):
                 """
                 SELECT key FROM idempotency_records
                 WHERE owner_id = ? AND created_at < ?
+                    AND command != 'create_native_inbox_task'
                 """,
                 (owner_id, cutoff),
             ).fetchall()
             if not rows:
                 return 0
             conn.execute(
-                "DELETE FROM idempotency_records WHERE owner_id = ? AND created_at < ?",
+                """
+                DELETE FROM idempotency_records
+                WHERE owner_id = ? AND created_at < ?
+                    AND command != 'create_native_inbox_task'
+                """,
                 (owner_id, cutoff),
             )
         for row in rows:

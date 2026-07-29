@@ -65,12 +65,26 @@ Uploaded audio is accepted only when it stays within these limits:
 Raw uploaded audio is purged after
 `BRAIN_BUDDY_VOICE_RAW_AUDIO_RETENTION_SECONDS`; uncommitted transcript and
 proposal working artifacts are purged after
-`BRAIN_BUDDY_VOICE_WORKING_ARTIFACT_RETENTION_SECONDS`. The persisted runner
-recovers due/expired provider runs and performs both retention sweeps every
+`BRAIN_BUDDY_VOICE_WORKING_ARTIFACT_RETENTION_SECONDS`. The working-artifact
+sweep also reduces the frozen commit ledger's proposal titles to hashes in the
+same pass, so no plaintext derived text outlives that window (the compact
+ID/hash action receipts are retained). The persisted runner recovers
+due/expired provider runs and performs both retention sweeps every
 `BRAIN_BUDDY_VOICE_SWEEP_INTERVAL_SECONDS`. A value of `0` disables its periodic
 thread, while application startup still performs one synchronous recovery/purge
 pass. `BRAIN_BUDDY_ENABLE_VOICE_SWEEP_IN_TEST=1` is test-only opt-in for that
 periodic thread.
+
+The same sweep also resumes operations stuck in `committing` (a crash between
+the frozen commit batch and finalize). Resumption drives the exact
+owner-serialized, deterministic-child-key commit path a client retry uses, so a
+swept resume can never create a task twice. Operators do not need to intervene:
+a stuck `committing` operation is retried every sweep interval until it
+completes. If one is stuck indefinitely, the cause is a persistently failing
+Tasks write (check logs/storage) rather than the saga itself; the frozen ledger
+and any already-created tasks remain durable and the resume stays idempotent.
+The sweep log line — `Voice sweep: recovered N lease(s), resumed N commit(s),
+...` — reports counts only and never operation content.
 
 ## Language and keyterm hints
 

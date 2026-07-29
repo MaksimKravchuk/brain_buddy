@@ -493,8 +493,56 @@ def validate_handoff(payload: object) -> dict[str, Any]:
     risk = _required_string(raw_review.get("risk"), "planning_review.risk")
     if risk not in {"standard", "high"}:
         raise ValueError("planning_review.risk is unsupported")
-    if raw_review.get("status") != "approved":
-        raise ValueError("planning_review.status must be approved")
+    status = raw_review.get("status")
+    if status == "founder-accepted":
+        # Founder-acceptance policy (authorized by the repo owner, 2026-07-29):
+        # a review loop that does not converge to `approved` may be closed by
+        # the founder explicitly accepting the recorded state. This path never
+        # relaxes honesty requirements — it demands MORE record than approval:
+        # the full campaign history and a substantive rationale must accompany
+        # the acceptance, so the handoff documents exactly what was reviewed,
+        # what was found, and why the founder accepted it anyway.
+        acceptance = raw_review.get("founder_acceptance")
+        if not isinstance(acceptance, dict):
+            raise ValueError(
+                "founder-accepted review requires a founder_acceptance record"
+            )
+        _required_string(
+            acceptance.get("accepted_by"), "founder_acceptance.accepted_by"
+        )
+        _required_string(
+            acceptance.get("accepted_on"), "founder_acceptance.accepted_on"
+        )
+        rationale = _required_string(
+            acceptance.get("rationale"), "founder_acceptance.rationale"
+        )
+        if len(rationale) < 120:
+            raise ValueError(
+                "founder_acceptance.rationale must substantively explain what "
+                "was accepted and why (a short label is not a record)"
+            )
+        history = acceptance.get("campaign_history")
+        if not isinstance(history, list) or not history:
+            raise ValueError(
+                "founder_acceptance.campaign_history must list every campaign run"
+            )
+        for index, entry in enumerate(history):
+            if not isinstance(entry, dict):
+                raise ValueError(
+                    f"founder_acceptance.campaign_history[{index}] must be an object"
+                )
+            _required_string(
+                entry.get("run_id"),
+                f"founder_acceptance.campaign_history[{index}].run_id",
+            )
+            _required_string(
+                entry.get("status"),
+                f"founder_acceptance.campaign_history[{index}].status",
+            )
+    elif status != "approved":
+        raise ValueError(
+            "planning_review.status must be approved or founder-accepted"
+        )
     reviewers = _string_list(
         raw_review.get("reviewers"), "planning_review.reviewers", minimum=3
     )

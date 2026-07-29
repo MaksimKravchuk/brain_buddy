@@ -1,0 +1,71 @@
+{
+  "report_id": "def27a7228b6bd84c92c86deeb88f8bff26b8e88a7eac6d5ad3894c0ce587aff",
+  "schema_version": 2,
+  "run_key": "c407ddcc582e4541f2f13f14f485820137452c4ba21833634292a1615d90415e",
+  "git_sha": "RECORDED_FIXTURE_NOT_A_REAL_SHA",
+  "corpus_id": "founder_ru_reading_script",
+  "corpus_digest": "16e22c085bbcede0f78f70a20edc55a609547fdd34d4fffa4cf3b9f91b89248f",
+  "corpus_version": 1,
+  "provider_config_digest": "0f78efc193d7a9938cddfbcdcdb2ecf698c109cedce76bb0df95f4bbc892c3c8",
+  "coverage": {
+    "utterances_scored": 50,
+    "utterances_in_corpus": 50
+  },
+  "criteria": [
+    {
+      "criterion": "SC-001",
+      "passed": true,
+      "detail": {
+        "committed_task_count": 17,
+        "threshold": 15,
+        "has_full_recording": true,
+        "evidence_mode": "sealed_audio_pipeline"
+      }
+    },
+    {
+      "criterion": "SC-002",
+      "passed": true,
+      "detail": {
+        "correct_hits": 38,
+        "task_yielding_total": 43,
+        "ratio": 0.8837,
+        "threshold": 0.8,
+        "miss_breakdown": {
+          "count_mismatch": 5,
+          "translated": 0,
+          "ungrounded": 0,
+          "missing_required_terms": 0
+        },
+        "oracle": "count==expected AND language-faithful AND grounded content AND required embedded terms preserved",
+        "evidence_mode": "sealed_audio_pipeline"
+      }
+    },
+    {
+      "criterion": "SC-003",
+      "passed": true,
+      "detail": {
+        "translated_titles": 0,
+        "titles_total": 53,
+        "evidence_mode": "sealed_audio_pipeline"
+      }
+    },
+    {
+      "criterion": "SC-004",
+      "passed": true,
+      "detail": {
+        "conjunction_false_splits": 0,
+        "conjunction_eligible": 22,
+        "evidence_mode": "sealed_audio_pipeline"
+      }
+    },
+    {
+      "criterion": "SC-007",
+      "passed": true,
+      "detail": {
+        "seal_to_awaiting_confirmation_seconds": 41.2,
+        "threshold_seconds": 120.0,
+        "evidence_mode": "sealed_audio_pipeline"
+      }
+    }
+  ]
+}

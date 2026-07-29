@@ -1,0 +1,71 @@
+{
+  "report_id": "c066dbb76beec87b733462bd8d071230e0931c7ef18d5497bc1d3775e6c8fcc5",
+  "schema_version": 2,
+  "run_key": "bfd2defec8cd40eae754fe2eef538b77b3d29871f1cb165aaa354d00e6ac2eb8",
+  "git_sha": "317aca5e339233916e9635b073dfda524af1540c",
+  "corpus_id": "founder_ru_reading_script",
+  "corpus_digest": "16e22c085bbcede0f78f70a20edc55a609547fdd34d4fffa4cf3b9f91b89248f",
+  "corpus_version": 1,
+  "provider_config_digest": "0f78efc193d7a9938cddfbcdcdb2ecf698c109cedce76bb0df95f4bbc892c3c8",
+  "coverage": {
+    "utterances_scored": 50,
+    "utterances_in_corpus": 50
+  },
+  "criteria": [
+    {
+      "criterion": "SC-001",
+      "passed": true,
+      "detail": {
+        "committed_task_count": 25,
+        "threshold": 15,
+        "has_full_recording": true,
+        "evidence_mode": "sealed_audio_pipeline"
+      }
+    },
+    {
+      "criterion": "SC-002",
+      "passed": false,
+      "detail": {
+        "correct_hits": 32,
+        "task_yielding_total": 43,
+        "ratio": 0.7442,
+        "threshold": 0.8,
+        "miss_breakdown": {
+          "count_mismatch": 8,
+          "translated": 0,
+          "ungrounded": 0,
+          "missing_required_terms": 3
+        },
+        "oracle": "count==expected AND language-faithful AND grounded content AND required embedded terms preserved",
+        "evidence_mode": "text_reconciler"
+      }
+    },
+    {
+      "criterion": "SC-003",
+      "passed": true,
+      "detail": {
+        "translated_titles": 0,
+        "titles_total": 44,
+        "evidence_mode": "text_reconciler"
+      }
+    },
+    {
+      "criterion": "SC-004",
+      "passed": false,
+      "detail": {
+        "conjunction_false_splits": 2,
+        "conjunction_eligible": 22,
+        "evidence_mode": "text_reconciler"
+      }
+    },
+    {
+      "criterion": "SC-007",
+      "passed": true,
+      "detail": {
+        "seal_to_awaiting_confirmation_seconds": 21.125,
+        "threshold_seconds": 120.0,
+        "evidence_mode": "sealed_audio_pipeline"
+      }
+    }
+  ]
+}

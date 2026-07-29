@@ -205,6 +205,23 @@ its contents with the same `validate_handoff` contract used by
 schema-violating, unapproved, under-reviewed, or cyclic-lane handoff fails the
 mandatory CI spec gate.
 
+## Founder acceptance
+
+A high-risk planning-review campaign is a bounded quality tool, not an oracle:
+fresh reviewer sessions re-litigate artifacts from scratch, and on a large,
+actively-amended package the blocking-finding count may diverge across
+campaigns even as every verified defect is fixed. When the repo owner judges
+that the loop has stopped converging, the review may be closed by explicit
+founder acceptance: `planning_review.status: founder-accepted`, carrying a
+`founder_acceptance` record with `accepted_by`, `accepted_on`, a substantive
+`rationale`, and the complete `campaign_history` (every run id and its true
+status). The validators accept this status only with that full record — it
+documents more than an approval does, never less. Findings that motivated
+fixes must be fixed or tracked in open handoff lanes before acceptance;
+fabricating an `approved` status remains prohibited. First recorded use:
+spec 005 (2026-07-29), five campaigns, nine product decisions, every verified
+defect fixed, closed by the founder for a single-user deployment.
+
 ## Historical grandfathering
 
 Existing history is preserved rather than regenerated blindly.

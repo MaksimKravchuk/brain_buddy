@@ -31,6 +31,7 @@ from app.workflows.voice_brain_dump.adapters import (
     OpenAiAccurateStt,
     OpenAITextReconciler,
 )
+from app.workflows.voice_brain_dump.adapters.deepgram_stt import DeepgramAccurateStt
 from app.workflows.voice_brain_dump.providers import (
     AccurateSttPort,
     DeterministicAccurateStt,
@@ -79,6 +80,19 @@ def _build_accurate_stt(config: AppConfig) -> AccurateSttPort:
         if not api_key:
             return DisabledAccurateStt("STT_PROVIDER_CREDENTIALS_MISSING")
         return OpenAiAccurateStt(
+            api_key=api_key,
+            model=settings.model,
+            timeout_seconds=settings.timeout_seconds,
+            max_retries=settings.max_retries,
+            retry_backoff_seconds=settings.retry_backoff_seconds,
+            max_cost_usd_per_operation=settings.max_cost_usd_per_operation,
+            estimated_cost_usd_per_megabyte=settings.estimated_cost_usd_per_megabyte,
+        )
+    if settings.provider == "deepgram":
+        api_key = os.getenv(settings.api_key_env)
+        if not api_key:
+            return DisabledAccurateStt("STT_PROVIDER_CREDENTIALS_MISSING")
+        return DeepgramAccurateStt(
             api_key=api_key,
             model=settings.model,
             timeout_seconds=settings.timeout_seconds,
@@ -146,6 +160,35 @@ def _build_text_reconciler(config: AppConfig) -> TextReconcilerPort:
     return DisabledTextReconciler()
 
 
+def _allowed_external_provider_categories(config: AppConfig) -> frozenset[str]:
+    """The provider categories consent may name, per configuration.
+
+    Each configured role contributes its verbatim category string (``openai`` /
+    ``deepgram`` / ``deterministic``) so consent driven by the discovery endpoint
+    -- which reports those same config strings -- clears the pre-upload guard. A
+    ``disabled`` role contributes nothing. ``deterministic`` additionally admits
+    ``openai`` for backward compatibility with legacy single-provider clients
+    (and older tests) that named ``openai`` for a deterministic stack before the
+    discovery endpoint reported the category honestly. This only widens the set
+    of *nameable* categories; the actual egress guard
+    (``_required_external_provider_categories`` derived from the wired adapters'
+    ``requires_external_processing``) is unchanged, so no unconsented vendor can
+    receive data.
+    """
+
+    allowed: set[str] = set()
+    for provider in (
+        config.voice.accurate_stt.provider,
+        config.voice.reconciler.provider,
+    ):
+        if provider == "disabled":
+            continue
+        allowed.add(provider)
+        if provider == "deterministic":
+            allowed.add("openai")
+    return frozenset(allowed)
+
+
 def build_container(config: AppConfig) -> Container:
     data_root = config.data_dir
     tree_repo = TreeRepository(data_root)
@@ -174,6 +217,21 @@ def build_container(config: AppConfig) -> Container:
         },
     )
     task_service = TaskService(task_repo)
+
+    def _voice_enabled_for_owner(owner_id: str) -> bool:
+        """Whether ``voice_brain_dump`` is effective for the operation's owner.
+
+        Used by the background runner so external provider work never advances
+        for an owner whose exposure flag is OFF. A missing user fails closed.
+        """
+
+        user = user_repo.get_by_id(owner_id)
+        if user is None:
+            return False
+        return config.feature_flags.effective_flags(user.email).get(
+            "voice_brain_dump", False
+        )
+
     voice_brain_dump_service = VoiceBrainDumpService(
         voice_operation_repo,
         accurate_stt=_build_accurate_stt(config),
@@ -187,16 +245,10 @@ def build_container(config: AppConfig) -> Container:
             config.voice.max_cumulative_cost_usd_per_operation
         ),
         provider_run_lease_seconds=_provider_run_lease_seconds(config),
-        allowed_external_provider_categories=frozenset(
-            "openai" if provider == "deterministic" else provider
-            for provider in (
-                config.voice.accurate_stt.provider,
-                config.voice.reconciler.provider,
-            )
-            if provider != "disabled"
-        ),
+        allowed_external_provider_categories=_allowed_external_provider_categories(config),
         audio_limits=config.voice.audio_limits,
         task_port=InProcessTaskPort(task_service.create_native_inbox_task),
+        voice_enabled_for_owner=_voice_enabled_for_owner,
     )
     auth_service = AuthService(
         user_repo=user_repo,
