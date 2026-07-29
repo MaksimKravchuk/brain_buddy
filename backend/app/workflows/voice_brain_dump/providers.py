@@ -86,6 +86,10 @@ class ReconcileResult:
     patches: list[ProposalPatch]
     confidences: dict[str, float] = field(default_factory=dict)
     estimated_cost_usd: float = 0.0
+    # Human-readable reasons for operations the model proposed but that failed
+    # semantic grounding and were dropped per-operation rather than raised for
+    # the whole call. Defaulted so existing construction sites stay valid.
+    skipped_operations: list[str] = field(default_factory=list)
 
 
 class FastSttPort(Protocol):
