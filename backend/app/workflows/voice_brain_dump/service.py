@@ -484,6 +484,10 @@ class VoiceBrainDumpService:
         those are the compact, immutable, ID-only audit provenance a
         completed operation keeps forever and must not depend on the raw
         ``segments``/``proposals``/``proposal_patches`` this purge clears.
+
+        It also reduces the frozen ``commit_batch`` action titles to hashes in
+        the same pass, so no plaintext derived text (transcript, proposals, or
+        ledger titles) outlives the working-artifact window (ADR-0002).
         """
 
         current_time = now or utcnow()
@@ -527,6 +531,30 @@ class VoiceBrainDumpService:
                     "updated_at": current_time,
                     "revision": operation.revision + 1,
                 }
+                if operation.commit_batch is not None:
+                    # The frozen ledger keeps proposal titles in plaintext so a
+                    # partial commit can resume by re-creating the task. Past the
+                    # window on a terminal (or withdrawal-finalized) operation
+                    # resume is impossible, so reduce each title to its SHA-256 --
+                    # the same hash the action receipt already records -- keeping
+                    # only the ledger's resume/audit identity (child keys, action
+                    # results). Runs once: the sweep skips an operation whose
+                    # working text is already cleared, so titles are never
+                    # re-hashed.
+                    purge_update["commit_batch"] = operation.commit_batch.model_copy(
+                        update={
+                            "actions": [
+                                action.model_copy(
+                                    update={
+                                        "title": hashlib.sha256(
+                                            action.title.encode("utf-8")
+                                        ).hexdigest()
+                                    }
+                                )
+                                for action in operation.commit_batch.actions
+                            ]
+                        }
+                    )
                 if withdrawn and not is_terminal:
                     # Finalize a withdrawn, still non-terminal operation as the
                     # sweep deletes its derived text so it stops presenting a
@@ -586,6 +614,44 @@ class VoiceBrainDumpService:
                 # inside retry_brain_dump_operation is authoritative, so
                 # losing here is an expected, safe no-op, not an error.
                 continue
+        return recovered
+
+    def recover_committing_operations(self, *, limit: int = 50) -> int:
+        """Resume operations frozen mid-commit (crashed in ``committing``).
+
+        The periodic half of the commit saga: a crash between the frozen batch
+        and finalize leaves an operation ``committing`` with a durable partial
+        ledger and nothing to finish it. This resumes each through the exact
+        owner-serialized commit path a client retry uses -- safe by construction
+        under the concurrency design: deterministic per-action child keys plus
+        the owner-serialized Tasks idempotency mean a swept resume can never
+        create a task twice. ``committing`` means the owner already committed, so
+        auto-resume is the correct completion, not a surprise interaction. Each
+        op resumes under its own owner lock; one that still cannot complete
+        (e.g. a persistently unavailable TaskPort) simply stays ``committing``
+        and is retried on the next sweep rather than blocking the others.
+        """
+
+        recovered = 0
+        for candidate in self.operation_repo.list_committing_operations():
+            if recovered >= limit:
+                break
+            try:
+                result = self.commit_brain_dump_operation(
+                    candidate.id,
+                    ExpectedRevisionRequest(expected_revision=candidate.revision),
+                    owner_id=candidate.owner_id,
+                    idempotency_key=(
+                        f"commit_recovery:{candidate.id}:{candidate.revision}"
+                    ),
+                )
+            except (ValidationFailure, ConflictError, NotFoundError):
+                # A concurrent manual retry, cancel, or withdrawal moved the
+                # operation out of ``committing`` first; the begin-commit checks
+                # are authoritative, so losing that race is a safe no-op.
+                continue
+            if result.status == "completed":
+                recovered += 1
         return recovered
 
     @_serialized_write

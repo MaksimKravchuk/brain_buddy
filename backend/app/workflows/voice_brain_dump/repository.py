@@ -427,6 +427,26 @@ class OperationRepository(BaseRepository):
             for row in rows
         ]
 
+    def list_committing_operations(self) -> list[BrainDumpOperationDocument]:
+        """Operations frozen mid-commit (``committing``) that may need resuming.
+
+        A crash between the frozen batch and finalize leaves an operation here
+        with a durable partial ledger; the caller resumes each through the
+        owner-serialized, deterministic-child-key commit path.
+        """
+
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT payload FROM brain_dump_operations
+                WHERE status = 'committing'
+                """
+            ).fetchall()
+        return [
+            self._decode_brain_dump_operation(json.loads(row["payload"]))[0]
+            for row in rows
+        ]
+
     def list_expired_working_artifact_operations(
         self, *, before: datetime
     ) -> list[BrainDumpOperationDocument]:
