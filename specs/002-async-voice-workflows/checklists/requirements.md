@@ -156,3 +156,9 @@ ADR-0002 operation/patch/confirmation substrate or native GTD contracts. Any
 implementation change to role boundaries, state transitions, persistence
 ownership, confirmation payload, or migration behavior must amend the
 spec/ADR/plan before code proceeds.
+
+Re-verified on 2026-07-24 at `origin/main` `77fe9aa`: CHK032/CHK033 remain
+satisfied after correcting historical file paths, shipped-task status, the
+current polling transport, and ADR-0008 delivery language. Credentialed corpus
+outcomes remain release evidence, not a claim that T044/T053/T055/T060/T062 or
+T063 has completed.

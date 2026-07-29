@@ -5,12 +5,20 @@ from __future__ import annotations
 import logging
 import math
 import os
+from collections.abc import Mapping
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
+from types import MappingProxyType
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+)
 
 load_dotenv()
 
@@ -27,6 +35,98 @@ class AppEnvironment(str, Enum):
     DEVELOPMENT = "development"
     PRODUCTION = "production"
     TEST = "test"
+
+
+# Explicit allow-list of server-owned feature flags. A flag must be declared
+# here before configuration may reference it; anything else fails closed at
+# startup. Flags gate exposure/rollout only — they are never authorization.
+#
+# ``voice_brain_dump`` (ADR-0008) gates the native voice Brain Dump feature:
+# the backend brain-dump commands and provider discovery, plus the frontend
+# route (which reads the effective flag from ``/api/auth/me``). It ships
+# default OFF and rolls out OFF → INTERNAL → ON like every other flag.
+KNOWN_FEATURE_FLAGS: tuple[str, ...] = ("delivery_canary", "voice_brain_dump")
+
+
+class FeatureFlagState(str, Enum):
+    """Rollout stage of one allow-listed feature flag."""
+
+    OFF = "off"
+    INTERNAL = "internal"
+    ON = "on"
+
+
+class FeatureFlagSettings(BaseModel):
+    """Server-owned rollout flags: allow-listed, default OFF, fail closed."""
+
+    states: Mapping[str, FeatureFlagState] = Field(
+        default_factory=dict,
+        validate_default=True,
+        description="Rollout stage per allow-listed flag; missing flags are OFF.",
+    )
+    internal_users: frozenset[str] = Field(
+        default_factory=frozenset,
+        description="Normalized emails eligible for INTERNAL-stage flags.",
+    )
+
+    model_config = ConfigDict(frozen=True)
+
+    @field_validator("states")
+    @classmethod
+    def validate_states(
+        cls, states: Mapping[str, FeatureFlagState]
+    ) -> Mapping[str, FeatureFlagState]:
+        unknown = sorted(set(states) - set(KNOWN_FEATURE_FLAGS))
+        if unknown:
+            raise ValueError(
+                f"Unknown feature flag(s) {unknown}; allowed flags are "
+                f"{sorted(KNOWN_FEATURE_FLAGS)}."
+            )
+        # The frozen model only blocks attribute assignment; the proxy makes
+        # the mapping itself read-only so items cannot be mutated either.
+        return MappingProxyType(
+            {
+                name: states.get(name, FeatureFlagState.OFF)
+                for name in KNOWN_FEATURE_FLAGS
+            }
+        )
+
+    @field_serializer("states")
+    def _serialize_states(
+        self, states: Mapping[str, FeatureFlagState]
+    ) -> dict[str, FeatureFlagState]:
+        # MappingProxyType is not serializable by pydantic-core; dumping a
+        # copy keeps model_dump/model_dump_json working without exposing the
+        # internal read-only mapping.
+        return dict(states)
+
+    @field_validator("internal_users")
+    @classmethod
+    def validate_internal_users(cls, users: frozenset[str]) -> frozenset[str]:
+        normalized: set[str] = set()
+        for user in users:
+            candidate = user.strip().lower()
+            if not candidate or "@" not in candidate:
+                raise ValueError(
+                    f"Internal feature-flag user '{user}' is not an email address."
+                )
+            normalized.add(candidate)
+        return frozenset(normalized)
+
+    def effective_flags(self, email: str | None) -> dict[str, bool]:
+        """Effective boolean flag payload for one authenticated user."""
+
+        normalized = (email or "").strip().lower()
+        effective: dict[str, bool] = {}
+        for name in KNOWN_FEATURE_FLAGS:
+            state = self.states[name]
+            if state is FeatureFlagState.ON:
+                effective[name] = True
+            elif state is FeatureFlagState.INTERNAL:
+                effective[name] = bool(normalized) and normalized in self.internal_users
+            else:
+                effective[name] = False
+        return effective
 
 
 class LoggingSettings(BaseModel):
@@ -166,6 +266,7 @@ class AppConfig(BaseModel):
     session: SessionSettings = Field(default_factory=SessionSettings)
     password_policy: PasswordPolicy = Field(default_factory=PasswordPolicy)
     voice: VoiceSettings = Field(default_factory=VoiceSettings)
+    feature_flags: FeatureFlagSettings = Field(default_factory=FeatureFlagSettings)
 
     model_config = ConfigDict(frozen=True)
 
@@ -176,6 +277,45 @@ class AppConfig(BaseModel):
     @property
     def log_level(self) -> str:
         return self.logging.normalized_level
+
+
+def _parse_feature_flag_states(raw: str) -> dict[str, FeatureFlagState]:
+    """Parse ``name=state,name=state`` pairs, failing closed on any oddity."""
+
+    states: dict[str, FeatureFlagState] = {}
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        name, separator, state_value = entry.partition("=")
+        name = name.strip()
+        state_value = state_value.strip().lower()
+        if not separator or not name or not state_value:
+            raise ValueError(
+                f"Feature flag entry '{entry}' must look like 'flag_name=state'."
+            )
+        if name in states:
+            raise ValueError(f"Feature flag '{name}' is configured more than once.")
+        try:
+            states[name] = FeatureFlagState(state_value)
+        except ValueError as exc:
+            raise ValueError(
+                f"Feature flag '{name}' has invalid state '{state_value}'; "
+                "expected one of off, internal, on."
+            ) from exc
+    return states
+
+
+def _build_feature_flags() -> FeatureFlagSettings:
+    states = _parse_feature_flag_states(os.getenv("BRAIN_BUDDY_FEATURE_FLAGS", ""))
+    internal_users = frozenset(
+        value.strip()
+        for value in os.getenv(
+            "BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS", ""
+        ).split(",")
+        if value.strip()
+    )
+    return FeatureFlagSettings(states=states, internal_users=internal_users)
 
 
 def _read_schema_version(data_dir: Path) -> str:
@@ -236,16 +376,25 @@ def _build_config() -> AppConfig:
         ).split(",")
         if value.strip()
     )
+    # Provider-specific defaults: Deepgram (multilingual STT) uses the nova-3
+    # model and a DEEPGRAM_API_KEY credential; OpenAI keeps its transcribe
+    # model and OPENAI_API_KEY. Either default is overridable via the explicit
+    # env vars below.
+    accurate_stt_is_deepgram = accurate_provider == "deepgram"
+    default_accurate_model = (
+        "nova-3" if accurate_stt_is_deepgram else "gpt-4o-mini-transcribe"
+    )
+    default_accurate_api_key_env = (
+        "DEEPGRAM_API_KEY" if accurate_stt_is_deepgram else "OPENAI_API_KEY"
+    )
     accurate_stt = VoiceProviderSettings(
         provider=accurate_provider,
-        model=os.getenv(
-            "BRAIN_BUDDY_VOICE_ACCURATE_STT_MODEL", "gpt-4o-mini-transcribe"
-        ),
+        model=os.getenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_MODEL", default_accurate_model),
         api_key_env=os.getenv(
-            "BRAIN_BUDDY_VOICE_ACCURATE_STT_API_KEY_ENV", "OPENAI_API_KEY"
+            "BRAIN_BUDDY_VOICE_ACCURATE_STT_API_KEY_ENV", default_accurate_api_key_env
         ),
         timeout_seconds=float(
-            os.getenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_TIMEOUT_SECONDS", "60")
+            os.getenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_TIMEOUT_SECONDS", "180")
         ),
         max_retries=int(
             os.getenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_MAX_RETRIES", "2")
@@ -358,6 +507,7 @@ def _build_config() -> AppConfig:
         session=session_config,
         password_policy=password_policy,
         voice=voice,
+        feature_flags=_build_feature_flags(),
     )
 
 
@@ -371,6 +521,9 @@ def get_config() -> AppConfig:
 __all__ = [
     "AppConfig",
     "AppEnvironment",
+    "FeatureFlagSettings",
+    "FeatureFlagState",
+    "KNOWN_FEATURE_FLAGS",
     "PasswordPolicy",
     "SessionSettings",
     "VoiceAudioLimits",

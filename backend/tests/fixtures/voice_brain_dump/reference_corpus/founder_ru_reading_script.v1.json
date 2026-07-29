@@ -1,0 +1,695 @@
+{
+  "corpus_id": "founder_ru_reading_script",
+  "version": 1,
+  "language_primary": "ru",
+  "source": "Founder-authored Russian reading script, 50 numbered utterances. Fictional GTD task examples containing no real personal data; safe to commit. Ground truth for SC-002/SC-003/SC-004 of the multilingual Voice Brain Dump feature.",
+  "task_yielding_rule": "An utterance is task-yielding when, processed in isolation, its primary illocution creates or modifies at least one task/project/reminder/note (a modification of an existing task grounds as its own task in isolation). Pure queries and display requests are not task-yielding.",
+  "conjunction_single_intent_rule": "True when a single-intent utterance's coordinating conjunction (и/но/а/then/and) joins objects, attributes, or constraints and must not be split into multiple proposals (SC-004 eligibility). Genuinely multi-task utterances use category 'multi' and are not eligible.",
+  "utterances": [
+    {
+      "n": 1,
+      "text": "Добавь задачу проверить почту сегодня вечером.",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 2,
+      "text": "Напомни мне завтра утром позвонить Анне.",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 3,
+      "text": "Создай проект «Запуск BrainBuddy» и поставь ему высокий приоритет.",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": true,
+      "source_scripts": [
+        "cyrillic",
+        "latin"
+      ],
+      "embedded_foreign_terms": [
+        "BrainBuddy"
+      ]
+    },
+    {
+      "n": 4,
+      "text": "Покажи все задачи на сегодня в контексте «Работа».",
+      "category": "display",
+      "task_yielding": false,
+      "expected_task_count": 0,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 5,
+      "text": "Отметь задачу про договор выполненной.",
+      "category": "modify",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 6,
+      "text": "Перенеси встречу с Максимом на пятницу, на три часа дня.",
+      "category": "modify",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 7,
+      "text": "Добавь в inbox идею про голосовой ввод.",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic",
+        "latin"
+      ],
+      "embedded_foreign_terms": [
+        "inbox"
+      ]
+    },
+    {
+      "n": 8,
+      "text": "Найди задачи без срока и назначь им низкий приоритет.",
+      "category": "modify",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": true,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 9,
+      "text": "Создай задачу написать Илье и добавь контекст «Телефон».",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": true,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 10,
+      "text": "Что у меня запланировано на двадцать первое июля две тысячи двадцать шестого года?",
+      "category": "query",
+      "task_yielding": false,
+      "expected_task_count": 0,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 11,
+      "text": "Поставь дедлайн на первое августа и напомни за два дня.",
+      "category": "modify",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": true,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 12,
+      "text": "Добавь тег mobile к проекту BrainBuddy.",
+      "category": "modify",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic",
+        "latin"
+      ],
+      "embedded_foreign_terms": [
+        "mobile",
+        "BrainBuddy"
+      ]
+    },
+    {
+      "n": 13,
+      "text": "Открой мой weekly review и покажи просроченные задачи.",
+      "category": "display",
+      "task_yielding": false,
+      "expected_task_count": 0,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic",
+        "latin"
+      ],
+      "embedded_foreign_terms": [
+        "weekly review"
+      ]
+    },
+    {
+      "n": 14,
+      "text": "Создай задачу проверить pull request номер сто три.",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic",
+        "latin"
+      ],
+      "embedded_foreign_terms": [
+        "pull request"
+      ]
+    },
+    {
+      "n": 15,
+      "text": "Добавь в проект Voice Capture задачу протестировать Safari на iPhone.",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic",
+        "latin"
+      ],
+      "embedded_foreign_terms": [
+        "Voice Capture",
+        "Safari",
+        "iPhone"
+      ]
+    },
+    {
+      "n": 16,
+      "text": "Напомни Лене про demo в Google Meet завтра в десять тридцать.",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic",
+        "latin"
+      ],
+      "embedded_foreign_terms": [
+        "demo",
+        "Google Meet"
+      ]
+    },
+    {
+      "n": 17,
+      "text": "Поставь этой задаче priority high, но не меняй дату.",
+      "category": "modify",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": true,
+      "source_scripts": [
+        "cyrillic",
+        "latin"
+      ],
+      "embedded_foreign_terms": [
+        "priority high"
+      ]
+    },
+    {
+      "n": 18,
+      "text": "Перенеси задачу в someday, а проект оставь активным.",
+      "category": "modify",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": true,
+      "source_scripts": [
+        "cyrillic",
+        "latin"
+      ],
+      "embedded_foreign_terms": [
+        "someday"
+      ]
+    },
+    {
+      "n": 19,
+      "text": "Создай задачу купить билеты и сразу добавь заметку «у окна, если получится».",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": true,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 20,
+      "text": "Покажи задачи для дома и исключи всё, что уже выполнено.",
+      "category": "display",
+      "task_yielding": false,
+      "expected_task_count": 0,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 21,
+      "text": "Добавь задачу записать голосовой корпус, назначь срок на воскресенье и поставь высокий приоритет.",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": true,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 22,
+      "text": "Создай проект «Новый onboarding», добавь туда задачу собрать feedback и напомни мне об этом в понедельник.",
+      "category": "multi",
+      "task_yielding": true,
+      "expected_task_count": 2,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic",
+        "latin"
+      ],
+      "embedded_foreign_terms": [
+        "onboarding",
+        "feedback"
+      ]
+    },
+    {
+      "n": 23,
+      "text": "Найди задачу про аналитику, переименуй её в «Проверить метрики» и перенеси на завтра.",
+      "category": "modify",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": true,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 24,
+      "text": "Отметь звонок завершённым, но следующую задачу не закрывай.",
+      "category": "modify",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": true,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 25,
+      "text": "Добавь молоко и хлеб в список покупок и не создавай два разных проекта.",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": true,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 26,
+      "text": "Покажи сначала срочные рабочие задачи, а потом личные без дедлайна.",
+      "category": "display",
+      "task_yielding": false,
+      "expected_task_count": 0,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 27,
+      "text": "Перенеси созвон на два часа и сообщи, какие задачи из-за этого конфликтуют.",
+      "category": "modify",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": true,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 28,
+      "text": "Создай задачу написать отчёт, добавь контекст «Ноутбук», а срок поставь на вечер пятницы.",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": true,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 29,
+      "text": "Напомни мне отправить invoice, когда я открою контекст Office.",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic",
+        "latin"
+      ],
+      "embedded_foreign_terms": [
+        "invoice",
+        "Office"
+      ]
+    },
+    {
+      "n": 30,
+      "text": "Добавь задачу проверить API и UI в одном проходе, не разбивай её на две.",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": true,
+      "source_scripts": [
+        "cyrillic",
+        "latin"
+      ],
+      "embedded_foreign_terms": [
+        "API",
+        "UI"
+      ]
+    },
+    {
+      "n": 31,
+      "text": "Эм, добавь задачу… проверить, работает ли микрофон в мобильном браузере.",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 32,
+      "text": "Так, нет, не на сегодня — перенеси оплату подписки на завтра.",
+      "category": "modify",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 33,
+      "text": "Создай, пожалуйста, задачу для Анны… хотя нет, назначь её Максиму.",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 34,
+      "text": "Напомни мне в восемь, ой, лучше в восемь тридцать, отправить презентацию.",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 35,
+      "text": "Не закрывай проект BrainBuddy, просто отложи задачу про landing page.",
+      "category": "modify",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic",
+        "latin"
+      ],
+      "embedded_foreign_terms": [
+        "BrainBuddy",
+        "landing page"
+      ]
+    },
+    {
+      "n": 36,
+      "text": "Не добавляй новую задачу, а обнови существующую заметку про релиз.",
+      "category": "modify",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": true,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 37,
+      "text": "Удали напоминание на понедельник, но саму задачу сохрани.",
+      "category": "modify",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": true,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 38,
+      "text": "Покажи не завершённые, а именно отменённые задачи за эту неделю.",
+      "category": "display",
+      "task_yielding": false,
+      "expected_task_count": 0,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 39,
+      "text": "Слушай, я сейчас на улице, добавь быстро: купить зарядку до вечера.",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 40,
+      "text": "Тут шумно, но запиши задачу — проверить запись с телефона и загрузить один audio file.",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": true,
+      "source_scripts": [
+        "cyrillic",
+        "latin"
+      ],
+      "embedded_foreign_terms": [
+        "audio file"
+      ]
+    },
+    {
+      "n": 41,
+      "text": "Я в метро, связь пропадает, напомни перезвонить Илье через сорок минут.",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 42,
+      "text": "Добавь это в BrainBuddy, ну, в проект про voice input, с контекстом mobile.",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic",
+        "latin"
+      ],
+      "embedded_foreign_terms": [
+        "BrainBuddy",
+        "voice input",
+        "mobile"
+      ]
+    },
+    {
+      "n": 43,
+      "text": "Короче, на завтра: созвон с командой, подготовить demo и проверить backup.",
+      "category": "multi",
+      "task_yielding": true,
+      "expected_task_count": 3,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic",
+        "latin"
+      ],
+      "embedded_foreign_terms": [
+        "demo",
+        "backup"
+      ]
+    },
+    {
+      "n": 44,
+      "text": "Эй, BrainBuddy, покажи, что горит сегодня и что можно перенести на следующую неделю.",
+      "category": "display",
+      "task_yielding": false,
+      "expected_task_count": 0,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic",
+        "latin"
+      ],
+      "embedded_foreign_terms": [
+        "BrainBuddy"
+      ]
+    },
+    {
+      "n": 45,
+      "text": "Создай задачу «Проверить speech-to-text», добавь label QA и свяжи её с проектом Voice Capture.",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": true,
+      "source_scripts": [
+        "cyrillic",
+        "latin"
+      ],
+      "embedded_foreign_terms": [
+        "speech-to-text",
+        "QA",
+        "Voice Capture"
+      ]
+    },
+    {
+      "n": 46,
+      "text": "Запиши: Максим готовит backend, Анна проверяет UX, а я собираю founder feedback.",
+      "category": "multi",
+      "task_yielding": true,
+      "expected_task_count": 3,
+      "conjunction_single_intent": false,
+      "source_scripts": [
+        "cyrillic",
+        "latin"
+      ],
+      "embedded_foreign_terms": [
+        "backend",
+        "UX",
+        "founder feedback"
+      ]
+    },
+    {
+      "n": 47,
+      "text": "Добавь встречу на тридцать первое декабря в двадцать три тридцать, но без повторения.",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": true,
+      "source_scripts": [
+        "cyrillic"
+      ],
+      "embedded_foreign_terms": []
+    },
+    {
+      "n": 48,
+      "text": "Поставь срок на второе января две тысячи двадцать седьмого года и приоритет medium.",
+      "category": "modify",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": true,
+      "source_scripts": [
+        "cyrillic",
+        "latin"
+      ],
+      "embedded_foreign_terms": [
+        "medium"
+      ]
+    },
+    {
+      "n": 49,
+      "text": "Когда закончу звонок, напомни открыть Cursor и проверить Copilot suggestions.",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": true,
+      "source_scripts": [
+        "cyrillic",
+        "latin"
+      ],
+      "embedded_foreign_terms": [
+        "Cursor",
+        "Copilot suggestions"
+      ]
+    },
+    {
+      "n": 50,
+      "text": "Добавь задачу протестировать русский и English code-switching на реальном Android device, а потом покажи её в контексте QA.",
+      "category": "create",
+      "task_yielding": true,
+      "expected_task_count": 1,
+      "conjunction_single_intent": true,
+      "source_scripts": [
+        "cyrillic",
+        "latin"
+      ],
+      "embedded_foreign_terms": [
+        "English",
+        "code-switching",
+        "Android device",
+        "QA"
+      ]
+    }
+  ]
+}

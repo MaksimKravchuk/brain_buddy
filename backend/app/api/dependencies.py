@@ -93,3 +93,38 @@ def get_current_user(
             detail="Authentication required.",
         )
     return user
+
+
+def voice_brain_dump_enabled(user: User, config: AppConfig) -> bool:
+    """Whether the ADR-0008 ``voice_brain_dump`` rollout flag is effective."""
+
+    return config.feature_flags.effective_flags(user.email).get(
+        "voice_brain_dump", False
+    )
+
+
+def require_voice_brain_dump_enabled(
+    current_user: User = Depends(get_current_user),
+    config: AppConfig = Depends(get_config_dep),
+) -> User:
+    """Gate the new-capture voice Brain Dump routes on the ADR-0008 rollout flag.
+
+    ``voice_brain_dump`` ships default OFF and rolls out OFF → INTERNAL → ON.
+    An authenticated user for whom the flag is not effective gets a fail-closed
+    404: the feature is simply not present for them (the refusal never discloses
+    operation existence). Because this depends on :func:`get_current_user`, an
+    unauthenticated caller is still rejected with 401 first.
+
+    Exposure control is not authorization: the flag gates creation, recording,
+    and forward processing, but an owner keeps privacy authority over an existing
+    operation (read, withdraw consent, cancel, delete raw audio) even when the
+    flag is OFF -- those routes use :func:`get_current_user` directly and check
+    :func:`voice_brain_dump_enabled` only for the gated actions.
+    """
+
+    if not voice_brain_dump_enabled(current_user, config):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Voice brain dump is not available.",
+        )
+    return current_user

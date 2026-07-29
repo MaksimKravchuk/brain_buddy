@@ -24,6 +24,7 @@ from app.exceptions import (
     ValidationFailure,
 )
 from app.workflows.voice_brain_dump.domain import ProposalPatch, ReconciledProposal
+from app.workflows.voice_brain_dump.language_fidelity import title_is_language_faithful
 from app.workflows.voice_brain_dump.providers import (
     ReconcileResult,
     ReconcileTextRequest,
@@ -31,6 +32,17 @@ from app.workflows.voice_brain_dump.providers import (
 
 _DEFAULT_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 _Operation = Literal["add", "update", "split", "merge", "remove", "supersede"]
+
+
+class _SemanticGroundingFailure(ValidationFailure):
+    """A single operation could not be grounded in the cited transcript.
+
+    Distinguished from a plain ``ValidationFailure`` so ``_materialize`` can
+    drop just the offending operation and keep its well-formed siblings: a
+    grounding miss reflects one hallucinated task, whereas a protocol
+    violation (server-owned IDs, unknown references, bad arity) means the
+    model is malfunctioning and the whole call must fail closed.
+    """
 
 
 class _OperationDraft(BaseModel):
@@ -122,11 +134,33 @@ Completion = Callable[[dict[str, object]], dict[str, object]]
 
 
 @dataclass(slots=True)
+class _MaterializedOperations:
+    """Surviving patches, their originating drafts, and skipped-op reasons.
+
+    ``patches`` and ``drafts`` stay index-aligned so confidence can be mapped
+    back to each surviving operation even after ungrounded siblings are
+    dropped.
+    """
+
+    patches: list[ProposalPatch]
+    drafts: list[_OperationDraft]
+    skipped: list[str]
+
+
+@dataclass(slots=True)
 class OpenAITextReconciler:
     """Call a current OpenAI text model using strict structured output."""
 
     api_key: str = field(repr=False)
     model: str = "gpt-4o"
+    template_version: str = "brain-dump-reconciler-v2"
+    """Safe, configured identifier for the system prompt in ``_payload``.
+
+    Bump this whenever the system/response-schema prompt text materially
+    changes, so persisted provider runs and receipts (ADR-0002 audit
+    provenance) can distinguish output produced under different prompt
+    versions without persisting the prompt text itself.
+    """
     endpoint: str = _DEFAULT_ENDPOINT
     timeout_seconds: float = 30.0
     max_retries: int = 2
@@ -146,33 +180,46 @@ class OpenAITextReconciler:
         # attempt, so the admission check and any recorded spend (success or
         # failure alike) must assume the worst case.
         estimated_cost = (
-            len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) / 1_000_000
-        ) * self.estimated_cost_usd_per_megabyte * (self.max_retries + 1)
+            (len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) / 1_000_000)
+            * self.estimated_cost_usd_per_megabyte
+            * (self.max_retries + 1)
+        )
         if estimated_cost > self.max_cost_usd_per_operation:
             raise ProviderTerminalError("RECONCILER_COST_LIMIT_EXCEEDED")
         try:
-            raw = self.complete(payload) if self.complete is not None else self._call(payload)
+            raw = (
+                self.complete(payload)
+                if self.complete is not None
+                else self._call(payload)
+            )
             try:
                 envelope = _ReconcileEnvelope.model_validate(raw)
             except ValidationError:
                 raise ValidationFailure(
                     "Reconciler returned an invalid operation envelope."
                 ) from None
-            patches = self._materialize(request, envelope.operations)
-        except (ProviderRetryableError, ProviderTerminalError, ValidationFailure) as exc:
+            materialized = self._materialize(request, envelope.operations)
+        except (
+            ProviderRetryableError,
+            ProviderTerminalError,
+            ValidationFailure,
+        ) as exc:
             exc.estimated_cost_usd = estimated_cost
             raise
         return ReconcileResult(
             input_hash=hashlib.sha256(
                 json.dumps(payload["messages"], sort_keys=True).encode("utf-8")
             ).hexdigest(),
-            patches=patches,
+            patches=materialized.patches,
             confidences={
                 patch.proposal_id: draft.confidence
-                for patch, draft in zip(patches, envelope.operations, strict=True)
+                for patch, draft in zip(
+                    materialized.patches, materialized.drafts, strict=True
+                )
                 if draft.confidence is not None
             },
             estimated_cost_usd=estimated_cost,
+            skipped_operations=materialized.skipped,
         )
 
     def _payload(self, request: ReconcileTextRequest) -> dict[str, object]:
@@ -224,7 +271,22 @@ class OpenAITextReconciler:
                         "supersede renames. A remove must also cite the source_segment_ids that "
                         "justify deleting the proposal; never remove an existing proposal without "
                         "transcript evidence for that removal. Do not split a single shopping "
-                        "intent solely on a conjunction. New "
+                        "intent solely on a conjunction. Write every task title in the same "
+                        "language as the transcript segment(s) it cites; never translate a title "
+                        "into another language. Each transcript segment is one separately spoken "
+                        "utterance: do not merge content from different segments into a single "
+                        "proposal unless they explicitly describe the same single action, and do "
+                        "not split one segment into multiple proposals unless it clearly "
+                        "enumerates independent commands. Emit one proposal for every actionable "
+                        "segment; a segment may be skipped only if it is a query/display request, "
+                        "a filler or self-correction, or modifies an existing proposal. "
+                        "Reminder and note phrasings (for example «напомни…», "
+                        '"remind me…", «запиши…») are actionable task '
+                        "creates. Keep each title concise: the core action and its "
+                        "object, phrased as in the source. Do not append deadlines, "
+                        "dates, times, contexts, tags, labels, project names, or note "
+                        "text to the title unless the title would be meaningless "
+                        "without them. New "
                         "proposal IDs are server-owned: set proposal_id to null for add/split/"
                         "merge/supersede. Existing update/remove targets must use an exact "
                         "supplied ID. Return every schema field; use null or [] when a field "
@@ -235,7 +297,9 @@ class OpenAITextReconciler:
                 },
                 {
                     "role": "user",
-                    "content": json.dumps(context, ensure_ascii=False, separators=(",", ":")),
+                    "content": json.dumps(
+                        context, ensure_ascii=False, separators=(",", ":")
+                    ),
                 },
             ],
         }
@@ -269,7 +333,9 @@ class OpenAITextReconciler:
                     )
             except httpx.TransportError as exc:
                 if attempt >= self.max_retries:
-                    raise ProviderRetryableError("RECONCILER_PROVIDER_RETRYABLE") from exc
+                    raise ProviderRetryableError(
+                        "RECONCILER_PROVIDER_RETRYABLE"
+                    ) from exc
                 self._backoff(attempt)
                 attempt += 1
                 continue
@@ -294,7 +360,7 @@ class OpenAITextReconciler:
 
     def _materialize(
         self, request: ReconcileTextRequest, operations: list[_OperationDraft]
-    ) -> list[ProposalPatch]:
+    ) -> _MaterializedOperations:
         existing = {
             item.id: item
             for item in request.active_proposals
@@ -305,10 +371,19 @@ class OpenAITextReconciler:
             segment.id: segment.text for segment in request.transcript_segments
         }
         patches: list[ProposalPatch] = []
+        drafts: list[_OperationDraft] = []
+        skipped: list[str] = []
         allocated_ids: set[str] = set(existing)
 
         for index, draft in enumerate(operations):
-            self._validate_draft(draft, existing, known_segments, source_text_by_id)
+            try:
+                self._validate_draft(draft, existing, known_segments, source_text_by_id)
+            except _SemanticGroundingFailure as exc:
+                # One hallucinated/ungrounded task: drop it and keep its
+                # well-formed siblings. Protocol violations are not caught here
+                # and still fail the whole call below.
+                skipped.append(str(exc))
+                continue
             proposal_id = draft.proposal_id
             if draft.operation in {"add", "split", "merge", "supersede"}:
                 collision_offset = 0
@@ -333,7 +408,13 @@ class OpenAITextReconciler:
                     base_revision=draft.base_revision,
                 )
             )
-        return patches
+            drafts.append(draft)
+        if not patches and skipped:
+            raise ValidationFailure(
+                "All reconciler operations were dropped as ungrounded: "
+                + " | ".join(skipped)
+            )
+        return _MaterializedOperations(patches=patches, drafts=drafts, skipped=skipped)
 
     @staticmethod
     def _validate_draft(
@@ -345,11 +426,16 @@ class OpenAITextReconciler:
         structural = {"add", "split", "merge", "supersede"}
         if draft.operation in structural and draft.proposal_id is not None:
             raise ValidationFailure("New reconciler proposal IDs are server-owned.")
-        if draft.operation in {"update", "remove"} and draft.proposal_id not in existing:
+        if (
+            draft.operation in {"update", "remove"}
+            and draft.proposal_id not in existing
+        ):
             raise ValidationFailure("Reconciler targeted an unknown proposal ID.")
         if draft.operation == "remove":
             if draft.title is not None or draft.predecessor_ids:
-                raise ValidationFailure("Remove accepts only an existing proposal target.")
+                raise ValidationFailure(
+                    "Remove accepts only an existing proposal target."
+                )
             if (
                 not draft.source_segment_ids
                 or not set(draft.source_segment_ids) <= known_segments
@@ -372,16 +458,18 @@ class OpenAITextReconciler:
             return
         if not draft.title or not draft.title.strip():
             raise ValidationFailure("Reconciler operation requires a task title.")
-        if not draft.source_segment_ids or not set(draft.source_segment_ids) <= known_segments:
+        if (
+            not draft.source_segment_ids
+            or not set(draft.source_segment_ids) <= known_segments
+        ):
             raise ValidationFailure("Reconciler used unknown transcript provenance.")
         if draft.operation == "add" and draft.predecessor_ids:
             raise ValidationFailure("Add cannot carry predecessors.")
         if draft.operation in structural and any(
-            proposal.tombstoned
-            and proposal.title.casefold() == draft.title.casefold()
+            proposal.tombstoned and proposal.title.casefold() == draft.title.casefold()
             for proposal in existing.values()
         ):
-            raise ValidationFailure(
+            raise _SemanticGroundingFailure(
                 "Reconciler cannot restore a user-deleted proposal."
             )
         # Every operation that mints or rewrites a title (add/update/split/
@@ -396,6 +484,20 @@ class OpenAITextReconciler:
             source_text,
             enforce_action=True,
         )
+        # FR-006 language-faithful title invariant, a *generation* rule distinct
+        # from the FR-008 grounding tolerance enforced above. Grounding proves a
+        # title's meaning is supported (and tolerates morphological variation);
+        # this separate check rejects a title whose ordinary spoken words were
+        # translated out of the cited segment's language. It is independent of
+        # grounding on purpose: a translated title can share a proper noun or a
+        # normalized/loanword verb and so satisfy a grounding path, yet FR-006
+        # still prohibits it. Lands in the same skip taxonomy -- one offending
+        # operation dropped, its well-formed siblings kept.
+        if not title_is_language_faithful(draft.title, source_text):
+            raise _SemanticGroundingFailure(
+                "unsupported task title was translated out of the cited "
+                "transcript's language; FR-006 requires a language-faithful title."
+            )
         if draft.operation == "split" and len(draft.predecessor_ids) != 1:
             raise ValidationFailure("Split requires exactly one predecessor.")
         if draft.operation == "merge" and len(draft.predecessor_ids) < 2:
@@ -540,11 +642,148 @@ class OpenAITextReconciler:
     # be accepted only when the same cited clause contains that exact token.
     _ACTION_NORMALIZATION_PAIRS = frozenset({frozenset({"call", "phone"})})
 
+    # Explicit, bilingual self-correction vocabulary. A speaker who utters one
+    # of these markers is discarding what they just said and restating the
+    # command ("напомни в восемь, ой, лучше в восемь тридцать"). The restated
+    # tail is a legitimate source for the title, so ``_correction_clauses``
+    # offers it as an additional grounding clause -- but only for constructive
+    # grounding, never for the destructive-removal guard.
+    _CORRECTION_SINGLE_MARKERS = frozenset(
+        {
+            "actually",
+            "ой",
+            "лучше",
+            "вернее",
+        }
+    )
+    _CORRECTION_PHRASE_MARKERS = (
+        ("no", "wait"),
+        ("i", "mean"),
+        ("scratch", "that"),
+        ("хотя", "нет"),
+        ("так", "нет"),
+        ("то", "есть"),
+    )
+
+    @staticmethod
+    def _tokens_equivalent(first: str, second: str) -> bool:
+        """Morphology-tolerant token equality for inflected multilingual text.
+
+        Exact match, or a shared leading stem that is both substantial (at
+        least 4 characters) and dominant (at least 60% of the longer token).
+        This unifies Russian imperative/infinitive and case-ending variants
+        ("создай"/"создать", "перенеси"/"перенести", "задачу"/"задачи",
+        "молоко"/"молока") without conflating genuinely different words that
+        merely share a short prefix ("call"/"cancel", "milk"/"milkshake",
+        "просмотр"/"проспект"). Short tokens (< 4 shared characters) match
+        only when identical, which preserves the exact-match guarantee for
+        brief proper names such as "Bob".
+        """
+
+        if first == second:
+            return True
+        shorter, longer = sorted((first, second), key=len)
+        common = 0
+        for left, right in zip(shorter, longer, strict=False):
+            if left != right:
+                break
+            common += 1
+        return common >= 4 and common * 5 >= len(longer) * 3
+
+    @staticmethod
+    def _entities_subset(subset: set[str], superset: set[str]) -> bool:
+        """Every ``subset`` term has a morphology-tolerant match in ``superset``."""
+
+        return all(
+            any(
+                OpenAITextReconciler._entities_equivalent(item, candidate)
+                for candidate in superset
+            )
+            for item in subset
+        )
+
+    @staticmethod
+    def _damerau_levenshtein(first: str, second: str) -> int:
+        """Optimal string-alignment distance (insert/delete/substitute plus
+        adjacent transposition).
+
+        Used only by ``_entities_equivalent`` for conservative STT-garble
+        tolerance on long identity tokens; never for action verbs or the base
+        grounding-token comparison.
+        """
+
+        len_first, len_second = len(first), len(second)
+        if not len_first:
+            return len_second
+        if not len_second:
+            return len_first
+        previous_two: list[int] = [0] * (len_second + 1)
+        previous = list(range(len_second + 1))
+        for i in range(1, len_first + 1):
+            current = [i] + [0] * len_second
+            for j in range(1, len_second + 1):
+                cost = 0 if first[i - 1] == second[j - 1] else 1
+                current[j] = min(
+                    current[j - 1] + 1,
+                    previous[j] + 1,
+                    previous[j - 1] + cost,
+                )
+                if (
+                    i > 1
+                    and j > 1
+                    and first[i - 1] == second[j - 2]
+                    and first[i - 2] == second[j - 1]
+                ):
+                    current[j] = min(current[j], previous_two[j - 2] + 1)
+            previous_two, previous = previous, current
+        return previous[len_second]
+
+    @staticmethod
+    def _entities_equivalent(first: str, second: str) -> bool:
+        """Entity/identity-anchor equality with conservative STT-garble tolerance.
+
+        Starts from the same morphology-tolerant equality used everywhere else,
+        then additionally tolerates a small transcription garble in a *long*
+        identity token ("Brianbuddy"/"grainbuddy" -> "BrainBuddy"): both sides
+        at least 5 characters, edit distance at most 2 *and* at most a quarter
+        of the longer token. Short names ("Bob"/"Alice", "Анне"/"Максиму") never
+        qualify -- their length floor excludes them -- so one concrete target can
+        never be laundered into a different one. This tolerance applies only to
+        entity/anchor comparison, never to action verbs or the base token check.
+        """
+
+        if OpenAITextReconciler._tokens_equivalent(first, second):
+            return True
+        if len(first) < 5 or len(second) < 5:
+            return False
+        distance = OpenAITextReconciler._damerau_levenshtein(first, second)
+        return distance <= 2 and distance * 4 <= max(len(first), len(second))
+
+    @staticmethod
+    def _fuzzy_sublist(needle: list[str], haystack: list[str]) -> bool:
+        """Whether ``needle`` occurs contiguously in ``haystack`` up to inflection.
+
+        A contiguous full-phrase match keeps the action bound to the exact
+        target span it governs in the source clause, so it cannot launder a
+        cross-clause rebinding even though individual tokens match loosely.
+        """
+
+        if not needle or len(needle) > len(haystack):
+            return False
+        for start in range(len(haystack) - len(needle) + 1):
+            if all(
+                OpenAITextReconciler._tokens_equivalent(want, haystack[start + offset])
+                for offset, want in enumerate(needle)
+            ):
+                return True
+        return False
+
     @staticmethod
     def _actions_are_equivalent(proposed: str, source: str) -> bool:
-        return proposed == source or frozenset({proposed, source}) in (
-            OpenAITextReconciler._ACTION_NORMALIZATION_PAIRS
-        )
+        pair = frozenset({proposed, source})
+        if pair in OpenAITextReconciler._ACTION_NORMALIZATION_PAIRS:
+            return True
+        return OpenAITextReconciler._tokens_equivalent(proposed, source)
 
     @staticmethod
     def _action_predicate(tokens: list[str]) -> tuple[str | None, bool, int | None]:
@@ -600,9 +839,7 @@ class OpenAITextReconciler:
         # задачу" = do not edit the task). A task-reference noun makes that
         # scope ambiguous, so it cannot authorize removal without an explicit
         # affirmative destructive term.
-        if any(
-            token in OpenAITextReconciler._TASK_REFERENCE_TERMS for token in tokens
-        ):
+        if any(token in OpenAITextReconciler._TASK_REFERENCE_TERMS for token in tokens):
             return False
         return any(
             pair in OpenAITextReconciler._DESTRUCTIVE_NEGATION_PAIRS
@@ -849,6 +1086,212 @@ class OpenAITextReconciler:
         return set(tokens[action_index + 1 :])
 
     @staticmethod
+    def _grounding_clauses(
+        fragment: str, clauses: list[str], *, require_action: bool
+    ) -> list[str]:
+        """Source clauses that support one title fragment, keeping bindings intact.
+
+        A clause grounds the fragment when the fragment's concrete identity
+        anchors are all present in that single clause (so a target cannot be
+        pulled from a different command), and -- when the action matters --
+        the clause's own predicate matches the fragment's with the same
+        polarity, either as an equivalent verb or because the whole fragment
+        phrase appears contiguously in the clause. Splitting a multi-clause
+        title into fragments and grounding each one independently lets a
+        single command that punctuation/conjunctions fragmented (``молоко и
+        хлеб``, ``на пятницу, на три часа``) still ground, while a rebinding
+        that borrows one clause's verb for another clause's target never
+        finds a single clause carrying both.
+        """
+
+        fragment_entities = OpenAITextReconciler._named_entities(
+            fragment
+        ) | OpenAITextReconciler._identity_anchor_terms(fragment)
+        fragment_tokens = re.findall(
+            r"[^\W\d_]+", fragment.casefold(), flags=re.UNICODE
+        )
+        (
+            fragment_action,
+            fragment_negated,
+            fragment_action_index,
+        ) = OpenAITextReconciler._action_predicate(fragment_tokens)
+        grounded: list[str] = []
+        for clause in clauses:
+            clause_entities = OpenAITextReconciler._named_entities(
+                clause
+            ) | OpenAITextReconciler._identity_anchor_terms(clause)
+            if not OpenAITextReconciler._entities_subset(
+                fragment_entities, clause_entities
+            ):
+                continue
+            if not require_action:
+                grounded.append(clause)
+                continue
+            clause_tokens = re.findall(
+                r"[^\W\d_]+", clause.casefold(), flags=re.UNICODE
+            )
+            clause_action, clause_negated, _ = OpenAITextReconciler._action_predicate(
+                clause_tokens
+            )
+            if (
+                fragment_action is not None
+                and clause_action is not None
+                and fragment_negated == clause_negated
+                and (
+                    OpenAITextReconciler._actions_are_equivalent(
+                        fragment_action, clause_action
+                    )
+                    or OpenAITextReconciler._fuzzy_sublist(
+                        fragment_tokens, clause_tokens
+                    )
+                )
+            ):
+                grounded.append(clause)
+        if grounded or not require_action:
+            return grounded
+        # No single clause holds every entity: this may be one command whose
+        # title legitimately aggregates entities from sibling clauses of the
+        # SAME cited segment ("Отложить задачу про landing page в проекте
+        # BrainBuddy", "Проверить backup на завтра"). Admit it only if the
+        # action stays bound to its own primary target inside one clause; the
+        # sibling clauses may then contribute adjuncts, but never a competing
+        # direct object, so a cross-clause rebinding still fails.
+        return OpenAITextReconciler._action_bound_clauses(
+            fragment_tokens,
+            fragment_action,
+            fragment_negated,
+            fragment_action_index,
+            clauses,
+        )
+
+    @staticmethod
+    def _action_bound_clauses(
+        fragment_tokens: list[str],
+        fragment_action: str | None,
+        fragment_negated: bool,
+        action_index: int | None,
+        clauses: list[str],
+    ) -> list[str]:
+        """A clause that binds the fragment's action to its own primary target.
+
+        Returns the single clause (if any) in which the fragment's
+        ``[action ... primary-target]`` head appears contiguously (up to
+        inflection) with the same polarity. Requiring the action and its
+        nearest concrete object to be co-located in one clause keeps a rebinding
+        that recombines one clause's verb with another clause's target ("email
+        team and fire Bob" -> "Fire team") from ever finding a home, while a
+        genuine single command spread across comma/conjunction fragments still
+        grounds. Adjunct entities beyond the primary target are bounded by the
+        segment-level identity-subset check already performed by the caller.
+        """
+
+        if fragment_action is None or action_index is None:
+            return []
+        primary_index: int | None = None
+        for offset in range(action_index + 1, len(fragment_tokens)):
+            if len(fragment_tokens[offset]) >= 3:
+                primary_index = offset
+                break
+        if primary_index is None:
+            return []
+        needle = fragment_tokens[action_index : primary_index + 1]
+        for clause in clauses:
+            clause_tokens = re.findall(
+                r"[^\W\d_]+", clause.casefold(), flags=re.UNICODE
+            )
+            _, clause_negated, _ = OpenAITextReconciler._action_predicate(clause_tokens)
+            if fragment_negated != clause_negated:
+                continue
+            if OpenAITextReconciler._fuzzy_sublist(needle, clause_tokens):
+                return [clause]
+        return []
+
+    @staticmethod
+    def _fragment_action_recognized(fragment: str, clauses: list[str]) -> bool:
+        """Whether the fragment's leading verb is actually spoken in the segment.
+
+        True when the fragment's action equals some clause's own predicate (up
+        to inflection) or the whole fragment appears verbatim in a clause. A
+        fragment whose head is not a spoken action is a descriptive attribute
+        (a bare due-date such as "срок на вечер пятницы"), not an action claim,
+        so it may ground as an adjunct; a fragment that DOES claim a spoken verb
+        must keep binding that verb to its target and is never relaxed this way.
+        """
+
+        tokens = re.findall(r"[^\W\d_]+", fragment.casefold(), flags=re.UNICODE)
+        action, _, _ = OpenAITextReconciler._action_predicate(tokens)
+        if action is None:
+            return False
+        for clause in clauses:
+            clause_tokens = re.findall(
+                r"[^\W\d_]+", clause.casefold(), flags=re.UNICODE
+            )
+            clause_action, _, _ = OpenAITextReconciler._action_predicate(clause_tokens)
+            if (
+                clause_action is not None
+                and OpenAITextReconciler._actions_are_equivalent(action, clause_action)
+            ):
+                return True
+            if OpenAITextReconciler._fuzzy_sublist(tokens, clause_tokens):
+                return True
+        return False
+
+    @staticmethod
+    def _correction_clauses(source_text: str) -> list[str]:
+        """Extra grounding clauses for self-corrected / false-start utterances.
+
+        A bilingual correction marker (see ``_CORRECTION_SINGLE_MARKERS`` /
+        ``_CORRECTION_PHRASE_MARKERS``) or an em/en dash marks a spoken
+        self-correction: the speaker discards what they just said and restates
+        the command ("Так, нет, не на сегодня -- перенеси оплату подписки на
+        завтра"). The restated tail is offered as an additional clause so the
+        corrected reading can ground. These variants are consulted only for
+        constructive grounding; the destructive-removal guard never sees them,
+        so stripping a "не на сегодня" false start can never turn a negation
+        into deletion authority.
+        """
+
+        variants: list[str] = []
+        for sentence in re.findall(r"[^.!?;]+", source_text):
+            if not sentence.strip():
+                continue
+            tail = OpenAITextReconciler._corrected_tail(sentence)
+            if tail is not None and tail.strip():
+                variants.extend(OpenAITextReconciler._source_clauses(tail))
+        return variants
+
+    @staticmethod
+    def _corrected_tail(sentence: str) -> str | None:
+        """The restatement that follows the last correction cue in one sentence.
+
+        Returns the substring after the last correction marker or em/en dash,
+        or ``None`` when the sentence carries no correction cue. Only the em
+        dash (--) and en dash separate a false start from its restatement; the
+        ASCII hyphen is left alone so hyphenated tokens ("code-switching",
+        "pull-request") are never split.
+        """
+
+        cut = -1
+        for match in re.finditer(r"[—–]", sentence):
+            cut = max(cut, match.end())
+        words = [
+            (match.group().casefold(), match.start(), match.end())
+            for match in re.finditer(r"[^\W\d_]+", sentence, flags=re.UNICODE)
+        ]
+        for position, (word, _start, end) in enumerate(words):
+            if word in OpenAITextReconciler._CORRECTION_SINGLE_MARKERS:
+                cut = max(cut, end)
+            for phrase in OpenAITextReconciler._CORRECTION_PHRASE_MARKERS:
+                window = tuple(
+                    entry[0] for entry in words[position : position + len(phrase)]
+                )
+                if window == phrase:
+                    cut = max(cut, words[position + len(phrase) - 1][2])
+        if cut < 0:
+            return None
+        return sentence[cut:]
+
+    @staticmethod
     def _assert_semantic_support(
         title: str,
         source_text: str,
@@ -886,8 +1329,16 @@ class OpenAITextReconciler:
         operation = "destructive removal" if destructive else "task identity"
         title_terms = identity_terms(title)
         source_terms = identity_terms(source_text)
-        if not title_terms or not source_terms or not title_terms & source_terms:
-            raise ValidationFailure(
+        if (
+            not title_terms
+            or not source_terms
+            or not any(
+                OpenAITextReconciler._tokens_equivalent(title_term, source_term)
+                for title_term in title_terms
+                for source_term in source_terms
+            )
+        ):
+            raise _SemanticGroundingFailure(
                 f"unsupported {operation} is not grounded in cited transcript evidence."
             )
 
@@ -897,56 +1348,63 @@ class OpenAITextReconciler:
         source_entities = OpenAITextReconciler._named_entities(
             source_text
         ) | OpenAITextReconciler._identity_anchor_terms(source_text)
-        if title_entities - source_entities:
-            raise ValidationFailure(
+        if not OpenAITextReconciler._entities_subset(title_entities, source_entities):
+            raise _SemanticGroundingFailure(
                 f"unsupported {operation} names a different concrete identity than "
                 "the cited transcript evidence supports."
             )
 
+        # Ground each title fragment against a single source clause, so a
+        # command that punctuation or a conjunction split still grounds while a
+        # cross-clause action/target rebinding cannot. Action entailment is not
+        # enforced for a destructive removal; the destructive-language check
+        # below is the guard that path relies on instead.
         clauses = OpenAITextReconciler._source_clauses(source_text)
-        title_tokens = re.findall(r"[^\W\d_]+", title.casefold(), flags=re.UNICODE)
-        title_action, title_negated, _ = OpenAITextReconciler._action_predicate(
-            title_tokens
-        )
-        clause_supports_title = []
-        for clause in clauses:
-            clause_entities = OpenAITextReconciler._named_entities(
-                clause
-            ) | OpenAITextReconciler._identity_anchor_terms(clause)
-            if title_entities <= clause_entities:
-                clause_supports_title.append(clause)
-
-        action_supported = not enforce_action or destructive or any(
-            title_action is not None
-            and source_action is not None
-            and title_negated == source_negated
-            and (
-                OpenAITextReconciler._actions_are_equivalent(
-                    title_action, source_action
-                )
-                or any(
-                    clause_tokens[index : index + len(title_tokens)] == title_tokens
-                    for index in range(len(clause_tokens) - len(title_tokens) + 1)
-                )
+        title_fragments = OpenAITextReconciler._source_clauses(title) or [title]
+        require_action = enforce_action and not destructive
+        # Constructive grounding may also draw on a self-corrected restatement
+        # of the utterance. These variants are withheld from the destructive
+        # path (its pool stays the raw clauses), so a stripped false start can
+        # never hand a removal the negation it would otherwise need.
+        grounding_pool = clauses
+        if not destructive:
+            correction = OpenAITextReconciler._correction_clauses(source_text)
+            if correction:
+                grounding_pool = [*clauses, *correction]
+        supporting_clauses: list[str] = []
+        for index, fragment in enumerate(title_fragments):
+            grounded = OpenAITextReconciler._grounding_clauses(
+                fragment, grounding_pool, require_action=require_action
             )
-            for clause in clause_supports_title
-            for clause_tokens in [
-                re.findall(r"[^\W\d_]+", clause.casefold(), flags=re.UNICODE)
-            ]
-            for source_action, source_negated, _ in [
-                OpenAITextReconciler._action_predicate(clause_tokens)
-            ]
-        )
-        if not clause_supports_title or not action_supported:
-            raise ValidationFailure(
-                f"unsupported {operation} is not grounded in one cited transcript clause."
-            )
+            if (
+                not grounded
+                and require_action
+                and index > 0
+                and not OpenAITextReconciler._fragment_action_recognized(
+                    fragment, grounding_pool
+                )
+            ):
+                # A trailing, action-less adjunct of the SAME task (a bare
+                # due-date/attribute like "срок на вечер пятницы"): it claims no
+                # spoken verb, and every token already cleared the segment-level
+                # identity check, so entity presence in one clause is enough.
+                # The head fragment carries the task's action and is never
+                # relaxed this way, so no invented verb can slip in here.
+                grounded = OpenAITextReconciler._grounding_clauses(
+                    fragment, grounding_pool, require_action=False
+                )
+            if not grounded:
+                raise _SemanticGroundingFailure(
+                    f"unsupported {operation} is not grounded in "
+                    "one cited transcript clause."
+                )
+            supporting_clauses.extend(grounded)
 
         if destructive and not any(
             OpenAITextReconciler._has_destructive_support(clause)
-            for clause in clause_supports_title
+            for clause in supporting_clauses
         ):
-            raise ValidationFailure(
+            raise _SemanticGroundingFailure(
                 "unsupported destructive removal has no explicit destructive or "
                 "negating language in the cited transcript evidence."
             )

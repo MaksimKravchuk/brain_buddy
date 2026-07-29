@@ -47,6 +47,14 @@ def _clear_session_cookie(response: Response, config: AppConfig) -> None:
     )
 
 
+def _me_response(user: User, config: AppConfig) -> MeResponse:
+    return MeResponse(
+        id=user.id,
+        email=user.email,
+        feature_flags=config.feature_flags.effective_flags(user.email),
+    )
+
+
 @router.post(
     "/signup",
     response_model=MeResponse,
@@ -76,7 +84,7 @@ def signup(
         ) from exc
 
     _set_session_cookie(response, raw_token, config)
-    return MeResponse(id=user.id, email=user.email)
+    return _me_response(user, config)
 
 
 @router.post(
@@ -104,7 +112,7 @@ def login(
         ) from exc
 
     _set_session_cookie(response, raw_token, config)
-    return MeResponse(id=user.id, email=user.email)
+    return _me_response(user, config)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -121,5 +129,8 @@ def logout(
 
 
 @router.get("/me", response_model=MeResponse, responses=error_responses(401))
-def me(current_user: User = Depends(get_current_user)) -> MeResponse:
-    return MeResponse(id=current_user.id, email=current_user.email)
+def me(
+    current_user: User = Depends(get_current_user),
+    config: AppConfig = Depends(get_config_dep),
+) -> MeResponse:
+    return _me_response(current_user, config)

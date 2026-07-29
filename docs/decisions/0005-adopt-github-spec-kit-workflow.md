@@ -2,6 +2,7 @@
 
 Date: 2026-07-16
 Status: Accepted
+Amended: 2026-07-25 — repository pin upgraded from `v0.12.17` to `v0.14.2`; ADR-0009 adds the Architect-owned planning review control plane
 Decision owner: BrainBuddy
 Related: `.specify/`, `.claude/skills/`, official Hermes Spec Kit skills,
 `specs/`, `docs/spec-kit-workflow.md`, ADR-0001, ADR-0002, Kanban task
@@ -22,8 +23,9 @@ starts.
 
 ## Decision
 
-Adopt the official `github/spec-kit` release `v0.12.17` as BrainBuddy's mandatory
-feature-spec authoring workflow. Refresh the existing repository scaffold using
+Adopt the official `github/spec-kit` release as BrainBuddy's mandatory
+feature-spec authoring workflow. The initial adoption used `v0.12.17`; the
+current reviewed pin is `v0.14.2`. Refresh the existing repository scaffold using
 the pinned CLI through isolated `uv tool`/`uvx`, keep the supported Claude Code
 project integration, and provision the official Hermes planning skills into the
 architect profile. Preserve existing specs, ADRs, and constitution history.
@@ -31,7 +33,7 @@ architect profile. Preserve existing specs, ADRs, and constitution history.
 The canonical path for new or materially changed feature specs is:
 
 ```text
-constitution -> /speckit-specify -> /speckit-clarify -> /speckit-plan -> /speckit-checklist -> /speckit-tasks -> Hermes Kanban handoff
+constitution -> /speckit-specify -> /speckit-clarify -> /speckit-plan -> bounded planning review -> /speckit-checklist -> /speckit-tasks -> /speckit-analyze -> validated Hermes Kanban handoff
 ```
 
 Spec Kit owns versioned planning artifacts under `specs/` and project workflow
@@ -122,20 +124,22 @@ What future agents must preserve:
 
 ## Verification / tests
 
-- `uvx --from git+https://github.com/github/spec-kit.git@v0.12.17 specify --version`
-  reports `specify 0.12.17`.
+- `specify --version` reports `specify 0.14.2` from the isolated `uv tool`
+  installation.
 - `specify check` reports Claude Code available.
-- `uvx --from git+https://github.com/github/spec-kit.git@v0.12.17 specify init --here --integration claude --force`
-  refreshes the repository while preserving the existing constitution.
-- The official `v0.12.17` Hermes integration is the source of the seven planning
+- `specify integration upgrade claude --force` refreshes managed project assets;
+  the existing constitution and five BrainBuddy-specific overrides are preserved.
+- The official `v0.14.2` integration assets are the source of the seven planning
   skills projected into the architect profile. The project integration status
   remains Claude-only and `multi_install_safe=true`; this avoids upstream's
   global uninstall/overwrite hazard.
 - `hermes --profile architect skills list` exposes constitution, specify,
   clarify, plan, checklist, tasks, and analyze, but not implement or
   taskstoissues.
-- The local `.specify/workflows/speckit/workflow.yml` ends at tasks plus Hermes
-  Kanban handoff and does not call `speckit.implement`.
+- The local `.specify/workflows/speckit/workflow.yml` runs only bounded,
+  sandboxed planning reviews and does not call `speckit.implement`,
+  `taskstoissues`, or publish runtime cards. The validated
+  `hermes-handoff.json` is compiled only by the Hermes Kanban Orchestrator.
 - `python3 scripts/check_spec_kit_specs.py` validates required new-spec artifacts,
   regular nonempty files, and documented grandfathering baselines.
 - `python3 -m unittest scripts/test_check_spec_kit_specs.py -v` covers missing

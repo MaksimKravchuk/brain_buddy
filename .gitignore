@@ -6,6 +6,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+secrets.txt
 venv/
 
 # Node
@@ -44,6 +45,9 @@ data/
 
 # Hermes Kanban worktrees
 .worktrees/
+
+# Spec Kit local workflow run state (evidence is summarized in feature handoffs)
+.specify/workflows/runs/
 
 # Codex
 .codex/

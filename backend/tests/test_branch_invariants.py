@@ -354,11 +354,18 @@ def test_voice_sweep_iteration_runs_all_three_duties_and_survives_a_failure(
 
     calls: list[str] = []
     real_recover = container.voice_brain_dump_service.recover_due_provider_leases
+    real_recover_commit = (
+        container.voice_brain_dump_service.recover_committing_operations
+    )
     real_purge_raw = container.voice_brain_dump_service.purge_expired_raw_audio
 
     def recover_due_provider_leases(**kwargs: object) -> int:
         calls.append("recover")
         return real_recover(**kwargs)
+
+    def recover_committing_operations(**kwargs: object) -> int:
+        calls.append("resume_commits")
+        return real_recover_commit(**kwargs)
 
     def purge_expired_raw_audio(**kwargs: object) -> int:
         calls.append("raw_audio")
@@ -369,15 +376,18 @@ def test_voice_sweep_iteration_runs_all_three_duties_and_survives_a_failure(
         raise RuntimeError("transient repository error")
 
     container.voice_brain_dump_service.recover_due_provider_leases = recover_due_provider_leases
+    container.voice_brain_dump_service.recover_committing_operations = (
+        recover_committing_operations
+    )
     container.voice_brain_dump_service.purge_expired_raw_audio = purge_expired_raw_audio
     container.voice_brain_dump_service.purge_expired_working_artifacts = (
         purge_expired_working_artifacts
     )
 
-    # Must not raise even though the third duty fails.
+    # Must not raise even though the last duty fails.
     _run_voice_sweep(container)
 
-    assert calls == ["recover", "raw_audio", "working_artifacts"]
+    assert calls == ["recover", "resume_commits", "raw_audio", "working_artifacts"]
 
 
 def test_voice_sweep_thread_wakes_immediately_and_stops_cleanly(container) -> None:
@@ -425,13 +435,15 @@ def test_voice_sweep_logs_completed_recovery_and_retention_work(
 
     caplog.set_level(logging.INFO, logger="app.main")
     container.voice_brain_dump_service.recover_due_provider_leases = lambda: 1
+    container.voice_brain_dump_service.recover_committing_operations = lambda: 4
     container.voice_brain_dump_service.purge_expired_raw_audio = lambda: 2
     container.voice_brain_dump_service.purge_expired_working_artifacts = lambda: 3
 
     _run_voice_sweep(container)
 
     assert (
-        "Voice sweep: recovered 1 lease(s), purged 2 raw-audio, 3 working-artifact"
+        "Voice sweep: recovered 1 lease(s), resumed 4 commit(s), purged 2 "
+        "raw-audio, 3 working-artifact"
         in (caplog.text)
     )
 

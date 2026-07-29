@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import logging
 import wave
 from datetime import timedelta
 
@@ -18,6 +19,8 @@ from app.exceptions import (
     ValidationFailure,
 )
 from app.workflows.voice_brain_dump.adapters import OpenAiAccurateStt
+from app.workflows.voice_brain_dump.domain import TranscriptHypothesis
+from app.workflows.voice_brain_dump.providers import AccurateSttRequest, SttResult
 
 
 def _start_operation(
@@ -77,6 +80,79 @@ def _real_adapter(transport: httpx.BaseTransport) -> OpenAiAccurateStt:
         estimated_cost_usd_per_megabyte=0.01,
         transport=transport,
     )
+
+
+class _MultiSegmentAccurateStt:
+    """Thin accurate-STT stub emitting one hypothesis per utterance, in order.
+
+    Mirrors DeepgramAccurateStt's utterance-level output without a network call,
+    so the service's multi-segment persistence/reconciliation path is exercised
+    with the deterministic reconciler wired by the test container.
+    """
+
+    provider_name = "openai"
+    requires_external_processing = True
+    max_cost_usd_per_operation = 1.0
+
+    def __init__(self, utterances: list[str]) -> None:
+        self._utterances = utterances
+
+    def transcribe_sealed_audio(self, request: AccurateSttRequest) -> SttResult:
+        if not request.sealed_audio:
+            raise ProviderTerminalError("STT_AUDIO_MISSING")
+        segments = [
+            TranscriptHypothesis(
+                id=f"accurate_stub_{index}",
+                sequence=index,
+                start_ms=(index - 1) * 1000,
+                end_ms=index * 1000,
+                text=text,
+                stability="stable",
+                provider_role="accurate",
+                model="stub-model",
+                supersedes_segment_ids=list(request.supersedes_segment_ids),
+            )
+            for index, text in enumerate(self._utterances, start=1)
+        ]
+        return SttResult(
+            role="accurate",
+            provider=self.provider_name,
+            input_hash=hashlib.sha256(request.sealed_audio).hexdigest(),
+            segments=segments,
+            estimated_cost_usd=0.01,
+        )
+
+
+class _SplitVendorStt:
+    """External accurate-STT stub for a vendor distinct from the reconciler.
+
+    Used to exercise the pre-upload split-vendor consent boundary: the upload
+    must fail closed before any audio is handed to STT, so transcription is
+    intentionally unreachable here.
+    """
+
+    provider_name = "deepgram"
+    requires_external_processing = True
+
+    def transcribe_sealed_audio(self, request: AccurateSttRequest) -> SttResult:
+        raise AssertionError(
+            "accurate STT must not run until consent names every external vendor"
+        )
+
+
+def _configure_split_vendor_pipeline(api_client) -> None:
+    """Wire a mixed-vendor pipeline (Deepgram STT + OpenAI reconciler), both
+    externally processed, so consent must name BOTH vendors before any audio
+    may leave the device."""
+
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    service = api_client.app.state.container.voice_brain_dump_service
+    service.accurate_stt = _SplitVendorStt()
+    service.text_reconciler = OpenAITextReconciler(
+        api_key="test-key", complete=lambda _payload: {"operations": []}
+    )
+    service.allowed_external_provider_categories = frozenset({"deepgram", "openai"})
 
 
 def _withdraw_consent(api_client, operation_id: str) -> None:
@@ -387,6 +463,128 @@ def test_seal_persists_semantic_reconciler_failures_for_recovery(
     assert str(provider_error) not in sealed.text
 
 
+def test_provider_failure_redacts_sensitive_values_from_logs_and_run_envelope(
+    api_client, caplog: pytest.LogCaptureFixture
+) -> None:
+    """T057/F3: provider failures expose only an allowlisted redacted code.
+
+    The sentinels represent each privacy-sensitive value the operation carries.
+    The persisted provider-run projection is the emitted failure envelope; it
+    and captured logs must not contain raw audio/text, vocabulary, provider
+    payloads, credentials, or a local path.
+    """
+
+    raw_audio = b"raw-audio-sentinel-7c1f"
+    raw_text = "raw-transcript-sentinel-7c1f"
+    vocabulary = "vocabulary-sentinel-7c1f"
+    provider_payload = "provider-payload-sentinel-7c1f"
+    credential = "credential-sentinel-7c1f"
+    local_path = "/private/voice/sentinel-7c1f.webm"
+
+    class FailingAccurateStt:
+        provider_name = "openai"
+        requires_external_processing = True
+        max_cost_usd_per_operation = 0.0
+
+        def transcribe_sealed_audio(self, request) -> None:  # type: ignore[no-untyped-def]
+            assert request.sealed_audio == raw_audio
+            assert request.vocabulary == [vocabulary]
+            raise ProviderTerminalError(
+                " | ".join(
+                    [
+                        raw_audio.decode(),
+                        raw_text,
+                        vocabulary,
+                        provider_payload,
+                        credential,
+                        local_path,
+                    ]
+                )
+            )
+
+    operation = _start_operation(
+        api_client,
+        key="start-provider-redaction-envelope",
+        external_processing_allowed=True,
+        vocabulary=[vocabulary],
+    )
+    api_client.app.state.container.voice_brain_dump_service.accurate_stt = (
+        FailingAccurateStt()
+    )
+
+    with caplog.at_level(logging.INFO):
+        sealed = _upload_and_seal(
+            api_client,
+            operation,
+            raw_audio,
+            "seal-provider-redaction-envelope",
+        )
+
+    assert sealed.status_code == 200, sealed.text
+    body = sealed.json()
+    provider_run_envelope = json.dumps(
+        {
+            "status": body["status"],
+            "provider_runs": body["provider_runs"],
+            "available_recovery_actions": body["available_recovery_actions"],
+        },
+        sort_keys=True,
+    )
+    assert body["provider_runs"][-1]["error_code"] == "PROVIDER_ERROR_UNSPECIFIED"
+    for sensitive_value in (
+        raw_audio.decode(),
+        raw_text,
+        vocabulary,
+        provider_payload,
+        credential,
+        local_path,
+    ):
+        assert sensitive_value not in provider_run_envelope
+        assert sensitive_value not in caplog.text
+
+
+def test_reconciler_failure_persists_the_configured_model_and_template_version(
+    api_client,
+) -> None:
+    """T064/F1: a failed reconciler attempt still made a real, billable/
+    audited call against a specific configured model and prompt template.
+    That identity must be persisted on the provider run even on failure, not
+    only on success, so ADR-0002 audit provenance is inspectable for every
+    terminal/retryable outcome."""
+
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    operation = _start_operation(
+        api_client,
+        key="start-reconciler-failure-model-version",
+        external_processing_allowed=True,
+    )
+
+    def fail(_payload: dict[str, object]) -> dict[str, object]:
+        raise ProviderRetryableError("temporary outage")
+
+    service = api_client.app.state.container.voice_brain_dump_service
+    service.text_reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        model="gpt-4o-audit-fixture",
+        template_version="brain-dump-reconciler-test-v2",
+        complete=fail,
+    )
+    sealed = _upload_and_seal(
+        api_client,
+        operation,
+        b"reconciler failure model version",
+        "seal-reconciler-failure-model-version",
+    )
+
+    assert sealed.status_code == 200, sealed.text
+    persisted_run = sealed.json()["provider_runs"][-1]
+    assert persisted_run["role"] == "reconciler"
+    assert persisted_run["status"] == "retryable_error"
+    assert persisted_run["model"] == "gpt-4o-audit-fixture"
+    assert persisted_run["template_version"] == "brain-dump-reconciler-test-v2"
+
+
 def test_terminal_accurate_stt_failure_allows_explicit_provisional_review(
     api_client,
 ) -> None:
@@ -507,6 +705,102 @@ def test_reconciler_success_records_its_estimated_cost_in_the_operation(
         run for run in sealed.json()["provider_runs"] if run["role"] == "reconciler"
     )
     assert reconciler_run["estimated_cost_usd"] > 0
+
+
+def test_reconciler_success_persists_the_configured_model_and_template_version(
+    api_client,
+) -> None:
+    """T064/F1: a successful reconciler run must persist the configured
+    model and prompt-template-version identifiers on the provider run so
+    ADR-0002 model/prompt audit provenance is inspectable rather than
+    silently dropped."""
+
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    operation = _start_operation(
+        api_client,
+        key="start-reconciler-success-model-version",
+        external_processing_allowed=True,
+    )
+    api_client.app.state.container.voice_brain_dump_service.text_reconciler = (
+        OpenAITextReconciler(
+            api_key="test-key",
+            model="gpt-4o-audit-fixture",
+            template_version="brain-dump-reconciler-test-v2",
+            complete=lambda _payload: {"operations": []},
+        )
+    )
+    sealed = _upload_and_seal(
+        api_client,
+        operation,
+        b"Buy milk",
+        "seal-reconciler-success-model-version",
+    )
+
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["status"] == "awaiting_confirmation"
+    reconciler_run = next(
+        run for run in sealed.json()["provider_runs"] if run["role"] == "reconciler"
+    )
+    assert reconciler_run["model"] == "gpt-4o-audit-fixture"
+    assert reconciler_run["template_version"] == "brain-dump-reconciler-test-v2"
+
+
+def test_commit_receipt_projects_the_reconciler_model_and_template_version(
+    api_client,
+) -> None:
+    """T064/F1: the immutable confirmation receipt must project the same
+    configured model/template-version identifiers recorded on the
+    succeeded reconciler run, so committed-task provenance remains
+    inspectable after working artifacts are later purged."""
+
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    operation = _start_operation(
+        api_client,
+        key="start-receipt-model-version",
+        external_processing_allowed=True,
+    )
+
+    def complete(payload: dict[str, object]) -> dict[str, object]:
+        context = json.loads(payload["messages"][1]["content"])  # type: ignore[index]
+        segment_id = context["transcript_segments"][0]["id"]
+        return {
+            "operations": [
+                {
+                    "operation": "add",
+                    "proposal_id": None,
+                    "title": "Buy milk",
+                    "source_segment_ids": [segment_id],
+                    "predecessor_ids": [],
+                    "base_revision": None,
+                }
+            ]
+        }
+
+    api_client.app.state.container.voice_brain_dump_service.text_reconciler = (
+        OpenAITextReconciler(
+            api_key="test-key",
+            model="gpt-4o-audit-fixture",
+            template_version="brain-dump-reconciler-test-v2",
+            complete=complete,
+        )
+    )
+    sealed = _upload_and_seal(
+        api_client, operation, b"Buy milk", "seal-receipt-model-version"
+    )
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["status"] == "awaiting_confirmation"
+
+    committed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/commit",
+        headers={"Idempotency-Key": "commit-receipt-model-version"},
+        json={"expected_revision": sealed.json()["revision"]},
+    )
+    assert committed.status_code == 200, committed.text
+    receipt = committed.json()["action_receipts"][0]
+    assert receipt["reconciliation_model"] == "gpt-4o-audit-fixture"
+    assert receipt["reconciliation_template_version"] == "brain-dump-reconciler-test-v2"
 
 
 def test_operation_admission_rejects_next_call_when_worst_case_would_exceed_cap(
@@ -892,12 +1186,103 @@ def test_external_stt_receives_declared_hints_through_the_real_decision_path(
     assert sealed.json()["status"] == "awaiting_confirmation"
     assert len(bodies) == 1
     assert b"\x1aE\xdf\xa3real-webm" in bodies[0]
-    assert b'name="language"' in bodies[0] and b"ru" in bodies[0]
+    # Two language hints are a code-switched recording: the adapter now omits
+    # the ``language`` field so the provider auto-detects both spoken languages
+    # instead of being forced onto a single hint.
+    assert b'name="language"' not in bodies[0]
     assert b"BrainBuddy" in bodies[0] and b"production smoke" in bodies[0]
     accurate_run = next(
         run for run in sealed.json()["provider_runs"] if run["role"] == "accurate_stt"
     )
     assert accurate_run["provider"] == "openai"
+
+
+def test_external_stt_pins_a_single_declared_language_hint_through_the_real_path(
+    api_client,
+) -> None:
+    """A single declared hint pins the decode language: unlike the two-hint
+    code-switched case above, the adapter forwards an explicit ``language``
+    field so the provider does not auto-detect."""
+
+    bodies: list[bytes] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(request.read())
+        return httpx.Response(200, json={"text": "Починить BrainBuddy"})
+
+    api_client.app.state.container.voice_brain_dump_service.accurate_stt = _real_adapter(
+        httpx.MockTransport(handler)
+    )
+    started = api_client.post(
+        "/api/brain-dump-operations",
+        headers={"Idempotency-Key": "start-single-hint"},
+        json={
+            "consent": {
+                "microphone": True,
+                "external_processing_allowed": True,
+                "provider": "openai",
+                "language_hints": ["ru"],
+                "vocabulary": ["BrainBuddy", "production smoke"],
+            }
+        },
+    )
+    assert started.status_code == 201, started.text
+
+    sealed = _upload_and_seal(
+        api_client, started.json(), b"\x1aE\xdf\xa3real-webm", "seal-single-hint"
+    )
+
+    assert sealed.status_code == 200, sealed.text
+    assert sealed.json()["status"] == "awaiting_confirmation"
+    assert len(bodies) == 1
+    assert b'name="language"' in bodies[0] and b"ru" in bodies[0]
+    assert b"BrainBuddy" in bodies[0] and b"production smoke" in bodies[0]
+
+
+def test_accurate_stt_persists_every_utterance_and_reconciles_the_full_transcript(
+    api_client,
+) -> None:
+    """Multi-utterance accurate STT: every ordered utterance is persisted as its
+    own accurate segment, all ids are recorded on the provider run, and the
+    reconciler sees the whole transcript -- not just the first utterance."""
+
+    service = api_client.app.state.container.voice_brain_dump_service
+    service.accurate_stt = _MultiSegmentAccurateStt(
+        ["купить хлеб и молоко", "позвонить врачу"]
+    )
+    started = _start_operation(
+        api_client, key="start-multi-segment", language_hints=["ru"]
+    )
+
+    sealed = _upload_and_seal(
+        api_client, started, b"\x1aE\xdf\xa3multi-segment-webm", "seal-multi-segment"
+    )
+
+    assert sealed.status_code == 200, sealed.text
+    body = sealed.json()
+    assert body["status"] == "awaiting_confirmation"
+
+    accurate = [s for s in body["segments"] if s["provider_role"] == "accurate"]
+    assert [s["text"] for s in accurate] == ["купить хлеб и молоко", "позвонить врачу"]
+    assert [s["sequence"] for s in accurate] == [1, 2]
+    accurate_ids = [s["id"] for s in accurate]
+
+    titles = [p["title"] for p in body["proposals"] if not p["deleted"]]
+    assert titles == ["Купить хлеб и молоко", "Позвонить врачу"]
+    # Both utterances reached the reconciler; every proposal cites the accurate
+    # transcript, and citing any accurate segment is accepted.
+    for proposal in body["proposals"]:
+        assert proposal["source_segment_ids"]
+        assert set(proposal["source_segment_ids"]) <= set(accurate_ids)
+
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    persisted = service.get_brain_dump_operation(body["id"], owner_id=owner_id)
+    accurate_run = next(
+        run
+        for run in persisted.provider_runs
+        if run.role == "accurate_stt" and run.status == "succeeded"
+    )
+    assert accurate_run.output_segment_ids == accurate_ids
 
 
 def test_external_stt_is_not_called_without_operation_consent(api_client) -> None:
@@ -1105,6 +1490,166 @@ def test_explicit_empty_provider_allowlist_fails_closed_before_audio_upload(
     assert fetched.status_code == 200
     assert fetched.json()["audio_chunks"] == []
     assert fetched.json()["media_ref"] is None
+
+
+def test_brain_dump_providers_endpoint_reports_external_roles(api_client) -> None:
+    """The providers endpoint names the configured external category per pipeline
+    role, sourced from configuration (``config.voice.<role>.provider``) rather
+    than the wired adapter."""
+
+    config = api_client.app.state.config
+    api_client.app.state.config = config.model_copy(
+        update={
+            "voice": config.voice.model_copy(
+                update={
+                    "accurate_stt": config.voice.accurate_stt.model_copy(
+                        update={"provider": "openai"}
+                    ),
+                    "reconciler": config.voice.reconciler.model_copy(
+                        update={"provider": "openai"}
+                    ),
+                }
+            )
+        }
+    )
+
+    response = api_client.get("/api/brain-dump-providers")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"accurate_stt": "openai", "reconciler": "openai"}
+
+
+def test_brain_dump_providers_endpoint_reports_category_and_omits_disabled(
+    api_client,
+) -> None:
+    """The endpoint reports the configured category verbatim -- a hermetic
+    ``test`` stack's ``deterministic`` accurate STT resolves rather than reading
+    ``None`` (so the client's discovery gate can open) -- while a ``disabled``
+    role is reported as ``None`` so the client omits it from consent."""
+
+    response = api_client.get("/api/brain-dump-providers")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"accurate_stt": "deterministic", "reconciler": None}
+
+
+def test_brain_dump_providers_endpoint_requires_authentication(
+    anonymous_api_client,
+) -> None:
+    response = anonymous_api_client.get("/api/brain-dump-providers")
+
+    assert response.status_code == 401
+
+
+def test_multi_provider_consent_gates_upload_via_effective_set(api_client) -> None:
+    """Consent may name each role's provider category in the ``providers`` list
+    (mixed-vendor pipelines) without the legacy single ``provider`` string; the
+    upload gate accepts audio only when the whole effective set is allowlisted."""
+
+    started = api_client.post(
+        "/api/brain-dump-operations",
+        headers={"Idempotency-Key": "start-multi-provider"},
+        json={
+            "consent": {
+                "microphone": True,
+                "external_processing_allowed": True,
+                "providers": ["openai"],
+                "language_hints": ["ru", "en"],
+                "vocabulary": [],
+            }
+        },
+    )
+    assert started.status_code == 201, started.text
+    operation = started.json()
+    assert operation["consent"]["providers"] == ["openai"]
+    assert operation["consent"]["provider"] is None
+
+    audio = b"\x1aE\xdf\xa3multi-provider-webm"
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+
+    assert uploaded.status_code == 200, uploaded.text
+    assert len(uploaded.json()["audio_chunks"]) == 1
+
+
+def test_split_vendor_upload_fails_closed_with_reconciler_only_consent(
+    api_client,
+) -> None:
+    """A mixed-vendor pipeline whose consent names only the reconciler vendor
+    must be rejected at the pre-upload boundary: the missing accurate-STT vendor
+    is caught before any chunk is accepted or persisted, so no audio leaves the
+    device."""
+
+    _configure_split_vendor_pipeline(api_client)
+
+    started = api_client.post(
+        "/api/brain-dump-operations",
+        headers={"Idempotency-Key": "start-split-vendor-reconciler-only"},
+        json={
+            "consent": {
+                "microphone": True,
+                "external_processing_allowed": True,
+                "providers": ["openai"],
+                "language_hints": ["ru", "en"],
+                "vocabulary": [],
+            }
+        },
+    )
+    assert started.status_code == 201, started.text
+    operation = started.json()
+
+    audio = b"\x1aE\xdf\xa3split-vendor-must-not-persist"
+    rejected = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+
+    assert rejected.status_code == 400, rejected.text
+    assert "AUDIO_UPLOAD_PROVIDER_CONSENT_REQUIRED" in rejected.text
+
+    fetched = api_client.get(f"/api/brain-dump-operations/{operation['id']}")
+    assert fetched.status_code == 200
+    assert fetched.json()["audio_chunks"] == []
+    assert fetched.json()["media_ref"] is None
+
+
+def test_split_vendor_upload_accepts_consent_naming_every_vendor(
+    api_client,
+) -> None:
+    """Consent naming both the STT and reconciler vendors clears the pre-upload
+    boundary and the chunk is accepted."""
+
+    _configure_split_vendor_pipeline(api_client)
+
+    started = api_client.post(
+        "/api/brain-dump-operations",
+        headers={"Idempotency-Key": "start-split-vendor-both"},
+        json={
+            "consent": {
+                "microphone": True,
+                "external_processing_allowed": True,
+                "providers": ["deepgram", "openai"],
+                "language_hints": ["ru", "en"],
+                "vocabulary": [],
+            }
+        },
+    )
+    assert started.status_code == 201, started.text
+    operation = started.json()
+
+    audio = b"\x1aE\xdf\xa3split-vendor-both-consented"
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+
+    assert uploaded.status_code == 200, uploaded.text
+    assert len(uploaded.json()["audio_chunks"]) == 1
 
 
 def test_brain_dump_operation_collects_provisional_tasks_without_inbox_writes(
