@@ -5,7 +5,18 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
 export type AuthUser = {
   id: string;
   email: string;
+  // Server-driven rollout flags from GET /api/auth/me (e.g. `voice_brain_dump`,
+  // `delivery_canary`). Absent on older backends that predate the field, so
+  // callers must fail closed and treat a missing flag as OFF.
+  feature_flags?: Record<string, boolean>;
 };
+
+// Reads a server rollout flag, defaulting to OFF (fail-closed) when the flag —
+// or the whole `feature_flags` map — is absent, so a gated capability stays
+// hidden until the backend explicitly enables it.
+export function hasFeatureFlag(user: AuthUser | null, flag: string): boolean {
+  return user?.feature_flags?.[flag] === true;
+}
 
 export type SignupPayload = {
   email: string;

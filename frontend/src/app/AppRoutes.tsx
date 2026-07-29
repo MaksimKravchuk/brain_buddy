@@ -2,7 +2,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { ProtectedRoute } from "../components/auth/ProtectedRoute";
-import { BrainDumpRoute } from "../features/brain-dump/BrainDumpRoute";
+import { BrainDumpGate } from "../features/brain-dump/BrainDumpGate";
 import { TaskListPage } from "../features/tasks/TaskListPage";
 import LoginPage from "../pages/LoginPage";
 import SignupPage from "../pages/SignupPage";
@@ -72,7 +72,7 @@ export function AppRoutes(): JSX.Element {
         path="/brain-dump/:operationId"
         element={
           <ProtectedRoute>
-            <BrainDumpRoute />
+            <BrainDumpGate />
           </ProtectedRoute>
         }
       />
@@ -80,7 +80,7 @@ export function AppRoutes(): JSX.Element {
         path="/brain-dump/:operationId/review"
         element={
           <ProtectedRoute>
-            <BrainDumpRoute />
+            <BrainDumpGate />
           </ProtectedRoute>
         }
       />
