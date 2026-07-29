@@ -1,0 +1,59 @@
+{
+  "report_id": "65d93a5e4922e31343760b10483d57c41d1cd8c639772d13a2506c1ea4ddecac",
+  "schema_version": 1,
+  "run_key": "58fa05e06e8d04e4567e8f5cb273b4a9145307f652bdf1db11693e904cd310cf",
+  "git_sha": "RECORDED_FIXTURE_NOT_A_REAL_SHA",
+  "corpus_id": "founder_ru_reading_script",
+  "corpus_digest": "16e22c085bbcede0f78f70a20edc55a609547fdd34d4fffa4cf3b9f91b89248f",
+  "corpus_version": 1,
+  "provider_config_digest": "9728325c0329f4a12ecf3837c3c55346616b05b3943cf42e48df6c45639ab270",
+  "coverage": {
+    "utterances_scored": 50,
+    "utterances_in_corpus": 50
+  },
+  "criteria": [
+    {
+      "criterion": "SC-001",
+      "passed": true,
+      "detail": {
+        "committed_task_count": 17,
+        "threshold": 15,
+        "has_full_recording": true
+      }
+    },
+    {
+      "criterion": "SC-002",
+      "passed": true,
+      "detail": {
+        "single_correct_hits": 35,
+        "task_yielding_total": 43,
+        "ratio": 0.814,
+        "threshold": 0.8
+      }
+    },
+    {
+      "criterion": "SC-003",
+      "passed": true,
+      "detail": {
+        "translated_titles": 0,
+        "titles_total": 53
+      }
+    },
+    {
+      "criterion": "SC-004",
+      "passed": true,
+      "detail": {
+        "conjunction_false_splits": 0,
+        "conjunction_eligible": 22
+      }
+    },
+    {
+      "criterion": "SC-007",
+      "passed": true,
+      "detail": {
+        "seal_to_awaiting_confirmation_seconds": 41.2,
+        "threshold_seconds": 120.0
+      }
+    }
+  ]
+}

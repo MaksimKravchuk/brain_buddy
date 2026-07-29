@@ -3570,3 +3570,146 @@ def test_openai_reconciler_damerau_levenshtein_distance(
     from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
 
     assert OpenAITextReconciler._damerau_levenshtein(first, second) == distance
+
+
+# --- FR-006 language-faithful title invariant (T037) -----------------------
+#
+# The reconciler enforces the FR-006 title-generation rule as an invariant
+# distinct from FR-008 grounding tolerance: a title translated out of its cited
+# segment's language is dropped into the same ``_SemanticGroundingFailure`` skip
+# taxonomy (one operation dropped, siblings kept), never silently accepted.
+
+
+def _reconcile_single_segment(
+    source_text: str,
+    operations: list[dict[str, object]],
+    *,
+    active_proposals: list[object] | None = None,
+):
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=3000,
+        text=source_text,
+        stability="stable",
+        provider_role="accurate",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {"operations": operations},
+    )
+    return reconciler.reconcile(
+        ReconcileTextRequest(
+            operation_id="operation_language_faithful",
+            transcript_segments=[segment],
+            active_proposals=active_proposals or [],
+            user_locks={},
+        )
+    )
+
+
+def test_language_faithful_invariant_drops_translated_title_even_if_grounding_accepts(
+    monkeypatch,
+) -> None:
+    """The invariant is independent of grounding: with semantic grounding
+    neutralized (standing in for any grounding path that would tolerate the
+    title's meaning -- a shared proper noun, a normalized/loanword verb), a
+    title translated out of the Russian source's language is still dropped as a
+    single ungrounded operation while its faithful sibling survives."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    monkeypatch.setattr(
+        OpenAITextReconciler,
+        "_assert_semantic_support",
+        staticmethod(lambda *args, **kwargs: None),
+    )
+
+    result = _reconcile_single_segment(
+        "Купить молоко и позвонить Анне",
+        [_add_op("Купить молоко"), _add_op("Call Anna")],
+    )
+
+    assert [patch.title for patch in result.patches] == ["Купить молоко"]
+    assert len(result.skipped_operations) == 1
+    assert "translated out of the cited transcript's language" in (
+        result.skipped_operations[0]
+    )
+
+
+def test_language_faithful_invariant_fails_closed_when_every_title_is_translated(
+    monkeypatch,
+) -> None:
+    """If the only operations are translated titles, the whole call fails closed
+    (never an empty success) -- the language rule reuses the ungrounded-drop
+    fail-closed contract."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    monkeypatch.setattr(
+        OpenAITextReconciler,
+        "_assert_semantic_support",
+        staticmethod(lambda *args, **kwargs: None),
+    )
+
+    with pytest.raises(ValidationFailure, match="ungrounded"):
+        _reconcile_single_segment(
+            "Купить молоко и позвонить Анне",
+            [_add_op("Buy milk"), _add_op("Call Anna")],
+        )
+
+
+def test_language_faithful_invariant_accepts_russian_title_with_latin_proper_nouns() -> (
+    None
+):
+    """A Russian title that embeds a Latin-script proper noun is faithful, not a
+    translation: the invariant is about the dominant language matching, not
+    script purity, so ``Починить BrainBuddy`` grounds and materializes."""
+
+    result = _reconcile_single_segment(
+        "Надо починить BrainBuddy и написать Наташе",
+        [_add_op("Починить BrainBuddy"), _add_op("Написать Наташе")],
+    )
+
+    assert [patch.title for patch in result.patches] == [
+        "Починить BrainBuddy",
+        "Написать Наташе",
+    ]
+    assert result.skipped_operations == []
+
+
+def test_language_faithful_invariant_accepts_english_title_from_english_source() -> (
+    None
+):
+    """A Latin-only utterance yields a Latin-script title; same-language English
+    output is never flagged as a translation."""
+
+    result = _reconcile_single_segment(
+        "please deploy the BrainBuddy release and test the smoke suite",
+        [_add_op("Deploy the BrainBuddy release"), _add_op("Test the smoke suite")],
+    )
+
+    assert [patch.title for patch in result.patches] == [
+        "Deploy the BrainBuddy release",
+        "Test the smoke suite",
+    ]
+    assert result.skipped_operations == []
+
+
+def test_language_faithful_invariant_accepts_mixed_code_switched_title() -> None:
+    """A code-switched Russian/English utterance yields a code-switched title
+    (Cyrillic action verbs plus embedded Latin technical terms), which the
+    invariant accepts rather than normalizing to a single language."""
+
+    result = _reconcile_single_segment(
+        "потом протестировать production smoke на staging",
+        [_add_op("Протестировать production smoke на staging")],
+    )
+
+    assert [patch.title for patch in result.patches] == [
+        "Протестировать production smoke на staging"
+    ]
+    assert result.skipped_operations == []

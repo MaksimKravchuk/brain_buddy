@@ -24,6 +24,7 @@ from app.exceptions import (
     ValidationFailure,
 )
 from app.workflows.voice_brain_dump.domain import ProposalPatch, ReconciledProposal
+from app.workflows.voice_brain_dump.language_fidelity import title_is_language_faithful
 from app.workflows.voice_brain_dump.providers import (
     ReconcileResult,
     ReconcileTextRequest,
@@ -483,6 +484,20 @@ class OpenAITextReconciler:
             source_text,
             enforce_action=True,
         )
+        # FR-006 language-faithful title invariant, a *generation* rule distinct
+        # from the FR-008 grounding tolerance enforced above. Grounding proves a
+        # title's meaning is supported (and tolerates morphological variation);
+        # this separate check rejects a title whose ordinary spoken words were
+        # translated out of the cited segment's language. It is independent of
+        # grounding on purpose: a translated title can share a proper noun or a
+        # normalized/loanword verb and so satisfy a grounding path, yet FR-006
+        # still prohibits it. Lands in the same skip taxonomy -- one offending
+        # operation dropped, its well-formed siblings kept.
+        if not title_is_language_faithful(draft.title, source_text):
+            raise _SemanticGroundingFailure(
+                "unsupported task title was translated out of the cited "
+                "transcript's language; FR-006 requires a language-faithful title."
+            )
         if draft.operation == "split" and len(draft.predecessor_ids) != 1:
             raise ValidationFailure("Split requires exactly one predecessor.")
         if draft.operation == "merge" and len(draft.predecessor_ids) < 2:
