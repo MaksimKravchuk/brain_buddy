@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { apiClient } from "../../api/client";
-import { taskKeys } from "../../api/taskHooks";
+import { taskKeys, useBrainDumpProviders } from "../../api/taskHooks";
 import type { BrainDumpOperationResponse, BrainDumpProposal, BrainDumpProposalStatus } from "../../api/taskTypes";
 
 type SpeechRecognitionResultEventLike = {
@@ -94,6 +94,10 @@ export function BrainDumpRoute(): JSX.Element {
   const localCaptureOperationIdRef = useRef<string | null>(null);
   const proposalMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const isReviewPath = location.pathname.endsWith("/review");
+  // Only the fresh-recording screen needs the configured providers, to seed the
+  // consent the user grants at Record time. Resuming an existing operation
+  // already carries its recorded consent, so the fetch stays off those paths.
+  const { data: brainDumpProviders } = useBrainDumpProviders(params.operationId === "new" && !isReviewPath);
   const activeProposals = useMemo(() => (operation?.proposals ?? []).filter((proposal) => !proposal.deleted), [operation]);
   const hasUnresolvedConflicts = activeProposals.some((proposal) => (proposal.conflicts ?? []).length > 0);
 
@@ -326,11 +330,27 @@ export function BrainDumpRoute(): JSX.Element {
     try {
       stream = await probeMicrophone();
       const vocabulary = vocabularyText.split(",").map((value) => value.trim()).filter(Boolean);
+      // Consent names every external provider the configured pipeline uses so a
+      // mixed-vendor setup (e.g. Deepgram STT + OpenAI reconciler) is authorized
+      // per role. `provider` stays the accurate-STT name for legacy compatibility.
+      const externalProviderNames = externalProcessingAllowed
+        ? Array.from(
+            new Set(
+              [brainDumpProviders?.accurate_stt, brainDumpProviders?.reconciler].filter(
+                (name): name is string => Boolean(name)
+              )
+            )
+          )
+        : [];
+      const legacyProvider = externalProcessingAllowed
+        ? brainDumpProviders?.accurate_stt ?? externalProviderNames[0] ?? "openai"
+        : null;
       const started = operationRef.current ?? (await apiClient.startBrainDump({
         consent: {
           microphone: true,
           external_processing_allowed: externalProcessingAllowed,
-          provider: externalProcessingAllowed ? "openai" : null,
+          provider: legacyProvider,
+          providers: externalProviderNames,
           language_hints: [...languageOptions[languageMode].hints],
           vocabulary
         }

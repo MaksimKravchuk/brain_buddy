@@ -31,6 +31,7 @@ from app.workflows.voice_brain_dump.adapters import (
     OpenAiAccurateStt,
     OpenAITextReconciler,
 )
+from app.workflows.voice_brain_dump.adapters.deepgram_stt import DeepgramAccurateStt
 from app.workflows.voice_brain_dump.providers import (
     AccurateSttPort,
     DeterministicAccurateStt,
@@ -79,6 +80,19 @@ def _build_accurate_stt(config: AppConfig) -> AccurateSttPort:
         if not api_key:
             return DisabledAccurateStt("STT_PROVIDER_CREDENTIALS_MISSING")
         return OpenAiAccurateStt(
+            api_key=api_key,
+            model=settings.model,
+            timeout_seconds=settings.timeout_seconds,
+            max_retries=settings.max_retries,
+            retry_backoff_seconds=settings.retry_backoff_seconds,
+            max_cost_usd_per_operation=settings.max_cost_usd_per_operation,
+            estimated_cost_usd_per_megabyte=settings.estimated_cost_usd_per_megabyte,
+        )
+    if settings.provider == "deepgram":
+        api_key = os.getenv(settings.api_key_env)
+        if not api_key:
+            return DisabledAccurateStt("STT_PROVIDER_CREDENTIALS_MISSING")
+        return DeepgramAccurateStt(
             api_key=api_key,
             model=settings.model,
             timeout_seconds=settings.timeout_seconds,

@@ -423,6 +423,11 @@ class BrainDumpConsent(StorageBaseModel):
     external_processing_allowed: bool = False
     recorded_at: datetime
     provider: str | None = None
+    providers: list[str] = Field(default_factory=list, max_length=5)
+    """Every external provider category the owner consented to for this
+    operation. Mixed-vendor pipelines (e.g. Deepgram STT + OpenAI reconciler)
+    name each role's category here; the legacy single ``provider`` is kept for
+    backward compatibility and folded into the effective consented set."""
     language_hints: list[str] = Field(default_factory=list, max_length=10)
     vocabulary: list[str] = Field(default_factory=list, max_length=200)
 

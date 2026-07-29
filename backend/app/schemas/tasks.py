@@ -255,6 +255,7 @@ class BrainDumpConsentRequest(StrictBaseModel):
     microphone: bool
     external_processing_allowed: bool = False
     provider: str | None = Field(default=None, max_length=100)
+    providers: list[str] = Field(default_factory=list, max_length=5)
     language_hints: list[str] = Field(default_factory=list, max_length=10)
     vocabulary: list[str] = Field(default_factory=list, max_length=200)
 
@@ -286,9 +287,21 @@ class BrainDumpConsentResponse(StrictBaseModel):
     microphone: bool
     external_processing_allowed: bool
     provider: str | None = None
+    providers: list[str] = Field(default_factory=list)
     language_hints: list[str] = Field(default_factory=list)
     vocabulary: list[str] = Field(default_factory=list)
     recorded_at: datetime
+
+
+class BrainDumpProvidersResponse(StrictBaseModel):
+    """Configured external voice-provider categories per pipeline role.
+
+    Each value is the provider category the client must name in consent for
+    that role, or ``None`` when the configured adapter performs no external
+    processing (e.g. a deterministic/disabled stand-in)."""
+
+    accurate_stt: str | None = None
+    reconciler: str | None = None
 
 
 class BrainDumpTranscriptSegmentResponse(StrictBaseModel):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,29 @@ from app.schemas.auth import Invite
 from app.utils.time import utcnow
 
 from .allure_taxonomy import resolve
+
+# --- Hermetic voice-provider environment ------------------------------------
+# ``app.core.config`` calls ``load_dotenv()`` at import, so a developer's
+# repo-root ``.env`` (e.g. ``BRAIN_BUDDY_VOICE_ACCURATE_STT_PROVIDER=deepgram``
+# plus real ``OPENAI_API_KEY``/``DEEPGRAM_API_KEY`` credentials) would leak into
+# the pytest process. That flips the TEST-env deterministic providers into
+# ``Disabled*``/real adapters and breaks the deterministic suite. Scrub every
+# voice provider selector and external credential once, at conftest import,
+# before any app config is built -- so the suite is hermetic regardless of a
+# developer's local ``.env``. Tests that intentionally exercise a specific
+# provider set it via ``monkeypatch`` (function-scoped, applied after this
+# module-level scrub) and keep working.
+_LEAKY_VOICE_ENV_PREFIX = "BRAIN_BUDDY_VOICE_"
+_LEAKY_VOICE_ENV_NAMES = ("OPENAI_API_KEY", "DEEPGRAM_API_KEY")
+
+
+def _scrub_leaky_voice_env() -> None:
+    for name in list(os.environ):
+        if name.startswith(_LEAKY_VOICE_ENV_PREFIX) or name in _LEAKY_VOICE_ENV_NAMES:
+            del os.environ[name]
+
+
+_scrub_leaky_voice_env()
 
 TEST_OWNER_ID = "user_test_owner"
 TEST_USER_EMAIL = "primary@example.com"
@@ -152,16 +176,16 @@ def validation_service(container: Container):
 def _allow_openai_voice_consent(container: Container) -> None:
     """Grant the 'openai' voice-provider consent category in test containers.
 
-    Production ``build_container`` derives this allowlist strictly from
-    configured provider settings (never falling back to "openai" for an
-    explicitly empty configuration -- see ``TaskService.__init__``). Tests
-    default both voice providers to disabled/deterministic and instead swap
-    in fake or real-shaped adapters directly on ``task_service``, so they
-    need the "openai" category granted explicitly to exercise consent-bound
-    flows against those swapped-in adapters.
+    Production ``build_container`` derives this allowlist from the configured
+    provider settings. Tests default both voice providers to
+    disabled/deterministic and instead swap in fake or real-shaped adapters
+    directly on ``voice_brain_dump_service``, so they grant the "openai"
+    category explicitly here to exercise consent-bound flows against those
+    swapped-in adapters -- decoupling the fixtures from container-derivation
+    internals.
     """
 
-    container.task_service.allowed_external_provider_categories = frozenset(
+    container.voice_brain_dump_service.allowed_external_provider_categories = frozenset(
         {"openai"}
     )
 

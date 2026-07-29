@@ -179,16 +179,29 @@ class VoiceBrainDumpService:
             else allowed_external_provider_categories
         )
 
+    @staticmethod
+    def _effective_consented_providers(consent: BrainDumpConsent) -> set[str]:
+        """Every external provider category this operation consented to.
+
+        The multi-provider ``providers`` list unioned with the legacy single
+        ``provider`` string (kept for backward compatibility) so a mixed-vendor
+        pipeline -- e.g. Deepgram STT plus an OpenAI reconciler -- can name each
+        role's category while an older single-provider consent still resolves.
+        """
+
+        effective = set(consent.providers)
+        if consent.provider:
+            effective.add(consent.provider)
+        return effective
+
     def _assert_external_provider_consent(self, consent: BrainDumpConsent) -> None:
         if not consent.external_processing_allowed:
             raise ValidationFailure(
                 "AUDIO_UPLOAD_CONSENT_REQUIRED: external processing consent is "
                 "required before audio may leave the device."
             )
-        if (
-            not consent.provider
-            or consent.provider not in self.allowed_external_provider_categories
-        ):
+        effective = self._effective_consented_providers(consent)
+        if not effective or not effective <= self.allowed_external_provider_categories:
             raise ValidationFailure(
                 "AUDIO_UPLOAD_PROVIDER_CONSENT_REQUIRED: external processing "
                 "consent must name a configured provider category before audio "
@@ -232,6 +245,7 @@ class VoiceBrainDumpService:
             "STT_PROVIDER_AUTHENTICATION_FAILED",
             "STT_AUDIO_TOO_LARGE",
             "STT_PROVIDER_REJECTED_REQUEST",
+            "STT_PROVIDER_INVALID_RESPONSE",
             "STT_PROVIDER_DISABLED",
             "STT_PROVIDER_CREDENTIALS_MISSING",
             "STT_DETERMINISTIC_PROVIDER_TEST_ONLY",
@@ -488,6 +502,7 @@ class VoiceBrainDumpService:
                 microphone=payload.consent.microphone,
                 external_processing_allowed=payload.consent.external_processing_allowed,
                 provider=payload.consent.provider,
+                providers=payload.consent.providers,
                 language_hints=payload.consent.language_hints,
                 vocabulary=payload.consent.vocabulary,
                 recorded_at=now,
@@ -995,33 +1010,37 @@ class VoiceBrainDumpService:
                 raise ValidationFailure(
                     "Brain dump has no accurate transcript checkpoint to reconcile."
                 )
-            accurate_segment = next(
-                (
-                    segment
-                    for segment in operation.segments
-                    if segment.id in accurate_run.output_segment_ids
-                ),
-                None,
-            )
-            if accurate_segment is None:
+            # Rebuild the full ordered accurate transcript (one hypothesis per
+            # utterance) from the checkpoint's output segment ids. The STT
+            # adapter may emit many utterance-level segments; every one must
+            # reach the reconciler in emission order, not just the first.
+            segments_by_id = {segment.id: segment for segment in operation.segments}
+            accurate_segments = [
+                segments_by_id[segment_id]
+                for segment_id in accurate_run.output_segment_ids
+                if segment_id in segments_by_id
+            ]
+            if len(accurate_segments) != len(accurate_run.output_segment_ids):
                 raise ValidationFailure(
                     "Brain dump accurate transcript checkpoint is incomplete."
                 )
-            accurate_hypothesis = TranscriptHypothesis(
-                id=accurate_segment.id,
-                sequence=accurate_segment.sequence,
-                start_ms=accurate_segment.start_ms,
-                end_ms=accurate_segment.end_ms,
-                text=accurate_segment.text,
-                stability=accurate_segment.stability,
-                provider_role="accurate",
-                model=accurate_segment.model,
-                supersedes_segment_ids=accurate_segment.supersedes_segment_ids,
-            )
+            accurate_hypotheses = [
+                TranscriptHypothesis(
+                    id=segment.id,
+                    sequence=segment.sequence,
+                    start_ms=segment.start_ms,
+                    end_ms=segment.end_ms,
+                    text=segment.text,
+                    stability=segment.stability,
+                    provider_role="accurate",
+                    model=segment.model,
+                    supersedes_segment_ids=segment.supersedes_segment_ids,
+                )
+                for segment in accurate_segments
+            ]
             return self._reconcile_accurate_checkpoint(
                 operation,
-                accurate_hypothesis=accurate_hypothesis,
-                accurate_segment=accurate_segment,
+                accurate_hypotheses=accurate_hypotheses,
                 checkpoint_runs=checkpoint_runs,
                 checkpoint_segments=operation.segments,
                 input_hash=accurate_run.input_hash,
@@ -1071,7 +1090,8 @@ class VoiceBrainDumpService:
                 raise ProviderTerminalError("STT_EXTERNAL_PROCESSING_CONSENT_REQUIRED")
             if (
                 self.accurate_stt.requires_external_processing
-                and operation.consent.provider != self.accurate_stt.provider_name
+                and self.accurate_stt.provider_name
+                not in self._effective_consented_providers(operation.consent)
             ):
                 raise ProviderTerminalError("STT_CONSENT_PROVIDER_MISMATCH")
             accurate_result = self.accurate_stt.transcribe_sealed_audio(
@@ -1128,23 +1148,32 @@ class VoiceBrainDumpService:
                 }
             )
 
-        accurate_hypothesis = accurate_result.segments[0]
-        accurate_segment = BrainDumpTranscriptSegmentDocument(
-            id=accurate_hypothesis.id,
-            sequence=max(
-                (segment.sequence for segment in operation.segments), default=0
-            )
-            + 1,
-            text=accurate_hypothesis.text,
-            stability=accurate_hypothesis.stability,
-            start_ms=accurate_hypothesis.start_ms,
-            end_ms=accurate_hypothesis.end_ms,
-            provider_role=accurate_hypothesis.provider_role,
-            provider=accurate_result.provider or self.accurate_stt.provider_name,
-            model=accurate_hypothesis.model,
-            supersedes_segment_ids=accurate_hypothesis.supersedes_segment_ids,
-            created_at=now,
+        # DeepgramAccurateStt emits one hypothesis per utterance (ordered,
+        # sequence 1..N); OpenAI emits a single blob. Persist ALL of them as
+        # ordered accurate transcript segments so no utterance is dropped, and
+        # record every id on the run so the reconciler checkpoint can rebuild
+        # the full transcript.
+        accurate_hypotheses = list(accurate_result.segments)
+        base_sequence = max(
+            (segment.sequence for segment in operation.segments), default=0
         )
+        accurate_provider = accurate_result.provider or self.accurate_stt.provider_name
+        accurate_segments = [
+            BrainDumpTranscriptSegmentDocument(
+                id=hypothesis.id,
+                sequence=base_sequence + index,
+                text=hypothesis.text,
+                stability=hypothesis.stability,
+                start_ms=hypothesis.start_ms,
+                end_ms=hypothesis.end_ms,
+                provider_role=hypothesis.provider_role,
+                provider=accurate_provider,
+                model=hypothesis.model,
+                supersedes_segment_ids=hypothesis.supersedes_segment_ids,
+                created_at=now,
+            )
+            for index, hypothesis in enumerate(accurate_hypotheses, start=1)
+        ]
         accurate_run = BrainDumpProviderRunDocument(
             id=(
                 claimed_run.id
@@ -1157,12 +1186,12 @@ class VoiceBrainDumpService:
             checkpoint="accurate_transcribed",
             attempt=attempt,
             recovery_count=recovery_count,
-            provider=accurate_result.provider or self.accurate_stt.provider_name,
-            model=accurate_hypothesis.model,
+            provider=accurate_provider,
+            model=accurate_hypotheses[0].model,
             estimated_cost_usd=accurate_result.estimated_cost_usd,
             reserved_cost_usd=0.0,
             consumed_cost_usd=accurate_result.estimated_cost_usd,
-            output_segment_ids=[accurate_segment.id],
+            output_segment_ids=[segment.id for segment in accurate_segments],
             created_at=now,
             updated_at=now,
         )
@@ -1172,7 +1201,7 @@ class VoiceBrainDumpService:
             update={
                 "status": "reconciling",
                 "status_history": [*operation.status_history, "reconciling"],
-                "segments": [*operation.segments, accurate_segment],
+                "segments": [*operation.segments, *accurate_segments],
                 "provider_runs": [
                     *prior_runs,
                     accurate_run,
@@ -1181,7 +1210,9 @@ class VoiceBrainDumpService:
                         role="reconciler",
                         status="pending",
                         input_hash=hashlib.sha256(
-                            accurate_hypothesis.text.encode("utf-8")
+                            "\n".join(
+                                hypothesis.text for hypothesis in accurate_hypotheses
+                            ).encode("utf-8")
                         ).hexdigest(),
                         checkpoint="accurate_transcribed",
                         attempt=1,
@@ -1202,8 +1233,7 @@ class VoiceBrainDumpService:
         self,
         operation: BrainDumpOperationDocument,
         *,
-        accurate_hypothesis: TranscriptHypothesis,
-        accurate_segment: BrainDumpTranscriptSegmentDocument,
+        accurate_hypotheses: list[TranscriptHypothesis],
         checkpoint_runs: list[BrainDumpProviderRunDocument],
         checkpoint_segments: list[BrainDumpTranscriptSegmentDocument],
         input_hash: str,
@@ -1256,7 +1286,10 @@ class VoiceBrainDumpService:
                     attempt=attempt,
                     recovery_count=recovery_count,
                 )
-            if operation.consent.provider != self.text_reconciler.provider_id:
+            if (
+                self.text_reconciler.provider_id
+                not in self._effective_consented_providers(operation.consent)
+            ):
                 return self._reconciler_failure(
                     operation,
                     checkpoint_segments=checkpoint_segments,
@@ -1274,7 +1307,7 @@ class VoiceBrainDumpService:
             fixture_result = self.text_reconciler.reconcile(
                 ReconcileTextRequest(
                     operation_id=operation.id,
-                    transcript_segments=[accurate_hypothesis],
+                    transcript_segments=accurate_hypotheses,
                     active_proposals=[],
                     user_locks={},
                 )
@@ -1284,17 +1317,21 @@ class VoiceBrainDumpService:
                 operation.proposals,
                 titles,
                 operation_id=operation.id,
-                source_segment_id=accurate_hypothesis.id,
+                source_segment_ids=[
+                    hypothesis.id for hypothesis in accurate_hypotheses
+                ],
                 now=now,
             )
             reconciler_input_hash = hashlib.sha256(
-                accurate_hypothesis.text.encode("utf-8")
+                "\n".join(hypothesis.text for hypothesis in accurate_hypotheses).encode(
+                    "utf-8"
+                )
             ).hexdigest()
             reconciler_cost = fixture_result.estimated_cost_usd
         else:
             reconciler_request = ReconcileTextRequest(
                 operation_id=operation.id,
-                transcript_segments=[accurate_hypothesis],
+                transcript_segments=accurate_hypotheses,
                 active_proposals=[
                     self._proposal_document_to_reconciled(proposal)
                     for proposal in operation.proposals
@@ -2644,7 +2681,7 @@ class VoiceBrainDumpService:
         titles: list[str],
         *,
         operation_id: str,
-        source_segment_id: str,
+        source_segment_ids: list[str],
         now: datetime,
     ) -> tuple[list[BrainDumpProposalDocument], list[ProposalPatch]]:
         """Reconcile accurate-STT titles through opaque-ID, lineage-aware patches.
@@ -2655,7 +2692,11 @@ class VoiceBrainDumpService:
         path, not only a unit-tested pure module.
         """
 
-        segment_ids = [source_segment_id]
+        # Proposals derived from the accurate transcript cite every accurate
+        # segment; the first is the stable lineage anchor so single-utterance
+        # proposal identity is unchanged.
+        segment_ids = list(source_segment_ids)
+        primary_segment_id = source_segment_ids[0]
         mutable = [proposal for proposal in existing if not proposal.deleted]
         base = [self._proposal_document_to_reconciled(proposal) for proposal in mutable]
 
@@ -2663,7 +2704,7 @@ class VoiceBrainDumpService:
 
         def stable_id(title: str, lineage: str) -> str:
             identity = (
-                f"{operation_id}|{source_segment_id}|{lineage}|{title.casefold()}"
+                f"{operation_id}|{primary_segment_id}|{lineage}|{title.casefold()}"
             )
             return "proposal_" + hashlib.sha256(identity.encode()).hexdigest()[:12]
 

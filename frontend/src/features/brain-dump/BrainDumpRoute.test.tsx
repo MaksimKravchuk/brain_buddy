@@ -135,6 +135,13 @@ function emitSpeech(text: string, isFinal = true) {
   recognition.onresult({ results: [{ 0: { transcript: text }, isFinal }] });
 }
 
+// The fresh-recording screen fetches the configured voice providers (static
+// server config) to seed consent. That read is orthogonal to the operation
+// lifecycle, so call-count assertions look only at operation-endpoint fetches.
+function operationFetchCalls() {
+  return fetchMock.mock.calls.filter(([input]) => !String(input).includes("/brain-dump-providers"));
+}
+
 describe("BrainDumpRoute", () => {
   beforeEach(() => {
     fetchMock.mockReset();
@@ -262,12 +269,39 @@ describe("BrainDumpRoute", () => {
         microphone: true,
         external_processing_allowed: true,
         provider: "openai",
+        providers: [],
         language_hints: ["ru", "en"],
         vocabulary: ["BrainBuddy", "production smoke"]
       }
     });
     expect(recognition?.lang).toBe("ru-RU");
     expect(screen.getByText("Browser preview · provisional")).toBeInTheDocument();
+  });
+
+  it("names each configured provider in consent for a mixed-vendor pipeline", async () => {
+    const queryClient = new QueryClient();
+    // Seed the providers cache (the hook's staleTime is Infinity, so no fetch
+    // fires) to deterministically exercise the mixed-vendor consent the
+    // /brain-dump-providers endpoint drives: Deepgram STT + OpenAI reconciler.
+    queryClient.setQueryData(["brain-dump-providers"], { accurate_stt: "deepgram", reconciler: "openai" });
+    let startBody: { consent: { provider: string | null; providers: string[] } } | undefined;
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain-dump-providers")) {
+        return jsonResponse({ accurate_stt: "deepgram", reconciler: "openai" });
+      }
+      if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
+        startBody = JSON.parse(String(init.body));
+        return jsonResponse(operation(), 201);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/new", queryClient);
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+
+    expect(startBody?.consent.provider).toBe("deepgram");
+    expect(startBody?.consent.providers).toEqual(["deepgram", "openai"]);
   });
 
   it("ignores stale transcript responses that arrive after a newer pause", async () => {
@@ -391,7 +425,7 @@ describe("BrainDumpRoute", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Original audio recording is unavailable");
     expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(operationFetchCalls()).toHaveLength(0);
   });
 
   it("uploads MediaRecorder chunks and seals their manifest before opening review", async () => {
@@ -549,7 +583,7 @@ describe("BrainDumpRoute", () => {
     await userEvent.click(screen.getByRole("button", { name: "Record" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("permission prompt rejected");
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(operationFetchCalls()).toHaveLength(0);
   });
 
   it("shows the generic microphone denial when the browser throws a non-error", async () => {
@@ -560,7 +594,7 @@ describe("BrainDumpRoute", () => {
     await userEvent.click(screen.getByRole("button", { name: "Record" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Microphone permission was denied.");
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(operationFetchCalls()).toHaveLength(0);
   });
 
   it("uses webkit speech recognition, uploads interim transcripts and reports upload failures", async () => {
@@ -673,7 +707,7 @@ describe("BrainDumpRoute", () => {
     await userEvent.click(screen.getByRole("button", { name: "Record" }));
 
     act(() => emitSpeech("   "));
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(operationFetchCalls()).toHaveLength(1);
 
     act(() => recognition?.onerror?.({ error: "not-allowed" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Microphone permission was denied.");
@@ -1024,7 +1058,7 @@ describe("BrainDumpRoute", () => {
     renderBrainDump();
     await userEvent.click(screen.getByRole("button", { name: "Discard" }));
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(operationFetchCalls()).toHaveLength(0);
   });
 
   it("reports load failures when an existing brain dump cannot be resumed", async () => {
@@ -1686,7 +1720,7 @@ describe("BrainDumpRoute", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Secure cloud transcription consent");
     expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
     expect(recognitions).toHaveLength(0);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(operationFetchCalls()).toHaveLength(0);
   });
 
   it("renders the stopped-capture UI for a persisted paused operation whose cloud consent is already revoked", async () => {

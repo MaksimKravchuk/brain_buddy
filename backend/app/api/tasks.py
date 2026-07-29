@@ -36,6 +36,7 @@ from app.schemas.tasks import (
     BrainDumpProposalResponse,
     BrainDumpProposalUpdateRequest,
     BrainDumpProviderRunResponse,
+    BrainDumpProvidersResponse,
     BrainDumpSealRequest,
     BrainDumpTranscriptAppendRequest,
     BrainDumpTranscriptSegmentResponse,
@@ -105,6 +106,36 @@ def start_brain_dump_operation(
             owner_id=current_user.id,
             idempotency_key=_require_idempotency_key(idempotency_key),
         )
+    )
+
+
+@router.get(
+    "/brain-dump-providers",
+    response_model=BrainDumpProvidersResponse,
+    responses=error_responses(401),
+)
+def get_brain_dump_providers(
+    current_user: User = Depends(get_current_user),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
+) -> BrainDumpProvidersResponse:
+    """Report the external voice-provider category configured per pipeline role.
+
+    A role whose configured adapter performs no external processing (a
+    deterministic or disabled stand-in) is reported as ``None`` so the client
+    omits it from consent.
+    """
+
+    accurate_stt = voice_brain_dump_service.accurate_stt
+    reconciler = voice_brain_dump_service.text_reconciler
+    return BrainDumpProvidersResponse(
+        accurate_stt=(
+            accurate_stt.provider_name
+            if accurate_stt.requires_external_processing
+            else None
+        ),
+        reconciler=(
+            reconciler.provider_id if reconciler.requires_external_processing else None
+        ),
     )
 
 
@@ -775,6 +806,7 @@ def _to_brain_dump_response(
             microphone=operation.consent.microphone,
             external_processing_allowed=operation.consent.external_processing_allowed,
             provider=operation.consent.provider,
+            providers=operation.consent.providers,
             language_hints=operation.consent.language_hints,
             vocabulary=operation.consent.vocabulary,
             recorded_at=operation.consent.recorded_at,
