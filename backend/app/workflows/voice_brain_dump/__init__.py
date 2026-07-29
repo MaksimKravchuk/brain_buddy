@@ -1,6 +1,6 @@
 """Voice Brain Dump schema-v2 workflow contracts."""
 
-from .confirmation import ConfirmedAction, confirm_native_inbox_actions
+from .confirmation import ConfirmedAction, confirm_native_inbox_action
 from .domain import (
     ProposalConflict,
     ProposalPatch,
@@ -45,5 +45,5 @@ __all__ = [
     "VoiceBrainDumpService",
     "active_transcript_hypotheses",
     "apply_proposal_patches",
-    "confirm_native_inbox_actions",
+    "confirm_native_inbox_action",
 ]

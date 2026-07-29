@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { apiClient } from "../../api/client";
-import { taskKeys } from "../../api/taskHooks";
+import { taskKeys, useBrainDumpProviders } from "../../api/taskHooks";
 import type { BrainDumpOperationResponse, BrainDumpProposal, BrainDumpProposalStatus } from "../../api/taskTypes";
 
 type SpeechRecognitionResultEventLike = {
@@ -94,7 +94,28 @@ export function BrainDumpRoute(): JSX.Element {
   const localCaptureOperationIdRef = useRef<string | null>(null);
   const proposalMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const isReviewPath = location.pathname.endsWith("/review");
+  // Only the fresh-recording screen needs the configured providers, to seed the
+  // consent the user grants at Record time. Resuming an existing operation
+  // already carries its recorded consent, so the fetch stays off those paths.
+  const isNewRecording = params.operationId === "new" && !isReviewPath;
+  const providersQuery = useBrainDumpProviders(isNewRecording);
+  const brainDumpProviders = providersQuery.data ?? null;
+  // Fail-closed provider discovery: consent and Record are gated on
+  // GET /api/brain-dump-providers resolving to a named audio destination. Until
+  // discovery succeeds and names the configured vendors, no consent may be
+  // granted and no microphone/recorder/upload may start (FR-012, privacy
+  // boundary). A discovery that succeeds but names no accurate-STT vendor is
+  // treated as failed: we will not record when the audio destination is unknown.
+  const providersReady = providersQuery.isSuccess && Boolean(brainDumpProviders?.accurate_stt);
+  const providersFailed = providersQuery.isError || (providersQuery.isSuccess && !brainDumpProviders?.accurate_stt);
   const activeProposals = useMemo(() => (operation?.proposals ?? []).filter((proposal) => !proposal.deleted), [operation]);
+  const segmentsById = useMemo(() => {
+    const map = new Map<string, BrainDumpOperationResponse["segments"][number]>();
+    for (const segment of operation?.segments ?? []) {
+      map.set(segment.id, segment);
+    }
+    return map;
+  }, [operation]);
   const hasUnresolvedConflicts = activeProposals.some((proposal) => (proposal.conflicts ?? []).length > 0);
 
   const applyOperation = useCallback((next: BrainDumpOperationResponse | null) => {
@@ -316,6 +337,16 @@ export function BrainDumpRoute(): JSX.Element {
       setError("Secure cloud transcription consent is required before recording.");
       return;
     }
+    // Fail-closed: never touch the microphone until provider discovery has
+    // resolved the real vendor names the consent above was granted against.
+    // The consent checkbox and Record button are already gated on
+    // `providersReady`; this guard is the enforcement point that keeps
+    // getUserMedia / MediaRecorder / audio upload off a degraded or unresolved
+    // discovery, so audio can never egress to an unnamed provider (FR-012).
+    if (!brainDumpProviders?.accurate_stt) {
+      setError("Configured voice providers are still loading. Wait until they appear before recording.");
+      return;
+    }
     const Recognition = speechRecognitionConstructor();
     if (typeof MediaRecorder === "undefined") {
       setError("Original audio recording is unavailable in this browser.");
@@ -326,11 +357,25 @@ export function BrainDumpRoute(): JSX.Element {
     try {
       stream = await probeMicrophone();
       const vocabulary = vocabularyText.split(",").map((value) => value.trim()).filter(Boolean);
+      // Consent reached here only past the fail-closed guards above, so external
+      // processing is allowed and `accurate_stt` is a resolved vendor name. We
+      // name every external provider the configured pipeline uses so a
+      // mixed-vendor setup (e.g. Deepgram STT + OpenAI reconciler) is authorized
+      // per role; `provider` stays the accurate-STT name for legacy compatibility.
+      const externalProviderNames = Array.from(
+        new Set(
+          [brainDumpProviders.accurate_stt, brainDumpProviders.reconciler].filter(
+            (name): name is string => Boolean(name)
+          )
+        )
+      );
+      const legacyProvider = brainDumpProviders.accurate_stt;
       const started = operationRef.current ?? (await apiClient.startBrainDump({
         consent: {
           microphone: true,
           external_processing_allowed: externalProcessingAllowed,
-          provider: externalProcessingAllowed ? "openai" : null,
+          provider: legacyProvider,
+          providers: externalProviderNames,
           language_hints: [...languageOptions[languageMode].hints],
           vocabulary
         }
@@ -588,6 +633,7 @@ export function BrainDumpRoute(): JSX.Element {
         isSaving={isSaving}
         committable={operation?.committable ?? false}
         proposals={activeProposals}
+        segmentsById={segmentsById}
         reconciliationQuality={operation?.reconciliation_quality ?? "none"}
         rawAudioExpiresAt={operation?.raw_audio_expires_at}
         rawAudioPresent={operation?.raw_audio_present ?? false}
@@ -604,21 +650,27 @@ export function BrainDumpRoute(): JSX.Element {
 
   return (
     <RecordingSurface
+      accurateSttProvider={brainDumpProviders?.accurate_stt ?? null}
+      reconcilerProvider={brainDumpProviders?.reconciler ?? null}
       consentWithdrawnMidCapture={consentWithdrawnMidCapture}
       externalProcessingAllowed={externalProcessingAllowed}
       error={error}
+      isNewRecording={isNewRecording}
       isStarting={isStarting}
       languageMode={languageMode}
       lastTranscript={lastTranscript}
       locallyStartedOperationId={localCaptureOperationIdRef.current}
       operation={operation}
       proposals={activeProposals}
+      providersReady={providersReady}
+      providersFailed={providersFailed}
       onCancel={() => void command("cancel")}
       onExternalProcessingAllowedChange={setExternalProcessingAllowed}
       onFinish={() => void command("finish")}
       onLanguageModeChange={setLanguageMode}
       onPause={() => void command("pause")}
       onResume={() => void command("resume")}
+      onRetryProviders={() => void providersQuery.refetch()}
       onStart={() => void startRecording()}
       onWithdrawConsent={() => void command("withdraw_consent")}
       onVocabularyTextChange={setVocabularyText}
@@ -672,41 +724,53 @@ function RecoverySurface({
 }
 
 function RecordingSurface({
+  accurateSttProvider,
+  reconcilerProvider,
   consentWithdrawnMidCapture,
   externalProcessingAllowed,
   error,
+  isNewRecording,
   isStarting,
   languageMode,
   lastTranscript,
   locallyStartedOperationId,
   operation,
   proposals,
+  providersReady,
+  providersFailed,
   onCancel,
   onExternalProcessingAllowedChange,
   onFinish,
   onLanguageModeChange,
   onPause,
   onResume,
+  onRetryProviders,
   onStart,
   onWithdrawConsent,
   onVocabularyTextChange,
   vocabularyText
 }: {
+  accurateSttProvider: string | null;
+  reconcilerProvider: string | null;
   consentWithdrawnMidCapture: boolean;
   externalProcessingAllowed: boolean;
   error: string | null;
+  isNewRecording: boolean;
   isStarting: boolean;
   languageMode: LanguageMode;
   lastTranscript: string;
   locallyStartedOperationId: string | null;
   operation: BrainDumpOperationResponse | null;
   proposals: BrainDumpProposal[];
+  providersReady: boolean;
+  providersFailed: boolean;
   onCancel: () => void;
   onExternalProcessingAllowedChange: (allowed: boolean) => void;
   onFinish: () => void;
   onLanguageModeChange: (mode: LanguageMode) => void;
   onPause: () => void;
   onResume: () => void;
+  onRetryProviders: () => void;
   onStart: () => void;
   onWithdrawConsent: () => void;
   onVocabularyTextChange: (value: string) => void;
@@ -726,6 +790,16 @@ function RecordingSurface({
   const captureStopped = consentWithdrawnMidCapture || captureStoppedByConsent;
   const isPaused = operation?.status === "paused" && !captureStopped;
   const isRecording = operation?.status === "recording" && !captureStopped;
+  // Name the actual configured vendors so the user approves exactly the
+  // providers their audio and transcript will reach (FR-012). The consent
+  // surface is only rendered once discovery has resolved (`providersReady`),
+  // so there is no generic no-vendor fallback here: every external role that is
+  // configured is named, and audio never egresses to an unnamed provider.
+  const cloudConsentProviderParts = [
+    accurateSttProvider ? `speech-to-text by ${accurateSttProvider}` : null,
+    reconcilerProvider ? `task extraction by ${reconcilerProvider}` : null
+  ].filter((part): part is string => part !== null);
+  const cloudConsentDescription = `Allow secure cloud processing: ${cloudConsentProviderParts.join(", ")}. Audio is not sent without this consent.`;
   return (
     <div className="min-h-screen bg-surface-base text-slate-900" data-operation-id={operation?.id ?? "new"}>
       <div className="fixed inset-0 flex items-center justify-center bg-slate-50/80 p-0 backdrop-blur-sm sm:p-4">
@@ -742,7 +816,7 @@ function RecordingSurface({
 
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 sm:px-6" aria-live="polite">
             {error ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
-            {!operation ? (
+            {!operation && isNewRecording ? (
               <div className="mb-4 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
                 <label className="grid gap-1 text-slate-700">
                   <span className="text-xs font-semibold">Speech languages</span>
@@ -756,13 +830,26 @@ function RecordingSurface({
                   <span className="text-xs font-semibold">Key terms</span>
                   <input aria-label="Voice key terms" className="h-10 rounded-lg border border-slate-300 bg-white px-3" value={vocabularyText} onChange={(event) => onVocabularyTextChange(event.target.value)} />
                 </label>
-                <label className="flex items-start gap-2 text-xs text-slate-600">
-                  <input aria-label="Allow secure cloud transcription" className="mt-0.5" type="checkbox" checked={externalProcessingAllowed} onChange={(event) => onExternalProcessingAllowedChange(event.target.checked)} />
-                  <span>Allow secure cloud transcription after Stop. Audio is not sent without this consent.</span>
-                </label>
+                {providersReady ? (
+                  <label className="flex items-start gap-2 text-xs text-slate-600">
+                    <input aria-label="Allow secure cloud transcription" className="mt-0.5" type="checkbox" checked={externalProcessingAllowed} onChange={(event) => onExternalProcessingAllowedChange(event.target.checked)} />
+                    <span>{cloudConsentDescription}</span>
+                  </label>
+                ) : providersFailed ? (
+                  <div role="alert" className="grid gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    <span>Could not load the configured voice providers, so recording is unavailable. No audio leaves this device until the vendors are confirmed.</span>
+                    <button type="button" className="justify-self-start rounded-md border border-amber-300 bg-white px-2.5 py-1 font-semibold text-amber-800" onClick={onRetryProviders}>
+                      Retry
+                    </button>
+                  </div>
+                ) : (
+                  <p role="status" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
+                    Checking configured providers…
+                  </p>
+                )}
               </div>
             ) : null}
-            <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-600">Headed to inbox · {count}</div>
+            <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-600">Provisional · {count}</div>
             <div className="flex flex-col gap-2">
               {proposals.map((proposal) => <ProposalCard key={proposal.id} proposal={proposal} />)}
               {proposals.length === 0 ? <p className="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">Press Record and speak. Provisional Inbox tasks will grow here while you talk.</p> : null}
@@ -783,7 +870,7 @@ function RecordingSurface({
                 <p className="mt-2 whitespace-pre-wrap rounded-lg bg-white p-2 text-xs text-slate-500">{lastTranscript || "No transcript yet."}</p>
               </details>
               {!operation ? (
-                <button type="button" className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white shadow-soft" disabled={isStarting} onClick={onStart}>
+                <button type="button" className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white shadow-soft disabled:cursor-not-allowed disabled:opacity-50" disabled={isStarting || (isNewRecording && !providersReady)} onClick={onStart}>
                   <Mic className="h-4 w-4" aria-hidden />
                   Record
                 </button>
@@ -867,6 +954,7 @@ function ReviewSurface({
   rawAudioExpiresAt,
   rawAudioPresent,
   proposals,
+  segmentsById,
   reconciliationQuality,
   onBack,
   onDelete,
@@ -883,6 +971,7 @@ function ReviewSurface({
   rawAudioExpiresAt?: string | null;
   rawAudioPresent: boolean;
   proposals: BrainDumpProposal[];
+  segmentsById: Map<string, BrainDumpOperationResponse["segments"][number]>;
   reconciliationQuality: "none" | "provisional_only" | "accurate" | "conflicted";
   onBack: () => void;
   onDelete: (proposal: BrainDumpProposal) => void;
@@ -918,7 +1007,9 @@ function ReviewSurface({
           </div>
         ) : null}
         <div className="flex flex-col gap-2.5">
-          {proposals.map((proposal) => (
+          {proposals.map((proposal) => {
+            const predecessors = proposal.predecessor_ids ?? [];
+            return (
             <article key={proposal.id} className="rounded-[14px] border border-slate-200 bg-white px-3.5 py-3 shadow-soft">
               <div className="flex items-start gap-2.5">
                 <span className="mt-1 text-xs font-semibold text-slate-500">#{proposal.ordinal}</span>
@@ -931,14 +1022,15 @@ function ReviewSurface({
                     {(proposal.locked_fields ?? []).map((field) => (
                       <span key={field} className="rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-700">Locked: {field}</span>
                     ))}
-                    {(proposal.predecessor_ids ?? []).length > 0 ? (
+                    {predecessors.length > 0 ? (
                       <span className="rounded-full bg-violet-50 px-2.5 py-1 text-xs text-violet-700">
-                        {(proposal.predecessor_ids ?? []).length > 1
-                          ? `Merged from ${(proposal.predecessor_ids ?? []).length} tasks`
+                        {predecessors.length > 1
+                          ? `Merged from ${predecessors.length} tasks`
                           : "Split from an earlier task"}
                       </span>
                     ) : null}
                   </div>
+                  <ProposalCitations segmentIds={proposal.source_segment_ids} segmentsById={segmentsById} />
                   {(proposal.conflicts ?? []).map((conflict) => (
                     <div key={`${conflict.field}-${conflict.suggested_value ?? ""}`} className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
                       <div className="font-semibold">Conflict: {conflict.field}</div>
@@ -956,7 +1048,8 @@ function ReviewSurface({
                 </button>
               </div>
             </article>
-          ))}
+            );
+          })}
         </div>
       </main>
 
@@ -966,9 +1059,46 @@ function ReviewSurface({
         </button>
         <button type="button" className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-brand-primary text-[15px] font-semibold text-white shadow-glow disabled:cursor-not-allowed disabled:opacity-50" disabled={!committable || hasUnresolvedConflicts || isSaving} onClick={onSave}>
           <Inbox className="h-4 w-4" aria-hidden />
-          {isSaving ? "Saving…" : `Save ${proposals.length} to inbox`}
+          {isSaving ? "Confirming…" : `Confirm ${proposals.length} ${proposals.length === 1 ? "addition" : "additions"}`}
         </button>
       </footer>
     </div>
+  );
+}
+
+// Resolves a proposal's cited source segment IDs to the exact utterance text on
+// the review surface so each proposal visibly cites what it came from
+// (US1 / FR-002). Single and multiple citations render one quoted utterance
+// each; a missing or stale ID (e.g. superseded during reconciliation) degrades
+// to a placeholder rather than crashing the review screen.
+function ProposalCitations({
+  segmentIds,
+  segmentsById
+}: {
+  segmentIds: string[];
+  segmentsById: Map<string, BrainDumpOperationResponse["segments"][number]>;
+}): JSX.Element | null {
+  const uniqueIds = Array.from(new Set(segmentIds));
+  if (uniqueIds.length === 0) {
+    return null;
+  }
+  return (
+    <section aria-label="Cited utterances" className="mt-2 rounded-lg border border-slate-100 bg-slate-50 px-2.5 py-2">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-400">Cited from what you said</p>
+      <ul className="mt-1 flex flex-col gap-1">
+        {uniqueIds.map((id) => {
+          const segment = segmentsById.get(id);
+          return (
+            <li key={id} className="text-xs leading-snug text-slate-600">
+              {segment ? (
+                <span>“{segment.text}”</span>
+              ) : (
+                <span className="italic text-slate-400">Source utterance no longer available</span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }

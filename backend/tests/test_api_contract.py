@@ -35,6 +35,7 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
         ("/api/auth/me", "get"): {"401"},
         ("/api/auth/signup", "post"): {"400", "409", "422"},
         ("/api/brain-dump-operations", "post"): {"400", "401", "409", "422"},
+        ("/api/brain-dump-providers", "get"): {"401"},
         ("/api/brain-dump-operations/{operation_id}", "get"): {"401", "404", "422"},
         ("/api/brain-dump-operations/{operation_id}/audio/{chunk_number}", "put"): {
             "400",

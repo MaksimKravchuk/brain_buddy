@@ -6,14 +6,18 @@ from collections.abc import Sequence
 from datetime import date
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Header, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 
 from app.api.contracts import error_responses
 from app.api.dependencies import (
+    get_config_dep,
     get_current_user,
     get_task_service,
     get_voice_brain_dump_service,
+    require_voice_brain_dump_enabled,
+    voice_brain_dump_enabled,
 )
+from app.core.config import AppConfig
 from app.exceptions import ValidationFailure
 from app.modules.tasks import TaskService
 from app.modules.tasks.domain import (
@@ -36,6 +40,7 @@ from app.schemas.tasks import (
     BrainDumpProposalResponse,
     BrainDumpProposalUpdateRequest,
     BrainDumpProviderRunResponse,
+    BrainDumpProvidersResponse,
     BrainDumpSealRequest,
     BrainDumpTranscriptAppendRequest,
     BrainDumpTranscriptSegmentResponse,
@@ -80,6 +85,13 @@ from app.workflows.voice_brain_dump.service import (
 
 router = APIRouter(tags=["tasks"])
 
+# Privacy controls over an existing operation that stay reachable when the
+# ``voice_brain_dump`` exposure flag is OFF (ADR-0002 reversible authority). All
+# other operation commands are new-capture/forward surfaces and stay gated.
+_VOICE_OFF_REACHABLE_ACTIONS = frozenset(
+    {"withdraw_consent", "cancel", "delete_raw_audio"}
+)
+
 
 def _require_idempotency_key(idempotency_key: str | None) -> str:
     if not idempotency_key:
@@ -96,7 +108,7 @@ def _require_idempotency_key(idempotency_key: str | None) -> str:
 def start_brain_dump_operation(
     payload: BrainDumpOperationStartRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_voice_brain_dump_enabled),
     voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     return _to_brain_dump_response(
@@ -105,6 +117,38 @@ def start_brain_dump_operation(
             owner_id=current_user.id,
             idempotency_key=_require_idempotency_key(idempotency_key),
         )
+    )
+
+
+@router.get(
+    "/brain-dump-providers",
+    response_model=BrainDumpProvidersResponse,
+    responses=error_responses(401),
+)
+def get_brain_dump_providers(
+    current_user: User = Depends(require_voice_brain_dump_enabled),
+    config: AppConfig = Depends(get_config_dep),
+) -> BrainDumpProvidersResponse:
+    """Report the configured external voice-provider category per pipeline role.
+
+    Sourced from configuration (``config.voice.<role>.provider``), not the wired
+    adapter: a role configured ``"disabled"`` is reported as ``None`` so the
+    client omits it from consent, and every other category (``openai`` /
+    ``deepgram`` / ``deterministic``) is reported verbatim. This is the honest
+    "actual configured vendor" FR-012 requires -- a hermetic ``test`` stack
+    reports ``"deterministic"`` rather than ``None``, so its discovery resolves
+    and the client's consent + Record gate can open (a deterministic stack still
+    performs no external egress; the pre-upload consent guard enforces that
+    independently). The consented categories the client sends back match exactly
+    these strings.
+    """
+
+    def _category(provider: str) -> str | None:
+        return None if provider == "disabled" else provider
+
+    return BrainDumpProvidersResponse(
+        accurate_stt=_category(config.voice.accurate_stt.provider),
+        reconciler=_category(config.voice.reconciler.provider),
     )
 
 
@@ -118,6 +162,9 @@ def get_brain_dump_operation(
     current_user: User = Depends(get_current_user),
     voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
+    # Read/status of an existing operation stays reachable with the flag OFF:
+    # exposure control must not remove an owner's ability to see the operation
+    # they still hold privacy controls over.
     return _to_brain_dump_response(
         voice_brain_dump_service.get_brain_dump_operation(operation_id, owner_id=current_user.id)
     )
@@ -132,7 +179,7 @@ def append_brain_dump_transcript(
     operation_id: str,
     payload: BrainDumpTranscriptAppendRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_voice_brain_dump_enabled),
     voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     return _to_brain_dump_response(
@@ -155,7 +202,7 @@ async def upload_brain_dump_audio_chunk(
     chunk_number: int,
     request: Request,
     x_content_sha256: str | None = Header(default=None, alias="X-Content-SHA256"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_voice_brain_dump_enabled),
     voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     if not x_content_sha256:
@@ -219,7 +266,7 @@ def seal_brain_dump_operation(
     operation_id: str,
     payload: BrainDumpSealRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_voice_brain_dump_enabled),
     voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     return _to_brain_dump_response(
@@ -242,7 +289,7 @@ def update_brain_dump_proposal(
     proposal_id: str,
     payload: BrainDumpProposalUpdateRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_voice_brain_dump_enabled),
     voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     return _to_brain_dump_response(
@@ -267,8 +314,20 @@ def command_brain_dump_operation(
     payload: ExpectedRevisionRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
+    config: AppConfig = Depends(get_config_dep),
     voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
+    # Privacy authority over an existing operation stays reachable with the flag
+    # OFF (ADR-0002 reversible withdrawal/deletion): withdraw consent, cancel,
+    # and delete raw audio are never gated. Every forward/new-capture action is,
+    # returning the same fail-closed 404 the gated routes do.
+    if action not in _VOICE_OFF_REACHABLE_ACTIONS and not voice_brain_dump_enabled(
+        current_user, config
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Voice brain dump is not available.",
+        )
     idempotency = _require_idempotency_key(idempotency_key)
     if action == "commit":
         operation = voice_brain_dump_service.commit_brain_dump_operation(
@@ -775,6 +834,7 @@ def _to_brain_dump_response(
             microphone=operation.consent.microphone,
             external_processing_allowed=operation.consent.external_processing_allowed,
             provider=operation.consent.provider,
+            providers=operation.consent.providers,
             language_hints=operation.consent.language_hints,
             vocabulary=operation.consent.vocabulary,
             recorded_at=operation.consent.recorded_at,
@@ -892,6 +952,9 @@ def _to_brain_dump_segment_response(
         id=segment.id,
         sequence=segment.sequence,
         text=segment.text,
+        content_sha256=segment.content_sha256,
+        language=segment.language,
+        confidence=segment.confidence,
         stability=segment.stability,
         start_ms=segment.start_ms,
         end_ms=segment.end_ms,

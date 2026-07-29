@@ -484,15 +484,17 @@ test("Voice Brain Dump records provisional cards, reviews edits/deletes and save
     await page.keyboard.press("Tab");
     await expect(page.getByText("Edited", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Delete Call dentist" }).click();
-    await expect(page.getByText("Call dentist")).toHaveCount(0);
+    // The deleted card is gone; its words may legitimately survive inside a
+    // sibling card's cited-utterance quote, so assert on the card, not the page.
+    await expect(page.getByRole("button", { name: "Delete Call dentist" })).toHaveCount(0);
     await page.getByRole("button", { name: "Delete Untranscribed sealed audio" }).click();
-    await expect(page.getByText("Untranscribed sealed audio")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Delete Untranscribed sealed audio" })).toHaveCount(0);
     const beforeSave = await listInboxTasks(page);
     assertArrayLength(beforeSave, 0, "Inbox should remain empty before saving reviewed drafts");
   });
 
   await test.step("save creates exactly one real Inbox task with edited wording", async () => {
-    await page.getByRole("button", { name: "Save 1 to inbox" }).click();
+    await page.getByRole("button", { name: "Confirm 1 addition" }).click();
     await expect(page.getByRole("heading", { name: "Saved 1 task to Inbox" })).toBeVisible();
     await page.goto("/tasks/inbox");
     await expect(page.getByText("Buy oat milk for breakfast")).toBeVisible();
@@ -624,7 +626,7 @@ test("Voice Brain Dump resume and commit idempotency do not create duplicate Inb
     await page.getByLabel("Task title #1").fill("Write weekly update for the team");
     await page.keyboard.press("Tab");
     await expect(page.getByText("Edited", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Save 1 to inbox" }).click();
+    await page.getByRole("button", { name: "Confirm 1 addition" }).click();
     await expect(page.getByRole("heading", { name: "Saved 1 task to Inbox" })).toBeVisible();
     const completed = await apiGet<BrainDumpOperation>(page, `/api/brain-dump-operations/${operationId}`);
     assertArrayLength(completed.committed_task_ids, 1, "Committed task ids after first save");
@@ -731,7 +733,7 @@ test("Voice Brain Dump failures are visible and preserve recoverable live sessio
     // The concurrent proposal mutation is now surfaced as a reconciliation
     // conflict. Commit is honestly gated until the user resolves it, rather
     // than submitting a stale revision and manufacturing a duplicate task.
-    await expect(recoveryPage.getByRole("button", { name: /Save .* to inbox/ })).toBeDisabled();
+    await expect(recoveryPage.getByRole("button", { name: /Confirm .* additions?/ })).toBeDisabled();
     await expect(recoveryPage.getByLabel("Task title #1")).toBeVisible();
     await recoveryPage.close();
   });

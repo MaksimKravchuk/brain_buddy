@@ -361,11 +361,21 @@ class OperationRepository(BaseRepository):
 
     def delete_brain_dump_audio_chunks(
         self, *, owner_id: str, operation_id: str, chunks: list[tuple[int, str]]
-    ) -> None:
+    ) -> bool:
+        """Delete an operation's raw-audio media and verify no bytes remain.
+
+        Returns ``True`` only when the operation's media directory is confirmed
+        gone (so the caller may safely clear the metadata that makes it
+        findable). A permission/IO error -- including a partial failure that
+        removes some files but leaves the directory -- returns ``False`` without
+        raising, so the caller keeps the audio fail-closed and the retention
+        sweep retries until absence is confirmed.
+        """
+
         del chunks
-        shutil.rmtree(
-            self.brain_dump_audio_operation_path(owner_id, operation_id), ignore_errors=True
-        )
+        operation_dir = self.brain_dump_audio_operation_path(owner_id, operation_id)
+        shutil.rmtree(operation_dir, ignore_errors=True)
+        return not operation_dir.exists()
 
     def list_expired_raw_audio_operations(
         self,
@@ -410,6 +420,26 @@ class OperationRepository(BaseRepository):
                 """
                 SELECT payload FROM brain_dump_operations
                 WHERE status IN ('accurate_transcribing', 'reconciling')
+                """
+            ).fetchall()
+        return [
+            self._decode_brain_dump_operation(json.loads(row["payload"]))[0]
+            for row in rows
+        ]
+
+    def list_committing_operations(self) -> list[BrainDumpOperationDocument]:
+        """Operations frozen mid-commit (``committing``) that may need resuming.
+
+        A crash between the frozen batch and finalize leaves an operation here
+        with a durable partial ledger; the caller resumes each through the
+        owner-serialized, deterministic-child-key commit path.
+        """
+
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT payload FROM brain_dump_operations
+                WHERE status = 'committing'
                 """
             ).fetchall()
         return [
@@ -593,6 +623,55 @@ class OperationRepository(BaseRepository):
                 ),
             )
         BaseRepository.dump_model(self.idempotency_path(owner_id, record.key), record)
+
+    def scrub_idempotency_snapshots(
+        self, *, owner_id: str, operation_id: str, response_body: dict[str, object]
+    ) -> int:
+        """Redact an operation's text-bearing snapshots from its command log.
+
+        Every voice command records the full operation as its replay result, so
+        transcript/proposal text lives in the idempotency records too -- a
+        plaintext copy outside the operation table. When the working-artifact
+        purge clears an operation's text, this overwrites every command record
+        for that operation (SQLite row + JSON sidecar) with the already-redacted
+        snapshot, so no text outlives the retention window. Replay stays coherent
+        (an old key returns the current text-free operation) and the redacted
+        snapshot carries the operation's post-purge revision, so reconciling it
+        never resurrects text.
+        """
+
+        payload = json.dumps(response_body, sort_keys=True)
+        with self._connection() as conn, _sqlite_guard("Idempotency-Key", operation_id):
+            rows = conn.execute(
+                """
+                SELECT key, command, request_hash, created_at
+                FROM idempotency_records
+                WHERE owner_id = ? AND resource_id = ?
+                """,
+                (owner_id, operation_id),
+            ).fetchall()
+            if not rows:
+                return 0
+            conn.execute(
+                """
+                UPDATE idempotency_records SET response_body = ?
+                WHERE owner_id = ? AND resource_id = ?
+                """,
+                (payload, owner_id, operation_id),
+            )
+        for row in rows:
+            BaseRepository.dump_model(
+                self.idempotency_path(owner_id, row["key"]),
+                IdempotencyRecord(
+                    key=row["key"],
+                    command=row["command"],
+                    request_hash=row["request_hash"],
+                    resource_id=operation_id,
+                    response_body=response_body,
+                    created_at=row["created_at"],
+                ),
+            )
+        return len(rows)
 
     def purge_expired_idempotency(self, *, owner_id: str, now: datetime) -> int:
         """Drop idempotency records past retention so history stays bounded."""

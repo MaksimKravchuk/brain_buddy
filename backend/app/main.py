@@ -24,14 +24,18 @@ _VOICE_SWEEP_INTERVAL_SECONDS = float(
 def _run_voice_sweep(container: Container) -> None:
     """One pass of the persisted voice-operation runner's periodic duties.
 
-    Recovers due/expired provider-run leases, then purges raw audio and
-    uncommitted working artifacts past their configured retention. A single
-    bad pass must never kill the loop that calls this.
+    Recovers due/expired provider-run leases, advances due provider runs,
+    resumes operations frozen mid-commit, then purges raw audio and uncommitted
+    working artifacts past their configured retention. A single bad pass must
+    never kill the loop that calls this.
     """
 
     try:
         recovered_leases = container.voice_brain_dump_service.recover_due_provider_leases()
         advanced_runs = container.voice_brain_dump_service.run_due_brain_dump_provider_runs()
+        resumed_commits = (
+            container.voice_brain_dump_service.recover_committing_operations()
+        )
         purged_raw_audio = container.voice_brain_dump_service.purge_expired_raw_audio()
         purged_working_artifacts = (
             container.voice_brain_dump_service.purge_expired_working_artifacts()
@@ -39,11 +43,18 @@ def _run_voice_sweep(container: Container) -> None:
     except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
         logger.exception("Voice operation sweep iteration failed")
         return
-    if recovered_leases or advanced_runs or purged_raw_audio or purged_working_artifacts:
+    if (
+        recovered_leases
+        or advanced_runs
+        or resumed_commits
+        or purged_raw_audio
+        or purged_working_artifacts
+    ):
         logger.info(
-            "Voice sweep: recovered %s lease(s), purged %s raw-audio, %s "
-            "working-artifact operation(s), advanced %s provider run(s)",
+            "Voice sweep: recovered %s lease(s), resumed %s commit(s), purged %s "
+            "raw-audio, %s working-artifact operation(s), advanced %s provider run(s)",
             recovered_leases,
+            resumed_commits,
             purged_raw_audio,
             purged_working_artifacts,
             advanced_runs,

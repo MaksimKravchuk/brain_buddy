@@ -42,13 +42,26 @@ def _audio_multipart_metadata(audio: bytes) -> tuple[str, str]:
     raise ProviderTerminalError("STT_AUDIO_FORMAT_UNSUPPORTED")
 
 
+def _is_insufficient_quota(response: httpx.Response) -> bool:
+    """Detect an OpenAI insufficient_quota 429 without logging its payload."""
+
+    try:
+        payload = response.json()
+    except ValueError:
+        return False
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if not isinstance(error, dict):
+        return False
+    return any(error.get(key) == "insufficient_quota" for key in ("type", "code"))
+
+
 @dataclass(slots=True)
 class OpenAiAccurateStt:
     """Transcribe sealed audio with OpenAI without logging provider payloads."""
 
     api_key: str = field(repr=False)
     model: str = "gpt-4o-mini-transcribe"
-    timeout_seconds: float = 60.0
+    timeout_seconds: float = 180.0
     max_retries: int = 2
     retry_backoff_seconds: Sequence[float] = (1.0, 2.0)
     max_cost_usd_per_operation: float = 0.50
@@ -144,6 +157,11 @@ class OpenAiAccurateStt:
 
             if response.status_code < 400:
                 return response
+            # OpenAI returns 429 for both transient rate limits (retryable) and
+            # a permanently exhausted quota (terminal). Only the former should
+            # burn the retry budget; an insufficient_quota 429 is rejected now.
+            if response.status_code == 429 and _is_insufficient_quota(response):
+                raise ProviderTerminalError("STT_PROVIDER_REJECTED_REQUEST")
             if response.status_code in _RETRYABLE_STATUS_CODES:
                 if attempt >= self.max_retries:
                     raise ProviderRetryableError("STT_PROVIDER_UNAVAILABLE")
@@ -158,7 +176,10 @@ class OpenAiAccurateStt:
 
     def _form_fields(self, request: AccurateSttRequest) -> dict[str, str]:
         fields = {"model": self.model, "response_format": "json"}
-        if request.language_hints:
+        # A single hint pins the decode language; zero or multiple hints leave
+        # the field off so the provider auto-detects the spoken language(s)
+        # instead of forcing one hint onto a code-switched recording.
+        if len(request.language_hints) == 1:
             first_hint = request.language_hints[0].strip().casefold()
             fields["language"] = _LANGUAGE_ALIASES.get(
                 first_hint, first_hint.split("-", 1)[0]
@@ -175,8 +196,8 @@ class OpenAiAccurateStt:
 
     def _stable_segment_id(self, request: AccurateSttRequest, text: str) -> str:
         digest = hashlib.sha256(
-            "|".join((request.operation_id, request.media_ref, self.model, text)).encode(
-                "utf-8"
-            )
+            "|".join(
+                (request.operation_id, request.media_ref, self.model, text)
+            ).encode("utf-8")
         ).hexdigest()[:12]
         return f"accurate_{digest}"
