@@ -361,11 +361,21 @@ class OperationRepository(BaseRepository):
 
     def delete_brain_dump_audio_chunks(
         self, *, owner_id: str, operation_id: str, chunks: list[tuple[int, str]]
-    ) -> None:
+    ) -> bool:
+        """Delete an operation's raw-audio media and verify no bytes remain.
+
+        Returns ``True`` only when the operation's media directory is confirmed
+        gone (so the caller may safely clear the metadata that makes it
+        findable). A permission/IO error -- including a partial failure that
+        removes some files but leaves the directory -- returns ``False`` without
+        raising, so the caller keeps the audio fail-closed and the retention
+        sweep retries until absence is confirmed.
+        """
+
         del chunks
-        shutil.rmtree(
-            self.brain_dump_audio_operation_path(owner_id, operation_id), ignore_errors=True
-        )
+        operation_dir = self.brain_dump_audio_operation_path(owner_id, operation_id)
+        shutil.rmtree(operation_dir, ignore_errors=True)
+        return not operation_dir.exists()
 
     def list_expired_raw_audio_operations(
         self,

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -67,6 +68,8 @@ from .providers import (
 )
 from .repository import OperationRepository
 from .task_port import TaskPort
+
+logger = logging.getLogger(__name__)
 
 _P = ParamSpec("_P")
 _Result = TypeVar("_Result")
@@ -341,6 +344,37 @@ class VoiceBrainDumpService:
             else cls._PROVIDER_ERROR_FALLBACK_CODE
         )
 
+    def _raw_audio_cleanup_fields(
+        self,
+        operation: BrainDumpOperationDocument,
+        *,
+        deleted: bool,
+        now: datetime,
+        context: str,
+    ) -> dict[str, object]:
+        """Metadata updates for a raw-audio deletion, fail-closed on failure.
+
+        On confirmed deletion, clear the references that make the bytes
+        findable. On failure, keep every audio reference (so ``raw_audio_present``
+        stays honestly True and the bytes are not orphaned) and bring the
+        retention deadline forward to now so the sweep retries deletion until
+        absence is confirmed -- only then is the metadata cleared.
+        """
+
+        if deleted:
+            return {
+                "audio_chunks": [],
+                "media_ref": None,
+                "sealed_manifest_hash": None,
+            }
+        logger.warning(
+            "raw-audio deletion failed for operation %s (%s); retaining media "
+            "metadata so the retention sweep retries",
+            operation.id,
+            context,
+        )
+        return {"raw_audio_expires_at": now}
+
     def purge_expired_raw_audio(self, *, now: datetime | None = None) -> int:
         """Purge raw audio past its reconciliation-anchored privacy deadline.
 
@@ -386,7 +420,7 @@ class VoiceBrainDumpService:
                     or provider_run_is_in_flight
                 ):
                     continue
-                self.operation_repo.delete_brain_dump_audio_chunks(
+                deleted = self.operation_repo.delete_brain_dump_audio_chunks(
                     owner_id=operation.owner_id,
                     operation_id=operation.id,
                     chunks=[
@@ -394,6 +428,16 @@ class VoiceBrainDumpService:
                         for chunk in operation.audio_chunks
                     ],
                 )
+                if not deleted:
+                    # Fail closed: the bytes remain on disk. Leave the metadata
+                    # and the already-due/eligible state untouched so the next
+                    # sweep retries; never report a purge that did not happen.
+                    logger.warning(
+                        "raw-audio retention deletion failed for operation %s; "
+                        "will retry on the next sweep",
+                        operation.id,
+                    )
+                    continue
                 self.operation_repo.save_brain_dump_operation(
                     operation.model_copy(
                         update={
@@ -2053,9 +2097,9 @@ class VoiceBrainDumpService:
                 )
                 for proposal in operation.proposals
             ]
-        clear_raw_audio = action == "cancel"
-        if clear_raw_audio:
-            self.operation_repo.delete_brain_dump_audio_chunks(
+        cleanup_fields: dict[str, object] = {}
+        if action == "cancel":
+            deleted = self.operation_repo.delete_brain_dump_audio_chunks(
                 owner_id=owner_id,
                 operation_id=operation.id,
                 chunks=[
@@ -2063,15 +2107,13 @@ class VoiceBrainDumpService:
                     for chunk in operation.audio_chunks
                 ],
             )
+            cleanup_fields = self._raw_audio_cleanup_fields(
+                operation, deleted=deleted, now=now, context="cancel"
+            )
         updated = operation.model_copy(
             update={
                 "status": next_status,
                 "proposals": proposals,
-                "audio_chunks": [] if clear_raw_audio else operation.audio_chunks,
-                "media_ref": None if clear_raw_audio else operation.media_ref,
-                "sealed_manifest_hash": (
-                    None if clear_raw_audio else operation.sealed_manifest_hash
-                ),
                 "working_artifacts_expires_at": (
                     now + self.working_artifacts_retention
                     if action == "cancel"
@@ -2079,6 +2121,7 @@ class VoiceBrainDumpService:
                 ),
                 "updated_at": now,
                 "revision": operation.revision + 1,
+                **cleanup_fields,
             }
         )
         self.operation_repo.save_brain_dump_operation(updated)
@@ -2170,7 +2213,7 @@ class VoiceBrainDumpService:
                 }
             )
             provider_runs = [*provider_runs[:-1], invalidated_run]
-        self.operation_repo.delete_brain_dump_audio_chunks(
+        deleted = self.operation_repo.delete_brain_dump_audio_chunks(
             owner_id=owner_id,
             operation_id=operation.id,
             chunks=[
@@ -2190,13 +2233,13 @@ class VoiceBrainDumpService:
                     else operation.status_history
                 ),
                 "provider_runs": provider_runs,
-                "audio_chunks": [],
-                "media_ref": None,
-                "sealed_manifest_hash": None,
                 "consent_withdrawn_at": now,
                 "working_artifacts_expires_at": now + self.working_artifacts_retention,
                 "updated_at": now,
                 "revision": operation.revision + 1,
+                **self._raw_audio_cleanup_fields(
+                    operation, deleted=deleted, now=now, context="consent withdrawal"
+                ),
             }
         )
         self.operation_repo.save_brain_dump_operation(updated)
@@ -2247,7 +2290,7 @@ class VoiceBrainDumpService:
                 "Raw audio cannot be deleted while provider processing is in flight."
             )
         now = utcnow()
-        self.operation_repo.delete_brain_dump_audio_chunks(
+        deleted = self.operation_repo.delete_brain_dump_audio_chunks(
             owner_id=owner_id,
             operation_id=operation.id,
             chunks=[
@@ -2257,12 +2300,12 @@ class VoiceBrainDumpService:
         )
         updated = operation.model_copy(
             update={
-                "audio_chunks": [],
-                "media_ref": None,
-                "sealed_manifest_hash": None,
                 "raw_audio_expires_at": now,
                 "updated_at": now,
                 "revision": operation.revision + 1,
+                **self._raw_audio_cleanup_fields(
+                    operation, deleted=deleted, now=now, context="explicit deletion"
+                ),
             }
         )
         self.operation_repo.save_brain_dump_operation(updated)
@@ -2626,11 +2669,24 @@ class VoiceBrainDumpService:
         proposal_id: str,
         task_id: str,
     ) -> BrainDumpOperationDocument:
-        """Durably mark one frozen action ``succeeded`` with its canonical task."""
+        """Durably mark one frozen action ``succeeded`` with its canonical task.
+
+        Compare-and-set: if the action is already ``succeeded`` (a concurrent or
+        resumed runner recorded it first -- its deterministic child key created
+        the SAME canonical task), this is a no-op that returns the operation
+        unchanged. A lost race is never a second apply, and never bumps the
+        revision of an already-resolved (possibly completed) operation.
+        """
 
         batch = operation.commit_batch
         if batch is None:  # pragma: no cover - only called mid-commit
             raise ValidationFailure("Brain dump commit batch is missing.")
+        target = next(
+            (action for action in batch.actions if action.proposal_id == proposal_id),
+            None,
+        )
+        if target is not None and target.status == "succeeded":
+            return operation
         actions = [
             action.model_copy(update={"status": "succeeded", "task_id": task_id})
             if action.proposal_id == proposal_id and action.status != "succeeded"

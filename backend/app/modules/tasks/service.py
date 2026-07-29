@@ -225,6 +225,7 @@ class TaskService:
         self.task_repo.create(task)
         return task
 
+    @_serialized_write
     def create_native_inbox_task(
         self,
         *,
@@ -233,7 +234,15 @@ class TaskService:
         source_capture_ids: list[str],
         idempotency_key: str,
     ) -> TaskDocument:
-        """In-process ``TaskPort`` adapter for a confirmed Brain Dump action."""
+        """In-process ``TaskPort`` adapter for a confirmed Brain Dump action.
+
+        Owner-serialized like every other Tasks write: the deterministic child
+        idempotency key is resolved and the idempotency record + task are
+        persisted inside one owner-locked transaction. That makes "one child
+        key -> at most one task" real under a concurrent commit replay -- two
+        racing callers cannot each pass the idempotency check and mint separate
+        tasks, and a fault can never leave the record and the task out of step.
+        """
 
         command = "create_native_inbox_task"
         payload = TaskCreateRequest(title=title, source_capture_ids=source_capture_ids)
