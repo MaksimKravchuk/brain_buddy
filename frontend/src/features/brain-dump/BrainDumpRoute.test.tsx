@@ -298,10 +298,40 @@ describe("BrainDumpRoute", () => {
     });
 
     renderBrainDump("/brain-dump/new", queryClient);
+    // FR-012: the recording screen displays the actual configured vendors so
+    // the user approves exactly the providers their audio and transcript reach.
+    expect(
+      await screen.findByText(
+        "Allow secure cloud processing: speech-to-text by deepgram, task extraction by openai. Audio is not sent without this consent."
+      )
+    ).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Record" }));
 
     expect(startBody?.consent.provider).toBe("deepgram");
     expect(startBody?.consent.providers).toEqual(["deepgram", "openai"]);
+  });
+
+  it("keeps generic consent copy until the configured providers resolve", async () => {
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain-dump-providers")) {
+        // Never resolves during the test: the providers config is still
+        // loading, so the consent copy must not claim any specific vendor.
+        return new Promise<Response>(() => {});
+      }
+      if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
+        return jsonResponse(operation(), 201);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/new");
+
+    expect(
+      screen.getByText(
+        "Allow secure cloud transcription after Stop. Audio is not sent without this consent."
+      )
+    ).toBeInTheDocument();
   });
 
   it("ignores stale transcript responses that arrive after a newer pause", async () => {

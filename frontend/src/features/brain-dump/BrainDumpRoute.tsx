@@ -624,6 +624,8 @@ export function BrainDumpRoute(): JSX.Element {
 
   return (
     <RecordingSurface
+      accurateSttProvider={brainDumpProviders?.accurate_stt ?? null}
+      reconcilerProvider={brainDumpProviders?.reconciler ?? null}
       consentWithdrawnMidCapture={consentWithdrawnMidCapture}
       externalProcessingAllowed={externalProcessingAllowed}
       error={error}
@@ -692,6 +694,8 @@ function RecoverySurface({
 }
 
 function RecordingSurface({
+  accurateSttProvider,
+  reconcilerProvider,
   consentWithdrawnMidCapture,
   externalProcessingAllowed,
   error,
@@ -712,6 +716,8 @@ function RecordingSurface({
   onVocabularyTextChange,
   vocabularyText
 }: {
+  accurateSttProvider: string | null;
+  reconcilerProvider: string | null;
   consentWithdrawnMidCapture: boolean;
   externalProcessingAllowed: boolean;
   error: string | null;
@@ -746,6 +752,18 @@ function RecordingSurface({
   const captureStopped = consentWithdrawnMidCapture || captureStoppedByConsent;
   const isPaused = operation?.status === "paused" && !captureStopped;
   const isRecording = operation?.status === "recording" && !captureStopped;
+  // Name the actual configured vendors so the user approves exactly the
+  // providers their audio and transcript will reach (FR-012). Each external
+  // role is listed by name; while the provider config is still loading (null)
+  // the copy stays generic rather than claiming a vendor we can't confirm.
+  const cloudConsentProviderParts = [
+    accurateSttProvider ? `speech-to-text by ${accurateSttProvider}` : null,
+    reconcilerProvider ? `task extraction by ${reconcilerProvider}` : null
+  ].filter((part): part is string => part !== null);
+  const cloudConsentDescription =
+    cloudConsentProviderParts.length > 0
+      ? `Allow secure cloud processing: ${cloudConsentProviderParts.join(", ")}. Audio is not sent without this consent.`
+      : "Allow secure cloud transcription after Stop. Audio is not sent without this consent.";
   return (
     <div className="min-h-screen bg-surface-base text-slate-900" data-operation-id={operation?.id ?? "new"}>
       <div className="fixed inset-0 flex items-center justify-center bg-slate-50/80 p-0 backdrop-blur-sm sm:p-4">
@@ -778,7 +796,7 @@ function RecordingSurface({
                 </label>
                 <label className="flex items-start gap-2 text-xs text-slate-600">
                   <input aria-label="Allow secure cloud transcription" className="mt-0.5" type="checkbox" checked={externalProcessingAllowed} onChange={(event) => onExternalProcessingAllowedChange(event.target.checked)} />
-                  <span>Allow secure cloud transcription after Stop. Audio is not sent without this consent.</span>
+                  <span>{cloudConsentDescription}</span>
                 </label>
               </div>
             ) : null}

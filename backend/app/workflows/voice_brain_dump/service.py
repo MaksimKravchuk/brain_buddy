@@ -194,6 +194,26 @@ class VoiceBrainDumpService:
             effective.add(consent.provider)
         return effective
 
+    def _required_external_provider_categories(self) -> set[str]:
+        """Every configured role that genuinely ships bytes off-device.
+
+        A role whose adapter sets ``requires_external_processing`` uploads
+        audio (accurate STT) or the derived transcript (reconciler) to a real
+        vendor, so its exact provider identity MUST be named in consent before
+        any audio leaves the device -- not caught only when that stage later
+        runs, by which point the audio has already been uploaded. Deterministic
+        and disabled stand-ins set the flag ``False`` and contribute nothing
+        here, so isolated deterministic flows keep their single-category
+        consent.
+        """
+
+        required: set[str] = set()
+        if getattr(self.accurate_stt, "requires_external_processing", False):
+            required.add(self.accurate_stt.provider_name)
+        if getattr(self.text_reconciler, "requires_external_processing", False):
+            required.add(self.text_reconciler.provider_id)
+        return required
+
     def _assert_external_provider_consent(self, consent: BrainDumpConsent) -> None:
         if not consent.external_processing_allowed:
             raise ValidationFailure(
@@ -206,6 +226,20 @@ class VoiceBrainDumpService:
                 "AUDIO_UPLOAD_PROVIDER_CONSENT_REQUIRED: external processing "
                 "consent must name a configured provider category before audio "
                 "may leave the device."
+            )
+        # Fail closed at the pre-upload boundary when consent omits any role
+        # that will actually egress data. A split-vendor pipeline (e.g.
+        # Deepgram STT + OpenAI reconciler) whose consent names only one vendor
+        # must be rejected here, before a single chunk is accepted, rather than
+        # letting audio upload and surfacing the mismatch only when the missing
+        # provider runs.
+        required = self._required_external_provider_categories()
+        if not required <= effective:
+            raise ValidationFailure(
+                "AUDIO_UPLOAD_PROVIDER_CONSENT_REQUIRED: external processing "
+                "consent must name every configured external provider "
+                "(speech-to-text and task extraction) before audio may leave "
+                "the device."
             )
 
     # Only a terminal operation's raw audio/working artifacts are ever

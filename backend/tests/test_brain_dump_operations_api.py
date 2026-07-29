@@ -123,6 +123,38 @@ class _MultiSegmentAccurateStt:
         )
 
 
+class _SplitVendorStt:
+    """External accurate-STT stub for a vendor distinct from the reconciler.
+
+    Used to exercise the pre-upload split-vendor consent boundary: the upload
+    must fail closed before any audio is handed to STT, so transcription is
+    intentionally unreachable here.
+    """
+
+    provider_name = "deepgram"
+    requires_external_processing = True
+
+    def transcribe_sealed_audio(self, request: AccurateSttRequest) -> SttResult:
+        raise AssertionError(
+            "accurate STT must not run until consent names every external vendor"
+        )
+
+
+def _configure_split_vendor_pipeline(api_client) -> None:
+    """Wire a mixed-vendor pipeline (Deepgram STT + OpenAI reconciler), both
+    externally processed, so consent must name BOTH vendors before any audio
+    may leave the device."""
+
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    service = api_client.app.state.container.voice_brain_dump_service
+    service.accurate_stt = _SplitVendorStt()
+    service.text_reconciler = OpenAITextReconciler(
+        api_key="test-key", complete=lambda _payload: {"operations": []}
+    )
+    service.allowed_external_provider_categories = frozenset({"deepgram", "openai"})
+
+
 def _withdraw_consent(api_client, operation_id: str) -> None:
     """Simulate a consent withdrawal after audio was durably uploaded.
 
@@ -1522,6 +1554,83 @@ def test_multi_provider_consent_gates_upload_via_effective_set(api_client) -> No
     assert operation["consent"]["provider"] is None
 
     audio = b"\x1aE\xdf\xa3multi-provider-webm"
+    uploaded = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+
+    assert uploaded.status_code == 200, uploaded.text
+    assert len(uploaded.json()["audio_chunks"]) == 1
+
+
+def test_split_vendor_upload_fails_closed_with_reconciler_only_consent(
+    api_client,
+) -> None:
+    """A mixed-vendor pipeline whose consent names only the reconciler vendor
+    must be rejected at the pre-upload boundary: the missing accurate-STT vendor
+    is caught before any chunk is accepted or persisted, so no audio leaves the
+    device."""
+
+    _configure_split_vendor_pipeline(api_client)
+
+    started = api_client.post(
+        "/api/brain-dump-operations",
+        headers={"Idempotency-Key": "start-split-vendor-reconciler-only"},
+        json={
+            "consent": {
+                "microphone": True,
+                "external_processing_allowed": True,
+                "providers": ["openai"],
+                "language_hints": ["ru", "en"],
+                "vocabulary": [],
+            }
+        },
+    )
+    assert started.status_code == 201, started.text
+    operation = started.json()
+
+    audio = b"\x1aE\xdf\xa3split-vendor-must-not-persist"
+    rejected = api_client.put(
+        f"/api/brain-dump-operations/{operation['id']}/audio/0",
+        content=audio,
+        headers={"X-Content-SHA256": hashlib.sha256(audio).hexdigest()},
+    )
+
+    assert rejected.status_code == 400, rejected.text
+    assert "AUDIO_UPLOAD_PROVIDER_CONSENT_REQUIRED" in rejected.text
+
+    fetched = api_client.get(f"/api/brain-dump-operations/{operation['id']}")
+    assert fetched.status_code == 200
+    assert fetched.json()["audio_chunks"] == []
+    assert fetched.json()["media_ref"] is None
+
+
+def test_split_vendor_upload_accepts_consent_naming_every_vendor(
+    api_client,
+) -> None:
+    """Consent naming both the STT and reconciler vendors clears the pre-upload
+    boundary and the chunk is accepted."""
+
+    _configure_split_vendor_pipeline(api_client)
+
+    started = api_client.post(
+        "/api/brain-dump-operations",
+        headers={"Idempotency-Key": "start-split-vendor-both"},
+        json={
+            "consent": {
+                "microphone": True,
+                "external_processing_allowed": True,
+                "providers": ["deepgram", "openai"],
+                "language_hints": ["ru", "en"],
+                "vocabulary": [],
+            }
+        },
+    )
+    assert started.status_code == 201, started.text
+    operation = started.json()
+
+    audio = b"\x1aE\xdf\xa3split-vendor-both-consented"
     uploaded = api_client.put(
         f"/api/brain-dump-operations/{operation['id']}/audio/0",
         content=audio,
