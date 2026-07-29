@@ -40,7 +40,12 @@ class AppEnvironment(str, Enum):
 # Explicit allow-list of server-owned feature flags. A flag must be declared
 # here before configuration may reference it; anything else fails closed at
 # startup. Flags gate exposure/rollout only — they are never authorization.
-KNOWN_FEATURE_FLAGS: tuple[str, ...] = ("delivery_canary",)
+#
+# ``voice_brain_dump`` (ADR-0008) gates the native voice Brain Dump feature:
+# the backend brain-dump commands and provider discovery, plus the frontend
+# route (which reads the effective flag from ``/api/auth/me``). It ships
+# default OFF and rolls out OFF → INTERNAL → ON like every other flag.
+KNOWN_FEATURE_FLAGS: tuple[str, ...] = ("delivery_canary", "voice_brain_dump")
 
 
 class FeatureFlagState(str, Enum):

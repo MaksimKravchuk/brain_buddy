@@ -13,6 +13,7 @@ from app.api.dependencies import (
     get_current_user,
     get_task_service,
     get_voice_brain_dump_service,
+    require_voice_brain_dump_enabled,
 )
 from app.exceptions import ValidationFailure
 from app.modules.tasks import TaskService
@@ -97,7 +98,7 @@ def _require_idempotency_key(idempotency_key: str | None) -> str:
 def start_brain_dump_operation(
     payload: BrainDumpOperationStartRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_voice_brain_dump_enabled),
     voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     return _to_brain_dump_response(
@@ -115,7 +116,7 @@ def start_brain_dump_operation(
     responses=error_responses(401),
 )
 def get_brain_dump_providers(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_voice_brain_dump_enabled),
     voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpProvidersResponse:
     """Report the external voice-provider category configured per pipeline role.
@@ -146,7 +147,7 @@ def get_brain_dump_providers(
 )
 def get_brain_dump_operation(
     operation_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_voice_brain_dump_enabled),
     voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     return _to_brain_dump_response(
@@ -163,7 +164,7 @@ def append_brain_dump_transcript(
     operation_id: str,
     payload: BrainDumpTranscriptAppendRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_voice_brain_dump_enabled),
     voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     return _to_brain_dump_response(
@@ -186,7 +187,7 @@ async def upload_brain_dump_audio_chunk(
     chunk_number: int,
     request: Request,
     x_content_sha256: str | None = Header(default=None, alias="X-Content-SHA256"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_voice_brain_dump_enabled),
     voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     if not x_content_sha256:
@@ -250,7 +251,7 @@ def seal_brain_dump_operation(
     operation_id: str,
     payload: BrainDumpSealRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_voice_brain_dump_enabled),
     voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     return _to_brain_dump_response(
@@ -273,7 +274,7 @@ def update_brain_dump_proposal(
     proposal_id: str,
     payload: BrainDumpProposalUpdateRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_voice_brain_dump_enabled),
     voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     return _to_brain_dump_response(
@@ -297,7 +298,7 @@ def command_brain_dump_operation(
     action: str,
     payload: ExpectedRevisionRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_voice_brain_dump_enabled),
     voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
 ) -> BrainDumpOperationResponse:
     idempotency = _require_idempotency_key(idempotency_key)

@@ -93,3 +93,28 @@ def get_current_user(
             detail="Authentication required.",
         )
     return user
+
+
+def require_voice_brain_dump_enabled(
+    current_user: User = Depends(get_current_user),
+    config: AppConfig = Depends(get_config_dep),
+) -> User:
+    """Gate the native voice Brain Dump routes on the ADR-0008 rollout flag.
+
+    ``voice_brain_dump`` ships default OFF and rolls out OFF → INTERNAL → ON.
+    An authenticated user for whom the flag is not effective gets a fail-closed
+    404: the feature is simply not present for them (the refusal never discloses
+    operation existence). Because this depends on :func:`get_current_user`, an
+    unauthenticated caller is still rejected with 401 first. The frontend gates
+    the route on the same effective flag it reads from ``/api/auth/me``; this is
+    the server-side enforcement behind that.
+    """
+
+    if not config.feature_flags.effective_flags(current_user.email).get(
+        "voice_brain_dump", False
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Voice brain dump is not available.",
+        )
+    return current_user

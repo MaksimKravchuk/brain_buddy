@@ -43,6 +43,18 @@ def _scrub_leaky_voice_env() -> None:
 
 _scrub_leaky_voice_env()
 
+# --- Voice Brain Dump rollout flag default (T034) ---------------------------
+# The native voice Brain Dump feature ships behind a server-owned, default-OFF
+# rollout flag (``voice_brain_dump``, ADR-0008). The backend suite predates the
+# flag and drives the brain-dump routes directly, so the whole TEST process
+# defaults the flag ON -- overriding any developer ``.env`` for hermeticity, in
+# the same spirit as the voice-provider scrub above. The handful of tests that
+# specifically exercise the OFF/INTERNAL gate build their own app with a
+# monkeypatched ``BRAIN_BUDDY_FEATURE_FLAGS`` (function-scoped, applied after
+# this module-level default), so this default never masks the gate itself.
+os.environ["BRAIN_BUDDY_FEATURE_FLAGS"] = "voice_brain_dump=on"
+os.environ.pop("BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS", None)
+
 TEST_OWNER_ID = "user_test_owner"
 TEST_USER_EMAIL = "primary@example.com"
 TEST_USER_PASSWORD = "correct-horse-battery-staple"

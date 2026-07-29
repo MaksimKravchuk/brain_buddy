@@ -556,6 +556,42 @@ class BrainDumpActionReceiptDocument(StorageBaseModel):
     confirmed_at: datetime
 
 
+class BrainDumpCommitActionDocument(StorageBaseModel):
+    """One frozen commit action plus its durable per-action result (T033).
+
+    Captured from a reviewed proposal at freeze time -- before the first
+    ``TaskPort`` write -- so a retry consumes this snapshot rather than
+    re-deriving from live proposals whose title/child-key could have drifted.
+    ``status`` flips to ``succeeded`` (with ``task_id``) once the canonical task
+    is durably created, and a resume skips every already-succeeded action.
+    """
+
+    proposal_id: str
+    ordinal: int = Field(ge=1)
+    title: str = Field(min_length=1, max_length=500)
+    source_segment_ids: list[str] = Field(default_factory=list)
+    child_idempotency_key: str
+    proposal_revision: int = Field(default=1, ge=1)
+    user_edited: bool = False
+    status: Literal["pending", "succeeded"] = "pending"
+    task_id: str | None = None
+
+
+class BrainDumpCommitBatchDocument(StorageBaseModel):
+    """Frozen proposal/action snapshot + the per-action result ledger (T033).
+
+    Persisted once, before the first ``TaskPort`` write, with deterministic
+    batch (``id``) and per-action child identity; the commit loop and every
+    retry (including after a process restart) read their work exclusively from
+    ``actions`` so partial success is durable and completion is idempotent.
+    """
+
+    id: str
+    frozen_revision: int = Field(ge=1)
+    actions: list[BrainDumpCommitActionDocument] = Field(default_factory=list)
+    created_at: datetime
+
+
 class BrainDumpOperationDocument(StorageBaseModel):
     """Operation-private workspace for native voice Brain Dump capture."""
 
@@ -578,11 +614,22 @@ class BrainDumpOperationDocument(StorageBaseModel):
     """
     sealed_manifest_hash: str | None = Field(default=None, min_length=64, max_length=64)
     working_artifacts_expires_at: datetime | None = None
+    consent_withdrawn_at: datetime | None = None
+    """Set when external-processing consent is withdrawn for this operation.
+
+    Marks the operation as a persisted cleanup transition: its uncommitted
+    working artifacts (transcript segments + proposals) become sweep-eligible on
+    ``working_artifacts_expires_at`` without any further user command, even while
+    the operation is still in a non-terminal status. Committed provenance
+    (``action_receipts``/``committed_task_ids``) is never touched by that sweep.
+    """
     reconciliation_quality: Literal[
         "none", "provisional_only", "accurate", "conflicted"
     ] = "none"
     provider_runs: list[BrainDumpProviderRunDocument] = Field(default_factory=list)
     proposal_patches: list[BrainDumpProposalPatchDocument] = Field(default_factory=list)
+    commit_batch: BrainDumpCommitBatchDocument | None = None
+    """Frozen batch + partial-commit ledger (T033); set at the first commit."""
     action_receipts: list[BrainDumpActionReceiptDocument] = Field(default_factory=list)
     status_history: list[BrainDumpStatus] = Field(default_factory=list)
     committed_task_ids: list[str] = Field(default_factory=list)
