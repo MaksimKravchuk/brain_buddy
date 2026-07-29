@@ -50,6 +50,7 @@ from .domain import (
     BrainDumpProposalPatchDocument,
     BrainDumpProposalStatus,
     BrainDumpProviderRunDocument,
+    BrainDumpSegmentContentHashDocument,
     BrainDumpTranscriptSegmentDocument,
     IdempotencyRecord,
     ProposalConflict,
@@ -554,6 +555,25 @@ class VoiceBrainDumpService:
                     "updated_at": current_time,
                     "revision": operation.revision + 1,
                 }
+                if operation.segments:
+                    # Retain a durable segment-ID -> content-hash map before the
+                    # exact transcript text is cleared, so a cited segment ID can
+                    # still be authenticated after purge (FR-002). Captured once,
+                    # since the sweep skips an operation whose text is gone.
+                    purge_update["segment_content_hashes"] = [
+                        BrainDumpSegmentContentHashDocument(
+                            id=segment.id,
+                            sequence=segment.sequence,
+                            content_sha256=(
+                                segment.content_sha256
+                                or hashlib.sha256(
+                                    segment.text.encode("utf-8")
+                                ).hexdigest()
+                            ),
+                            language=segment.language,
+                        )
+                        for segment in operation.segments
+                    ]
                 if operation.commit_batch is not None:
                     # The frozen ledger keeps proposal titles in plaintext so a
                     # partial commit can resume by re-creating the task. Past the
@@ -1397,6 +1417,11 @@ class VoiceBrainDumpService:
                 id=hypothesis.id,
                 sequence=base_sequence + index,
                 text=hypothesis.text,
+                content_sha256=hashlib.sha256(
+                    hypothesis.text.encode("utf-8")
+                ).hexdigest(),
+                language=hypothesis.language,
+                confidence=hypothesis.confidence,
                 stability=hypothesis.stability,
                 start_ms=hypothesis.start_ms,
                 end_ms=hypothesis.end_ms,
@@ -1895,6 +1920,9 @@ class VoiceBrainDumpService:
                         segments_by_sequence[segment.sequence] = existing.model_copy(
                             update={
                                 "text": segment.text,
+                                "content_sha256": hashlib.sha256(
+                                    segment.text.encode("utf-8")
+                                ).hexdigest(),
                                 "stability": segment.stability,
                             }
                         )
@@ -1905,6 +1933,7 @@ class VoiceBrainDumpService:
                 id=generate_id("segment"),
                 sequence=segment.sequence,
                 text=segment.text,
+                content_sha256=hashlib.sha256(segment.text.encode("utf-8")).hexdigest(),
                 stability=segment.stability,
                 created_at=now,
             )
@@ -2777,6 +2806,7 @@ class VoiceBrainDumpService:
                     operation,
                     proposal_id=action.proposal_id,
                     task_id=confirmed.task_id,
+                    owner_id=owner_id,
                 )
                 if operation.status != "committing":
                     break
@@ -2802,8 +2832,15 @@ class VoiceBrainDumpService:
         *,
         proposal_id: str,
         task_id: str,
+        owner_id: str,
     ) -> BrainDumpOperationDocument:
-        """Durably mark one frozen action ``succeeded`` with its canonical task.
+        """Durably mark one frozen action ``succeeded`` and write its receipt.
+
+        The immutable per-action receipt (source link) is persisted in the SAME
+        transaction as the ledger result, so every created canonical task has its
+        receipt even if the batch faults or is hard-cancelled before finalize
+        (ADR-0002 per-action durability). Both are idempotent under resume/replay
+        by their deterministic identity (child key / ``receipt:{op}:{proposal}``).
 
         Compare-and-set: if the action is already ``succeeded`` (a concurrent or
         resumed runner recorded it first -- its deterministic child key created
@@ -2821,31 +2858,51 @@ class VoiceBrainDumpService:
         )
         if target is not None and target.status == "succeeded":
             return operation
+        now = utcnow()
         actions = [
             action.model_copy(update={"status": "succeeded", "task_id": task_id})
             if action.proposal_id == proposal_id and action.status != "succeeded"
             else action
             for action in batch.actions
         ]
+        receipts = list(operation.action_receipts)
+        receipt_id = f"receipt:{operation.id}:{proposal_id}"
+        if target is not None and not any(
+            receipt.id == receipt_id for receipt in receipts
+        ):
+            receipts.append(
+                self._action_receipt(
+                    operation, target, task_id=task_id, owner_id=owner_id, now=now
+                )
+            )
         recorded = operation.model_copy(
             update={
                 "commit_batch": batch.model_copy(update={"actions": actions}),
-                "updated_at": utcnow(),
+                "action_receipts": receipts,
+                "updated_at": now,
                 "revision": operation.revision + 1,
             }
         )
         self.operation_repo.save_brain_dump_operation(recorded)
         return recorded
 
-    def _finalize_committed_operation(
-        self, operation: BrainDumpOperationDocument, *, owner_id: str
-    ) -> BrainDumpOperationDocument:
-        """Write the immutable receipts and complete a fully-confirmed batch."""
+    def _action_receipt(
+        self,
+        operation: BrainDumpOperationDocument,
+        action: BrainDumpCommitActionDocument,
+        *,
+        task_id: str,
+        owner_id: str,
+        now: datetime,
+    ) -> BrainDumpActionReceiptDocument:
+        """Build one immutable action receipt/source link for a confirmed action.
 
-        batch = operation.commit_batch
-        if batch is None:  # pragma: no cover - only called after _run_commit_batch
-            raise ValidationFailure("Brain dump commit batch is missing.")
-        now = utcnow()
+        Deterministic identity (``receipt:{operation}:{proposal}``) makes writing
+        it idempotent across resume/replay. Computed from the frozen action + the
+        operation as it stands mid-commit (patches, manifest, reconciler run,
+        plaintext title hash), before any retention reduction.
+        """
+
         reconciler_run = next(
             (
                 run
@@ -2856,8 +2913,56 @@ class VoiceBrainDumpService:
             ),
             None,
         )
+        return BrainDumpActionReceiptDocument(
+            id=f"receipt:{operation.id}:{action.proposal_id}",
+            proposal_id=action.proposal_id,
+            task_id=task_id,
+            child_idempotency_key=action.child_idempotency_key,
+            source_segment_ids=list(action.source_segment_ids),
+            proposal_patch_ids=[
+                patch.id
+                for patch in operation.proposal_patches
+                if patch.proposal_id == action.proposal_id
+            ],
+            source_operation_id=operation.id,
+            source_manifest_hash=operation.sealed_manifest_hash,
+            reconciliation_run_id=reconciler_run.id if reconciler_run else None,
+            reconciliation_provider=(
+                reconciler_run.provider if reconciler_run else None
+            ),
+            reconciliation_model=reconciler_run.model if reconciler_run else None,
+            reconciliation_template_version=(
+                reconciler_run.template_version if reconciler_run else None
+            ),
+            reconciliation_quality=operation.reconciliation_quality,
+            confirmed_title_sha256=hashlib.sha256(
+                action.title.encode("utf-8")
+            ).hexdigest(),
+            proposal_revision=action.proposal_revision,
+            user_edited=action.user_edited,
+            confidence="unknown",
+            confirmed_by_actor_id=owner_id,
+            confirmed_at=now,
+        )
+
+    def _finalize_committed_operation(
+        self, operation: BrainDumpOperationDocument, *, owner_id: str
+    ) -> BrainDumpOperationDocument:
+        """Complete a fully-confirmed batch; every receipt is already durable.
+
+        Each action's receipt was written per-action alongside its ledger result,
+        so this only aggregates ``committed_task_ids`` and backfills any receipt
+        an action recorded before per-action receipts existed (idempotent by
+        receipt id) -- new commits reach here with every receipt present.
+        """
+
+        batch = operation.commit_batch
+        if batch is None:  # pragma: no cover - only called after _run_commit_batch
+            raise ValidationFailure("Brain dump commit batch is missing.")
+        now = utcnow()
+        existing_receipt_ids = {receipt.id for receipt in operation.action_receipts}
         committed_task_ids: list[str] = []
-        action_receipts: list[BrainDumpActionReceiptDocument] = []
+        backfilled_receipts: list[BrainDumpActionReceiptDocument] = []
         for action in batch.actions:
             if action.task_id is None:  # pragma: no cover - finalize is all-succeeded
                 raise ValidationFailure(
@@ -2865,46 +2970,26 @@ class VoiceBrainDumpService:
                     "commit with an unresolved action."
                 )
             committed_task_ids.append(action.task_id)
-            action_receipts.append(
-                BrainDumpActionReceiptDocument(
-                    id=f"receipt:{operation.id}:{action.proposal_id}",
-                    proposal_id=action.proposal_id,
-                    task_id=action.task_id,
-                    child_idempotency_key=action.child_idempotency_key,
-                    source_segment_ids=list(action.source_segment_ids),
-                    proposal_patch_ids=[
-                        patch.id
-                        for patch in operation.proposal_patches
-                        if patch.proposal_id == action.proposal_id
-                    ],
-                    source_operation_id=operation.id,
-                    source_manifest_hash=operation.sealed_manifest_hash,
-                    reconciliation_run_id=reconciler_run.id if reconciler_run else None,
-                    reconciliation_provider=(
-                        reconciler_run.provider if reconciler_run else None
-                    ),
-                    reconciliation_model=reconciler_run.model if reconciler_run else None,
-                    reconciliation_template_version=(
-                        reconciler_run.template_version if reconciler_run else None
-                    ),
-                    reconciliation_quality=operation.reconciliation_quality,
-                    confirmed_title_sha256=hashlib.sha256(
-                        action.title.encode("utf-8")
-                    ).hexdigest(),
-                    proposal_revision=action.proposal_revision,
-                    user_edited=action.user_edited,
-                    confidence="unknown",
-                    confirmed_by_actor_id=owner_id,
-                    confirmed_at=now,
+            if f"receipt:{operation.id}:{action.proposal_id}" not in existing_receipt_ids:
+                backfilled_receipts.append(
+                    self._action_receipt(
+                        operation,
+                        action,
+                        task_id=action.task_id,
+                        owner_id=owner_id,
+                        now=now,
+                    )
                 )
-            )
         updated = operation.model_copy(
             update={
                 "status": "completed",
                 # Source/proposal/edit records are immutable audit evidence
                 # through working-artifact retention; source refs must never
                 # point at data erased by the confirmation itself.
-                "action_receipts": [*operation.action_receipts, *action_receipts],
+                "action_receipts": [
+                    *operation.action_receipts,
+                    *backfilled_receipts,
+                ],
                 "committed_task_ids": committed_task_ids,
                 "raw_audio_expires_at": (
                     operation.raw_audio_expires_at or now + self.raw_audio_retention

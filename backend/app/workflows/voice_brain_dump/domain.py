@@ -436,6 +436,15 @@ class BrainDumpTranscriptSegmentDocument(StorageBaseModel):
     id: str
     sequence: int = Field(ge=1)
     text: str = Field(min_length=1, max_length=20_000)
+    content_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    """SHA-256 of the exact utterance text, stamped at persistence for every
+    segment (preview + accurate). Nullable only for pre-existing schema-v2
+    segments written before this field existed (no backfill -- they predate the
+    FR-002 promise). It is what survives the working-artifact text purge as the
+    durable segment-ID-to-content-hash provenance (see
+    ``segment_content_hashes``)."""
+    language: str | None = None
+    confidence: float | None = None
     stability: Literal["interim", "stable"]
     start_ms: int = Field(default=0, ge=0)
     end_ms: int = Field(default=1, gt=0)
@@ -444,6 +453,17 @@ class BrainDumpTranscriptSegmentDocument(StorageBaseModel):
     model: str | None = None
     supersedes_segment_ids: list[str] = Field(default_factory=list)
     created_at: datetime
+
+
+class BrainDumpSegmentContentHashDocument(StorageBaseModel):
+    """Durable segment-ID -> utterance-content-hash provenance retained after the
+    working-artifact text purge. The exact transcript text is cleared, but a
+    cited segment ID stays authenticatable against its content hash (FR-002)."""
+
+    id: str
+    sequence: int = Field(ge=1)
+    content_sha256: str = Field(min_length=64, max_length=64)
+    language: str | None = None
 
 
 class BrainDumpProposalConflictDocument(StorageBaseModel):
@@ -601,6 +621,12 @@ class BrainDumpOperationDocument(StorageBaseModel):
     status: BrainDumpStatus
     consent: BrainDumpConsent
     segments: list[BrainDumpTranscriptSegmentDocument] = Field(default_factory=list)
+    segment_content_hashes: list[BrainDumpSegmentContentHashDocument] = Field(
+        default_factory=list
+    )
+    """Segment-ID -> content-hash map captured at the working-artifact purge, so
+    post-purge provenance (FR-002) survives even though ``segments`` (the exact
+    text) is cleared. Empty until that purge runs."""
     proposals: list[BrainDumpProposalDocument] = Field(default_factory=list)
     media_ref: str | None = None
     audio_chunks: list[BrainDumpAudioChunkDocument] = Field(default_factory=list)

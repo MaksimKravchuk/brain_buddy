@@ -308,6 +308,9 @@ class BrainDumpTranscriptSegmentResponse(StrictBaseModel):
     id: str
     sequence: int
     text: str
+    content_sha256: str | None = None
+    language: str | None = None
+    confidence: float | None = None
     stability: Literal["interim", "stable"]
     start_ms: int = 0
     end_ms: int = 1
