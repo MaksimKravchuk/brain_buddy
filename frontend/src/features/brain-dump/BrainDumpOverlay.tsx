@@ -87,7 +87,7 @@ export function BrainDumpOverlay({
       {/* Click-outside-to-close. Deliberately not a button: the header's X is the
           accessible close control, and a second one with the same name would just
           duplicate it in the accessibility tree and the tab order. */}
-      {onClose ? <div aria-hidden className="absolute inset-0" onClick={onClose} /> : null}
+      {onClose ? <div aria-hidden data-testid="brain-dump-scrim" className="absolute inset-0" onClick={onClose} /> : null}
       <section
         ref={panelRef}
         tabIndex={-1}
