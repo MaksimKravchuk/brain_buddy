@@ -263,13 +263,17 @@ jobs:
           } >> "${GITHUB_ENV}"
           echo "Captured rollback images for ${backend_app} and ${frontend_app}."
 
-      # Stage (no immediate restart) the smoke identity and the internal
-      # canary rollout so the deploy release below applies them: the backend
+      # Stage (no immediate restart) the smoke identity and the feature-flag
+      # rollout so the deploy release below applies them: the backend
       # seeds/rotates the admin account on startup and marks it internal.
       # Values come only from GitHub production environment secrets and are
       # never printed; an unchanged secret set is tolerated so redeploys of
       # the same configuration stay idempotent.
-      - name: Stage the smoke identity and internal canary rollout
+      #
+      # This is the authoritative flag state: it is restaged on every deploy,
+      # so a manual `flyctl secrets set BRAIN_BUDDY_FEATURE_FLAGS` is reverted
+      # by the next release. Change the rollout here, not out of band.
+      - name: Stage the smoke identity and feature-flag rollout
         shell: bash
         env:
           BRAIN_BUDDY_ADMIN_EMAIL: ${{ secrets.BRAIN_BUDDY_ADMIN_EMAIL }}
@@ -282,7 +286,7 @@ jobs:
             BRAIN_BUDDY_ADMIN_EMAIL="${BRAIN_BUDDY_ADMIN_EMAIL}" \
             BRAIN_BUDDY_ADMIN_PASSWORD="${BRAIN_BUDDY_ADMIN_PASSWORD}" \
             BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS="${BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS}" \
-            BRAIN_BUDDY_FEATURE_FLAGS="delivery_canary=internal" 2>&1) \
+            BRAIN_BUDDY_FEATURE_FLAGS="delivery_canary=internal,voice_brain_dump=on" 2>&1) \
             || status=$?
           if [ "${status}" -ne 0 ] \
             && ! printf '%s\n' "${output}" | grep -qi "no change"; then
@@ -292,7 +296,7 @@ jobs:
             echo "Staging the smoke identity secrets failed (exit ${status})." >&2
             exit "${status}"
           fi
-          echo "Staged smoke identity and delivery_canary=internal for ${BACKEND_APP}."
+          echo "Staged smoke identity, delivery_canary=internal and voice_brain_dump=on for ${BACKEND_APP}."
 
       - name: Deploy backend
         run: flyctl deploy --config fly.backend.toml --remote-only

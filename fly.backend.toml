@@ -13,6 +13,16 @@ primary_region = 'ams'
   BRAIN_BUDDY_API_KEY_HEADER = 'X-API-Key'
   BRAIN_BUDDY_API_PREFIX = '/api'
   BRAIN_BUDDY_ENV = 'production'
+  # Voice Brain Dump provider roles (ADR-0008). Non-secret selection only; the
+  # credentials come from the DEEPGRAM_API_KEY / OPENAI_API_KEY Fly secrets via
+  # each role's api_key_env default. Models are pinned rather than inherited so
+  # a default change in config.py cannot silently move production. A missing
+  # credential degrades the role to disabled (fail closed), it does not fail
+  # startup.
+  BRAIN_BUDDY_VOICE_ACCURATE_STT_MODEL = 'nova-3'
+  BRAIN_BUDDY_VOICE_ACCURATE_STT_PROVIDER = 'deepgram'
+  BRAIN_BUDDY_VOICE_RECONCILER_MODEL = 'gpt-4o'
+  BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER = 'openai'
 
 [[mounts]]
   source = 'brain_buddy_data'
