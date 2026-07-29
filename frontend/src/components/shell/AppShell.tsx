@@ -181,7 +181,9 @@ function TopBar({ onOpenDrawer }: { onOpenDrawer: () => void }): JSX.Element {
         <button
           type="button"
           className="inline-flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-lg bg-brand-primary px-3 text-sm font-medium text-white shadow-soft transition-colors duration-200 ease-smooth hover:bg-brand-primary-hover active:scale-[0.98] sm:px-4"
-          onClick={() => navigate("/brain-dump/new")}
+          // Stamping the current location makes brain dump open as a modal over
+          // this view instead of replacing it — see AppRoutes.
+          onClick={() => navigate("/brain-dump/new", { state: { backgroundLocation: location } })}
         >
           <Mic className="h-[15px] w-[15px]" aria-hidden />
           Brain dump
