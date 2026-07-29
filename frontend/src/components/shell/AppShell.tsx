@@ -61,7 +61,7 @@ const dateItems: Array<{ path: string; label: string; icon: ComponentType<{ clas
 const fallbackProjectColors = ["#0ea5e9", "#6366f1", "#94a3b8", "#10b981"];
 
 const navRowClass = (active: boolean): string =>
-  `flex h-[34px] w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium transition-colors ${
+  `flex h-[34px] w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium transition-colors duration-200 ease-smooth ${
     active ? "bg-white text-slate-900 shadow-soft" : "text-slate-600 hover:bg-surface-sunken hover:text-slate-900"
   }`;
 
@@ -151,7 +151,7 @@ function TopBar({ onOpenDrawer }: { onOpenDrawer: () => void }): JSX.Element {
 
   return (
     <header
-      className="relative z-30 flex h-14 items-center gap-4 border-b border-slate-200 bg-white/90 px-4 backdrop-blur sm:px-5"
+      className="relative z-30 flex h-14 items-center gap-2 border-b border-slate-200 bg-white/90 px-4 backdrop-blur sm:gap-4 sm:px-5"
       style={{ height: "56px" }}
     >
       <button
@@ -162,11 +162,11 @@ function TopBar({ onOpenDrawer }: { onOpenDrawer: () => void }): JSX.Element {
       >
         <Menu className="h-5 w-5" />
       </button>
-      <Link to="/tasks/next" className="flex items-center gap-2 text-[15px] font-semibold tracking-[-0.005em] text-slate-900">
+      <Link to="/tasks/next" className="flex shrink-0 items-center gap-2 whitespace-nowrap text-sm font-semibold tracking-[-0.005em] text-slate-900 sm:text-[15px]">
         <Sprout className="h-[22px] w-[22px] text-brand-primary" aria-hidden />
         <span>Brain Buddy</span>
       </Link>
-      <label className="hidden h-[34px] w-[340px] max-w-[32vw] items-center gap-2 rounded-lg border border-transparent bg-surface-sunken px-3 text-slate-400 transition focus-within:border-brand-primary focus-within:bg-white md:flex">
+      <label className="hidden h-[34px] w-[340px] max-w-[32vw] items-center gap-2 rounded-lg border border-transparent bg-surface-sunken px-3 text-slate-400 transition-colors duration-200 ease-smooth focus-within:border-brand-primary focus-within:bg-white md:flex">
         <Search className="h-[15px] w-[15px] shrink-0" aria-hidden />
         <input
           type="search"
@@ -177,10 +177,10 @@ function TopBar({ onOpenDrawer }: { onOpenDrawer: () => void }): JSX.Element {
           className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 placeholder:text-slate-400"
         />
       </label>
-      <div className="ml-auto flex items-center gap-2 sm:gap-3">
+      <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
         <button
           type="button"
-          className="inline-flex h-9 items-center gap-2 rounded-lg bg-brand-primary px-4 text-sm font-medium text-white shadow-soft transition hover:bg-brand-primary-hover active:scale-[0.98]"
+          className="inline-flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-lg bg-brand-primary px-3 text-sm font-medium text-white shadow-soft transition-colors duration-200 ease-smooth hover:bg-brand-primary-hover active:scale-[0.98] sm:px-4"
           onClick={() => navigate("/brain-dump/new")}
         >
           <Mic className="h-[15px] w-[15px]" aria-hidden />
@@ -354,7 +354,7 @@ function Sidebar({
                 <li key={project.id} className="group relative">
                   <NavLink
                     to={`/projects/${project.id}`}
-                    className={`flex min-h-[34px] w-full items-start gap-2.5 rounded-lg px-2.5 py-[7px] pr-7 text-sm font-medium transition-colors ${
+                    className={`flex min-h-[34px] w-full items-start gap-2.5 rounded-lg px-2.5 py-[7px] pr-7 text-sm font-medium transition-colors duration-200 ease-smooth ${
                       !weeklyReviewOpen && activeProjectId === project.id
                         ? "bg-white text-slate-900 shadow-soft"
                         : "text-slate-600 hover:bg-surface-sunken hover:text-slate-900"
@@ -433,7 +433,7 @@ function Sidebar({
                 type="button"
                 aria-label="New project"
                 aria-expanded={openPopover === "new-project"}
-                className="flex h-[34px] w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-slate-400 transition-colors hover:bg-surface-sunken hover:text-slate-600"
+                className="flex h-[34px] w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-slate-400 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-600"
                 onClick={() => setOpenPopover(openPopover === "new-project" ? null : "new-project")}
               >
                 <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -491,7 +491,7 @@ function Sidebar({
                   <span className="relative inline-flex">
                     <NavLink
                       to={`/tags/${tag.id}`}
-                      className={`rounded-full border px-2.5 py-[3px] text-xs font-medium transition-colors ${
+                      className={`rounded-full border px-2.5 py-[3px] text-xs font-medium transition-colors duration-200 ease-smooth ${
                         !weeklyReviewOpen && activeTagId === tag.id
                           ? "border-brand-primary bg-info-bg text-info-fg"
                           : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
@@ -570,7 +570,7 @@ function Sidebar({
                 type="button"
                 aria-label="New tag"
                 aria-expanded={openPopover === "new-tag"}
-                className="rounded-full border border-dashed border-slate-300 bg-transparent px-2.5 py-[3px] text-xs font-medium text-slate-400 transition-colors hover:border-slate-400 hover:text-slate-600"
+                className="rounded-full border border-dashed border-slate-300 bg-transparent px-2.5 py-[3px] text-xs font-medium text-slate-400 transition-colors duration-200 ease-smooth hover:border-slate-400 hover:text-slate-600"
                 onClick={() => setOpenPopover(openPopover === "new-tag" ? null : "new-tag")}
               >
                 New tag
