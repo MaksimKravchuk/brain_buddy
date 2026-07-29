@@ -160,6 +160,35 @@ def _build_text_reconciler(config: AppConfig) -> TextReconcilerPort:
     return DisabledTextReconciler()
 
 
+def _allowed_external_provider_categories(config: AppConfig) -> frozenset[str]:
+    """The provider categories consent may name, per configuration.
+
+    Each configured role contributes its verbatim category string (``openai`` /
+    ``deepgram`` / ``deterministic``) so consent driven by the discovery endpoint
+    -- which reports those same config strings -- clears the pre-upload guard. A
+    ``disabled`` role contributes nothing. ``deterministic`` additionally admits
+    ``openai`` for backward compatibility with legacy single-provider clients
+    (and older tests) that named ``openai`` for a deterministic stack before the
+    discovery endpoint reported the category honestly. This only widens the set
+    of *nameable* categories; the actual egress guard
+    (``_required_external_provider_categories`` derived from the wired adapters'
+    ``requires_external_processing``) is unchanged, so no unconsented vendor can
+    receive data.
+    """
+
+    allowed: set[str] = set()
+    for provider in (
+        config.voice.accurate_stt.provider,
+        config.voice.reconciler.provider,
+    ):
+        if provider == "disabled":
+            continue
+        allowed.add(provider)
+        if provider == "deterministic":
+            allowed.add("openai")
+    return frozenset(allowed)
+
+
 def build_container(config: AppConfig) -> Container:
     data_root = config.data_dir
     tree_repo = TreeRepository(data_root)
@@ -216,14 +245,7 @@ def build_container(config: AppConfig) -> Container:
             config.voice.max_cumulative_cost_usd_per_operation
         ),
         provider_run_lease_seconds=_provider_run_lease_seconds(config),
-        allowed_external_provider_categories=frozenset(
-            "openai" if provider == "deterministic" else provider
-            for provider in (
-                config.voice.accurate_stt.provider,
-                config.voice.reconciler.provider,
-            )
-            if provider != "disabled"
-        ),
+        allowed_external_provider_categories=_allowed_external_provider_categories(config),
         audio_limits=config.voice.audio_limits,
         task_port=InProcessTaskPort(task_service.create_native_inbox_task),
         voice_enabled_for_owner=_voice_enabled_for_owner,

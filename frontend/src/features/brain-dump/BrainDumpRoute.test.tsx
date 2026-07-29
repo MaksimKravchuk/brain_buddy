@@ -355,6 +355,40 @@ describe("BrainDumpRoute", () => {
     expect(startBody?.consent.providers).toEqual(["openai"]);
   });
 
+  it("resolves discovery for a deterministic accurate-STT category and names it end-to-end", async () => {
+    // A hermetic/test stack honestly reports "deterministic" (not null), so
+    // discovery resolves and the consent + Record gate opens instead of staying
+    // fail-closed forever. The category flows verbatim into the consent copy and
+    // the consent providers payload.
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(["brain-dump-providers"], { accurate_stt: "deterministic", reconciler: "openai" });
+    let startBody: { consent: { provider: string | null; providers: string[] } } | undefined;
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain-dump-providers")) {
+        return jsonResponse({ accurate_stt: "deterministic", reconciler: "openai" });
+      }
+      if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
+        startBody = JSON.parse(String(init.body));
+        return jsonResponse(operation(), 201);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/new", queryClient);
+
+    expect(
+      await screen.findByText(
+        "Allow secure cloud processing: speech-to-text by deterministic, task extraction by openai. Audio is not sent without this consent."
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Record" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+
+    expect(startBody?.consent.provider).toBe("deterministic");
+    expect(startBody?.consent.providers).toEqual(["deterministic", "openai"]);
+  });
+
   it("gates consent and Record while provider discovery is still loading, never touching the mic", async () => {
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);

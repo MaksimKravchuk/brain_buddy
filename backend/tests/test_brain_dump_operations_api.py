@@ -1493,17 +1493,24 @@ def test_explicit_empty_provider_allowlist_fails_closed_before_audio_upload(
 
 
 def test_brain_dump_providers_endpoint_reports_external_roles(api_client) -> None:
-    """The providers endpoint names the external category per pipeline role,
-    sourced from the actually-configured adapters."""
+    """The providers endpoint names the configured external category per pipeline
+    role, sourced from configuration (``config.voice.<role>.provider``) rather
+    than the wired adapter."""
 
-    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
-
-    service = api_client.app.state.container.voice_brain_dump_service
-    service.accurate_stt = _real_adapter(
-        httpx.MockTransport(lambda _request: httpx.Response(200, json={"text": "ok"}))
-    )
-    service.text_reconciler = OpenAITextReconciler(
-        api_key="test-key", complete=lambda _payload: {"operations": []}
+    config = api_client.app.state.config
+    api_client.app.state.config = config.model_copy(
+        update={
+            "voice": config.voice.model_copy(
+                update={
+                    "accurate_stt": config.voice.accurate_stt.model_copy(
+                        update={"provider": "openai"}
+                    ),
+                    "reconciler": config.voice.reconciler.model_copy(
+                        update={"provider": "openai"}
+                    ),
+                }
+            )
+        }
     )
 
     response = api_client.get("/api/brain-dump-providers")
@@ -1512,14 +1519,18 @@ def test_brain_dump_providers_endpoint_reports_external_roles(api_client) -> Non
     assert response.json() == {"accurate_stt": "openai", "reconciler": "openai"}
 
 
-def test_brain_dump_providers_endpoint_omits_non_external_roles(api_client) -> None:
-    """A deterministic or disabled stand-in performs no external processing and
-    is reported as ``None`` so the client omits it from consent."""
+def test_brain_dump_providers_endpoint_reports_category_and_omits_disabled(
+    api_client,
+) -> None:
+    """The endpoint reports the configured category verbatim -- a hermetic
+    ``test`` stack's ``deterministic`` accurate STT resolves rather than reading
+    ``None`` (so the client's discovery gate can open) -- while a ``disabled``
+    role is reported as ``None`` so the client omits it from consent."""
 
     response = api_client.get("/api/brain-dump-providers")
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"accurate_stt": None, "reconciler": None}
+    assert response.json() == {"accurate_stt": "deterministic", "reconciler": None}
 
 
 def test_brain_dump_providers_endpoint_requires_authentication(

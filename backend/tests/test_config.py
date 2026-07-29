@@ -168,11 +168,12 @@ def test_compose_e2e_runs_backend_in_test_environment() -> None:
 def test_compose_e2e_configures_a_genuinely_allowlisted_openai_category(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The Compose Playwright harness names ``openai`` in its consent flows
-    (matching the frontend's only supported provider category). Reproduce the
-    Compose backend's configuration -- ``BRAIN_BUDDY_ENV=test`` plus the
-    reconciler provider the runner script sets -- and confirm the container
-    genuinely allowlists "openai" for consent while the reconciler adapter
+    """The Compose Playwright harness's discovery reports the configured
+    categories -- ``deterministic`` accurate STT plus the ``openai`` reconciler
+    the runner script sets -- and the frontend names exactly those in consent.
+    Reproduce the Compose backend's configuration (``BRAIN_BUDDY_ENV=test`` plus
+    ``BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER=openai``) and confirm the container
+    genuinely allowlists both categories for consent while the reconciler adapter
     stays the deterministic, no-network stand-in (never a real OpenAI call).
     """
 
@@ -191,8 +192,12 @@ def test_compose_e2e_configures_a_genuinely_allowlisted_openai_category(
 
     container = build_container(get_config())
 
+    # Both configured categories are nameable in consent: "deterministic" (the
+    # accurate-STT category the discovery endpoint now reports and the client
+    # names) and "openai" (the reconciler category), the latter kept as legacy
+    # compatibility for the deterministic accurate STT as well.
     assert container.voice_brain_dump_service.allowed_external_provider_categories == frozenset(
-        {"openai"}
+        {"deterministic", "openai"}
     )
     assert isinstance(
         container.voice_brain_dump_service.text_reconciler, DeterministicTextReconciler

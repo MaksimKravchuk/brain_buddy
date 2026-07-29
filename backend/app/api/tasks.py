@@ -127,26 +127,28 @@ def start_brain_dump_operation(
 )
 def get_brain_dump_providers(
     current_user: User = Depends(require_voice_brain_dump_enabled),
-    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
+    config: AppConfig = Depends(get_config_dep),
 ) -> BrainDumpProvidersResponse:
-    """Report the external voice-provider category configured per pipeline role.
+    """Report the configured external voice-provider category per pipeline role.
 
-    A role whose configured adapter performs no external processing (a
-    deterministic or disabled stand-in) is reported as ``None`` so the client
-    omits it from consent.
+    Sourced from configuration (``config.voice.<role>.provider``), not the wired
+    adapter: a role configured ``"disabled"`` is reported as ``None`` so the
+    client omits it from consent, and every other category (``openai`` /
+    ``deepgram`` / ``deterministic``) is reported verbatim. This is the honest
+    "actual configured vendor" FR-012 requires -- a hermetic ``test`` stack
+    reports ``"deterministic"`` rather than ``None``, so its discovery resolves
+    and the client's consent + Record gate can open (a deterministic stack still
+    performs no external egress; the pre-upload consent guard enforces that
+    independently). The consented categories the client sends back match exactly
+    these strings.
     """
 
-    accurate_stt = voice_brain_dump_service.accurate_stt
-    reconciler = voice_brain_dump_service.text_reconciler
+    def _category(provider: str) -> str | None:
+        return None if provider == "disabled" else provider
+
     return BrainDumpProvidersResponse(
-        accurate_stt=(
-            accurate_stt.provider_name
-            if accurate_stt.requires_external_processing
-            else None
-        ),
-        reconciler=(
-            reconciler.provider_id if reconciler.requires_external_processing else None
-        ),
+        accurate_stt=_category(config.voice.accurate_stt.provider),
+        reconciler=_category(config.voice.reconciler.provider),
     )
 
 

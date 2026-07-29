@@ -118,7 +118,13 @@ test.beforeEach(async ({ page }) => {
       return;
     }
     if (url.pathname.includes("/auth/me")) {
-      await route.fulfill({ json: { id: "user-1", email: "max@example.test" } });
+      await route.fulfill({
+        json: { id: "user-1", email: "max@example.test", feature_flags: { voice_brain_dump: true } }
+      });
+      return;
+    }
+    if (url.pathname === "/api/brain-dump-providers") {
+      await route.fulfill({ json: { accurate_stt: "openai", reconciler: "openai" } });
       return;
     }
     const taskDetailMatch = url.pathname.match(/\/tasks\/(task-\d+)$/);
