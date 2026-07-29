@@ -1,0 +1,132 @@
+{
+  "schema_version": "speckit-hermes-handoff/v1",
+  "root_outcome": "Stable multilingual voice brain dump: a real multi-minute Russian/English code-switched recording becomes individually reviewable, correctly split, language-faithful task proposals with full transcript provenance, consent that names every configured vendor, and per-proposal grounding that never poisons the batch — with FR-016 grounding tolerance as the single remaining lane.",
+  "artifacts": {
+    "spec": "specs/005-multilingual-voice-brain-dump/spec.md",
+    "plan": "specs/005-multilingual-voice-brain-dump/plan.md",
+    "tasks": "specs/005-multilingual-voice-brain-dump/tasks.md",
+    "checklist": "specs/005-multilingual-voice-brain-dump/checklists/requirements.md",
+    "adrs": [
+      "docs/decisions/0001-vnext-modular-monolith-and-workflow-contracts.md",
+      "docs/decisions/0002-async-voice-operation-substrate.md"
+    ]
+  },
+  "planning_review": {
+    "run_id": "manual005",
+    "risk": "high",
+    "status": "blocked",
+    "reviewers": [
+      "requirements-consistency",
+      "architecture-consistency",
+      "testability-evidence",
+      "adversarial-high-risk"
+    ]
+  },
+  "product_decisions": [
+    {
+      "category": "privacy",
+      "question": "When transcription and reconciliation are handled by different vendors, what must external-processing consent name?",
+      "answer": "Consent must name every configured vendor (consent.providers), and each pipeline stage re-verifies its own vendor is in the consented set and fails closed before data leaves the device; the recording UI shows the real configured vendor names discovered from GET /api/brain-dump-providers, never a hardcoded label.",
+      "evidence_ref": "spec.md FR-011/FR-012, US2; constitution Principle I; plan.md decision 5; verified SC-006"
+    },
+    {
+      "category": "scope",
+      "question": "Should reconciliation batch multiple utterances per model call to raise proposal yield?",
+      "answer": "No. Windowed/batched reconciliation was tested live 2026-07-29 and rejected: +3 proposals for +21% cost and a reintroduced translation regression. The full-list single reconciler feed with per-proposal grounding is retained.",
+      "evidence_ref": "spec.md Out of Scope; plan.md 'Remaining work'; tasks.md Notes"
+    },
+    {
+      "category": "acceptance-behavior",
+      "question": "Until FR-016 lands, how should proposals that need multi-clause modifier, self-correction, or garbled-proper-noun tolerance behave?",
+      "answer": "They fail closed rather than guess (measured cost ≈ one third of real-dump proposals). Anti-hallucination grounding (FR-009) is never weakened to raise yield; FR-016 is deferred to its own lane.",
+      "evidence_ref": "spec.md FR-016, Edge Cases; plan.md FR-016 lane; tasks.md Phase 5"
+    }
+  ],
+  "lanes": [
+    {
+      "id": "delivered-core",
+      "outcome": "Multilingual STT + morphology-tolerant grounding + per-proposal skip + multi-vendor consent + test hermeticity, delivered and live-verified 2026-07-29 (covers US1, US2, US3).",
+      "depends_on": [],
+      "task_refs": [
+        "T001", "T002", "T003",
+        "T004", "T005", "T006", "T007", "T008", "T009", "T010", "T011", "T012", "T013",
+        "T014", "T015", "T016", "T017", "T018", "T019",
+        "T020", "T021", "T022", "T023"
+      ],
+      "scope_paths": [
+        "backend/app/workflows/voice_brain_dump/domain.py",
+        "backend/app/workflows/voice_brain_dump/service.py",
+        "backend/app/workflows/voice_brain_dump/confirmation.py",
+        "backend/app/workflows/voice_brain_dump/providers.py",
+        "backend/app/workflows/voice_brain_dump/adapters/deepgram_stt.py",
+        "backend/app/workflows/voice_brain_dump/adapters/openai_stt.py",
+        "backend/app/workflows/voice_brain_dump/adapters/reconciler.py",
+        "backend/app/core/config.py",
+        "backend/app/container.py",
+        "backend/app/api/tasks.py",
+        "backend/tests/conftest.py",
+        "frontend/src/api/taskHooks.ts",
+        "frontend/src/api/client.ts",
+        "frontend/src/features/brain-dump/BrainDumpRoute.tsx"
+      ],
+      "exclusive_writer_scope": [
+        "backend/app/workflows/voice_brain_dump/domain.py",
+        "backend/app/workflows/voice_brain_dump/service.py",
+        "backend/app/workflows/voice_brain_dump/confirmation.py",
+        "backend/app/workflows/voice_brain_dump/providers.py",
+        "backend/app/workflows/voice_brain_dump/adapters/deepgram_stt.py",
+        "backend/app/workflows/voice_brain_dump/adapters/openai_stt.py",
+        "backend/app/core/config.py",
+        "backend/app/container.py",
+        "backend/app/api/tasks.py",
+        "backend/tests/conftest.py",
+        "frontend/src/api/taskHooks.ts",
+        "frontend/src/api/client.ts",
+        "frontend/src/features/brain-dump/BrainDumpRoute.tsx"
+      ],
+      "acceptance_evidence": [
+        "SC-001: reference 4-minute RU/EN recording yields 15 committed tasks (prior: 0)",
+        "SC-002: ≈82% of actionable utterances yield exactly one correct proposal (prior ~33%)",
+        "SC-003: zero translated titles on the reference corpus (prior 9 of 50)",
+        "SC-004: zero conjunction false-splits",
+        "SC-005: batch with an unverifiable proposal still delivers every verified sibling",
+        "SC-006: consent omitting the transcription vendor fails closed with no upload",
+        "SC-007: 4-minute recording processed in ~30s (target <2 min)",
+        "SC-008: 875 backend / 443 frontend tests green with the feature active",
+        "Live e2e 2026-07-29: real 4-min m4a -> 62 utterance segments -> 15 committed tasks"
+      ]
+    },
+    {
+      "id": "fr016-grounding-tolerance",
+      "outcome": "Extend semantic verification to tolerate multi-clause modifier grounding within one cited utterance, mid-utterance self-corrections (prefer the corrected value), and transcription-garbled proper nouns, without weakening FR-009 anti-hallucination guarantees.",
+      "depends_on": ["delivered-core"],
+      "task_refs": ["T024", "T025", "T026", "T027", "T028"],
+      "scope_paths": [
+        "backend/app/workflows/voice_brain_dump/adapters/reconciler.py",
+        "backend/app/workflows/voice_brain_dump/evaluation.py"
+      ],
+      "exclusive_writer_scope": [
+        "backend/app/workflows/voice_brain_dump/adapters/reconciler.py",
+        "backend/app/workflows/voice_brain_dump/evaluation.py"
+      ],
+      "acceptance_evidence": [
+        "FR-016 fixtures for the three shapes ground and commit while the FR-009 rejection matrix (T021) stays fully green",
+        "Reference-corpus evaluation harness records a positive recovered-proposal delta with zero new translations and zero new false splits",
+        "No regression in SC-003/SC-004 or the anti-hallucination rejection tests before release"
+      ]
+    }
+  ],
+  "risks": [
+    "Real-provider dependence (Deepgram nova-3, OpenAI gpt-4o): provider outage, quota exhaustion, or contract drift degrades capture; mitigated by terminal-vs-retryable classification, bounded retries, checkpoint resume, and deterministic CI providers.",
+    "Grounding tolerance (FR-016) must not erode FR-009: any loosening risks admitting hallucinated or recombined proposals; the FR-009 rejection matrix is a standing gate on the fr016 lane.",
+    "Split-vendor consent correctness is privacy-critical: a stage that skips its per-vendor guard would upload without consent; enforced fail-closed per stage and covered by consent-mismatch tests.",
+    "Reference-corpus overfitting: metrics are from one founder-read 50-utterance corpus; broader multilingual capture may shift boundary precision and translation rates."
+  ],
+  "non_goals": [
+    "Windowed/batched reconciliation calls (tested and rejected 2026-07-29: +21% cost, translation regression).",
+    "Inferring structured fields (due dates, tags, projects, priority) from speech.",
+    "Live streaming transcription vendor changes for the provisional preview track.",
+    "Consent UX copy and first-class structured task fields.",
+    "Any change to the AsyncOperation state machine, chunk-upload manifest identity, or freeze/confirm idempotency contract."
+  ]
+}
