@@ -59,7 +59,7 @@ deletion, frozen-batch phased-saga commit, ADR-0008 rollout flag, operational
 evidence report, ADR-0006 copy, title-shape invariant) plus the
 commit-concurrency/deletion fixes, the commit_batch/committing retention fixes, and
 the live evidence report are delivered at
-HEAD `317aca5` (1000 backend / 452 frontend green — see "Hardening lane (delivered)").
+HEAD `317aca5` (1003 backend / 454 frontend green — see "Hardening lane (delivered)").
 
 ## Technical Context
 
@@ -108,7 +108,7 @@ corpus ~50 utterances / ~30 actionable cold-start creations.
 (Phase 6, T029-T037) that closed the high-risk-review gaps (consent egress
 boundary, review-screen provenance, consent-withdrawal deletion, frozen-batch
 phased-saga commit, ADR-0008 default-OFF rollout flag, corpus evidence) are all
-delivered and verified (1000 backend / 452 frontend green). Final confirmation is
+delivered and verified (1003 backend / 454 frontend green). Final confirmation is
 the approved planning-review campaign against `2c3e4ec`.*
 
 - **Spec workflow**: `spec.md` and `checklists/requirements.md` are current and
@@ -137,7 +137,7 @@ the approved planning-review campaign against `2c3e4ec`.*
   skip, consent-mismatch fail-closed, hermeticity) and frontend Vitest
   (provider discovery, consent payload). Edge cases cover invalid/oversized/
   malformed provider responses, timeouts, quota exhaustion, consent denial,
-  idempotent replay, and partial failure. Full suites: 1000 backend / 452
+  idempotent replay, and partial failure. Full suites: 1003 backend / 452
   frontend green with the feature active at HEAD `2c3e4ec` (SC-008).
 - **Contracts (Principle III / ADR-0001, ADR-0002)**: The consent
   `providers: list[str]` field and the `GET /api/brain-dump-providers`
@@ -428,7 +428,7 @@ behavior. Closing the UI never cancels; reopening resumes by operation ID.
   (task-count accuracy, boundary precision, zero translations, zero conjunction
   splits), reported separately from the unit suites.
 
-Delivered evidence: 1000 backend (97.23% coverage, incl. 334 reconciliation) + 452
+Delivered evidence: 1003 backend (97.23% coverage, incl. 334 reconciliation) + 452
 frontend green at HEAD `317aca5`, including the delivered vendor-B-only
 no-persistence consent test. The live evidence report ran at `900eeb8`
 (`run_key e8cb406f…`): SC-001 (19 committed), SC-003 (0/45 translated), SC-007
@@ -528,7 +528,7 @@ paths in commits `889a956`, `2ca19f0`, `2420c96`, `b670856`, `2c3e4ec`:
    copy (`2c3e4ec`), and a script-based language-fidelity title invariant distinct
    from FR-008 grounding (`b670856`).
 
-Integrated verification: full suite 1000 backend (97.22% cov) / 452 frontend green,
+Integrated verification: full suite 1003 backend (97.22% cov) / 454 frontend green,
 build/ruff/mypy clean, plus a live e2e drive yielding 25 committed proposals.
 **SHA provenance** (distinct roles, do not conflate): the hardening lane completed
 at `2c3e4ec`; commit concurrency/deletion at `cac5a27`; commit_batch/committing
@@ -551,8 +551,8 @@ transcript — aggregate metrics and named tests only):
   `2ca19f0`/`2420c96`/`b670856`/`2c3e4ec`, concurrency/deletion `cac5a27`, live
   evidence `900eeb8`/`0b0d166`, commit_batch/committing retention `c979621`, and
   the spec package), pending ASK-class landing.
-- **Automated suites**: 1000 backend (pytest, 97.23% coverage, incl. 334
-  reconciliation) + 452 frontend (Vitest) green with the feature active — this
+- **Automated suites**: 1003 backend (pytest, 97.23% coverage, incl. 334
+  reconciliation) + 454 frontend (Vitest) green with the feature active — this
   supersedes the earlier 875/907 backend figures.
 - **SC → evidence**: SC-002/003/004 map to the reconciliation grounding/shaping
   tests in `backend/tests/test_voice_brain_dump_reconciliation.py` and the T035

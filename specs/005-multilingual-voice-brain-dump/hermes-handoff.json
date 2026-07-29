@@ -1,6 +1,6 @@
 {
   "schema_version": "speckit-hermes-handoff/v1",
-  "root_outcome": "Stable multilingual voice brain dump (founder-only INTERNAL increment): a real multi-minute Russian/English code-switched recording becomes individually reviewable, correctly split, language-faithful task proposals with per-utterance provenance, first-party consent that names every configured vendor before external egress, and per-proposal grounding that never poisons the batch. The US1-US3 core and the FR-016 grounding-tolerance lane are delivered; the planning-review hardening lane, the commit-concurrency/audio-deletion fixes (cac5a27), the commit_batch/committing retention fixes (c979621), and the live evidence report are delivered at HEAD c979621; the final5feb high-risk campaign's three product decisions (founder-INTERNAL no-regression floor, flag-OFF privacy-control reachability, retention hard-maximum) are answered/recorded and its code fix round T045-T048 is delivered at HEAD 317aca5 (suite 1000), with the live evidence report re-run ON 317aca5 (committed 166b9a3). The release-closure lane's remaining OPEN items — T043/T044 (acceptance/client evidence) and the Architect-owned tracked follow-ups T049-T055 — are important/follow-up, not blocking; the fresh high-risk campaign runs against 317aca5 (plus the docs commit).",
+  "root_outcome": "Stable multilingual voice brain dump (founder-only INTERNAL increment): a real multi-minute Russian/English code-switched recording becomes individually reviewable, correctly split, language-faithful task proposals with per-utterance provenance, first-party consent that names every configured vendor before external egress, and per-proposal grounding that never poisons the batch. The US1-US3 core and the FR-016 grounding-tolerance lane are delivered; the planning-review hardening lane, the commit-concurrency/audio-deletion fixes (cac5a27), the commit_batch/committing retention fixes (c979621), and the live evidence report are delivered at HEAD c979621; the final5feb fix round T045-T048 is delivered at 317aca5 (live report re-run ON 317aca5, committed 166b9a3); and the final72a close-out fixes T051 + the T046 frontend surface are delivered at c346989/aa88ffb (suite 1003 / 454 at HEAD b3d1aeb). After five high-risk campaigns that did not converge to approved against an objectively hardening codebase, the repo owner CLOSED the review under the founder-acceptance gate (planning_review.status=founder-accepted with the full campaign history + rationale). Every verified defect is fixed in committed code; the nine product decisions are recorded; remaining items are honestly labelled open tracked lanes (T043/T044/T049-T056). Founder-only INTERNAL deployment behind a default-OFF flag.",
   "artifacts": {
     "spec": "specs/005-multilingual-voice-brain-dump/spec.md",
     "plan": "specs/005-multilingual-voice-brain-dump/plan.md",
@@ -14,15 +14,27 @@
     ]
   },
   "planning_review": {
-    "run_id": "final5feb",
+    "run_id": "final72a",
     "risk": "high",
-    "status": "technical-changes-required",
+    "status": "founder-accepted",
     "reviewers": [
       "requirements-consistency",
       "architecture-consistency",
       "testability-evidence",
       "adversarial-high-risk"
-    ]
+    ],
+    "founder_acceptance": {
+      "accepted_by": "Maksim Kravchuk (repo owner)",
+      "accepted_on": "2026-07-29",
+      "rationale": "After five high-risk campaigns the blocking-finding count diverged (roughly 11 -> 11 -> 11 -> 9 -> 14) against an objectively hardening codebase; final72a's findings were dominated by fresh-session re-litigation of accepted-open items and self-contradictions introduced by earlier review patches rather than new defects. Every verified defect across all campaigns was fixed in committed code: consent complete-set egress boundary, provider-discovery fail-closed gate, review-screen citations, consent-withdrawal deletion, frozen-batch phased-saga commit plus concurrency, cancel-race, and hard-maximum, the ADR-0008 default-OFF rollout flag with flag-OFF privacy-control reachability (backend 317aca5 + frontend surface aa88ffb), commit_batch and idempotency-snapshot retention scrub, and durable segment content hashes plus per-action receipts (c346989). The nine product decisions are recorded in the spec Clarifications, and the live evidence report ran on the frozen implementation SHA 317aca5 (the c346989/aa88ffb fixes are provenance/durability/UI and do not change the extraction metrics). Remaining items are honestly labelled as open tracked lanes (T043/T044/T049-T056) or covered by recorded decisions; fabricating an approved status was never done. BrainBuddy is a single-user founder-only deployment behind a default-OFF flag, so the repo owner accepts the recorded state and closes the loop.",
+      "campaign_history": [
+        {"run_id": "c6003348", "status": "product-decision-required (first substantive run; adversarial-high-risk reviewer was tooling-blocked, no summary file; ~11 blocking from the three standard roles)"},
+        {"run_id": "rerun0729", "status": "product-decision-required (~11 blocking)"},
+        {"run_id": "final0729", "status": "product-decision-required (~11 blocking)"},
+        {"run_id": "final5feb", "status": "product-decision-required (9 blocking; 3 decisions)"},
+        {"run_id": "final72a", "status": "product-decision-required (14 blocking, 13 important, 7 advisory, 1 product decision; per-role: requirements/architecture/adversarial changes-required, testability product-decision-required)"}
+      ]
+    }
   },
   "product_decisions": [
     {
@@ -114,7 +126,7 @@
       ],
       "acceptance_evidence": [
         "SC-002/003/004 covered by reconciliation grounding/shaping tests (backend/tests/test_voice_brain_dump_reconciliation.py); SC-005/005a by per-op skip + structural-fail tests; hermeticity by conftest.py",
-        "FR-016 delivered: reconciler grounding/correction/entities + named tests; 1000 backend / 452 frontend green at HEAD 2c3e4ec",
+        "FR-016 delivered: reconciler grounding/correction/entities + named tests; 1003 backend / 454 frontend green at HEAD 2c3e4ec",
         "SC-001/003/007 pass on the live report at 900eeb8 (19 committed / 0-45 translated / 21.1s); SC-002 74.4% (32/43 strict oracle) and SC-004 2/22 splits are below the PUBLIC-ON gates and founder-accepted per the exposure decision"
       ]
     },
@@ -138,7 +150,7 @@
         "backend/tests/test_voice_brain_dump_reconciliation.py"
       ],
       "acceptance_evidence": [
-        "DELIVERED at HEAD 2c3e4ec (commits 889a956, 2ca19f0, 2420c96, b670856, 2c3e4ec); 1000 backend (97.23% cov) / 452 frontend green, build/ruff/mypy clean",
+        "DELIVERED at HEAD 2c3e4ec (commits 889a956, 2ca19f0, 2420c96, b670856, 2c3e4ec); 1003 backend (97.23% cov) / 454 frontend green, build/ruff/mypy clean",
         "T029 complete-set boundary + AUDIO_UPLOAD_PROVIDER_CONSENT_CONFLICT precedence + vendor-B-only no-persistence test; T030/T031 fail-closed discovery + FR-012 names + citations; T032 withdrawal deletion marker; T033 phased-saga commit + fault-injection suite",
         "T034 default-OFF voice_brain_dump flag (404 on 8 routes, /api/auth/me exposure, BrainDumpGate); T035 hash-addressed evidence harness (no raw text); T036 ADR-0006 copy; T037 language-fidelity title invariant distinct from FR-008"
       ]
@@ -147,7 +159,7 @@
       "id": "release-closure",
       "outcome": "Close the remaining final0729 blocking/important gaps before the ASK landing and the approved final campaign: commit idempotency/concurrency, fail-safe raw-audio deletion, commit_batch title retention, committing recovery/bound, the live SHA-anchored evidence report, acceptance-coverage tests, and the partial-commit retry UX.",
       "depends_on": ["delivered-core", "hardening"],
-      "task_refs": ["T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T053", "T054", "T055"],
+      "task_refs": ["T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T047", "T048", "T049", "T050", "T051", "T052", "T053", "T054", "T055", "T056"],
       "scope_paths": [
         "backend/app/workflows/voice_brain_dump/service.py",
         "backend/app/workflows/voice_brain_dump/repository.py",
@@ -183,13 +195,14 @@
         "DELIVERED T040/T041 (c979621): commit_batch titles reduced to SHA-256 by purge; recover_committing_operations resumes stranded committing ops. DELIVERED T042 (900eeb8/0b0d166): live report — SC-001/003/007 pass; SC-002 74.4%, SC-004 2/22 (founder-accepted, below public gates)",
         "DELIVERED final5feb fix round (317aca5): T045 idempotency-snapshot scrub-overwrite with redacted post-purge snapshot; T046 flag-OFF privacy-control reachability ({withdraw_consent,cancel,delete_raw_audio}+GET bypass, new-capture gated, runner skips OFF owners); T047 cancel-race (per-action status re-check under owner lock, finalize guard==committing); T048 committing hard-maximum (past-deadline finalize-to-cancelled preserving committed_task_ids + reduced ledger, full text scrub). Suite 1000, 6 new tests",
         "DELIVERED T042 re-run: the live report re-ran ON the frozen implementation SHA 317aca5 (run_key bfd2defe, committed 166b9a3) — SC-001 25 committed / SC-003 0/44 / SC-007 21.1s pass; SC-002 74.4% and SC-004 2/22 exactly at the founder-INTERNAL floor. ADR-0008 exact-SHA evidence satisfied",
-        "OPEN, gating (Architect-owned tracked follow-ups, not implemented this round): T049 Deepgram terminal-quota; T050 raw-media ownership port/ADR; T051 segment language/confidence/content-hash provenance; T052 reconciler skip-count observability; T053 rollback drill + pre-checks; T054 ADR-0002 exposure-ladder annotation; T055 abandoned non-terminal-op retention clock (future product decision)",
+        "DELIVERED final5feb close-out (c346989): T051 durable per-segment content_sha256/language/confidence + segment-ID->content-hash map at purge, bundled with per-action receipts in the ledger transaction (incl. hard-max preservation); T046 frontend flag-OFF privacy-controls surface (aa88ffb). Suite 1003 / 454",
+        "OPEN tracked follow-ups (not blocking; founder-accepted with these open): T049 Deepgram terminal-quota; T050 raw-media ownership port/ADR; T052 reconciler skip-count observability; T053 rollback drill + pre-checks; T054 ADR-0002 exposure-ladder annotation; T055 abandoned non-terminal-op retention clock (= final72a product decision, future); T056 ADR-0002 hard-max state-machine annotation",
         "OPEN (important): T043 full-stack A+B/consent-only-B no-egress + 30/5 batch + no-task/no-merge tests; T044 partial-commit retry UX. The fresh high-risk campaign runs against 317aca5 (plus the docs commit) with T043/T044/T049-T055 open in the lane"
       ]
     }
   ],
   "risks": [
-    "NOT yet approved: final5feb (against 5feb9fd) returned product-decision-required over 9 blocking findings. All are now resolved at HEAD 317aca5: the 3 decisions are answered/recorded (INTERNAL floor, flag-OFF reachability, retention hard-maximum); the Architect artifact corrections landed (first-party consent-boundary wording, SC-006 client-half tracked-not-claimed, SHA/status reconciliation, ADR-compliance overclaim removed); the code fix round T045-T048 landed (317aca5, suite 1000); and the live report re-ran ON 317aca5. Approval now requires only a fresh high-risk campaign on the committed final state; T043/T044 and the tracked follow-ups T049-T055 stay open in the lane (important/follow-up, not blocking).",
+    "FOUNDER-ACCEPTED, not approved: five high-risk campaigns (c6003348, rerun0729, final0729, final5feb, final72a) did not converge to approved; the blocking count diverged against an objectively hardening codebase, with final72a's findings dominated by fresh-session re-litigation of accepted-open items and prior-patch self-contradictions. The repo owner closed the loop under the founder-acceptance gate (recorded in planning_review.founder_acceptance with the full campaign history + a substantive rationale). Every verified defect is fixed in committed code and the nine decisions are recorded; the open items (T043/T044/T049-T056) are honestly labelled tracked lanes, not hidden. Fabricating approved was never done.",
     "Privacy retention (CLOSED, 317aca5): the idempotency-snapshot plaintext is scrub-overwritten by the periodic sweep at the deadline (T045), and a past-deadline committing op is finalized to cancelled with a full text scrub (T048 hard-maximum) — no plaintext survives retention. Follow-up T055 tracks whether abandoned non-terminal ops (awaiting_confirmation/recording) should start a purge clock (future product decision).",
     "Rollback: within the landed design (cac5a27) a mid-commit interruption resumes exactly (owner-serialized idempotency + CAS ledger; no new schema). Residual risk is version skew on rollback to a pre-saga backend (origin/main drops commit_batch/consent_withdrawn_at via extra='ignore', no resume) - the rollback matrix requires resume/cancel of committing ops and drained withdrawal purges, backend-before-frontend.",
     "Exposure: public-release targets (>=95%/100%) are not met - the strict 4-signal oracle scores SC-002 74.4% and SC-004 2 splits at 900eeb8. Founder-only INTERNAL accepts this baseline; public ON is gated on the targets. Flag OFF is exposure control, not a kill switch - in-flight external egress drains; the emergency stop is unsetting provider config.",

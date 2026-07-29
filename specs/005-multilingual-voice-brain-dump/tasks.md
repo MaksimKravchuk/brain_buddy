@@ -231,7 +231,7 @@ than guess (FR-009 preserved).
 found between the spec's promises and the delivered code. Landed test-first on the
 ASK-class paths, Kanban-dispatched, in commits `889a956`, `2ca19f0`, `2420c96`,
 `b670856`, `2c3e4ec`. Integrated verification at hardening completion: 969 backend
-(97.23% coverage) / 452 frontend green (now 1000 backend at HEAD `c979621` with the
+(97.23% coverage) / 452 frontend green (now 1003 backend at HEAD `c979621` with the
 release-closure fixes), build green, ruff + mypy clean, plus a
 live e2e drive through the hardened pipeline (flag ON, phased commit saga): real
 4-minute recording → 19 proposals (up from 15) → committed per-action → tasks in
@@ -270,7 +270,7 @@ tracker.
   (proven by a grounding-neutralized test), so a translated/ungrounded title
   FR-006 prohibits cannot be accepted.
 
-**Checkpoint**: all Phase 6 items delivered with tests; suites green (1000 backend
+**Checkpoint**: all Phase 6 items delivered with tests; suites green (1003 backend
 / 452 frontend at HEAD `c979621`). Known non-gating leftover: Playwright
 visual baselines need regeneration; the live T035 report on the release SHA is
 still to be produced. The final high-risk campaign runs against `2c3e4ec`.
@@ -331,7 +331,10 @@ campaign runs with those two open in the lane.
   sidecar) with a redacted post-purge snapshot at the working-artifact deadline, so
   full-operation transcript/proposal text does not survive past retention without a
   later owner command; replay stays coherent. *(architecture blocking: privacy-retention — closed)*
-- [X] T046 [CLOSE] Flag-OFF privacy-control reachability (backend, `317aca5`):
+- [X] T046 [CLOSE] Flag-OFF privacy-control reachability (backend `317aca5`;
+  frontend surface `aa88ffb` — a URL-referenced existing op renders status +
+  withdraw + delete-raw-audio + discard, capture-free; no-reference → note; 454
+  frontend / 5 gate tests):
   `{withdraw_consent, cancel, delete_raw_audio}` plus GET read/status bypass the
   `voice_brain_dump` gate; all new-capture actions and provider discovery stay
   gated; the runner skips OFF owners via a container-wired predicate. *(architecture
@@ -354,10 +357,13 @@ campaign runs with those two open in the lane.
 - [ ] T050 [CLOSE] Raw-media ownership remediation: route raw media through a
   Capture-owned port/repository OR author the accepted ADR-0001 amendment naming the
   temporary owner; update the plan conclusion. *(architecture module-boundary-adr)*
-- [ ] T051 [CLOSE] Transcript-segment provenance contract: persist per-segment
-  language codes, confidence, and a full content hash; carry them through the
-  projection; retain an immutable segment-ID→content-hash map in redacted provenance
-  after text purge (not the title/manifest hash). *(architecture provenance-contract)*
+- [X] T051 [CLOSE] Transcript-segment provenance contract (backend, `c346989`):
+  per-segment `content_sha256`, `language`, and `confidence` persisted and carried
+  through the projection; a durable segment-ID→content-hash map captured at purge
+  via `segment_content_hashes`. Bundled with per-action receipts written per-action
+  in the ledger transaction (incl. hard-max preservation), closing final72a's
+  provenance-contract and commit-durability/source-linkage findings. Suite 1003,
+  3 tests. *(architecture provenance-contract + commit-durability — closed)*
 - [ ] T052 [CLOSE] Reconciler skip observability: persist a coarse
   skipped-operation count + allowlisted reason-code counts on the successful
   `ProviderRun` (no titles/reasons), so per-op fail-closed behavior is durably
@@ -374,12 +380,20 @@ campaign runs with those two open in the lane.
   `awaiting_confirmation`/`recording` — never start their working-artifact retention
   clock under ADR-0002's completion-anchored wording; whether abandonment should
   start a purge clock is a future product decision." Tracked open for a product
-  decision; not implemented this round. *(follow-up: privacy-retention)*
+  decision; not implemented this round. This is the same class as the final72a
+  product decision. *(follow-up: privacy-retention)*
+- [ ] T056 [CLOSE] ADR-0002 state-machine annotation for the retention hard-maximum:
+  record an ADR-0002 annotation for the committing→cancelled hard-max/expiry
+  transition and the working-artifact-deadline anchor, so the accepted ADR matches
+  the delivered state machine (final72a state-machine-adr-alignment / adr-governance-debt).
+  Docs-only. *(architecture follow-up)*
 
-**Checkpoint**: T038-T042 (through `c979621`) and T045-T048 (fix round, `317aca5`)
-are delivered; the live report re-ran on the frozen implementation SHA `317aca5`
-(committed `166b9a3`): SC-001 25 committed, SC-003 0/44, SC-007 21.1s pass; SC-002
-74.4% and SC-004 2/22 exactly at the founder-INTERNAL floor. Suite 1000 backend /
+**Checkpoint**: T038-T042 (through `c979621`), T045-T048 (fix round, `317aca5`),
+and the final5feb close-out fixes T051 + T046-frontend (`c346989`/`aa88ffb`) are
+delivered; suite 1003 backend / 454 frontend green at HEAD `b3d1aeb`. The live
+report re-ran on the frozen implementation SHA `317aca5` (committed `166b9a3`):
+SC-001 25 committed, SC-003 0/44, SC-007 21.1s pass; SC-002
+74.4% and SC-004 2/22 exactly at the founder-INTERNAL floor. Suite 1003 backend /
 452 frontend green. OPEN and gating the approved handoff: T043/T044
 (acceptance/client evidence) + T049-T055 (Architect-owned tracked follow-ups). The
 fresh high-risk campaign runs against `317aca5` (plus the docs commit).
@@ -411,7 +425,7 @@ fresh high-risk campaign runs against `317aca5` (plus the docs commit).
 ## Notes
 
 - Phases 1-6 (T001-T037) plus release-closure T038-T042 are delivered at HEAD
-  `c979621` (1000 backend / 452 frontend green); release-closure T043/T044 and the
+  `c979621` (1003 backend / 452 frontend green); release-closure T043/T044 and the
   final5feb items T045-T054 (fix round + tracked follow-ups) remain open and gate
   the approved handoff. Known non-gating leftover: Playwright visual baselines
   need regeneration; the live T035 operational report on the release SHA is still
