@@ -119,7 +119,7 @@ function workspaceRoutes(): JSX.Element {
         path="/crt/*"
         element={
           <ProtectedRoute>
-            <ComingLater title="Think with CRT" />
+            <ComingLater title="Thinking Mode" />
           </ProtectedRoute>
         }
       />

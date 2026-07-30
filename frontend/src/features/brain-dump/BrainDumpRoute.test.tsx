@@ -237,11 +237,11 @@ describe("BrainDumpRoute", () => {
 
     act(() => emitSpeech("Renew car insurance. Reply to Anna about the offsite."));
     expect(await screen.findByText("2 tasks captured")).toBeInTheDocument();
-    expect(screen.getByText("Provisional · 2")).toBeInTheDocument();
+    expect(screen.getByText("Headed to inbox · 2")).toBeInTheDocument();
     expect(screen.getByText("#1")).toBeInTheDocument();
     expect(screen.getByText("Renew car insurance")).toBeInTheDocument();
     expect(screen.getByText("Wording still changing")).toBeInTheDocument();
-    expect(screen.getByText("Nothing is saved until review"));
+    expect(screen.getByText("Nothing is saved until you stop"));
 
     await userEvent.click(screen.getByRole("button", { name: "Pause" }));
     expect(await screen.findByRole("button", { name: "Resume" })).toBeEnabled();
@@ -992,8 +992,8 @@ describe("BrainDumpRoute", () => {
     fetchMock.mockImplementation(() => Promise.reject(new Error("should not command a new operation")));
 
     renderBrainDump("/brain-dump/new/review");
-    await userEvent.click(screen.getByRole("button", { name: "Discard" }));
-    await userEvent.click(screen.getByRole("button", { name: "Confirm 0 additions" }));
+    await userEvent.click(screen.getByRole("button", { name: "Discard all" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send 0 to inbox" }));
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(screen.getByRole("heading", { name: "Review 0 tasks" })).toBeInTheDocument();
@@ -1120,7 +1120,7 @@ describe("BrainDumpRoute", () => {
     });
 
     renderBrainDump("/brain-dump/brain_dump_existing/review");
-    await userEvent.click(await screen.findByRole("button", { name: "Discard" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Discard all" }));
 
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/brain_dump_existing/cancel"), expect.anything());
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/commit"), expect.anything());
@@ -1153,7 +1153,7 @@ describe("BrainDumpRoute", () => {
     await userEvent.click(screen.getByRole("button", { name: "Record" }));
     act(() => emitSpeech("Renew car insurance. Reply to Anna."));
     await userEvent.click(await screen.findByRole("button", { name: "Stop & review" }));
-    await userEvent.click(await screen.findByRole("button", { name: "Confirm 2 additions" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Send 2 to inbox" }));
 
     expect(await screen.findByText("Saved 2 tasks to Inbox")).toBeInTheDocument();
   });
@@ -1221,7 +1221,7 @@ describe("BrainDumpRoute", () => {
     expect(within(review).queryByText("Reply to Anna")).not.toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/tasks"), expect.anything());
 
-    await userEvent.click(screen.getByRole("button", { name: "Confirm 1 addition" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send 1 to inbox" }));
     expect(await screen.findByText("Saved 1 task to Inbox")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/brain_dump_1/commit"), expect.anything());
   });
@@ -1374,7 +1374,7 @@ describe("BrainDumpRoute", () => {
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
 
     renderBrainDump("/brain-dump/brain_dump_existing/review", queryClient);
-    await userEvent.click(await screen.findByRole("button", { name: "Confirm 1 addition" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Send 1 to inbox" }));
 
     expect(await screen.findByText("Saved 1 task to Inbox")).toBeInTheDocument();
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["tasks"] });
@@ -1399,7 +1399,7 @@ describe("BrainDumpRoute", () => {
     });
 
     renderBrainDump("/brain-dump/brain_dump_existing/review");
-    await userEvent.click(await screen.findByRole("button", { name: "Confirm 1 addition" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Send 1 to inbox" }));
     await userEvent.click(await screen.findByRole("button", { name: "View inbox" }));
 
     expect(await screen.findByText("Task list route: inbox")).toBeInTheDocument();
@@ -1437,7 +1437,7 @@ describe("BrainDumpRoute", () => {
     renderBrainDump("/brain-dump/brain_dump_provisional_audio/review");
 
     expect(await screen.findByText(/These are provisional drafts/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Confirm 1 addition" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send 1 to inbox" })).toBeDisabled();
     await userEvent.click(screen.getByRole("button", { name: "Delete audio now" }));
 
     await waitFor(() => expect(screen.queryByRole("button", { name: "Delete audio now" })).not.toBeInTheDocument());
@@ -1472,7 +1472,7 @@ describe("BrainDumpRoute", () => {
 
     renderBrainDump("/brain-dump/brain_dump_reviewed_provisional/review");
 
-    const save = await screen.findByRole("button", { name: "Confirm 1 addition" });
+    const save = await screen.findByRole("button", { name: "Send 1 to inbox" });
     expect(save).toBeEnabled();
     await userEvent.click(save);
     expect(await screen.findByText("Saved 1 task to Inbox")).toBeInTheDocument();
@@ -1527,7 +1527,7 @@ describe("BrainDumpRoute", () => {
     expect(await screen.findByText("Conflict: title")).toBeInTheDocument();
     expect(screen.getByText("Mine: Починить BrainBuddy MVP")).toBeInTheDocument();
     expect(screen.getByText("Suggestion: Починить BrainBuddy")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Confirm 1 addition" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send 1 to inbox" })).toBeDisabled();
   });
 
   it("keeps a provider-driven removal visible and individually confirmable instead of hiding it", async () => {
@@ -1559,7 +1559,7 @@ describe("BrainDumpRoute", () => {
 
     expect(await screen.findByText("Conflict: removal")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Reply to Anna")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Confirm 1 addition" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send 1 to inbox" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Keep mine" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Use suggestion" })).toBeInTheDocument();
   });
@@ -2131,7 +2131,7 @@ describe("BrainDumpRoute", () => {
       renderBrainDump("/brain-dump/brain_dump_committing/review");
 
       expect(await screen.findByText("Saving tasks")).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "Confirm 1 addition" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Send 1 to inbox" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Record" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
 

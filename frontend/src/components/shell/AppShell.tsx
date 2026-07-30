@@ -17,15 +17,18 @@ import {
   Sprout,
   X
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentType, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts } from "../../api/taskTypes";
 import { useAuthStore } from "../../stores/authStore";
+import { ShellToastContext } from "./shellToast";
 
 interface AppShellProps {
   children: ReactNode;
+  /** Right-side detail panel (prototype `bbs-detail`), rendered beside the content pane. */
+  panel?: ReactNode;
   counts: TaskCounts;
   projects: ProjectResponse[];
   tags: TagResponse[];
@@ -78,10 +81,28 @@ export function SoonChip(): JSX.Element {
 }
 
 export function AppShell(props: AppShellProps): JSX.Element {
-  const { children } = props;
+  const { children, panel } = props;
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [weeklyReviewOpen, setWeeklyReviewOpen] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const location = useLocation();
+
+  const notify = useCallback((message: string) => {
+    setToast(message);
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = setTimeout(() => setToast(null), 2600);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     setWeeklyReviewOpen(false);
@@ -94,18 +115,29 @@ export function AppShell(props: AppShellProps): JSX.Element {
   };
 
   return (
-    <div className="min-h-screen bg-surface-base text-slate-900">
-      <TopBar onOpenDrawer={() => setIsDrawerOpen(true)} />
-      <div className="flex h-[calc(100vh-56px)] min-h-0 overflow-hidden">
-        <aside className="hidden w-[248px] shrink-0 overflow-y-auto border-r border-slate-200 px-3 pb-6 pt-4 lg:block">
-          <Sidebar {...sidebarProps} />
-        </aside>
-        <main className="min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
-          {weeklyReviewOpen ? <WeeklyReviewPlaceholder /> : children}
-        </main>
+    <ShellToastContext.Provider value={notify}>
+      <div className="min-h-screen bg-surface-base text-slate-900">
+        <TopBar onOpenDrawer={() => setIsDrawerOpen(true)} />
+        <div className="flex h-[calc(100vh-56px)] min-h-0 overflow-hidden">
+          <aside className="hidden w-[248px] shrink-0 overflow-y-auto border-r border-slate-200 px-3 pb-6 pt-4 lg:block">
+            <Sidebar {...sidebarProps} />
+          </aside>
+          <main className="min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8 lg:pb-16 lg:pt-8">
+            {weeklyReviewOpen ? <WeeklyReviewPlaceholder /> : children}
+          </main>
+          {weeklyReviewOpen ? null : panel}
+        </div>
+        <NavigationDrawer {...sidebarProps} open={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} />
+        {toast ? (
+          <div
+            role="status"
+            className="fixed bottom-6 left-1/2 z-[200] -translate-x-1/2 whitespace-nowrap rounded-[12px] border border-slate-200 bg-white/95 px-4 py-2.5 text-[13px] text-slate-700 shadow-floating backdrop-blur motion-safe:animate-fade-in-up"
+          >
+            {toast}
+          </div>
+        ) : null}
       </div>
-      <NavigationDrawer {...sidebarProps} open={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} />
-    </div>
+    </ShellToastContext.Provider>
   );
 }
 
@@ -124,7 +156,7 @@ function WeeklyReviewPlaceholder(): JSX.Element {
           still building this one.
         </p>
         <span className="mt-3 rounded-full bg-surface-sunken px-2.5 py-[3px] text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-400">
-          Coming soon
+          Placeholder — not designed yet
         </span>
       </div>
     </section>
@@ -321,11 +353,11 @@ function Sidebar({
           <button
             type="button"
             disabled
-            aria-label="Think with CRT — Coming soon"
+            aria-label="Thinking Mode — Coming soon"
             className="flex h-[34px] w-full cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-slate-400"
           >
             <Network className="h-4 w-4 shrink-0" aria-hidden />
-            <span className="min-w-0 flex-1 truncate">Think with CRT</span>
+            <span className="min-w-0 flex-1 truncate">Thinking Mode</span>
             <SoonChip />
           </button>
         </li>

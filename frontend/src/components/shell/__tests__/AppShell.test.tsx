@@ -81,7 +81,7 @@ describe("AppShell canonical sidebar", () => {
     const user = userEvent.setup();
     renderShell();
 
-    expect(screen.getByRole("button", { name: "Think with CRT — Coming soon" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Thinking Mode — Coming soon" })).toBeDisabled();
     expect(screen.getByText("Next task list content")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Weekly review" }));

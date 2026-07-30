@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, Inbox, Mic, Pause, Play, Square, Trash2 } from "lucide-react";
+import { ChevronLeft, Inbox, Mic, Pause, Play, Square, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
@@ -835,117 +835,217 @@ function RecordingSurface({
       onClose={operation ? undefined : onClose}
       operationId={operation?.id ?? "new"}
     >
-          <BrainDumpOverlayHeader
-            titleId={TITLE_ID}
-            title="Brain dump"
-            meta={`${count} ${count === 1 ? "task" : "tasks"} captured`}
-            onClose={operation ? undefined : onClose}
-            status={
-              <span className={`mt-1 inline-flex shrink-0 items-center gap-1.5 text-xs font-medium ${isRecording ? "text-rose-600" : "text-slate-500"}`}>
-                <span className={`h-1.5 w-1.5 rounded-full ${isRecording ? "bg-rose-600" : "bg-slate-400"}`} aria-hidden />
-                {captureStopped ? "Cloud processing stopped" : isPaused ? "Paused" : isRecording ? "Recording" : "Ready"}
-              </span>
-            }
-          />
-
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 sm:px-6" aria-live="polite">
-            {error ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
-            {!operation && isNewRecording ? (
-              <div className="mb-4 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
-                <label className="grid gap-1 text-slate-700">
-                  <span className="text-xs font-semibold">Speech languages</span>
-                  <select aria-label="Speech languages" className="h-10 rounded-lg border border-slate-300 bg-white px-3" value={languageMode} onChange={(event) => onLanguageModeChange(event.target.value as LanguageMode)}>
-                    <option value="ru-en">Russian + English</option>
-                    <option value="ru">Russian</option>
-                    <option value="en">English</option>
-                  </select>
-                </label>
-                <label className="grid gap-1 text-slate-700">
-                  <span className="text-xs font-semibold">Key terms</span>
-                  <input aria-label="Voice key terms" className="h-10 rounded-lg border border-slate-300 bg-white px-3" value={vocabularyText} onChange={(event) => onVocabularyTextChange(event.target.value)} />
-                </label>
-                {providersReady ? (
-                  <label className="flex items-start gap-2 text-xs text-slate-600">
-                    <input aria-label="Allow secure cloud transcription" className="mt-0.5" type="checkbox" checked={externalProcessingAllowed} onChange={(event) => onExternalProcessingAllowedChange(event.target.checked)} />
-                    <span>{cloudConsentDescription}</span>
-                  </label>
-                ) : providersFailed ? (
-                  <div role="alert" className="grid gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                    <span>Could not load the configured voice providers, so recording is unavailable. No audio leaves this device until the vendors are confirmed.</span>
-                    <button type="button" className="justify-self-start rounded-md border border-amber-300 bg-white px-2.5 py-1 font-semibold text-amber-800" onClick={onRetryProviders}>
-                      Retry
-                    </button>
-                  </div>
-                ) : (
-                  <p role="status" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
-                    Checking configured providers…
-                  </p>
-                )}
-              </div>
-            ) : null}
-            <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-600">Provisional · {count}</div>
-            <div className="flex flex-col gap-2">
-              {proposals.map((proposal) => <ProposalCard key={proposal.id} proposal={proposal} />)}
-              {proposals.length === 0 ? <p className="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">Press Record and speak. Provisional Inbox tasks will grow here while you talk.</p> : null}
+      {!operation && onClose ? (
+        <button
+          type="button"
+          aria-label="Close brain dump"
+          className="absolute right-3.5 top-3.5 z-[2] inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900"
+          onClick={onClose}
+        >
+          <X className="h-[18px] w-[18px]" aria-hidden />
+        </button>
+      ) : null}
+      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden sm:min-h-[480px] sm:grid-cols-[320px_1fr]">
+        {/* Status pane: mic, timer, transcript, wave and the capture controls. */}
+        <div className="flex shrink-0 flex-col items-center gap-2.5 border-b border-slate-200 bg-surface-base px-6 pb-5 pt-[max(28px,env(safe-area-inset-top))] text-center sm:border-b-0 sm:border-r sm:pt-8">
+          <div className="relative mb-1.5 h-14 w-14 shrink-0">
+            <span
+              className={`absolute inset-0 rounded-full bg-sky-300/40 ${isRecording ? "motion-safe:animate-[bbPulse_1.8s_cubic-bezier(.22,1,.36,1)_infinite]" : ""}`}
+              aria-hidden
+            />
+            <div className="absolute inset-0 flex items-center justify-center rounded-full bg-brand-primary text-white">
+              <Mic className="h-[22px] w-[22px]" aria-hidden />
             </div>
           </div>
-
-          <footer className="shrink-0 border-t border-slate-100 bg-slate-50/80 px-4 py-3 sm:px-5">
-            <div className="flex flex-wrap items-center gap-2 gap-y-2 sm:gap-3">
-              <div className="relative h-10 w-10 shrink-0" aria-label="Voice level">
-                <span className={`absolute inset-0 rounded-full bg-sky-200/70 ${isRecording ? "animate-[bbPulse_1.8s_cubic-bezier(.22,1,.36,1)_infinite]" : ""}`} />
-                <div className="absolute inset-0 flex items-center justify-center rounded-full bg-brand-primary text-white">
-                  <Mic className="h-4 w-4" aria-hidden />
-                </div>
-              </div>
-              <details className="min-w-0 flex-1 basis-full text-[13px] leading-normal text-slate-500 sm:basis-auto">
-                <summary className="cursor-pointer list-none overflow-hidden text-ellipsis whitespace-nowrap">{lastTranscript || "Transcript stays collapsed while tasks remain primary"}</summary>
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">Browser preview · provisional</span>
-                <p className="mt-2 whitespace-pre-wrap rounded-lg bg-white p-2 text-xs text-slate-500">{lastTranscript || "No transcript yet."}</p>
-              </details>
-              {!operation ? (
-                <button type="button" className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white shadow-soft disabled:cursor-not-allowed disabled:opacity-50" disabled={isStarting || (isNewRecording && !providersReady)} onClick={onStart}>
-                  <Mic className="h-4 w-4" aria-hidden />
-                  Record
-                </button>
-              ) : captureStopped ? (
-                <span className="inline-flex h-10 items-center rounded-lg border border-amber-200 bg-amber-50 px-4 text-sm font-medium text-amber-800">
-                  Cloud processing stopped
-                </span>
-              ) : isPaused ? (
-                <button type="button" className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white shadow-soft" onClick={onResume}>
-                  <Play className="h-4 w-4" aria-hidden />
-                  Resume
-                </button>
-              ) : (
-                <button type="button" className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700" onClick={onPause}>
-                  <Pause className="h-4 w-4" aria-hidden />
-                  Pause
-                </button>
-              )}
-              <button type="button" className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700" onClick={onCancel}>Discard</button>
-              {operation?.consent.external_processing_allowed ? (
-                <button type="button" className="inline-flex h-10 items-center rounded-lg border border-amber-200 bg-white px-4 text-sm font-medium text-amber-800" onClick={onWithdrawConsent}>
-                  Stop cloud processing
-                </button>
-              ) : null}
-              <button type="button" className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white shadow-soft hover:bg-brand-primary-hover sm:px-5" disabled={!operation} onClick={onFinish}>
-                <Square className="h-3.5 w-3.5" aria-hidden />
-                Stop & review
+          <div>
+            <h1 id={TITLE_ID} className="text-[20px] font-semibold leading-[1.3] tracking-[-0.015em] text-slate-900">Brain dump</h1>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {count ? `${count} ${count === 1 ? "task" : "tasks"} captured` : "Speak freely — tasks are extracted as you go"}
+            </p>
+          </div>
+          <span className={`inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold tabular-nums ${isRecording ? "text-rose-600" : "text-slate-500"}`}>
+            <span className={`h-[7px] w-[7px] rounded-full ${isRecording ? "bg-rose-600 motion-safe:animate-pulse-dot" : "bg-slate-400"}`} aria-hidden />
+            {captureStopped ? "Cloud processing stopped" : isPaused ? "Paused" : isRecording ? "Recording" : "Ready"}
+            {operation && !captureStopped ? <RecordingTimer running={isRecording} /> : null}
+          </span>
+          <div className="min-h-2 flex-1" aria-hidden />
+          <div className="min-h-[38px] max-w-[280px] text-center text-[13px] leading-[1.45] text-slate-400" aria-live="off">
+            {lastTranscript ? (
+              <>
+                <TranscriptTail transcript={lastTranscript} />
+                <span className="ml-[3px] inline-block h-[13px] w-[2px] -translate-y-[1px] bg-brand-primary align-middle motion-safe:animate-caret-blink" aria-hidden />
+              </>
+            ) : (
+              "Transcript preview appears while you talk"
+            )}
+          </div>
+          <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-amber-700">Browser preview · provisional</span>
+          <DumpWave active={isRecording} />
+          <div className="flex w-full flex-col gap-2 pt-1">
+            {!operation ? (
+              <button type="button" className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white shadow-soft transition-colors duration-200 ease-smooth hover:bg-brand-primary-hover disabled:cursor-not-allowed disabled:opacity-50" disabled={isStarting || (isNewRecording && !providersReady)} onClick={onStart}>
+                <Mic className="h-4 w-4" aria-hidden />
+                Record
               </button>
+            ) : (
+              <>
+                <button type="button" className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white shadow-soft transition-colors duration-200 ease-smooth hover:bg-brand-primary-hover" onClick={onFinish}>
+                  <Square className="h-3.5 w-3.5" aria-hidden />
+                  Stop &amp; review
+                </button>
+                <div className="flex w-full gap-2">
+                  {captureStopped ? (
+                    <span className="inline-flex h-9 flex-1 items-center justify-center rounded-lg border border-amber-200 bg-amber-50 px-3 text-xs font-medium text-amber-800">
+                      Cloud processing stopped
+                    </span>
+                  ) : isPaused ? (
+                    <button type="button" className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 transition-colors duration-200 ease-smooth hover:border-slate-300" onClick={onResume}>
+                      <Play className="h-3.5 w-3.5" aria-hidden />
+                      Resume
+                    </button>
+                  ) : (
+                    <button type="button" className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 transition-colors duration-200 ease-smooth hover:border-slate-300" onClick={onPause}>
+                      <Pause className="h-3.5 w-3.5" aria-hidden />
+                      Pause
+                    </button>
+                  )}
+                  <button type="button" className="inline-flex h-9 flex-1 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 transition-colors duration-200 ease-smooth hover:border-slate-300" onClick={onCancel}>Discard</button>
+                </div>
+                {operation.consent.external_processing_allowed ? (
+                  <button type="button" className="inline-flex h-9 w-full items-center justify-center rounded-lg border border-amber-200 bg-white px-3 text-xs font-medium text-amber-800 transition-colors duration-200 ease-smooth hover:bg-amber-50" onClick={onWithdrawConsent}>
+                    Stop cloud processing
+                  </button>
+                ) : null}
+              </>
+            )}
+            {!operation ? (
+              <button type="button" className="inline-flex h-9 w-full items-center justify-center rounded-lg px-3 text-xs font-medium text-slate-500 transition-colors duration-200 ease-smooth hover:text-slate-700" onClick={onCancel}>Discard</button>
+            ) : null}
+          </div>
+          <span className="text-xs text-slate-500">Nothing is saved until you stop</span>
+        </div>
+
+        {/* Captured-task stack: provisional tasks headed to the inbox. */}
+        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto px-6 pb-4 pt-[18px]" aria-live="polite">
+          {error ? <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
+          {!operation && isNewRecording ? (
+            <div className="grid gap-3 rounded-xl border border-slate-200 bg-white p-3 text-sm shadow-soft">
+              <label className="grid gap-1 text-slate-700">
+                <span className="text-xs font-semibold">Speech languages</span>
+                <select aria-label="Speech languages" className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none transition-colors duration-200 ease-smooth focus:border-brand-primary" value={languageMode} onChange={(event) => onLanguageModeChange(event.target.value as LanguageMode)}>
+                  <option value="ru-en">Russian + English</option>
+                  <option value="ru">Russian</option>
+                  <option value="en">English</option>
+                </select>
+              </label>
+              <label className="grid gap-1 text-slate-700">
+                <span className="text-xs font-semibold">Key terms</span>
+                <input aria-label="Voice key terms" className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none transition-colors duration-200 ease-smooth focus:border-brand-primary" value={vocabularyText} onChange={(event) => onVocabularyTextChange(event.target.value)} />
+              </label>
+              {providersReady ? (
+                <label className="flex items-start gap-2 text-xs text-slate-600">
+                  <input aria-label="Allow secure cloud transcription" className="mt-0.5" type="checkbox" checked={externalProcessingAllowed} onChange={(event) => onExternalProcessingAllowedChange(event.target.checked)} />
+                  <span>{cloudConsentDescription}</span>
+                </label>
+              ) : providersFailed ? (
+                <div role="alert" className="grid gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  <span>Could not load the configured voice providers, so recording is unavailable. No audio leaves this device until the vendors are confirmed.</span>
+                  <button type="button" className="justify-self-start rounded-md border border-amber-300 bg-white px-2.5 py-1 font-semibold text-amber-800" onClick={onRetryProviders}>
+                    Retry
+                  </button>
+                </div>
+              ) : (
+                <p role="status" className="rounded-lg border border-slate-200 bg-surface-base px-3 py-2 text-xs text-slate-500">
+                  Checking configured providers…
+                </p>
+              )}
             </div>
-            <p className="mt-2 text-center text-xs text-slate-500">Nothing is saved until review</p>
-          </footer>
+          ) : null}
+          <div className="mb-0.5 mt-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Headed to inbox · {count}</div>
+          {proposals.map((proposal) => <ProposalCard key={proposal.id} proposal={proposal} />)}
+          {proposals.length === 0 ? (
+            <p className="rounded-[12px] border-[1.5px] border-dashed border-slate-300 px-3.5 py-3 text-[13px] text-slate-400">
+              Tasks appear here as you speak
+            </p>
+          ) : null}
+        </div>
+      </div>
     </BrainDumpOverlay>
   );
 }
 
-function ProposalCard({ proposal }: { proposal: BrainDumpProposal }): JSX.Element {
+/** Last words of the live transcript, with the tail emphasised like the prototype. */
+function TranscriptTail({ transcript }: { transcript: string }): JSX.Element {
+  const words = transcript.split(/\s+/).filter(Boolean);
+  const shown = words.slice(-18);
+  const lead = shown.slice(0, Math.max(0, shown.length - 5)).join(" ");
+  const tail = shown.slice(-5).join(" ");
   return (
-    <article aria-label={`Draft task ${proposal.ordinal}: ${proposal.title}`} className={`flex items-center gap-2 rounded-[10px] border px-3.5 py-2.5 shadow-soft ${proposal.status === "wording_changing" ? "border-dashed border-slate-300 bg-slate-50" : "border-slate-200 bg-white"}`}>
+    <>
+      {words.length > 18 ? "…" : ""}
+      {lead ? `${lead} ` : ""}
+      <span className="text-slate-600">{tail}</span>
+    </>
+  );
+}
+
+const waveBarHeights = [0.45, 0.8, 0.4, 1, 0.6, 0.9, 0.5, 0.75, 0.35, 0.85, 0.55];
+
+function DumpWave({ active }: { active: boolean }): JSX.Element {
+  return (
+    <div className="flex h-[26px] items-center justify-center gap-[3px]" aria-hidden>
+      {waveBarHeights.map((height, index) => (
+        <span
+          key={index}
+          className={`w-1 rounded-sm bg-brand-primary ${active ? "motion-safe:animate-wave-bar" : "opacity-40"}`}
+          style={{ height: Math.round(height * 26), animationDelay: `${(index % 5) * 0.15}s` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Elapsed capture time — freezes while paused, like the prototype's REC counter. */
+function RecordingTimer({ running }: { running: boolean }): JSX.Element {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!running) {
+      return;
+    }
+    const timer = setInterval(() => setElapsed((seconds) => seconds + 1), 1000);
+    return () => clearInterval(timer);
+  }, [running]);
+  return (
+    <span>
+      {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}
+    </span>
+  );
+}
+
+function ProposalCard({ proposal }: { proposal: BrainDumpProposal }): JSX.Element {
+  if (proposal.status === "wording_changing") {
+    // The prototype's "forming" card: dashed with a shimmer sweep while the
+    // wording is still moving under the speaker.
+    return (
+      <article
+        aria-label={`Draft task ${proposal.ordinal}: ${proposal.title}`}
+        className="relative flex items-center gap-2.5 overflow-hidden rounded-[12px] border-[1.5px] border-dashed border-slate-300 px-3.5 py-[11px]"
+      >
+        <span className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-slate-400/15 to-transparent motion-safe:animate-shimmer-sweep" aria-hidden />
+        <span className="text-[11px] font-semibold text-slate-400">#{proposal.ordinal}</span>
+        <div className="min-w-0 flex-1 text-sm text-slate-500">{proposal.title}</div>
+        <span className="text-[11px] text-slate-400">{statusLabels[proposal.status]}</span>
+      </article>
+    );
+  }
+  return (
+    <article
+      aria-label={`Draft task ${proposal.ordinal}: ${proposal.title}`}
+      className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 rounded-[12px] border border-slate-200 bg-white px-3.5 py-[11px] shadow-soft motion-safe:animate-card-in"
+    >
       <span className="text-[11px] font-semibold text-slate-500">#{proposal.ordinal}</span>
       <div className="min-w-0 flex-1 text-sm font-medium text-slate-900">{proposal.title}</div>
-      <span className={proposal.status === "wording_changing" ? "text-[11px] text-slate-500" : "rounded-full bg-sky-50 px-2 py-0.5 text-[11px] text-sky-700"}>{statusLabels[proposal.status]}</span>
+      <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] text-sky-700">{statusLabels[proposal.status]}</span>
     </article>
   );
 }
@@ -1039,16 +1139,16 @@ function ReviewSurface({
             <button type="button" className="shrink-0 font-semibold text-rose-700" onClick={onDeleteRawAudio}>Delete audio now</button>
           </div>
         ) : null}
-        <div className="flex flex-col gap-2.5">
+        <div className="grid grid-cols-1 items-start gap-2.5 sm:grid-cols-2">
           {proposals.map((proposal) => {
             const predecessors = proposal.predecessor_ids ?? [];
             return (
-            <article key={proposal.id} className="rounded-[14px] border border-slate-200 bg-white px-3.5 py-3 shadow-soft">
+            <article key={proposal.id} className="rounded-[12px] border border-slate-200 bg-white py-2.5 pl-3.5 pr-2.5 shadow-soft">
               <div className="flex items-start gap-2.5">
-                <span className="mt-1 text-xs font-semibold text-slate-500">#{proposal.ordinal}</span>
+                <span className="mt-1.5 text-xs font-semibold text-slate-500">#{proposal.ordinal}</span>
                 <div className="min-w-0 flex-1">
                   <label className="sr-only" htmlFor={`proposal-title-${proposal.id}`}>Task title #{proposal.ordinal}</label>
-                  <input key={`${proposal.id}-${proposal.revision}`} id={`proposal-title-${proposal.id}`} defaultValue={proposal.title} onBlur={(event) => void onUpdateTitle(proposal, event.currentTarget.value)} className="w-full border-0 border-b-[1.5px] border-sky-200 bg-transparent pb-1 text-[15px] font-medium text-slate-900 outline-none" />
+                  <input key={`${proposal.id}-${proposal.revision}`} id={`proposal-title-${proposal.id}`} defaultValue={proposal.title} onBlur={(event) => void onUpdateTitle(proposal, event.currentTarget.value)} className="-ml-1.5 w-full rounded-md border-[1.5px] border-transparent bg-transparent px-1.5 py-0.5 text-sm font-medium text-slate-900 outline-none transition-colors duration-200 ease-smooth hover:border-slate-200 focus:border-brand-primary focus:bg-white" />
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700">Inbox</span>
                     <span className="rounded-full bg-sky-50 px-2.5 py-1 text-xs text-sky-700">{statusLabels[proposal.status]}</span>
@@ -1076,8 +1176,8 @@ function ReviewSurface({
                     </div>
                   ))}
                 </div>
-                <button type="button" className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-500" aria-label={`Delete ${proposal.title}`} onClick={() => onDelete(proposal)}>
-                  <Trash2 className="h-4 w-4" aria-hidden />
+                <button type="button" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-600" aria-label={`Delete ${proposal.title}`} onClick={() => onDelete(proposal)}>
+                  <X className="h-4 w-4" aria-hidden />
                 </button>
               </div>
             </article>
@@ -1086,13 +1186,13 @@ function ReviewSurface({
         </div>
       </main>
 
-      <footer className="flex shrink-0 items-center gap-3 border-t border-slate-100 bg-surface-base px-4 py-3 pb-[max(12px,env(safe-area-inset-bottom))] sm:px-6">
-        <button type="button" className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600" onClick={onDiscard}>
-          Discard
-        </button>
-        <button type="button" className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-brand-primary text-[15px] font-semibold text-white shadow-glow disabled:cursor-not-allowed disabled:opacity-50" disabled={!committable || hasUnresolvedConflicts || isSaving} onClick={onSave}>
+      <footer className="flex shrink-0 flex-col items-center gap-2.5 border-t border-slate-200 bg-surface-base px-6 py-4 pb-[max(16px,env(safe-area-inset-bottom))]">
+        <button type="button" className="inline-flex h-11 w-full max-w-[320px] items-center justify-center gap-2 rounded-xl bg-brand-primary px-5 text-[15px] font-semibold text-white shadow-glow transition-colors duration-200 ease-smooth hover:bg-brand-primary-hover disabled:cursor-not-allowed disabled:opacity-50" disabled={!committable || hasUnresolvedConflicts || isSaving} onClick={onSave}>
           <Inbox className="h-4 w-4" aria-hidden />
-          {isSaving ? "Confirming…" : `Confirm ${proposals.length} ${proposals.length === 1 ? "addition" : "additions"}`}
+          {isSaving ? "Sending…" : `Send ${proposals.length} to inbox`}
+        </button>
+        <button type="button" className="text-[13px] font-medium text-slate-500 transition-colors duration-200 ease-smooth hover:text-slate-700" onClick={onDiscard}>
+          Discard all
         </button>
       </footer>
     </BrainDumpOverlay>

@@ -142,7 +142,7 @@ describe("AppRoutes", () => {
     expect(screen.queryByText("Draft the launch announcement")).not.toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/tasks?state=next"), expect.anything());
     expect(screen.getByRole("button", { name: "Weekly review" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Think with CRT — Coming soon" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Thinking Mode — Coming soon" })).toBeDisabled();
     expect(screen.queryByRole("link", { name: /CRT.*legacy/i })).not.toBeInTheDocument();
   });
 
@@ -189,10 +189,12 @@ describe("AppRoutes", () => {
     const rowTitle = await screen.findByText("Fix onboarding drop-off");
     const row = rowTitle.closest("article");
     expect(row).not.toBeNull();
-    expect(row).toHaveClass("rounded-[12px]", "px-4", "py-3", "shadow-soft", "transition-shadow", "duration-200", "ease-smooth");
+    expect(row).toHaveClass("rounded-[12px]", "px-3.5", "py-[7px]", "shadow-soft", "transition-all", "duration-200", "ease-smooth");
 
-    const projectLabel = within(row as HTMLElement).getByText("Onboarding drop-off");
-    expect(projectLabel).toHaveClass("text-slate-400");
+    // The per-row project column is gone (prototype default); the group heading
+    // carries the project name instead.
+    expect(within(row as HTMLElement).queryByText("Onboarding drop-off")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Onboarding drop-off" })).toBeInTheDocument();
 
     const addTaskForm = screen.getByLabelText("New task title").closest("form");
     expect(addTaskForm).toHaveClass("rounded-[12px]", "border-dashed");
@@ -250,7 +252,7 @@ describe("AppRoutes", () => {
   it("keeps direct CRT routes inert until the feature is available", async () => {
     renderRoutes("/crt/demo-tree");
 
-    expect(await screen.findByRole("heading", { name: "Think with CRT" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Thinking Mode" })).toBeInTheDocument();
     expect(screen.getByText("Coming later")).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.queryByRole("heading", { name: "Next actions" })).not.toBeInTheDocument();
@@ -302,12 +304,10 @@ describe("AppRoutes", () => {
 
     renderRoutes("/tasks/next");
     expect(await screen.findByRole("heading", { name: "Next actions" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "No project" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Group by project" }));
-
-    // First-seen project order is preserved and "No project" sinks to the bottom,
-    // even though the unassigned task came first in the response.
+    // Grouping is the default view, first-seen project order is preserved and
+    // "No project" sinks to the bottom, even though the unassigned task came
+    // first in the response.
     const groupHeadings = await screen.findAllByRole("heading", { level: 2 });
     expect(groupHeadings.map((heading) => heading.textContent)).toEqual([
       "Launch v2",
@@ -321,10 +321,15 @@ describe("AppRoutes", () => {
     // The per-row project column is redundant once the heading carries it.
     expect(within(launchGroup).queryByText("Launch v2")).not.toBeInTheDocument();
 
-    // Toggling off restores the flat list.
+    // Toggling off restores the flat list and survives in the URL as group=off.
     await user.click(screen.getByRole("button", { name: "Group by project" }));
     expect(screen.queryByRole("list", { name: "Launch v2" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "No project" })).not.toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Tasks" })).toBeInTheDocument();
+
+    // Toggling back on regroups.
+    await user.click(screen.getByRole("button", { name: "Group by project" }));
+    expect(await screen.findByRole("list", { name: "Launch v2" })).toBeInTheDocument();
   });
 
   it("hides the grouping toggle where every task would share one heading", async () => {
@@ -380,7 +385,8 @@ describe("AppRoutes", () => {
     await user.click(screen.getByRole("button", { name: "Load more tasks" }));
 
     expect(await screen.findByText("Overflow task 54")).toBeInTheDocument();
-    expect(within(screen.getByRole("list", { name: "Tasks" })).getAllByRole("listitem")).toHaveLength(55);
+    // Every task is projectless, so the default grouping shows one group list.
+    expect(within(screen.getByRole("list", { name: "No project" })).getAllByRole("listitem")).toHaveLength(55);
     expect(screen.queryByRole("button", { name: "Load more tasks" })).not.toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining("cursor=next-page"), expect.anything());
   });
@@ -420,7 +426,8 @@ describe("AppRoutes", () => {
     renderRoutes("/tasks/inbox?q=shared");
 
     expect(await screen.findByRole("heading", { name: "Inbox" })).toBeInTheDocument();
-    expect(await screen.findByText("2 tasks")).toBeInTheDocument();
+    // The Inbox pane leads with the prototype's processing hint instead of a count.
+    expect(await screen.findByText("Process these — decide the next action for each.")).toBeInTheDocument();
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
         expect.stringContaining("/tasks?state=inbox"),
@@ -585,21 +592,25 @@ describe("AppRoutes", () => {
     await user.click(screen.getByRole("link", { name: "Fix onboarding drop-off" }));
     expect(await screen.findByRole("heading", { name: "Task detail" })).toBeInTheDocument();
 
+    // Panel fields save on change, carrying the task's expected revision.
     await user.selectOptions(await screen.findByLabelText("Project"), "project-launch");
-    await user.click(screen.getByLabelText("#calls"));
-    await user.click(screen.getByLabelText("#deep-work"));
-    await user.click(screen.getByRole("button", { name: "Save task detail" }));
-
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
         expect.stringMatching(/\/tasks\/task-1$/),
         expect.objectContaining({ method: "PATCH", body: expect.stringContaining('"project_id":"project-launch"') })
       );
     });
-    const saveDetailCall = vi.mocked(fetch).mock.calls.find(
-      ([input, init]) => /\/tasks\/task-1$/.test(String(input)) && (init as RequestInit | undefined)?.method === "PATCH"
-    );
-    expect(JSON.parse(String(saveDetailCall?.[1]?.body))).toMatchObject({ tag_ids: ["tag-calls"] });
+
+    await user.click(screen.getByLabelText("#calls"));
+    await waitFor(() => {
+      const patchCalls = vi
+        .mocked(fetch)
+        .mock.calls.filter(
+          ([input, init]) => /\/tasks\/task-1$/.test(String(input)) && (init as RequestInit | undefined)?.method === "PATCH"
+        );
+      const tagCall = patchCalls[patchCalls.length - 1];
+      expect(JSON.parse(String(tagCall?.[1]?.body))).toMatchObject({ tag_ids: ["tag-deep-work", "tag-calls"] });
+    });
   });
 
   it("returns to Next actions when the active Project or Tag view is archived or deleted", async () => {
@@ -630,8 +641,6 @@ describe("AppRoutes", () => {
 
     expect(await screen.findByRole("heading", { name: "Task detail" })).toBeInTheDocument();
     await user.selectOptions(await screen.findByLabelText("Priority"), "high");
-    await user.type(await screen.findByLabelText("Details"), "Updated detail");
-    await user.click(screen.getByRole("button", { name: "Save task detail" }));
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
         expect.stringMatching(/\/tasks\/task-1$/),
@@ -642,8 +651,19 @@ describe("AppRoutes", () => {
       );
     });
 
-    await user.type(screen.getByLabelText("New subtask title"), "Draft outline");
-    await user.click(screen.getByRole("button", { name: "Add subtask" }));
+    await user.type(await screen.findByLabelText("Details"), "Updated detail");
+    await user.tab();
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringMatching(/\/tasks\/task-1$/),
+        expect.objectContaining({
+          method: "PATCH",
+          body: expect.stringContaining('"details":"Updated detail"')
+        })
+      );
+    });
+
+    await user.type(screen.getByLabelText("New subtask title"), "Draft outline{Enter}");
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
         expect.stringMatching(/\/tasks\/task-1\/subtasks$/),
@@ -651,8 +671,7 @@ describe("AppRoutes", () => {
       );
     });
 
-    await user.type(screen.getByLabelText("New comment"), "Looks good");
-    await user.click(screen.getByRole("button", { name: "Add comment" }));
+    await user.type(screen.getByLabelText("New comment"), "Looks good{Enter}");
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
         expect.stringMatching(/\/tasks\/task-1\/comments$/),
@@ -660,7 +679,7 @@ describe("AppRoutes", () => {
       );
     });
 
-    await user.click(screen.getByRole("button", { name: "Complete" }));
+    await user.click(screen.getByRole("button", { name: "Complete task" }));
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
         expect.stringMatching(/\/tasks\/task-1\/transitions$/),
@@ -731,13 +750,16 @@ describe("AppRoutes", () => {
 
     renderRoutes("/tasks/next/task-1");
 
-    expect(await screen.findByRole("button", { name: "Reopen to Inbox" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reopen to Next" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reopen to Waiting for" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Move to/i })).not.toBeInTheDocument();
+    // Terminal tasks reopen through the list selector — never a bare move.
+    const listSelect = await screen.findByLabelText("List");
+    expect(screen.getByRole("option", { name: "Completed" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Reopen to Inbox" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Reopen to Next actions" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Reopen to Waiting for" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /^Move to/i })).not.toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Waiting for"), "Ada");
-    await user.click(screen.getByRole("button", { name: "Reopen to Waiting for" }));
+    await user.selectOptions(listSelect, "waiting");
 
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
@@ -840,16 +862,14 @@ describe("AppRoutes", () => {
     expect(screen.getByRole("heading", { name: "Next actions" })).toHaveFocus();
   });
 
-  it("shows an honest, noninteractive Agent placeholder in task detail", async () => {
+  it("keeps the panel's unbuilt Think affordance honest via the placeholder toast", async () => {
+    const user = userEvent.setup();
     renderRoutes("/tasks/next/task-1");
     await screen.findByRole("heading", { name: "Task detail" });
 
-    const agentZone = await screen.findByTestId("task-detail-agent");
-    expect(within(agentZone).getByRole("heading", { name: "Agent" })).toBeInTheDocument();
-    const soon = within(agentZone).getByText("Soon");
-    expect(soon).toHaveAttribute("aria-hidden", "true");
-    expect(within(agentZone).getByText("Coming soon")).toBeInTheDocument();
-    expect(within(agentZone).queryByRole("button")).not.toBeInTheDocument();
-    expect(within(agentZone).queryByRole("link")).not.toBeInTheDocument();
+    // The prototype panel has no agent zone; its Think action is present but
+    // announces itself as a placeholder instead of pretending to work.
+    await user.click(await screen.findByRole("button", { name: "Think" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Thinking canvas isn't built yet — placeholder");
   });
 });

@@ -1,19 +1,20 @@
 /* istanbul ignore file -- task shell rendering is covered by route tests and Playwright snapshots. */
-import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, Edit3, Layers, Plus, RotateCcw, X } from "lucide-react";
+import { AlertTriangle, CalendarDays, Check, ChevronDown, Layers, Plus, RotateCcw, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode, RefObject } from "react";
+import type { ReactNode } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { apiClient } from "../../api/client";
-import { parseOpenTaskState, parseTaskDateView, useProjects, useTags, useTaskDetail, useTaskList } from "../../api/taskHooks";
-import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts, TaskPriority, TaskResponse, TaskSort, TaskSubtaskResponse, TaskUpdateRequest } from "../../api/taskTypes";
-import { AppShell, SoonChip } from "../../components/shell/AppShell";
+import { parseOpenTaskState, parseTaskDateView, taskKeys, useProjects, useTags, useTaskDetail, useTaskList } from "../../api/taskHooks";
+import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts, TaskResponse, TaskSubtaskResponse, TaskSort } from "../../api/taskTypes";
+import { AppShell } from "../../components/shell/AppShell";
 import { Button } from "../../components/ui/Button";
 import { getErrorMessage } from "../../utils/error";
 import { applySmartAddSuggestion, parseSmartAdd, smartAddChips, smartAddSuggestions } from "./smartAdd";
 import type { SmartAddDraft, SmartAddSuggestion } from "./smartAdd";
 import { SmartAddSuggestions } from "./SmartAddSuggestions";
+import { TaskDetailEmptyPanel, TaskDetailPanel } from "./TaskDetailPanel";
 
 const stateLabels: Record<OpenTaskState, string> = {
   inbox: "Inbox",
@@ -31,34 +32,9 @@ const dateViewLabels = {
 const emptyCounts: TaskCounts = { inbox: 0, next: 0, waiting: 0, someday: 0 };
 const emptyProjects: ProjectResponse[] = [];
 const emptyTags: TagResponse[] = [];
-const openStateOptions: OpenTaskState[] = ["inbox", "next", "waiting", "someday"];
 
 function idempotencyKey(action: string): string {
   return `task-shell-${action}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-const desktopMediaQuery = "(min-width: 1024px)";
-
-function useIsDesktop(): boolean {
-  const [isDesktop, setIsDesktop] = useState(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-      return true;
-    }
-    return window.matchMedia(desktopMediaQuery).matches;
-  });
-
-  useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-      return;
-    }
-    const mediaQueryList = window.matchMedia(desktopMediaQuery);
-    const onChange = () => setIsDesktop(mediaQueryList.matches);
-    onChange();
-    mediaQueryList.addEventListener("change", onChange);
-    return () => mediaQueryList.removeEventListener("change", onChange);
-  }, []);
-
-  return isDesktop;
 }
 
 export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): JSX.Element {
@@ -71,12 +47,10 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const taskId = params.taskId;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const isDesktop = useIsDesktop();
   const [newTitle, setNewTitle] = useState("");
   const [newWaitingFor, setNewWaitingFor] = useState("");
-  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
-  const [editingTitle, setEditingTitle] = useState("");
   const [showCompleted, setShowCompleted] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(true);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const rowLinkRefs = useRef<Map<string, HTMLAnchorElement>>(new Map());
   const detailHeadingRef = useRef<HTMLHeadingElement | null>(null);
@@ -91,15 +65,15 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   };
 
   const sort = parseTaskSort(searchParams.get("sort"));
-  // Grouping lives in the URL beside `sort` so a grouped view survives reload,
-  // opening a task, and sharing — the same contract the sort control already has.
-  const groupByProject = searchParams.get("group") === "project";
   const searchQuery = searchParams.get("q") ?? "";
   const today = localDateIso();
   const isInboxProductView = state === "inbox" && !projectId && !tagId && !dateView;
   // A project view is already one project, and Inbox is by definition the
   // projectless projection, so grouping either would produce a single heading.
   const canGroupByProject = !projectId && state !== "inbox";
+  // The prototype groups by project out of the box; the URL carries the
+  // opt-out beside `sort` so a flat view survives reload and sharing.
+  const groupByProject = canGroupByProject && searchParams.get("group") !== "off";
   const taskQuery = useTaskList({
     state,
     projectId,
@@ -119,9 +93,10 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const tagsQuery = useTags();
 
   useEffect(() => {
-    if (taskId && isDesktop) {
+    if (taskId) {
+      setPanelOpen(true);
       detailHeadingRef.current?.focus();
-    } else if (!taskId && isDesktop && previousTaskIdRef.current) {
+    } else if (previousTaskIdRef.current) {
       const originLink = rowLinkRefs.current.get(previousTaskIdRef.current);
       if (originLink && document.contains(originLink)) {
         originLink.focus();
@@ -130,13 +105,12 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       }
     }
     previousTaskIdRef.current = taskId;
-  }, [detailQuery.data, isDesktop, taskId]);
+  }, [detailQuery.data, taskId]);
 
   const projects = projectsQuery.data ?? emptyProjects;
   const tags = tagsQuery.data ?? emptyTags;
   const tasks = taskQuery.data?.items ?? [];
   const counts = taskQuery.data?.counts_by_state ?? emptyCounts;
-  const detailIsInProjection = Boolean(taskId && tasks.some((task) => task.id === taskId));
 
   const invalidateTasks = () => queryClient.invalidateQueries({ queryKey: ["tasks"] });
   const listPath = projectId
@@ -145,6 +119,29 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       ? `/tags/${tagId}`
       : `/tasks/${params.state ?? "next"}`;
   const closeTarget = { pathname: listPath, search: searchParams.toString() };
+
+  // Prototype keyboard model: Escape deselects the task, ⌘\ toggles the panel.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "\\" && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        setPanelOpen((open) => !open);
+        return;
+      }
+      if (event.key !== "Escape" || !taskId) {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      // A modal surface (brain dump, mobile drawer) or a focused field owns
+      // Escape; deselecting underneath it would yank the view away.
+      if (target?.closest("input, textarea, select, [role=dialog]") || document.querySelector('[role="dialog"][aria-modal="true"]')) {
+        return;
+      }
+      navigate(closeTarget);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  });
 
   const createMutation = useMutation({
     mutationFn: (draft: SmartAddDraft) => {
@@ -183,18 +180,6 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     onError: (caught: unknown) => setMutationError(getErrorMessage(caught))
   });
 
-  const updateMutation = useMutation({
-    mutationFn: ({ task, payload }: { task: TaskResponse; payload: Omit<TaskUpdateRequest, "expected_revision"> }) =>
-      apiClient.updateTask(task.id, { ...payload, expected_revision: task.revision }, idempotencyKey("edit")),
-    onSuccess: () => {
-      setEditingTaskId(null);
-      setEditingTitle("");
-      setMutationError(null);
-      void invalidateTasks();
-    },
-    onError: (caught: unknown) => setMutationError(getErrorMessage(caught))
-  });
-
   const transitionMutation = useMutation({
     mutationFn: ({ task, action, toState }: { task: TaskResponse; action: "move" | "complete" | "reopen"; toState?: OpenTaskState }) =>
       apiClient.transitionTask(task.id, { action, to_state: toState, expected_revision: task.revision }, idempotencyKey(action)),
@@ -208,8 +193,11 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const detailUpdateMutation = useMutation({
     mutationFn: ({ task, payload }: { task: TaskResponse; payload: Parameters<typeof apiClient.updateTask>[1] }) =>
       apiClient.updateTask(task.id, payload, idempotencyKey("detail-edit")),
-    onSuccess: () => {
+    onSuccess: (updated) => {
       setMutationError(null);
+      // Per-field saves need the bumped revision before the list refetch lands,
+      // or the next field edit would carry a stale expected_revision.
+      queryClient.setQueryData(taskKeys.detail(updated.id), updated);
       void invalidateTasks();
     },
     onError: (caught: unknown) => setMutationError(getErrorMessage(caught))
@@ -222,8 +210,9 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
         { action, to_state: toState, waiting_for: waitingFor || undefined, expected_revision: task.revision },
         idempotencyKey(`detail-${action}`)
       ),
-    onSuccess: () => {
+    onSuccess: (updated) => {
       setMutationError(null);
+      queryClient.setQueryData(taskKeys.detail(updated.id), updated);
       void invalidateTasks();
     },
     onError: (caught: unknown) => setMutationError(getErrorMessage(caught))
@@ -327,53 +316,47 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     return stateLabels[state ?? "next"];
   }, [dateView, projectId, projects, state, tagId, tags]);
 
+  // The prototype's Inbox pane leads with a processing hint instead of a count.
   const taskNoun = counts[state ?? "next"] === 1 ? "task" : "tasks";
-  const subtitle = state ? `${counts[state]} ${taskNoun}` : `${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`;
+  const meta = state === "inbox"
+    ? "Process these — decide the next action for each."
+    : state
+      ? `${counts[state]} ${taskNoun}`
+      : `${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`;
 
   const hasFrameError = taskQuery.isError || projectsQuery.isError || tagsQuery.isError;
 
   // Shared by the flat list and by every project group, so the two render paths
   // can never drift apart.
   const taskListProps = {
-    projects,
     tags,
     taskPathBase: listPath,
     taskSearch: searchParams.toString(),
-    editingTaskId,
-    editingTitle,
+    selectedTaskId: taskId,
     registerRowLink,
-    onBeginEdit: (task: TaskResponse) => {
-      setEditingTaskId(task.id);
-      setEditingTitle(task.title);
-    },
-    onCancelEdit: () => {
-      setEditingTaskId(null);
-      setEditingTitle("");
-    },
-    onComplete: (task: TaskResponse) => transitionMutation.mutate({ task, action: "complete" as const }),
-    onEditTitle: (value: string) => setEditingTitle(value),
-    onMoveToNext: (task: TaskResponse) =>
-      transitionMutation.mutate({ task, action: "move" as const, toState: "next" as const }),
-    onSaveEdit: (task: TaskResponse) => updateMutation.mutate({ task, payload: { title: editingTitle.trim() } }),
-    expandedTaskId: taskId,
-    onCollapse: () => navigate(closeTarget),
-    detailHeadingRef,
-    detailTask: detailQuery.data,
-    detailIsLoading: detailQuery.isLoading,
-    detailError: detailQuery.error,
-    onSaveDetail: (task: TaskResponse, payload: Parameters<typeof apiClient.updateTask>[1]) =>
-      detailUpdateMutation.mutate({ task, payload }),
-    onTransitionDetail: (
-      task: TaskResponse,
-      action: "move" | "complete" | "reopen" | "cancel",
-      toState?: OpenTaskState,
-      waitingFor?: string
-    ) => detailTransitionMutation.mutate({ task, action, toState, waitingFor }),
-    onCreateSubtask: (task: TaskResponse, title: string) => subtaskCreateMutation.mutate({ task, title }),
-    onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") =>
-      subtaskTransitionMutation.mutate({ task, subtask, action }),
-    onCreateComment: (task: TaskResponse, body: string) => commentCreateMutation.mutate({ task, body })
+    onComplete: (task: TaskResponse) => transitionMutation.mutate({ task, action: "complete" as const })
   };
+
+  const panel = !panelOpen ? null : taskId ? (
+    <TaskDetailPanel
+      task={detailQuery.data}
+      projects={projects}
+      tags={tags}
+      isLoading={detailQuery.isLoading}
+      error={detailQuery.error}
+      headingRef={detailHeadingRef}
+      onClose={() => navigate(closeTarget)}
+      onSave={(task, payload) => detailUpdateMutation.mutate({ task, payload })}
+      onTransition={(task, action, toState, waitingFor) =>
+        detailTransitionMutation.mutate({ task, action, toState, waitingFor })
+      }
+      onCreateSubtask={(task, subtaskTitle) => subtaskCreateMutation.mutate({ task, title: subtaskTitle })}
+      onTransitionSubtask={(task, subtask, action) => subtaskTransitionMutation.mutate({ task, subtask, action })}
+      onCreateComment={(task, body) => commentCreateMutation.mutate({ task, body })}
+    />
+  ) : (
+    <TaskDetailEmptyPanel />
+  );
 
   return (
     <AppShell
@@ -383,6 +366,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       activeState={state}
       activeProjectId={projectId}
       activeTagId={tagId}
+      panel={panel}
       onCreateProject={(name) => projectMutation.mutate({ action: "create", name })}
       onRenameProject={(project, name) => projectMutation.mutate({ action: "rename", project, name })}
       onArchiveProject={(project) => projectMutation.mutate({ action: "archive", project })}
@@ -391,138 +375,115 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       onDeleteTag={(tag) => tagMutation.mutate({ action: "delete", tag })}
     >
       <section aria-labelledby="task-list-title" className="mx-auto max-w-[760px]">
-        {isDesktop || !taskId ? (
-          <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="mb-5 flex flex-wrap items-end gap-x-3 gap-y-2">
+          <div className="min-w-0">
             <h1 id="task-list-title" ref={listHeadingRef} tabIndex={-1} className="m-0 text-title font-semibold text-slate-900 outline-none">
               {title}
             </h1>
-            <span className="text-xs text-slate-600">{subtitle}</span>
-            <div className="ml-auto flex items-center gap-1.5">
-              {canGroupByProject ? (
-                <Button
-                  variant={groupByProject ? "secondary" : "ghost"}
-                  size="sm"
-                  aria-pressed={groupByProject}
-                  leftIcon={<Layers aria-hidden />}
-                  onClick={() => {
+            <p className="m-0 mt-1 text-xs text-slate-500">{meta}</p>
+          </div>
+          <div className="ml-auto flex items-center gap-1.5">
+            {canGroupByProject ? (
+              <Button
+                variant={groupByProject ? "secondary" : "ghost"}
+                size="sm"
+                aria-pressed={groupByProject}
+                leftIcon={<Layers aria-hidden />}
+                onClick={() => {
+                  const next = new URLSearchParams(searchParams);
+                  if (groupByProject) {
+                    next.set("group", "off");
+                  } else {
+                    next.delete("group");
+                  }
+                  setSearchParams(next, { replace: true });
+                }}
+              >
+                Group by project
+              </Button>
+            ) : null}
+            <label className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2.5 text-xs font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900">
+              <input
+                type="checkbox"
+                className="h-3.5 w-3.5 rounded border-slate-300 text-brand-primary accent-brand-primary"
+                checked={showCompleted}
+                onChange={(event) => setShowCompleted(event.currentTarget.checked)}
+              />
+              Show completed
+            </label>
+            <label className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900">
+              <span className="text-slate-500">Sort</span>
+              <span className="relative inline-flex">
+                <select
+                  aria-label="Sort tasks"
+                  className="appearance-none bg-transparent pr-5 text-xs font-medium text-slate-700 outline-none"
+                  value={sort}
+                  onChange={(event) => {
                     const next = new URLSearchParams(searchParams);
-                    if (groupByProject) {
-                      next.delete("group");
+                    const value = parseTaskSort(event.currentTarget.value);
+                    if (value === "manual") {
+                      next.delete("sort");
                     } else {
-                      next.set("group", "project");
+                      next.set("sort", value);
                     }
                     setSearchParams(next, { replace: true });
                   }}
                 >
-                  Group by project
-                </Button>
-              ) : null}
-              <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900">
-                <input
-                  type="checkbox"
-                  className="h-3.5 w-3.5 rounded border-slate-300 text-brand-primary accent-brand-primary"
-                  checked={showCompleted}
-                  onChange={(event) => setShowCompleted(event.currentTarget.checked)}
-                />
-                Show completed
-              </label>
-              <label className="inline-flex items-center gap-1.5 text-xs text-slate-500">
-                Sort
-                <span className="relative inline-flex">
-                  <select
-                    aria-label="Sort tasks"
-                    className="h-8 appearance-none rounded-lg border border-slate-200 bg-white pl-2.5 pr-7 text-xs font-medium text-slate-700 shadow-soft outline-none transition-colors duration-200 ease-smooth hover:border-slate-300 focus:border-brand-primary"
-                    value={sort}
-                    onChange={(event) => {
-                      const next = new URLSearchParams(searchParams);
-                      const value = parseTaskSort(event.currentTarget.value);
-                      if (value === "manual") {
-                        next.delete("sort");
-                      } else {
-                        next.set("sort", value);
-                      }
-                      setSearchParams(next, { replace: true });
-                    }}
-                  >
-                    <option value="manual">Manual</option>
-                    <option value="due">Due date</option>
-                    <option value="priority">Priority</option>
-                    <option value="title">Title</option>
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden />
-                </span>
-              </label>
-            </div>
+                  <option value="manual">Manual</option>
+                  <option value="due">Due date</option>
+                  <option value="priority">Priority</option>
+                  <option value="title">Title</option>
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden />
+              </span>
+            </label>
           </div>
-        ) : null}
+        </div>
 
         {mutationError ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{mutationError}</div> : null}
 
-        {isDesktop || !taskId ? (
-          hasFrameError ? (
-            <ErrorState
-              message={getErrorMessage(taskQuery.error ?? projectsQuery.error ?? tagsQuery.error)}
-              onRetry={() => {
-                void taskQuery.refetch();
-                void projectsQuery.refetch();
-                void tagsQuery.refetch();
-              }}
-            />
-          ) : taskQuery.isLoading || projectsQuery.isLoading || tagsQuery.isLoading ? (
-            <LoadingState label={title} />
-          ) : tasks.length ? (
-            groupByProject ? (
-              <div className="flex flex-col gap-6">
-                {groupTasksByProject(tasks, projects).map((group) => (
-                  <section key={group.key} aria-labelledby={`task-group-${group.key}`}>
-                    <div className="mb-2 flex items-center gap-2 px-1">
-                      <span
-                        className="h-2 w-2 shrink-0 rounded-full"
-                        style={{ backgroundColor: group.color ?? "#cbd5e1" }}
-                        aria-hidden
-                      />
-                      <h2
-                        id={`task-group-${group.key}`}
-                        className="m-0 min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500"
-                      >
-                        {group.name}
-                      </h2>
-                      <span className="text-xs font-medium text-slate-400">{group.tasks.length}</span>
-                    </div>
-                    <TaskList {...taskListProps} tasks={group.tasks} label={group.name} showProject={false} />
-                  </section>
-                ))}
-              </div>
-            ) : (
-              <TaskList {...taskListProps} tasks={tasks} />
-            )
-          ) : (
-            <EmptyState state={state} />
-          )
-        ) : null}
-
-        {taskId && (!isDesktop || !detailIsInProjection) ? (
-          <TaskDetailPanel
-            task={detailQuery.data}
-            projects={projects}
-            tags={tags}
-            isLoading={detailQuery.isLoading}
-            error={detailQuery.error}
-            headingRef={detailHeadingRef}
-            onClose={() => navigate(closeTarget)}
-            onSave={(task, payload) => detailUpdateMutation.mutate({ task, payload })}
-            onTransition={(task, action, toState, waitingFor) =>
-              detailTransitionMutation.mutate({ task, action, toState, waitingFor })
-            }
-            onCreateSubtask={(task, title) => subtaskCreateMutation.mutate({ task, title })}
-            onTransitionSubtask={(task, subtask, action) =>
-              subtaskTransitionMutation.mutate({ task, subtask, action })
-            }
-            onCreateComment={(task, body) => commentCreateMutation.mutate({ task, body })}
+        {hasFrameError ? (
+          <ErrorState
+            message={getErrorMessage(taskQuery.error ?? projectsQuery.error ?? tagsQuery.error)}
+            onRetry={() => {
+              void taskQuery.refetch();
+              void projectsQuery.refetch();
+              void tagsQuery.refetch();
+            }}
           />
-        ) : null}
+        ) : taskQuery.isLoading || projectsQuery.isLoading || tagsQuery.isLoading ? (
+          <LoadingState label={title} />
+        ) : tasks.length ? (
+          groupByProject ? (
+            <div className="flex flex-col gap-6">
+              {groupTasksByProject(tasks, projects).map((group) => (
+                <section key={group.key} aria-labelledby={`task-group-${group.key}`}>
+                  <div className="mb-2 flex items-baseline gap-2.5 px-1">
+                    <span
+                      className="h-2 w-2 shrink-0 self-center rounded-full"
+                      style={{ backgroundColor: group.color ?? "#cbd5e1" }}
+                      aria-hidden
+                    />
+                    <h2
+                      id={`task-group-${group.key}`}
+                      className="m-0 min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500"
+                    >
+                      {group.name}
+                    </h2>
+                    <span className="text-xs font-medium text-slate-400">{group.tasks.length}</span>
+                  </div>
+                  <TaskList {...taskListProps} tasks={group.tasks} label={group.name} />
+                </section>
+              ))}
+            </div>
+          ) : (
+            <TaskList {...taskListProps} tasks={tasks} />
+          )
+        ) : (
+          <EmptyState state={state} />
+        )}
 
-        {(isDesktop || !taskId) && taskQuery.hasNextPage ? (
+        {taskQuery.hasNextPage ? (
           <div className="mt-3 flex justify-center">
             <Button
               variant="secondary"
@@ -534,7 +495,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
           </div>
         ) : null}
 
-        {!(isDesktop || !taskId) ? null : dateView ? (
+        {dateView ? (
           <DateViewCaptureHint />
         ) : (
           <TaskCreator
@@ -611,162 +572,70 @@ function tagLabel(tag: TagResponse): string {
 
 function TaskList({
   tasks,
-  projects,
   tags,
   taskPathBase,
   taskSearch,
-  editingTaskId,
-  editingTitle,
+  selectedTaskId,
   registerRowLink,
-  onBeginEdit,
-  onCancelEdit,
   onComplete,
-  onEditTitle,
-  onMoveToNext,
-  onSaveEdit,
-  expandedTaskId,
-  onCollapse,
-  detailHeadingRef,
-  detailTask,
-  detailIsLoading,
-  detailError,
-  onSaveDetail,
-  onTransitionDetail,
-  onCreateSubtask,
-  onTransitionSubtask,
-  onCreateComment,
-  label,
-  showProject = true
+  label
 }: {
   tasks: TaskResponse[];
-  projects: ProjectResponse[];
   tags: TagResponse[];
   taskPathBase: string;
   taskSearch: string;
-  editingTaskId: string | null;
-  editingTitle: string;
+  selectedTaskId?: string;
   registerRowLink: (taskId: string, el: HTMLAnchorElement | null) => void;
-  onBeginEdit: (task: TaskResponse) => void;
-  onCancelEdit: () => void;
   onComplete: (task: TaskResponse) => void;
-  onEditTitle: (title: string) => void;
-  onMoveToNext: (task: TaskResponse) => void;
-  onSaveEdit: (task: TaskResponse) => void;
-  expandedTaskId?: string;
-  onCollapse: () => void;
-  detailHeadingRef: RefObject<HTMLHeadingElement>;
-  detailTask?: TaskResponse;
-  detailIsLoading: boolean;
-  detailError: unknown;
-  onSaveDetail: (task: TaskResponse, payload: Parameters<typeof apiClient.updateTask>[1]) => void;
-  onTransitionDetail: (task: TaskResponse, action: "move" | "complete" | "reopen" | "cancel", toState?: OpenTaskState, waitingFor?: string) => void;
-  onCreateSubtask: (task: TaskResponse, title: string) => void;
-  onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") => void;
-  onCreateComment: (task: TaskResponse, body: string) => void;
   /** Names this list for assistive tech; each group supplies its project name. */
   label?: string;
-  /** Off inside a project group, where every row shares the heading's project. */
-  showProject?: boolean;
 }): JSX.Element {
-  const projectById = new Map(projects.map((project) => [project.id, project]));
   const tagById = new Map(tags.map((tag) => [tag.id, tag]));
 
   return (
-    <div className="flex flex-col gap-2" role="list" aria-label={label ?? "Tasks"}>
-      {tasks.map((task) => {
-        const project = task.project_id ? projectById.get(task.project_id) : undefined;
-        const taskTags = task.tag_ids.map((id) => tagById.get(id)).filter((tag): tag is TagResponse => Boolean(tag));
-        const isExpanded = expandedTaskId === task.id;
-        return (
-          <TaskRow
-            key={task.id}
-            task={task}
-            project={project}
-            tags={taskTags}
-            detailPath={`${taskPathBase}/${task.id}${taskSearch ? `?${taskSearch}` : ""}`}
-            showProject={showProject}
-            isEditing={editingTaskId === task.id}
-            editingTitle={editingTitle}
-            registerRowLink={registerRowLink}
-            onBeginEdit={onBeginEdit}
-            onCancelEdit={onCancelEdit}
-            onComplete={onComplete}
-            onEditTitle={onEditTitle}
-            onMoveToNext={onMoveToNext}
-            onSaveEdit={onSaveEdit}
-            isExpanded={isExpanded}
-          >
-            {isExpanded ? (
-              <TaskDetailPanel
-                task={detailTask}
-                projects={projects}
-                tags={tags}
-                isLoading={detailIsLoading}
-                error={detailError}
-                headingRef={detailHeadingRef}
-                onClose={onCollapse}
-                onSave={onSaveDetail}
-                onTransition={onTransitionDetail}
-                onCreateSubtask={onCreateSubtask}
-                onTransitionSubtask={onTransitionSubtask}
-                onCreateComment={onCreateComment}
-              />
-            ) : null}
-          </TaskRow>
-        );
-      })}
+    <div className="flex flex-col gap-[5px]" role="list" aria-label={label ?? "Tasks"}>
+      {tasks.map((task) => (
+        <TaskRow
+          key={task.id}
+          task={task}
+          tags={task.tag_ids.map((id) => tagById.get(id)).filter((tag): tag is TagResponse => Boolean(tag))}
+          detailPath={`${taskPathBase}/${task.id}${taskSearch ? `?${taskSearch}` : ""}`}
+          isSelected={selectedTaskId === task.id}
+          registerRowLink={registerRowLink}
+          onComplete={onComplete}
+        />
+      ))}
     </div>
   );
 }
 
 function TaskRow({
   task,
-  project,
   tags,
   detailPath,
-  showProject = true,
-  isEditing,
-  editingTitle,
+  isSelected,
   registerRowLink,
-  onBeginEdit,
-  onCancelEdit,
-  onComplete,
-  onEditTitle,
-  onMoveToNext,
-  onSaveEdit,
-  isExpanded,
-  children
+  onComplete
 }: {
   task: TaskResponse;
-  project?: ProjectResponse;
   tags: TagResponse[];
   detailPath: string;
-  showProject?: boolean;
-  isEditing: boolean;
-  editingTitle: string;
+  isSelected: boolean;
   registerRowLink: (taskId: string, el: HTMLAnchorElement | null) => void;
-  onBeginEdit: (task: TaskResponse) => void;
-  onCancelEdit: () => void;
   onComplete: (task: TaskResponse) => void;
-  onEditTitle: (title: string) => void;
-  onMoveToNext: (task: TaskResponse) => void;
-  onSaveEdit: (task: TaskResponse) => void;
-  isExpanded: boolean;
-  children?: ReactNode;
 }): JSX.Element {
   const isTerminal = task.state === "completed" || task.state === "cancelled";
   const navigate = useNavigate();
+  const subtasks = task.subtasks ?? [];
+  const doneSubtasks = subtasks.filter((subtask) => subtask.state !== "open").length;
 
   return (
     <article
-      className={`group flex flex-col gap-2 rounded-[12px] border px-4 py-3 shadow-soft transition-shadow duration-200 ease-smooth hover:shadow-raised ${
-        isTerminal ? "border-slate-200 bg-slate-50/70" : isExpanded ? "border-slate-200 bg-white shadow-raised" : "border-slate-200 bg-white"
-      }`}
+      className={`group rounded-[12px] border px-3.5 py-[7px] shadow-soft transition-all duration-200 ease-smooth hover:shadow-raised ${
+        isSelected ? "border-brand-primary bg-info-bg shadow-raised" : "border-slate-200 bg-white"
+      } ${isTerminal ? "opacity-45" : ""}`}
       role="listitem"
       onClick={(event) => {
-        if (isExpanded) {
-          return;
-        }
         const target = event.target as HTMLElement;
         if (target.closest("a, button, input, textarea, select, label")) {
           return;
@@ -774,440 +643,58 @@ function TaskRow({
         navigate(detailPath);
       }}
     >
-      {/* Wrapping row: below `sm` the checkbox and title claim the first line and the
-          chips wrap underneath, instead of each chip stretching to the card width.
-          `sm:contents` dissolves the checkbox/title wrapper so that from `sm` up the
-          row is a single flex line again and the project name can still `ml-auto`. */}
-      <div className="flex min-h-[32px] flex-wrap items-center gap-x-3 gap-y-2">
-        <div className="flex min-w-0 basis-full items-center gap-3 sm:contents">
+      <div className="flex min-h-[26px] flex-wrap items-center gap-x-2.5 gap-y-1.5">
         {isTerminal ? (
           <span
             aria-hidden
             className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border-[1.5px] ${
               task.state === "completed"
-                ? "border-emerald-500 bg-emerald-500 text-white"
+                ? "border-brand-primary bg-brand-primary text-white"
                 : "border-slate-300 bg-slate-200 text-slate-500"
             }`}
           >
-            {task.state === "completed" ? <Check className="h-3 w-3" /> : <X className="h-2.5 w-2.5" />}
+            {task.state === "completed" ? <Check className="h-[11px] w-[11px]" /> : <X className="h-2.5 w-2.5" />}
           </span>
         ) : (
           <button
             type="button"
-            className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border border-[1.5px] border-slate-300 bg-white text-white hover:border-sky-400 hover:bg-sky-500"
+            className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border-[1.5px] border-slate-300 bg-white text-transparent transition-colors duration-200 ease-smooth hover:border-brand-primary"
             aria-label={`Complete ${task.title}`}
             onClick={() => onComplete(task)}
           >
-            <Check className="h-3 w-3" aria-hidden />
+            <Check className="h-[11px] w-[11px]" aria-hidden />
           </button>
         )}
-        {isEditing ? (
-          <form
-            className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (editingTitle.trim()) {
-                onSaveEdit(task);
-              }
-            }}
-          >
-            <label className="sr-only" htmlFor={`task-title-${task.id}`}>Task title</label>
-            <input
-              id={`task-title-${task.id}`}
-              aria-label="Task title"
-              className="min-w-0 flex-1 rounded-lg border border-sky-200 px-3 py-2 text-sm font-medium text-slate-900 outline-none focus:border-sky-400"
-              value={editingTitle}
-              onChange={(event) => onEditTitle(event.currentTarget.value)}
-            />
-            <Button type="submit" size="sm">Save task title</Button>
-            <Button variant="secondary" size="sm" onClick={onCancelEdit}>Cancel</Button>
-          </form>
-        ) : (
-          <Link
-            ref={(el) => registerRowLink(task.id, el)}
-            to={detailPath}
-            className={`min-w-0 flex-1 truncate text-sm font-medium hover:text-brand-primary ${
-              isTerminal ? "text-slate-400 line-through decoration-slate-300" : "text-slate-900"
-            }`}
-          >
-            {task.title}
-          </Link>
-        )}
-        </div>
-        {isTerminal ? <Chip variant="neutral">{task.state === "completed" ? "Completed" : "Cancelled"}</Chip> : null}
-        {!isEditing && !isTerminal ? (
-          <span className="hidden shrink-0 items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 sm:flex">
-            <button
-              type="button"
-              className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-slate-900"
-              aria-label={`Edit ${task.title}`}
-              onClick={() => onBeginEdit(task)}
-            >
-              <Edit3 className="h-3.5 w-3.5" aria-hidden />
-            </button>
-            {task.state !== "next" ? (
-              <button
-                type="button"
-                className="inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:border-slate-300 hover:text-slate-900"
-                aria-label={`Move ${task.title} to Next`}
-                onClick={() => onMoveToNext(task)}
-              >
-                <ArrowRight className="h-3 w-3" aria-hidden />
-                Next
-              </button>
-            ) : null}
-          </span>
+        <Link
+          ref={(el) => registerRowLink(task.id, el)}
+          to={detailPath}
+          className={`min-w-0 flex-1 truncate text-sm font-medium hover:text-brand-primary ${
+            isTerminal ? "text-slate-500 line-through decoration-slate-300" : "text-slate-900"
+          }`}
+        >
+          {task.title}
+        </Link>
+        {task.due_date ? (
+          <Chip variant="due">
+            <CalendarDays className="h-[11px] w-[11px]" aria-hidden />
+            {formatDueDate(task.due_date)}
+          </Chip>
         ) : null}
-        {task.due_date ? <Chip variant="due">{formatDueDate(task.due_date)}</Chip> : null}
-        {tags.map((tag) => (
-          <Chip key={tag.id} variant="neutral">{tagLabel(tag)}</Chip>
-        ))}
-        {project && showProject ? (
-          <span className="min-w-0 shrink truncate text-[11px] text-slate-400 sm:ml-auto sm:text-right lg:max-w-[160px]">{project.name}</span>
+        {subtasks.length ? (
+          <Chip variant="neutral">
+            {doneSubtasks} / {subtasks.length}
+          </Chip>
         ) : null}
+        <span className="ml-auto flex shrink-0 items-center gap-2.5">
+          {task.state === "waiting" && task.waiting_for ? (
+            <span className="max-w-[140px] truncate text-[11px] text-slate-400">{task.waiting_for}</span>
+          ) : null}
+          {tags.map((tag) => (
+            <Chip key={tag.id} variant="neutral">{tagLabel(tag)}</Chip>
+          ))}
+        </span>
       </div>
-      {children}
     </article>
-  );
-}
-
-const detailFieldClass =
-  "min-h-10 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition-colors duration-200 ease-smooth hover:border-slate-300 focus:border-brand-primary focus:shadow-ring-focus";
-
-const detailCaptionClass = "text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500";
-
-function DetailField({ label, children }: { label: string; children: ReactNode }): JSX.Element {
-  return (
-    <label className="flex min-w-0 flex-col gap-1">
-      <span className={detailCaptionClass}>{label}</span>
-      {children}
-    </label>
-  );
-}
-
-function DetailSection({ title, children }: { title: string; children: ReactNode }): JSX.Element {
-  return (
-    <section className="flex min-w-0 flex-col gap-2">
-      <h3 className={`m-0 ${detailCaptionClass}`}>{title}</h3>
-      {children}
-    </section>
-  );
-}
-
-function TaskDetailPanel({
-  task,
-  projects,
-  tags,
-  isLoading,
-  error,
-  headingRef,
-  onClose,
-  onSave,
-  onTransition,
-  onCreateSubtask,
-  onTransitionSubtask,
-  onCreateComment
-}: {
-  task?: TaskResponse;
-  projects: ProjectResponse[];
-  tags: TagResponse[];
-  isLoading: boolean;
-  error: unknown;
-  headingRef: RefObject<HTMLHeadingElement>;
-  onClose: () => void;
-  onSave: (task: TaskResponse, payload: Parameters<typeof apiClient.updateTask>[1]) => void;
-  onTransition: (task: TaskResponse, action: "move" | "complete" | "reopen" | "cancel", toState?: OpenTaskState, waitingFor?: string) => void;
-  onCreateSubtask: (task: TaskResponse, title: string) => void;
-  onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") => void;
-  onCreateComment: (task: TaskResponse, body: string) => void;
-}): JSX.Element {
-  const isOpenState = Boolean(task && task.state !== "completed" && task.state !== "cancelled");
-
-  return (
-    <aside
-      className="-mx-4 -my-5 flex min-h-[calc(100vh-56px)] min-w-0 flex-col gap-[18px] bg-surface-base px-4 py-5 sm:-mx-6 sm:px-6 motion-safe:lg:animate-detail-enter lg:m-0 lg:min-h-0 lg:bg-transparent lg:p-0 lg:pt-3.5 lg:border-t lg:border-slate-200"
-      aria-labelledby="task-detail-title"
-    >
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          aria-label="Back to list"
-          className="-ml-1 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 lg:hidden"
-          onClick={onClose}
-        >
-          <ArrowLeft className="h-5 w-5" aria-hidden />
-        </button>
-        <h2
-          id="task-detail-title"
-          ref={headingRef}
-          tabIndex={-1}
-          className="sr-only m-0 flex-1 text-sm font-semibold uppercase tracking-wide text-slate-500 outline-none lg:not-sr-only"
-        >
-          Task detail
-        </h2>
-        <p className="m-0 min-w-0 flex-1 break-words whitespace-normal text-[20px] font-semibold leading-[1.3] tracking-[-0.015em] text-slate-900 lg:hidden">
-          {task?.title ?? "Task"}
-        </p>
-        <Button
-          variant="secondary"
-          size="sm"
-          className="hidden lg:inline-flex"
-          leftIcon={<X aria-hidden />}
-          onClick={onClose}
-        >
-          Close
-        </Button>
-      </div>
-
-      {isLoading ? <p className="text-sm text-slate-600">Loading task detail…</p> : null}
-      {error ? <p role="alert" className="text-sm text-rose-700">{getErrorMessage(error)}</p> : null}
-      {task ? (
-        <div className="flex flex-col gap-[18px]">
-          <form
-            className="flex min-w-0 flex-col gap-3"
-            key={`${task.id}-${task.revision}`}
-            onSubmit={(event) => {
-              event.preventDefault();
-              const form = new FormData(event.currentTarget);
-              const tagIds = form.getAll("tag_ids").map(String);
-              const details = String(form.get("details") ?? "").trim();
-              const projectId = String(form.get("project_id") ?? "");
-              const dueDate = String(form.get("due_date") ?? "");
-              const waitingFor = String(form.get("waiting_for") ?? "").trim();
-              onSave(task, {
-                title: String(form.get("title") ?? "").trim(),
-                details: details || null,
-                project_id: projectId || null,
-                tag_ids: tagIds,
-                due_date: dueDate || null,
-                priority: String(form.get("priority") ?? "none") as TaskPriority,
-                ...(task.state === "waiting" ? { waiting_for: waitingFor } : {}),
-                expected_revision: task.revision
-              });
-            }}
-          >
-            <DetailField label="Title">
-              <input name="title" aria-label="Title" defaultValue={task.title} className={detailFieldClass} />
-            </DetailField>
-            <DetailField label="Details">
-              <textarea
-                name="details"
-                aria-label="Details"
-                defaultValue={task.details ?? ""}
-                rows={3}
-                placeholder="Notes, links, whatever helps you pick this up again"
-                className={`${detailFieldClass} py-2 placeholder:text-slate-400`}
-              />
-            </DetailField>
-            <div className="grid min-w-0 gap-3 sm:grid-cols-3">
-              <DetailField label="Project">
-                <select name="project_id" aria-label="Project" defaultValue={task.project_id ?? ""} className={detailFieldClass}>
-                  <option value="">No project</option>
-                  {projects.map((project) => (
-                    <option key={project.id} value={project.id}>{project.name}</option>
-                  ))}
-                </select>
-              </DetailField>
-              <DetailField label="Due date">
-                <input name="due_date" aria-label="Due date" type="date" defaultValue={task.due_date ?? ""} className={detailFieldClass} />
-              </DetailField>
-              <DetailField label="Priority">
-                <select name="priority" aria-label="Priority" defaultValue={task.priority} className={detailFieldClass}>
-                  <option value="none">None</option>
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                </select>
-              </DetailField>
-            </div>
-            <fieldset className="min-w-0">
-              <legend className={`mb-1.5 ${detailCaptionClass}`}>Tags</legend>
-              <div className="flex flex-wrap gap-1.5">
-                {tags.map((tag) => (
-                  <label key={tag.id} className="inline-flex cursor-pointer items-center">
-                    <input
-                      name="tag_ids"
-                      type="checkbox"
-                      value={tag.id}
-                      defaultChecked={task.tag_ids.includes(tag.id)}
-                      className="peer sr-only"
-                    />
-                    <span className="rounded-full border border-slate-200 bg-white px-2.5 py-[3px] text-[11px] font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:border-slate-300 peer-checked:border-brand-primary peer-checked:bg-info-bg peer-checked:text-info-fg peer-focus-visible:shadow-ring-focus">
-                      #{tag.name.replace(/^[#@]/, "")}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-            <div className="flex min-w-0 flex-col gap-3 border-t border-slate-200 pt-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <Button type="submit" size="md">Save task detail</Button>
-                {isOpenState ? (
-                  <>
-                    <Button
-                      variant="secondary"
-                      size="md"
-                      className="border-emerald-200 text-emerald-700 hover:border-emerald-300 hover:text-emerald-800"
-                      leftIcon={<Check aria-hidden />}
-                      onClick={() => onTransition(task, "complete")}
-                    >
-                      Complete
-                    </Button>
-                    <Button variant="danger" size="md" onClick={() => onTransition(task, "cancel")}>
-                      Cancel task
-                    </Button>
-                  </>
-                ) : null}
-              </div>
-              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                <span className={`mr-0.5 ${detailCaptionClass}`}>{isOpenState ? "Move to" : "Reopen to"}</span>
-                {(isOpenState ? openStateOptions.filter((option) => option !== task.state) : openStateOptions).map((option) => (
-                  <TaskTransitionButton
-                    key={option}
-                    label={`${isOpenState ? "Move to" : "Reopen to"} ${stateLabels[option].replace(" actions", "")}`}
-                    text={stateLabels[option].replace(" actions", "")}
-                    targetState={option}
-                    action={isOpenState ? "move" : "reopen"}
-                    task={task}
-                    onTransition={onTransition}
-                  />
-                ))}
-              </div>
-              <DetailField label="Waiting for">
-                <input
-                  name="waiting_for"
-                  aria-label="Waiting for"
-                  defaultValue={task.waiting_for ?? ""}
-                  placeholder="Who or what are you waiting on?"
-                  className={`${detailFieldClass} placeholder:text-slate-400 sm:max-w-[380px]`}
-                />
-                <span className="text-[11px] text-slate-500">Required to move or reopen a task into Waiting for.</span>
-              </DetailField>
-            </div>
-          </form>
-
-          <DetailSection title="Subtasks">
-            <div className="flex flex-col gap-1.5" aria-label="Subtasks">
-              {(task.subtasks ?? []).map((subtask) => {
-                const done = subtask.state !== "open";
-                return (
-                  <div key={subtask.id} className="flex items-center gap-2 text-sm">
-                    <button
-                      type="button"
-                      className={`flex h-[14px] w-[14px] shrink-0 items-center justify-center rounded-full border border-[1.5px] ${
-                        done ? "border-brand-primary bg-brand-primary text-white" : "border-slate-300 bg-white text-white"
-                      }`}
-                      aria-label={done ? `Reopen ${subtask.title}` : `Complete ${subtask.title}`}
-                      onClick={() => onTransitionSubtask(task, subtask, done ? "reopen" : "complete")}
-                    >
-                      <Check className="h-2.5 w-2.5" aria-hidden />
-                    </button>
-                    <span className={done ? "text-slate-500 line-through" : "text-slate-800"}>{subtask.title}</span>
-                  </div>
-                );
-              })}
-            </div>
-            <form
-              className="flex w-full min-w-0 items-center gap-2 rounded-lg border border-dashed border-slate-200 bg-slate-50/70 p-2 lg:max-w-[420px]"
-              onSubmit={(event) => {
-                event.preventDefault();
-                const form = new FormData(event.currentTarget);
-                const title = String(form.get("subtask_title") ?? "").trim();
-                if (title) {
-                  onCreateSubtask(task, title);
-                  event.currentTarget.reset();
-                }
-              }}
-            >
-              <input
-                name="subtask_title"
-                aria-label="New subtask title"
-                className="min-h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none transition-colors duration-200 ease-smooth focus:border-brand-primary placeholder:text-slate-400"
-                placeholder="Add a subtask"
-              />
-              <Button type="submit" variant="secondary" size="sm">Add subtask</Button>
-            </form>
-          </DetailSection>
-
-          <div data-testid="task-detail-agent">
-            <DetailSection title="Agent">
-              <div className="flex items-center gap-2">
-                <SoonChip />
-                <span className="sr-only">Coming soon</span>
-              </div>
-            </DetailSection>
-          </div>
-
-          <DetailSection title="Comments">
-            <div className="flex flex-col gap-2" aria-label="Comments">
-              {(task.comments ?? []).map((comment) => (
-                <div key={comment.id} className="flex items-start gap-2">
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-sky-100 text-[10px] font-semibold text-sky-700">
-                    {comment.actor_id.slice(0, 2).toUpperCase()}
-                  </span>
-                  <p className="m-0 min-w-0 flex-1 text-sm text-slate-700">{comment.body}</p>
-                </div>
-              ))}
-            </div>
-            <form
-              className="flex w-full min-w-0 items-center gap-2 rounded-lg border border-dashed border-slate-200 bg-slate-50/70 p-2 lg:max-w-[420px]"
-              onSubmit={(event) => {
-                event.preventDefault();
-                const form = new FormData(event.currentTarget);
-                const body = String(form.get("comment_body") ?? "").trim();
-                if (body) {
-                  onCreateComment(task, body);
-                  event.currentTarget.reset();
-                }
-              }}
-            >
-              <input
-                name="comment_body"
-                aria-label="New comment"
-                className="min-h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none transition-colors duration-200 ease-smooth focus:border-brand-primary placeholder:text-slate-400"
-                placeholder="Add a comment"
-              />
-              <Button type="submit" variant="secondary" size="sm">Add comment</Button>
-            </form>
-          </DetailSection>
-        </div>
-      ) : null}
-    </aside>
-  );
-}
-
-function TaskTransitionButton({
-  task,
-  action,
-  targetState,
-  label,
-  text,
-  onTransition
-}: {
-  task: TaskResponse;
-  action: "move" | "reopen";
-  targetState: OpenTaskState;
-  /** Accessible name — spells out the action ("Move to Inbox"). */
-  label: string;
-  /** Visible text — the destination only, since the group already reads "Move to". */
-  text: string;
-  onTransition: (task: TaskResponse, action: "move" | "complete" | "reopen" | "cancel", toState?: OpenTaskState, waitingFor?: string) => void;
-}): JSX.Element {
-  return (
-    <Button
-      variant="secondary"
-      size="sm"
-      aria-label={label}
-      onClick={(event) => {
-        const detailForm = event.currentTarget.form;
-        const waitingFor = detailForm
-          ? String(new FormData(detailForm).get("waiting_for") ?? "")
-          : undefined;
-        onTransition(task, action, targetState, targetState === "waiting" ? waitingFor : undefined);
-      }}
-    >
-      {text}
-    </Button>
   );
 }
 
@@ -1252,6 +739,12 @@ function TaskCreator({
   const popupOpen = suggestionsOpen && suggestions.length > 0;
   const selectedSuggestionIndex = Math.min(activeSuggestionIndex, Math.max(suggestions.length - 1, 0));
 
+  const placeholder = state === "next"
+    ? "Add a next action — or dump everything on your mind with the mic above"
+    : contextProjectId
+      ? "Add a task to this project"
+      : "Add a task";
+
   const submitDraft = () => {
     if (draft.isValid && (!waitingForRequired || newWaitingFor.trim())) {
       setSuggestionsOpen(false);
@@ -1278,15 +771,17 @@ function TaskCreator({
   };
 
   return (
-    <div className="mt-3 space-y-3">
+    <div className="mt-2 space-y-3">
+      {/* The prototype's dashed "add task" row; the smart-add form lives inside
+          it so the affordance is directly typable rather than click-to-expand. */}
       <form
-        className="flex flex-col gap-2 rounded-[12px] border border-dashed border-slate-200 bg-slate-50/70 p-3 sm:flex-row sm:items-center"
+        className="flex w-full flex-wrap items-center gap-3 rounded-[12px] border-[1.5px] border-dashed border-slate-300 bg-transparent px-4 py-3 transition-colors duration-200 ease-smooth focus-within:border-brand-primary hover:border-brand-primary"
         onSubmit={(event) => {
           event.preventDefault();
           submitDraft();
         }}
       >
-        <Plus className="hidden h-3.5 w-3.5 text-slate-500 sm:block" aria-hidden />
+        <Plus className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
         <label className="sr-only" htmlFor="new-task-title">New task title</label>
         <input
           ref={inputRef}
@@ -1295,8 +790,8 @@ function TaskCreator({
           aria-expanded={popupOpen}
           aria-controls={popupOpen ? smartAddSuggestionsId : undefined}
           aria-activedescendant={popupOpen ? `${smartAddSuggestionsId}-option-${selectedSuggestionIndex}` : undefined}
-          className="min-h-10 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-300"
-          placeholder="Add a task with #tag and @project — or dump with the mic above"
+          className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+          placeholder={placeholder}
           value={newTitle}
           onChange={(event) => {
             onTitleChange(event.currentTarget.value);
@@ -1343,21 +838,23 @@ function TaskCreator({
             <input
               id="new-task-waiting-for"
               aria-label="Waiting for"
-              className="min-h-10 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-300"
+              className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
               placeholder="Waiting for who or what?"
               value={newWaitingFor}
               onChange={(event) => onWaitingForChange(event.currentTarget.value)}
             />
           </>
         ) : null}
-        <Button
-          type="submit"
-          size="lg"
-          isLoading={isCreating}
-          disabled={!draft.isValid || (waitingForRequired && !newWaitingFor.trim())}
-        >
-          Add task
-        </Button>
+        {newTitle.trim() ? (
+          <Button
+            type="submit"
+            size="sm"
+            isLoading={isCreating}
+            disabled={!draft.isValid || (waitingForRequired && !newWaitingFor.trim())}
+          >
+            Add task
+          </Button>
+        ) : null}
       </form>
       {popupOpen ? (
         <SmartAddSuggestions
@@ -1392,9 +889,9 @@ function DateViewCaptureHint(): JSX.Element {
 
 function LoadingState({ label }: { label: string }): JSX.Element {
   return (
-    <div className="space-y-2" aria-label={`Loading ${label}`}>
+    <div className="space-y-[5px]" aria-label={`Loading ${label}`}>
       {[0, 1, 2, 3].map((item) => (
-        <div key={item} className="h-12 animate-pulse rounded-[12px] border border-slate-200 bg-white" />
+        <div key={item} className="h-10 animate-pulse rounded-[12px] border border-slate-200 bg-white" />
       ))}
     </div>
   );

@@ -132,6 +132,28 @@ const config: Config = {
         "detail-enter": {
           "0%": { opacity: "0", transform: "translateY(-4px)" },
           "100%": { opacity: "1", transform: "translateY(0)" }
+        },
+        "pulse-dot": {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0.35" }
+        },
+        "wave-bar": {
+          to: { transform: "scaleY(0.3)" }
+        },
+        "caret-blink": {
+          "50%": { opacity: "0" }
+        },
+        "card-in": {
+          "0%": { opacity: "0", transform: "translateY(6px) scale(0.98)" },
+          "100%": { opacity: "1", transform: "translateY(0) scale(1)" }
+        },
+        "shimmer-sweep": {
+          "0%": { transform: "translateX(-100%)" },
+          "100%": { transform: "translateX(100%)" }
+        },
+        "slide-in-right": {
+          "0%": { opacity: "0", transform: "translateX(16px)" },
+          "100%": { opacity: "1", transform: "translateX(0)" }
         }
       },
       animation: {
@@ -150,7 +172,13 @@ const config: Config = {
         "scale-fade-out":
           "scale-fade-out 180ms cubic-bezier(0.4, 0, 1, 1) forwards",
         shimmer: "shimmer 1500ms linear infinite",
-        "detail-enter": "detail-enter 250ms cubic-bezier(0.22, 1, 0.36, 1)"
+        "detail-enter": "detail-enter 250ms cubic-bezier(0.22, 1, 0.36, 1)",
+        "pulse-dot": "pulse-dot 1.6s cubic-bezier(0.22, 1, 0.36, 1) infinite",
+        "wave-bar": "wave-bar 1s cubic-bezier(0.22, 1, 0.36, 1) infinite alternate",
+        "caret-blink": "caret-blink 1.1s step-end infinite",
+        "card-in": "card-in 300ms cubic-bezier(0.22, 1, 0.36, 1)",
+        "shimmer-sweep": "shimmer-sweep 2.2s cubic-bezier(0.22, 1, 0.36, 1) infinite",
+        "slide-in-right": "slide-in-right 250ms cubic-bezier(0.22, 1, 0.36, 1)"
       }
     }
   },
