@@ -207,7 +207,7 @@ test.describe("desktop task shell at the canonical 1240x800 viewport", () => {
       // Zero secondary counts stay visible (Someday / maybe has 0 open tasks).
       await expect(page.getByRole("link", { name: "Someday / maybe 0" })).toBeVisible();
       await expect(page.getByRole("button", { name: "Weekly review" })).toBeEnabled();
-      await expect(page.getByRole("button", { name: "Think with CRT — Coming soon" })).toBeDisabled();
+      await expect(page.getByRole("button", { name: "Thinking Mode — Coming soon" })).toBeDisabled();
     });
 
     await test.step("keep wrapped desktop tag actions inside the sidebar", async () => {
@@ -249,25 +249,28 @@ test.describe("desktop task shell at the canonical 1240x800 viewport", () => {
   });
 });
 
-test("clicking a task expands inline task detail in place", async ({ page }) => {
+test("clicking a task opens the docked right-side detail panel", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 780 });
   await page.goto("/tasks/next");
 
   await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
+  // With no selection the panel shows the prototype's empty state.
+  await expect(page.getByText("Nothing selected")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Task detail" })).toHaveCount(0);
 
   await page.getByRole("link", { name: "Fix onboarding drop-off" }).click();
   await expect(page.getByRole("heading", { name: "Task detail" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("Fix onboarding drop-off");
   await expect(page.getByLabel("New subtask title")).toBeVisible();
   await expect(page.getByLabel("New comment")).toBeVisible();
 
-  await test.step("keep the canonical task-row link addressable while the mobile-only title stays hidden", async () => {
+  await test.step("keep the canonical task-row link addressable while the panel is open", async () => {
     await expect(page.getByRole("link", { name: "Fix onboarding drop-off" })).toBeVisible();
-    await expect(page.locator("p", { hasText: "Fix onboarding drop-off" })).toBeHidden();
   });
 
   await page.getByRole("button", { name: "Close" }).click();
   await expect(page.getByRole("heading", { name: "Task detail" })).toHaveCount(0);
+  await expect(page.getByText("Nothing selected")).toBeVisible();
 });
 
 test("task detail preserves the filtered route, focus, and Back history after detail whitespace clicks", async ({ page }) => {
@@ -281,8 +284,8 @@ test("task detail preserves the filtered route, focus, and Back history after de
   const detailHeading = page.getByRole("heading", { name: "Task detail" });
   await expect(detailHeading).toBeFocused();
 
-  await test.step("ignore noninteractive Agent whitespace without adding a same-URL history entry", async () => {
-    await page.getByTestId("task-detail-agent").click();
+  await test.step("ignore noninteractive panel whitespace without adding a same-URL history entry", async () => {
+    await page.getByRole("heading", { name: "Comments" }).click();
     await expect(page).toHaveURL(/\/tasks\/next\/task-2\?sort=priority&q=Persisted$/);
   });
 
@@ -292,24 +295,22 @@ test("task detail preserves the filtered route, focus, and Back history after de
   await expect(originLink).toBeFocused();
 });
 
-test("mobile task detail pushes the list pane and browser back restores it", async ({ page }) => {
+test("mobile task detail slides over the list and browser back restores it", async ({ page }) => {
   await page.setViewportSize({ width: 402, height: 874 });
   await page.goto("/tasks/next");
 
   await page.getByRole("link", { name: "Fix onboarding drop-off" }).click();
-  await expect(page.getByRole("button", { name: "Back to list" })).toBeVisible();
-  await expect(page.getByText("Fix onboarding drop-off", { exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Next actions" })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Agent" })).toBeVisible();
-  await expect(page.getByText("Coming soon")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Task detail" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("Fix onboarding drop-off");
+  await expect(page.getByRole("heading", { name: "Comments" })).toBeVisible();
   await expect(page.locator("body")).toHaveScreenshot("claude-design-task-detail-mobile-402x874.png", {
     animations: "disabled",
     maxDiffPixelRatio: 0.08
   });
 
   await page.goBack();
+  await expect(page.getByRole("heading", { name: "Task detail" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Back to list" })).toHaveCount(0);
 });
 
 test("mobile task detail wraps a long task title without horizontal overflow", async ({ page }) => {
@@ -321,16 +322,19 @@ test("mobile task detail wraps a long task title without horizontal overflow", a
   await page.goto("/tasks/next");
   await page.getByRole("link", { name: "Fix onboarding drop-off" }).click();
 
-  const mobileTitle = page.getByText(longTitle, { exact: true });
-  await expect(mobileTitle).toBeVisible();
+  const mobileTitle = page.getByRole("textbox", { name: "Title", exact: true });
+  await expect(mobileTitle).toHaveValue(longTitle);
   await test.step("keep the full mobile detail title readable inside the viewport", async () => {
+    // The title textarea auto-grows to its content, so the full title must fit
+    // without horizontal or vertical clipping.
     const titleMetrics = await mobileTitle.evaluate((element) => ({
       clientWidth: element.clientWidth,
       scrollWidth: element.scrollWidth,
-      whiteSpace: getComputedStyle(element).whiteSpace
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight
     }));
-    if (titleMetrics.scrollWidth > titleMetrics.clientWidth || titleMetrics.whiteSpace === "nowrap") {
-      throw new Error(`Expected a wrapped mobile title, received ${JSON.stringify(titleMetrics)}`);
+    if (titleMetrics.scrollWidth > titleMetrics.clientWidth || titleMetrics.scrollHeight > titleMetrics.clientHeight + 1) {
+      throw new Error(`Expected a fully visible wrapped mobile title, received ${JSON.stringify(titleMetrics)}`);
     }
   });
 });
@@ -440,7 +444,7 @@ test("Brain Dump recording and review surfaces use source-derived mobile geometr
   await page.getByRole("checkbox", { name: "Allow secure cloud transcription" }).check();
   await page.getByRole("button", { name: "Record" }).click();
   await expect(page.getByText("Recording")).toBeVisible();
-  await expect(page.getByText("Nothing is saved until review")).toBeVisible();
+  await expect(page.getByText("Nothing is saved until you stop")).toBeVisible();
   await expect(page.locator("body")).toHaveScreenshot("claude-design-brain-dump-recording-402x874.png", {
     animations: "disabled",
     maxDiffPixelRatio: 0.08
@@ -448,7 +452,7 @@ test("Brain Dump recording and review surfaces use source-derived mobile geometr
 
   await page.getByRole("button", { name: "Stop & review" }).click();
   await expect(page.getByRole("heading", { name: "Review 9 tasks" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Confirm 9 additions" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send 9 to inbox" })).toBeVisible();
   await expect(page.locator("body")).toHaveScreenshot("claude-design-brain-dump-review-402x874.png", {
     animations: "disabled",
     maxDiffPixelRatio: 0.08

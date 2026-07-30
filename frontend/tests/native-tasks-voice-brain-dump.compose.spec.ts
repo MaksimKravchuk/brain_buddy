@@ -357,7 +357,9 @@ test("native task shell uses real backend counts, filters, reload and relogin pe
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
     await expect(page.getByText("2 tasks")).toBeVisible();
-    await expect(page.getByRole("list", { name: "Tasks" })).toContainText("Draft launch note");
+    // Next actions groups by project out of the box; the seeded project task
+    // sits in its own group list under a "Launch Plan" heading.
+    await expect(page.getByRole("list", { name: "Launch Plan" })).toContainText("Draft launch note");
     for (const title of forbiddenDemoTitles) {
       await expect(page.getByText(title, { exact: true })).toHaveCount(0);
     }
@@ -411,24 +413,25 @@ test("minimal task management creates, edits, moves, completes, reopens and pers
     await expect(page.getByText("Plan dentist visit")).toBeVisible();
   });
 
-  await test.step("edit title and move Inbox to Next", async () => {
-    await page.getByRole("button", { name: "Edit Plan dentist visit" }).click();
-    await page.getByRole("textbox", { name: "Task title", exact: true }).fill("Book dentist checkup");
-    await page.getByRole("button", { name: "Save task title" }).click();
-    await expect(page.getByText("Book dentist checkup")).toBeVisible();
-    await page.getByRole("button", { name: "Move Book dentist checkup to Next" }).click();
-    await expect(page.getByText("Book dentist checkup")).toHaveCount(0);
+  await test.step("edit title and move Inbox to Next from the detail panel", async () => {
+    await page.getByRole("link", { name: "Plan dentist visit" }).click();
+    const detailTitle = page.getByRole("textbox", { name: "Title", exact: true });
+    await detailTitle.fill("Book dentist checkup");
+    await detailTitle.press("Enter");
+    await expect(page.getByRole("link", { name: "Book dentist checkup" })).toBeVisible();
+    await page.getByLabel("List").selectOption("next");
+    await expect(page.getByRole("link", { name: "Book dentist checkup" })).toHaveCount(0);
     await page.goto("/tasks/next");
     await expect(page.getByText("Book dentist checkup")).toBeVisible();
   });
 
-  await test.step("complete and reopen the task", async () => {
+  await test.step("complete and reopen the task through the panel list selector", async () => {
     await page.getByRole("button", { name: "Complete Book dentist checkup" }).click();
     await expect(page.getByText("Book dentist checkup")).toHaveCount(0);
     await page.getByRole("checkbox", { name: "Show completed" }).check();
     await expect(page.getByText("Book dentist checkup")).toBeVisible();
     await page.getByRole("link", { name: "Book dentist checkup" }).click();
-    await page.getByRole("button", { name: "Reopen to Next" }).click();
+    await page.getByLabel("List").selectOption("next");
     await expect(page.getByRole("button", { name: "Complete Book dentist checkup" })).toBeVisible();
   });
 
@@ -494,7 +497,7 @@ test("Voice Brain Dump records provisional cards, reviews edits/deletes and save
   });
 
   await test.step("save creates exactly one real Inbox task with edited wording", async () => {
-    await page.getByRole("button", { name: "Confirm 1 addition" }).click();
+    await page.getByRole("button", { name: "Send 1 to inbox" }).click();
     await expect(page.getByRole("heading", { name: "Saved 1 task to Inbox" })).toBeVisible();
     await page.goto("/tasks/inbox");
     await expect(page.getByText("Buy oat milk for breakfast")).toBeVisible();
@@ -626,7 +629,7 @@ test("Voice Brain Dump resume and commit idempotency do not create duplicate Inb
     await page.getByLabel("Task title #1").fill("Write weekly update for the team");
     await page.keyboard.press("Tab");
     await expect(page.getByText("Edited", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Confirm 1 addition" }).click();
+    await page.getByRole("button", { name: "Send 1 to inbox" }).click();
     await expect(page.getByRole("heading", { name: "Saved 1 task to Inbox" })).toBeVisible();
     const completed = await apiGet<BrainDumpOperation>(page, `/api/brain-dump-operations/${operationId}`);
     assertArrayLength(completed.committed_task_ids, 1, "Committed task ids after first save");
@@ -733,7 +736,7 @@ test("Voice Brain Dump failures are visible and preserve recoverable live sessio
     // The concurrent proposal mutation is now surfaced as a reconciliation
     // conflict. Commit is honestly gated until the user resolves it, rather
     // than submitting a stale revision and manufacturing a duplicate task.
-    await expect(recoveryPage.getByRole("button", { name: /Confirm .* additions?/ })).toBeDisabled();
+    await expect(recoveryPage.getByRole("button", { name: /Send .* to inbox/ })).toBeDisabled();
     await expect(recoveryPage.getByLabel("Task title #1")).toBeVisible();
     await recoveryPage.close();
   });
