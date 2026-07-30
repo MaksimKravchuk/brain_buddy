@@ -276,6 +276,64 @@ describe("AppRoutes", () => {
     expect(screen.queryByRole("button", { name: /Sort by tag/i })).not.toBeInTheDocument();
   });
 
+  it("groups Next actions by project on demand, sinking unassigned tasks to the bottom", async () => {
+    const user = userEvent.setup();
+    // Deliberately interleaved and unassigned-first, so passing this proves the
+    // grouping reorders rather than the fixture already being in group order.
+    const grouped = [
+      { ...taskFixture("t1", "Unassigned first"), project_id: null, order_key: 1 },
+      { ...taskFixture("t2", "Launch one"), project_id: "project-launch", order_key: 2 },
+      { ...taskFixture("t3", "Onboarding one"), project_id: "project-onboarding", order_key: 3 },
+      { ...taskFixture("t4", "Launch two"), project_id: "project-launch", order_key: 4 }
+    ];
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/tasks") || url.includes("/tasks?")) {
+        return Promise.resolve(jsonResponse({ ...taskResponse, items: grouped }));
+      }
+      if (url.includes("/projects")) {
+        return Promise.resolve(jsonResponse(projectsResponse));
+      }
+      if (url.includes("/tags")) {
+        return Promise.resolve(jsonResponse(tagsResponse));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
+    renderRoutes("/tasks/next");
+    expect(await screen.findByRole("heading", { name: "Next actions" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "No project" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Group by project" }));
+
+    // First-seen project order is preserved and "No project" sinks to the bottom,
+    // even though the unassigned task came first in the response.
+    const groupHeadings = await screen.findAllByRole("heading", { level: 2 });
+    expect(groupHeadings.map((heading) => heading.textContent)).toEqual([
+      "Launch v2",
+      "Onboarding drop-off",
+      "No project"
+    ]);
+
+    // Both Launch tasks collapse into one group rather than repeating the heading.
+    const launchGroup = screen.getByRole("list", { name: "Launch v2" });
+    expect(within(launchGroup).getAllByRole("listitem")).toHaveLength(2);
+    // The per-row project column is redundant once the heading carries it.
+    expect(within(launchGroup).queryByText("Launch v2")).not.toBeInTheDocument();
+
+    // Toggling off restores the flat list.
+    await user.click(screen.getByRole("button", { name: "Group by project" }));
+    expect(screen.queryByRole("list", { name: "Launch v2" })).not.toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Tasks" })).toBeInTheDocument();
+  });
+
+  it("hides the grouping toggle where every task would share one heading", async () => {
+    renderRoutes("/tasks/inbox");
+
+    expect(await screen.findByRole("heading", { name: "Inbox" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Group by project" })).not.toBeInTheDocument();
+  });
+
   it("offers cursor continuation so large state projections remain reachable", async () => {
     const user = userEvent.setup();
     const firstPageTasks = Array.from({ length: 50 }, (_, index) =>

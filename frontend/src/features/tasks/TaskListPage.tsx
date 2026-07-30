@@ -1,5 +1,5 @@
 /* istanbul ignore file -- task shell rendering is covered by route tests and Playwright snapshots. */
-import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, Edit3, Plus, RotateCcw, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, Edit3, Layers, Plus, RotateCcw, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -91,9 +91,15 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   };
 
   const sort = parseTaskSort(searchParams.get("sort"));
+  // Grouping lives in the URL beside `sort` so a grouped view survives reload,
+  // opening a task, and sharing — the same contract the sort control already has.
+  const groupByProject = searchParams.get("group") === "project";
   const searchQuery = searchParams.get("q") ?? "";
   const today = localDateIso();
   const isInboxProductView = state === "inbox" && !projectId && !tagId && !dateView;
+  // A project view is already one project, and Inbox is by definition the
+  // projectless projection, so grouping either would produce a single heading.
+  const canGroupByProject = !projectId && state !== "inbox";
   const taskQuery = useTaskList({
     state,
     projectId,
@@ -326,6 +332,49 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
 
   const hasFrameError = taskQuery.isError || projectsQuery.isError || tagsQuery.isError;
 
+  // Shared by the flat list and by every project group, so the two render paths
+  // can never drift apart.
+  const taskListProps = {
+    projects,
+    tags,
+    taskPathBase: listPath,
+    taskSearch: searchParams.toString(),
+    editingTaskId,
+    editingTitle,
+    registerRowLink,
+    onBeginEdit: (task: TaskResponse) => {
+      setEditingTaskId(task.id);
+      setEditingTitle(task.title);
+    },
+    onCancelEdit: () => {
+      setEditingTaskId(null);
+      setEditingTitle("");
+    },
+    onComplete: (task: TaskResponse) => transitionMutation.mutate({ task, action: "complete" as const }),
+    onEditTitle: (value: string) => setEditingTitle(value),
+    onMoveToNext: (task: TaskResponse) =>
+      transitionMutation.mutate({ task, action: "move" as const, toState: "next" as const }),
+    onSaveEdit: (task: TaskResponse) => updateMutation.mutate({ task, payload: { title: editingTitle.trim() } }),
+    expandedTaskId: taskId,
+    onCollapse: () => navigate(closeTarget),
+    detailHeadingRef,
+    detailTask: detailQuery.data,
+    detailIsLoading: detailQuery.isLoading,
+    detailError: detailQuery.error,
+    onSaveDetail: (task: TaskResponse, payload: Parameters<typeof apiClient.updateTask>[1]) =>
+      detailUpdateMutation.mutate({ task, payload }),
+    onTransitionDetail: (
+      task: TaskResponse,
+      action: "move" | "complete" | "reopen" | "cancel",
+      toState?: OpenTaskState,
+      waitingFor?: string
+    ) => detailTransitionMutation.mutate({ task, action, toState, waitingFor }),
+    onCreateSubtask: (task: TaskResponse, title: string) => subtaskCreateMutation.mutate({ task, title }),
+    onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") =>
+      subtaskTransitionMutation.mutate({ task, subtask, action }),
+    onCreateComment: (task: TaskResponse, body: string) => commentCreateMutation.mutate({ task, body })
+  };
+
   return (
     <AppShell
       counts={shellCounts}
@@ -349,6 +398,25 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             </h1>
             <span className="text-xs text-slate-600">{subtitle}</span>
             <div className="ml-auto flex items-center gap-1.5">
+              {canGroupByProject ? (
+                <Button
+                  variant={groupByProject ? "secondary" : "ghost"}
+                  size="sm"
+                  aria-pressed={groupByProject}
+                  leftIcon={<Layers aria-hidden />}
+                  onClick={() => {
+                    const next = new URLSearchParams(searchParams);
+                    if (groupByProject) {
+                      next.delete("group");
+                    } else {
+                      next.set("group", "project");
+                    }
+                    setSearchParams(next, { replace: true });
+                  }}
+                >
+                  Group by project
+                </Button>
+              ) : null}
               <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900">
                 <input
                   type="checkbox"
@@ -403,43 +471,31 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
           ) : taskQuery.isLoading || projectsQuery.isLoading || tagsQuery.isLoading ? (
             <LoadingState label={title} />
           ) : tasks.length ? (
-            <TaskList
-              tasks={tasks}
-              projects={projects}
-              tags={tags}
-              taskPathBase={listPath}
-              taskSearch={searchParams.toString()}
-              editingTaskId={editingTaskId}
-              editingTitle={editingTitle}
-              registerRowLink={registerRowLink}
-              onBeginEdit={(task) => {
-                setEditingTaskId(task.id);
-                setEditingTitle(task.title);
-              }}
-              onCancelEdit={() => {
-                setEditingTaskId(null);
-                setEditingTitle("");
-              }}
-              onComplete={(task) => transitionMutation.mutate({ task, action: "complete" })}
-              onEditTitle={(title) => setEditingTitle(title)}
-              onMoveToNext={(task) => transitionMutation.mutate({ task, action: "move", toState: "next" })}
-              onSaveEdit={(task) => updateMutation.mutate({ task, payload: { title: editingTitle.trim() } })}
-              expandedTaskId={taskId}
-              onCollapse={() => navigate(closeTarget)}
-              detailHeadingRef={detailHeadingRef}
-              detailTask={detailQuery.data}
-              detailIsLoading={detailQuery.isLoading}
-              detailError={detailQuery.error}
-              onSaveDetail={(task, payload) => detailUpdateMutation.mutate({ task, payload })}
-              onTransitionDetail={(task, action, toState, waitingFor) =>
-                detailTransitionMutation.mutate({ task, action, toState, waitingFor })
-              }
-              onCreateSubtask={(task, title) => subtaskCreateMutation.mutate({ task, title })}
-              onTransitionSubtask={(task, subtask, action) =>
-                subtaskTransitionMutation.mutate({ task, subtask, action })
-              }
-              onCreateComment={(task, body) => commentCreateMutation.mutate({ task, body })}
-            />
+            groupByProject ? (
+              <div className="flex flex-col gap-6">
+                {groupTasksByProject(tasks, projects).map((group) => (
+                  <section key={group.key} aria-labelledby={`task-group-${group.key}`}>
+                    <div className="mb-2 flex items-center gap-2 px-1">
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: group.color ?? "#cbd5e1" }}
+                        aria-hidden
+                      />
+                      <h2
+                        id={`task-group-${group.key}`}
+                        className="m-0 min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500"
+                      >
+                        {group.name}
+                      </h2>
+                      <span className="text-xs font-medium text-slate-400">{group.tasks.length}</span>
+                    </div>
+                    <TaskList {...taskListProps} tasks={group.tasks} label={group.name} showProject={false} />
+                  </section>
+                ))}
+              </div>
+            ) : (
+              <TaskList {...taskListProps} tasks={tasks} />
+            )
           ) : (
             <EmptyState state={state} />
           )
@@ -500,6 +556,43 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   );
 }
 
+interface TaskProjectGroup {
+  key: string;
+  name: string;
+  color: string | null;
+  tasks: TaskResponse[];
+}
+
+/**
+ * Groups tasks by project, preserving the order the server returned so an active
+ * sort still holds inside each group. Groups appear in first-seen order and
+ * "No project" sinks to the bottom, matching the design prototype.
+ */
+function groupTasksByProject(tasks: TaskResponse[], projects: ProjectResponse[]): TaskProjectGroup[] {
+  const projectById = new Map(projects.map((project) => [project.id, project]));
+  const groups: TaskProjectGroup[] = [];
+  const byKey = new Map<string, TaskProjectGroup>();
+
+  for (const task of tasks) {
+    const key = task.project_id ?? "__none__";
+    let group = byKey.get(key);
+    if (!group) {
+      const project = task.project_id ? projectById.get(task.project_id) : undefined;
+      group = {
+        key,
+        name: project?.name ?? "No project",
+        color: project?.color ?? null,
+        tasks: []
+      };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    group.tasks.push(task);
+  }
+
+  return groups.sort((left, right) => Number(left.key === "__none__") - Number(right.key === "__none__"));
+}
+
 function Chip({ variant = "neutral", children }: { variant?: "due" | "neutral"; children: ReactNode }): JSX.Element {
   const variantClass =
     variant === "due"
@@ -541,7 +634,9 @@ function TaskList({
   onTransitionDetail,
   onCreateSubtask,
   onTransitionSubtask,
-  onCreateComment
+  onCreateComment,
+  label,
+  showProject = true
 }: {
   tasks: TaskResponse[];
   projects: ProjectResponse[];
@@ -568,12 +663,16 @@ function TaskList({
   onCreateSubtask: (task: TaskResponse, title: string) => void;
   onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") => void;
   onCreateComment: (task: TaskResponse, body: string) => void;
+  /** Names this list for assistive tech; each group supplies its project name. */
+  label?: string;
+  /** Off inside a project group, where every row shares the heading's project. */
+  showProject?: boolean;
 }): JSX.Element {
   const projectById = new Map(projects.map((project) => [project.id, project]));
   const tagById = new Map(tags.map((tag) => [tag.id, tag]));
 
   return (
-    <div className="flex flex-col gap-2" role="list" aria-label="Tasks">
+    <div className="flex flex-col gap-2" role="list" aria-label={label ?? "Tasks"}>
       {tasks.map((task) => {
         const project = task.project_id ? projectById.get(task.project_id) : undefined;
         const taskTags = task.tag_ids.map((id) => tagById.get(id)).filter((tag): tag is TagResponse => Boolean(tag));
@@ -585,6 +684,7 @@ function TaskList({
             project={project}
             tags={taskTags}
             detailPath={`${taskPathBase}/${task.id}${taskSearch ? `?${taskSearch}` : ""}`}
+            showProject={showProject}
             isEditing={editingTaskId === task.id}
             editingTitle={editingTitle}
             registerRowLink={registerRowLink}
@@ -624,6 +724,7 @@ function TaskRow({
   project,
   tags,
   detailPath,
+  showProject = true,
   isEditing,
   editingTitle,
   registerRowLink,
@@ -640,6 +741,7 @@ function TaskRow({
   project?: ProjectResponse;
   tags: TagResponse[];
   detailPath: string;
+  showProject?: boolean;
   isEditing: boolean;
   editingTitle: string;
   registerRowLink: (taskId: string, el: HTMLAnchorElement | null) => void;
@@ -760,7 +862,7 @@ function TaskRow({
         {tags.map((tag) => (
           <Chip key={tag.id} variant="neutral">{tagLabel(tag)}</Chip>
         ))}
-        {project ? (
+        {project && showProject ? (
           <span className="min-w-0 shrink truncate text-[11px] text-slate-400 sm:ml-auto sm:text-right lg:max-w-[160px]">{project.name}</span>
         ) : null}
       </div>
