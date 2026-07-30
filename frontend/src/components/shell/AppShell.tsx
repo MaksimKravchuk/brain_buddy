@@ -489,11 +489,16 @@ function Sidebar({
             tags.map((tag) => {
               const popoverId = `tag-${tag.id}`;
               return (
-                <span key={tag.id} className="group inline-flex">
-                  <span className="relative inline-flex">
+                <span key={tag.id} className="group inline-flex max-w-full">
+                  <span className="relative inline-flex min-w-0 max-w-full">
+                    {/* A pill is a single-line shape: a long tag wrapped to two lines
+                        inside a rounded-full border reads as broken. Truncate instead
+                        and carry the full name in `title` — the link text itself is
+                        untouched, so the accessible name stays complete. */}
                     <NavLink
                       to={`/tags/${tag.id}`}
-                      className={`rounded-full border px-2.5 py-[3px] text-xs font-medium transition-colors duration-200 ease-smooth ${
+                      title={tag.name}
+                      className={`max-w-full truncate rounded-full border px-2.5 py-[3px] text-xs font-medium transition-colors duration-200 ease-smooth ${
                         !weeklyReviewOpen && activeTagId === tag.id
                           ? "border-brand-primary bg-info-bg text-info-fg"
                           : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
