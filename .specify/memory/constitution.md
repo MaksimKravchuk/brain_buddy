@@ -4,7 +4,7 @@ Sync Impact Report:
 - Modified principles: I. Data Consent & Safety; II. Tested Delivery Across Stack; III. Contract-First Interfaces; IV. Traceable & Actionable Observability; V. Responsive, Resilient Experience -> Responsive, Resilient, Mobile-First Experience
 - Added sections: Spec-Driven Development Workflow; Historical Spec Grandfathering
 - Removed sections: None
-- Templates requiring updates: ✅ .specify/templates/plan-template.md; ✅ .specify/templates/spec-template.md; ✅ .specify/templates/tasks-template.md; ✅ .specify/templates/checklist-template.md; ✅ .claude/skills/speckit-* refreshed from github/spec-kit v0.14.2
+- Templates requiring updates: ✅ .specify/templates/plan-template.md; ✅ .specify/templates/spec-template.md; ✅ .specify/templates/tasks-template.md; ✅ .specify/templates/checklist-template.md; ✅ .claude/skills/speckit-* and .agents/skills/speckit-* refreshed from github/spec-kit v0.15.0
 - Follow-up TODOs: None
 -->
 # BrainBuddy Constitution

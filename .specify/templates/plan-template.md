@@ -42,7 +42,7 @@ Amend the spec first when implementation intent changes.
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
 - Spec workflow: Is the relevant `specs/[###-feature]/spec.md` current, and are
-  clarification/checklist outcomes reflected before planning implementation?
+  clarification outcomes reflected before planning implementation?
 - Consent & Safety: How will data stay local-first, with explicit consent and
   provider/API-key enforcement where needed? Confirm no real data, secrets, raw
   audio/transcripts, paths, or content fingerprints are committed/logged.
