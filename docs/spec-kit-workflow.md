@@ -3,9 +3,9 @@
 BrainBuddy uses the official GitHub Spec Kit as the mandatory authoring workflow
 for every new or materially changed feature specification.
 
-- Spec Kit version: `github/spec-kit` `v0.14.2`
-- Verified release date: 2026-07-24
-- Installed integration: Claude Code skills under `.claude/skills/`
+- Spec Kit version: `github/spec-kit` `v0.15.0`
+- Installed integrations: Claude Code skills under `.claude/skills/` and Codex
+  skills under `.agents/skills/`
 - Scope: feature specification and planning artifacts under `specs/`
 - Non-scope: execution orchestration, code review, CI, merge, release, or deploy
 
@@ -15,7 +15,7 @@ Use isolated uv tooling. Do not install Spec Kit with pip inside the Hermes
 runtime or the application backend/frontend environments.
 
 ```bash
-uv tool install specify-cli --force --from git+https://github.com/github/spec-kit.git@v0.14.2
+uv tool install specify-cli --force --from git+https://github.com/github/spec-kit.git@v0.15.0
 specify --version
 specify check
 specify integration list
@@ -24,15 +24,15 @@ specify integration list
 Expected version output:
 
 ```text
-specify 0.14.2
+specify 0.15.0
 ```
 
-`specify check` should show Claude Code as available for the Claude workflow.
+`specify check` should show both Claude Code and Codex CLI as available.
 If the CLI needs to be refreshed without modifying the global uv tool install,
 use the same pinned release through `uvx`:
 
 ```bash
-uvx --from git+https://github.com/github/spec-kit.git@v0.14.2 specify --version
+uvx --from git+https://github.com/github/spec-kit.git@v0.15.0 specify --version
 ```
 
 ## Refreshing Spec Kit in this repository
@@ -43,20 +43,23 @@ manifest-aware upgrade path:
 ```bash
 specify integration status --json
 specify integration upgrade claude --force
+specify integration upgrade codex --force
 # If reviewed extensions are installed, update each pinned extension explicitly:
 # specify extension update <extension-id>
 ```
 
 Do not run an unscoped `specify extension update`: community extensions have
-independent versions and require their own source review. No extensions were
-installed during the v0.14.2 refresh.
+independent versions and require their own source review. No extensions are
+installed in BrainBuddy. In particular, do not install the Git extension:
+automatic feature branches, hooks, and commits conflict with Hermes Kanban
+worktree ownership and delivery gates.
 
-Before the forced integration refresh, preserve the BrainBuddy-specific disabled
-`speckit-implement` stub and the four customized templates. Restore them after
-the refresh, inspect `git diff`, and accept the expected integration-status
-warning for those five deliberate overrides. The current refresh installs
-v0.14.2 shared assets under `.specify/` and Claude Code skills under
-`.claude/skills/`.
+Before a forced integration refresh, preserve the BrainBuddy-specific disabled
+`speckit-implement` stubs for both integrations and the four customized
+templates. Restore them after the refresh, inspect `git diff`, and accept the
+expected integration-status warnings for those six deliberate overrides. The
+current refresh installs v0.15.0 shared assets under `.specify/`, Claude Code
+skills under `.claude/skills/`, and Codex skills under `.agents/skills/`.
 
 After any future refresh:
 
@@ -85,7 +88,7 @@ For every new or materially changed BrainBuddy feature:
 6. Run the bounded planning-review workflow after `plan.md`; the Architect resolves
    technical findings and uses a Kanban `needs_input` block only for product
    decisions.
-7. Use `/speckit-checklist` after review. Under the pinned v0.14.2 workflow,
+7. Use `/speckit-checklist` after review. Under the pinned v0.15.0 workflow,
    checklist setup requires `plan.md`; do not run checklist as a pre-plan command.
 8. Use `/speckit-tasks` to generate logical implementation tasks grouped by
    independently testable user story, then run `/speckit-analyze`.
@@ -107,7 +110,19 @@ skills, so the invocation names use hyphens:
 /speckit-analyze
 ```
 
-The Claude integration keeps `/speckit-implement` only as a disabled
+Codex exposes the same planning skills with `$` skill invocations:
+
+```text
+$speckit-constitution
+$speckit-specify
+$speckit-clarify
+$speckit-plan
+$speckit-checklist
+$speckit-tasks
+$speckit-analyze
+```
+
+The Claude and Codex integrations keep `speckit-implement` only as a disabled
 compatibility stub. The Hermes architect profile receives only the planning
 skills listed above through `/speckit-analyze`; it does not receive
 `speckit-implement` or `speckit-taskstoissues`. Neither command may run
