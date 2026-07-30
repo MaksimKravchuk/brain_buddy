@@ -6,6 +6,10 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { apiClient } from "../../api/client";
 import { taskKeys, useBrainDumpProviders } from "../../api/taskHooks";
 import type { BrainDumpOperationResponse, BrainDumpProposal, BrainDumpProposalStatus } from "../../api/taskTypes";
+import { BrainDumpOverlay, BrainDumpOverlayHeader } from "./BrainDumpOverlay";
+import { useCloseBrainDump } from "./brainDumpNavigation";
+
+const TITLE_ID = "brain-dump-title";
 
 type SpeechRecognitionResultEventLike = {
   results: ArrayLike<{ 0: { transcript: string }; isFinal?: boolean }>;
@@ -93,6 +97,15 @@ export function BrainDumpRoute(): JSX.Element {
   const operationRef = useRef<BrainDumpOperationResponse | null>(null);
   const localCaptureOperationIdRef = useRef<string | null>(null);
   const proposalMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const closeOverlay = useCloseBrainDump();
+  // The overlay owns a URL for reload recovery, so every hop inside the flow has
+  // to carry `backgroundLocation` forward or closing the panel would lose the
+  // view it was opened over.
+  const brainDumpState = location.state;
+  const navigateWithinBrainDump = useCallback(
+    (to: string) => navigate(to, { replace: true, state: brainDumpState }),
+    [brainDumpState, navigate]
+  );
   const isReviewPath = location.pathname.endsWith("/review");
   // Only the fresh-recording screen needs the configured providers, to seed the
   // consent the user grants at Record time. Resuming an existing operation
@@ -383,7 +396,7 @@ export function BrainDumpRoute(): JSX.Element {
       localCaptureOperationIdRef.current = started.id;
       applyOperation(started);
       if (params.operationId === "new") {
-        navigate(`/brain-dump/${started.id}`, { replace: true });
+        navigateWithinBrainDump(`/brain-dump/${started.id}`);
       }
       startMediaRecorderFor(started, stream);
       if (Recognition) {
@@ -474,7 +487,7 @@ export function BrainDumpRoute(): JSX.Element {
             idempotencyKey("finish")
           );
           applyOperation(finished);
-          navigate(`/brain-dump/${finished.id}/review`, { replace: true });
+          navigateWithinBrainDump(`/brain-dump/${finished.id}/review`);
           return;
         }
         const expectedChunks = audioChunkNumberRef.current;
@@ -488,7 +501,7 @@ export function BrainDumpRoute(): JSX.Element {
           idempotencyKey("seal")
         );
         applyOperation(sealed);
-        navigate(`/brain-dump/${sealed.id}/review`, { replace: true });
+        navigateWithinBrainDump(`/brain-dump/${sealed.id}/review`);
         return;
       }
       const updated = await apiClient.commandBrainDump(current.id, action, current.revision, idempotencyKey(action));
@@ -520,7 +533,7 @@ export function BrainDumpRoute(): JSX.Element {
         applyOperation(null);
         setConsentWithdrawnMidCapture(false);
         setLastTranscript("");
-        navigate("/brain-dump/new", { replace: true });
+        navigateWithinBrainDump("/brain-dump/new");
       }
       if (action === "commit") {
         setSavedCount(updated.committed_task_ids.length);
@@ -588,21 +601,25 @@ export function BrainDumpRoute(): JSX.Element {
 
   if (savedCount !== null) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-surface-base px-4 text-slate-900">
-        <section className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-floating">
-          <Inbox className="mx-auto h-8 w-8 text-brand-primary" aria-hidden />
-          <h1 className="mt-3 text-xl font-semibold">Saved {savedCount} {savedCount === 1 ? "task" : "tasks"} to Inbox</h1>
-          <p className="mt-2 text-sm text-slate-500">No duplicate tasks are created if this save is retried.</p>
+      <BrainDumpOverlay labelledBy={TITLE_ID} onClose={closeOverlay} size="narrow">
+        <BrainDumpOverlayHeader
+          titleId={TITLE_ID}
+          eyebrow="Brain dump"
+          title={`Saved ${savedCount} ${savedCount === 1 ? "task" : "tasks"} to Inbox`}
+          meta="No duplicate tasks are created if this save is retried."
+          onClose={closeOverlay}
+        />
+        <div className="flex flex-col gap-2 px-5 py-4 sm:px-6">
           <button
             type="button"
-            className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-brand-primary px-5 text-[15px] font-semibold text-white shadow-glow hover:bg-brand-primary-hover"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-brand-primary px-5 text-[15px] font-semibold text-white shadow-glow hover:bg-brand-primary-hover"
             onClick={() => navigate("/tasks/inbox", { replace: true })}
           >
             <Inbox className="h-4 w-4" aria-hidden />
             View inbox
           </button>
-        </section>
-      </div>
+        </div>
+      </BrainDumpOverlay>
     );
   }
 
@@ -637,7 +654,7 @@ export function BrainDumpRoute(): JSX.Element {
         reconciliationQuality={operation?.reconciliation_quality ?? "none"}
         rawAudioExpiresAt={operation?.raw_audio_expires_at}
         rawAudioPresent={operation?.raw_audio_present ?? false}
-        onBack={() => navigate(`/brain-dump/${operation?.id ?? "new"}`, { replace: true })}
+        onBack={() => navigateWithinBrainDump(`/brain-dump/${operation?.id ?? "new"}`)}
         onDelete={deleteProposal}
         onDeleteRawAudio={() => void command("delete_raw_audio")}
         onDiscard={() => void command("cancel")}
@@ -665,6 +682,7 @@ export function BrainDumpRoute(): JSX.Element {
       providersReady={providersReady}
       providersFailed={providersFailed}
       onCancel={() => void command("cancel")}
+      onClose={closeOverlay}
       onExternalProcessingAllowedChange={setExternalProcessingAllowed}
       onFinish={() => void command("finish")}
       onLanguageModeChange={setLanguageMode}
@@ -705,21 +723,26 @@ function RecoverySurface({
     ? "The task reconciler can be retried from the accurate transcript."
     : "The transcription provider can be retried from the sealed recording.";
   return (
-    <div className="flex min-h-screen items-center justify-center bg-surface-base px-4 text-slate-900">
-      <section role="alert" className="w-full max-w-md rounded-2xl border border-amber-200 bg-white p-6 shadow-floating">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-amber-700">Voice brain dump</p>
-        <h1 className="mt-2 text-xl font-semibold">{`${stageName} ${retryable ? "paused" : "failed"}`}</h1>
-        <p className="mt-2 text-sm text-slate-600">
+    // Not dismissible: a stalled recording still holds retained audio, so the
+    // user must choose retry, review, or delete rather than walk away from it.
+    <BrainDumpOverlay labelledBy={TITLE_ID} size="narrow">
+      <BrainDumpOverlayHeader
+        titleId={TITLE_ID}
+        eyebrow="Brain dump"
+        title={`${stageName} ${retryable ? "paused" : "failed"}`}
+      />
+      <div role="alert" className="flex flex-col gap-4 px-5 py-4 sm:px-6">
+        <p className="text-sm text-slate-600">
           {providerError ?? (retryable ? retryFallback : "The recording could not be processed accurately.")}
         </p>
-        {error ? <p className="mt-3 text-sm text-rose-700">{error}</p> : null}
-        <div className="mt-5 flex flex-col gap-2">
+        {error ? <p className="text-sm text-rose-700">{error}</p> : null}
+        <div className="flex flex-col gap-2">
           {retryable ? <button type="button" className="h-11 rounded-xl bg-brand-primary px-4 text-sm font-semibold text-white" onClick={onRetry}>{retryLabel}</button> : null}
           {availableActions.has("review_provisional") ? <button type="button" className="h-11 rounded-xl border border-slate-200 px-4 text-sm font-medium text-slate-700" onClick={onReview}>Review provisional tasks</button> : null}
           <button type="button" className="h-11 rounded-xl border border-rose-200 px-4 text-sm font-medium text-rose-700" onClick={onDelete}>Delete recording</button>
         </div>
-      </section>
-    </div>
+      </div>
+    </BrainDumpOverlay>
   );
 }
 
@@ -739,6 +762,7 @@ function RecordingSurface({
   providersReady,
   providersFailed,
   onCancel,
+  onClose,
   onExternalProcessingAllowedChange,
   onFinish,
   onLanguageModeChange,
@@ -765,6 +789,8 @@ function RecordingSurface({
   providersReady: boolean;
   providersFailed: boolean;
   onCancel: () => void;
+  /** Dismiss the panel. Undefined once a capture exists. */
+  onClose: (() => void) | undefined;
   onExternalProcessingAllowedChange: (allowed: boolean) => void;
   onFinish: () => void;
   onLanguageModeChange: (mode: LanguageMode) => void;
@@ -801,18 +827,26 @@ function RecordingSurface({
   ].filter((part): part is string => part !== null);
   const cloudConsentDescription = `Allow secure cloud processing: ${cloudConsentProviderParts.join(", ")}. Audio is not sent without this consent.`;
   return (
-    <div className="min-h-screen bg-surface-base text-slate-900" data-operation-id={operation?.id ?? "new"}>
-      <div className="fixed inset-0 flex items-center justify-center bg-slate-50/80 p-0 backdrop-blur-sm sm:p-4">
-        <section role="dialog" aria-modal="true" aria-labelledby="brain-dump-title" className="flex h-[100dvh] w-full flex-col overflow-hidden bg-white shadow-floating sm:h-[640px] sm:w-[min(720px,calc(100vw-32px))] sm:rounded-[20px] sm:border sm:border-slate-200">
-          <header className="flex shrink-0 items-center gap-2 border-b border-slate-100 px-5 py-4 sm:px-6">
-            <h1 id="brain-dump-title" className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-600">Brain dump</h1>
-            <span className="text-xs text-slate-400">·</span>
-            <span className="text-xs font-semibold text-slate-900">{count} {count === 1 ? "task" : "tasks"} captured</span>
-            <span className={`ml-auto inline-flex items-center gap-1.5 text-xs font-medium ${isRecording ? "text-rose-600" : "text-slate-500"}`}>
-              <span className={`h-1.5 w-1.5 rounded-full ${isRecording ? "bg-rose-600" : "bg-slate-400"}`} aria-hidden />
-              {captureStopped ? "Cloud processing stopped" : isPaused ? "Paused" : isRecording ? "Recording" : "Ready"}
-            </span>
-          </header>
+    // Dismissible only before a capture exists. Once one is live, closing would
+    // leave the microphone open behind an invisible dialog, so the exits are
+    // Discard and Stop & review.
+    <BrainDumpOverlay
+      labelledBy={TITLE_ID}
+      onClose={operation ? undefined : onClose}
+      operationId={operation?.id ?? "new"}
+    >
+          <BrainDumpOverlayHeader
+            titleId={TITLE_ID}
+            title="Brain dump"
+            meta={`${count} ${count === 1 ? "task" : "tasks"} captured`}
+            onClose={operation ? undefined : onClose}
+            status={
+              <span className={`mt-1 inline-flex shrink-0 items-center gap-1.5 text-xs font-medium ${isRecording ? "text-rose-600" : "text-slate-500"}`}>
+                <span className={`h-1.5 w-1.5 rounded-full ${isRecording ? "bg-rose-600" : "bg-slate-400"}`} aria-hidden />
+                {captureStopped ? "Cloud processing stopped" : isPaused ? "Paused" : isRecording ? "Recording" : "Ready"}
+              </span>
+            }
+          />
 
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 sm:px-6" aria-live="polite">
             {error ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
@@ -902,9 +936,7 @@ function RecordingSurface({
             </div>
             <p className="mt-2 text-center text-xs text-slate-500">Nothing is saved until review</p>
           </footer>
-        </section>
-      </div>
-    </div>
+    </BrainDumpOverlay>
   );
 }
 
@@ -929,20 +961,18 @@ function ProcessingSurface({
 }): JSX.Element {
   const label = processingStatusLabels.get(operation.status) ?? "Processing";
   return (
-    <div className="min-h-screen bg-surface-base text-slate-900" data-operation-id={operation.id}>
-      <div className="fixed inset-0 flex items-center justify-center bg-slate-50/80 p-4 backdrop-blur-sm">
-        <section role="status" aria-live="polite" className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-floating">
-          {error ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
-          <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-600">Voice brain dump</p>
-          <h1 className="mt-2 text-xl font-semibold text-slate-900">{label}</h1>
-          <p className="mt-1 text-sm text-slate-500">{operation.status}</p>
-          <div className="mt-4 flex flex-col gap-2">
-            {proposals.map((proposal) => <ProposalCard key={proposal.id} proposal={proposal} />)}
-            {proposals.length === 0 ? <p className="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">We are keeping the task list first while the accurate transcript catches up.</p> : null}
-          </div>
-        </section>
+    // Not dismissible: the operation is mid-pipeline server-side and the panel is
+    // the only place its progress and outcome surface.
+    <BrainDumpOverlay labelledBy={TITLE_ID} size="narrow" operationId={operation.id}>
+      <BrainDumpOverlayHeader titleId={TITLE_ID} eyebrow="Brain dump" title={label} meta={operation.status} />
+      <div role="status" aria-live="polite" className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
+        {error ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
+        <div className="flex flex-col gap-2">
+          {proposals.map((proposal) => <ProposalCard key={proposal.id} proposal={proposal} />)}
+          {proposals.length === 0 ? <p className="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">We are keeping the task list first while the accurate transcript catches up.</p> : null}
+        </div>
       </div>
-    </div>
+    </BrainDumpOverlay>
   );
 }
 
@@ -982,18 +1012,21 @@ function ReviewSurface({
   onUpdateTitle: (proposal: BrainDumpProposal, title: string) => void;
 }): JSX.Element {
   return (
-    <div className="flex min-h-screen flex-col bg-surface-base text-slate-900">
-      <header className="flex shrink-0 items-center gap-3 border-b border-slate-100 bg-white/95 px-4 pt-[max(16px,env(safe-area-inset-top))] pb-3">
-        <button type="button" className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600" aria-label="Back to recording" onClick={onBack}>
+    // Not dismissible: these drafts exist only inside the operation, so leaving
+    // has to be an explicit Discard or Confirm.
+    <BrainDumpOverlay labelledBy={TITLE_ID}>
+      <header className="flex shrink-0 items-center gap-3 border-b border-slate-100 px-4 pt-[max(16px,env(safe-area-inset-top))] pb-3 sm:px-6 sm:pt-5">
+        <button type="button" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition-colors duration-200 ease-smooth hover:border-slate-300 hover:text-slate-900" aria-label="Back to recording" onClick={onBack}>
           <ChevronLeft className="h-5 w-5" aria-hidden />
         </button>
         <div className="min-w-0 flex-1">
-          <h1 className="text-[17px] font-semibold tracking-[-0.015em] text-slate-900">Review {proposals.length} {proposals.length === 1 ? "task" : "tasks"}</h1>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Brain dump</p>
+          <h1 id={TITLE_ID} className="text-[20px] font-semibold leading-[1.3] tracking-[-0.015em] text-slate-900">Review {proposals.length} {proposals.length === 1 ? "task" : "tasks"}</h1>
           <p className="mt-0.5 text-xs text-slate-500">Edit before they land in your inbox</p>
         </div>
       </header>
 
-      <main aria-label="Review brain dump proposals" className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+      <main aria-label="Review brain dump proposals" className="min-h-0 flex-1 overflow-y-auto px-4 py-3 sm:px-6">
         {error ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
         {!committable ? (
           <div role="status" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -1053,7 +1086,7 @@ function ReviewSurface({
         </div>
       </main>
 
-      <footer className="flex shrink-0 items-center gap-3 border-t border-slate-100 bg-white/95 px-4 py-3 pb-[max(12px,env(safe-area-inset-bottom))]">
+      <footer className="flex shrink-0 items-center gap-3 border-t border-slate-100 bg-surface-base px-4 py-3 pb-[max(12px,env(safe-area-inset-bottom))] sm:px-6">
         <button type="button" className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600" onClick={onDiscard}>
           Discard
         </button>
@@ -1062,7 +1095,7 @@ function ReviewSurface({
           {isSaving ? "Confirming…" : `Confirm ${proposals.length} ${proposals.length === 1 ? "addition" : "additions"}`}
         </button>
       </footer>
-    </div>
+    </BrainDumpOverlay>
   );
 }
 

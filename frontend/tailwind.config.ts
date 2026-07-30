@@ -30,14 +30,6 @@ const config: Config = {
           "primary-hover": "#38bdf8",
           secondary: "#6366f1"
         },
-        node: {
-          "leaf-bg": "#ef4444",
-          "leaf-fg": "#ffffff",
-          "root-bg": "#facc15",
-          "root-fg": "#1f2937",
-          "default-bg": "#ffffff",
-          "default-fg": "#0f172a"
-        },
         info: {
           DEFAULT: "#0ea5e9",
           bg: "#f0f9ff",

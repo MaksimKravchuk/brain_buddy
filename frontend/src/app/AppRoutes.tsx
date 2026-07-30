@@ -1,15 +1,52 @@
 /* istanbul ignore file -- route glue is exercised by AppRoutes tests and Playwright shell snapshots. */
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import { ProtectedRoute } from "../components/auth/ProtectedRoute";
 import { BrainDumpGate } from "../features/brain-dump/BrainDumpGate";
+import type { BrainDumpLocationState } from "../features/brain-dump/brainDumpNavigation";
 import { TaskListPage } from "../features/tasks/TaskListPage";
 import LoginPage from "../pages/LoginPage";
 import SignupPage from "../pages/SignupPage";
 
+// Brain dump is a modal over the workspace, so its routes render twice: the
+// first <Routes> resolves whatever view stays *behind* the panel, and the second
+// resolves the panel itself. Opening it from the top bar stamps the current
+// location onto the history entry as `backgroundLocation`, so the list the user
+// was on stays visible underneath. A deep link or reload has no such state —
+// then the first <Routes> falls back to the default list as the backdrop, which
+// keeps the operation recoverable from its URL alone.
 export function AppRoutes(): JSX.Element {
+  const location = useLocation();
+  const backgroundLocation = (location.state as BrainDumpLocationState | null)?.backgroundLocation;
+
   return (
-    <Routes>
+    <>
+      <Routes location={backgroundLocation ?? location}>{workspaceRoutes()}</Routes>
+      <Routes>
+        <Route
+          path="/brain-dump/:operationId"
+          element={
+            <ProtectedRoute>
+              <BrainDumpGate />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/brain-dump/:operationId/review"
+          element={
+            <ProtectedRoute>
+              <BrainDumpGate />
+            </ProtectedRoute>
+          }
+        />
+      </Routes>
+    </>
+  );
+}
+
+function workspaceRoutes(): JSX.Element {
+  return (
+    <>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
       <Route
@@ -68,19 +105,13 @@ export function AppRoutes(): JSX.Element {
           </ProtectedRoute>
         }
       />
+      {/* Backdrop for a brain dump opened directly rather than from the top bar.
+          The panel itself is rendered by the overlay <Routes> in AppRoutes. */}
       <Route
-        path="/brain-dump/:operationId"
+        path="/brain-dump/*"
         element={
           <ProtectedRoute>
-            <BrainDumpGate />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/brain-dump/:operationId/review"
-        element={
-          <ProtectedRoute>
-            <BrainDumpGate />
+            <TaskListPage mode="state" />
           </ProtectedRoute>
         }
       />
@@ -100,7 +131,7 @@ export function AppRoutes(): JSX.Element {
           </ProtectedRoute>
         }
       />
-    </Routes>
+    </>
   );
 }
 

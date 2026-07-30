@@ -2,6 +2,8 @@ import { useParams } from "react-router-dom";
 
 import { hasFeatureFlag } from "../../api/auth";
 import { useAuthStore } from "../../stores/authStore";
+import { BrainDumpOverlay, BrainDumpOverlayHeader } from "./BrainDumpOverlay";
+import { useCloseBrainDump } from "./brainDumpNavigation";
 import { BrainDumpPrivacyControls } from "./BrainDumpPrivacyControls";
 import { BrainDumpRoute } from "./BrainDumpRoute";
 
@@ -20,6 +22,7 @@ import { BrainDumpRoute } from "./BrainDumpRoute";
 export function BrainDumpGate(): JSX.Element {
   const user = useAuthStore((state) => state.user);
   const params = useParams();
+  const closeOverlay = useCloseBrainDump();
   const hasKnownOperation = Boolean(params.operationId) && params.operationId !== "new";
 
   if (hasFeatureFlag(user, "voice_brain_dump")) {
@@ -31,14 +34,16 @@ export function BrainDumpGate(): JSX.Element {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-surface-base px-6 text-center">
-      <section className="rounded-2xl border border-slate-200 bg-white px-8 py-10 shadow-raised">
-        <p className="text-xs font-semibold uppercase tracking-[0.06em] text-brand-primary">Not available yet</p>
-        <h1 className="mt-2 text-title font-semibold text-slate-900">Voice brain dump is off</h1>
-        <p className="mt-2 max-w-md text-sm text-slate-600">
-          This workspace does not have voice brain dump enabled yet. It will appear here once it is turned on for your account.
-        </p>
-      </section>
-    </main>
+    <BrainDumpOverlay labelledBy="brain-dump-off-title" onClose={closeOverlay} size="narrow">
+      <BrainDumpOverlayHeader
+        titleId="brain-dump-off-title"
+        eyebrow="Not available yet"
+        title="Voice brain dump is off"
+        onClose={closeOverlay}
+      />
+      <p className="px-5 py-4 text-sm text-slate-600 sm:px-6">
+        This workspace does not have voice brain dump enabled yet. It will appear here once it is turned on for your account.
+      </p>
+    </BrainDumpOverlay>
   );
 }

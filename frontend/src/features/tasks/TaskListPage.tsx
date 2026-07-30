@@ -1,5 +1,5 @@
 /* istanbul ignore file -- task shell rendering is covered by route tests and Playwright snapshots. */
-import { AlertTriangle, ArrowLeft, Check, Edit3, Plus, RotateCcw, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, Edit3, Plus, RotateCcw, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -9,6 +9,7 @@ import { apiClient } from "../../api/client";
 import { parseOpenTaskState, parseTaskDateView, useProjects, useTags, useTaskDetail, useTaskList } from "../../api/taskHooks";
 import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts, TaskPriority, TaskResponse, TaskSort, TaskSubtaskResponse, TaskUpdateRequest } from "../../api/taskTypes";
 import { AppShell, SoonChip } from "../../components/shell/AppShell";
+import { Button } from "../../components/ui/Button";
 import { getErrorMessage } from "../../utils/error";
 import { applySmartAddSuggestion, parseSmartAdd, smartAddChips, smartAddSuggestions } from "./smartAdd";
 import type { SmartAddDraft, SmartAddSuggestion } from "./smartAdd";
@@ -342,34 +343,48 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     >
       <section aria-labelledby="task-list-title" className="mx-auto max-w-[760px]">
         {isDesktop || !taskId ? (
-          <div className="mb-4 flex flex-wrap items-baseline gap-3">
-          <h1 id="task-list-title" ref={listHeadingRef} tabIndex={-1} className="m-0 text-title font-semibold text-slate-900 outline-none">
-            {title}
-          </h1>
-          <span className="text-xs text-slate-600">{subtitle}</span>
-          <label className="ml-auto inline-flex items-center gap-2 text-xs text-slate-600">
-            Sort
-            <select
-              aria-label="Sort tasks"
-              className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-700"
-              value={sort}
-              onChange={(event) => {
-                const next = new URLSearchParams(searchParams);
-                const value = parseTaskSort(event.currentTarget.value);
-                if (value === "manual") {
-                  next.delete("sort");
-                } else {
-                  next.set("sort", value);
-                }
-                setSearchParams(next, { replace: true });
-              }}
-            >
-              <option value="manual">Manual</option>
-              <option value="due">Due date</option>
-              <option value="priority">Priority</option>
-              <option value="title">Title</option>
-            </select>
-          </label>
+          <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+            <h1 id="task-list-title" ref={listHeadingRef} tabIndex={-1} className="m-0 text-title font-semibold text-slate-900 outline-none">
+              {title}
+            </h1>
+            <span className="text-xs text-slate-600">{subtitle}</span>
+            <div className="ml-auto flex items-center gap-1.5">
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 rounded border-slate-300 text-brand-primary accent-brand-primary"
+                  checked={showCompleted}
+                  onChange={(event) => setShowCompleted(event.currentTarget.checked)}
+                />
+                Show completed
+              </label>
+              <label className="inline-flex items-center gap-1.5 text-xs text-slate-500">
+                Sort
+                <span className="relative inline-flex">
+                  <select
+                    aria-label="Sort tasks"
+                    className="h-8 appearance-none rounded-lg border border-slate-200 bg-white pl-2.5 pr-7 text-xs font-medium text-slate-700 shadow-soft outline-none transition-colors duration-200 ease-smooth hover:border-slate-300 focus:border-brand-primary"
+                    value={sort}
+                    onChange={(event) => {
+                      const next = new URLSearchParams(searchParams);
+                      const value = parseTaskSort(event.currentTarget.value);
+                      if (value === "manual") {
+                        next.delete("sort");
+                      } else {
+                        next.set("sort", value);
+                      }
+                      setSearchParams(next, { replace: true });
+                    }}
+                  >
+                    <option value="manual">Manual</option>
+                    <option value="due">Due date</option>
+                    <option value="priority">Priority</option>
+                    <option value="title">Title</option>
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden />
+                </span>
+              </label>
+            </div>
           </div>
         ) : null}
 
@@ -453,14 +468,13 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
 
         {(isDesktop || !taskId) && taskQuery.hasNextPage ? (
           <div className="mt-3 flex justify-center">
-            <button
-              type="button"
-              className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 shadow-soft transition-colors duration-200 ease-smooth hover:border-sky-200 hover:text-brand-primary disabled:cursor-not-allowed disabled:opacity-60"
+            <Button
+              variant="secondary"
               onClick={() => void taskQuery.fetchNextPage()}
-              disabled={taskQuery.isFetchingNextPage}
+              isLoading={taskQuery.isFetchingNextPage}
             >
               {taskQuery.isFetchingNextPage ? "Loading more tasks…" : "Load more tasks"}
-            </button>
+            </Button>
           </div>
         ) : null}
 
@@ -475,12 +489,10 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             contextProjectId={projectId}
             contextTagId={tagId}
             state={state}
-            showCompleted={showCompleted}
             isCreating={createMutation.isPending}
             onCreate={(draft) => createMutation.mutate(draft)}
             onTitleChange={setNewTitle}
             onWaitingForChange={setNewWaitingFor}
-            onToggleCompleted={setShowCompleted}
           />
         )}
       </section>
@@ -646,7 +658,7 @@ function TaskRow({
   return (
     <article
       className={`group flex flex-col gap-2 rounded-[12px] border px-4 py-3 shadow-soft transition-shadow duration-200 ease-smooth hover:shadow-raised ${
-        isTerminal ? "border-emerald-100 bg-emerald-50/50" : isExpanded ? "border-slate-200 bg-white shadow-raised" : "border-slate-200 bg-white"
+        isTerminal ? "border-slate-200 bg-slate-50/70" : isExpanded ? "border-slate-200 bg-white shadow-raised" : "border-slate-200 bg-white"
       }`}
       role="listitem"
       onClick={(event) => {
@@ -660,10 +672,22 @@ function TaskRow({
         navigate(detailPath);
       }}
     >
-      <div className="flex min-h-[32px] flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+      {/* Wrapping row: below `sm` the checkbox and title claim the first line and the
+          chips wrap underneath, instead of each chip stretching to the card width.
+          `sm:contents` dissolves the checkbox/title wrapper so that from `sm` up the
+          row is a single flex line again and the project name can still `ml-auto`. */}
+      <div className="flex min-h-[32px] flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="flex min-w-0 basis-full items-center gap-3 sm:contents">
         {isTerminal ? (
-          <span className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-white px-2 text-xs font-medium text-emerald-700">
-            {task.state === "completed" ? "Completed" : "Cancelled"}
+          <span
+            aria-hidden
+            className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border-[1.5px] ${
+              task.state === "completed"
+                ? "border-emerald-500 bg-emerald-500 text-white"
+                : "border-slate-300 bg-slate-200 text-slate-500"
+            }`}
+          >
+            {task.state === "completed" ? <Check className="h-3 w-3" /> : <X className="h-2.5 w-2.5" />}
           </span>
         ) : (
           <button
@@ -693,20 +717,24 @@ function TaskRow({
               value={editingTitle}
               onChange={(event) => onEditTitle(event.currentTarget.value)}
             />
-            <button type="submit" className="h-9 rounded-lg bg-brand-primary px-3 text-xs font-semibold text-white">Save task title</button>
-            <button type="button" className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-600" onClick={onCancelEdit}>Cancel</button>
+            <Button type="submit" size="sm">Save task title</Button>
+            <Button variant="secondary" size="sm" onClick={onCancelEdit}>Cancel</Button>
           </form>
         ) : (
           <Link
             ref={(el) => registerRowLink(task.id, el)}
             to={detailPath}
-            className={`min-w-0 flex-1 truncate text-sm font-medium text-slate-900 hover:text-brand-primary ${isTerminal ? "line-through decoration-emerald-500/70" : ""}`}
+            className={`min-w-0 flex-1 truncate text-sm font-medium hover:text-brand-primary ${
+              isTerminal ? "text-slate-400 line-through decoration-slate-300" : "text-slate-900"
+            }`}
           >
             {task.title}
           </Link>
         )}
+        </div>
+        {isTerminal ? <Chip variant="neutral">{task.state === "completed" ? "Completed" : "Cancelled"}</Chip> : null}
         {!isEditing && !isTerminal ? (
-          <span className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100">
+          <span className="hidden shrink-0 items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 sm:flex">
             <button
               type="button"
               className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-slate-900"
@@ -718,11 +746,12 @@ function TaskRow({
             {task.state !== "next" ? (
               <button
                 type="button"
-                className="h-7 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-2 text-[11px] text-slate-600 hover:text-slate-900"
+                className="inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:border-slate-300 hover:text-slate-900"
                 aria-label={`Move ${task.title} to Next`}
                 onClick={() => onMoveToNext(task)}
               >
-                → Next
+                <ArrowRight className="h-3 w-3" aria-hidden />
+                Next
               </button>
             ) : null}
           </span>
@@ -732,7 +761,7 @@ function TaskRow({
           <Chip key={tag.id} variant="neutral">{tagLabel(tag)}</Chip>
         ))}
         {project ? (
-          <span className="shrink-0 truncate text-right text-[11px] text-slate-400 sm:ml-auto lg:max-w-[160px]">{project.name}</span>
+          <span className="min-w-0 shrink truncate text-[11px] text-slate-400 sm:ml-auto sm:text-right lg:max-w-[160px]">{project.name}</span>
         ) : null}
       </div>
       {children}
@@ -741,7 +770,27 @@ function TaskRow({
 }
 
 const detailFieldClass =
-  "min-h-10 rounded-lg border border-slate-200 px-3 text-sm text-slate-900 outline-none focus:border-brand-primary focus:shadow-ring-focus";
+  "min-h-10 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition-colors duration-200 ease-smooth hover:border-slate-300 focus:border-brand-primary focus:shadow-ring-focus";
+
+const detailCaptionClass = "text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500";
+
+function DetailField({ label, children }: { label: string; children: ReactNode }): JSX.Element {
+  return (
+    <label className="flex min-w-0 flex-col gap-1">
+      <span className={detailCaptionClass}>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function DetailSection({ title, children }: { title: string; children: ReactNode }): JSX.Element {
+  return (
+    <section className="flex min-w-0 flex-col gap-2">
+      <h3 className={`m-0 ${detailCaptionClass}`}>{title}</h3>
+      {children}
+    </section>
+  );
+}
 
 function TaskDetailPanel({
   task,
@@ -770,9 +819,11 @@ function TaskDetailPanel({
   onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") => void;
   onCreateComment: (task: TaskResponse, body: string) => void;
 }): JSX.Element {
+  const isOpenState = Boolean(task && task.state !== "completed" && task.state !== "cancelled");
+
   return (
     <aside
-      className="-mx-4 -my-5 flex min-h-[calc(100vh-56px)] flex-col gap-[18px] bg-surface-base px-4 py-5 sm:-mx-6 sm:px-6 motion-safe:lg:animate-detail-enter lg:m-0 lg:min-h-0 lg:bg-transparent lg:p-0 lg:pt-3.5 lg:border-t lg:border-slate-200"
+      className="-mx-4 -my-5 flex min-h-[calc(100vh-56px)] min-w-0 flex-col gap-[18px] bg-surface-base px-4 py-5 sm:-mx-6 sm:px-6 motion-safe:lg:animate-detail-enter lg:m-0 lg:min-h-0 lg:bg-transparent lg:p-0 lg:pt-3.5 lg:border-t lg:border-slate-200"
       aria-labelledby="task-detail-title"
     >
       <div className="flex items-center gap-3">
@@ -795,14 +846,15 @@ function TaskDetailPanel({
         <p className="m-0 min-w-0 flex-1 break-words whitespace-normal text-[20px] font-semibold leading-[1.3] tracking-[-0.015em] text-slate-900 lg:hidden">
           {task?.title ?? "Task"}
         </p>
-        <button
-          type="button"
-          className="hidden h-8 items-center gap-1 rounded-lg border border-slate-200 px-2 text-xs text-slate-600 lg:inline-flex"
+        <Button
+          variant="secondary"
+          size="sm"
+          className="hidden lg:inline-flex"
+          leftIcon={<X aria-hidden />}
           onClick={onClose}
         >
-          <X className="h-3.5 w-3.5" aria-hidden />
           Close
-        </button>
+        </Button>
       </div>
 
       {isLoading ? <p className="text-sm text-slate-600">Loading task detail…</p> : null}
@@ -810,7 +862,7 @@ function TaskDetailPanel({
       {task ? (
         <div className="flex flex-col gap-[18px]">
           <form
-            className="grid gap-3 lg:grid-cols-2"
+            className="flex min-w-0 flex-col gap-3"
             key={`${task.id}-${task.revision}`}
             onSubmit={(event) => {
               event.preventDefault();
@@ -832,84 +884,107 @@ function TaskDetailPanel({
               });
             }}
           >
-            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
-              Title
+            <DetailField label="Title">
               <input name="title" aria-label="Title" defaultValue={task.title} className={detailFieldClass} />
-            </label>
-            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
-              Project
-              <select name="project_id" aria-label="Project" defaultValue={task.project_id ?? ""} className={detailFieldClass}>
-                <option value="">No project</option>
-                {projects.map((project) => (
-                  <option key={project.id} value={project.id}>{project.name}</option>
-                ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600 lg:col-span-2">
-              Details
-              <textarea name="details" aria-label="Details" defaultValue={task.details ?? ""} rows={3} className={`${detailFieldClass} py-2`} />
-            </label>
-            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
-              Due date
-              <input name="due_date" aria-label="Due date" type="date" defaultValue={task.due_date ?? ""} className={detailFieldClass} />
-            </label>
-            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
-              Priority
-              <select name="priority" aria-label="Priority" defaultValue={task.priority} className={detailFieldClass}>
-                <option value="none">None</option>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-              </select>
-            </label>
-            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
-              Waiting for
-              <input name="waiting_for" aria-label="Waiting for" defaultValue={task.waiting_for ?? ""} className={detailFieldClass} />
-              <span className="text-[11px] font-normal text-slate-500">Required when moving or reopening to Waiting.</span>
-            </label>
-            <fieldset className="flex flex-wrap gap-2 text-xs font-medium text-slate-600">
-              <legend className="mb-1 w-full">Tags</legend>
-              {tags.map((tag) => (
-                <label key={tag.id} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1">
-                  <input name="tag_ids" type="checkbox" value={tag.id} defaultChecked={task.tag_ids.includes(tag.id)} />
-                  #{tag.name.replace(/^[#@]/, "")}
-                </label>
-              ))}
-            </fieldset>
-            <div className="flex flex-wrap items-end gap-2 lg:col-span-2">
-              <button type="submit" className="h-10 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white">Save task detail</button>
-              {task.state !== "completed" && task.state !== "cancelled" ? (
-                <>
-                  <button type="button" className="h-10 rounded-lg border border-emerald-200 px-3 text-sm text-emerald-700" onClick={() => onTransition(task, "complete")}>Complete</button>
-                  <button type="button" className="h-10 rounded-lg border border-rose-200 px-3 text-sm text-rose-700" onClick={() => onTransition(task, "cancel")}>Cancel</button>
-                  {openStateOptions.filter((option) => option !== task.state).map((option) => (
-                    <TaskTransitionButton
-                      key={option}
-                      label={`Move to ${stateLabels[option].replace(" actions", "")}`}
-                      targetState={option}
-                      action="move"
-                      task={task}
-                      onTransition={onTransition}
-                    />
+            </DetailField>
+            <DetailField label="Details">
+              <textarea
+                name="details"
+                aria-label="Details"
+                defaultValue={task.details ?? ""}
+                rows={3}
+                placeholder="Notes, links, whatever helps you pick this up again"
+                className={`${detailFieldClass} py-2 placeholder:text-slate-400`}
+              />
+            </DetailField>
+            <div className="grid min-w-0 gap-3 sm:grid-cols-3">
+              <DetailField label="Project">
+                <select name="project_id" aria-label="Project" defaultValue={task.project_id ?? ""} className={detailFieldClass}>
+                  <option value="">No project</option>
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>{project.name}</option>
                   ))}
-                </>
-              ) : (
-                openStateOptions.map((option) => (
+                </select>
+              </DetailField>
+              <DetailField label="Due date">
+                <input name="due_date" aria-label="Due date" type="date" defaultValue={task.due_date ?? ""} className={detailFieldClass} />
+              </DetailField>
+              <DetailField label="Priority">
+                <select name="priority" aria-label="Priority" defaultValue={task.priority} className={detailFieldClass}>
+                  <option value="none">None</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </DetailField>
+            </div>
+            <fieldset className="min-w-0">
+              <legend className={`mb-1.5 ${detailCaptionClass}`}>Tags</legend>
+              <div className="flex flex-wrap gap-1.5">
+                {tags.map((tag) => (
+                  <label key={tag.id} className="inline-flex cursor-pointer items-center">
+                    <input
+                      name="tag_ids"
+                      type="checkbox"
+                      value={tag.id}
+                      defaultChecked={task.tag_ids.includes(tag.id)}
+                      className="peer sr-only"
+                    />
+                    <span className="rounded-full border border-slate-200 bg-white px-2.5 py-[3px] text-[11px] font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:border-slate-300 peer-checked:border-brand-primary peer-checked:bg-info-bg peer-checked:text-info-fg peer-focus-visible:shadow-ring-focus">
+                      #{tag.name.replace(/^[#@]/, "")}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <div className="flex min-w-0 flex-col gap-3 border-t border-slate-200 pt-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button type="submit" size="md">Save task detail</Button>
+                {isOpenState ? (
+                  <>
+                    <Button
+                      variant="secondary"
+                      size="md"
+                      className="border-emerald-200 text-emerald-700 hover:border-emerald-300 hover:text-emerald-800"
+                      leftIcon={<Check aria-hidden />}
+                      onClick={() => onTransition(task, "complete")}
+                    >
+                      Complete
+                    </Button>
+                    <Button variant="danger" size="md" onClick={() => onTransition(task, "cancel")}>
+                      Cancel task
+                    </Button>
+                  </>
+                ) : null}
+              </div>
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                <span className={`mr-0.5 ${detailCaptionClass}`}>{isOpenState ? "Move to" : "Reopen to"}</span>
+                {(isOpenState ? openStateOptions.filter((option) => option !== task.state) : openStateOptions).map((option) => (
                   <TaskTransitionButton
                     key={option}
-                    label={`Reopen to ${stateLabels[option].replace(" actions", "")}`}
+                    label={`${isOpenState ? "Move to" : "Reopen to"} ${stateLabels[option].replace(" actions", "")}`}
+                    text={stateLabels[option].replace(" actions", "")}
                     targetState={option}
-                    action="reopen"
+                    action={isOpenState ? "move" : "reopen"}
                     task={task}
                     onTransition={onTransition}
                   />
-                ))
-              )}
+                ))}
+              </div>
+              <DetailField label="Waiting for">
+                <input
+                  name="waiting_for"
+                  aria-label="Waiting for"
+                  defaultValue={task.waiting_for ?? ""}
+                  placeholder="Who or what are you waiting on?"
+                  className={`${detailFieldClass} placeholder:text-slate-400 sm:max-w-[380px]`}
+                />
+                <span className="text-[11px] text-slate-500">Required to move or reopen a task into Waiting for.</span>
+              </DetailField>
             </div>
           </form>
 
-          <div className="flex flex-col gap-2">
-            <h3 className="m-0 text-xs font-semibold uppercase tracking-wide text-slate-500">Subtasks</h3>
+          <DetailSection title="Subtasks">
             <div className="flex flex-col gap-1.5" aria-label="Subtasks">
               {(task.subtasks ?? []).map((subtask) => {
                 const done = subtask.state !== "open";
@@ -931,7 +1006,7 @@ function TaskDetailPanel({
               })}
             </div>
             <form
-              className="flex w-full gap-2 rounded-lg border border-dashed border-slate-200 bg-slate-50/70 p-2 lg:max-w-[380px]"
+              className="flex w-full min-w-0 items-center gap-2 rounded-lg border border-dashed border-slate-200 bg-slate-50/70 p-2 lg:max-w-[420px]"
               onSubmit={(event) => {
                 event.preventDefault();
                 const form = new FormData(event.currentTarget);
@@ -942,21 +1017,26 @@ function TaskDetailPanel({
                 }
               }}
             >
-              <input name="subtask_title" aria-label="New subtask title" className="min-h-10 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm" placeholder="Add a subtask" />
-              <button type="submit" className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm">Add subtask</button>
+              <input
+                name="subtask_title"
+                aria-label="New subtask title"
+                className="min-h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none transition-colors duration-200 ease-smooth focus:border-brand-primary placeholder:text-slate-400"
+                placeholder="Add a subtask"
+              />
+              <Button type="submit" variant="secondary" size="sm">Add subtask</Button>
             </form>
+          </DetailSection>
+
+          <div data-testid="task-detail-agent">
+            <DetailSection title="Agent">
+              <div className="flex items-center gap-2">
+                <SoonChip />
+                <span className="sr-only">Coming soon</span>
+              </div>
+            </DetailSection>
           </div>
 
-          <div className="flex flex-col gap-2" data-testid="task-detail-agent">
-            <h3 className="m-0 text-xs font-semibold uppercase tracking-wide text-slate-500">Agent</h3>
-            <div className="flex items-center gap-2">
-              <SoonChip />
-              <span className="sr-only">Coming soon</span>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <h3 className="m-0 text-xs font-semibold uppercase tracking-wide text-slate-500">Comments</h3>
+          <DetailSection title="Comments">
             <div className="flex flex-col gap-2" aria-label="Comments">
               {(task.comments ?? []).map((comment) => (
                 <div key={comment.id} className="flex items-start gap-2">
@@ -968,7 +1048,7 @@ function TaskDetailPanel({
               ))}
             </div>
             <form
-              className="flex w-full gap-2 rounded-lg border border-dashed border-slate-200 bg-slate-50/70 p-2 lg:max-w-[380px]"
+              className="flex w-full min-w-0 items-center gap-2 rounded-lg border border-dashed border-slate-200 bg-slate-50/70 p-2 lg:max-w-[420px]"
               onSubmit={(event) => {
                 event.preventDefault();
                 const form = new FormData(event.currentTarget);
@@ -979,10 +1059,15 @@ function TaskDetailPanel({
                 }
               }}
             >
-              <input name="comment_body" aria-label="New comment" className="min-h-10 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm" placeholder="Add a comment" />
-              <button type="submit" className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm">Add comment</button>
+              <input
+                name="comment_body"
+                aria-label="New comment"
+                className="min-h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none transition-colors duration-200 ease-smooth focus:border-brand-primary placeholder:text-slate-400"
+                placeholder="Add a comment"
+              />
+              <Button type="submit" variant="secondary" size="sm">Add comment</Button>
             </form>
-          </div>
+          </DetailSection>
         </div>
       ) : null}
     </aside>
@@ -994,18 +1079,23 @@ function TaskTransitionButton({
   action,
   targetState,
   label,
+  text,
   onTransition
 }: {
   task: TaskResponse;
   action: "move" | "reopen";
   targetState: OpenTaskState;
+  /** Accessible name — spells out the action ("Move to Inbox"). */
   label: string;
+  /** Visible text — the destination only, since the group already reads "Move to". */
+  text: string;
   onTransition: (task: TaskResponse, action: "move" | "complete" | "reopen" | "cancel", toState?: OpenTaskState, waitingFor?: string) => void;
 }): JSX.Element {
   return (
-    <button
-      type="button"
-      className="h-10 rounded-lg border border-slate-200 px-3 text-sm text-slate-700"
+    <Button
+      variant="secondary"
+      size="sm"
+      aria-label={label}
       onClick={(event) => {
         const detailForm = event.currentTarget.form;
         const waitingFor = detailForm
@@ -1014,8 +1104,8 @@ function TaskTransitionButton({
         onTransition(task, action, targetState, targetState === "waiting" ? waitingFor : undefined);
       }}
     >
-      {label}
-    </button>
+      {text}
+    </Button>
   );
 }
 
@@ -1027,12 +1117,10 @@ function TaskCreator({
   contextProjectId,
   contextTagId,
   state,
-  showCompleted,
   isCreating,
   onCreate,
   onTitleChange,
-  onWaitingForChange,
-  onToggleCompleted
+  onWaitingForChange
 }: {
   newTitle: string;
   newWaitingFor: string;
@@ -1041,12 +1129,10 @@ function TaskCreator({
   contextProjectId?: string;
   contextTagId?: string;
   state?: OpenTaskState;
-  showCompleted: boolean;
   isCreating: boolean;
   onCreate: (draft: SmartAddDraft) => void;
   onTitleChange: (title: string) => void;
   onWaitingForChange: (value: string) => void;
-  onToggleCompleted: (show: boolean) => void;
 }): JSX.Element {
   const waitingForRequired = state === "waiting";
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -1162,9 +1248,14 @@ function TaskCreator({
             />
           </>
         ) : null}
-        <button type="submit" disabled={isCreating || !draft.isValid || (waitingForRequired && !newWaitingFor.trim())} className="h-10 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
+        <Button
+          type="submit"
+          size="lg"
+          isLoading={isCreating}
+          disabled={!draft.isValid || (waitingForRequired && !newWaitingFor.trim())}
+        >
           Add task
-        </button>
+        </Button>
       </form>
       {popupOpen ? (
         <SmartAddSuggestions
@@ -1185,10 +1276,6 @@ function TaskCreator({
           <span className="text-slate-500">Title: “{draft.cleanTitle}”</span>
         </div>
       ) : null}
-      <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-600">
-        <input type="checkbox" checked={showCompleted} onChange={(event) => onToggleCompleted(event.currentTarget.checked)} />
-        Show terminal tasks
-      </label>
     </div>
   );
 }
@@ -1229,10 +1316,14 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
         <div className="min-w-0 flex-1">
           <p className="font-semibold">We couldn't load tasks</p>
           <p className="mt-1 text-rose-800">{message}</p>
-          <button type="button" className="mt-3 inline-flex h-9 items-center gap-2 rounded-lg bg-white px-3 font-medium text-rose-800 shadow-soft" onClick={onRetry}>
-            <RotateCcw className="h-4 w-4" aria-hidden />
+          <Button
+            variant="secondary"
+            className="mt-3 border-rose-200 text-rose-800 hover:border-rose-300 hover:text-rose-900"
+            leftIcon={<RotateCcw aria-hidden />}
+            onClick={onRetry}
+          >
             Retry
-          </button>
+          </Button>
         </div>
       </div>
     </div>
