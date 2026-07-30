@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { ShieldCheck, Trash2 } from "lucide-react";
+import { ShieldCheck, Trash2, X } from "lucide-react";
 import { useParams } from "react-router-dom";
 
 import { apiClient } from "../../api/client";
 import type { BrainDumpOperationResponse } from "../../api/taskTypes";
+import { BrainDumpOverlay } from "./BrainDumpOverlay";
+import { useCloseBrainDump } from "./brainDumpNavigation";
 
 // Human-readable operation status for the privacy surface. Mirrors the phrasing
 // the main route uses so the two never disagree about what a status means.
@@ -40,6 +42,7 @@ function privacyIdempotencyKey(action: string) {
 // deliberately renders no Record button and no new-capture consent checkbox.
 export function BrainDumpPrivacyControls(): JSX.Element {
   const params = useParams();
+  const closeOverlay = useCloseBrainDump();
   const operationId = params.operationId && params.operationId !== "new" ? params.operationId : null;
   const [operation, setOperation] = useState<BrainDumpOperationResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -90,14 +93,28 @@ export function BrainDumpPrivacyControls(): JSX.Element {
   const canDiscard = Boolean(operation) && !isTerminal;
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-surface-base px-4 text-slate-900">
-      <section className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-floating">
-        <p className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-brand-primary">
-          <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
-          Voice brain dump · privacy controls
-        </p>
-        <h1 className="mt-2 text-xl font-semibold">You stay in control of this recording</h1>
-        <p className="mt-2 text-sm text-slate-600">
+    <BrainDumpOverlay labelledBy="brain-dump-privacy-title" onClose={closeOverlay} size="narrow">
+      <header className="flex shrink-0 items-start gap-3 border-b border-slate-100 px-5 pt-[max(16px,env(safe-area-inset-top))] pb-3 sm:px-6 sm:pt-5">
+        <div className="min-w-0 flex-1">
+          <p className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-brand-primary">
+            <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
+            Voice brain dump · privacy controls
+          </p>
+          <h1 id="brain-dump-privacy-title" className="text-[20px] font-semibold leading-[1.3] tracking-[-0.015em] text-slate-900">
+            You stay in control of this recording
+          </h1>
+        </div>
+        <button
+          type="button"
+          aria-label="Close brain dump"
+          className="-mr-1.5 -mt-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900"
+          onClick={closeOverlay}
+        >
+          <X className="h-4 w-4" aria-hidden />
+        </button>
+      </header>
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
+        <p className="text-sm text-slate-600">
           New voice recordings are turned off for this workspace, but you can still manage the recording you already
           started.
         </p>
@@ -158,7 +175,7 @@ export function BrainDumpPrivacyControls(): JSX.Element {
             </div>
           </>
         ) : null}
-      </section>
-    </main>
+      </div>
+    </BrainDumpOverlay>
   );
 }

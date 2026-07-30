@@ -425,7 +425,7 @@ test("minimal task management creates, edits, moves, completes, reopens and pers
   await test.step("complete and reopen the task", async () => {
     await page.getByRole("button", { name: "Complete Book dentist checkup" }).click();
     await expect(page.getByText("Book dentist checkup")).toHaveCount(0);
-    await page.getByRole("checkbox", { name: "Show terminal tasks" }).check();
+    await page.getByRole("checkbox", { name: "Show completed" }).check();
     await expect(page.getByText("Book dentist checkup")).toBeVisible();
     await page.getByRole("link", { name: "Book dentist checkup" }).click();
     await page.getByRole("button", { name: "Reopen to Next" }).click();
