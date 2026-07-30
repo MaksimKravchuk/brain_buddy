@@ -1226,11 +1226,19 @@ describe("BrainDumpRoute", () => {
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/brain_dump_1/commit"), expect.anything());
   });
 
-  it("ignores discard clicks before a brain dump operation exists", async () => {
+  it("offers only Record before a capture exists, with closing as the way out", async () => {
     fetchMock.mockImplementation(() => Promise.reject(new Error("no requests expected")));
 
     renderBrainDump();
-    await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+
+    // Capture controls act on an operation, so none are offered before one
+    // exists — there is nothing to discard, pause or stop yet. The panel is
+    // dismissible in this state, so the X is the exit.
+    expect(screen.getByRole("button", { name: "Record" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Discard" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop & review" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close brain dump" })).toBeInTheDocument();
 
     expect(operationFetchCalls()).toHaveLength(0);
   });

@@ -746,6 +746,35 @@ function RecoverySurface({
   );
 }
 
+function formatElapsed(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+/**
+ * Seconds of actual capture, ticking only while recording so a pause holds the
+ * clock. Deliberately measures this session rather than deriving from
+ * `created_at`, which would count paused and offline time as recorded audio.
+ */
+function useElapsedSeconds(isRecording: boolean, operationId?: string): number {
+  const [seconds, setSeconds] = useState(0);
+
+  useEffect(() => {
+    setSeconds(0);
+  }, [operationId]);
+
+  useEffect(() => {
+    if (!isRecording) {
+      return;
+    }
+    const timer = setInterval(() => setSeconds((current) => current + 1), 1000);
+    return () => clearInterval(timer);
+  }, [isRecording]);
+
+  return seconds;
+}
+
 function RecordingSurface({
   accurateSttProvider,
   reconcilerProvider,
@@ -816,6 +845,7 @@ function RecordingSurface({
   const captureStopped = consentWithdrawnMidCapture || captureStoppedByConsent;
   const isPaused = operation?.status === "paused" && !captureStopped;
   const isRecording = operation?.status === "recording" && !captureStopped;
+  const elapsedSeconds = useElapsedSeconds(isRecording, operation?.id);
   // Name the actual configured vendors so the user approves exactly the
   // providers their audio and transcript will reach (FR-012). The consent
   // surface is only rendered once discovery has resolved (`providersReady`),
@@ -848,8 +878,89 @@ function RecordingSurface({
             }
           />
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 sm:px-6" aria-live="polite">
-            {error ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
+          {error ? (
+            <div role="alert" className="mx-4 mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 sm:mx-6">{error}</div>
+          ) : null}
+
+          <div
+            className={`min-h-0 flex-1 ${
+              operation
+                ? // Stacked below `sm`: the status pane takes its content height and
+                  // the task stack gets the rest, rather than the two splitting the
+                  // panel evenly and leaving the status pane half empty.
+                  "grid grid-rows-[auto_minmax(0,1fr)] sm:grid-cols-[300px_1fr] sm:grid-rows-none"
+                : "overflow-y-auto"
+            }`}
+          >
+            {operation ? (
+              // Live capture: status and controls on the left, tasks accumulating on
+              // the right — the prototype's two-pane body. It also gives the primary
+              // action a column of its own instead of wrapping below the secondary
+              // ones, which is what the single-row footer used to do at this width.
+              <div className="flex shrink-0 flex-col items-center gap-3 border-b border-slate-100 bg-surface-base px-5 py-5 text-center sm:border-b-0 sm:border-r">
+                <div className="relative h-14 w-14 shrink-0" aria-hidden>
+                  <span className={`absolute inset-0 rounded-full bg-sky-200/70 ${isRecording ? "motion-safe:animate-[bbPulse_1.8s_cubic-bezier(.22,1,.36,1)_infinite]" : ""}`} />
+                  <div className="absolute inset-0 flex items-center justify-center rounded-full bg-brand-primary text-white">
+                    <Mic className="h-6 w-6" />
+                  </div>
+                </div>
+                <span
+                  className={`inline-flex items-center gap-1.5 text-sm font-semibold tabular-nums ${isRecording ? "text-recording" : "text-slate-500"}`}
+                  aria-label={`Recorded ${formatElapsed(elapsedSeconds)}`}
+                >
+                  <span className={`h-[7px] w-[7px] rounded-full ${isRecording ? "bg-recording motion-safe:animate-pulse" : "bg-slate-400"}`} aria-hidden />
+                  {formatElapsed(elapsedSeconds)}
+                </span>
+
+                {/* Pushes the controls to the bottom of the fixed-height side
+                    column. Below `sm` the panes stack, so the same spacer would
+                    just open a gap between the mic and the controls. */}
+                <div className="hidden min-h-0 flex-1 sm:block" />
+
+                <details className="w-full min-w-0 text-[13px] leading-normal text-slate-500">
+                  <summary className="cursor-pointer list-none overflow-hidden text-ellipsis whitespace-nowrap">
+                    {lastTranscript || "Listening — your words appear here"}
+                  </summary>
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">Browser preview · provisional</span>
+                  <p className="mt-2 whitespace-pre-wrap rounded-lg bg-white p-2 text-left text-xs text-slate-500">{lastTranscript || "No transcript yet."}</p>
+                </details>
+
+                <div className="flex w-full flex-col gap-2">
+                  <button type="button" className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white shadow-soft transition-colors duration-200 ease-smooth hover:bg-brand-primary-hover" onClick={onFinish}>
+                    <Square className="h-3.5 w-3.5" aria-hidden />
+                    Stop &amp; review
+                  </button>
+                  <div className="flex w-full gap-2">
+                    {captureStopped ? (
+                      <span className="inline-flex h-10 flex-1 items-center justify-center rounded-lg border border-amber-200 bg-amber-50 px-3 text-sm font-medium text-amber-800">
+                        Cloud processing stopped
+                      </span>
+                    ) : isPaused ? (
+                      <button type="button" className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition-colors duration-200 ease-smooth hover:border-slate-300" onClick={onResume}>
+                        <Play className="h-4 w-4" aria-hidden />
+                        Resume
+                      </button>
+                    ) : (
+                      <button type="button" className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition-colors duration-200 ease-smooth hover:border-slate-300" onClick={onPause}>
+                        <Pause className="h-4 w-4" aria-hidden />
+                        Pause
+                      </button>
+                    )}
+                    <button type="button" className="inline-flex h-10 flex-1 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition-colors duration-200 ease-smooth hover:border-slate-300" onClick={onCancel}>Discard</button>
+                  </div>
+                  {operation.consent.external_processing_allowed ? (
+                    // A rare escape hatch: kept reachable, but no longer the loudest
+                    // control in the panel.
+                    <button type="button" className="text-xs font-medium text-amber-700 underline-offset-2 hover:underline" onClick={onWithdrawConsent}>
+                      Stop cloud processing
+                    </button>
+                  ) : null}
+                </div>
+                <p className="text-xs text-slate-500">Nothing is saved until review</p>
+              </div>
+            ) : null}
+
+            <div className="min-h-0 overflow-y-auto px-4 py-3 sm:px-6" aria-live="polite">
             {!operation && isNewRecording ? (
               <div className="mb-4 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
                 <label className="grid gap-1 text-slate-700">
@@ -888,54 +999,31 @@ function RecordingSurface({
               {proposals.map((proposal) => <ProposalCard key={proposal.id} proposal={proposal} />)}
               {proposals.length === 0 ? <p className="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">Press Record and speak. Provisional Inbox tasks will grow here while you talk.</p> : null}
             </div>
+            </div>
           </div>
 
-          <footer className="shrink-0 border-t border-slate-100 bg-slate-50/80 px-4 py-3 sm:px-5">
-            <div className="flex flex-wrap items-center gap-2 gap-y-2 sm:gap-3">
-              <div className="relative h-10 w-10 shrink-0" aria-label="Voice level">
-                <span className={`absolute inset-0 rounded-full bg-sky-200/70 ${isRecording ? "animate-[bbPulse_1.8s_cubic-bezier(.22,1,.36,1)_infinite]" : ""}`} />
-                <div className="absolute inset-0 flex items-center justify-center rounded-full bg-brand-primary text-white">
-                  <Mic className="h-4 w-4" aria-hidden />
+          {!operation ? (
+            <footer className="shrink-0 border-t border-slate-100 bg-surface-base px-4 py-3 sm:px-6">
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="relative h-10 w-10 shrink-0" aria-hidden>
+                  <div className="absolute inset-0 flex items-center justify-center rounded-full bg-brand-primary text-white">
+                    <Mic className="h-4 w-4" />
+                  </div>
                 </div>
-              </div>
-              <details className="min-w-0 flex-1 basis-full text-[13px] leading-normal text-slate-500 sm:basis-auto">
-                <summary className="cursor-pointer list-none overflow-hidden text-ellipsis whitespace-nowrap">{lastTranscript || "Transcript stays collapsed while tasks remain primary"}</summary>
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">Browser preview · provisional</span>
-                <p className="mt-2 whitespace-pre-wrap rounded-lg bg-white p-2 text-xs text-slate-500">{lastTranscript || "No transcript yet."}</p>
-              </details>
-              {!operation ? (
-                <button type="button" className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white shadow-soft disabled:cursor-not-allowed disabled:opacity-50" disabled={isStarting || (isNewRecording && !providersReady)} onClick={onStart}>
+                <p className="min-w-0 flex-1 text-[13px] text-slate-500">Speak freely — tasks are extracted as you go.</p>
+                <button
+                  type="button"
+                  className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand-primary px-5 text-sm font-semibold text-white shadow-soft transition-colors duration-200 ease-smooth hover:bg-brand-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={isStarting || (isNewRecording && !providersReady)}
+                  onClick={onStart}
+                >
                   <Mic className="h-4 w-4" aria-hidden />
                   Record
                 </button>
-              ) : captureStopped ? (
-                <span className="inline-flex h-10 items-center rounded-lg border border-amber-200 bg-amber-50 px-4 text-sm font-medium text-amber-800">
-                  Cloud processing stopped
-                </span>
-              ) : isPaused ? (
-                <button type="button" className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white shadow-soft" onClick={onResume}>
-                  <Play className="h-4 w-4" aria-hidden />
-                  Resume
-                </button>
-              ) : (
-                <button type="button" className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700" onClick={onPause}>
-                  <Pause className="h-4 w-4" aria-hidden />
-                  Pause
-                </button>
-              )}
-              <button type="button" className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700" onClick={onCancel}>Discard</button>
-              {operation?.consent.external_processing_allowed ? (
-                <button type="button" className="inline-flex h-10 items-center rounded-lg border border-amber-200 bg-white px-4 text-sm font-medium text-amber-800" onClick={onWithdrawConsent}>
-                  Stop cloud processing
-                </button>
-              ) : null}
-              <button type="button" className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white shadow-soft hover:bg-brand-primary-hover sm:px-5" disabled={!operation} onClick={onFinish}>
-                <Square className="h-3.5 w-3.5" aria-hidden />
-                Stop & review
-              </button>
-            </div>
-            <p className="mt-2 text-center text-xs text-slate-500">Nothing is saved until review</p>
-          </footer>
+              </div>
+              <p className="mt-2 text-center text-xs text-slate-500">Nothing is saved until review</p>
+            </footer>
+          ) : null}
     </BrainDumpOverlay>
   );
 }
