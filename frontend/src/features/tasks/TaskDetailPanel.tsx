@@ -1,6 +1,6 @@
 /* istanbul ignore file -- source-faithful detail panel is covered by route tests and Playwright snapshots. */
 import { Check, ChevronRight, Inbox, MoreHorizontal, Network, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 
 import { apiClient } from "../../api/client";
@@ -87,6 +87,7 @@ export function TaskDetailPanel({
 }): JSX.Element {
   const notify = useShellToast();
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
   const isTerminal = Boolean(task && (task.state === "completed" || task.state === "cancelled"));
 
   useEffect(() => {
@@ -102,7 +103,17 @@ export function TaskDetailPanel({
         <button type="button" aria-label="Close" className={iconButtonClass} onClick={onClose}>
           <ChevronRight className="h-[15px] w-[15px]" aria-hidden />
         </button>
-        <span className="relative ml-auto flex items-center gap-1">
+        <span
+          className="relative ml-auto flex items-center gap-1"
+          onKeyDown={(event) => {
+            if (menuOpen && event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              setMenuOpen(false);
+              menuButtonRef.current?.focus();
+            }
+          }}
+        >
           <button
             type="button"
             aria-label="Thinking canvas"
@@ -114,6 +125,7 @@ export function TaskDetailPanel({
           {task && !isTerminal ? (
             <>
               <button
+                ref={menuButtonRef}
                 type="button"
                 aria-label="Task menu"
                 aria-expanded={menuOpen}

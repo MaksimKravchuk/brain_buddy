@@ -1,7 +1,7 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAuthStore } from "../stores/authStore";
@@ -69,12 +69,18 @@ function taskFixture(id: string, title: string, state = "next") {
   };
 }
 
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location">{`${location.pathname}${location.search}`}</div>;
+}
+
 function renderRoutes(initialEntry: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[initialEntry]}>
+        <LocationProbe />
         <AppRoutes />
       </MemoryRouter>
     </QueryClientProvider>
@@ -719,6 +725,41 @@ describe("AppRoutes", () => {
     expect(screen.getByText("Next actions is clear")).toBeInTheDocument();
   });
 
+  it("dismisses the open Task menu before retaining Task detail Escape behavior", async () => {
+    renderRoutes("/tasks/next/task-1?sort=due");
+
+    const heading = await screen.findByRole("heading", { name: "Task detail" });
+    const menuButton = await screen.findByRole("button", { name: "Task menu" });
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(5));
+    const requestCount = vi.mocked(fetch).mock.calls.length;
+
+    fireEvent.click(menuButton);
+    expect(menuButton).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "Cancel task" })).toBeInTheDocument();
+
+    fireEvent.keyDown(menuButton, { key: "x" });
+    expect(screen.getByRole("button", { name: "Cancel task" })).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledTimes(requestCount);
+
+    fireEvent.keyDown(menuButton, { key: "Escape" });
+    expect(screen.queryByRole("button", { name: "Cancel task" })).not.toBeInTheDocument();
+    expect(heading).toBeInTheDocument();
+    expect(screen.getByTestId("location")).toHaveTextContent("/tasks/next/task-1?sort=due");
+    expect(menuButton).toHaveFocus();
+    expect(fetch).toHaveBeenCalledTimes(requestCount);
+
+    const title = screen.getByLabelText("Title");
+    title.focus();
+    fireEvent.keyDown(title, { key: "Escape" });
+    expect(heading).toBeInTheDocument();
+    expect(screen.getByTestId("location")).toHaveTextContent("/tasks/next/task-1?sort=due");
+
+    menuButton.focus();
+    fireEvent.keyDown(menuButton, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Task detail" })).not.toBeInTheDocument());
+    expect(screen.getByTestId("location")).toHaveTextContent("/tasks/next?sort=due");
+  });
+
   it("keeps terminal recovery explicit in task detail", async () => {
     const user = userEvent.setup();
     const completedTask = {
@@ -757,6 +798,7 @@ describe("AppRoutes", () => {
     expect(screen.getByRole("option", { name: "Reopen to Next actions" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Reopen to Waiting for" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: /^Move to/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Task menu" })).not.toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Waiting for"), "Ada");
     await user.selectOptions(listSelect, "waiting");
