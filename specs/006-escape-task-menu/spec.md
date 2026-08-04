@@ -2,8 +2,8 @@
 
 **Feature Branch**: `paperclip/bra-1-escape-menu`
 **Created**: 2026-08-04
-**Status**: Draft for independent ratification
-**Input**: BRA-2 — preserve Task detail when Escape dismisses its open Task menu
+**Status**: Draft pending bounded planning review and independent ratification
+**Input**: BRA-2, amended by BRA-6 after independent ratification findings
 
 ## User Scenarios & Testing *(mandatory)*
 

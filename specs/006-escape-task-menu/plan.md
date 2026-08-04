@@ -40,12 +40,11 @@ Give the Task menu first ownership of Escape while it is open. The menu closes, 
 ## Planned Source Scope
 
 ```text
-frontend/src/features/tasks/
-├── TaskDetailPanel.tsx                  # menu-owned Escape and trigger focus restoration
-└── __tests__/TaskListPage.test.tsx      # one targeted route-level behavioral test (create if absent)
+frontend/src/features/tasks/TaskDetailPanel.tsx  # menu-owned Escape and trigger focus restoration
+frontend/src/app/AppRoutes.test.tsx               # established route-level behavioral test module
 ```
 
-If the implementation agent finds an established Task route test file at implementation time, the test belongs there instead of creating a duplicate fixture module. No other production path is planned.
+The existing `frontend/src/app/AppRoutes.test.tsx` route fixture already renders real Task routes and owns the relevant API/router setup. Extend that module rather than creating a duplicate task fixture module. No other production path is planned.
 
 ## Single Targeted Behavioral Test Strategy
 
@@ -80,6 +79,7 @@ The test must carry non-empty Allure `epic`, `feature`, `story`, a human-readabl
 
 - Focused RED then GREEN Vitest command for the targeted test.
 - Focused frontend test file passes with required Allure taxonomy.
-- `python3 scripts/check_spec_kit_specs.py` passes after independent planning review and validated `hermes-handoff.json` are added.
+- The Architect runs the bounded read-only planning-review campaign, resolves technical findings, authors and validates `hermes-handoff.json`, and records the approved run before independent ratification.
+- `python3 scripts/check_spec_kit_specs.py` passes with the Architect-authored handoff present.
 - Independent review confirms only planned frontend behavior changes and no production/config/CI/security scope drift.
 - Feature is a localized UI fix with no feature flag or migration; normal repository delivery gates still apply.

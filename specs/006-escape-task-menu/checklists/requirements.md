@@ -30,10 +30,11 @@
 
 ## Ratification Gate
 
-- [ ] Independent planning review approves the package.
-- [ ] A ratifier adds a validated `hermes-handoff.json`; the author must not self-ratify.
-- [ ] `python3 scripts/check_spec_kit_specs.py` passes on the ratified package.
+- [ ] The Architect completes an approved bounded planning-review campaign and records its exact run ID.
+- [ ] The Architect authors and validates `hermes-handoff.json` against the approved review evidence; the read-only ratifier does not edit artifacts.
+- [ ] `python3 scripts/check_spec_kit_specs.py` passes before the exact authored SHA is handed to the independent ratifier.
+- [ ] A separate ratifier reviews the exact authored SHA and records an approve/block receipt without editing the package.
 
 ## Result
 
-AUTHOR COMPLETE — observable intent and implementation evidence are specified; independent ratification and the validated handoff remain intentionally separate.
+AUTHOR REMEDIATION IN PROGRESS — observable intent and implementation evidence are specified; the Architect-owned review and handoff gates must complete before read-only independent ratification.

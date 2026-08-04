@@ -10,7 +10,7 @@
 
 **Independent Test**: A route-level Testing Library test opens a selected task and its menu, verifies the first Escape dismisses only the menu and restores focus, then verifies a second Escape closes detail.
 
-- [ ] **T001 [US1] RED** — In the established Task route test module, or `frontend/src/features/tasks/__tests__/TaskListPage.test.tsx` if none exists, add one targeted behavioral test with required Allure taxonomy. Verify first-Escape menu dismissal, same route/heading preservation, no mutation, trigger focus restoration, and second-Escape fallback. Run only that test and record the expected failure caused by current parent navigation.
+- [ ] **T001 [US1] RED** — In the established route fixture `frontend/src/app/AppRoutes.test.tsx`, add one targeted behavioral test with required Allure taxonomy. Verify first-Escape menu dismissal, same route/heading preservation, no mutation, trigger focus restoration, and second-Escape fallback. Run only that test and record the expected failure caused by current parent navigation.
 - [ ] **T002 [US1] GREEN** — In `frontend/src/features/tasks/TaskDetailPanel.tsx`, add the minimum menu-owned Escape handling and stable trigger focus restoration needed to pass T001. Prevent the handled keydown from reaching the document-level detail-close behavior. Do not alter menu actions or Task lifecycle behavior.
 - [ ] **T003 [US1] VERIFY** — Re-run the targeted test, then the containing frontend test file. Confirm required Allure taxonomy is emitted and no warning/error output is introduced.
 - [ ] **T004 [US1] SCOPE** — Review the diff to confirm no backend, API, persistence, route-contract, configuration, CI, security, or unrelated UI changes.
