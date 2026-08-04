@@ -21,11 +21,11 @@ Give the Task menu first ownership of Escape while it is open. The menu closes, 
 
 ## Constitution Check
 
-*GATE: Passed for planning; independent ratification remains required.*
+*GATE: Passed after approved bounded review `0b6f2fc1`; independent ratification remains required.*
 
 - **Spec workflow**: This package states the what/why, technical ownership, one testable story, a requirements checklist, and test-first tasks. It must be independently ratified before implementation handoff.
 - **Consent & Safety**: No data, remote processing, persistence, credentials, or durable side effects are introduced.
-- **Tests**: One targeted route-level Testing Library test is written first and observed failing because Escape currently reaches the document listener and closes Task detail. It then proves both menu-first dismissal and unchanged menu-closed fallback.
+- **Tests**: First extend the existing terminal-task route test with a characterization assertion that the menu is absent. Then write one targeted route-level Testing Library test and observe it failing because Escape currently reaches the document listener and closes Task detail. It proves menu-first dismissal, non-Escape delegation, focused-field ownership, no request side effect, and unchanged eligible menu-closed fallback. Existing modal-owner coverage plus unchanged-parent-handler review guards the modal exclusion.
 - **Contracts**: No API, schema, route shape, lifecycle, or persistence contract changes. This refines keyboard ownership inside the existing Task detail UI.
 - **Observability**: No request or operation occurs, so correlation IDs and logs are unaffected.
 - **Mobile/resilience/performance**: Keyboard-only behavior adds no mobile flow, offline state, data-loss risk, or CRT performance work; responsive layout remains unchanged.
@@ -46,14 +46,17 @@ frontend/src/app/AppRoutes.test.tsx               # established route-level beha
 
 The existing `frontend/src/app/AppRoutes.test.tsx` route fixture already renders real Task routes and owns the relevant API/router setup. Extend that module rather than creating a duplicate task fixture module. No other production path is planned.
 
-## Single Targeted Behavioral Test Strategy
+## Targeted Behavioral Test Strategy
 
-Use one route-level Testing Library test with real `TaskListPage`/`TaskDetailPanel` behavior and the smallest existing API/router fixture:
+Use the established route-level Testing Library module with real `TaskListPage`/`TaskDetailPanel` behavior and its existing mocked-fetch request log:
 
-1. Render a selected non-terminal task at a concrete detail route and record the current route/heading.
-2. Open `Task menu`; verify `aria-expanded=true` and `Cancel task` is visible.
-3. Dispatch Escape and verify the menu is absent, the same task route and `Task detail` heading remain, no mutation client was called, and the `Task menu` button has focus.
-4. Dispatch Escape again with the menu closed and verify the existing navigation to the list route.
+1. Before the RED test, extend `keeps terminal recovery explicit in task detail` to assert the terminal fixture has no `Task menu`; observe that characterization guard pass before production edits.
+2. Render a selected non-terminal task at a concrete detail route and record the current route/heading.
+3. Open `Task menu`; verify `aria-expanded=true` and `Cancel task` is visible, then record the mocked-fetch call count after all route/menu setup requests settle.
+4. Dispatch a representative non-Escape key and verify the menu remains open and the request count is unchanged.
+5. Dispatch Escape and verify the menu is absent, the same task route and `Task detail` heading remain, the mocked-fetch call count is still unchanged (therefore no GET or write request occurred), and the `Task menu` button has focus.
+6. Focus the existing Title textarea, dispatch Escape with the menu closed, and verify Task detail remains; then focus the menu button, dispatch a later Escape, and verify the existing navigation to the list route.
+7. Retain the unchanged `TaskListPage` modal exclusion and cite the existing `BrainDumpOverlay.test.tsx` test `closes on Escape and on a click outside the panel when the overlay is dismissible` as evidence that the modal itself owns Escape.
 
 The test must carry non-empty Allure `epic`, `feature`, `story`, a human-readable title, and at least one named step using `frontend/src/test/allureTaxonomy.ts`. The implementation card must record RED output before production edits and GREEN output afterward.
 
@@ -61,25 +64,26 @@ The test must carry non-empty Allure `epic`, `feature`, `story`, a human-readabl
 
 | Requirement | Evidence assertion | Evidence location |
 |---|---|---|
-| FR-001 | `Cancel task` disappears after first Escape | targeted Task route test |
+| FR-001 | menu remains for a non-Escape key; `Cancel task` disappears after first Escape | targeted Task route test |
 | FR-002 | route does not change after first Escape | targeted Task route test |
 | FR-003 | same task route and `Task detail` heading remain | targeted Task route test |
 | FR-004 | `Task menu` trigger receives focus | targeted Task route test |
-| FR-005 | second Escape navigates to existing list target | targeted Task route test |
-| FR-006 | no mutation client call; changed source scope stays localized | targeted test plus changed-path review |
+| FR-005 | focused Title Escape preserves detail; later eligible Escape navigates; modal owner coverage stays green while the parent handler remains unchanged | targeted Task route test, existing `BrainDumpOverlay.test.tsx` Escape test, changed-path review |
+| FR-006 | mocked-fetch count is unchanged from the settled setup checkpoint through non-Escape and first-Escape handling; changed source scope stays localized | targeted Task route test plus changed-path review |
+| Terminal negative | terminal fixture renders no `Task menu` | existing terminal recovery route test with one characterization assertion |
 
 ## Risks and Mitigations
 
 - **Both handlers observe one Escape**: stop propagation in the menu-owned handler before document-level navigation; prove route stability after one keydown.
 - **Focus is lost when menu unmounts**: restore focus to the stable trigger ref after closing; assert focus behavior.
-- **Fallback regresses**: exercise a second Escape after dismissal in the same behavioral test.
-- **Over-broad keyboard interception**: attach menu handling only while open and assert non-Escape/menu-closed behavior remains delegated.
+- **Fallback regresses**: exercise focused-field exclusion and then an eligible later Escape after dismissal in the same behavioral test; retain the unchanged modal exclusion and its modal-owner test evidence.
+- **Over-broad keyboard interception**: attach menu handling only while open; assert a non-Escape leaves the menu open, a focused Title owns Escape when the menu is closed, and terminal detail renders no menu.
 
 ## Release and Verification Gates
 
-- Focused RED then GREEN Vitest command for the targeted test.
+- Baseline-green terminal characterization, then focused RED and GREEN Vitest commands for the targeted behavior test.
 - Focused frontend test file passes with required Allure taxonomy.
-- The Architect runs the bounded read-only planning-review campaign, resolves technical findings, authors and validates `hermes-handoff.json`, and records the approved run before independent ratification.
+- Approved standard-risk bounded read-only planning review `0b6f2fc1` is recorded; the Architect resolves its evidence findings, authors and validates `hermes-handoff.json`, and hands the exact commit to independent ratification.
 - `python3 scripts/check_spec_kit_specs.py` passes with the Architect-authored handoff present.
 - Independent review confirms only planned frontend behavior changes and no production/config/CI/security scope drift.
 - Feature is a localized UI fix with no feature flag or migration; normal repository delivery gates still apply.

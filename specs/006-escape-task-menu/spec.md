@@ -2,7 +2,7 @@
 
 **Feature Branch**: `paperclip/bra-1-escape-menu`
 **Created**: 2026-08-04
-**Status**: Draft pending bounded planning review and independent ratification
+**Status**: Authored after approved bounded planning review; pending independent ratification
 **Input**: BRA-2, amended by BRA-6 after independent ratification findings
 
 ## User Scenarios & Testing *(mandatory)*
@@ -23,7 +23,8 @@ A keyboard user viewing Task detail can dismiss the open Task menu without accid
 
 ### Negative Scenarios and Edge Cases
 
-- Escape from an input, textarea, select, or modal dialog while the Task menu is closed remains owned by that control or modal; this feature does not broaden the parent detail-close shortcut.
+- Escape from an input, textarea, or select while the Task menu is closed remains owned by that control; this feature does not broaden the parent detail-close shortcut.
+- An open modal dialog continues to own Escape instead of allowing Task detail to close underneath it; this is guarded by the unchanged `TaskListPage` exclusion and existing modal-owner tests.
 - Non-Escape keys do not dismiss the Task menu.
 - Closing the Task menu with Escape does not cancel, complete, reopen, move, or otherwise mutate the task.
 - The behavior applies only while the non-terminal Task menu button and menu are rendered; terminal-task behavior is unchanged.
@@ -56,16 +57,18 @@ A keyboard user viewing Task detail can dismiss the open Task menu without accid
 
 ## Success Criteria *(mandatory)*
 
-- **SC-001**: One targeted Testing Library regression test proves that a first Escape closes the open Task menu, preserves the same detail route and `Task detail` heading, restores focus to the Task menu button, and does not navigate.
-- **SC-002**: The same targeted behavioral test proves that Escape with the menu closed still closes Task detail through the existing route behavior.
-- **SC-003**: No production files outside the existing Task detail/menu ownership path are required, and no API call or task mutation occurs during menu dismissal.
+- **SC-001**: One targeted Testing Library regression test proves that a non-Escape key leaves the open Task menu in place and that a first Escape closes it, preserves the same detail route and `Task detail` heading, restores focus to the Task menu button, and does not navigate.
+- **SC-002**: The same targeted behavioral test proves that focused-field ownership remains intact with the menu closed and that a later eligible Escape still closes Task detail through the existing route behavior.
+- **SC-003**: No production files outside the existing Task detail/menu ownership path are required; a request-log checkpoint proves menu dismissal emits no additional request, including no task write.
+- **SC-004**: Existing modal-owner coverage plus unchanged-parent-handler review proves an open modal retains Escape ownership, and the existing terminal-task route test explicitly proves no Task menu is rendered for a terminal task.
 
 ## Requirement → Acceptance Evidence
 
 | Requirement | Planned evidence |
 |---|---|
-| FR-001, FR-002 | Targeted route-level Testing Library test: open menu, dispatch Escape once, assert `Cancel task` is absent and the detail route is unchanged. |
+| FR-001, FR-002 | Targeted route-level Testing Library test: open menu, dispatch a non-Escape key and assert it remains open; dispatch Escape once, then assert `Cancel task` is absent and the detail route is unchanged. |
 | FR-003 | In the same test, assert the selected task route is unchanged and the `Task detail` heading remains rendered after the first Escape. |
 | FR-004 | In the same test, assert the accessible `Task menu` button has focus after the first Escape. |
-| FR-005 | Continue the same test with a second Escape and assert navigation returns to the pre-existing list route; retain existing field/dialog exclusions unchanged. |
-| FR-006 | Assert no task mutation client call occurs during the first Escape; changed-path review confirms frontend-only localized scope. |
+| FR-005 | With the menu closed, focus the existing Title textarea and assert Escape preserves Task detail; then focus an eligible target and assert a later Escape returns to the pre-existing list route. Cite `BrainDumpOverlay.test.tsx` Escape ownership coverage and changed-path review of the unchanged `TaskListPage` modal exclusion. |
+| FR-006 | Record the mocked-fetch call count after route/menu setup and assert the first Escape adds no request of any method; changed-path review confirms frontend-only localized scope. |
+| Terminal-task negative scenario | Extend the existing `keeps terminal recovery explicit in task detail` route test to assert `Task menu` is absent for the terminal fixture. |

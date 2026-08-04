@@ -26,15 +26,16 @@
 - [x] Every FR maps to a named assertion in the requirement → evidence matrix.
 - [x] The plan identifies concrete current source ownership and a bounded changed-path scope.
 - [x] Tasks preserve RED → GREEN → verification order and required Allure taxonomy.
+- [x] Non-Escape, focused-field, modal-owner, terminal-task, and no-request outcomes map to explicit test or changed-path evidence.
 - [x] No unresolved clarification marker or template placeholder remains.
 
 ## Ratification Gate
 
-- [ ] The Architect completes an approved bounded planning-review campaign and records its exact run ID.
-- [ ] The Architect authors and validates `hermes-handoff.json` against the approved review evidence; the read-only ratifier does not edit artifacts.
-- [ ] `python3 scripts/check_spec_kit_specs.py` passes before the exact authored SHA is handed to the independent ratifier.
+- [x] The Architect completed approved standard-risk bounded planning-review campaign `0b6f2fc1` and resolved its three evidence findings in the authored package.
+- [x] The Architect authored and validated `hermes-handoff.json` against approved review `0b6f2fc1`; the read-only ratifier does not edit artifacts.
+- [x] `python3 scripts/check_spec_kit_specs.py` passes before the exact authored SHA is handed to the independent ratifier.
 - [ ] A separate ratifier reviews the exact authored SHA and records an approve/block receipt without editing the package.
 
 ## Result
 
-AUTHOR REMEDIATION IN PROGRESS — observable intent and implementation evidence are specified; the Architect-owned review and handoff gates must complete before read-only independent ratification.
+AUTHORING COMPLETE — approved bounded review `0b6f2fc1` is recorded, its evidence findings are resolved, the handoff is valid, and the package is ready for exact-SHA independent ratification.

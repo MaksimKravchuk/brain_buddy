@@ -1,0 +1,66 @@
+{
+  "schema_version": "speckit-hermes-handoff/v1",
+  "root_outcome": "For a selected non-terminal Task detail, Escape dismisses the open Task menu first, restores focus to its trigger, preserves the selected detail and emits no request; only a later eligible Escape closes Task detail under the existing parent exclusions.",
+  "artifacts": {
+    "spec": "specs/006-escape-task-menu/spec.md",
+    "plan": "specs/006-escape-task-menu/plan.md",
+    "tasks": "specs/006-escape-task-menu/tasks.md",
+    "checklist": "specs/006-escape-task-menu/checklists/requirements.md",
+    "adrs": [
+      "docs/decisions/0001-vnext-modular-monolith-and-workflow-contracts.md",
+      "docs/decisions/0006-native-gtd-lifecycle-and-capability-baseline.md",
+      "docs/decisions/0008-verified-trunk-serial-landing.md",
+      "docs/decisions/0009-architect-planning-review-control-plane.md"
+    ]
+  },
+  "planning_review": {
+    "run_id": "0b6f2fc1",
+    "risk": "standard",
+    "status": "approved",
+    "reviewers": [
+      "requirements-consistency",
+      "architecture-consistency",
+      "testability-evidence"
+    ]
+  },
+  "product_decisions": [],
+  "lanes": [
+    {
+      "id": "escape-menu-layer",
+      "outcome": "Deliver the single nearest-layer Escape behavior through a characterized terminal guard, an observed RED, minimal menu-owned handling, and focused regression evidence.",
+      "depends_on": [],
+      "task_refs": [
+        "T001",
+        "T002",
+        "T003",
+        "T004"
+      ],
+      "scope_paths": [
+        "frontend/src/app/AppRoutes.test.tsx",
+        "frontend/src/features/brain-dump/BrainDumpOverlay.test.tsx",
+        "frontend/src/features/tasks/TaskDetailPanel.tsx",
+        "frontend/src/features/tasks/TaskListPage.tsx"
+      ],
+      "exclusive_writer_scope": [
+        "frontend/src/app/AppRoutes.test.tsx",
+        "frontend/src/features/tasks/TaskDetailPanel.tsx"
+      ],
+      "acceptance_evidence": [
+        "SC-001 and FR-001 through FR-004: the targeted route test proves non-Escape delegation, first-Escape menu-only dismissal, route and heading preservation, focus restoration, and same-event navigation suppression.",
+        "SC-002 and FR-005: the targeted route test proves focused-Title Escape preserves detail and a later eligible Escape closes detail; the existing BrainDumpOverlay Escape-owner test stays green and changed-path review proves TaskListPage exclusions are untouched.",
+        "SC-003 and FR-006: mocked-fetch call count remains unchanged from settled setup through non-Escape and first-Escape handling, and changed-path review confirms the localized frontend-only production scope.",
+        "SC-004 and terminal negative scenario: the existing terminal recovery route test explicitly asserts that a terminal task renders no Task menu."
+      ]
+    }
+  ],
+  "risks": [
+    "One keydown could reach both the menu and document handlers; stop propagation in the menu-owned handler and prove route stability after the first Escape.",
+    "Menu unmount could lose keyboard focus; restore the stable Task menu trigger ref and assert focus.",
+    "Over-broad interception could regress existing ownership; preserve TaskListPage unchanged and verify non-Escape, focused-field, modal-owner, terminal-task, and later eligible Escape behavior."
+  ],
+  "non_goals": [
+    "Changing Task menu actions, terminal-task controls, Task lifecycle, or task persistence.",
+    "Changing Task detail routes, list-target calculation, focused-field or modal exclusions, or panel toggling.",
+    "Adding a global keyboard manager, dependency, store, API, backend, configuration, CI, feature flag, migration, deploy, or release change."
+  ]
+}
