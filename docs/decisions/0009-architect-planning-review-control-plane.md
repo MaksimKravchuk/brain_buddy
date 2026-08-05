@@ -1,7 +1,7 @@
 # ADR-0009: Architect-owned planning review control plane
 
 Date: 2026-07-25
-Status: Accepted
+Status: Accepted (mandatory-gate scope partially superseded by ADR-0011)
 Decision owner: BrainBuddy
 Related: ADR-0005, `.specify/workflows/speckit/`, `docs/spec-kit-workflow.md`, `scripts/spec_kit_planning_review.py`
 
@@ -102,8 +102,8 @@ Tradeoffs:
 - An engine smoke run with deterministic reviewer stand-ins must complete three
   parallel reviews, preserve the nested `inputs.json` envelope, write an
   `approved` summary, and leave `.specify/feature.json` absent.
-- `python3 scripts/check_spec_kit_specs.py` and its unit suite remain green. That
-  mandatory CI gate loads `validate_handoff` from
+- `python3 scripts/check_spec_kit_specs.py` and its unit suite remain green. The
+  deterministic CI check for committed Spec Kit packages loads `validate_handoff` from
   `scripts/spec_kit_planning_review.py` and fails closed on malformed JSON, an
   empty object, a wrong schema version, a non-`approved` planning-review status,
   a missing required reviewer role, or a cyclic/overlapping lane DAG — a present

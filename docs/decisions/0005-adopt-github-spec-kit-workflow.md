@@ -1,8 +1,8 @@
 # ADR-0005: Adopt GitHub Spec Kit for feature specification workflow
 
 Date: 2026-07-16
-Status: Accepted
-Amended: 2026-07-25 — repository pin upgraded from `v0.12.17` to `v0.14.2`; ADR-0009 adds the Architect-owned planning review control plane
+Status: Accepted (mandatory scope superseded by ADR-0011)
+Amended: 2026-08-05 — repository pin upgraded to `v0.15.0`; ADR-0009 adds the read-only planning review control plane and ADR-0011 makes its use risk-proportional
 Decision owner: BrainBuddy
 Related: `.specify/`, `.claude/skills/`, official Hermes Spec Kit skills,
 `specs/`, `docs/spec-kit-workflow.md`, ADR-0001, ADR-0002, Kanban task
@@ -23,14 +23,14 @@ starts.
 
 ## Decision
 
-Adopt the official `github/spec-kit` release as BrainBuddy's mandatory
-feature-spec authoring workflow. The initial adoption used `v0.12.17`; the
-current reviewed pin is `v0.14.2`. Refresh the existing repository scaffold using
+Adopt the official `github/spec-kit` release as BrainBuddy's pinned
+feature-planning tool under ADR-0011's risk-proportional policy. The initial
+adoption used `v0.12.17`; the current reviewed pin is `v0.15.0`. Refresh the existing repository scaffold using
 the pinned CLI through isolated `uv tool`/`uvx`, keep the supported Claude Code
 project integration, and provision the official Hermes planning skills into the
 architect profile. Preserve existing specs, ADRs, and constitution history.
 
-The canonical path for new or materially changed feature specs is:
+When standard or high-risk work uses a committed Spec Kit package, its canonical path is:
 
 ```text
 constitution -> /speckit-specify -> /speckit-clarify -> /speckit-plan -> bounded planning review -> /speckit-checklist -> /speckit-tasks -> /speckit-analyze -> validated Hermes Kanban handoff
@@ -44,8 +44,8 @@ the official planning skills to the architect profile, disables
 `/speckit-implement`, and does not use `speckit-taskstoissues` as a second graph
 publisher.
 
-Architect-profile agents own Spec Kit technical planning for new or materially
-changed architecture/feature specs: module boundaries, contracts, ADR alignment,
+Architect-profile agents own Spec Kit technical planning whenever the owning
+card's risk classification invokes it: module boundaries, contracts, ADR alignment,
 data handling, observability, release gates, and implementation handoff. The
 implementation profiles consume the architect-owned artifacts from their Kanban
 cards rather than inventing architecture during delivery.
@@ -90,7 +90,7 @@ project keeps Spec Kit scoped to authoring and planning.
 ## Consequences
 
 Positive consequences:
-- New feature specs have a single documented workflow and minimum artifact set.
+- Committed feature-spec packages have a single documented workflow and minimum artifact set.
 - Claude Code receives first-class Spec Kit skills in the repository.
 - The Hermes architect profile receives the official planning-only Spec Kit
   skills, while the Kanban orchestrator receives the compact handoff policy.
@@ -124,12 +124,12 @@ What future agents must preserve:
 
 ## Verification / tests
 
-- `specify --version` reports `specify 0.14.2` from the isolated `uv tool`
+- `specify --version` reports `specify 0.15.0` from the isolated `uv tool`
   installation.
 - `specify check` reports Claude Code available.
 - `specify integration upgrade claude --force` refreshes managed project assets;
   the existing constitution and five BrainBuddy-specific overrides are preserved.
-- The official `v0.14.2` integration assets are the source of the seven planning
+- The official `v0.15.0` integration assets are the source of the seven planning
   skills projected into the architect profile. The project integration status
   remains Claude-only and `multi_install_safe=true`; this avoids upstream's
   global uninstall/overwrite hazard.

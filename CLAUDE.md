@@ -53,14 +53,22 @@ docker compose up --build        # backend:8000, frontend:8080
 docker compose down --volumes
 ```
 
-### Spec Kit feature authoring (mandatory)
+### Spec Kit feature planning (risk-proportional)
 
-Use GitHub Spec Kit v0.14.2 for every new or materially changed feature spec.
-Install or refresh the CLI with isolated uv tooling, never pip inside Hermes:
+Use GitHub Spec Kit v0.15.0 only when the owning Hermes card's risk warrants it.
+Classify by effects; a high-risk effect always wins even when labeled maintenance,
+a bug fix, or a refactor. Small maintenance and behavior-preserving changes use
+the card directly only when no high-risk category is touched; standard feature
+review is advisory; high-risk auth, privacy, security,
+destructive-data, public-contract, migration, concurrency, payment,
+safety/compliance, or irreversible work requires review and a validated handoff.
+A workflow failure stays on the owning card and must not create a separate
+process-gate card. Install or refresh the CLI with isolated uv tooling, never pip
+inside Hermes:
 
 ```bash
-uv tool install specify-cli --force --from git+https://github.com/github/spec-kit.git@v0.14.2
-specify --version          # expect: specify 0.14.2
+uv tool install specify-cli --force --from git+https://github.com/github/spec-kit.git@v0.15.0
+specify --version          # expect: specify 0.15.0
 specify check              # verifies Claude Code and other agent prerequisites
 specify integration list   # confirms claude is available/installed
 ```

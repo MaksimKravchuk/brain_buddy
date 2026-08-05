@@ -79,8 +79,7 @@
               "privacy",
               "permissions",
               "pricing",
-              "safety-compliance",
-              "acceptance-behavior"
+              "safety-compliance"
             ]
           },
           "question": {"type": "string", "minLength": 1},

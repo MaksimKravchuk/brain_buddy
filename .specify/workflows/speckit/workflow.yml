@@ -7,7 +7,7 @@ workflow:
   description: "Runs bounded read-only reviews after Architect authors spec.md and plan.md; Hermes Kanban remains the sole execution runtime"
 
 requires:
-  speckit_version: ">=0.14.2"
+  speckit_version: ">=0.15.0"
 
 inputs:
   risk:
@@ -33,6 +33,7 @@ steps:
     step:
       id: run-read-only-review
       type: shell
+      timeout: 960
       run: >-
         python3 scripts/spec_kit_planning_review.py review
         --run-id "{{ context.run_id }}"
@@ -44,6 +45,7 @@ steps:
     then:
       - id: run-fable-adversarial-review
         type: shell
+        timeout: 960
         run: >-
           python3 scripts/spec_kit_planning_review.py review
           --run-id "{{ context.run_id }}"

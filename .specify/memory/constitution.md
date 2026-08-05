@@ -47,12 +47,14 @@ BrainBuddy vNext is optimized for fast capture and review from mobile-first voic
 - Local drafts, operation checkpoints, and confirmed domain records MUST avoid data loss and warn before destructive navigation or side effects.
 
 ## Spec-Driven Development Workflow
-GitHub Spec Kit is the mandatory authoring workflow for every new or materially changed BrainBuddy feature spec.
-- The canonical artifact flow is constitution -> `/speckit-specify` (what/why) -> `/speckit-clarify` and/or `/speckit-checklist` -> `/speckit-plan` (how/architecture) -> `/speckit-tasks`.
+GitHub Spec Kit is a risk-proportional planning tool under ADR-0011: optional for standard work, unnecessary for small maintenance with explicit intent, and mandatory for high-risk auth/privacy/security, destructive-data, public-contract, migration, concurrency, payment, safety/compliance, or irreversible work. Classification is based on effects; any high-risk effect wins regardless of a maintenance, bug-fix, or refactor label.
+- When Spec Kit is used, the canonical artifact flow is constitution -> `/speckit-specify` (what/why) -> `/speckit-clarify` -> `/speckit-plan` (how/architecture) -> bounded read-only review -> `/speckit-checklist` -> `/speckit-tasks` -> `/speckit-analyze` -> validated Hermes handoff.
 - Use the official `github/spec-kit` CLI pinned to the repository-documented version through isolated `uv tool`/`uvx`; never install it with pip inside the Hermes runtime.
 - `specs/` contains the versioned Spec Kit artifacts. Implementation intent changes MUST amend the relevant spec/plan/tasks before product code proceeds.
 - Generated `tasks.md` is planning input. It does not bypass Hermes Kanban ownership, isolated worktrees, TDD, independent review, CI, PR merge gates, or release gates.
 - Spec Kit is not an execution orchestrator for BrainBuddy. Hermes Kanban remains responsible for task routing, implementation ownership, review handoffs, and release traceability.
+- Spec Kit workflow/runtime failures MUST remain technical remediation on the owning feature card and MUST NOT create separate process-gate cards, child blockers, or founder questions. Standard review failure does not block implementation; high-risk planning remains fail-closed with at most one corrective rerun.
+- Reviewer fan-out/fan-in MUST use one stable preflight worktree fingerprint; any mid-campaign drift invalidates the run. Missing acceptance behavior with a safe, reversible pilot option is Architect-owned technical remediation, not a product-owner question.
 
 ## Historical Spec Grandfathering
 The repository contains pre-adoption specs and requirements that must remain readable without forcing unsafe regeneration.
@@ -74,7 +76,7 @@ How features are specified, planned, implemented, reviewed, and released.
 - Specs MUST define independently testable user stories, acceptance scenarios, edge cases, consent/privacy impact, observability impact, and success criteria.
 - Plans MUST document architecture, contract changes, persistence ownership, test strategy, release/smoke validation, and any justified constitution complexity.
 - Tasks MUST be grouped by independently shippable user story, include concrete file paths, and preserve tests-before-implementation ordering unless the spec explicitly waives tests.
-- Reviews MUST block on constitution compliance, Spec Kit artifact completeness, ADR alignment, consent enforcement, contract alignment, dual-stack validation, observability, and performance/mobile resilience.
+- Reviews MUST block on constitution compliance, completeness of any committed Spec Kit package, ADR alignment, consent enforcement, contract alignment, dual-stack validation, observability, and performance/mobile resilience. High-risk Spec Kit review is mandatory; standard Spec Kit review is advisory.
 
 ## Governance
 This constitution supersedes conflicting local practices and guides all reviews.
@@ -83,4 +85,4 @@ This constitution supersedes conflicting local practices and guides all reviews.
 - Compliance reviews occur on every PR and before releases; violations need documented justification plus a remediation plan and owner.
 - Accepted ADRs under `docs/decisions/` may refine this constitution for their decision scope, but broad governance changes belong here.
 
-**Version**: 1.1.0 | **Ratified**: 2025-12-20 | **Last Amended**: 2026-07-16
+**Version**: 1.2.0 | **Ratified**: 2025-12-20 | **Last Amended**: 2026-08-05

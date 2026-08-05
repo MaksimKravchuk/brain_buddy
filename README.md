@@ -114,13 +114,18 @@ See `docs/api_usage.md` for request/response details and examples.
 - Continuous improvement scripts live in the root `Makefile` (`make test-backend`, `make test-frontend`).
 
 ## Feature Specs
-GitHub Spec Kit v0.14.2 is the mandatory workflow for new or materially changed
-feature specs: constitution → `/speckit-specify` → `/speckit-clarify` →
-`/speckit-plan` → bounded read-only planning review → `/speckit-checklist` →
-`/speckit-tasks` → `/speckit-analyze` → validated Hermes Kanban handoff. See
-`docs/spec-kit-workflow.md` for the exact Claude Code commands, uv/uvx setup,
-historical spec grandfathering, and the boundary between Spec Kit planning and
-Hermes Kanban execution/review.
+GitHub Spec Kit v0.15.0 is a risk-proportional planning tool, not the execution
+runtime. Classify by effects: a high-risk effect always wins even when the work
+is called maintenance or a bug fix. Small maintenance and behavior-preserving
+work use the owning Hermes card directly only when no high-risk category is
+touched. Standard feature work may use Spec Kit with advisory review; high-risk
+auth, privacy, security, destructive-data, public-contract, migration,
+concurrency, payment, safety/compliance, or irreversible work requires the
+bounded review and validated Hermes handoff before implementation. A workflow
+failure never creates a separate process-gate card. See
+`docs/spec-kit-workflow.md` and ADR-0011 for the
+exact commands, failure semantics, historical grandfathering, and the boundary
+between Spec Kit planning and Hermes Kanban execution/review.
 
 ## Performance & Observability
 - File-backed caches reduce repeated tree loads during read-heavy sessions.

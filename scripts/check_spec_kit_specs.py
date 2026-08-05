@@ -241,10 +241,13 @@ def main() -> int:
         for failure in failures:
             print(f"- {failure}", file=sys.stderr)
         print(
-            "\nNew or materially changed features must follow: constitution -> "
-            "/speckit-specify -> /speckit-clarify -> /speckit-plan -> "
-            "bounded planning review -> /speckit-checklist -> /speckit-tasks -> "
-            "/speckit-analyze -> validated Hermes Kanban handoff.",
+            "\nCommitted Spec Kit packages must be complete and validated. "
+            "High-risk work requires: constitution -> /speckit-specify -> "
+            "/speckit-clarify -> /speckit-plan -> bounded planning review -> "
+            "/speckit-checklist -> /speckit-tasks -> /speckit-analyze -> "
+            "validated Hermes Kanban handoff. Standard work may proceed from "
+            "the owning card when advisory tooling is unavailable, but must "
+            "not commit an incomplete generated package.",
             file=sys.stderr,
         )
         return 1

@@ -10,10 +10,12 @@ that after reading the generated review summary.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -30,7 +32,11 @@ PRODUCT_DECISION_CATEGORIES = {
     "permissions",
     "pricing",
     "safety-compliance",
-    "acceptance-behavior",
+}
+# Read compatibility for already-approved v1 handoffs; new reviewer output cannot
+# use this broad category and must keep reversible defaults Architect-owned.
+HANDOFF_PRODUCT_DECISION_CATEGORIES = PRODUCT_DECISION_CATEGORIES | {
+    "acceptance-behavior"
 }
 VERDICTS = {"pass", "changes-required", "product-decision-required"}
 SEVERITIES = {"blocking", "important", "advisory"}
@@ -96,6 +102,98 @@ def run_directory(root: Path, run_id: str) -> Path:
     if resolved.parent != runs_root:
         raise ReviewError("Workflow run directory escaped the project run root")
     return resolved
+
+
+def worktree_fingerprint(root: Path) -> str:
+    """Hash every tracked or unignored file without including ignored run output."""
+    result = subprocess.run(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        cwd=root,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.decode(errors="replace").strip()
+        raise ReviewError(detail or "Unable to enumerate planning-review worktree")
+
+    digest = hashlib.sha256()
+    for raw_path in sorted(item for item in result.stdout.split(b"\0") if item):
+        relative = Path(os.fsdecode(raw_path))
+        candidate = root / relative
+        digest.update(raw_path)
+        digest.update(b"\0")
+        try:
+            digest.update(candidate.lstat().st_mode.to_bytes(4, byteorder="big"))
+            digest.update(b"\0")
+            if candidate.is_symlink():
+                digest.update(b"symlink\0")
+                digest.update(os.fsencode(os.readlink(candidate)))
+            elif candidate.is_file():
+                digest.update(b"file\0")
+                digest.update(candidate.read_bytes())
+            else:
+                digest.update(b"missing-or-special\0")
+        except FileNotFoundError:
+            digest.update(b"vanished\0")
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def assert_worktree_snapshot(root: Path, expected: object) -> None:
+    if not isinstance(expected, str) or worktree_fingerprint(root) != expected:
+        raise ReviewError(
+            "Worktree changed during planning review; discard this tainted campaign "
+            "and start one bounded review from a stable snapshot."
+        )
+
+
+def run_bounded_process(
+    command: list[str], *, cwd: Path, env: dict[str, str], timeout: float
+) -> subprocess.CompletedProcess[str]:
+    """Run a reviewer in its own process group and reap the group on timeout."""
+    process = subprocess.Popen(
+        command,
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=os.name == "posix",
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        if os.name == "posix":
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        else:
+            process.terminate()
+        try:
+            stdout, stderr = process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            if os.name == "posix":
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            else:
+                process.kill()
+            stdout, stderr = process.communicate()
+        else:
+            # The reviewer parent may exit on TERM while a detached-style
+            # descendant in the same group ignores TERM and closes inherited
+            # pipes. Always kill any remaining group members before returning.
+            if os.name == "posix":
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        detail = (stderr or stdout).strip()
+        suffix = f": {detail[-1000:]}" if detail else ""
+        raise ReviewError(f"Reviewer timed out after {timeout:g} seconds{suffix}") from exc
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
 def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
@@ -349,7 +447,11 @@ Hard boundaries:
 - Do not edit files, run implementation, commit, push, create cards, or propose a second scheduler.
 - Spec Kit tasks are planning input; Hermes Kanban remains the sole execution runtime.
 - Technical decisions belong to Architect. Do not escalate database, framework, API shape, module boundary, testing strategy, migration mechanics, or implementation choices to the product owner.
-- Product decisions are allowed only for: {allowed_categories}.
+- Missing or contradictory acceptance behavior is technical when a safe, reversible
+  pilot choice exists. Select the safest reversible pilot default, describe it in a
+  finding recommendation, and do not create a product-owner question.
+- Product decisions are allowed only for: {allowed_categories}, and only when they
+  require genuine product authority rather than a reversible technical default.
 - Cite concrete file paths/symbols/sections in every finding's evidence.
 - Return only JSON matching the supplied schema, with role exactly {role!r}.
 """
@@ -361,6 +463,8 @@ def run_review(*, root: Path, run_id: str, role: str) -> Path:
     if not context_path.is_file():
         raise ReviewError("Planning preflight was not completed for this run")
     context = json.loads(context_path.read_text(encoding="utf-8"))
+    expected_fingerprint = context.get("worktree_fingerprint")
+    assert_worktree_snapshot(root, expected_fingerprint)
     feature_dir = Path(context["feature_dir"]).resolve()
     if (root / "specs").resolve() not in feature_dir.parents:
         raise ReviewError("Persisted feature directory escaped specs/")
@@ -371,17 +475,11 @@ def run_review(*, root: Path, run_id: str, role: str) -> Path:
     if shutil.which(command[0]) is None:
         raise ReviewError(f"Required reviewer CLI is not installed: {command[0]}")
 
-    result = subprocess.run(
-        command,
-        cwd=root,
-        env=env,
-        text=True,
-        capture_output=True,
-        timeout=900,
-    )
+    result = run_bounded_process(command, cwd=root, env=env, timeout=900)
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip() or "no diagnostic output"
         raise ReviewError(f"{role} reviewer failed: {detail[-2000:]}")
+    assert_worktree_snapshot(root, expected_fingerprint)
     review = validate_review(parse_review_output(result.stdout), expected_role=role)
     target = run_dir / "reviews" / f"{role}.json"
     write_json_atomic(target, review)
@@ -407,7 +505,10 @@ def aggregate_reviews(reviews: list[dict[str, Any]], *, risk: str) -> dict[str, 
         action = "Block only the Architect Kanban card with this decision packet."
     elif any(item.get("severity") == "blocking" for item in technical_findings):
         status = "technical-changes-required"
-        action = "Architect resolves technical findings and reruns the review campaign once."
+        action = (
+            "Architect resolves technical findings on the owning card; do not create "
+            "a child process-gate card or automatic review loop."
+        )
     else:
         status = "approved"
         action = "Architect may finalize tasks.md, analyze, and the compact Kanban handoff."
@@ -425,7 +526,14 @@ def aggregate_reviews(reviews: list[dict[str, Any]], *, risk: str) -> dict[str, 
 def preflight(*, root: Path, run_id: str) -> Path:
     feature_dir = resolve_feature_dir(root)
     target = run_directory(root, run_id) / "planning-context.json"
-    write_json_atomic(target, {"feature_dir": str(feature_dir), "project_root": str(root)})
+    write_json_atomic(
+        target,
+        {
+            "feature_dir": str(feature_dir),
+            "project_root": str(root),
+            "worktree_fingerprint": worktree_fingerprint(root),
+        },
+    )
     return target
 
 
@@ -440,6 +548,11 @@ def parse_workflow_inputs(payload: object) -> dict[str, Any]:
 
 def summarize(*, root: Path, run_id: str) -> Path:
     run_dir = run_directory(root, run_id)
+    context_path = run_dir / "planning-context.json"
+    if not context_path.is_file():
+        raise ReviewError("Planning preflight was not completed for this run")
+    context = json.loads(context_path.read_text(encoding="utf-8"))
+    assert_worktree_snapshot(root, context.get("worktree_fingerprint"))
     inputs_path = run_dir / "inputs.json"
     if not inputs_path.is_file():
         raise ReviewError("Workflow inputs.json is missing")
@@ -562,7 +675,7 @@ def validate_handoff(payload: object) -> dict[str, Any]:
         category = _required_string(
             raw.get("category"), f"product_decisions[{index}].category"
         )
-        if category not in PRODUCT_DECISION_CATEGORIES:
+        if category not in HANDOFF_PRODUCT_DECISION_CATEGORIES:
             raise ValueError(f"unsupported product decision category: {category!r}")
         product_decisions.append(
             {

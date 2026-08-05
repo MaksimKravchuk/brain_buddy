@@ -1,7 +1,8 @@
 # BrainBuddy Spec Kit workflow
 
-BrainBuddy uses the official GitHub Spec Kit as the mandatory authoring workflow
-for every new or materially changed feature specification.
+BrainBuddy uses the official GitHub Spec Kit as a risk-proportional planning
+tool. It is mandatory only for high-risk feature planning; it is optional for
+standard work and unnecessary for small maintenance with explicit intent.
 
 - Spec Kit version: `github/spec-kit` `v0.15.0`
 - Installed integrations: Claude Code skills under `.claude/skills/` and Codex
@@ -72,9 +73,43 @@ After any future refresh:
 5. Run `python3 scripts/check_spec_kit_specs.py`.
 6. Run any affected backend/frontend checks before opening a PR.
 
+## Risk classification and failure semantics
+
+Classify the owning Hermes card by effects before creating a Spec Kit package.
+Any high-risk effect wins even if the work is labeled maintenance, a bug fix, or
+a refactor:
+
+- **Small maintenance:** operational repairs, dependency/tooling
+  upkeep, and behavior-preserving refactors with explicit scope and acceptance
+  evidence that touch no high-risk category. Work directly from the owning
+  Hermes card; do not invoke Spec Kit.
+- **Standard feature:** bounded, reversible product behavior without the
+  high-risk categories below. Spec Kit `spec.md`/`plan.md` and review are
+  advisory. A valid reviewed handoff is preferred when a package is committed,
+  but the owning card remains executable when a reviewer or workflow is
+  unavailable.
+- **High risk:** auth, privacy, security, destructive data/schema operations,
+  public contracts, migrations, concurrency, payments, safety/compliance, or
+  irreversible effects. The bounded campaign and validated handoff are required
+  before implementation begins.
+
+Standard review failure does not block implementation. Record the unavailable or
+failed review on the owning card, keep scope and acceptance evidence explicit,
+and continue through the normal Hermes TDD/review/CI gates. Do not commit an
+incomplete generated package merely to imply approval.
+
+High-risk planning remains fail-closed. The Architect resolves technical
+findings, may rerun the campaign once, and otherwise uses the documented founder
+acceptance path. A timeout, malformed reviewer result, unavailable CLI/quota, or
+handoff-generation problem is technical work on the owning card. It must not
+create a separate process-gate card, child blocker, or user question.
+
+Spec Kit never owns task lifecycle. Hermes Kanban is the sole runtime for claims,
+worktrees, retries, implementation, review, landing, deploy, and completion.
+
 ## Canonical feature-spec path
 
-For every new or materially changed BrainBuddy feature:
+For standard or high-risk BrainBuddy feature planning that uses Spec Kit:
 
 1. Read `.specify/memory/constitution.md`, `AGENTS.md`, `CLAUDE.md`, and relevant
    ADRs under `docs/decisions/`.
@@ -85,17 +120,18 @@ For every new or materially changed BrainBuddy feature:
 4. Use `/speckit-clarify` to resolve ambiguous requirements before planning.
 5. Use `/speckit-plan` to describe architecture, module ownership, contracts,
    tests, data handling, observability, mobile/resilience, and release gates.
-6. Run the bounded planning-review workflow after `plan.md`; the Architect resolves
-   technical findings and uses a Kanban `needs_input` block only for product
-   decisions.
+6. For standard work, run the bounded planning review when available and treat it
+   as advisory. For high-risk work, the campaign is mandatory. In either mode,
+   the Architect resolves technical findings itself; user input is reserved for
+   genuine product or authority decisions on the owning card.
 7. Use `/speckit-checklist` after review. Under the pinned v0.15.0 workflow,
    checklist setup requires `plan.md`; do not run checklist as a pre-plan command.
 8. Use `/speckit-tasks` to generate logical implementation tasks grouped by
    independently testable user story, then run `/speckit-analyze`.
 9. Create and validate `hermes-handoff.json`; hand its 1–6 coarse lanes to the
    Kanban Orchestrator instead of executing implementation in Spec Kit.
-10. Amend spec/plan/tasks and rerun affected review/validation whenever
-    implementation intent changes.
+10. Amend spec/plan/tasks when implementation intent changes. Revalidate committed
+    packages, but never create an automatic or unbounded review loop.
 
 For Claude Code and Hermes Agent in this repository, Spec Kit is installed as
 skills, so the invocation names use hyphens:
@@ -133,8 +169,9 @@ review, CI, PR, and release gates.
 
 ## Architect-owned Kanban path
 
-When a BrainBuddy architecture or feature spec is new or materially changed, the
-architect profile owns the full planning lane before implementation begins:
+When an owning Hermes card uses Spec Kit, the Architect remains the sole planning
+writer. High-risk cards complete this lane before implementation; standard cards
+may continue from explicit card intent if the advisory tooling is unavailable:
 
 1. Create or claim one architect-owned Kanban card. In that card's isolated
    worktree, use the official Hermes Spec Kit skills for constitution,
@@ -149,25 +186,36 @@ architect profile owns the full planning lane before implementation begins:
      -i risk=standard --json
    ```
 
-   Use `risk=high` for auth/privacy, destructive data/schema, public-contract,
-   security, migration, concurrency, or irreversible changes. Standard mode runs
-   three isolated Codex review sessions (`requirements-consistency`,
+   Use `risk=high` only for the classified high-risk categories above. Standard
+   mode runs three isolated Codex review sessions (`requirements-consistency`,
    `architecture-consistency`, and `testability-evidence`) with an enforced
    read-only sandbox. High-risk mode additionally requires a Fable adversarial
-   review in plan mode with only `Read,Grep,Glob`; unavailable quota or malformed
-   output fails closed.
+   review in plan mode with only `Read,Grep,Glob`. Standard tooling failure is
+   recorded and does not create a card or block implementation. High-risk
+   unavailable quota, timeout, or malformed output fails closed on the same
+   owning card. Each reviewer runs in its own process group; timeout cleanup
+   terminates and reaps that group so provider descendants cannot become orphaned.
+   Preflight fingerprints every tracked or unignored worktree file;
+   any mid-campaign edit invalidates the campaign instead of mixing snapshots.
 3. Read
    `.specify/workflows/runs/<run-id>/planning-review-summary.json`. Reviewers
    cannot edit product or planning files. The Architect resolves technical
-   findings itself and may rerun the bounded campaign once. Framework, database,
-   API shape, module boundaries, test strategy, and migration mechanics are
-   technical decisions and never user escalations.
-4. If the summary says `product-decision-required`, block only the owning
-   Architect Kanban card with `needs_input`. Ask only about scope, UX, priority,
-   privacy, permissions, pricing, safety/compliance, or observable acceptance
-   behavior. Record the answer in the spec and final handoff, then rerun reviews.
-   Workflow run state stays local and is ignored by Git; Kanban remains the
-   durable user-conversation and execution state.
+   findings itself and may run at most one bounded corrective campaign. After
+   that terminal result, unresolved findings stay as one factual blocker on the
+   owning card; no automatic campaign or child card is created. Framework,
+   database, API shape, module boundaries, test strategy, migration mechanics,
+   and reversible pilot acceptance defaults are technical decisions and never
+   user escalations.
+4. If the summary says `product-decision-required`, first reclassify each item:
+   technical choices stay with the Architect. Only genuine scope, UX, priority,
+   privacy/legal posture, permissions, pricing, or safety/compliance may put the
+   owning card in `needs_input`. Missing acceptance behavior with a safe,
+   reversible pilot option is technical: choose the safest default and record it
+   as a finding remediation. Never create a
+   child or separate process-gate card for review state, runtime repair, retries,
+   or handoff work. Record any answer in the spec and final handoff. Workflow run
+   state stays local and is ignored by Git; Kanban remains the durable
+   user-conversation and execution state.
 5. When review status is `approved`, run `/speckit-checklist`, `/speckit-tasks`,
    and `/speckit-analyze`, then create
    `specs/NNN-feature/hermes-handoff.json` conforming to
@@ -177,6 +225,10 @@ architect profile owns the full planning lane before implementation begins:
    SPECIFY_FEATURE_DIRECTORY=specs/NNN-feature \
      python3 scripts/spec_kit_planning_review.py validate-handoff
    ```
+
+   For standard work whose advisory review is unavailable, do not fabricate an
+   approved handoff: continue from the owning card and leave the incomplete
+   generated package uncommitted. High-risk work cannot use this fallback.
 
 6. The handoff contains one root outcome and 1–6 coarse, acyclic, independently
    mergeable lanes with task references, dependency order, exclusive writer
@@ -218,7 +270,7 @@ The check does not merely assert that `hermes-handoff.json` exists: it validates
 its contents with the same `validate_handoff` contract used by
 `scripts/spec_kit_planning_review.py validate-handoff`, so an unparseable,
 schema-violating, unapproved, under-reviewed, or cyclic-lane handoff fails the
-mandatory CI spec gate.
+deterministic CI check for committed Spec Kit packages.
 
 ## Founder acceptance
 
