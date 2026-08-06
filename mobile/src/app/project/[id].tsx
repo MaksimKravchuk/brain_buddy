@@ -13,7 +13,7 @@ export default function ProjectScreen() {
     <TaskListScreen
       title={title}
       projectId={id}
-      showBack
+      mode="sub"
       emptyHeadline="No open tasks"
       emptyHint="Tasks you add here join this project."
     />

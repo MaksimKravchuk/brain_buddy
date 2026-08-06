@@ -15,6 +15,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ApiError } from "@/api/client";
 import { SessionProvider, useSession } from "@/auth/SessionProvider";
+import { ToastHost } from "@/components/ToastHost";
 import { colors } from "@/theme/tokens";
 
 SplashScreen.preventAutoHideAsync();
@@ -75,22 +76,24 @@ export default function RootLayout() {
           <SessionProvider>
             <AuthGate>
               <StatusBar style="dark" />
-              <Stack
-                screenOptions={{
-                  headerShown: false,
-                  contentStyle: { backgroundColor: colors.surfaceBase },
-                }}
-              >
-                <Stack.Screen name="(tabs)" />
-                <Stack.Screen name="sign-in" />
-                <Stack.Screen name="task/[id]" options={{ presentation: "modal" }} />
-                <Stack.Screen name="brain-dump/index" options={{ presentation: "fullScreenModal" }} />
-                <Stack.Screen
-                  name="brain-dump/[operationId]"
-                  options={{ presentation: "fullScreenModal", gestureEnabled: false }}
-                />
-                <Stack.Screen name="settings" options={{ presentation: "modal" }} />
-              </Stack>
+              <ToastHost>
+                <Stack
+                  screenOptions={{
+                    headerShown: false,
+                    contentStyle: { backgroundColor: colors.surfaceBase },
+                  }}
+                >
+                  <Stack.Screen name="index" />
+                  <Stack.Screen name="list/[state]" options={{ animation: "none" }} />
+                  <Stack.Screen name="sign-in" />
+                  <Stack.Screen name="brain-dump/index" options={{ presentation: "fullScreenModal" }} />
+                  <Stack.Screen
+                    name="brain-dump/[operationId]"
+                    options={{ presentation: "fullScreenModal", gestureEnabled: false }}
+                  />
+                  <Stack.Screen name="settings" options={{ presentation: "modal" }} />
+                </Stack>
+              </ToastHost>
             </AuthGate>
           </SessionProvider>
         </QueryClientProvider>

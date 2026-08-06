@@ -12,7 +12,7 @@ export default function TagScreen() {
     <TaskListScreen
       title={title}
       tagId={id}
-      showBack
+      mode="sub"
       emptyHeadline="No open tasks"
       emptyHint="Tasks you add here keep this tag."
     />

@@ -54,10 +54,12 @@ export function Button({
     >
       {loading ? (
         <ActivityIndicator size="small" color={textColor[variant]} />
-      ) : (
+      ) : typeof children === "string" ? (
         <BBText variant="body" weight="medium" color={textColor[variant]}>
           {children}
         </BBText>
+      ) : (
+        children
       )}
     </Pressable>
   );

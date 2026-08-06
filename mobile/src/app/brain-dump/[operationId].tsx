@@ -11,6 +11,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useApi } from "@/auth/SessionProvider";
 import type { BrainDumpOperationResponse, BrainDumpProposal } from "@/api/types";
@@ -18,6 +19,8 @@ import { BBText } from "@/components/BBText";
 import { Button } from "@/components/Button";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { Screen } from "@/components/Screen";
+import { PaneHead } from "@/components/shell/PaneHead";
+import { useToast } from "@/components/ToastHost";
 import {
   applyOperation,
   canCommit,
@@ -28,13 +31,15 @@ import {
   visibleProposals,
 } from "@/braindump/machine";
 import { newIdempotencyKey } from "@/utils/ids";
-import { colors, fonts, minHitTarget, radii, space, type as typeScale } from "@/theme/tokens";
+import { colors, fonts, minHitTarget, radii, shadows, space, type as typeScale } from "@/theme/tokens";
 
 export default function BrainDumpOperationScreen() {
   const { operationId } = useLocalSearchParams<{ operationId: string }>();
   const router = useRouter();
   const api = useApi();
   const queryClient = useQueryClient();
+  const insets = useSafeAreaInsets();
+  const toast = useToast();
 
   const [operation, setOperation] = useState<BrainDumpOperationResponse | null>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
@@ -45,6 +50,7 @@ export default function BrainDumpOperationScreen() {
   const patchQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollDelayRef = useRef<number | null>(null);
+  const closedRef = useRef(false);
 
   const remember = useCallback((incoming: BrainDumpOperationResponse) => {
     const next = applyOperation(operationRef.current, incoming);
@@ -63,6 +69,21 @@ export default function BrainDumpOperationScreen() {
       return null;
     }
   }, [api, operationId, remember]);
+
+  const leave = useCallback(
+    (message?: string) => {
+      if (closedRef.current) {
+        return;
+      }
+      closedRef.current = true;
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      router.dismissAll();
+      if (message) {
+        toast(message);
+      }
+    },
+    [queryClient, router, toast],
+  );
 
   // Poll while the server is working; pause in background, refresh on return.
   useEffect(() => {
@@ -112,7 +133,10 @@ export default function BrainDumpOperationScreen() {
    * each PATCH uses the revision produced by the previous one.
    */
   const enqueueProposalPatch = useCallback(
-    (proposalId: string, patch: { title?: string; deleted?: boolean; conflict_resolution?: "keep" | "accept" }) => {
+    (
+      proposalId: string,
+      patch: { title?: string; deleted?: boolean; conflict_resolution?: "keep" | "accept" },
+    ) => {
       patchQueueRef.current = patchQueueRef.current
         .then(async () => {
           const current = operationRef.current;
@@ -154,27 +178,35 @@ export default function BrainDumpOperationScreen() {
           newIdempotencyKey(),
         );
         const next = remember(updated);
-        if (isPollable(next.status)) {
-          pollDelayRef.current = null;
-          const fresh = await fetchOnce();
-          if (fresh && isPollable(fresh.status)) {
-            // Re-arm the poll loop for committing.
-            pollDelayRef.current = null;
-            const tick = async () => {
-              const latest = await fetchOnce();
-              if (latest && isPollable(latest.status)) {
-                const delay = nextPollDelay(pollDelayRef.current);
-                pollDelayRef.current = delay;
-                pollTimerRef.current = setTimeout(tick, delay);
-              }
-            };
-            const delay = nextPollDelay(pollDelayRef.current);
-            pollDelayRef.current = delay;
-            pollTimerRef.current = setTimeout(tick, delay);
-          }
+
+        if (action === "cancel") {
+          leave("Dump discarded — nothing was saved");
+          return;
         }
-        if (action === "commit" || action === "cancel") {
-          queryClient.invalidateQueries({ queryKey: ["tasks"] });
+        if (next.status === "completed") {
+          leave(`Saved ${next.committed_task_ids.length} to inbox`);
+          return;
+        }
+        if (isPollable(next.status)) {
+          const tick = async () => {
+            const latest = await fetchOnce();
+            if (!latest) {
+              return;
+            }
+            if (latest.status === "completed") {
+              leave(`Saved ${latest.committed_task_ids.length} to inbox`);
+              return;
+            }
+            if (isPollable(latest.status)) {
+              const delay = nextPollDelay(pollDelayRef.current);
+              pollDelayRef.current = delay;
+              pollTimerRef.current = setTimeout(tick, delay);
+            }
+          };
+          pollDelayRef.current = null;
+          const delay = nextPollDelay(pollDelayRef.current);
+          pollDelayRef.current = delay;
+          pollTimerRef.current = setTimeout(tick, delay);
         }
       } catch (error) {
         setActionError(error);
@@ -183,17 +215,12 @@ export default function BrainDumpOperationScreen() {
         setActionPending(false);
       }
     },
-    [api, fetchOnce, queryClient, remember],
+    [api, fetchOnce, leave, remember],
   );
-
-  const leave = () => {
-    queryClient.invalidateQueries({ queryKey: ["tasks"] });
-    router.dismissAll();
-  };
 
   if (!operation) {
     return (
-      <Screen padTop padBottom>
+      <Screen>
         <View style={styles.center}>
           {loadError ? (
             <ErrorBanner error={loadError} onRetry={() => fetchOnce()} />
@@ -212,18 +239,22 @@ export default function BrainDumpOperationScreen() {
   const provisionalOnly = operation.reconciliation_quality === "provisional_only";
   const recoveryActions = operation.available_recovery_actions ?? [];
 
-  return (
-    <Screen padTop padBottom>
-      <View style={styles.header}>
-        <Pressable accessibilityRole="button" onPress={leave} style={styles.headerButton}>
-          <BBText variant="body" color={colors.brandPrimary}>
-            Close
-          </BBText>
-        </Pressable>
-        <BBText variant="subtitle">Brain dump</BBText>
-        <View style={styles.headerButton} />
-      </View>
+  const headRow = (
+    <View style={[styles.head, { paddingTop: insets.top + space.s3 }]}>
+      <View style={styles.headSpacer} />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+        onPress={() => runCommand("cancel")}
+        style={styles.iconButton}
+      >
+        <X size={18} color={colors.fg4} strokeWidth={2} />
+      </Pressable>
+    </View>
+  );
 
+  return (
+    <Screen>
       {isPollable(status) ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.brandPrimary} size="large" />
@@ -233,84 +264,101 @@ export default function BrainDumpOperationScreen() {
           </BBText>
         </View>
       ) : status === "awaiting_confirmation" ? (
-        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-          <BBText variant="display">{`Review ${proposals.length} ${proposals.length === 1 ? "task" : "tasks"}`}</BBText>
-          <BBText variant="body" color={colors.fg5}>
-            Edit before they land in your inbox. Nothing is saved until you confirm.
-          </BBText>
+        <>
+          {headRow}
+          <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+            <PaneHead
+              title={`Review ${proposals.length} ${proposals.length === 1 ? "task" : "tasks"}`}
+              meta="Edit before they land in your inbox. Nothing is saved until you confirm."
+            />
 
-          {provisionalOnly ? (
-            <View style={styles.warnCard}>
-              <BBText variant="body" color={colors.warningFg}>
-                Provisional only — the accurate transcript wasn't available, so these come from the
-                live preview. Review them carefully.
-              </BBText>
-            </View>
-          ) : null}
-
-          {actionError ? <ErrorBanner error={actionError} /> : null}
-
-          <View style={styles.proposalList}>
-            {proposals.map((proposal) => (
-              <ProposalCard
-                key={proposal.id}
-                proposal={proposal}
-                onTitleCommit={(title) => {
-                  if (title.trim() && title.trim() !== proposal.title) {
-                    enqueueProposalPatch(proposal.id, { title: title.trim() });
-                  }
-                }}
-                onDelete={() => enqueueProposalPatch(proposal.id, { deleted: true })}
-                onResolveConflict={(resolution) =>
-                  enqueueProposalPatch(proposal.id, { conflict_resolution: resolution })
-                }
-              />
-            ))}
-            {proposals.length === 0 ? (
-              <View style={styles.card}>
-                <BBText variant="body" color={colors.fg5}>
-                  No tasks were proposed from this dump.
+            {provisionalOnly ? (
+              <View style={styles.warnCard}>
+                <BBText variant="body" color={colors.warningFg}>
+                  Provisional only — the accurate transcript wasn't available, so these come from
+                  the live preview. Review them carefully.
                 </BBText>
               </View>
             ) : null}
-          </View>
 
-          {operation.raw_audio_present ? (
-            <View style={styles.audioRow}>
-              <View style={styles.audioText}>
-                <BBText variant="caption" color={colors.fg5}>
-                  {operation.raw_audio_expires_at
-                    ? `Recording kept until ${new Date(operation.raw_audio_expires_at).toLocaleString()}`
-                    : "Recording kept temporarily"}
-                </BBText>
-              </View>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Delete recording"
-                onPress={() => runCommand("delete_raw_audio")}
-                style={styles.audioDelete}
-              >
-                <Trash2 size={16} color={colors.dangerFg} strokeWidth={1.75} />
-                <BBText variant="caption" color={colors.dangerFg}>
-                  Delete now
-                </BBText>
-              </Pressable>
+            {actionError ? <ErrorBanner error={actionError} /> : null}
+
+            <View style={styles.proposalList}>
+              {proposals.map((proposal) => (
+                <ProposalCard
+                  key={proposal.id}
+                  proposal={proposal}
+                  onTitleCommit={(title) => {
+                    if (title.trim() && title.trim() !== proposal.title) {
+                      enqueueProposalPatch(proposal.id, { title: title.trim() });
+                    }
+                  }}
+                  onDelete={() => enqueueProposalPatch(proposal.id, { deleted: true })}
+                  onResolveConflict={(resolution) =>
+                    enqueueProposalPatch(proposal.id, { conflict_resolution: resolution })
+                  }
+                />
+              ))}
+              {proposals.length === 0 ? (
+                <View style={styles.card}>
+                  <BBText variant="body" color={colors.fg5}>
+                    No tasks were proposed from this dump.
+                  </BBText>
+                </View>
+              ) : null}
             </View>
-          ) : null}
 
-          {conflicts > 0 ? (
-            <BBText variant="caption" color={colors.warningFg}>
-              {`Resolve ${conflicts} ${conflicts === 1 ? "conflict" : "conflicts"} before confirming.`}
-            </BBText>
-          ) : null}
+            {operation.raw_audio_present ? (
+              <View style={styles.audioRow}>
+                <View style={styles.audioText}>
+                  <BBText variant="caption" color={colors.fg5}>
+                    {operation.raw_audio_expires_at
+                      ? `Recording kept until ${new Date(operation.raw_audio_expires_at).toLocaleString()}`
+                      : "Recording kept temporarily"}
+                  </BBText>
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Delete recording"
+                  onPress={() => runCommand("delete_raw_audio")}
+                  style={styles.audioDelete}
+                >
+                  <Trash2 size={16} color={colors.dangerFg} strokeWidth={1.75} />
+                  <BBText variant="caption" color={colors.dangerFg}>
+                    Delete now
+                  </BBText>
+                </Pressable>
+              </View>
+            ) : null}
 
-          <Button onPress={() => runCommand("commit")} disabled={!commitReady} loading={actionPending}>
-            {`Confirm ${proposals.length} ${proposals.length === 1 ? "addition" : "additions"}`}
-          </Button>
-          <Button variant="ghost" onPress={() => runCommand("cancel")} disabled={actionPending}>
-            Discard everything
-          </Button>
-        </ScrollView>
+            {conflicts > 0 ? (
+              <BBText variant="caption" color={colors.warningFg}>
+                {`Resolve ${conflicts} ${conflicts === 1 ? "conflict" : "conflicts"} before confirming.`}
+              </BBText>
+            ) : null}
+          </ScrollView>
+
+          <View style={[styles.sheet, { paddingBottom: insets.bottom + space.s5 }]}>
+            <Button
+              onPress={() => runCommand("commit")}
+              disabled={!commitReady}
+              loading={actionPending}
+              style={styles.sheetButton}
+            >
+              {`Confirm ${proposals.length} ${proposals.length === 1 ? "addition" : "additions"}`}
+            </Button>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => runCommand("cancel")}
+              disabled={actionPending}
+              style={styles.ghostAction}
+            >
+              <BBText variant="caption" weight="medium" color={colors.fg5}>
+                Discard all
+              </BBText>
+            </Pressable>
+          </View>
+        </>
       ) : status === "completed" ? (
         <View style={styles.center}>
           <BBText variant="display" style={styles.centerText}>
@@ -319,7 +367,7 @@ export default function BrainDumpOperationScreen() {
           <BBText variant="body" color={colors.fg5} style={styles.centerText}>
             Clarify them into next actions when you're ready.
           </BBText>
-          <Button onPress={leave}>Done</Button>
+          <Button onPress={() => leave()}>Done</Button>
         </View>
       ) : status === "cancelled" ? (
         <View style={styles.center}>
@@ -327,7 +375,7 @@ export default function BrainDumpOperationScreen() {
           <BBText variant="body" color={colors.fg5}>
             Nothing was saved and the recording was deleted.
           </BBText>
-          <Button onPress={leave}>Done</Button>
+          <Button onPress={() => leave()}>Done</Button>
         </View>
       ) : (
         <View style={styles.center}>
@@ -415,20 +463,16 @@ function ProposalCard({
           hitSlop={8}
           style={styles.proposalDelete}
         >
-          <X size={18} color={colors.fg5} strokeWidth={2} />
+          <X size={16} color={colors.fg6} strokeWidth={2} />
         </Pressable>
       </View>
-      <View style={styles.proposalMeta}>
-        <BBText variant="micro" color={colors.fg5}>
-          {proposal.user_edited
-            ? "Edited by you"
-            : proposal.status === "reconciled"
-              ? "Reconciled"
-              : proposal.status === "conflicted"
-                ? "Needs a decision"
-                : "Provisional"}
-        </BBText>
-      </View>
+      {proposal.user_edited || proposal.status === "conflicted" ? (
+        <View style={styles.proposalMeta}>
+          <BBText variant="micro" color={colors.fg5}>
+            {proposal.user_edited ? "Edited by you" : "Needs a decision"}
+          </BBText>
+        </View>
+      ) : null}
       {conflicts.map((conflict, index) => (
         <View key={`${conflict.field}-${index}`} style={styles.conflictBlock}>
           <BBText variant="caption" color={colors.warningFg}>
@@ -457,16 +501,20 @@ function ProposalCard({
 }
 
 const styles = StyleSheet.create({
-  header: {
+  head: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: space.s5,
-    paddingVertical: space.s3,
+    paddingHorizontal: space.s4,
+    paddingBottom: space.s2,
   },
-  headerButton: {
-    minWidth: 64,
-    minHeight: minHitTarget,
+  headSpacer: {
+    flex: 1,
+  },
+  iconButton: {
+    width: minHitTarget,
+    height: minHitTarget,
+    margin: -space.s2,
+    alignItems: "center",
     justifyContent: "center",
   },
   center: {
@@ -480,7 +528,8 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   scroll: {
-    padding: space.s5,
+    padding: space.s4,
+    paddingTop: 18,
     gap: space.s4,
   },
   card: {
@@ -488,8 +537,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radii.card,
-    padding: space.s4,
+    padding: 14,
     gap: space.s2,
+    ...shadows.soft,
   },
   cardConflicted: {
     borderColor: colors.warningBorder,
@@ -512,7 +562,7 @@ const styles = StyleSheet.create({
     alignSelf: "stretch",
   },
   proposalList: {
-    gap: space.s2,
+    gap: 10,
   },
   proposalRow: {
     flexDirection: "row",
@@ -522,13 +572,15 @@ const styles = StyleSheet.create({
   proposalInput: {
     flex: 1,
     fontSize: typeScale.body,
-    lineHeight: Math.round(typeScale.body * 1.5),
+    lineHeight: Math.round(typeScale.body * 1.4),
     fontFamily: fonts.medium,
     color: colors.fg1,
     padding: 0,
   },
   proposalDelete: {
     padding: space.s1,
+    marginTop: -2,
+    marginRight: -4,
   },
   proposalMeta: {
     flexDirection: "row",
@@ -566,5 +618,22 @@ const styles = StyleSheet.create({
   recoveryActions: {
     alignSelf: "stretch",
     gap: space.s2,
+  },
+  sheet: {
+    alignItems: "center",
+    gap: space.s3,
+    paddingTop: 14,
+    paddingHorizontal: space.s4,
+    backgroundColor: "rgba(255,255,255,0.9)",
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  sheetButton: {
+    alignSelf: "stretch",
+    minHeight: 46,
+  },
+  ghostAction: {
+    minHeight: minHitTarget - 12,
+    justifyContent: "center",
   },
 });

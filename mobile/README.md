@@ -53,19 +53,27 @@ make build-mobile         # expo export --platform ios (Metro bundle integrity)
 
 ```
 src/app/                 expo-router routes
-  (tabs)/                Inbox · Next · Waiting · Someday · Browse
-  task/[id]              detail: edit fields, complete/move/reopen/cancel
-  brain-dump/index       capture (mic pulse, waveform, pause/resume, stop & review)
-  brain-dump/[operationId]  processing → review proposals → confirm
+  list/[state]           the four GTD lists (drawer navigation, per the mobile design)
+  task/[id]              detail: check row + chips, edit fields, complete/move/reopen/cancel
+  brain-dump/index       capture (mic badge + timer head, waveform sheet, stop & review)
+  brain-dump/[operationId]  processing → review proposals → confirm (bottom sheet)
   sign-in, settings, history, project/[id], tag/[id]
+src/components/shell/    TopBar (hamburger · mic · avatar), Drawer (GTD nav + projects
+                         + tags + history), PaneHead, AddTaskRow — the design's mobile shell
 src/api/                 client.ts (port of frontend/src/api/client.ts), types, React Query hooks
 src/auth/                SessionProvider (cookie session, /me probe, 401 → sign-in)
 src/braindump/           manifest hashing, chunk uploader, capture state machine, recorder config
 src/lifecycle/guards.ts  ADR-0006 transition matrix (UI never offers invalid commands)
 src/theme/tokens.ts      design tokens from .claude/skills/brain-buddy-design/colors_and_type.css
-src/components/          BBText, Button, TaskRow, Sheet, chips, brain-dump animations
+src/components/          BBText, Button, TaskRow, Sheet, chips, toasts, brain-dump animations
 integration/             Node harness + scenarios (real client, real backend)
 ```
+
+The mobile IA follows the "Brain Buddy Mobile" design (Claude Design project
+`40b1b752…`, drawer-nav variant), translated to the shipped contracts: Tags
+instead of `@contexts`, no agent/executor chips (Execution is deferred),
+"Weekly review · coming later", and the provisional brain-dump language
+required by ADR-0006 (B-37).
 
 ### Contracts the client honors
 

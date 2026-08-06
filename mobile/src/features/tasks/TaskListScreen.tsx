@@ -1,27 +1,21 @@
 import { useRouter } from "expo-router";
-import { Mic, Plus } from "lucide-react-native";
 import { useMemo, useState } from "react";
-import {
-  ActivityIndicator,
-  FlatList,
-  Pressable,
-  RefreshControl,
-  StyleSheet,
-  View,
-} from "react-native";
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, View } from "react-native";
 
 import { useTaskList, useTransitionTask } from "@/api/hooks";
 import type { OpenTaskState, TaskResponse } from "@/api/types";
-import { useSession } from "@/auth/SessionProvider";
-import { BBText } from "@/components/BBText";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { Screen } from "@/components/Screen";
 import { TaskRow } from "@/components/TaskRow";
+import { AddTaskRow } from "@/components/shell/AddTaskRow";
+import { Drawer } from "@/components/shell/Drawer";
+import { PaneHead } from "@/components/shell/PaneHead";
+import { TopBar } from "@/components/shell/TopBar";
 import { QuickAddSheet } from "@/features/tasks/QuickAddSheet";
 import { useClassificationNames } from "@/features/tasks/useClassificationNames";
 import { buildTransition } from "@/lifecycle/guards";
-import { colors, minHitTarget, radii, space } from "@/theme/tokens";
+import { colors, space } from "@/theme/tokens";
 
 export interface TaskListScreenProps {
   title: string;
@@ -30,9 +24,16 @@ export interface TaskListScreenProps {
   tagId?: string;
   emptyHeadline: string;
   emptyHint?: string;
-  /** Back affordance for stacked (project/tag) screens. */
-  showBack?: boolean;
+  /** "root" = hamburger + drawer; "sub" = back chevron + centered top-bar title. */
+  mode?: "root" | "sub";
 }
+
+const ADD_LABELS: Record<string, string> = {
+  next: "Add a next action — or dump everything with the mic",
+  inbox: "Add a task",
+  waiting: "Add a task",
+  someday: "Add a task",
+};
 
 export function TaskListScreen({
   title,
@@ -41,18 +42,15 @@ export function TaskListScreen({
   tagId,
   emptyHeadline,
   emptyHint,
-  showBack = false,
+  mode = "root",
 }: TaskListScreenProps) {
   const router = useRouter();
-  const { voiceEnabled } = useSession();
-  const filters = useMemo(
-    () => ({ state, projectId, tagId }),
-    [state, projectId, tagId],
-  );
+  const filters = useMemo(() => ({ state, projectId, tagId }), [state, projectId, tagId]);
   const query = useTaskList(filters);
   const transition = useTransitionTask();
   const { projectName, tagNames } = useClassificationNames();
   const [quickAddVisible, setQuickAddVisible] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const tasks: TaskResponse[] = useMemo(
     () => (query.data ? query.data.pages.flatMap((page) => page.items) : []),
@@ -60,6 +58,18 @@ export function TaskListScreen({
   );
   const totalKnown = tasks.length;
   const hasMore = query.hasNextPage;
+
+  const countLabel = `${totalKnown}${hasMore ? "+" : ""} ${totalKnown === 1 && !hasMore ? "task" : "tasks"}`;
+  const meta =
+    state === "inbox"
+      ? "Process these — decide the next action for each."
+      : tagId
+        ? `${countLabel} across your lists`
+        : countLabel;
+
+  const addLabel = projectId
+    ? "Add a task to this project"
+    : ADD_LABELS[state ?? "inbox"] ?? "Add a task";
 
   const completeTask = (task: TaskResponse) => {
     const guard = buildTransition(task, {
@@ -72,47 +82,12 @@ export function TaskListScreen({
   };
 
   return (
-    <Screen padTop>
-      <View style={styles.header}>
-        {showBack ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Back"
-            onPress={() => router.back()}
-            style={styles.backButton}
-          >
-            <BBText variant="body" color={colors.brandPrimary}>
-              Back
-            </BBText>
-          </Pressable>
-        ) : null}
-        <View style={styles.headerText}>
-          <BBText variant="title">{title}</BBText>
-          <BBText variant="caption">
-            {hasMore ? `${totalKnown}+ tasks` : `${totalKnown} ${totalKnown === 1 ? "task" : "tasks"}`}
-          </BBText>
-        </View>
-        <View style={styles.headerActions}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Add task"
-            onPress={() => setQuickAddVisible(true)}
-            style={styles.addButton}
-          >
-            <Plus size={20} color={colors.fg4} strokeWidth={2} />
-          </Pressable>
-          {voiceEnabled ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Brain dump"
-              onPress={() => router.push("/brain-dump")}
-              style={styles.micButton}
-            >
-              <Mic size={20} color="#FFFFFF" strokeWidth={2} />
-            </Pressable>
-          ) : null}
-        </View>
-      </View>
+    <Screen>
+      {mode === "root" ? (
+        <TopBar leading="menu" onMenu={() => setDrawerOpen(true)} showActions />
+      ) : (
+        <TopBar leading="back" title={title} />
+      )}
 
       {query.isLoading ? (
         <View style={styles.center}>
@@ -122,24 +97,32 @@ export function TaskListScreen({
         <View style={styles.pad}>
           <ErrorBanner error={query.error} onRetry={() => query.refetch()} />
         </View>
-      ) : tasks.length === 0 ? (
-        <EmptyState headline={emptyHeadline} hint={emptyHint} />
       ) : (
         <FlatList
           data={tasks}
           keyExtractor={(task) => task.id}
           contentContainerStyle={styles.list}
-          ItemSeparatorComponent={() => <View style={{ height: space.s2 }} />}
+          ListHeaderComponent={<PaneHead title={title} meta={meta} />}
+          ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           renderItem={({ item }) => (
             <TaskRow
               task={item}
               projectName={projectId ? undefined : projectName(item.project_id)}
-              tagNames={tagNames(item.tag_ids)}
-              onPress={() => router.push({ pathname: "/task/[id]", params: { id: item.id } })}
+              tagNames={tagId ? [] : tagNames(item.tag_ids)}
+              onPress={() => router.push({ pathname: "/task/[id]", params: { id: item.id, from: title } })}
               onToggleComplete={() => completeTask(item)}
               completing={transition.isPending}
             />
           )}
+          ListEmptyComponent={<EmptyState headline={emptyHeadline} hint={emptyHint} />}
+          ListFooterComponent={
+            <>
+              {query.isFetchingNextPage ? (
+                <ActivityIndicator color={colors.brandPrimary} style={styles.footer} />
+              ) : null}
+              <AddTaskRow label={addLabel} onPress={() => setQuickAddVisible(true)} />
+            </>
+          }
           refreshControl={
             <RefreshControl
               refreshing={query.isRefetching && !query.isFetchingNextPage}
@@ -153,11 +136,6 @@ export function TaskListScreen({
               query.fetchNextPage();
             }
           }}
-          ListFooterComponent={
-            query.isFetchingNextPage ? (
-              <ActivityIndicator color={colors.brandPrimary} style={styles.footer} />
-            ) : null
-          }
         />
       )}
 
@@ -174,61 +152,25 @@ export function TaskListScreen({
         projectId={projectId}
         tagId={tagId}
       />
+
+      {mode === "root" ? <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} /> : null}
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: space.s5,
-    paddingTop: space.s3,
-    paddingBottom: space.s3,
-    gap: space.s3,
-  },
-  backButton: {
-    minHeight: minHitTarget,
-    justifyContent: "center",
-  },
-  headerText: {
-    flex: 1,
-    gap: 2,
-  },
-  headerActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: space.s3,
-  },
-  addButton: {
-    width: minHitTarget,
-    height: minHitTarget,
-    borderRadius: radii.full,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceRaised,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  micButton: {
-    width: minHitTarget,
-    height: minHitTarget,
-    borderRadius: radii.full,
-    backgroundColor: colors.brandPrimary,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   center: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
   },
   pad: {
-    padding: space.s5,
+    padding: space.s4,
   },
   list: {
-    paddingHorizontal: space.s5,
-    paddingBottom: space.s8,
+    paddingHorizontal: space.s4,
+    paddingTop: 18,
+    paddingBottom: space.s8 + space.s4,
   },
   footer: {
     paddingVertical: space.s4,
