@@ -230,7 +230,9 @@ function AccountMenu(): JSX.Element {
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Account menu"
+        // The signed-in email stays in the accessible name: e2e helpers (and
+        // screen-reader users) identify the session by it.
+        aria-label={user?.email ? `Account menu for ${user.email}` : "Account menu"}
         className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-100 text-xs font-semibold text-sky-700 transition-shadow duration-200 ease-smooth hover:shadow-soft"
         onClick={() => setOpen((value) => !value)}
       >

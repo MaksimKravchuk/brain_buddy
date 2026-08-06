@@ -56,14 +56,40 @@ fly secrets set \
 
 The admin account is a normal account — it has no elevated privileges, it just happens to exist when the app boots. Treat the env vars with the same care as any other secret: a leak of `BRAIN_BUDDY_ADMIN_PASSWORD` is a leak of that account.
 
+## Account management (GDPR data rights)
+
+`/api/account` gives every signed-in user self-serve control over their data
+(see `docs/data-retention.md` for retention and purge mechanics):
+
+- **Profile** — `PATCH /api/account/profile` sets a display name.
+- **Email change** — `POST /api/account/email` re-checks the current password
+  and rewrites the email index atomically. A conflicting address returns the
+  same generic 400 as any other rejection so the endpoint is not an
+  account-enumeration oracle.
+- **Password change** — `POST /api/account/password` re-checks the current
+  password, enforces the signup policy, and revokes every *other* session.
+- **Export** — `GET /api/account/export` streams a ZIP of everything the
+  account owns (never the password hash or session records).
+- **Deletion** — `POST /api/account/delete` deactivates the account (all
+  sessions revoked) and schedules a hard purge after a 14-day grace period.
+  Logging back in inside the grace period cancels the deletion; past-due
+  logins fail with the generic credential error. The maintenance sweep (and
+  `python -m app.cli purge-due-accounts`) performs the purge.
+
+The three credential-sensitive actions return **403** on a failed password
+re-check (401 is reserved for "session gone") and share a per-user in-memory
+rate limit (10 attempts / 10 minutes).
+
 ## Known limitations (ordered by urgency if you scale)
 
 | Limitation | How to fix later |
 |---|---|
-| In-memory rate limiter loses state on restart. | Move to a small persistent store (SQLite, `data/rate_limit.json`). |
-| Per-IP only — an attacker rotating IPs can still brute force a single account. | Add per-email limiting alongside per-IP. |
+| In-memory rate limiters (login per-IP, sensitive actions per-user) lose state on restart. | Move to a small persistent store (SQLite, `data/rate_limit.json`). |
+| Login limiting is per-IP only — an attacker rotating IPs can still brute force a single account. | Add per-email limiting alongside per-IP. |
 | No password reset / email verification. | Requires an email provider. Until then, a forgotten password means deleting the user file and re-issuing an invite. |
-| No session list / remote revoke. | Add `GET/DELETE /api/auth/sessions`. |
+| Email changes are unverified — a typo'd new address silently corrupts the contact channel (nothing emails users today, but it will matter once reset mail exists). | Send a confirmation link to the new address before switching. |
+| Stolen credentials can cancel a pending account deletion by logging in during the grace period. | Require an explicit "keep my account" confirmation after login instead of auto-cancelling. |
+| No session list / remote revoke UI. | Add `GET/DELETE /api/auth/sessions` (bulk revocation already exists internally for password change and deletion). |
 | No audit log. | Append-only record of logins, signups, deletions. |
 | Passwords and sessions live in loose JSON files. | Move to SQLite once you have more than a handful of users. |
 
@@ -71,10 +97,11 @@ None of these are urgent at the current scale, but they're worth knowing about.
 
 ## Where the code lives
 
-- **Schemas** — `backend/app/schemas/auth.py`
+- **Schemas** — `backend/app/schemas/auth.py`, `backend/app/schemas/account.py`
 - **Repositories** — `backend/app/repositories/{user,session,invite}.py`
 - **Auth service** — `backend/app/services/auth_service.py`
-- **Routes** — `backend/app/api/auth.py`
+- **Account service (profile, export, deletion)** — `backend/app/services/account_service.py`
+- **Routes** — `backend/app/api/auth.py`, `backend/app/api/account.py`
 - **Dependency injection** — `get_current_user` in `backend/app/api/dependencies.py`
 - **Rate limiter** — `backend/app/core/rate_limit.py`
 - **CLI** — `backend/app/cli.py`

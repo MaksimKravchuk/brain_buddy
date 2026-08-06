@@ -378,12 +378,16 @@ function DangerZone(): JSX.Element {
 function DeleteAccountDialog({ onClose }: { onClose: () => void }): JSX.Element {
   const navigate = useNavigate();
   const clearSession = useAuthStore((state) => state.clearSession);
+  const scheduleDeletionNotice = useAuthStore((state) => state.scheduleDeletionNotice);
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const mutation = useMutation({
     mutationFn: () => apiClient.requestAccountDeletion({ current_password: password }),
     onSuccess: (scheduled) => {
+      // Stash the purge date in the store before clearing the session:
+      // ProtectedRoute races us to /login and would drop router state.
+      scheduleDeletionNotice(scheduled.purge_at);
       clearSession();
       navigate("/login", { replace: true, state: { deletionScheduled: scheduled.purge_at } });
     },

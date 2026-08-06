@@ -39,6 +39,17 @@ describe("authStore", () => {
     expect(useAuthStore.getState().deletionCancelledNotice).toBe(false);
   });
 
+  it("carries a scheduled deletion purge date across the session clear", async () => {
+    useAuthStore.getState().scheduleDeletionNotice("2026-08-20T12:00:00Z");
+    useAuthStore.getState().clearSession();
+    expect(useAuthStore.getState().deletionScheduledFor).toBe("2026-08-20T12:00:00Z");
+
+    // A successful login means the deletion is cancelled — drop the notice.
+    vi.spyOn(authApi, "login").mockResolvedValue({ id: "u1", email: "a@b.c" });
+    await useAuthStore.getState().login({ email: "a@b.c", password: "x" });
+    expect(useAuthStore.getState().deletionScheduledFor).toBeNull();
+  });
+
   it("login surfaces a cancelled account deletion as a dismissible notice", async () => {
     vi.spyOn(authApi, "login").mockResolvedValue({
       id: "u1",
