@@ -50,7 +50,8 @@
     "test": "jest",
     "typecheck": "tsc --noEmit",
     "integration": "tsx integration/run.ts",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "start:tunnel": "expo start --tunnel"
   },
   "private": true
 }

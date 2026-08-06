@@ -12,6 +12,8 @@ optimistic-concurrency contract (`Idempotency-Key` header +
 
 ## Run it on your iPhone (Expo Go)
 
+> Never used Node or Expo before? Follow **[GETTING_STARTED.md](./GETTING_STARTED.md)** — it assumes nothing.
+
 ```bash
 cd mobile
 npm install
