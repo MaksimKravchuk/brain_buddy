@@ -274,6 +274,8 @@ def build_container(config: AppConfig) -> Container:
         session_repo=session_repo,
         invite_repo=invite_repo,
         tree_service=tree_service,
+        version_repo=version_repo,
+        validation_repo=validation_repo,
         task_repo=task_repo,
         voice_operation_repo=voice_operation_repo,
         auth_service=auth_service,

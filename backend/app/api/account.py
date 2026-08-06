@@ -8,6 +8,7 @@ re-check the current password and share a per-user rate limit.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import StreamingResponse
 
 from app.core.config import AppConfig
 from app.core.rate_limit import sensitive_action_rate_limiter
@@ -117,6 +118,28 @@ def change_password(
         current_password=payload.current_password,
         new_password=payload.new_password,
         keep_token_hash=keep_token_hash,
+    )
+
+
+@router.get(
+    "/export",
+    responses={
+        200: {
+            "content": {"application/zip": {}},
+            "description": "ZIP archive of every record the account owns.",
+        },
+        **error_responses(401),
+    },
+)
+def export_account_data(
+    current_user: User = Depends(get_current_user),
+    account_service: AccountService = Depends(get_account_service),
+) -> StreamingResponse:
+    filename, stream = account_service.export_account_data(current_user)
+    return StreamingResponse(
+        stream,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
