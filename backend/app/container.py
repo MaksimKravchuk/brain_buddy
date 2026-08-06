@@ -20,6 +20,7 @@ from app.repositories import (
     VersionRepository,
 )
 from app.services import (
+    AccountService,
     AuthService,
     NodeService,
     RelationService,
@@ -65,6 +66,7 @@ class Container:
     version_service: VersionService
     validation_service: ValidationService
     auth_service: AuthService
+    account_service: AccountService
     task_service: TaskService
     voice_brain_dump_service: VoiceBrainDumpService
 
@@ -257,6 +259,11 @@ def build_container(config: AppConfig) -> Container:
         password_policy=config.password_policy,
         session_settings=config.session,
     )
+    account_service = AccountService(
+        user_repo=user_repo,
+        session_repo=session_repo,
+        auth_service=auth_service,
+    )
 
     return Container(
         tree_repo=tree_repo,
@@ -275,6 +282,7 @@ def build_container(config: AppConfig) -> Container:
         version_service=version_service,
         validation_service=validation_service,
         auth_service=auth_service,
+        account_service=account_service,
         task_service=task_service,
         voice_brain_dump_service=voice_brain_dump_service,
     )

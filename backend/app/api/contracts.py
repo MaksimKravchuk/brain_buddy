@@ -9,6 +9,7 @@ from app.schemas import ErrorResponse
 _ERROR_DESCRIPTIONS = {
     400: "The command violates a domain invariant.",
     401: "Authentication is required or the session is invalid.",
+    403: "The re-entered current password did not match.",
     404: "The requested resource is absent or belongs to another owner.",
     409: "The request conflicts with the current resource state.",
     422: "The request path, query, or body does not match the API schema.",

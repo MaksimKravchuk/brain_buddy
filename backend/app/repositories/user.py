@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from pathlib import Path
 
-from app.exceptions import ConflictError
+from app.exceptions import ConflictError, NotFoundError
 from app.schemas.auth import User
 from app.utils.file_ops import ensure_directory, read_json
 
@@ -76,7 +77,68 @@ class UserRepository(BaseRepository):
 
         The email index is not touched — callers must not change the email
         here. Used for mutations like password rotation that keep identity
-        stable.
+        stable. Email changes must go through `update_email`.
         """
 
         self.dump_model(self._user_path(user.id), user)
+
+    def update_email(self, user_id: str, new_email: str) -> User:
+        """Move an account to a new email address, keeping the index correct.
+
+        Raises `NotFoundError` if the user doesn't exist and `ConflictError`
+        if the address is already registered to another account. The index is
+        rewritten first (new key added, old keys for this user removed) in a
+        single atomic write, then the user file: if we crash between the two,
+        the new address already resolves and the old one no longer does, so
+        login behaves correctly and only the user file's `email` field is
+        stale until the change is retried.
+        """
+
+        user = self.get_by_id(user_id)
+        if user is None:
+            raise NotFoundError("User", user_id)
+
+        normalized = self.normalize_email(new_email)
+        if normalized == user.email:
+            return user
+
+        index = self._load_email_index()
+        existing_owner = index.get(normalized)
+        if existing_owner is not None and existing_owner != user_id:
+            raise ConflictError("User", normalized)
+
+        updated_index = {
+            key: value for key, value in index.items() if value != user_id
+        }
+        updated_index[normalized] = user_id
+        self._save_email_index(updated_index)
+
+        updated = user.model_copy(update={"email": normalized})
+        self.dump_model(self._user_path(user_id), updated)
+        return updated
+
+    def delete(self, user_id: str) -> None:
+        """Remove a user record and every email-index entry pointing at it.
+
+        Idempotent. The index is scanned by value (not just the current email
+        key) so a crash mid-`update_email` can never leave a resolvable
+        address behind, and it is saved before the user file is unlinked so a
+        crash never leaves an email resolving to a missing file.
+        """
+
+        index = self._load_email_index()
+        pruned = {key: value for key, value in index.items() if value != user_id}
+        if len(pruned) != len(index):
+            self._save_email_index(pruned)
+        with suppress(FileNotFoundError):
+            self._user_path(user_id).unlink()
+
+    def list_users(self) -> list[User]:
+        """Return every stored user (used by the account purge sweep)."""
+
+        users: list[User] = []
+        for path in sorted(self.users_dir.glob("*.json")):
+            if path.name == BY_EMAIL_INDEX_FILENAME:
+                continue
+            users.append(self.load_model(path, User))
+        return users

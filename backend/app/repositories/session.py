@@ -50,3 +50,26 @@ class SessionRepository(BaseRepository):
         path = self._session_path(token_hash)
         with suppress(FileNotFoundError):
             path.unlink()
+
+    def delete_all_for_user(self, user_id: str, *, keep: str | None = None) -> int:
+        """Revoke every session belonging to `user_id`; return the count.
+
+        Sessions are keyed by token hash, so this scans the whole directory —
+        fine at this scale. `keep` preserves one token hash (the caller's own
+        session, e.g. after a password change). Unreadable files are skipped.
+        """
+
+        removed = 0
+        for path in self.sessions_dir.glob("*.json"):
+            if keep is not None and path.stem == keep:
+                continue
+            try:
+                session = self.load_model(path, Session)
+            except Exception:  # noqa: BLE001 - corrupt entry must not block revocation
+                continue
+            if session.user_id != user_id:
+                continue
+            with suppress(FileNotFoundError):
+                path.unlink()
+                removed += 1
+        return removed
