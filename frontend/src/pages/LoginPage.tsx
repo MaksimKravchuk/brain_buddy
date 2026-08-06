@@ -18,7 +18,9 @@ export default function LoginPage(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
   const redirectTo = (location.state as LocationState)?.from?.pathname ?? "/";
-  const deletionScheduled = (location.state as LocationState)?.deletionScheduled;
+  const deletionScheduledFor = useAuthStore((state) => state.deletionScheduledFor);
+  const deletionScheduled =
+    (location.state as LocationState)?.deletionScheduled ?? deletionScheduledFor ?? undefined;
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

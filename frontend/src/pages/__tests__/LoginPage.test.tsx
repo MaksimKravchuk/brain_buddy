@@ -80,6 +80,12 @@ describe("LoginPage", () => {
     );
   });
 
+  it("shows the grace notice from the auth store when router state was lost", () => {
+    useAuthStore.setState({ deletionScheduledFor: "2026-08-20T12:00:00Z" });
+    renderLogin();
+    expect(screen.getByRole("status")).toHaveTextContent(/permanently deleted on/i);
+  });
+
   it("explains the grace period after an account deletion request", () => {
     render(
       <MemoryRouter

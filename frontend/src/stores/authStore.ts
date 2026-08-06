@@ -9,18 +9,26 @@ interface AuthStoreState {
   status: AuthStatus;
   /** Set when the latest login cancelled a pending account deletion. */
   deletionCancelledNotice: boolean;
+  /**
+   * Purge date of a just-requested account deletion. Carried here (not only
+   * in router state) because clearing the session makes ProtectedRoute issue
+   * its own /login redirect, which would drop router state on the floor.
+   */
+  deletionScheduledFor: string | null;
   hydrate: () => Promise<void>;
   login: (payload: LoginPayload) => Promise<void>;
   signup: (payload: SignupPayload) => Promise<void>;
   logout: () => Promise<void>;
   clearSession: () => void;
   dismissDeletionNotice: () => void;
+  scheduleDeletionNotice: (purgeAt: string) => void;
 }
 
 export const useAuthStore = create<AuthStoreState>((set) => ({
   user: null,
   status: "loading",
   deletionCancelledNotice: false,
+  deletionScheduledFor: null,
 
   async hydrate() {
     try {
@@ -40,7 +48,8 @@ export const useAuthStore = create<AuthStoreState>((set) => ({
     set({
       user,
       status: "authed",
-      deletionCancelledNotice: user.deletion_cancelled === true
+      deletionCancelledNotice: user.deletion_cancelled === true,
+      deletionScheduledFor: null
     });
   },
 
@@ -66,5 +75,9 @@ export const useAuthStore = create<AuthStoreState>((set) => ({
 
   dismissDeletionNotice() {
     set({ deletionCancelledNotice: false });
+  },
+
+  scheduleDeletionNotice(purgeAt) {
+    set({ deletionScheduledFor: purgeAt });
   }
 }));

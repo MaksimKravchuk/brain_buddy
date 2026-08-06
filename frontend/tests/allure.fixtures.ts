@@ -19,6 +19,12 @@ type EpicFeatureStory = { epic: string; feature: string; story: string };
 /** Ordered spec-path rules: the first match wins. */
 const PATH_RULES: Array<{ match: RegExp } & EpicFeatureStory> = [
   {
+    match: /e2e\/account/,
+    epic: "End-to-end journeys",
+    feature: "Account & data rights",
+    story: "Profile, export, and deletion lifecycle",
+  },
+  {
     match: /e2e\/auth/,
     epic: "End-to-end journeys",
     feature: "Authentication & access",
