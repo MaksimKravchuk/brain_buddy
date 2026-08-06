@@ -36,6 +36,20 @@ describe("authStore", () => {
     vi.spyOn(authApi, "login").mockResolvedValue({ id: "u1", email: "a@b.c" });
     await useAuthStore.getState().login({ email: "a@b.c", password: "x" });
     expect(useAuthStore.getState().status).toBe("authed");
+    expect(useAuthStore.getState().deletionCancelledNotice).toBe(false);
+  });
+
+  it("login surfaces a cancelled account deletion as a dismissible notice", async () => {
+    vi.spyOn(authApi, "login").mockResolvedValue({
+      id: "u1",
+      email: "a@b.c",
+      deletion_cancelled: true
+    });
+    await useAuthStore.getState().login({ email: "a@b.c", password: "x" });
+    expect(useAuthStore.getState().deletionCancelledNotice).toBe(true);
+
+    useAuthStore.getState().dismissDeletionNotice();
+    expect(useAuthStore.getState().deletionCancelledNotice).toBe(false);
   });
 
   it("logout clears the session even when the API call fails", async () => {

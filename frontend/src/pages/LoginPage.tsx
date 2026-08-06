@@ -6,7 +6,11 @@ import { ApiError } from "../api/client";
 import { Button } from "../components/ui/Button";
 import { useAuthStore } from "../stores/authStore";
 
-type LocationState = { from?: { pathname: string } } | null;
+type LocationState = {
+  from?: { pathname: string };
+  /** Purge date stamped by the delete-account flow so we can explain the grace period. */
+  deletionScheduled?: string;
+} | null;
 
 export default function LoginPage(): JSX.Element {
   const status = useAuthStore((state) => state.status);
@@ -14,6 +18,7 @@ export default function LoginPage(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
   const redirectTo = (location.state as LocationState)?.from?.pathname ?? "/";
+  const deletionScheduled = (location.state as LocationState)?.deletionScheduled;
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -44,6 +49,16 @@ export default function LoginPage(): JSX.Element {
 
   return (
     <AuthLayout title="Sign in to Brain Buddy">
+      {deletionScheduled ? (
+        <p
+          role="status"
+          className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+        >
+          Your account is deactivated and will be permanently deleted on{" "}
+          {new Date(deletionScheduled).toLocaleDateString()}. Sign back in before then to cancel
+          the deletion.
+        </p>
+      ) : null}
       <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
         <label className="flex flex-col gap-1 text-sm">
           <span className="font-medium text-slate-700">Email</span>
@@ -100,6 +115,11 @@ export function AuthLayout({
           {title}
         </h1>
         {children}
+        <p className="mt-4 text-center text-xs text-slate-400">
+          <Link to="/privacy" className="underline">
+            Privacy policy
+          </Link>
+        </p>
       </div>
     </div>
   );

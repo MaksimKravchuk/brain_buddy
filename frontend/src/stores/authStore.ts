@@ -7,16 +7,20 @@ export type AuthStatus = "loading" | "authed" | "anon";
 interface AuthStoreState {
   user: AuthUser | null;
   status: AuthStatus;
+  /** Set when the latest login cancelled a pending account deletion. */
+  deletionCancelledNotice: boolean;
   hydrate: () => Promise<void>;
   login: (payload: LoginPayload) => Promise<void>;
   signup: (payload: SignupPayload) => Promise<void>;
   logout: () => Promise<void>;
   clearSession: () => void;
+  dismissDeletionNotice: () => void;
 }
 
 export const useAuthStore = create<AuthStoreState>((set) => ({
   user: null,
   status: "loading",
+  deletionCancelledNotice: false,
 
   async hydrate() {
     try {
@@ -33,7 +37,11 @@ export const useAuthStore = create<AuthStoreState>((set) => ({
 
   async login(payload) {
     const user = await authApi.login(payload);
-    set({ user, status: "authed" });
+    set({
+      user,
+      status: "authed",
+      deletionCancelledNotice: user.deletion_cancelled === true
+    });
   },
 
   async signup(payload) {
@@ -54,5 +62,9 @@ export const useAuthStore = create<AuthStoreState>((set) => ({
 
   clearSession() {
     set({ user: null, status: "anon" });
+  },
+
+  dismissDeletionNotice() {
+    set({ deletionCancelledNotice: false });
   }
 }));
