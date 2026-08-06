@@ -3,6 +3,7 @@
 ## Project Structure & Module Organization
 - `backend/`: FastAPI app under `app/` with repositories, services, and `tests/` (pytest).
 - `frontend/`: Vite React client under `src/`; Vitest specs live in `src/**/__tests__/`.
+- `mobile/`: Expo (React Native) iOS-first client; Jest specs in `src/**/__tests__/`, real-backend integration suite in `integration/`. See `mobile/AGENTS.md`.
 - `docs/`: Architecture, API, troubleshooting, performance, and smoke runbooks.
 - `deploy/`: Container assets (nginx config).
 - `scripts/`: Utility scripts such as `smoke_test.sh`.

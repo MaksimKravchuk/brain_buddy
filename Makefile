@@ -1,4 +1,4 @@
-.PHONY: install-backend install-frontend dev-backend dev-frontend lint-backend lint-frontend test-backend ci-backend test-frontend test-e2e build-frontend ci-frontend validate-ci check-specs
+.PHONY: install-backend install-frontend dev-backend dev-frontend lint-backend lint-frontend test-backend ci-backend test-frontend test-e2e build-frontend ci-frontend validate-ci check-specs install-mobile typecheck-mobile test-mobile integration-mobile build-mobile ci-mobile
 
 install-backend:
 	cd backend && python -m pip install -e .[dev]
@@ -59,3 +59,23 @@ validate-ci:
 check-specs:
 	python3 -m unittest scripts/test_check_spec_kit_specs.py -v
 	python3 scripts/check_spec_kit_specs.py
+
+# --- Mobile (Expo / React Native, mobile/) ---
+
+install-mobile:
+	cd mobile && npm install
+
+typecheck-mobile:
+	cd mobile && npx tsc --noEmit
+
+test-mobile:
+	cd mobile && npx jest
+
+# Boots its own disposable backend (requires backend deps: make install-backend)
+integration-mobile:
+	cd mobile && npm run integration
+
+build-mobile:
+	cd mobile && npx expo export --platform ios
+
+ci-mobile: typecheck-mobile test-mobile build-mobile
