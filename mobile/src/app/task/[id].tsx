@@ -11,8 +11,16 @@ import {
 } from "react-native";
 
 import { ApiError } from "@/api/client";
-import { useTask, useTransitionTask, useUpdateTask } from "@/api/hooks";
+import {
+  useCreateComment,
+  useCreateSubtask,
+  useTask,
+  useTransitionSubtask,
+  useTransitionTask,
+  useUpdateTask,
+} from "@/api/hooks";
 import type { OpenTaskState, TaskPriority, TaskUpdateRequest } from "@/api/types";
+import { useSession } from "@/auth/SessionProvider";
 import { BBText } from "@/components/BBText";
 import { Button } from "@/components/Button";
 import { TagPill } from "@/components/Chip";
@@ -44,12 +52,49 @@ function isoDatePlus(days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+/** "2h" / "3d" style relative timestamp for comments. */
+function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) {
+    return "";
+  }
+  const minutes = Math.max(0, Math.round((Date.now() - then) / 60_000));
+  if (minutes < 1) {
+    return "now";
+  }
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h`;
+  }
+  const days = Math.round(hours / 24);
+  if (days < 7) {
+    return `${days}d`;
+  }
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function ownInitials(email: string | undefined): string {
+  if (!email) {
+    return "·";
+  }
+  const name = email.split("@")[0];
+  const parts = name.split(/[._-]+/).filter(Boolean);
+  return (parts.length >= 2 ? parts[0][0] + parts[1][0] : name.slice(0, 2)).toUpperCase();
+}
+
 export default function TaskDetailScreen() {
   const { id, from } = useLocalSearchParams<{ id: string; from?: string }>();
   const query = useTask(id);
   const update = useUpdateTask(id);
   const transition = useTransitionTask(id);
+  const createSubtask = useCreateSubtask(id);
+  const transitionSubtask = useTransitionSubtask(id);
+  const createComment = useCreateComment(id);
   const { projectName, tagNames } = useClassificationNames();
+  const { me } = useSession();
 
   const task = query.data;
 
@@ -57,6 +102,8 @@ export default function TaskDetailScreen() {
   const [details, setDetails] = useState("");
   const [dueDraft, setDueDraft] = useState("");
   const [waitingDraft, setWaitingDraft] = useState("");
+  const [subtaskDraft, setSubtaskDraft] = useState("");
+  const [commentDraft, setCommentDraft] = useState("");
   const [moveVisible, setMoveVisible] = useState(false);
   const [moveTarget, setMoveTarget] = useState<OpenTaskState | null>(null);
   const [moveWaitingFor, setMoveWaitingFor] = useState("");
@@ -344,52 +391,100 @@ export default function TaskDetailScreen() {
           </View>
         </View>
 
-        {task.subtasks && task.subtasks.length > 0 ? (
-          <View style={styles.field}>
-            <BBText variant="label">Subtasks</BBText>
-            <View style={styles.card}>
-              {task.subtasks.map((subtask) => (
-                <View key={subtask.id} style={styles.subtaskRow}>
-                  <View
-                    style={[
-                      styles.subtaskCheck,
-                      subtask.state === "completed" ? styles.subtaskCheckDone : null,
-                    ]}
-                  >
-                    {subtask.state === "completed" ? (
-                      <Check size={9} color="#FFFFFF" strokeWidth={3} />
-                    ) : null}
-                  </View>
-                  <BBText
-                    variant="body"
-                    color={subtask.state === "open" ? colors.fg2 : colors.fg6}
-                    style={subtask.state === "completed" ? styles.subtaskDone : null}
-                  >
-                    {subtask.title}
-                  </BBText>
-                </View>
-              ))}
-            </View>
-          </View>
-        ) : null}
+        <View style={styles.field}>
+          <BBText variant="label">Subtasks</BBText>
+          {(task.subtasks ?? []).map((subtask) => {
+            const subDone = subtask.state === "completed";
+            const subCancelled = subtask.state === "cancelled";
+            return (
+              <View key={subtask.id} style={styles.subtaskRow}>
+                <Pressable
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: subDone }}
+                  accessibilityLabel={subDone ? "Reopen subtask" : "Complete subtask"}
+                  disabled={!openTask || subCancelled || transitionSubtask.isPending}
+                  onPress={() =>
+                    transitionSubtask.mutate({
+                      subtaskId: subtask.id,
+                      action: subDone ? "reopen" : "complete",
+                      expectedRevision: subtask.revision,
+                    })
+                  }
+                  hitSlop={12}
+                  style={[styles.subtaskCheck, subDone ? styles.subtaskCheckDone : null]}
+                >
+                  {subDone ? <Check size={10} color="#FFFFFF" strokeWidth={3} /> : null}
+                </Pressable>
+                <BBText
+                  variant="body"
+                  color={subtask.state === "open" ? colors.fg2 : colors.fg6}
+                  style={[styles.subtaskTitle, subDone ? styles.subtaskDone : null]}
+                >
+                  {subtask.title}
+                </BBText>
+              </View>
+            );
+          })}
+          {openTask ? (
+            <TextInput
+              style={styles.addInput}
+              value={subtaskDraft}
+              onChangeText={setSubtaskDraft}
+              placeholder="Add a subtask"
+              placeholderTextColor={colors.fg6}
+              editable={!createSubtask.isPending}
+              onSubmitEditing={() => {
+                const trimmed = subtaskDraft.trim();
+                if (trimmed) {
+                  createSubtask.mutate(trimmed, { onSuccess: () => setSubtaskDraft("") });
+                }
+              }}
+              returnKeyType="done"
+            />
+          ) : null}
+          {createSubtask.isError ? <ErrorBanner error={createSubtask.error} /> : null}
+          {transitionSubtask.isError ? <ErrorBanner error={transitionSubtask.error} /> : null}
+        </View>
 
-        {task.comments && task.comments.length > 0 ? (
-          <View style={styles.field}>
-            <BBText variant="label">Comments</BBText>
-            <View style={styles.card}>
-              {task.comments.map((comment) => (
-                <View key={comment.id} style={styles.comment}>
-                  <BBText variant="body" color={colors.fg2}>
-                    {comment.body}
-                  </BBText>
-                  <BBText variant="micro" color={colors.fg5}>
-                    {new Date(comment.created_at).toLocaleString()}
-                  </BBText>
-                </View>
-              ))}
+        <View style={styles.field}>
+          <BBText variant="label">Comments</BBText>
+          {(task.comments ?? []).map((comment) => (
+            <View key={comment.id} style={styles.comment}>
+              <View style={styles.commentAvatar}>
+                <BBText style={styles.commentAvatarText}>{ownInitials(me?.email)}</BBText>
+              </View>
+              <View style={styles.commentBody}>
+                <BBText variant="micro" color={colors.fg5}>
+                  {relativeTime(comment.created_at)}
+                  {comment.edited_at ? " · edited" : ""}
+                </BBText>
+                <BBText variant="body" color={colors.fg2}>
+                  {comment.body}
+                </BBText>
+              </View>
             </View>
-          </View>
-        ) : null}
+          ))}
+          {openTask ? (
+            <TextInput
+              style={styles.addInput}
+              value={commentDraft}
+              onChangeText={setCommentDraft}
+              placeholder="Add a comment"
+              placeholderTextColor={colors.fg6}
+              editable={!createComment.isPending}
+              multiline
+              blurOnSubmit
+              onSubmitEditing={() => {
+                const trimmed = commentDraft.trim();
+                if (trimmed) {
+                  createComment.mutate(trimmed, { onSuccess: () => setCommentDraft("") });
+                }
+              }}
+              returnKeyType="done"
+            />
+          ) : null}
+          {createComment.isError ? <ErrorBanner error={createComment.error} /> : null}
+        </View>
 
         <View style={styles.actions}>
           {openTask ? (
@@ -507,8 +602,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   checkDone: {
-    backgroundColor: colors.success,
-    borderColor: colors.success,
+    backgroundColor: colors.brandPrimary,
+    borderColor: colors.brandPrimary,
   },
   titleInput: {
     flex: 1,
@@ -579,36 +674,66 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brandPrimary,
     borderColor: colors.brandPrimary,
   },
-  card: {
-    backgroundColor: colors.surfaceRaised,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.card,
-    padding: space.s4,
-    gap: space.s3,
-  },
   subtaskRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: space.s2,
+    minHeight: 32,
   },
   subtaskCheck: {
-    width: 16,
-    height: 16,
+    width: 18,
+    height: 18,
     borderRadius: radii.full,
     borderWidth: 1.5,
     borderColor: colors.fg7,
+    backgroundColor: colors.surfaceRaised,
     alignItems: "center",
     justifyContent: "center",
   },
   subtaskCheckDone: {
-    backgroundColor: colors.success,
-    borderColor: colors.success,
+    backgroundColor: colors.brandPrimary,
+    borderColor: colors.brandPrimary,
+  },
+  subtaskTitle: {
+    flex: 1,
   },
   subtaskDone: {
     textDecorationLine: "line-through",
   },
+  addInput: {
+    borderWidth: 1.5,
+    borderStyle: "dashed",
+    borderColor: colors.fg7,
+    borderRadius: 12,
+    paddingHorizontal: space.s3,
+    paddingVertical: 11,
+    fontSize: typeScale.body,
+    fontFamily: fonts.regular,
+    color: colors.fg1,
+    minHeight: 44,
+    marginTop: space.s1,
+  },
   comment: {
+    flexDirection: "row",
+    gap: space.s2,
+    alignItems: "flex-start",
+  },
+  commentAvatar: {
+    width: 26,
+    height: 26,
+    borderRadius: radii.full,
+    backgroundColor: "#E0F2FE",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 1,
+  },
+  commentAvatarText: {
+    fontSize: 10,
+    fontFamily: fonts.semibold,
+    color: "#0369A1",
+  },
+  commentBody: {
+    flex: 1,
     gap: 2,
   },
   actions: {

@@ -118,3 +118,40 @@ export function useTransitionTask(taskId?: string) {
     onSuccess: invalidate,
   });
 }
+
+export function useCreateSubtask(taskId: string) {
+  const api = useApi();
+  const invalidate = useInvalidateTasks();
+  return useMutation({
+    mutationFn: (title: string) => api.createSubtask(taskId, { title }, newIdempotencyKey()),
+    onSuccess: invalidate,
+  });
+}
+
+export function useTransitionSubtask(taskId: string) {
+  const api = useApi();
+  const invalidate = useInvalidateTasks();
+  return useMutation({
+    mutationFn: (input: {
+      subtaskId: string;
+      action: "complete" | "reopen" | "cancel";
+      expectedRevision: number;
+    }) =>
+      api.transitionSubtask(
+        taskId,
+        input.subtaskId,
+        { action: input.action, expected_revision: input.expectedRevision },
+        newIdempotencyKey(),
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+export function useCreateComment(taskId: string) {
+  const api = useApi();
+  const invalidate = useInvalidateTasks();
+  return useMutation({
+    mutationFn: (body: string) => api.createComment(taskId, { body }, newIdempotencyKey()),
+    onSuccess: invalidate,
+  });
+}
