@@ -107,7 +107,7 @@ def login(
             detail="Too many login attempts. Try again in a few minutes.",
         )
     try:
-        user, raw_token = auth_service.login(
+        user, raw_token, deletion_cancelled = auth_service.login(
             email=payload.email, password=payload.password
         )
     except InvalidCredentialsError as exc:
@@ -116,7 +116,7 @@ def login(
         ) from exc
 
     _set_session_cookie(response, raw_token, config)
-    return _me_response(user, config)
+    return _me_response(user, config, deletion_cancelled=deletion_cancelled)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)

@@ -22,12 +22,13 @@ _VOICE_SWEEP_INTERVAL_SECONDS = float(
 )
 
 
-def _run_voice_sweep(container: Container) -> None:
-    """One pass of the persisted voice-operation runner's periodic duties.
+def _run_maintenance_sweep(container: Container) -> None:
+    """One pass of the backend's periodic maintenance duties.
 
     Recovers due/expired provider-run leases, advances due provider runs,
-    resumes operations frozen mid-commit, then purges raw audio and uncommitted
-    working artifacts past their configured retention. A single bad pass must
+    resumes operations frozen mid-commit, purges raw audio and uncommitted
+    working artifacts past their configured retention, then hard-deletes
+    accounts whose deletion grace period has elapsed. A single bad pass must
     never kill the loop that calls this.
     """
 
@@ -41,8 +42,9 @@ def _run_voice_sweep(container: Container) -> None:
         purged_working_artifacts = (
             container.voice_brain_dump_service.purge_expired_working_artifacts()
         )
+        purged_accounts = container.account_service.purge_due_accounts()
     except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
-        logger.exception("Voice operation sweep iteration failed")
+        logger.exception("Maintenance sweep iteration failed")
         return
     if (
         recovered_leases
@@ -50,15 +52,18 @@ def _run_voice_sweep(container: Container) -> None:
         or resumed_commits
         or purged_raw_audio
         or purged_working_artifacts
+        or purged_accounts
     ):
         logger.info(
-            "Voice sweep: recovered %s lease(s), resumed %s commit(s), purged %s "
-            "raw-audio, %s working-artifact operation(s), advanced %s provider run(s)",
+            "Maintenance sweep: recovered %s lease(s), resumed %s commit(s), "
+            "purged %s raw-audio, %s working-artifact operation(s), advanced "
+            "%s provider run(s), purged %s account(s)",
             recovered_leases,
             resumed_commits,
             purged_raw_audio,
             purged_working_artifacts,
             advanced_runs,
+            purged_accounts,
         )
 
 
@@ -78,7 +83,7 @@ def _start_voice_sweep_thread(
             wake_event.clear()
             if stop_event.is_set():
                 break
-            _run_voice_sweep(container)
+            _run_maintenance_sweep(container)
 
     thread = threading.Thread(target=_loop, name="voice-operation-sweep", daemon=True)
     thread.start()
@@ -120,7 +125,7 @@ def create_app() -> FastAPI:
     # no process was running, then purge whatever raw audio/working
     # artifacts are already due. This must run unconditionally (including in
     # tests) since it is a one-shot, synchronous, already-tested code path.
-    _run_voice_sweep(app.state.container)
+    _run_maintenance_sweep(app.state.container)
 
     app.state.voice_sweep_stop_event = threading.Event()
     app.state.voice_sweep_wake_event = threading.Event()

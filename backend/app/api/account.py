@@ -7,11 +7,13 @@ re-check the current password and share a per-user rate limit.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from app.core.config import AppConfig
 from app.core.rate_limit import sensitive_action_rate_limiter
 from app.schemas.account import (
+    AccountDeleteRequest,
+    AccountDeleteResponse,
     AccountResponse,
     EmailChangeRequest,
     PasswordChangeRequest,
@@ -115,4 +117,31 @@ def change_password(
         current_password=payload.current_password,
         new_password=payload.new_password,
         keep_token_hash=keep_token_hash,
+    )
+
+
+@router.post(
+    "/delete",
+    response_model=AccountDeleteResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses=error_responses(401, 403, 422, 429),
+)
+def request_deletion(
+    payload: AccountDeleteRequest,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    account_service: AccountService = Depends(get_account_service),
+    config: AppConfig = Depends(get_config_dep),
+) -> AccountDeleteResponse:
+    _check_sensitive_rate_limit(current_user)
+    user = account_service.request_deletion(
+        current_user, current_password=payload.current_password
+    )
+    # Every session was just revoked; drop the caller's cookie too.
+    response.delete_cookie(key=config.session.cookie_name, path="/")
+    purge_at = account_service.purge_at_for(user)
+    assert user.deletion_requested_at is not None and purge_at is not None
+    return AccountDeleteResponse(
+        deletion_requested_at=user.deletion_requested_at,
+        purge_at=purge_at,
     )

@@ -477,6 +477,46 @@ class OperationRepository(BaseRepository):
             for row in rows
         ]
 
+    def list_brain_dump_operations_for_owner(
+        self, *, owner_id: str
+    ) -> list[BrainDumpOperationDocument]:
+        """Every operation belonging to one owner (GDPR export support)."""
+
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT payload FROM brain_dump_operations WHERE owner_id = ?",
+                (owner_id,),
+            ).fetchall()
+        return [
+            self._decode_brain_dump_operation(json.loads(row["payload"]))[0]
+            for row in rows
+        ]
+
+    def delete_all_for_owner(self, *, owner_id: str) -> None:
+        """Erase every operation, mirror, and media blob for one owner.
+
+        GDPR account-purge support. Runs under ``command_lock`` so it
+        serializes with any straggler command for the owner; the deletes and
+        directory removals are idempotent so an interrupted purge can run
+        again.
+        """
+
+        with self.command_lock(owner_id), self._connection() as conn:
+            conn.execute(
+                "DELETE FROM brain_dump_operations WHERE owner_id = ?",
+                (owner_id,),
+            )
+            conn.execute(
+                "DELETE FROM idempotency_records WHERE owner_id = ?",
+                (owner_id,),
+            )
+        for dirname in (
+            "brain-dump-operations",
+            "brain-dump-media",
+            "voice-operation-commands",
+        ):
+            shutil.rmtree(self.resolve(dirname, owner_id), ignore_errors=True)
+
     def purge_brain_dump_media_orphans(self) -> int:
         """Remove untracked media and interrupted atomic-write temp files.
 
