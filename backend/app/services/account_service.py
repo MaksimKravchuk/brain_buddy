@@ -11,7 +11,6 @@ import logging
 import shutil
 import tempfile
 import zipfile
-from contextlib import suppress
 from datetime import datetime, timedelta
 from typing import IO, Any
 
@@ -107,12 +106,18 @@ class AccountService:
     # ------------------------------------------------------------------
 
     def update_profile(self, user: User, *, display_name: str) -> User:
-        """Set (or clear, via empty string) the display name."""
+        """Set (or clear, via empty string) the display name.
+
+        Patches a fresh read under the repository write lock — saving the
+        request-scoped `user` wholesale could resurrect fields another
+        request changed meanwhile (worst case: un-scheduling a deletion).
+        """
 
         cleaned = display_name.strip()
-        updated = user.model_copy(update={"display_name": cleaned or None})
-        self.user_repo.save(updated)
-        return updated
+        return self.user_repo.mutate(
+            user.id,
+            lambda fresh: fresh.model_copy(update={"display_name": cleaned or None}),
+        )
 
     def change_email(
         self, user: User, *, new_email: str, current_password: str
@@ -145,10 +150,11 @@ class AccountService:
 
         self._require_current_password(user, current_password)
         self.auth_service.validate_password_format(new_password)
-        updated = user.model_copy(
-            update={"password_hash": self.auth_service.hash_password(new_password)}
+        new_hash = self.auth_service.hash_password(new_password)
+        self.user_repo.mutate(
+            user.id,
+            lambda fresh: fresh.model_copy(update={"password_hash": new_hash}),
         )
-        self.user_repo.save(updated)
         revoked = self.session_repo.delete_all_for_user(user.id, keep=keep_token_hash)
         logger.info(
             "Password changed for %s; revoked %s other session(s)", user.id, revoked
@@ -311,9 +317,13 @@ class AccountService:
         """
 
         self._require_current_password(user, current_password)
-        if user.deletion_requested_at is None:
-            user = user.model_copy(update={"deletion_requested_at": utcnow()})
-            self.user_repo.save(user)
+
+        def _schedule(fresh: User) -> User:
+            if fresh.deletion_requested_at is not None:
+                return fresh
+            return fresh.model_copy(update={"deletion_requested_at": utcnow()})
+
+        user = self.user_repo.mutate(user.id, _schedule)
         revoked = self.session_repo.delete_all_for_user(user.id)
         logger.info(
             "Account deletion requested for %s (purge at %s); revoked %s session(s)",
@@ -349,8 +359,13 @@ class AccountService:
         self.voice_operation_repo.delete_all_for_owner(owner_id=user_id)
         self.task_repo.delete_all_for_owner(owner_id=user_id)
         for entry in self.tree_service.list_trees(owner_id=user_id):
-            with suppress(NotFoundError):
+            try:
                 self.tree_service.delete_tree(entry.id, owner_id=user_id)
+            except NotFoundError:
+                # A previous purge attempt removed the tree files but died
+                # before the index update — the entry itself still names the
+                # owner, so it must not survive this retry.
+                self.tree_service.remove_stale_tree_state(entry.id)
         self.invite_repo.scrub_user(user_id)
         self.user_repo.delete(user_id)
         logger.info("Purged account %s and all owned data", user_id)
