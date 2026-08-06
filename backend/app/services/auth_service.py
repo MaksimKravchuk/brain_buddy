@@ -29,6 +29,9 @@ from app.utils.time import utcnow
 
 logger = logging.getLogger(__name__)
 
+ACCOUNT_DELETION_GRACE = timedelta(days=14)
+"""How long a requested account deletion stays cancellable before purge."""
+
 
 class InvalidCredentialsError(BrainBuddyError):
     """Raised when a login attempt fails. Always uses the same message so
@@ -56,12 +59,14 @@ class AuthService:
         invite_repo: InviteRepository,
         password_policy: PasswordPolicy,
         session_settings: SessionSettings,
+        deletion_grace: timedelta = ACCOUNT_DELETION_GRACE,
     ) -> None:
         self.user_repo = user_repo
         self.session_repo = session_repo
         self.invite_repo = invite_repo
         self.password_policy = password_policy
         self.session_settings = session_settings
+        self.deletion_grace = deletion_grace
         self._hasher = PasswordHasher()
         # Precomputed dummy hash used to equalize login timing in the
         # "no such user" branch — prevents timing-based account enumeration.
@@ -196,12 +201,18 @@ class AuthService:
         raw_token, _ = self._create_session(user_id)
         return user, raw_token
 
-    def login(self, *, email: str, password: str) -> tuple[User, str]:
-        """Authenticate and return `(user, raw_session_token)`.
+    def login(self, *, email: str, password: str) -> tuple[User, str, bool]:
+        """Authenticate and return `(user, raw_session_token, deletion_cancelled)`.
 
         Always raises `InvalidCredentialsError` on failure — the caller
         maps that to a generic "Invalid email or password." response so
         we never leak whether the email exists.
+
+        A pending account deletion still inside its grace period is
+        cancelled by a successful login (`deletion_cancelled=True`). A
+        deletion already past its grace period refuses the login with the
+        same generic error, before any session is created: the account is
+        past the point of no return and must never be resurrected mid-purge.
         """
 
         normalized_email = self.user_repo.normalize_email(email)
@@ -215,8 +226,17 @@ class AuthService:
         if not self._verify_password(password, user.password_hash):
             raise InvalidCredentialsError()
 
+        deletion_cancelled = False
+        if user.deletion_requested_at is not None:
+            if utcnow() >= user.deletion_requested_at + self.deletion_grace:
+                raise InvalidCredentialsError()
+            user = user.model_copy(update={"deletion_requested_at": None})
+            self.user_repo.save(user)
+            deletion_cancelled = True
+            logger.info("Login cancelled pending deletion for %s", user.id)
+
         raw_token, _ = self._create_session(user.id)
-        return user, raw_token
+        return user, raw_token, deletion_cancelled
 
     # ------------------------------------------------------------------
     # Admin seeding
@@ -269,6 +289,7 @@ class AuthService:
 
 
 __all__ = [
+    "ACCOUNT_DELETION_GRACE",
     "AuthService",
     "InvalidCredentialsError",
     "InvalidInviteError",
