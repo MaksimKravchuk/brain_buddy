@@ -183,7 +183,22 @@ export default function BrainDumpCaptureScreen() {
           </View>
         ) : phase.kind === "error" ? (
           <View style={styles.centerBlock}>
-            <ErrorBanner error={phase.error} onRetry={capture.retryUpload} />
+            <ErrorBanner
+              error={phase.error}
+              onRetry={
+                phase.recoverable
+                  ? async () => {
+                      const operationId = await capture.retryUpload();
+                      if (operationId) {
+                        router.replace({
+                          pathname: "/brain-dump/[operationId]",
+                          params: { operationId },
+                        });
+                      }
+                    }
+                  : undefined
+              }
+            />
             <Button variant="ghost" onPress={leave}>
               Discard this dump
             </Button>

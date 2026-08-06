@@ -86,6 +86,9 @@ export default function BrainDumpOperationScreen() {
   );
 
   // Poll while the server is working; pause in background, refresh on return.
+  // A transient fetch failure must never end the loop: fall back to the last
+  // known status (the backoff keeps growing) and only stop once a FETCHED
+  // status is settled or interactive.
   useEffect(() => {
     let disposed = false;
 
@@ -98,13 +101,13 @@ export default function BrainDumpOperationScreen() {
       pollDelayRef.current = delay;
       pollTimerRef.current = setTimeout(async () => {
         const fresh = await fetchOnce();
-        schedule(fresh?.status);
+        schedule(fresh ? fresh.status : operationRef.current?.status);
       }, delay);
     };
 
     (async () => {
       const first = await fetchOnce();
-      schedule(first?.status);
+      schedule(first ? first.status : operationRef.current?.status);
     })();
 
     const subscription = AppState.addEventListener("change", (state) => {
@@ -113,7 +116,7 @@ export default function BrainDumpOperationScreen() {
           clearTimeout(pollTimerRef.current);
         }
         pollDelayRef.current = null;
-        fetchOnce().then((fresh) => schedule(fresh?.status));
+        fetchOnce().then((fresh) => schedule(fresh ? fresh.status : operationRef.current?.status));
       } else if (pollTimerRef.current) {
         clearTimeout(pollTimerRef.current);
       }
@@ -191,6 +194,12 @@ export default function BrainDumpOperationScreen() {
           const tick = async () => {
             const latest = await fetchOnce();
             if (!latest) {
+              // Transient failure: keep polling from the last known status.
+              if (isPollable(operationRef.current?.status ?? next.status)) {
+                const delay = nextPollDelay(pollDelayRef.current);
+                pollDelayRef.current = delay;
+                pollTimerRef.current = setTimeout(tick, delay);
+              }
               return;
             }
             if (latest.status === "completed") {

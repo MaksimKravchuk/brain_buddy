@@ -13,6 +13,8 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 
+import { ApiError } from "@/api/client";
+
 import { useApi } from "@/auth/SessionProvider";
 import type {
   SmartAddTaskCreateRequest,
@@ -94,19 +96,36 @@ export function useSmartAddTask() {
   });
 }
 
+/**
+ * A 409 means our `expected_revision` is stale: refetch so the screen's
+ * "the latest version is shown" claim is actually true and the next attempt
+ * carries the fresh revision.
+ */
+function useInvalidateOnConflict() {
+  const invalidate = useInvalidateTasks();
+  return (error: unknown) => {
+    if (error instanceof ApiError && error.status === 409) {
+      invalidate();
+    }
+  };
+}
+
 export function useUpdateTask(taskId: string) {
   const api = useApi();
   const invalidate = useInvalidateTasks();
+  const onConflict = useInvalidateOnConflict();
   return useMutation({
     mutationFn: (payload: TaskUpdateRequest) =>
       api.updateTask(taskId, payload, newIdempotencyKey()),
     onSuccess: invalidate,
+    onError: onConflict,
   });
 }
 
 export function useTransitionTask(taskId?: string) {
   const api = useApi();
   const invalidate = useInvalidateTasks();
+  const onConflict = useInvalidateOnConflict();
   return useMutation({
     mutationFn: (input: { taskId?: string; payload: TaskTransitionRequest }) => {
       const target = input.taskId ?? taskId;
@@ -116,21 +135,25 @@ export function useTransitionTask(taskId?: string) {
       return api.transitionTask(target, input.payload, newIdempotencyKey());
     },
     onSuccess: invalidate,
+    onError: onConflict,
   });
 }
 
 export function useCreateSubtask(taskId: string) {
   const api = useApi();
   const invalidate = useInvalidateTasks();
+  const onConflict = useInvalidateOnConflict();
   return useMutation({
     mutationFn: (title: string) => api.createSubtask(taskId, { title }, newIdempotencyKey()),
     onSuccess: invalidate,
+    onError: onConflict,
   });
 }
 
 export function useTransitionSubtask(taskId: string) {
   const api = useApi();
   const invalidate = useInvalidateTasks();
+  const onConflict = useInvalidateOnConflict();
   return useMutation({
     mutationFn: (input: {
       subtaskId: string;
@@ -144,14 +167,17 @@ export function useTransitionSubtask(taskId: string) {
         newIdempotencyKey(),
       ),
     onSuccess: invalidate,
+    onError: onConflict,
   });
 }
 
 export function useCreateComment(taskId: string) {
   const api = useApi();
   const invalidate = useInvalidateTasks();
+  const onConflict = useInvalidateOnConflict();
   return useMutation({
     mutationFn: (body: string) => api.createComment(taskId, { body }, newIdempotencyKey()),
     onSuccess: invalidate,
+    onError: onConflict,
   });
 }

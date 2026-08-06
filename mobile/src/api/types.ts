@@ -84,7 +84,7 @@ export interface TagResponse {
 }
 
 export interface TaskListFilters {
-  state?: OpenTaskState;
+  state?: TaskState;
   projectId?: string;
   tagId?: string;
   unassignedProject?: boolean;
