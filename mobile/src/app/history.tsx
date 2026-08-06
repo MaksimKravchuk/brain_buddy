@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, StyleSheet, View } from "react-native";
 
 import { useTaskList, useTransitionTask } from "@/api/hooks";
-import type { TaskResponse } from "@/api/types";
+import type { TaskResponse, TaskState } from "@/api/types";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { Screen } from "@/components/Screen";
@@ -20,28 +20,20 @@ import { colors, space } from "@/theme/tokens";
  */
 export default function HistoryScreen() {
   const { kind } = useLocalSearchParams<{ kind?: string }>();
-  const terminalState = kind === "cancelled" ? "cancelled" : "completed";
+  const terminalState: TaskState = kind === "cancelled" ? "cancelled" : "completed";
 
-  const filters = useMemo(
-    () =>
-      terminalState === "completed"
-        ? { includeCompleted: true as const }
-        : { includeCancelled: true as const },
-    [terminalState],
-  );
+  // `state=<terminal>` alone narrows the list to exactly that state
+  // server-side, so pagination walks only terminal rows — never open tasks
+  // that would otherwise fill pages ahead of them.
+  const filters = useMemo(() => ({ state: terminalState }), [terminalState]);
   const query = useTaskList(filters);
   const transition = useTransitionTask();
   const { projectName, tagNames } = useClassificationNames();
   const [reopening, setReopening] = useState<TaskResponse | null>(null);
 
-  // The list API includes terminal rows alongside open ones; this surface
-  // shows only the terminal slice.
   const tasks = useMemo(
-    () =>
-      (query.data ? query.data.pages.flatMap((page) => page.items) : []).filter(
-        (task) => task.state === terminalState,
-      ),
-    [query.data, terminalState],
+    () => (query.data ? query.data.pages.flatMap((page) => page.items) : []),
+    [query.data],
   );
 
   const title = terminalState === "completed" ? "Completed" : "Cancelled";
