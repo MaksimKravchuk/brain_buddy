@@ -6,9 +6,14 @@ only orchestrates re-auth checks, repository writes, and session revocation.
 
 from __future__ import annotations
 
+import json
 import logging
+import shutil
+import tempfile
+import zipfile
 from contextlib import suppress
 from datetime import datetime, timedelta
+from typing import IO, Any
 
 from app.exceptions import (
     ConflictError,
@@ -17,12 +22,24 @@ from app.exceptions import (
     ValidationFailure,
 )
 from app.modules.tasks import TaskRepository
-from app.repositories import InviteRepository, SessionRepository, UserRepository
+from app.repositories import (
+    InviteRepository,
+    SessionRepository,
+    UserRepository,
+    ValidationRepository,
+    VersionRepository,
+)
+from app.repositories.validation import VALIDATION_DIRNAME
+from app.repositories.version import _slugify_version_id
 from app.schemas.auth import User
 from app.services.auth_service import ACCOUNT_DELETION_GRACE, AuthService
 from app.services.tree_service import TreeService
 from app.utils.time import utcnow
 from app.workflows.voice_brain_dump.repository import OperationRepository
+
+# Accounts below this size are zipped fully in memory; anything larger
+# (voice-heavy accounts with raw audio) spools to a temp file on disk.
+_EXPORT_SPOOL_MAX_BYTES = 8 * 1024 * 1024
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +61,8 @@ class AccountService:
         session_repo: SessionRepository,
         invite_repo: InviteRepository,
         tree_service: TreeService,
+        version_repo: VersionRepository,
+        validation_repo: ValidationRepository,
         task_repo: TaskRepository,
         voice_operation_repo: OperationRepository,
         auth_service: AuthService,
@@ -53,6 +72,8 @@ class AccountService:
         self.session_repo = session_repo
         self.invite_repo = invite_repo
         self.tree_service = tree_service
+        self.version_repo = version_repo
+        self.validation_repo = validation_repo
         self.task_repo = task_repo
         self.voice_operation_repo = voice_operation_repo
         self.auth_service = auth_service
@@ -132,6 +153,150 @@ class AccountService:
         logger.info(
             "Password changed for %s; revoked %s other session(s)", user.id, revoked
         )
+
+    # ------------------------------------------------------------------
+    # Data export (GDPR access & portability)
+    # ------------------------------------------------------------------
+
+    def export_account_data(self, user: User) -> tuple[str, IO[bytes]]:
+        """Assemble everything the account owns into one ZIP archive.
+
+        Returns ``(filename, stream)`` with the stream rewound and ready to
+        send. JSON documents are pretty-printed for human readability; raw
+        voice audio (if still inside its retention window) is copied in as
+        the original binary chunks. Secrets — the password hash, session
+        records — and transient idempotency records are deliberately
+        excluded; the manifest says so.
+        """
+
+        now = utcnow()
+        filename = f"brain-buddy-export-{user.id}-{now:%Y%m%d}.zip"
+        spool: IO[bytes] = tempfile.SpooledTemporaryFile(  # noqa: SIM115 - returned
+            max_size=_EXPORT_SPOOL_MAX_BYTES
+        )
+        with zipfile.ZipFile(spool, "w", zipfile.ZIP_DEFLATED) as archive:
+
+            def write_json(name: str, payload: Any) -> None:
+                archive.writestr(
+                    name,
+                    json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False),
+                )
+
+            account = user.model_dump(mode="json")
+            account.pop("password_hash", None)
+            write_json("account.json", account)
+
+            tree_count = 0
+            for entry in self.tree_service.list_trees(owner_id=user.id):
+                tree_count += 1
+                tree = self.tree_service.get_tree_for_owner(entry.id, owner_id=user.id)
+                write_json(f"trees/{entry.id}/tree.json", tree.model_dump(mode="json"))
+                for version in self.version_repo.list_for_tree(entry.id):
+                    slug = _slugify_version_id(version.id)
+                    write_json(
+                        f"trees/{entry.id}/versions/{slug}.json",
+                        version.model_dump(mode="json"),
+                    )
+                validation_dir = self.validation_repo.resolve(
+                    entry.id, VALIDATION_DIRNAME
+                )
+                if validation_dir.is_dir():
+                    for history_path in sorted(validation_dir.glob("*.json")):
+                        node_id = history_path.stem
+                        entries = self.validation_repo.load_history(entry.id, node_id)
+                        write_json(
+                            f"trees/{entry.id}/validation/{node_id}.json",
+                            [item.model_dump(mode="json") for item in entries],
+                        )
+
+            tasks = self.task_repo.list_for_owner(owner_id=user.id)
+            write_json(
+                "tasks/tasks.json", [task.model_dump(mode="json") for task in tasks]
+            )
+            write_json(
+                "tasks/projects.json",
+                [
+                    project.model_dump(mode="json")
+                    for project in self.task_repo.list_projects_for_owner(
+                        owner_id=user.id
+                    )
+                ],
+            )
+            write_json(
+                "tasks/tags.json",
+                [
+                    tag.model_dump(mode="json")
+                    for tag in self.task_repo.list_tags_for_owner(owner_id=user.id)
+                ],
+            )
+            subtasks: list[Any] = []
+            comments: list[Any] = []
+            for task in tasks:
+                subtasks.extend(
+                    item.model_dump(mode="json")
+                    for item in self.task_repo.list_subtasks(
+                        owner_id=user.id, task_id=task.id
+                    )
+                )
+                comments.extend(
+                    item.model_dump(mode="json")
+                    for item in self.task_repo.list_comments(
+                        owner_id=user.id, task_id=task.id
+                    )
+                )
+            write_json("tasks/subtasks.json", subtasks)
+            write_json("tasks/comments.json", comments)
+
+            operations = self.voice_operation_repo.list_brain_dump_operations_for_owner(
+                owner_id=user.id
+            )
+            write_json(
+                "voice/operations.json",
+                [operation.model_dump(mode="json") for operation in operations],
+            )
+            audio_chunks = 0
+            for operation in operations:
+                for chunk in operation.audio_chunks:
+                    chunk_path = self.voice_operation_repo.brain_dump_audio_chunk_path(
+                        user.id, operation.id, chunk.chunk_number, chunk.sha256
+                    )
+                    if not chunk_path.is_file():
+                        continue
+                    audio_chunks += 1
+                    member = (
+                        f"voice/audio/{operation.id}/"
+                        f"{chunk.chunk_number:06d}-{chunk.sha256}.bin"
+                    )
+                    with (
+                        chunk_path.open("rb") as source,
+                        archive.open(member, "w") as target,
+                    ):
+                        shutil.copyfileobj(source, target)
+
+            write_json(
+                "export_manifest.json",
+                {
+                    "generated_at": now.isoformat(),
+                    "format": "brain-buddy-account-export/v1",
+                    "account_id": user.id,
+                    "counts": {
+                        "trees": tree_count,
+                        "tasks": len(tasks),
+                        "voice_operations": len(operations),
+                        "voice_audio_chunks": audio_chunks,
+                    },
+                    "excluded": [
+                        "password hash (secret, not portable personal data)",
+                        "session records (revoked secrets)",
+                        "idempotency records (transient request-dedup copies "
+                        "of data already exported)",
+                    ],
+                },
+            )
+
+        spool.seek(0)
+        logger.info("Assembled account export for %s", user.id)
+        return filename, spool
 
     # ------------------------------------------------------------------
     # Deletion lifecycle (GDPR erasure with a cancellable grace period)
