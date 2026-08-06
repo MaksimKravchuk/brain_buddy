@@ -95,10 +95,16 @@ required by ADR-0006 (B-37).
 
 ## Known v1 limitations
 
-- No live transcript preview lane while speaking (needs a dev build with
-  `expo-speech-recognition`; the server proposes tasks after Stop from
-  accurate STT). The designed live-preview experience is the natural next
-  step.
+- **No live capture stack while speaking** (the centerpiece of the "Brain
+  Buddy Mobile Prototype" design: rolling transcript, forming card,
+  proposals growing live). The backend already supports it — posting
+  preview segments to `POST …/transcript` drives live server-side
+  provisional extraction, exactly as the web app does — but live iOS
+  speech recognition needs `expo-speech-recognition`, a native module that
+  cannot run in Expo Go. Phase B = dev build (EAS; free-Apple-ID builds
+  expire weekly, the paid Apple program removes that), live transcript
+  strip + "Provisional · N" stack per `app/dump-core.jsx` / `dump.css` in
+  the design project. Until then the flow is record → stop → review.
 - Project/tag *assignment* and subtask/comment editing are read-only in the
   app (create/manage them on the web); quick add does attach the current
   project/tag context.
