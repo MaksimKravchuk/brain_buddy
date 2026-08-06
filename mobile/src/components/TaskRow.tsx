@@ -145,8 +145,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   checkDone: {
-    backgroundColor: colors.success,
-    borderColor: colors.success,
+    backgroundColor: colors.brandPrimary,
+    borderColor: colors.brandPrimary,
   },
   checkCancelled: {
     backgroundColor: colors.surfaceSunken,
