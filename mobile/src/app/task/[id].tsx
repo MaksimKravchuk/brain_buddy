@@ -1,5 +1,5 @@
 import { useLocalSearchParams } from "expo-router";
-import { Calendar, Check } from "lucide-react-native";
+import { Calendar, Check, Flag } from "lucide-react-native";
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -45,6 +45,17 @@ const STATE_LABELS: Record<string, string> = {
 };
 
 const PRIORITIES: TaskPriority[] = ["none", "low", "medium", "high"];
+const PRIORITY_LABELS: Record<TaskPriority, string> = {
+  none: "None",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+};
+const PRIORITY_COLORS: Record<string, string> = {
+  high: colors.danger,
+  medium: colors.warning,
+  low: colors.info,
+};
 
 function isoDatePlus(days: number): string {
   const date = new Date();
@@ -86,7 +97,7 @@ function ownInitials(email: string | undefined): string {
 }
 
 export default function TaskDetailScreen() {
-  const { id, from } = useLocalSearchParams<{ id: string; from?: string }>();
+  const { id } = useLocalSearchParams<{ id: string; from?: string }>();
   const query = useTask(id);
   const update = useUpdateTask(id);
   const transition = useTransitionTask(id);
@@ -100,10 +111,13 @@ export default function TaskDetailScreen() {
 
   const [title, setTitle] = useState("");
   const [details, setDetails] = useState("");
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [dueDraft, setDueDraft] = useState("");
   const [waitingDraft, setWaitingDraft] = useState("");
   const [subtaskDraft, setSubtaskDraft] = useState("");
   const [commentDraft, setCommentDraft] = useState("");
+  const [dueVisible, setDueVisible] = useState(false);
+  const [priorityVisible, setPriorityVisible] = useState(false);
   const [moveVisible, setMoveVisible] = useState(false);
   const [moveTarget, setMoveTarget] = useState<OpenTaskState | null>(null);
   const [moveWaitingFor, setMoveWaitingFor] = useState("");
@@ -128,7 +142,7 @@ export default function TaskDetailScreen() {
   if (query.isLoading || !task || !transitions) {
     return (
       <Screen>
-        <TopBar leading="back" title={from} />
+        <TopBar leading="back" />
         <View style={styles.center}>
           {query.isError ? (
             <ErrorBanner error={query.error} onRetry={() => query.refetch()} />
@@ -180,10 +194,12 @@ export default function TaskDetailScreen() {
   const openTask = transitions.moveTargets.length > 0;
   const taskTags = tagNames(task.tag_ids);
   const project = projectName(task.project_id);
+  const hasDetails = Boolean(task.details?.trim());
+  const showDetailsEditor = detailsOpen || hasDetails;
 
   return (
     <Screen padBottom>
-      <TopBar leading="back" title={from ?? STATE_LABELS[task.state]} />
+      <TopBar leading="back" />
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         {conflict ? (
           <View style={styles.conflictCard}>
@@ -195,6 +211,7 @@ export default function TaskDetailScreen() {
         {update.isError && !conflict ? <ErrorBanner error={update.error} /> : null}
         {transition.isError && !conflict ? <ErrorBanner error={transition.error} /> : null}
 
+        {/* Title */}
         <View style={styles.checkRow}>
           <Pressable
             accessibilityRole="checkbox"
@@ -217,6 +234,7 @@ export default function TaskDetailScreen() {
             value={title}
             onChangeText={setTitle}
             multiline
+            editable={openTask}
             placeholder="Task title"
             placeholderTextColor={colors.fg6}
             onEndEditing={() => {
@@ -230,15 +248,64 @@ export default function TaskDetailScreen() {
           />
         </View>
 
+        {/* Chips: real metadata + compact add affordances */}
         <View style={styles.chipRowIndented}>
           {task.due_date ? (
-            <View style={styles.dueChip}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Change due date"
+              disabled={!openTask}
+              onPress={() => setDueVisible(true)}
+              style={styles.dueChip}
+            >
               <Calendar size={11} color={colors.dueFg} strokeWidth={2} />
               <BBText variant="micro" color={colors.dueFg}>
                 {dueLabel(task.due_date)}
               </BBText>
-            </View>
+            </Pressable>
+          ) : openTask ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Add due date"
+              onPress={() => setDueVisible(true)}
+              style={styles.addChip}
+            >
+              <Calendar size={11} color={colors.fg6} strokeWidth={2} />
+              <BBText variant="micro" color={colors.fg6}>
+                Add date
+              </BBText>
+            </Pressable>
           ) : null}
+
+          {task.priority !== "none" ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Change priority"
+              disabled={!openTask}
+              onPress={() => setPriorityVisible(true)}
+              style={styles.neutralChip}
+            >
+              <View
+                style={[styles.priorityDot, { backgroundColor: PRIORITY_COLORS[task.priority] }]}
+              />
+              <BBText variant="micro" color={colors.fg4}>
+                {PRIORITY_LABELS[task.priority]}
+              </BBText>
+            </Pressable>
+          ) : openTask ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Set priority"
+              onPress={() => setPriorityVisible(true)}
+              style={styles.addChip}
+            >
+              <Flag size={11} color={colors.fg6} strokeWidth={2} />
+              <BBText variant="micro" color={colors.fg6}>
+                Priority
+              </BBText>
+            </Pressable>
+          ) : null}
+
           {taskTags.map((name) => (
             <TagPill key={name} name={name} />
           ))}
@@ -247,34 +314,18 @@ export default function TaskDetailScreen() {
               {project}
             </BBText>
           ) : null}
-          <BBText variant="micro" color={colors.fg6}>
-            {STATE_LABELS[task.state]}
-          </BBText>
-        </View>
-
-        <View style={styles.field}>
-          <BBText variant="label">Details</BBText>
-          <TextInput
-            style={[styles.input, styles.detailsInput]}
-            value={details}
-            onChangeText={setDetails}
-            multiline
-            placeholder="Notes, links, context…"
-            placeholderTextColor={colors.fg6}
-            onEndEditing={() => {
-              const next = details.trim() ? details : null;
-              if ((next ?? "") !== (task.details ?? "")) {
-                saveField({ details: next });
-              }
-            }}
-          />
+          {!openTask ? (
+            <BBText variant="micro" color={colors.fg6}>
+              {STATE_LABELS[task.state]}
+            </BBText>
+          ) : null}
         </View>
 
         {task.state === "waiting" ? (
-          <View style={styles.field}>
+          <View style={styles.waitingBlock}>
             <BBText variant="label">Waiting for</BBText>
             <TextInput
-              style={styles.input}
+              style={styles.waitingInput}
               value={waitingDraft}
               onChangeText={setWaitingDraft}
               placeholder="Who or what are you waiting on?"
@@ -289,108 +340,52 @@ export default function TaskDetailScreen() {
               }}
             />
             {task.waiting_since ? (
-              <BBText variant="caption" color={colors.fg5}>
-                {`Waiting since ${new Date(task.waiting_since).toLocaleDateString()}`}
+              <BBText variant="micro" color={colors.fg5}>
+                {`Since ${new Date(task.waiting_since).toLocaleDateString()}`}
               </BBText>
             ) : null}
           </View>
         ) : null}
 
-        <View style={styles.field}>
-          <BBText variant="label">Due date</BBText>
-          <View style={styles.chipRow}>
-            <Button
-              variant="secondary"
-              style={styles.smallButton}
-              onPress={() => {
-                setDueDraft(isoDatePlus(0));
-                saveField({ due_date: isoDatePlus(0) });
-              }}
-            >
-              Today
-            </Button>
-            <Button
-              variant="secondary"
-              style={styles.smallButton}
-              onPress={() => {
-                setDueDraft(isoDatePlus(1));
-                saveField({ due_date: isoDatePlus(1) });
-              }}
-            >
-              Tomorrow
-            </Button>
-            <Button
-              variant="secondary"
-              style={styles.smallButton}
-              onPress={() => {
-                setDueDraft(isoDatePlus(7));
-                saveField({ due_date: isoDatePlus(7) });
-              }}
-            >
-              Next week
-            </Button>
-            {task.due_date ? (
-              <Button
-                variant="ghost"
-                style={styles.smallButton}
-                onPress={() => {
-                  setDueDraft("");
-                  saveField({ due_date: null });
-                }}
-              >
-                Clear
-              </Button>
-            ) : null}
-          </View>
-          <TextInput
-            style={styles.input}
-            value={dueDraft}
-            onChangeText={setDueDraft}
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor={colors.fg6}
-            autoCapitalize="none"
-            autoCorrect={false}
-            onEndEditing={() => {
-              const trimmed = dueDraft.trim();
-              if (!trimmed && task.due_date) {
-                saveField({ due_date: null });
-                return;
-              }
-              if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed) && trimmed !== task.due_date) {
-                saveField({ due_date: trimmed });
-              } else if (trimmed && !/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-                setDueDraft(task.due_date ?? "");
-              }
-            }}
-          />
-        </View>
+        <View style={styles.divider} />
 
-        <View style={styles.field}>
-          <BBText variant="label">Priority</BBText>
-          <View style={styles.chipRow}>
-            {PRIORITIES.map((priority) => {
-              const selected = task.priority === priority;
-              return (
-                <Pressable
-                  key={priority}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected }}
-                  onPress={() => {
-                    if (!selected) {
-                      saveField({ priority });
-                    }
-                  }}
-                  style={[styles.priorityChip, selected ? styles.priorityChipSelected : null]}
-                >
-                  <BBText variant="body" weight="medium" color={selected ? "#FFFFFF" : colors.fg3}>
-                    {priority === "none" ? "None" : priority[0].toUpperCase() + priority.slice(1)}
-                  </BBText>
-                </Pressable>
-              );
-            })}
+        {/* Details: quiet — text when present, ghost affordance when not */}
+        {showDetailsEditor ? (
+          <View style={styles.field}>
+            <BBText variant="label">Details</BBText>
+            <TextInput
+              style={styles.detailsInput}
+              value={details}
+              onChangeText={setDetails}
+              multiline
+              autoFocus={detailsOpen && !hasDetails}
+              editable={openTask}
+              placeholder="Notes, links, context…"
+              placeholderTextColor={colors.fg6}
+              onEndEditing={() => {
+                const next = details.trim() ? details : null;
+                if ((next ?? "") !== (task.details ?? "")) {
+                  saveField({ details: next });
+                }
+                if (!next) {
+                  setDetailsOpen(false);
+                }
+              }}
+            />
           </View>
-        </View>
+        ) : openTask ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setDetailsOpen(true)}
+            style={styles.ghostAdd}
+          >
+            <BBText variant="caption" color={colors.fg6}>
+              Add details…
+            </BBText>
+          </Pressable>
+        ) : null}
 
+        {/* Subtasks */}
         <View style={styles.field}>
           <BBText variant="label">Subtasks</BBText>
           {(task.subtasks ?? []).map((subtask) => {
@@ -446,6 +441,7 @@ export default function TaskDetailScreen() {
           {transitionSubtask.isError ? <ErrorBanner error={transitionSubtask.error} /> : null}
         </View>
 
+        {/* Comments */}
         <View style={styles.field}>
           <BBText variant="label">Comments</BBText>
           {(task.comments ?? []).map((comment) => (
@@ -486,6 +482,7 @@ export default function TaskDetailScreen() {
           {createComment.isError ? <ErrorBanner error={createComment.error} /> : null}
         </View>
 
+        {/* Quiet footer actions */}
         <View style={styles.actions}>
           {openTask ? (
             <Button variant="secondary" onPress={() => setMoveVisible(true)}>
@@ -498,13 +495,16 @@ export default function TaskDetailScreen() {
             </Button>
           ) : null}
           {transitions.cancel ? (
-            <Button
-              variant="destructive"
+            <Pressable
+              accessibilityRole="button"
               onPress={() => runTransition("cancel")}
-              loading={transition.isPending}
+              disabled={transition.isPending}
+              style={styles.cancelAction}
             >
-              Cancel task
-            </Button>
+              <BBText variant="caption" weight="medium" color={colors.dangerFg}>
+                Cancel task
+              </BBText>
+            </Pressable>
           ) : null}
         </View>
 
@@ -513,6 +513,89 @@ export default function TaskDetailScreen() {
         </BBText>
       </ScrollView>
 
+      {/* Due date sheet */}
+      <Sheet visible={dueVisible} onClose={() => setDueVisible(false)} title="Due date">
+        <View style={styles.sheetChipRow}>
+          {(
+            [
+              ["Today", isoDatePlus(0)],
+              ["Tomorrow", isoDatePlus(1)],
+              ["Next week", isoDatePlus(7)],
+            ] as const
+          ).map(([label, value]) => (
+            <Button
+              key={label}
+              variant="secondary"
+              style={styles.sheetChip}
+              onPress={() => {
+                setDueDraft(value);
+                saveField({ due_date: value });
+                setDueVisible(false);
+              }}
+            >
+              {label}
+            </Button>
+          ))}
+        </View>
+        <TextInput
+          style={styles.sheetInput}
+          value={dueDraft}
+          onChangeText={setDueDraft}
+          placeholder="YYYY-MM-DD"
+          placeholderTextColor={colors.fg6}
+          autoCapitalize="none"
+          autoCorrect={false}
+          onSubmitEditing={() => {
+            const trimmed = dueDraft.trim();
+            if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed) && trimmed !== task.due_date) {
+              saveField({ due_date: trimmed });
+              setDueVisible(false);
+            }
+          }}
+          returnKeyType="done"
+        />
+        {task.due_date ? (
+          <Button
+            variant="ghost"
+            onPress={() => {
+              setDueDraft("");
+              saveField({ due_date: null });
+              setDueVisible(false);
+            }}
+          >
+            Clear due date
+          </Button>
+        ) : null}
+      </Sheet>
+
+      {/* Priority sheet */}
+      <Sheet visible={priorityVisible} onClose={() => setPriorityVisible(false)} title="Priority">
+        <View style={styles.sheetChipRow}>
+          {PRIORITIES.map((priority) => {
+            const selected = task.priority === priority;
+            return (
+              <Pressable
+                key={priority}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                onPress={() => {
+                  if (!selected) {
+                    saveField({ priority });
+                  }
+                  setPriorityVisible(false);
+                }}
+                style={[styles.priorityOption, selected ? styles.priorityOptionSelected : null]}
+              >
+                <BBText variant="body" weight="medium" color={selected ? "#FFFFFF" : colors.fg3}>
+                  {PRIORITY_LABELS[priority]}
+                </BBText>
+              </Pressable>
+            );
+          })}
+        </View>
+      </Sheet>
+
+      {/* Move sheet */}
       <Sheet
         visible={moveVisible}
         onClose={() => {
@@ -526,7 +609,7 @@ export default function TaskDetailScreen() {
           <View style={styles.field}>
             <BBText variant="label">Waiting for</BBText>
             <TextInput
-              style={styles.input}
+              style={styles.sheetInput}
               value={moveWaitingFor}
               onChangeText={setMoveWaitingFor}
               placeholder="Who or what are you waiting on?"
@@ -621,58 +704,77 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingLeft: 34,
   },
-  field: {
-    gap: space.s2,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.sm,
-    paddingHorizontal: space.s3,
-    paddingVertical: space.s3,
-    fontSize: typeScale.body,
-    fontFamily: fonts.regular,
-    color: colors.fg1,
-    backgroundColor: colors.surfaceRaised,
-    minHeight: 44,
-  },
-  detailsInput: {
-    minHeight: 88,
-    textAlignVertical: "top",
-  },
-  chipRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: space.s2,
-  },
   dueChip: {
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
     borderRadius: radii.full,
     paddingHorizontal: space.s2,
-    paddingVertical: 2,
+    paddingVertical: 3,
     backgroundColor: colors.dueBg,
     borderWidth: 1,
     borderColor: colors.dueBorder,
   },
-  smallButton: {
-    minHeight: 36,
-    paddingHorizontal: space.s3,
-  },
-  priorityChip: {
-    minHeight: 36,
-    paddingHorizontal: space.s4,
+  addChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    height: 24,
+    paddingHorizontal: space.s2,
     borderRadius: radii.full,
+    borderWidth: 1.5,
+    borderStyle: "dashed",
+    borderColor: colors.fg7,
+  },
+  neutralChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    height: 24,
+    paddingHorizontal: 9,
+    borderRadius: radii.full,
+    backgroundColor: colors.tagBg,
+  },
+  priorityDot: {
+    width: 7,
+    height: 7,
+    borderRadius: radii.full,
+  },
+  waitingBlock: {
+    gap: space.s2,
+    paddingLeft: 34,
+  },
+  waitingInput: {
     borderWidth: 1,
     borderColor: colors.border,
+    borderRadius: radii.sm,
+    paddingHorizontal: space.s3,
+    paddingVertical: space.s2,
+    fontSize: typeScale.body,
+    fontFamily: fonts.regular,
+    color: colors.fg1,
     backgroundColor: colors.surfaceRaised,
-    alignItems: "center",
+    minHeight: 40,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: colors.border,
+  },
+  field: {
+    gap: space.s2,
+  },
+  ghostAdd: {
+    minHeight: 32,
     justifyContent: "center",
   },
-  priorityChipSelected: {
-    backgroundColor: colors.brandPrimary,
-    borderColor: colors.brandPrimary,
+  detailsInput: {
+    fontSize: typeScale.body,
+    lineHeight: Math.round(typeScale.body * 1.5),
+    fontFamily: fonts.regular,
+    color: colors.fg2,
+    padding: 0,
+    minHeight: 24,
+    textAlignVertical: "top",
   },
   subtaskRow: {
     flexDirection: "row",
@@ -738,10 +840,50 @@ const styles = StyleSheet.create({
   },
   actions: {
     gap: space.s2,
-    marginTop: space.s2,
+    marginTop: space.s3,
+  },
+  cancelAction: {
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
   },
   metaLine: {
     textAlign: "center",
-    marginTop: space.s2,
+    marginTop: space.s1,
+  },
+  sheetChipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: space.s2,
+  },
+  sheetChip: {
+    minHeight: 40,
+    paddingHorizontal: space.s4,
+  },
+  sheetInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.sm,
+    paddingHorizontal: space.s3,
+    paddingVertical: space.s3,
+    fontSize: typeScale.body,
+    fontFamily: fonts.regular,
+    color: colors.fg1,
+    backgroundColor: colors.surfaceRaised,
+    minHeight: 44,
+  },
+  priorityOption: {
+    minHeight: 44,
+    paddingHorizontal: space.s5,
+    borderRadius: radii.full,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceRaised,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  priorityOptionSelected: {
+    backgroundColor: colors.brandPrimary,
+    borderColor: colors.brandPrimary,
   },
 });
