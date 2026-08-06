@@ -1,4 +1,5 @@
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams } from "expo-router";
+import { Calendar, Check } from "lucide-react-native";
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -14,9 +15,12 @@ import { useTask, useTransitionTask, useUpdateTask } from "@/api/hooks";
 import type { OpenTaskState, TaskPriority, TaskUpdateRequest } from "@/api/types";
 import { BBText } from "@/components/BBText";
 import { Button } from "@/components/Button";
+import { TagPill } from "@/components/Chip";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { Screen } from "@/components/Screen";
 import { Sheet } from "@/components/Sheet";
+import { TopBar } from "@/components/shell/TopBar";
+import { dueLabel } from "@/components/TaskRow";
 import { ReopenSheet } from "@/features/tasks/ReopenSheet";
 import { StatePicker } from "@/features/tasks/StatePicker";
 import { useClassificationNames } from "@/features/tasks/useClassificationNames";
@@ -41,8 +45,7 @@ function isoDatePlus(days: number): string {
 }
 
 export default function TaskDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
-  const router = useRouter();
+  const { id, from } = useLocalSearchParams<{ id: string; from?: string }>();
   const query = useTask(id);
   const update = useUpdateTask(id);
   const transition = useTransitionTask(id);
@@ -73,14 +76,12 @@ export default function TaskDetailScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [task?.id, task?.revision]);
 
-  const transitions = useMemo(
-    () => (task ? availableTransitions(task) : null),
-    [task],
-  );
+  const transitions = useMemo(() => (task ? availableTransitions(task) : null), [task]);
 
   if (query.isLoading || !task || !transitions) {
     return (
-      <Screen padTop>
+      <Screen>
+        <TopBar leading="back" title={from} />
         <View style={styles.center}>
           {query.isError ? (
             <ErrorBanner error={query.error} onRetry={() => query.refetch()} />
@@ -113,7 +114,7 @@ export default function TaskDetailScreen() {
     });
     if (!guard.ok) {
       setMoveGuardError(guard.reason);
-      return false;
+      return;
     }
     setMoveGuardError(null);
     transition.mutate(
@@ -126,28 +127,17 @@ export default function TaskDetailScreen() {
         },
       },
     );
-    return true;
   };
 
+  const done = task.state === "completed";
   const openTask = transitions.moveTargets.length > 0;
+  const taskTags = tagNames(task.tag_ids);
+  const project = projectName(task.project_id);
 
   return (
     <Screen padBottom>
+      <TopBar leading="back" title={from ?? STATE_LABELS[task.state]} />
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <View style={styles.topRow}>
-          <BBText variant="label">{STATE_LABELS[task.state]}</BBText>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Close"
-            onPress={() => router.back()}
-            style={styles.closeButton}
-          >
-            <BBText variant="body" color={colors.brandPrimary}>
-              Done
-            </BBText>
-          </Pressable>
-        </View>
-
         {conflict ? (
           <View style={styles.conflictCard}>
             <BBText variant="body" color={colors.warningFg}>
@@ -158,22 +148,62 @@ export default function TaskDetailScreen() {
         {update.isError && !conflict ? <ErrorBanner error={update.error} /> : null}
         {transition.isError && !conflict ? <ErrorBanner error={transition.error} /> : null}
 
-        <TextInput
-          style={styles.titleInput}
-          value={title}
-          onChangeText={setTitle}
-          multiline
-          placeholder="Task title"
-          placeholderTextColor={colors.fg6}
-          onEndEditing={() => {
-            const trimmed = title.trim();
-            if (trimmed && trimmed !== task.title) {
-              saveField({ title: trimmed });
-            } else {
-              setTitle(task.title);
-            }
-          }}
-        />
+        <View style={styles.checkRow}>
+          <Pressable
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: done }}
+            accessibilityLabel={done ? "Reopen task" : "Complete task"}
+            onPress={() => {
+              if (transitions.complete) {
+                runTransition("complete");
+              } else if (transitions.reopen) {
+                setReopenVisible(true);
+              }
+            }}
+            hitSlop={11}
+            style={[styles.check, done ? styles.checkDone : null]}
+          >
+            {done ? <Check size={12} color="#FFFFFF" strokeWidth={3} /> : null}
+          </Pressable>
+          <TextInput
+            style={styles.titleInput}
+            value={title}
+            onChangeText={setTitle}
+            multiline
+            placeholder="Task title"
+            placeholderTextColor={colors.fg6}
+            onEndEditing={() => {
+              const trimmed = title.trim();
+              if (trimmed && trimmed !== task.title) {
+                saveField({ title: trimmed });
+              } else {
+                setTitle(task.title);
+              }
+            }}
+          />
+        </View>
+
+        <View style={styles.chipRowIndented}>
+          {task.due_date ? (
+            <View style={styles.dueChip}>
+              <Calendar size={11} color={colors.dueFg} strokeWidth={2} />
+              <BBText variant="micro" color={colors.dueFg}>
+                {dueLabel(task.due_date)}
+              </BBText>
+            </View>
+          ) : null}
+          {taskTags.map((name) => (
+            <TagPill key={name} name={name} />
+          ))}
+          {project ? (
+            <BBText variant="micro" color={colors.fg6}>
+              {project}
+            </BBText>
+          ) : null}
+          <BBText variant="micro" color={colors.fg6}>
+            {STATE_LABELS[task.state]}
+          </BBText>
+        </View>
 
         <View style={styles.field}>
           <BBText variant="label">Details</BBText>
@@ -222,29 +252,45 @@ export default function TaskDetailScreen() {
         <View style={styles.field}>
           <BBText variant="label">Due date</BBText>
           <View style={styles.chipRow}>
-            <Button variant="secondary" style={styles.smallButton} onPress={() => {
-              setDueDraft(isoDatePlus(0));
-              saveField({ due_date: isoDatePlus(0) });
-            }}>
+            <Button
+              variant="secondary"
+              style={styles.smallButton}
+              onPress={() => {
+                setDueDraft(isoDatePlus(0));
+                saveField({ due_date: isoDatePlus(0) });
+              }}
+            >
               Today
             </Button>
-            <Button variant="secondary" style={styles.smallButton} onPress={() => {
-              setDueDraft(isoDatePlus(1));
-              saveField({ due_date: isoDatePlus(1) });
-            }}>
+            <Button
+              variant="secondary"
+              style={styles.smallButton}
+              onPress={() => {
+                setDueDraft(isoDatePlus(1));
+                saveField({ due_date: isoDatePlus(1) });
+              }}
+            >
               Tomorrow
             </Button>
-            <Button variant="secondary" style={styles.smallButton} onPress={() => {
-              setDueDraft(isoDatePlus(7));
-              saveField({ due_date: isoDatePlus(7) });
-            }}>
+            <Button
+              variant="secondary"
+              style={styles.smallButton}
+              onPress={() => {
+                setDueDraft(isoDatePlus(7));
+                saveField({ due_date: isoDatePlus(7) });
+              }}
+            >
               Next week
             </Button>
             {task.due_date ? (
-              <Button variant="ghost" style={styles.smallButton} onPress={() => {
-                setDueDraft("");
-                saveField({ due_date: null });
-              }}>
+              <Button
+                variant="ghost"
+                style={styles.smallButton}
+                onPress={() => {
+                  setDueDraft("");
+                  saveField({ due_date: null });
+                }}
+              >
                 Clear
               </Button>
             ) : null}
@@ -289,11 +335,7 @@ export default function TaskDetailScreen() {
                   }}
                   style={[styles.priorityChip, selected ? styles.priorityChipSelected : null]}
                 >
-                  <BBText
-                    variant="body"
-                    weight="medium"
-                    color={selected ? "#FFFFFF" : colors.fg3}
-                  >
+                  <BBText variant="body" weight="medium" color={selected ? "#FFFFFF" : colors.fg3}>
                     {priority === "none" ? "None" : priority[0].toUpperCase() + priority.slice(1)}
                   </BBText>
                 </Pressable>
@@ -302,37 +344,30 @@ export default function TaskDetailScreen() {
           </View>
         </View>
 
-        <View style={styles.field}>
-          <BBText variant="label">Organization</BBText>
-          <View style={styles.card}>
-            <BBText variant="body" color={colors.fg3}>
-              {projectName(task.project_id)
-                ? `Project · ${projectName(task.project_id)}`
-                : "No project"}
-            </BBText>
-            <BBText variant="body" color={colors.fg3}>
-              {task.tag_ids.length > 0
-                ? `Tags · ${tagNames(task.tag_ids).join(", ")}`
-                : "No tags"}
-            </BBText>
-            <BBText variant="caption" color={colors.fg5}>
-              Assign projects and tags on the web app for now.
-            </BBText>
-          </View>
-        </View>
-
         {task.subtasks && task.subtasks.length > 0 ? (
           <View style={styles.field}>
             <BBText variant="label">Subtasks</BBText>
             <View style={styles.card}>
               {task.subtasks.map((subtask) => (
-                <BBText
-                  key={subtask.id}
-                  variant="body"
-                  color={subtask.state === "open" ? colors.fg2 : colors.fg6}
-                >
-                  {`${subtask.state === "completed" ? "✓ " : subtask.state === "cancelled" ? "✕ " : "○ "}${subtask.title}`}
-                </BBText>
+                <View key={subtask.id} style={styles.subtaskRow}>
+                  <View
+                    style={[
+                      styles.subtaskCheck,
+                      subtask.state === "completed" ? styles.subtaskCheckDone : null,
+                    ]}
+                  >
+                    {subtask.state === "completed" ? (
+                      <Check size={9} color="#FFFFFF" strokeWidth={3} />
+                    ) : null}
+                  </View>
+                  <BBText
+                    variant="body"
+                    color={subtask.state === "open" ? colors.fg2 : colors.fg6}
+                    style={subtask.state === "completed" ? styles.subtaskDone : null}
+                  >
+                    {subtask.title}
+                  </BBText>
+                </View>
               ))}
             </View>
           </View>
@@ -357,14 +392,6 @@ export default function TaskDetailScreen() {
         ) : null}
 
         <View style={styles.actions}>
-          {transitions.complete ? (
-            <Button
-              onPress={() => runTransition("complete")}
-              loading={transition.isPending}
-            >
-              Complete
-            </Button>
-          ) : null}
           {openTask ? (
             <Button variant="secondary" onPress={() => setMoveVisible(true)}>
               Move to…
@@ -386,7 +413,7 @@ export default function TaskDetailScreen() {
           ) : null}
         </View>
 
-        <BBText variant="micro" color={colors.fg6} style={styles.meta}>
+        <BBText variant="micro" color={colors.fg6} style={styles.metaLine}>
           {`Created ${new Date(task.created_at).toLocaleDateString()} · revision ${task.revision}`}
         </BBText>
       </ScrollView>
@@ -399,11 +426,7 @@ export default function TaskDetailScreen() {
         }}
         title="Move to"
       >
-        <StatePicker
-          value={moveTarget}
-          onChange={setMoveTarget}
-          options={transitions.moveTargets}
-        />
+        <StatePicker value={moveTarget} onChange={setMoveTarget} options={transitions.moveTargets} />
         {moveTarget === "waiting" ? (
           <View style={styles.field}>
             <BBText variant="label">Waiting for</BBText>
@@ -438,10 +461,7 @@ export default function TaskDetailScreen() {
         task={reopenVisible ? task : null}
         onClose={() => setReopenVisible(false)}
         onReopen={(payload) => {
-          transition.mutate(
-            { payload },
-            { onSettled: () => setReopenVisible(false) },
-          );
+          transition.mutate({ payload }, { onSettled: () => setReopenVisible(false) });
         }}
         pending={transition.isPending}
         error={transition.isError ? transition.error : null}
@@ -458,17 +478,9 @@ const styles = StyleSheet.create({
     padding: space.s5,
   },
   scroll: {
-    padding: space.s5,
+    padding: space.s4,
+    paddingTop: 18,
     gap: space.s4,
-  },
-  topRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  closeButton: {
-    minHeight: 44,
-    justifyContent: "center",
   },
   conflictCard: {
     backgroundColor: colors.warningBg,
@@ -477,12 +489,42 @@ const styles = StyleSheet.create({
     borderRadius: radii.card,
     padding: space.s4,
   },
+  checkRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: space.s3,
+    marginBottom: -space.s2,
+  },
+  check: {
+    width: 22,
+    height: 22,
+    marginTop: 3,
+    borderRadius: radii.full,
+    borderWidth: 1.5,
+    borderColor: colors.fg7,
+    backgroundColor: colors.surfaceRaised,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  checkDone: {
+    backgroundColor: colors.success,
+    borderColor: colors.success,
+  },
   titleInput: {
+    flex: 1,
     fontSize: typeScale.title,
     lineHeight: Math.round(typeScale.title * 1.3),
+    letterSpacing: -0.3,
     fontFamily: fonts.semibold,
     color: colors.fg1,
     padding: 0,
+  },
+  chipRowIndented: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 6,
+    paddingLeft: 34,
   },
   field: {
     gap: space.s2,
@@ -508,6 +550,17 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: space.s2,
   },
+  dueChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderRadius: radii.full,
+    paddingHorizontal: space.s2,
+    paddingVertical: 2,
+    backgroundColor: colors.dueBg,
+    borderWidth: 1,
+    borderColor: colors.dueBorder,
+  },
   smallButton: {
     minHeight: 36,
     paddingHorizontal: space.s3,
@@ -532,7 +585,28 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radii.card,
     padding: space.s4,
+    gap: space.s3,
+  },
+  subtaskRow: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: space.s2,
+  },
+  subtaskCheck: {
+    width: 16,
+    height: 16,
+    borderRadius: radii.full,
+    borderWidth: 1.5,
+    borderColor: colors.fg7,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  subtaskCheckDone: {
+    backgroundColor: colors.success,
+    borderColor: colors.success,
+  },
+  subtaskDone: {
+    textDecorationLine: "line-through",
   },
   comment: {
     gap: 2,
@@ -541,7 +615,7 @@ const styles = StyleSheet.create({
     gap: space.s2,
     marginTop: space.s2,
   },
-  meta: {
+  metaLine: {
     textAlign: "center",
     marginTop: space.s2,
   },
