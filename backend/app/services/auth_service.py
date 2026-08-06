@@ -74,6 +74,16 @@ class AuthService:
     def hash_password(self, raw: str) -> str:
         return self._hasher.hash(raw)
 
+    def verify_password(self, user: User, raw: str) -> bool:
+        """Re-check a user's current password (sensitive-action re-auth)."""
+
+        return self._verify_password(raw, user.password_hash)
+
+    def validate_password_format(self, raw: str) -> None:
+        """Enforce the password policy; raises `ValidationFailure` on breach."""
+
+        self._validate_password_format(raw)
+
     def _verify_password(self, raw: str, hashed: str) -> bool:
         try:
             self._hasher.verify(hashed, raw)

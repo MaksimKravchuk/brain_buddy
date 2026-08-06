@@ -47,10 +47,14 @@ def _clear_session_cookie(response: Response, config: AppConfig) -> None:
     )
 
 
-def _me_response(user: User, config: AppConfig) -> MeResponse:
+def _me_response(
+    user: User, config: AppConfig, *, deletion_cancelled: bool = False
+) -> MeResponse:
     return MeResponse(
         id=user.id,
         email=user.email,
+        display_name=user.display_name,
+        deletion_cancelled=deletion_cancelled,
         feature_flags=config.feature_flags.effective_flags(user.email),
     )
 
