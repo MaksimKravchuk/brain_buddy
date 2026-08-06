@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 
@@ -22,6 +24,13 @@ class UserRepository(BaseRepository):
         super().__init__(root)
         self.users_dir = ensure_directory(self.resolve(USERS_DIRNAME))
         self.index_path = self.users_dir / BY_EMAIL_INDEX_FILENAME
+        # Serializes every user-record and email-index write in this process.
+        # Request handlers hold a request-scoped copy of the user, so two
+        # concurrent full-record saves would silently drop each other's
+        # fields (e.g. a profile save resurrecting an account whose deletion
+        # was scheduled after that request resolved its user). All mutations
+        # must go through `mutate` or otherwise hold this lock.
+        self._write_lock = threading.RLock()
 
     def _user_path(self, user_id: str) -> Path:
         return self.users_dir / f"{user_id}.json"
@@ -61,26 +70,49 @@ class UserRepository(BaseRepository):
         Raises `ConflictError` if the email is already registered.
         """
 
-        normalized = self.normalize_email(user.email)
-        index = self._load_email_index()
-        if normalized in index:
-            raise ConflictError("User", normalized)
+        with self._write_lock:
+            normalized = self.normalize_email(user.email)
+            index = self._load_email_index()
+            if normalized in index:
+                raise ConflictError("User", normalized)
 
-        stored = user.model_copy(update={"email": normalized})
-        self.dump_model(self._user_path(stored.id), stored)
-        index[normalized] = stored.id
-        self._save_email_index(index)
-        return stored
+            stored = user.model_copy(update={"email": normalized})
+            self.dump_model(self._user_path(stored.id), stored)
+            index[normalized] = stored.id
+            self._save_email_index(index)
+            return stored
 
     def save(self, user: User) -> None:
         """Overwrite an existing user record in place.
 
         The email index is not touched — callers must not change the email
-        here. Used for mutations like password rotation that keep identity
-        stable. Email changes must go through `update_email`.
+        here. Email changes must go through `update_email`, and concurrent
+        field mutations must go through `mutate`: this raw overwrite is for
+        single-writer contexts only (startup seeding, tests).
         """
 
-        self.dump_model(self._user_path(user.id), user)
+        with self._write_lock:
+            self.dump_model(self._user_path(user.id), user)
+
+    def mutate(self, user_id: str, mutator: Callable[[User], User]) -> User:
+        """Atomically read-modify-write one user record under the write lock.
+
+        `mutator` receives a fresh read of the record and returns the
+        updated model; only then is the record saved. This is the required
+        path for request-driven mutations — patching a request-scoped copy
+        would let concurrent writers overwrite each other's fields.
+
+        Raises `NotFoundError` if the user no longer exists (e.g. purged
+        while the request was in flight).
+        """
+
+        with self._write_lock:
+            current = self.get_by_id(user_id)
+            if current is None:
+                raise NotFoundError("User", user_id)
+            updated = mutator(current)
+            self.dump_model(self._user_path(user_id), updated)
+            return updated
 
     def update_email(self, user_id: str, new_email: str) -> User:
         """Move an account to a new email address, keeping the index correct.
@@ -94,28 +126,29 @@ class UserRepository(BaseRepository):
         stale until the change is retried.
         """
 
-        user = self.get_by_id(user_id)
-        if user is None:
-            raise NotFoundError("User", user_id)
+        with self._write_lock:
+            user = self.get_by_id(user_id)
+            if user is None:
+                raise NotFoundError("User", user_id)
 
-        normalized = self.normalize_email(new_email)
-        if normalized == user.email:
-            return user
+            normalized = self.normalize_email(new_email)
+            if normalized == user.email:
+                return user
 
-        index = self._load_email_index()
-        existing_owner = index.get(normalized)
-        if existing_owner is not None and existing_owner != user_id:
-            raise ConflictError("User", normalized)
+            index = self._load_email_index()
+            existing_owner = index.get(normalized)
+            if existing_owner is not None and existing_owner != user_id:
+                raise ConflictError("User", normalized)
 
-        updated_index = {
-            key: value for key, value in index.items() if value != user_id
-        }
-        updated_index[normalized] = user_id
-        self._save_email_index(updated_index)
+            updated_index = {
+                key: value for key, value in index.items() if value != user_id
+            }
+            updated_index[normalized] = user_id
+            self._save_email_index(updated_index)
 
-        updated = user.model_copy(update={"email": normalized})
-        self.dump_model(self._user_path(user_id), updated)
-        return updated
+            updated = user.model_copy(update={"email": normalized})
+            self.dump_model(self._user_path(user_id), updated)
+            return updated
 
     def delete(self, user_id: str) -> None:
         """Remove a user record and every email-index entry pointing at it.
@@ -126,12 +159,13 @@ class UserRepository(BaseRepository):
         crash never leaves an email resolving to a missing file.
         """
 
-        index = self._load_email_index()
-        pruned = {key: value for key, value in index.items() if value != user_id}
-        if len(pruned) != len(index):
-            self._save_email_index(pruned)
-        with suppress(FileNotFoundError):
-            self._user_path(user_id).unlink()
+        with self._write_lock:
+            index = self._load_email_index()
+            pruned = {key: value for key, value in index.items() if value != user_id}
+            if len(pruned) != len(index):
+                self._save_email_index(pruned)
+            with suppress(FileNotFoundError):
+                self._user_path(user_id).unlink()
 
     def list_users(self) -> list[User]:
         """Return every stored user (used by the account purge sweep)."""

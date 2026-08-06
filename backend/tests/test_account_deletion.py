@@ -262,6 +262,77 @@ def test_purge_account_is_idempotent(api_client: TestClient) -> None:
     assert container.tree_service.list_trees(owner_id=owner) == []
 
 
+def test_stale_profile_save_cannot_unschedule_deletion(api_client: TestClient) -> None:
+    """A mutation via a pre-deletion user snapshot must not clear the flag.
+
+    Regression: request handlers hold a request-scoped copy of the user; a
+    full-record save from that stale copy could silently resurrect an
+    account whose deletion was scheduled meanwhile.
+    """
+
+    container = _container(api_client)
+    user_id = _user_id(api_client)
+    stale = container.user_repo.get_by_id(user_id)
+    assert stale is not None and stale.deletion_requested_at is None
+
+    _request_deletion(api_client)
+
+    updated = container.account_service.update_profile(stale, display_name="Racer")
+    assert updated.display_name == "Racer"
+    assert updated.deletion_requested_at is not None
+
+    fresh = container.user_repo.get_by_id(user_id)
+    assert fresh is not None and fresh.deletion_requested_at is not None
+
+
+def test_account_purge_survives_voice_sweep_failure(
+    api_client: TestClient, monkeypatch
+) -> None:
+    """A broken voice pipeline must never starve GDPR erasure."""
+
+    from app.main import _run_maintenance_sweep
+
+    container = _container(api_client)
+    owner = _user_id(api_client)
+    _request_deletion(api_client)
+    _backdate_deletion(api_client, owner, days=15)
+
+    def _boom(**_kwargs: object) -> int:
+        raise RuntimeError("persistently corrupt voice operation")
+
+    monkeypatch.setattr(
+        container.voice_brain_dump_service, "recover_due_provider_leases", _boom
+    )
+
+    _run_maintenance_sweep(container)
+
+    assert container.user_repo.get_by_id(owner) is None
+
+
+def test_purge_removes_stale_index_entry_after_interrupted_delete(
+    api_client: TestClient,
+) -> None:
+    """A retried purge cleans index entries whose tree files are already gone."""
+
+    import shutil
+
+    container = _container(api_client)
+    owner = _user_id(api_client)
+    tree = api_client.post("/api/trees", json={"name": "Half deleted"})
+    assert tree.status_code == 201
+    tree_id = tree.json()["id"]
+
+    # Simulate a purge that died between removing the tree directory and
+    # updating index.json: the files are gone but the entry survives.
+    shutil.rmtree(_data_dir(api_client) / tree_id)
+    assert container.tree_service.list_trees(owner_id=owner) != []
+
+    container.account_service.purge_account(owner)
+
+    assert container.tree_service.list_trees(owner_id=owner) == []
+    assert all(entry.owner_id != owner for entry in container.index_repo.load_all())
+
+
 def test_accounts_inside_grace_are_not_purged(api_client: TestClient) -> None:
     """The sweep must never touch an account still inside its grace window."""
 

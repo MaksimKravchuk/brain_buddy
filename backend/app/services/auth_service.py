@@ -18,7 +18,12 @@ from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 
 from app.core.config import PasswordPolicy, SessionSettings
-from app.exceptions import BrainBuddyError, ConflictError, ValidationFailure
+from app.exceptions import (
+    BrainBuddyError,
+    ConflictError,
+    NotFoundError,
+    ValidationFailure,
+)
 from app.repositories import (
     InviteRepository,
     SessionRepository,
@@ -230,8 +235,20 @@ class AuthService:
         if user.deletion_requested_at is not None:
             if utcnow() >= user.deletion_requested_at + self.deletion_grace:
                 raise InvalidCredentialsError()
-            user = user.model_copy(update={"deletion_requested_at": None})
-            self.user_repo.save(user)
+            try:
+                # Patch the single field under the repo write lock so a
+                # concurrent account mutation can't be clobbered (nor can
+                # this cancellation be lost to one).
+                user = self.user_repo.mutate(
+                    user.id,
+                    lambda fresh: fresh.model_copy(
+                        update={"deletion_requested_at": None}
+                    ),
+                )
+            except NotFoundError:
+                # Purged between the credential check and the write — the
+                # account is gone; behave like any bad credential.
+                raise InvalidCredentialsError() from None
             deletion_cancelled = True
             logger.info("Login cancelled pending deletion for %s", user.id)
 

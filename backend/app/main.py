@@ -32,6 +32,15 @@ def _run_maintenance_sweep(container: Container) -> None:
     never kill the loop that calls this.
     """
 
+    # Account purging runs under its own error boundary, before and
+    # independent of the voice duties: a persistently failing voice
+    # operation must never starve GDPR erasure (and vice versa).
+    purged_accounts = 0
+    try:
+        purged_accounts = container.account_service.purge_due_accounts()
+    except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
+        logger.exception("Account purge sweep iteration failed")
+
     try:
         recovered_leases = container.voice_brain_dump_service.recover_due_provider_leases()
         advanced_runs = container.voice_brain_dump_service.run_due_brain_dump_provider_runs()
@@ -42,9 +51,8 @@ def _run_maintenance_sweep(container: Container) -> None:
         purged_working_artifacts = (
             container.voice_brain_dump_service.purge_expired_working_artifacts()
         )
-        purged_accounts = container.account_service.purge_due_accounts()
     except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
-        logger.exception("Maintenance sweep iteration failed")
+        logger.exception("Voice maintenance sweep iteration failed")
         return
     if (
         recovered_leases
