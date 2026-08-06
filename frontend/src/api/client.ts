@@ -21,6 +21,14 @@ import type {
   TaskTransitionRequest,
   TaskUpdateRequest
 } from "./taskTypes";
+import type {
+  AccountDeletePayload,
+  AccountDeleteResponse,
+  AccountResponse,
+  EmailChangePayload,
+  PasswordChangePayload,
+  ProfileUpdatePayload
+} from "./accountTypes";
 import { nowMs, recordTelemetry } from "../utils/telemetry";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
@@ -389,5 +397,27 @@ export const apiClient = {
       headers: { "Idempotency-Key": idempotencyKey },
       body: { expected_revision: expectedRevision }
     });
+  },
+
+  // Account management (GDPR data rights). No Idempotency-Key headers here:
+  // the backend account endpoints are naturally idempotent or re-auth guarded.
+  getAccount(signal?: AbortSignal) {
+    return request<AccountResponse>("/account", { signal });
+  },
+
+  updateProfile(payload: ProfileUpdatePayload) {
+    return request<AccountResponse>("/account/profile", { method: "PATCH", body: payload });
+  },
+
+  changeEmail(payload: EmailChangePayload) {
+    return request<AccountResponse>("/account/email", { method: "POST", body: payload });
+  },
+
+  changePassword(payload: PasswordChangePayload) {
+    return request<void>("/account/password", { method: "POST", body: payload });
+  },
+
+  requestAccountDeletion(payload: AccountDeletePayload) {
+    return request<AccountDeleteResponse>("/account/delete", { method: "POST", body: payload });
   }
 };

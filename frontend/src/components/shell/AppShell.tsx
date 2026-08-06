@@ -6,7 +6,9 @@ import {
   CalendarDays,
   CalendarRange,
   Clock,
+  FileText,
   Inbox,
+  LogOut,
   Menu,
   Mic,
   MoreHorizontal,
@@ -14,6 +16,7 @@ import {
   Plus,
   RotateCcw,
   Search,
+  Settings,
   Sprout,
   X
 } from "lucide-react";
@@ -118,6 +121,7 @@ export function AppShell(props: AppShellProps): JSX.Element {
     <ShellToastContext.Provider value={notify}>
       <div className="min-h-screen bg-surface-base text-slate-900">
         <TopBar onOpenDrawer={() => setIsDrawerOpen(true)} />
+        <DeletionCancelledBanner />
         <div className="flex h-[calc(100vh-56px)] min-h-0 overflow-hidden">
           <aside className="hidden w-[248px] shrink-0 overflow-y-auto border-r border-slate-200 px-3 pb-6 pt-4 lg:block">
             <Sidebar {...sidebarProps} />
@@ -163,12 +167,135 @@ function WeeklyReviewPlaceholder(): JSX.Element {
   );
 }
 
+function DeletionCancelledBanner(): JSX.Element | null {
+  const notice = useAuthStore((state) => state.deletionCancelledNotice);
+  const dismiss = useAuthStore((state) => state.dismissDeletionNotice);
+  if (!notice) {
+    return null;
+  }
+  return (
+    <div
+      role="status"
+      className="flex items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800"
+    >
+      <span>Welcome back — your scheduled account deletion has been cancelled.</span>
+      <button
+        type="button"
+        aria-label="Dismiss deletion notice"
+        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-amber-700 hover:bg-amber-100"
+        onClick={dismiss}
+      >
+        <X className="h-4 w-4" aria-hidden />
+      </button>
+    </div>
+  );
+}
+
+function AccountMenu(): JSX.Element {
+  const navigate = useNavigate();
+  const user = useAuthStore((state) => state.user);
+  const logout = useAuthStore((state) => state.logout);
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const initial = (user?.display_name?.[0] ?? user?.email?.[0])?.toUpperCase() ?? "M";
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const onPointerDown = (event: MouseEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const itemClass =
+    "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-slate-700 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900";
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Account menu"
+        className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-100 text-xs font-semibold text-sky-700 transition-shadow duration-200 ease-smooth hover:shadow-soft"
+        onClick={() => setOpen((value) => !value)}
+      >
+        {initial}
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          aria-label="Account"
+          className="absolute right-0 top-[calc(100%+8px)] z-50 w-60 rounded-xl border border-slate-200 bg-white p-1.5 shadow-floating"
+        >
+          <div className="px-2.5 py-2">
+            <p className="truncate text-sm font-medium text-slate-900">
+              {user?.display_name ?? user?.email ?? "Signed in"}
+            </p>
+            {user?.display_name && user?.email ? (
+              <p className="truncate text-xs text-slate-500">{user.email}</p>
+            ) : null}
+          </div>
+          <div className="my-1 h-px bg-slate-100" aria-hidden />
+          <button
+            type="button"
+            role="menuitem"
+            className={itemClass}
+            onClick={() => {
+              setOpen(false);
+              navigate("/settings/account");
+            }}
+          >
+            <Settings className="h-4 w-4 text-slate-500" aria-hidden /> Account settings
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className={itemClass}
+            onClick={() => {
+              setOpen(false);
+              navigate("/privacy");
+            }}
+          >
+            <FileText className="h-4 w-4 text-slate-500" aria-hidden /> Privacy policy
+          </button>
+          <div className="my-1 h-px bg-slate-100" aria-hidden />
+          <button
+            type="button"
+            role="menuitem"
+            className={itemClass}
+            onClick={async () => {
+              setOpen(false);
+              await logout();
+              navigate("/login");
+            }}
+          >
+            <LogOut className="h-4 w-4 text-slate-500" aria-hidden /> Sign out
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function TopBar({ onOpenDrawer }: { onOpenDrawer: () => void }): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
-  const user = useAuthStore((state) => state.user);
-  const initial = user?.email?.[0]?.toUpperCase() ?? "M";
   const searchQuery = searchParams.get("q") ?? "";
 
   const updateSearch = (value: string) => {
@@ -220,9 +347,7 @@ function TopBar({ onOpenDrawer }: { onOpenDrawer: () => void }): JSX.Element {
           <Mic className="h-[15px] w-[15px]" aria-hidden />
           Brain dump
         </button>
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-100 text-xs font-semibold text-sky-700" aria-label={user?.email ?? "User avatar"}>
-          {initial}
-        </div>
+        <AccountMenu />
       </div>
     </header>
   );
