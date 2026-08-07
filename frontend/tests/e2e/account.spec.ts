@@ -59,7 +59,14 @@ test.describe("account & data rights acceptance", () => {
       const downloadPromise = page.waitForEvent("download");
       await page.getByRole("button", { name: /download my data/i }).click();
       const download = await downloadPromise;
-      expect(download.suggestedFilename()).toMatch(/^brain-buddy-export-.+\.zip$/);
+      // A bare sync expect records a zero-duration Allure step with no
+      // evidence, which the taxonomy validator rejects; attach the actual
+      // filename as evidence and assert with an explicit throw instead.
+      const filename = download.suggestedFilename();
+      await testInfo.attach("export-filename", { body: filename, contentType: "text/plain" });
+      if (!/^brain-buddy-export-.+\.zip$/.test(filename)) {
+        throw new Error(`Unexpected export filename: ${filename}`);
+      }
       await expect(page.getByText(/download started/i)).toBeVisible();
     });
   });
