@@ -11,6 +11,7 @@ from app.core.config import AppConfig
 from app.modules.tasks import TaskService
 from app.schemas.auth import User
 from app.services import (
+    AccountService,
     AuthService,
     NodeService,
     RelationService,
@@ -63,6 +64,12 @@ def get_validation_service(
 
 def get_auth_service(container: Container = Depends(get_container)) -> AuthService:
     return container.auth_service
+
+
+def get_account_service(
+    container: Container = Depends(get_container),
+) -> AccountService:
+    return container.account_service
 
 
 def get_task_service(container: Container = Depends(get_container)) -> TaskService:

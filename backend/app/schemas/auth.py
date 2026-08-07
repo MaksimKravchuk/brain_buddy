@@ -16,6 +16,17 @@ class User(StorageBaseModel):
     email: str = Field(description="Normalized (lowercased) email address.")
     password_hash: str = Field(description="Argon2id hash of the user's password.")
     created_at: datetime = Field(description="UTC timestamp when the account was made.")
+    display_name: str | None = Field(
+        default=None, description="Optional display name chosen by the user."
+    )
+    deletion_requested_at: datetime | None = Field(
+        default=None,
+        description=(
+            "UTC timestamp when the user requested account deletion, or null. "
+            "The account is purged once the grace period elapses; logging in "
+            "before then clears this field."
+        ),
+    )
 
 
 class Session(StorageBaseModel):
@@ -71,6 +82,16 @@ class MeResponse(StrictBaseModel):
 
     id: str = Field(description="User identifier.")
     email: str = Field(description="Normalized email address.")
+    display_name: str | None = Field(
+        default=None, description="Optional display name chosen by the user."
+    )
+    deletion_cancelled: bool = Field(
+        default=False,
+        description=(
+            "True only on a login response that cancelled a pending account "
+            "deletion, so the client can tell the user."
+        ),
+    )
     feature_flags: dict[str, bool] = Field(
         default_factory=dict,
         description=(

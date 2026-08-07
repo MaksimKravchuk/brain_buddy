@@ -22,7 +22,7 @@ from app.core.rate_limit import InMemoryRateLimiter
 from app.exceptions import ConflictError, NotFoundError, ValidationFailure
 from app.main import (
     _maybe_seed_admin,
-    _run_voice_sweep,
+    _run_maintenance_sweep,
     _start_voice_sweep_thread,
     create_app,
 )
@@ -348,7 +348,7 @@ def test_index_missing_delete_and_configured_admin_seed(
 def test_voice_sweep_iteration_runs_all_three_duties_and_survives_a_failure(
     container,
 ) -> None:
-    """``_run_voice_sweep`` is the body of both the startup scan and the
+    """``_run_maintenance_sweep`` is the body of both the startup scan and the
     periodic thread; one bad pass (e.g. a transient repository error) must
     log and return rather than propagate and kill the caller/loop."""
 
@@ -385,7 +385,7 @@ def test_voice_sweep_iteration_runs_all_three_duties_and_survives_a_failure(
     )
 
     # Must not raise even though the last duty fails.
-    _run_voice_sweep(container)
+    _run_maintenance_sweep(container)
 
     assert calls == ["recover", "resume_commits", "raw_audio", "working_artifacts"]
 
@@ -439,10 +439,10 @@ def test_voice_sweep_logs_completed_recovery_and_retention_work(
     container.voice_brain_dump_service.purge_expired_raw_audio = lambda: 2
     container.voice_brain_dump_service.purge_expired_working_artifacts = lambda: 3
 
-    _run_voice_sweep(container)
+    _run_maintenance_sweep(container)
 
     assert (
-        "Voice sweep: recovered 1 lease(s), resumed 4 commit(s), purged 2 "
+        "Maintenance sweep: recovered 1 lease(s), resumed 4 commit(s), purged 2 "
         "raw-audio, 3 working-artifact"
         in (caplog.text)
     )

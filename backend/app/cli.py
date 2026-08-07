@@ -1,8 +1,10 @@
 """Operational CLI for the Brain Buddy backend.
 
 Run via ``python -m app.cli <command>`` inside the backend container.
-Currently the only command is ``create-invite``, which mints a one-shot
-invite code that unlocks signup on ``POST /api/auth/signup``.
+``create-invite`` mints a one-shot invite code that unlocks signup on
+``POST /api/auth/signup``; ``purge-due-accounts`` hard-deletes accounts
+whose deletion grace period has elapsed (the maintenance sweep does the
+same on a timer — this is the manual/ops entrypoint).
 """
 
 from __future__ import annotations
@@ -46,6 +48,17 @@ def create_invite() -> None:
     invite = Invite(code=code, created_at=utcnow())
     container.invite_repo.create(invite)
     typer.echo(code)
+
+
+@app.command("purge-due-accounts")
+def purge_due_accounts() -> None:
+    """Hard-delete accounts whose deletion grace period has elapsed."""
+
+    config = get_config()
+    container = build_container(config)
+
+    purged = container.account_service.purge_due_accounts()
+    typer.echo(f"Purged {purged} account(s).")
 
 
 if __name__ == "__main__":  # pragma: no cover

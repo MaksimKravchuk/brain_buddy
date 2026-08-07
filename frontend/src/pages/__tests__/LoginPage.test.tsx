@@ -79,4 +79,35 @@ describe("LoginPage", () => {
       expect(screen.getByText(/too many login attempts/i)).toBeInTheDocument()
     );
   });
+
+  it("shows the grace notice from the auth store when router state was lost", () => {
+    useAuthStore.setState({ deletionScheduledFor: "2026-08-20T12:00:00Z" });
+    renderLogin();
+    expect(screen.getByRole("status")).toHaveTextContent(/permanently deleted on/i);
+  });
+
+  it("explains the grace period after an account deletion request", () => {
+    render(
+      <MemoryRouter
+        initialEntries={[
+          { pathname: "/login", state: { deletionScheduled: "2026-08-20T12:00:00Z" } }
+        ]}
+      >
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(/permanently deleted on/i);
+    expect(screen.getByRole("status")).toHaveTextContent(/sign back in before then/i);
+  });
+
+  it("links to the privacy policy", () => {
+    renderLogin();
+    expect(screen.getByRole("link", { name: /privacy policy/i })).toHaveAttribute(
+      "href",
+      "/privacy"
+    );
+  });
 });

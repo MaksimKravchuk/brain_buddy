@@ -5,6 +5,10 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
 export type AuthUser = {
   id: string;
   email: string;
+  display_name?: string | null;
+  // True only on a login response that cancelled a pending account deletion,
+  // so the client can tell the user their account was kept.
+  deletion_cancelled?: boolean;
   // Server-driven rollout flags from GET /api/auth/me (e.g. `voice_brain_dump`,
   // `delivery_canary`). Absent on older backends that predate the field, so
   // callers must fail closed and treat a missing flag as OFF.

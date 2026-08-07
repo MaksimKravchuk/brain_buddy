@@ -10,7 +10,7 @@ provider-lease recovery and retention purges.
 
 from __future__ import annotations
 
-from app.main import _run_voice_sweep
+from app.main import _run_maintenance_sweep
 from app.schemas.tasks import ExpectedRevisionRequest
 from tests.test_brain_dump_commit_ledger import (
     _drive_to_awaiting,
@@ -86,7 +86,7 @@ def test_periodic_sweep_drives_committing_recovery(api_client) -> None:
     container = api_client.app.state.container
     service, owner_id, operation_id = _crash_mid_commit(api_client, "recover-sweep")
 
-    _run_voice_sweep(container)
+    _run_maintenance_sweep(container)
 
     completed = service.get_brain_dump_operation(operation_id, owner_id=owner_id)
     assert completed.status == "completed"

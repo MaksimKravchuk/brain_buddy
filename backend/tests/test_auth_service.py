@@ -86,9 +86,10 @@ def test_login_happy_path(container) -> None:
     container.auth_service.signup(
         email="bob@example.com", password="very-long-password", invite_code=code
     )
-    user, token = container.auth_service.login(
+    user, token, deletion_cancelled = container.auth_service.login(
         email="bob@example.com", password="very-long-password"
     )
+    assert deletion_cancelled is False
     assert user.email == "bob@example.com"
     assert token
     # Token resolves back to the same user.
@@ -125,7 +126,7 @@ def test_seed_admin_creates_account_when_missing(container) -> None:
     )
     assert user.email == "admin@example.com"
     # Can log in with the seeded credentials — no invite required.
-    _, token = container.auth_service.login(
+    _, token, _ = container.auth_service.login(
         email="admin@example.com", password="very-long-admin-password"
     )
     assert token
@@ -145,7 +146,7 @@ def test_seed_admin_rotates_password_when_env_changes(container) -> None:
         container.auth_service.login(
             email="admin@example.com", password="very-long-admin-password"
         )
-    _, token = container.auth_service.login(
+    _, token, _ = container.auth_service.login(
         email="admin@example.com", password="different-admin-password"
     )
     assert token

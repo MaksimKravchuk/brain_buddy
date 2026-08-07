@@ -47,10 +47,14 @@ def _clear_session_cookie(response: Response, config: AppConfig) -> None:
     )
 
 
-def _me_response(user: User, config: AppConfig) -> MeResponse:
+def _me_response(
+    user: User, config: AppConfig, *, deletion_cancelled: bool = False
+) -> MeResponse:
     return MeResponse(
         id=user.id,
         email=user.email,
+        display_name=user.display_name,
+        deletion_cancelled=deletion_cancelled,
         feature_flags=config.feature_flags.effective_flags(user.email),
     )
 
@@ -103,7 +107,7 @@ def login(
             detail="Too many login attempts. Try again in a few minutes.",
         )
     try:
-        user, raw_token = auth_service.login(
+        user, raw_token, deletion_cancelled = auth_service.login(
             email=payload.email, password=payload.password
         )
     except InvalidCredentialsError as exc:
@@ -112,7 +116,7 @@ def login(
         ) from exc
 
     _set_session_cookie(response, raw_token, config)
-    return _me_response(user, config)
+    return _me_response(user, config, deletion_cancelled=deletion_cancelled)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
