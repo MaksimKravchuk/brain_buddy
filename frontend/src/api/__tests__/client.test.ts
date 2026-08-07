@@ -43,6 +43,28 @@ describe("apiClient", () => {
     expect(init.body).toBe(audio);
   });
 
+  it("uses the account management API contracts", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(response({})));
+
+    await apiClient.getAccount();
+    await apiClient.updateProfile({ display_name: "Maks" });
+    await apiClient.changeEmail({ new_email: "a@b.c", current_password: "pw" });
+    await apiClient.changePassword({ current_password: "pw", new_password: "pw2" });
+    await apiClient.requestAccountDeletion({ current_password: "pw" });
+
+    expect(
+      fetchMock.mock.calls.map(([url, init]) => [url, (init as RequestInit).method])
+    ).toEqual([
+      ["/api/account", "GET"],
+      ["/api/account/profile", "PATCH"],
+      ["/api/account/email", "POST"],
+      ["/api/account/password", "POST"],
+      ["/api/account/delete", "POST"]
+    ]);
+    const [, deleteInit] = fetchMock.mock.calls[4] as [string, RequestInit];
+    expect(JSON.parse(String(deleteInit.body))).toEqual({ current_password: "pw" });
+  });
+
   it("uses the public task, project, and tag API contracts", async () => {
     fetchMock.mockImplementation(() => Promise.resolve(response({ items: [], counts_by_state: {} })));
 

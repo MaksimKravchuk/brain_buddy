@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from app.container import Container, build_container
 from app.core import get_config
-from app.core.rate_limit import login_rate_limiter
+from app.core.rate_limit import login_rate_limiter, sensitive_action_rate_limiter
 from app.main import create_app
 from app.schemas.auth import Invite
 from app.utils.time import utcnow
@@ -75,11 +75,13 @@ class BrainBuddyTestClient(TestClient):
 
 @pytest.fixture(autouse=True)
 def _reset_login_rate_limiter() -> Generator[None, None, None]:
-    """Ensure the in-memory login limiter doesn't bleed across tests."""
+    """Ensure the in-memory rate limiters don't bleed across tests."""
 
     login_rate_limiter.reset()
+    sensitive_action_rate_limiter.reset()
     yield
     login_rate_limiter.reset()
+    sensitive_action_rate_limiter.reset()
 
 
 def _declared_label_types(item: pytest.Item) -> set[str]:

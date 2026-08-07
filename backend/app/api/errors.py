@@ -11,6 +11,7 @@ from app.exceptions import (
     BrainBuddyError,
     ConflictError,
     NotFoundError,
+    ReauthFailedError,
     RepositoryError,
     StorageUnavailableError,
     ValidationFailure,
@@ -94,6 +95,19 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
         response = JSONResponse(
             status_code=409, content=payload.model_dump(by_alias=True)
+        )
+        if correlation_id:
+            response.headers[CORRELATION_HEADER] = correlation_id
+        return response
+
+    @app.exception_handler(ReauthFailedError)
+    async def handle_reauth_failed(
+        request: Request, exc: ReauthFailedError
+    ) -> JSONResponse:
+        correlation_id = getattr(request.state, "correlation_id", None)
+        payload = ErrorResponse(message=str(exc), reference_id=correlation_id)
+        response = JSONResponse(
+            status_code=403, content=payload.model_dump(by_alias=True)
         )
         if correlation_id:
             response.headers[CORRELATION_HEADER] = correlation_id

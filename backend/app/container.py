@@ -20,6 +20,7 @@ from app.repositories import (
     VersionRepository,
 )
 from app.services import (
+    AccountService,
     AuthService,
     NodeService,
     RelationService,
@@ -27,6 +28,7 @@ from app.services import (
     ValidationService,
     VersionService,
 )
+from app.services.auth_service import ACCOUNT_DELETION_GRACE
 from app.workflows.voice_brain_dump.adapters import (
     OpenAiAccurateStt,
     OpenAITextReconciler,
@@ -65,6 +67,7 @@ class Container:
     version_service: VersionService
     validation_service: ValidationService
     auth_service: AuthService
+    account_service: AccountService
     task_service: TaskService
     voice_brain_dump_service: VoiceBrainDumpService
 
@@ -250,12 +253,33 @@ def build_container(config: AppConfig) -> Container:
         task_port=InProcessTaskPort(task_service.create_native_inbox_task),
         voice_enabled_for_owner=_voice_enabled_for_owner,
     )
+    # Grace period between a deletion request and the irreversible purge.
+    # Overridable (in seconds) so the compose E2E suite can exercise the
+    # purge without waiting two weeks.
+    grace_env = os.getenv("BRAIN_BUDDY_ACCOUNT_PURGE_GRACE_SECONDS")
+    deletion_grace = (
+        timedelta(seconds=float(grace_env)) if grace_env else ACCOUNT_DELETION_GRACE
+    )
+
     auth_service = AuthService(
         user_repo=user_repo,
         session_repo=session_repo,
         invite_repo=invite_repo,
         password_policy=config.password_policy,
         session_settings=config.session,
+        deletion_grace=deletion_grace,
+    )
+    account_service = AccountService(
+        user_repo=user_repo,
+        session_repo=session_repo,
+        invite_repo=invite_repo,
+        tree_service=tree_service,
+        version_repo=version_repo,
+        validation_repo=validation_repo,
+        task_repo=task_repo,
+        voice_operation_repo=voice_operation_repo,
+        auth_service=auth_service,
+        deletion_grace=deletion_grace,
     )
 
     return Container(
@@ -275,6 +299,7 @@ def build_container(config: AppConfig) -> Container:
         version_service=version_service,
         validation_service=validation_service,
         auth_service=auth_service,
+        account_service=account_service,
         task_service=task_service,
         voice_brain_dump_service=voice_brain_dump_service,
     )

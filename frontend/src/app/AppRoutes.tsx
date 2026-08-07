@@ -2,10 +2,12 @@
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import { ProtectedRoute } from "../components/auth/ProtectedRoute";
+import { AccountSettingsPage } from "../features/account/AccountSettingsPage";
 import { BrainDumpGate } from "../features/brain-dump/BrainDumpGate";
 import type { BrainDumpLocationState } from "../features/brain-dump/brainDumpNavigation";
 import { TaskListPage } from "../features/tasks/TaskListPage";
 import LoginPage from "../pages/LoginPage";
+import PrivacyPolicyPage from "../pages/PrivacyPolicyPage";
 import SignupPage from "../pages/SignupPage";
 
 // Brain dump is a modal over the workspace, so its routes render twice: the
@@ -49,6 +51,17 @@ function workspaceRoutes(): JSX.Element {
     <>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
+      {/* Public on purpose: the policy must be readable before signing up, and
+          the catch-all below would otherwise bounce signed-out visitors. */}
+      <Route path="/privacy" element={<PrivacyPolicyPage />} />
+      <Route
+        path="/settings/account"
+        element={
+          <ProtectedRoute>
+            <AccountSettingsPage />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/"
         element={
