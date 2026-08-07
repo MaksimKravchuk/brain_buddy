@@ -78,6 +78,21 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
     "auth_service": (EPIC_AUTH, "Auth service", "Credential and session logic"),
     "auth_routes": (EPIC_AUTH, "Auth API", "Auth HTTP endpoints"),
     "ownership": (EPIC_AUTH, "Ownership", "Per-user data isolation"),
+    "account_api": (
+        EPIC_AUTH,
+        "Account API",
+        "Profile, email, and password endpoints",
+    ),
+    "account_deletion": (
+        EPIC_AUTH,
+        "Account deletion",
+        "Grace period and purge lifecycle",
+    ),
+    "account_export": (
+        EPIC_AUTH,
+        "Data export",
+        "GDPR export archive",
+    ),
     # AI validation
     "validation_service": (EPIC_AI, "Validation service", "AI feedback orchestration"),
     "api_validation": (EPIC_AI, "Validation API", "AI validation endpoint"),

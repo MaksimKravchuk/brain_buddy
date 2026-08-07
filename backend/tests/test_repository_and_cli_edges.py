@@ -34,6 +34,27 @@ def test_create_invite_cli_persists_and_prints_a_one_shot_code(
     assert container.invite_repo.get(code) is not None
 
 
+def test_purge_due_accounts_cli_reports_purged_count(
+    container, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cli, "get_config", lambda: None)
+    monkeypatch.setattr(cli, "build_container", lambda _config: container)
+    user = User(
+        id="user_cli_purge",
+        email="cli-purge@example.com",
+        password_hash="x",
+        created_at=datetime.now(UTC),
+        deletion_requested_at=datetime.now(UTC) - timedelta(days=15),
+    )
+    container.user_repo.create(user)
+
+    result = CliRunner().invoke(cli.app, ["purge-due-accounts"])
+
+    assert result.exit_code == 0
+    assert "Purged 1 account(s)." in result.stdout
+    assert container.user_repo.get_by_id("user_cli_purge") is None
+
+
 def test_provider_registry_round_trips_default_and_provider_config(data_dir) -> None:
     repository = ProviderRepository(data_dir)
 
