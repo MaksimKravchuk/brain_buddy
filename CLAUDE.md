@@ -53,6 +53,21 @@ docker compose up --build        # backend:8000, frontend:8080
 docker compose down --volumes
 ```
 
+### Mobile (Expo / React Native, iOS-first)
+
+```bash
+make install-mobile        # npm install in mobile/
+make typecheck-mobile      # tsc --noEmit
+make test-mobile           # jest unit tests
+make integration-mobile    # real api client vs disposable local backend (needs install-backend)
+make build-mobile          # expo export --platform ios (Metro bundle check)
+cd mobile && npx expo start   # run on an iPhone via Expo Go
+```
+
+See `mobile/README.md` for the device runbook and `mobile/AGENTS.md` for the
+wire-protocol contracts the client must keep (chunk hashing, manifest hash,
+lifecycle guards).
+
 ### Spec Kit feature authoring (mandatory)
 
 Use GitHub Spec Kit v0.14.2 for every new or materially changed feature spec.
