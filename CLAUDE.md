@@ -116,6 +116,7 @@ HTTP request
 
 **Key services:**
 - `TreeService` — CRUD + 16-entry LRU in-memory cache; also coordinates AI feedback
+- `AccountService` — self-serve GDPR account management (profile/email/password, ZIP data export, 14-day-grace deletion + purge); always on, never feature-flagged. See `docs/data-retention.md`
 - `NodeService` / `RelationService` — mutations that update the parent tree document
 - `ValidationService` — dispatches to an AI provider and records history
 - `VersionService` — creates/restores JSON snapshots of a tree

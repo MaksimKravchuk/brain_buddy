@@ -181,6 +181,16 @@ class TreeService:
             after_delete=lambda: self._remove_tree_state(tree_id),
         )
 
+    def remove_stale_tree_state(self, tree_id: str) -> None:
+        """Drop index/cache state for a tree whose files are already gone.
+
+        Account-purge retry support: a deletion interrupted between removing
+        the tree directory and updating the index leaves an owner-identifying
+        index entry that a normal delete can no longer reach. Idempotent.
+        """
+
+        self._remove_tree_state(tree_id)
+
     def generate_ai_feedback(
         self, tree_id: str, payload: AiFeedbackRequest, *, owner_id: str
     ) -> AiFeedbackResponse:

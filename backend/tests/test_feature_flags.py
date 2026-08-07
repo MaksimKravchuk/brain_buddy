@@ -348,7 +348,13 @@ def test_me_payload_never_leaks_cohort_or_rollout_stage(
     )
     resp = client.get("/api/auth/me")
     body = resp.json()
-    assert set(body) == {"id", "email", "feature_flags"}
+    assert set(body) == {
+        "id",
+        "email",
+        "display_name",
+        "deletion_cancelled",
+        "feature_flags",
+    }
     assert all(isinstance(value, bool) for value in body["feature_flags"].values())
     assert INTERNAL_EMAIL not in resp.text
     assert "internal" not in resp.text.lower()

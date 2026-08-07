@@ -1,6 +1,7 @@
 """Very small in-memory per-key rate limiter.
 
-Only used by `/auth/login`. Intentionally simple:
+Used by `/auth/login` (per source IP) and the sensitive account actions
+(per user id). Intentionally simple:
 
 - Per-key (source IP) sliding window.
 - In-memory — loses state on restart.
@@ -55,10 +56,24 @@ login_rate_limiter = InMemoryRateLimiter(
     window_seconds=LOGIN_WINDOW_SECONDS,
 )
 
+SENSITIVE_ACTION_MAX_ATTEMPTS = 10
+SENSITIVE_ACTION_WINDOW_SECONDS = 10 * 60
+
+# Guards the password-re-auth account endpoints (email/password change,
+# deletion request). Keyed by user id — the caller already holds a valid
+# session, so the identity to slow down is the account, not the source IP.
+sensitive_action_rate_limiter = InMemoryRateLimiter(
+    max_attempts=SENSITIVE_ACTION_MAX_ATTEMPTS,
+    window_seconds=SENSITIVE_ACTION_WINDOW_SECONDS,
+)
+
 
 __all__ = [
     "InMemoryRateLimiter",
     "LOGIN_MAX_ATTEMPTS",
     "LOGIN_WINDOW_SECONDS",
+    "SENSITIVE_ACTION_MAX_ATTEMPTS",
+    "SENSITIVE_ACTION_WINDOW_SECONDS",
     "login_rate_limiter",
+    "sensitive_action_rate_limiter",
 ]

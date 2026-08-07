@@ -41,6 +41,23 @@ class InviteRepository(BaseRepository):
 
         self.dump_model(self._invite_path(invite.code), invite)
 
+    def scrub_user(self, user_id: str) -> int:
+        """Detach a purged user from any invite they consumed; return the count.
+
+        GDPR erasure support: `used_by_user_id` must stay non-null so the
+        invite remains consumed (`is_used`), but it must no longer identify
+        the deleted account. Idempotent.
+        """
+
+        scrubbed = 0
+        for path in self.invites_dir.glob("*.json"):
+            invite = self.load_model(path, Invite)
+            if invite.used_by_user_id != user_id:
+                continue
+            self.save(invite.model_copy(update={"used_by_user_id": "deleted-user"}))
+            scrubbed += 1
+        return scrubbed
+
     def mark_used(self, code: str, *, user_id: str, used_at: datetime) -> Invite:
         """Mark an invite as consumed by a user.
 
