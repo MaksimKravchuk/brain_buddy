@@ -1,6 +1,6 @@
 <!--
 Sync Impact Report:
-- Version change: 1.0.0 -> 1.1.0
+- Version change: 1.1.0 -> 1.1.1
 - Modified principles: I. Data Consent & Safety; II. Tested Delivery Across Stack; III. Contract-First Interfaces; IV. Traceable & Actionable Observability; V. Responsive, Resilient Experience -> Responsive, Resilient, Mobile-First Experience
 - Added sections: Spec-Driven Development Workflow; Historical Spec Grandfathering
 - Removed sections: None
@@ -48,11 +48,11 @@ BrainBuddy vNext is optimized for fast capture and review from mobile-first voic
 
 ## Spec-Driven Development Workflow
 GitHub Spec Kit is the mandatory authoring workflow for every new or materially changed BrainBuddy feature spec.
-- The canonical artifact flow is constitution -> `/speckit-specify` (what/why) -> `/speckit-clarify` and/or `/speckit-checklist` -> `/speckit-plan` (how/architecture) -> `/speckit-tasks`.
-- Use the official `github/spec-kit` CLI pinned to the repository-documented version through isolated `uv tool`/`uvx`; never install it with pip inside the Hermes runtime.
+- The canonical artifact flow is constitution -> `/speckit-specify` (what/why) -> `/speckit-clarify` -> `/speckit-plan` (how/architecture) -> `/speckit-checklist` -> `/speckit-tasks` -> `/speckit-analyze`.
+- Use the official `github/spec-kit` CLI pinned to the repository-documented version through isolated `uv tool`/`uvx`; do not install it into application backend/frontend environments.
 - `specs/` contains the versioned Spec Kit artifacts. Implementation intent changes MUST amend the relevant spec/plan/tasks before product code proceeds.
-- Generated `tasks.md` is planning input. It does not bypass Hermes Kanban ownership, isolated worktrees, TDD, independent review, CI, PR merge gates, or release gates.
-- Spec Kit is not an execution orchestrator for BrainBuddy. Hermes Kanban remains responsible for task routing, implementation ownership, review handoffs, and release traceability.
+- Generated `tasks.md` is portable planning input organized by user story, dependency, and concrete file path. It does not bypass isolated worktrees, TDD, independent review, CI, landing, or release gates.
+- Spec Kit is not an execution orchestrator for BrainBuddy. Implementation may be performed by a developer or standalone agent. An explicitly activated managed outcome may add a separate control-plane overlay without changing these repository-wide rules.
 
 ## Historical Spec Grandfathering
 The repository contains pre-adoption specs and requirements that must remain readable without forcing unsafe regeneration.
@@ -83,4 +83,4 @@ This constitution supersedes conflicting local practices and guides all reviews.
 - Compliance reviews occur on every PR and before releases; violations need documented justification plus a remediation plan and owner.
 - Accepted ADRs under `docs/decisions/` may refine this constitution for their decision scope, but broad governance changes belong here.
 
-**Version**: 1.1.0 | **Ratified**: 2025-12-20 | **Last Amended**: 2026-07-16
+**Version**: 1.1.1 | **Ratified**: 2025-12-20 | **Last Amended**: 2026-08-08

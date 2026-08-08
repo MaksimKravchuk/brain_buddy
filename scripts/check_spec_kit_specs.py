@@ -3,12 +3,11 @@
 
 This check is intentionally deterministic and offline. It does not regenerate
 Spec Kit output; it only rejects new feature-spec directories that omit the
-minimum artifacts BrainBuddy requires after adopting github/spec-kit v0.12.17.
+minimum artifacts BrainBuddy requires with github/spec-kit v0.15.0.
 
-Present `hermes-handoff.json` files are additionally validated against the
-canonical contract in `scripts/spec_kit_planning_review.py` (schema version,
-approved planning-review status, required reviewer roles, and the acyclic lane
-DAG), so the mandatory CI spec gate fails closed on an unreviewed handoff.
+Legacy `hermes-handoff.json` files are validated when present. The repository
+check enforces only the portable Spec Kit minimum; an explicitly managed outcome
+has additional runtime gates outside this checker.
 """
 
 from __future__ import annotations
@@ -36,7 +35,6 @@ REQUIRED_FILES = (
     "checklists/requirements.md",
     "plan.md",
     "tasks.md",
-    HANDOFF_ARTIFACT,
 )
 
 GRANDFATHERED = {
@@ -165,11 +163,13 @@ def _validate_handoff_contents(path: Path, failures: list[str]) -> None:
 
 def _validate_required_files(spec_dir: Path, failures: list[str]) -> None:
     for required_file in REQUIRED_FILES:
-        present = _require_regular_nonempty(
-            spec_dir / required_file, failures, required_file
-        )
-        if present and required_file == HANDOFF_ARTIFACT:
-            _validate_handoff_contents(spec_dir / required_file, failures)
+        _require_regular_nonempty(spec_dir / required_file, failures, required_file)
+
+    legacy_handoff = spec_dir / HANDOFF_ARTIFACT
+    if legacy_handoff.exists() and _require_regular_nonempty(
+        legacy_handoff, failures, HANDOFF_ARTIFACT
+    ):
+        _validate_handoff_contents(legacy_handoff, failures)
 
 
 def _grandfathered_baseline_matches(spec_dir: Path, failures: list[str]) -> bool:
@@ -243,8 +243,7 @@ def main() -> int:
         print(
             "\nNew or materially changed features must follow: constitution -> "
             "/speckit-specify -> /speckit-clarify -> /speckit-plan -> "
-            "bounded planning review -> /speckit-checklist -> /speckit-tasks -> "
-            "/speckit-analyze -> validated Hermes Kanban handoff.",
+            "/speckit-checklist -> /speckit-tasks -> /speckit-analyze.",
             file=sys.stderr,
         )
         return 1

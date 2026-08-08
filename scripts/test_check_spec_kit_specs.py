@@ -141,7 +141,7 @@ class CheckSpecKitSpecsTests(unittest.TestCase):
         self.assertIn("missing tasks.md", stderr)
         self.assertIn("/speckit-checklist -> /speckit-tasks", stderr)
 
-    def test_new_feature_requires_validated_handoff_artifact(self) -> None:
+    def test_new_feature_does_not_require_legacy_handoff(self) -> None:
         check_spec_kit_specs.GRANDFATHERED = {}
         feature = self.specs_dir / "004-new-feature"
         (feature / "checklists").mkdir(parents=True)
@@ -150,10 +150,10 @@ class CheckSpecKitSpecsTests(unittest.TestCase):
         (feature / "plan.md").write_text("# Plan\n")
         (feature / "tasks.md").write_text("# Tasks\n")
 
-        result, _stdout, stderr = self._run_check()
+        result, stdout, stderr = self._run_check()
 
-        self.assertEqual(result, 1)
-        self.assertIn("missing hermes-handoff.json", stderr)
+        self.assertEqual(result, 0, stderr)
+        self.assertIn("Spec Kit artifact check passed.", stdout)
 
     def _write_feature_with_handoff(self, handoff_text: str) -> Path:
         check_spec_kit_specs.GRANDFATHERED = {}

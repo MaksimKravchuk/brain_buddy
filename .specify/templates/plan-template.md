@@ -56,9 +56,9 @@ Amend the spec first when implementation intent changes.
 - Mobile/resilience/performance: How will mobile capture/review interruptions,
   offline windows, data-loss protections, and ~200-node canvas responsiveness be
   maintained?
-- Delivery boundary: Confirm Spec Kit tasks are planning input only; Hermes
-  Kanban, isolated worktrees, TDD, review, CI, PR, and Fly release gates remain
-  authoritative.
+- Delivery boundary: Confirm Spec Kit tasks are portable planning input only;
+  isolated worktrees, TDD, independent verification, ADR-0008 landing, CI, and
+  Fly release gates remain authoritative regardless of execution tooling.
 
 ## Project Structure
 

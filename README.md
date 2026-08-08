@@ -114,13 +114,11 @@ See `docs/api_usage.md` for request/response details and examples.
 - Continuous improvement scripts live in the root `Makefile` (`make test-backend`, `make test-frontend`).
 
 ## Feature Specs
-GitHub Spec Kit v0.14.2 is the mandatory workflow for new or materially changed
-feature specs: constitution → `/speckit-specify` → `/speckit-clarify` →
-`/speckit-plan` → bounded read-only planning review → `/speckit-checklist` →
-`/speckit-tasks` → `/speckit-analyze` → validated Hermes Kanban handoff. See
-`docs/spec-kit-workflow.md` for the exact Claude Code commands, uv/uvx setup,
-historical spec grandfathering, and the boundary between Spec Kit planning and
-Hermes Kanban execution/review.
+GitHub Spec Kit v0.15.0 is mandatory for new or materially changed feature
+specs. Use `docs/spec-kit-workflow.md` for the portable authoring path, pinned
+commands, and historical grandfathering rules. Outcomes explicitly enrolled in
+the optional Hermes managed-delivery mode additionally follow ADR-0010 and
+`docs/spec-driven-kanban.md`.
 
 ## Performance & Observability
 - File-backed caches reduce repeated tree loads during read-heavy sessions.
