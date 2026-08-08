@@ -68,14 +68,15 @@ See `mobile/README.md` for the device runbook and `mobile/AGENTS.md` for the
 wire-protocol contracts the client must keep (chunk hashing, manifest hash,
 lifecycle guards).
 
-### Spec Kit feature authoring (mandatory)
+### Spec Kit feature authoring
 
-Use GitHub Spec Kit v0.14.2 for every new or materially changed feature spec.
-Install or refresh the CLI with isolated uv tooling, never pip inside Hermes:
+Use GitHub Spec Kit v0.15.0 for every new or materially changed feature spec.
+Install or refresh the CLI with isolated uv tooling, not inside application
+backend/frontend environments:
 
 ```bash
-uv tool install specify-cli --force --from git+https://github.com/github/spec-kit.git@v0.14.2
-specify --version          # expect: specify 0.14.2
+uv tool install specify-cli --force --from git+https://github.com/github/spec-kit.git@v0.15.0
+specify --version          # expect: specify 0.15.0
 specify check              # verifies Claude Code and other agent prerequisites
 specify integration list   # confirms claude is available/installed
 ```
@@ -87,21 +88,19 @@ Claude Code uses the skills installed under `.claude/skills/`:
 /speckit-specify <what and why, not implementation>
 /speckit-clarify
 /speckit-plan <how and architecture>
-# run .specify/workflows/speckit/workflow.yml (read-only planning reviews)
 /speckit-checklist
 /speckit-tasks
 /speckit-analyze
-# validate specs/NNN-feature/hermes-handoff.json
 ```
 
 Read `docs/spec-kit-workflow.md` before authoring specs. Spec Kit maintains
-versioned artifacts under `specs/`; Hermes Kanban still owns execution,
-isolated worktrees, TDD, review, CI, PR, merge, and release gates. Generated
-`tasks.md` is planning input only. Do not run `/speckit-implement`; it is
-disabled in BrainBuddy and implementation must be routed through Hermes Kanban.
-Architect-profile agents own technical planning, module boundaries, ADR
-alignment, and architecture handoff before implementation agents consume the
-artifacts from assigned Kanban cards.
+versioned artifacts under `specs/`. Generated `tasks.md` is portable planning
+input: implement it directly when the user's request includes implementation,
+while preserving worktree, TDD, review, CI, landing, and release gates. Do not
+assume Hermes or a Kanban runtime is present. If Claude Code is explicitly
+launched inside an opt-in Hermes-managed outcome, the invoking task supplies the
+additional signed scope and `docs/spec-driven-kanban.md` becomes authoritative
+for that managed run only.
 
 ## Architecture
 
