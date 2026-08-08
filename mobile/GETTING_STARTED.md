@@ -36,16 +36,13 @@ Either of these works:
   ```
   git clone https://github.com/MaksimKravchuk/brain_buddy.git
   cd brain_buddy
-  git checkout claude/ios-app-development-7a77wm
   ```
 
-  (The `git checkout` line is only needed until the mobile-app pull request
-  is merged to `main`.)
+- **Without git**: open the repository on github.com, click the green
+  **Code** button → **Download ZIP**, and unzip it somewhere easy to find.
 
-- **Without git**: open the repository on github.com, switch the branch
-  dropdown (top-left, says `main`) to `claude/ios-app-development-7a77wm`,
-  click the green **Code** button → **Download ZIP**, and unzip it
-  somewhere easy to find.
+The mobile app is on `main`, so the default branch is the one you want — no
+branch switching needed.
 
 ### 3. Install the app's dependencies
 
