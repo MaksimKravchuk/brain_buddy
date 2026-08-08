@@ -4,7 +4,7 @@ workflow:
   name: "BrainBuddy Architect Planning Review"
   version: "2.0.0"
   author: "BrainBuddy"
-  description: "Runs bounded read-only reviews after Architect authors spec.md and plan.md; Hermes Kanban remains the sole execution runtime"
+  description: "Historical bounded planning review retained for compatibility; opt-in managed outcomes may use spec-driven-kanban per ADR-0010"
 
 requires:
   speckit_version: ">=0.14.2"

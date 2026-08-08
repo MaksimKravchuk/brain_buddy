@@ -253,6 +253,5 @@ With multiple developers:
 - Commit after each task or logical group
 - Stop at any checkpoint to validate story independently
 - Avoid: vague tasks, same file conflicts, cross-story dependencies that break independence
-- Generated tasks.md is planning input only. Do not use it to bypass Hermes
-  Kanban ownership, isolated worktrees, TDD, independent review, CI, PR, merge,
-  or release gates.
+- Generated tasks.md is portable planning input only. Do not use it to bypass
+  isolated worktrees, TDD, independent review, CI, landing, or release gates.

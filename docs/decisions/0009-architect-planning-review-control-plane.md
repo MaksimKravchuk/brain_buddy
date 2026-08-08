@@ -1,7 +1,7 @@
 # ADR-0009: Architect-owned planning review control plane
 
 Date: 2026-07-25
-Status: Accepted
+Status: Accepted; superseded by ADR-0010 only for explicitly managed outcomes
 Decision owner: BrainBuddy
 Related: ADR-0005, `.specify/workflows/speckit/`, `docs/spec-kit-workflow.md`, `scripts/spec_kit_planning_review.py`
 
