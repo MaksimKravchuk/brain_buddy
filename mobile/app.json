@@ -16,7 +16,9 @@
     },
     "android": {
       "package": "com.brainbuddy.mobile",
-      "permissions": ["android.permission.RECORD_AUDIO"],
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#0EA5E9",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -43,7 +45,8 @@
         {
           "microphonePermission": "Brain Buddy records audio only while you hold a brain dump session. Nothing is saved until you stop."
         }
-      ]
+      ],
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,
