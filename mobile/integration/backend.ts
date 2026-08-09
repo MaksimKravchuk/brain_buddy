@@ -17,6 +17,8 @@ export interface BackendHandle {
 }
 
 const BACKEND_DIR = path.resolve(__dirname, "..", "..", "backend");
+const BACKEND_PYTHON =
+  process.env.BRAIN_BUDDY_BACKEND_PYTHON ?? path.join(BACKEND_DIR, ".venv", "bin", "python");
 
 export async function startBackend(port: number): Promise<BackendHandle> {
   const dataDir = mkdtempSync(path.join(tmpdir(), "bb-mobile-integration-"));
@@ -30,7 +32,7 @@ export async function startBackend(port: number): Promise<BackendHandle> {
   };
 
   const child: ChildProcess = spawn(
-    "python3",
+    BACKEND_PYTHON,
     ["-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", String(port)],
     { cwd: BACKEND_DIR, env, stdio: ["ignore", "pipe", "pipe"] },
   );
@@ -67,7 +69,7 @@ export async function startBackend(port: number): Promise<BackendHandle> {
   return {
     baseUrl,
     invite() {
-      const result = spawnSync("python3", ["-m", "app.cli", "create-invite"], {
+      const result = spawnSync(BACKEND_PYTHON, ["-m", "app.cli", "create-invite"], {
         cwd: BACKEND_DIR,
         env,
         encoding: "utf-8",

@@ -1,8 +1,13 @@
-import { Check, ChevronRight, Inbox, MoreHorizontal, Network, X } from "lucide-react";
+import { Bot, Check, ChevronRight, Inbox, MoreHorizontal, Network, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { RefObject } from "react";
 
+import { useAgentRuns } from "../../api/agentHooks";
+import { hasFeatureFlag } from "../../api/auth";
 import { apiClient } from "../../api/client";
+import { AgentHandoffOverlay } from "../agents/AgentHandoffOverlay";
+import { AgentRunSection } from "../agents/AgentRunSection";
+import { useAuthStore } from "../../stores/authStore";
 import type {
   OpenTaskState,
   ProjectResponse,
@@ -367,6 +372,8 @@ function TaskDetailBody({
         </div>
       </div>
 
+      <AgentTaskRelay task={task} isTerminal={isTerminal} />
+
       <div className="flex flex-col gap-2 border-t border-slate-200 px-4 py-3">
         <div className="flex items-center gap-2">
           <h3 className="m-0 flex-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
@@ -458,6 +465,72 @@ function TaskDetailBody({
         </span>
       </div>
     </div>
+  );
+}
+
+/**
+ * The task's external-agent surface: hand-off entry point plus every run.
+ *
+ * Gated on the `external_agent_relay` rollout flag, which is also what stops the
+ * run query from firing — the backend answers 404 while the flag is OFF, so
+ * asking would only manufacture an error for a capability the user cannot see.
+ * A terminal task keeps its run history but is offered no new hand-off.
+ */
+function AgentTaskRelay({ task, isTerminal }: { task: TaskResponse; isTerminal: boolean }): React.JSX.Element | null {
+  const user = useAuthStore((state) => state.user);
+  const enabled = hasFeatureFlag(user, "external_agent_relay");
+  const [reviewing, setReviewing] = useState(false);
+  const runsQuery = useAgentRuns(task.id, enabled);
+
+  useEffect(() => {
+    setReviewing(false);
+  }, [task.id]);
+
+  if (!enabled) {
+    return null;
+  }
+
+  const runs = runsQuery.data ?? [];
+
+  return (
+    <>
+      {runs.length || !isTerminal ? (
+        <div className="flex flex-col gap-2 border-t border-slate-200 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <h3 className="m-0 flex-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
+              External agent
+            </h3>
+            {!isTerminal ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                leftIcon={<Bot className="h-[13px] w-[13px]" aria-hidden />}
+                onClick={() => setReviewing(true)}
+              >
+                Hand to agent
+              </Button>
+            ) : null}
+          </div>
+          {!runs.length ? (
+            <p className="m-0 text-[12px] text-slate-500">
+              Review exactly what would be sent before anything leaves BrainBuddy.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      <AgentRunSection taskId={task.id} runs={runs} isLoading={runsQuery.isLoading} error={runsQuery.error} />
+
+      {reviewing ? (
+        <AgentHandoffOverlay
+          taskId={task.id}
+          taskTitle={task.title}
+          onClose={() => setReviewing(false)}
+          onDispatched={() => setReviewing(false)}
+        />
+      ) : null}
+    </>
   );
 }
 

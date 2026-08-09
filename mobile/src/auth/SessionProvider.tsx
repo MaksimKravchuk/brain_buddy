@@ -22,6 +22,8 @@ interface SessionContextValue {
   api: ApiClient;
   /** True when the account's voice_brain_dump flag is on (fail closed). */
   voiceEnabled: boolean;
+  /** True when the account's external_agent_relay flag is on (fail closed). */
+  agentRelayEnabled: boolean;
   signIn(email: string, password: string): Promise<void>;
   signUp(email: string, password: string, inviteCode: string): Promise<void>;
   signOut(): Promise<void>;
@@ -126,6 +128,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
       serverUrl,
       api,
       voiceEnabled: me?.feature_flags?.voice_brain_dump === true,
+      agentRelayEnabled: me?.feature_flags?.external_agent_relay === true,
       signIn,
       signUp,
       signOut,

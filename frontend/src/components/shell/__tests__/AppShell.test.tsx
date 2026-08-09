@@ -27,6 +27,7 @@ function RoutedTaskListContent() {
   return (
     <div>
       <div>{pathname === "/tasks/inbox" ? "Inbox task list content" : "Next task list content"}</div>
+      <span className="sr-only" data-testid="pathname">{pathname}</span>
       <div data-testid="location">{`${pathname}${search}`}</div>
       <div data-testid="location-state">{state ? JSON.stringify(state) : "none"}</div>
       <button type="button" onClick={() => notify("Thinking canvas isn't built yet — placeholder")}>
@@ -165,6 +166,17 @@ describe("AppShell canonical sidebar", () => {
     await user.click(screen.getByRole("button", { name: "Tag options @calls" }));
     await user.click(screen.getByRole("button", { name: "Delete" }));
     expect(handlers.onDeleteTag).toHaveBeenCalledWith(tags[0]);
+  });
+
+  it("reaches connected agents from the account menu", async () => {
+    const user = userEvent.setup();
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Account menu" }));
+    const menu = screen.getByRole("menu", { name: "Account" });
+    await user.click(within(menu).getByRole("menuitem", { name: "Connected agents" }));
+
+    expect(screen.getByTestId("pathname")).toHaveTextContent("/settings/agents");
   });
 
   it("keeps the mobile drawer CRUD usable and closes it on Escape and on navigation", async () => {

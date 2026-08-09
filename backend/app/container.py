@@ -8,6 +8,10 @@ from datetime import timedelta
 
 from app.ai.providers import MockValidationProvider, OpenAIValidationProvider
 from app.core.config import AppConfig, AppEnvironment, VoiceProviderSettings
+from app.modules.agents.connector import GenericHttpConnector
+from app.modules.agents.repository import AgentRepository
+from app.modules.agents.secrets import build_secret_box
+from app.modules.agents.service import AgentRelayService, TaskSnapshot
 from app.modules.tasks import TaskRepository, TaskService
 from app.repositories import (
     IndexRepository,
@@ -61,6 +65,7 @@ class Container:
     invite_repo: InviteRepository
     task_repo: TaskRepository
     voice_operation_repo: OperationRepository
+    agent_repo: AgentRepository
     tree_service: TreeService
     node_service: NodeService
     relation_service: RelationService
@@ -70,6 +75,7 @@ class Container:
     account_service: AccountService
     task_service: TaskService
     voice_brain_dump_service: VoiceBrainDumpService
+    agent_relay_service: AgentRelayService
 
 
 def _build_accurate_stt(config: AppConfig) -> AccurateSttPort:
@@ -204,6 +210,7 @@ def build_container(config: AppConfig) -> Container:
     invite_repo = InviteRepository(data_root)
     task_repo = TaskRepository(data_root)
     voice_operation_repo = OperationRepository(data_root)
+    agent_repo = AgentRepository(data_root)
 
     tree_service = TreeService(tree_repo, index_repo)
     node_service = NodeService(tree_repo, tree_service)
@@ -255,6 +262,35 @@ def build_container(config: AppConfig) -> Container:
         task_port=InProcessTaskPort(task_service.create_native_inbox_task),
         voice_enabled_for_owner=_voice_enabled_for_owner,
     )
+    def _task_snapshot(task_id: str, *, owner_id: str) -> TaskSnapshot:
+        """Read-only view of a Task for the relay.
+
+        Deliberately narrow: the relay may look at a Task's title and details to
+        build a hand-off manifest, and has no way to write one back (FR-012).
+        """
+
+        task = task_service.get_task(task_id, owner_id=owner_id)
+        return TaskSnapshot(id=task.id, title=task.title, details=task.details)
+
+    relay_settings = config.agent_relay
+    agent_relay_service = AgentRelayService(
+        agent_repo,
+        connector=GenericHttpConnector(
+            timeout_seconds=relay_settings.connector_timeout_seconds,
+            max_response_bytes=relay_settings.connector_max_response_bytes,
+            allow_private_destinations=relay_settings.allow_private_destinations,
+        ),
+        secret_box=build_secret_box(
+            os.getenv("BRAIN_BUDDY_AGENT_RELAY_KEYS"), environment=config.environment
+        ),
+        task_snapshot=_task_snapshot,
+        callback_url=relay_settings.callback_url,
+        stale_after=timedelta(seconds=relay_settings.stale_after_seconds),
+        reporting_window=timedelta(seconds=relay_settings.reporting_window_seconds),
+        content_retention=timedelta(seconds=relay_settings.content_retention_seconds),
+        allow_private_destinations=relay_settings.allow_private_destinations,
+    )
+
     # Grace period between a deletion request and the irreversible purge.
     # Overridable (in seconds) so the compose E2E suite can exercise the
     # purge without waiting two weeks.
@@ -280,6 +316,7 @@ def build_container(config: AppConfig) -> Container:
         validation_repo=validation_repo,
         task_repo=task_repo,
         voice_operation_repo=voice_operation_repo,
+        agent_repo=agent_repo,
         auth_service=auth_service,
         deletion_grace=deletion_grace,
     )
@@ -295,6 +332,7 @@ def build_container(config: AppConfig) -> Container:
         invite_repo=invite_repo,
         task_repo=task_repo,
         voice_operation_repo=voice_operation_repo,
+        agent_repo=agent_repo,
         tree_service=tree_service,
         node_service=node_service,
         relation_service=relation_service,
@@ -304,4 +342,5 @@ def build_container(config: AppConfig) -> Container:
         account_service=account_service,
         task_service=task_service,
         voice_brain_dump_service=voice_brain_dump_service,
+        agent_relay_service=agent_relay_service,
     )

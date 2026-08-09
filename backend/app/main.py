@@ -41,6 +41,15 @@ def _run_maintenance_sweep(container: Container) -> None:
     except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
         logger.exception("Account purge sweep iteration failed")
 
+    # Relay retention runs under its own boundary too: expiring relayed agent
+    # content is a privacy obligation that must not be starved by a failing
+    # voice operation, or starve one.
+    expired_agent_runs = 0
+    try:
+        expired_agent_runs = container.agent_relay_service.run_retention_sweep()
+    except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
+        logger.exception("External-agent retention sweep iteration failed")
+
     try:
         recovered_leases = (
             container.voice_brain_dump_service.recover_due_provider_leases()
@@ -65,17 +74,19 @@ def _run_maintenance_sweep(container: Container) -> None:
         or purged_raw_audio
         or purged_working_artifacts
         or purged_accounts
+        or expired_agent_runs
     ):
         logger.info(
             "Maintenance sweep: recovered %s lease(s), resumed %s commit(s), "
             "purged %s raw-audio, %s working-artifact operation(s), advanced "
-            "%s provider run(s), purged %s account(s)",
+            "%s provider run(s), purged %s account(s), expired %s agent run(s)",
             recovered_leases,
             resumed_commits,
             purged_raw_audio,
             purged_working_artifacts,
             advanced_runs,
             purged_accounts,
+            expired_agent_runs,
         )
 
 

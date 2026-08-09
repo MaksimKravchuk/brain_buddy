@@ -249,6 +249,15 @@ describe("AppRoutes", () => {
     });
   });
 
+  it("registers connected agents behind the external-agent relay rollout gate", async () => {
+    renderRoutes("/settings/agents");
+
+    expect(await screen.findByRole("heading", { name: "External agents are off" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining("/agent-connections"), expect.anything());
+    });
+  });
+
   it("keeps direct CRT routes inert until the feature is available", async () => {
     renderRoutes("/crt/demo-tree");
 

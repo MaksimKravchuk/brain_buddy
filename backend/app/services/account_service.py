@@ -20,6 +20,7 @@ from app.exceptions import (
     ReauthFailedError,
     ValidationFailure,
 )
+from app.modules.agents.repository import AgentRepository
 from app.modules.tasks import TaskRepository
 from app.repositories import (
     InviteRepository,
@@ -64,6 +65,7 @@ class AccountService:
         validation_repo: ValidationRepository,
         task_repo: TaskRepository,
         voice_operation_repo: OperationRepository,
+        agent_repo: AgentRepository,
         auth_service: AuthService,
         deletion_grace: timedelta = DELETION_GRACE,
     ) -> None:
@@ -75,6 +77,7 @@ class AccountService:
         self.validation_repo = validation_repo
         self.task_repo = task_repo
         self.voice_operation_repo = voice_operation_repo
+        self.agent_repo = agent_repo
         self.auth_service = auth_service
         self.deletion_grace = deletion_grace
 
@@ -357,6 +360,10 @@ class AccountService:
 
         self.session_repo.delete_all_for_user(user_id)
         self.voice_operation_repo.delete_all_for_owner(owner_id=user_id)
+        # External-agent connections, credentials, runs, events, commands, and
+        # relay audit metadata all go with the account (AC-021). This runs
+        # before the task purge because a run references the Task it evidences.
+        self.agent_repo.delete_all_for_owner(owner_id=user_id)
         self.task_repo.delete_all_for_owner(owner_id=user_id)
         for entry in self.tree_service.list_trees(owner_id=user_id):
             try:

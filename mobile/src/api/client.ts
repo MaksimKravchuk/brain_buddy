@@ -13,6 +13,19 @@
  */
 
 import type {
+  AgentConnectionCreatedResponse,
+  AgentConnectionCreateRequest,
+  AgentConnectionDisconnectRequest,
+  AgentConnectionResponse,
+  AgentConnectionRotateRequest,
+  AgentConnectionRotateSigningSecretRequest,
+  AgentConnectionSigningSecretResponse,
+  AgentHandoffConfirmRequest,
+  AgentHandoffPreviewRequest,
+  AgentManifestResponse,
+  AgentReplyRequest,
+  AgentRunResponse,
+  AgentRunSummaryResponse,
   BrainDumpAction,
   BrainDumpOperationResponse,
   BrainDumpProvidersResponse,
@@ -477,6 +490,131 @@ export function createApiClient(options: ApiClientOptions) {
         method: "POST",
         headers: { "Idempotency-Key": idempotencyKey },
         body: { expected_revision: expectedRevision },
+      });
+    },
+
+    // --- External agents ---
+
+    listAgentConnections(signal?: AbortSignal) {
+      return request<AgentConnectionResponse[]>("/agent-connections", { signal });
+    },
+
+    /**
+     * The 201 body is the only time the inbound signing secret is ever
+     * returned — show it once and never persist it.
+     */
+    createAgentConnection(payload: AgentConnectionCreateRequest, idempotencyKey: string) {
+      return request<AgentConnectionCreatedResponse>("/agent-connections", {
+        method: "POST",
+        headers: { "Idempotency-Key": idempotencyKey },
+        body: payload,
+      });
+    },
+
+    getAgentConnection(connectionId: string, signal?: AbortSignal) {
+      return request<AgentConnectionResponse>(`/agent-connections/${connectionId}`, { signal });
+    },
+
+    testAgentConnection(connectionId: string) {
+      return request<AgentConnectionResponse>(`/agent-connections/${connectionId}/test`, {
+        method: "POST",
+      });
+    },
+
+    rotateAgentCredential(
+      connectionId: string,
+      payload: AgentConnectionRotateRequest,
+      idempotencyKey: string,
+    ) {
+      return request<AgentConnectionResponse>(`/agent-connections/${connectionId}/credential`, {
+        method: "POST",
+        headers: { "Idempotency-Key": idempotencyKey },
+        body: payload,
+      });
+    },
+
+    rotateAgentSigningSecret(
+      connectionId: string,
+      payload: AgentConnectionRotateSigningSecretRequest,
+      idempotencyKey: string,
+    ) {
+      return request<AgentConnectionSigningSecretResponse>(
+        `/agent-connections/${connectionId}/signing-secret`,
+        {
+          method: "POST",
+          headers: { "Idempotency-Key": idempotencyKey },
+          body: payload,
+        },
+      );
+    },
+
+    disconnectAgentConnection(
+      connectionId: string,
+      payload: AgentConnectionDisconnectRequest,
+      idempotencyKey: string,
+    ) {
+      return request<AgentConnectionResponse>(`/agent-connections/${connectionId}/disconnect`, {
+        method: "POST",
+        headers: { "Idempotency-Key": idempotencyKey },
+        body: payload,
+      });
+    },
+
+    /** Reserves and returns the manifest to review. Nothing leaves yet. */
+    previewAgentHandoff(taskId: string, payload: AgentHandoffPreviewRequest) {
+      return request<AgentManifestResponse>(`/tasks/${taskId}/agent-runs/preview`, {
+        method: "POST",
+        body: payload,
+      });
+    },
+
+    confirmAgentHandoff(
+      taskId: string,
+      payload: AgentHandoffConfirmRequest,
+      idempotencyKey: string,
+    ) {
+      return request<AgentRunResponse>(`/tasks/${taskId}/agent-runs`, {
+        method: "POST",
+        headers: { "Idempotency-Key": idempotencyKey },
+        body: payload,
+      });
+    },
+
+    listAgentRuns(taskId: string, signal?: AbortSignal) {
+      return request<AgentRunResponse[]>(`/tasks/${taskId}/agent-runs`, { signal });
+    },
+
+    getAgentRun(runId: string, signal?: AbortSignal) {
+      return request<AgentRunResponse>(`/agent-runs/${runId}`, { signal });
+    },
+
+    /**
+     * The latest run for each of the given tasks, keyed by task ID and sparse:
+     * a task with no hand-off is absent from the answer.
+     */
+    listAgentRunSummaries(taskIds: string[], signal?: AbortSignal) {
+      const query = taskIds
+        .map((taskId) => `task_id=${encodeURIComponent(taskId)}`)
+        .join("&");
+      return request<Record<string, AgentRunSummaryResponse>>(
+        `/agent-run-summaries?${query}`,
+        { signal },
+      );
+    },
+
+    replyToAgentRun(runId: string, payload: AgentReplyRequest, idempotencyKey: string) {
+      return request<AgentRunResponse>(`/agent-runs/${runId}/reply`, {
+        method: "POST",
+        headers: { "Idempotency-Key": idempotencyKey },
+        body: payload,
+      });
+    },
+
+    /** Cancel carries no body: the run id in the path is the whole request. */
+    cancelAgentRun(runId: string, idempotencyKey: string) {
+      return request<AgentRunResponse>(`/agent-runs/${runId}/cancel`, {
+        method: "POST",
+        headers: { "Idempotency-Key": idempotencyKey },
       });
     },
   };

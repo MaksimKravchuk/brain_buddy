@@ -282,6 +282,12 @@ DEPLOY_REQUIREMENTS = (
         "the delivery canary must be pinned to the internal cohort",
     ),
     (
+        "internal external-agent-relay rollout",
+        "external_agent_relay=internal",
+        "the external agent relay must be staged for the internal cohort on "
+        "every production deploy",
+    ),
+    (
         "documented release image capture",
         "--image --json",
         "rollback capture must use the documented flyctl releases form",
@@ -338,6 +344,12 @@ DEPLOY_FORBIDDEN = (
         "masked failure",
         "|| true",
         "rollback/verification must never be masked with unconditional success",
+    ),
+    (
+        "general-availability external-agent-relay rollout",
+        "external_agent_relay=on",
+        "the external agent relay must stay pinned to the internal cohort; "
+        "widening it to everyone is a product decision, not a deploy default",
     ),
     (
         "manual dispatch",
