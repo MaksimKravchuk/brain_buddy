@@ -1,9 +1,10 @@
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, StyleSheet, View } from "react-native";
 
-import { useTaskList, useTransitionTask } from "@/api/hooks";
+import { useAgentRunSummaries, useTaskList, useTransitionTask } from "@/api/hooks";
 import type { TaskResponse, TaskState } from "@/api/types";
+import { useSession } from "@/auth/SessionProvider";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { Screen } from "@/components/Screen";
@@ -19,6 +20,7 @@ import { colors, space } from "@/theme/tokens";
  * asks for an explicit destination — the old state is never inferred.
  */
 export default function HistoryScreen() {
+  const router = useRouter();
   const { kind } = useLocalSearchParams<{ kind?: string }>();
   const terminalState: TaskState = kind === "cancelled" ? "cancelled" : "completed";
 
@@ -35,6 +37,9 @@ export default function HistoryScreen() {
     () => (query.data ? query.data.pages.flatMap((page) => page.items) : []),
     [query.data],
   );
+  const { agentRelayEnabled } = useSession();
+  const visibleTaskIds = useMemo(() => tasks.map((task) => task.id), [tasks]);
+  const agentRuns = useAgentRunSummaries(visibleTaskIds, agentRelayEnabled).data ?? {};
 
   const title = terminalState === "completed" ? "Completed" : "Cancelled";
 
@@ -80,7 +85,10 @@ export default function HistoryScreen() {
               task={item}
               projectName={projectName(item.project_id)}
               tagNames={tagNames(item.tag_ids)}
-              onPress={() => setReopening(item)}
+              agentRun={agentRuns[item.id]}
+              onPress={() =>
+                router.push({ pathname: "/task/[id]", params: { id: item.id, from: title } })
+              }
               onToggleComplete={() => setReopening(item)}
             />
           )}

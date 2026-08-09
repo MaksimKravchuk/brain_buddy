@@ -8,6 +8,7 @@ from fastapi import Depends, HTTPException, Request, status
 
 from app.container import Container
 from app.core.config import AppConfig
+from app.modules.agents.service import AgentRelayService
 from app.modules.tasks import TaskService
 from app.schemas.auth import User
 from app.services import (
@@ -82,6 +83,12 @@ def get_voice_brain_dump_service(
     return container.voice_brain_dump_service
 
 
+def get_agent_relay_service(
+    container: Container = Depends(get_container),
+) -> AgentRelayService:
+    return container.agent_relay_service
+
+
 def get_current_user(
     request: Request,
     auth_service: AuthService = Depends(get_auth_service),
@@ -133,5 +140,37 @@ def require_voice_brain_dump_enabled(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Voice brain dump is not available.",
+        )
+    return current_user
+
+
+def external_agent_relay_enabled(user: User, config: AppConfig) -> bool:
+    """Whether the ADR-0008 ``external_agent_relay`` rollout flag is effective."""
+
+    return config.feature_flags.effective_flags(user.email).get(
+        "external_agent_relay", False
+    )
+
+
+def require_external_agent_relay_enabled(
+    current_user: User = Depends(get_current_user),
+    config: AppConfig = Depends(get_config_dep),
+) -> User:
+    """Gate every owner-facing relay route on the ADR-0008 rollout flag.
+
+    Ships default OFF and rolls out OFF → INTERNAL → ON. An authenticated user
+    without the flag gets a fail-closed 404: the feature is simply not present.
+    Because this depends on :func:`get_current_user`, an unauthenticated caller
+    is still rejected with 401 first.
+
+    The inbound connector-event route is deliberately *not* gated: a run already
+    dispatched must stay able to report its outcome even if the owner's flag is
+    turned off afterwards.
+    """
+
+    if not external_agent_relay_enabled(current_user, config):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="External agent relay is not available.",
         )
     return current_user

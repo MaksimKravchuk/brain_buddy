@@ -72,6 +72,7 @@ DEPLOY_REQUIRED_SNIPPETS = (
     "BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS",
     "flyctl secrets set --stage",
     "delivery_canary=internal",
+    "external_agent_relay=internal",
     "--image --json",
     "capture_fly_release_image.py",
     "registry.fly.io/",
@@ -79,6 +80,13 @@ DEPLOY_REQUIRED_SNIPPETS = (
     "PREVIOUS_FRONTEND_IMAGE",
     "PREVIOUS_BACKEND_IMAGE",
     "workflow_run.head_sha",
+)
+
+# The authoritative production rollout: restaged on every deploy, so this exact
+# set — and nothing else — is what production runs with.
+STAGED_FEATURE_FLAGS = (
+    'BRAIN_BUDDY_FEATURE_FLAGS="delivery_canary=internal,'
+    'voice_brain_dump=on,external_agent_relay=internal"'
 )
 
 
@@ -326,6 +334,44 @@ class DeployContractTest(unittest.TestCase):
     def test_masked_rollback_is_rejected(self) -> None:
         text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
         mutated = _temp_workflow(text + "\n# sneaky\n#    flyctl deploy || true\n")
+        try:
+            self.assertEqual(validate_deploy_workflow(mutated), 1)
+        finally:
+            mutated.unlink()
+
+    def test_staged_feature_flag_rollout_is_exactly_the_authoritative_set(
+        self,
+    ) -> None:
+        """The staged value is authoritative — it is restaged on every deploy
+        and reverts any out-of-band `flyctl secrets set`. Pin the exact set so
+        a flag cannot be silently added, dropped, or widened here."""
+
+        text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn(STAGED_FEATURE_FLAGS, text)
+
+    def test_external_agent_relay_is_staged_internal_and_never_on(self) -> None:
+        """The relay ships to the internal cohort only; `on` would expose
+        bring-your-own-agent hand-off to every production user."""
+
+        text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("external_agent_relay=internal", text)
+        self.assertNotIn("external_agent_relay=on", text)
+
+    def test_missing_external_agent_relay_rollout_is_rejected(self) -> None:
+        mutated = _mutated_copy(DEPLOY_WORKFLOW, "external_agent_relay=internal")
+        try:
+            self.assertEqual(validate_deploy_workflow(mutated), 1)
+        finally:
+            mutated.unlink()
+
+    def test_external_agent_relay_staged_on_is_rejected(self) -> None:
+        """Widening the relay to everyone is a product decision, not a deploy
+        default; the validator must fail closed on it."""
+
+        text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+        mutated = _temp_workflow(
+            text.replace("external_agent_relay=internal", "external_agent_relay=on")
+        )
         try:
             self.assertEqual(validate_deploy_workflow(mutated), 1)
         finally:

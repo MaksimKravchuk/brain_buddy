@@ -29,6 +29,7 @@ import { Screen } from "@/components/Screen";
 import { Sheet } from "@/components/Sheet";
 import { TopBar } from "@/components/shell/TopBar";
 import { dueLabel } from "@/components/TaskRow";
+import { TaskAgentSection } from "@/features/agents/TaskAgentSection";
 import { ReopenSheet } from "@/features/tasks/ReopenSheet";
 import { StatePicker } from "@/features/tasks/StatePicker";
 import { useClassificationNames } from "@/features/tasks/useClassificationNames";
@@ -105,7 +106,7 @@ export default function TaskDetailScreen() {
   const transitionSubtask = useTransitionSubtask(id);
   const createComment = useCreateComment(id);
   const { projectName, tagNames } = useClassificationNames();
-  const { me } = useSession();
+  const { me, agentRelayEnabled } = useSession();
 
   const task = query.data;
 
@@ -384,6 +385,13 @@ export default function TaskDetailScreen() {
             </BBText>
           </Pressable>
         ) : null}
+
+        <TaskAgentSection
+          task={task}
+          projectName={project ?? null}
+          tagNames={taskTags}
+          enabled={agentRelayEnabled}
+        />
 
         {/* Subtasks */}
         <View style={styles.field}>
