@@ -6,7 +6,7 @@
  */
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -17,8 +17,21 @@ export interface BackendHandle {
 }
 
 const BACKEND_DIR = path.resolve(__dirname, "..", "..", "backend");
-const BACKEND_PYTHON =
-  process.env.BRAIN_BUDDY_BACKEND_PYTHON ?? path.join(BACKEND_DIR, ".venv", "bin", "python");
+
+export function resolveBackendPython(
+  backendDir: string,
+  override: string | undefined,
+  executableExists: (candidate: string) => boolean = existsSync,
+): string {
+  if (override) return override;
+  const virtualenvPython = path.join(backendDir, ".venv", "bin", "python");
+  return executableExists(virtualenvPython) ? virtualenvPython : "python3";
+}
+
+const BACKEND_PYTHON = resolveBackendPython(
+  BACKEND_DIR,
+  process.env.BRAIN_BUDDY_BACKEND_PYTHON,
+);
 
 export async function startBackend(port: number): Promise<BackendHandle> {
   const dataDir = mkdtempSync(path.join(tmpdir(), "bb-mobile-integration-"));
