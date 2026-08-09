@@ -439,6 +439,16 @@ class TestCommand:
             "unconfirmed"
         )
 
+    def test_a_non_success_response_leaves_the_command_unconfirmed(self) -> None:
+        """A connector rejection is not an acknowledgement of command delivery."""
+
+        connector, _ = build_connector(json_handler({"error": "rejected"}, 409))
+
+        outcome = connector.command(TARGET, envelope=self._envelope())
+
+        assert outcome.status == "unconfirmed"
+        assert outcome.error_code == "connector_http_409"
+
     def test_a_timeout_leaves_the_command_visibly_unconfirmed(self) -> None:
         """A command that times out is never claimed as delivered."""
 

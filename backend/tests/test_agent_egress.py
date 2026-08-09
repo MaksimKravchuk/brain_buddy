@@ -170,6 +170,31 @@ def test_private_network_opt_in_also_permits_plaintext_for_local_development() -
 
     assert resolved.port == 8099
     assert resolved.addresses == ("127.0.0.1",)
+    assert resolved.host_header == "localhost:8099"
+
+
+def test_empty_dns_answer_is_refused_as_unresolvable() -> None:
+    """An empty resolver answer cannot produce an unpinned network request."""
+
+    with pytest.raises(DestinationRejected) as excinfo:
+        validate_destination(
+            "https://empty.example.com/hooks",
+            resolver=_resolver({"empty.example.com": []}),
+        )
+
+    assert excinfo.value.code == "destination_unresolvable"
+
+
+def test_non_ip_dns_answer_is_refused_as_unresolvable() -> None:
+    """Every pinned resolver result must itself be a valid IP address."""
+
+    with pytest.raises(DestinationRejected) as excinfo:
+        validate_destination(
+            "https://invalid.example.com/hooks",
+            resolver=_resolver({"invalid.example.com": ["not-an-ip"]}),
+        )
+
+    assert excinfo.value.code == "destination_unresolvable"
 
 
 def test_default_port_is_derived_from_the_scheme() -> None:

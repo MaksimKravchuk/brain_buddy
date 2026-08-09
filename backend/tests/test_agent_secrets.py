@@ -9,6 +9,7 @@ production posture when no key material is configured.
 from __future__ import annotations
 
 import base64
+from collections import OrderedDict
 
 import pytest
 
@@ -16,6 +17,7 @@ from app.core.config import AppEnvironment
 from app.modules.agents.secrets import (
     AAD_INBOUND_SIGNING_SECRET,
     AAD_OUTBOUND_CREDENTIAL,
+    SealedSecret,
     SecretBox,
     SecretDecryptionFailed,
     SecretsUnavailable,
@@ -237,6 +239,46 @@ def test_malformed_key_configuration_is_refused(raw: str) -> None:
 
     with pytest.raises(SecretsUnavailable):
         parse_secret_keys(raw)
+
+
+def test_blank_entries_around_a_valid_key_are_ignored() -> None:
+    """Operator-friendly separators do not create phantom key declarations."""
+
+    keys = parse_secret_keys(f", v1:{KEY_V1},")
+
+    assert list(keys) == ["v1"]
+
+
+def test_an_all_blank_key_list_is_refused() -> None:
+    """A non-empty string of separators still contains no usable key material."""
+
+    with pytest.raises(SecretsUnavailable):
+        parse_secret_keys(", ,")
+
+
+def test_secret_box_refuses_an_empty_parsed_key_set() -> None:
+    """Direct construction cannot bypass the key configuration fail-closed rule."""
+
+    with pytest.raises(SecretsUnavailable):
+        SecretBox(OrderedDict())
+
+
+def test_malformed_fingerprint_never_matches(box: SecretBox) -> None:
+    """A stored digest without a live key identifier cannot validate a guess."""
+
+    assert box.fingerprint_matches("not-a-keyed-fingerprint", "message") is False
+
+
+def test_truncated_sealed_secret_is_refused(box: SecretBox) -> None:
+    """A nonce without authenticated ciphertext is never passed to AES-GCM."""
+
+    truncated = SealedSecret(
+        key_id=box.active_key_id,
+        ciphertext=base64.b64encode(b"x" * 12).decode(),
+    )
+
+    with pytest.raises(SecretDecryptionFailed, match="truncated"):
+        box.open(truncated, aad="conn_1")
 
 
 def test_production_without_configured_keys_fails_closed() -> None:
