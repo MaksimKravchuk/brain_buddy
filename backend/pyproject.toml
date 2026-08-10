@@ -124,7 +124,17 @@ testpaths = ["tests"]
 
 [tool.mutmut]
 source_paths = ["app"]
+# This is the OBSERVED scope (ADR-0011): everything the nightly report-only
+# campaign mutates. The ENFORCED scope that gates pull requests is narrower and
+# is configured with the gate itself; a module graduates from the first list to
+# the second only after clearing ADR-0004's 95% bar on its own.
+#
+# The task repository and auth service are here under calibration. Their
+# measured score at the time of admission was 68.3% (879 mutants, 279
+# survivors), so they are deliberately not gating anything yet.
 only_mutate = [
+  "app/modules/tasks/repository.py",
+  "app/services/auth_service.py",
   "app/services/tree_service.py",
   "app/services/version_service.py",
   "app/services/relation_service.py",
@@ -133,6 +143,11 @@ only_mutate = [
   "app/repositories/index.py",
 ]
 pytest_add_cli_args_test_selection = [
+  # Task module and auth: non-ASGI only. The HTTP-level suites cover the same
+  # behaviour but cannot run under mutmut's stack-statistics instrumentation.
+  "tests/test_task_owner_isolation.py",
+  "tests/test_task_branch_coverage.py",
+  "tests/test_auth_service.py",
   "tests/test_tree_service.py",
   "tests/test_relation_service.py",
   "tests/test_version_service.py",
