@@ -23,7 +23,7 @@ const account: AccountResponse = {
   purge_at: null
 };
 
-function LoginProbe(): JSX.Element {
+function LoginProbe(): React.JSX.Element {
   const location = useLocation();
   const state = location.state as { deletionScheduled?: string } | null;
   return <div>login page {state?.deletionScheduled ?? ""}</div>;

@@ -5,7 +5,7 @@ import { setUnauthorizedHandler } from "./api/client";
 import { AppRoutes } from "./app/AppRoutes";
 import { useAuthStore } from "./stores/authStore";
 
-export default function App(): JSX.Element {
+export default function App(): React.JSX.Element {
   const hydrate = useAuthStore((state) => state.hydrate);
   const clearSession = useAuthStore((state) => state.clearSession);
 
