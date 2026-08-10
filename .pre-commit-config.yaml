@@ -1,3 +1,9 @@
+# Hooks are lint and typecheck only, on every stack. Coverage floors, the
+# mutation campaign and the e2e suite stay in CI: a commit hook that takes
+# minutes gets bypassed with --no-verify, and a gate people routinely bypass is
+# not a gate.
+#
+# Install once per clone: `pre-commit install`.
 repos:
   - repo: https://github.com/psf/black
     rev: 24.4.2
@@ -21,3 +27,48 @@ repos:
     hooks:
       - id: mypy
         additional_dependencies: ["fastapi", "pydantic"]
+
+  # The TypeScript stacks run through `language: system` rather than
+  # pre-commit's node environment: the node hooks would install a second,
+  # isolated copy of each toolchain, while the versions that matter are the ones
+  # already pinned in each package-lock.json -- the same ones CI resolves.
+  #
+  # `pass_filenames: false` because both tools are configured project-wide; the
+  # `files` pattern decides whether the hook runs at all, and then the tool
+  # applies its own config to the whole workspace.
+  - repo: local
+    hooks:
+      - id: backend-import-contracts
+        name: backend import contracts
+        entry: bash -c 'cd backend && lint-imports'
+        language: system
+        files: ^backend/.*\.py$
+        pass_filenames: false
+
+      - id: frontend-eslint
+        name: frontend eslint
+        entry: bash -c 'cd frontend && npm run lint'
+        language: system
+        files: ^frontend/.*\.(ts|tsx|js|jsx)$
+        pass_filenames: false
+
+      - id: frontend-typecheck
+        name: frontend tsc --noEmit
+        entry: bash -c 'cd frontend && npm run typecheck'
+        language: system
+        files: ^frontend/.*\.(ts|tsx)$
+        pass_filenames: false
+
+      - id: mobile-eslint
+        name: mobile eslint
+        entry: bash -c 'cd mobile && npm run lint'
+        language: system
+        files: ^mobile/.*\.(ts|tsx|js|jsx)$
+        pass_filenames: false
+
+      - id: mobile-typecheck
+        name: mobile tsc --noEmit
+        entry: bash -c 'cd mobile && npm run typecheck'
+        language: system
+        files: ^mobile/.*\.(ts|tsx)$
+        pass_filenames: false
