@@ -79,9 +79,16 @@ jobs:
       backend: ${{ steps.decide.outputs.backend }}
       frontend: ${{ steps.decide.outputs.frontend }}
       mobile: ${{ steps.decide.outputs.mobile }}
+      floor-backend: ${{ steps.decide.outputs.floor-backend }}
+      floor-frontend: ${{ steps.decide.outputs.floor-frontend }}
+      floor-mobile: ${{ steps.decide.outputs.floor-mobile }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Full history: the floor comparison below needs a merge base, and
+          # this is the one job that pays for it on behalf of the others.
+          fetch-depth: 0
 
       # Computed with plain git rather than a paths-filter action. Such actions
       # read the changed-file list from the pull-requests API, which this
@@ -127,6 +134,22 @@ jobs:
           else
             echo "landing path; exercising every stack regardless of the diff"
           fi
+
+          # Did this branch itself edit a coverage floor? Three-dot, so the
+          # answer is about what the BRANCH changed since it diverged, not what
+          # the base branch has done meanwhile. A branch that merely fell behind
+          # a raised floor must not be accused of lowering it.
+          for stack in backend frontend mobile; do
+            touched=false
+            if [ "${{ github.event_name }}" = "pull_request" ] &&
+               git diff --name-only \
+                 '${{ github.event.pull_request.base.sha }}...HEAD' \
+                 -- "${stack}/coverage-floor.json" 2>/dev/null | grep -q .; then
+              touched=true
+            fi
+            echo "floor-${stack}=${touched}" >> "$GITHUB_OUTPUT"
+            echo "floor-${stack}=${touched}"
+          done
 
           {
             echo "backend=${backend}"
@@ -225,12 +248,20 @@ jobs:
         if: env.RUN == 'true'
         working-directory: .
         run: |
-          # The floor may only ratchet upward, so a pull request is also checked
-          # against the floor recorded on its base branch.
+          # The floor may only ratchet upward, so a branch that EDITS the floor
+          # is also checked against the base branch's copy. The `changes` job
+          # decided whether this branch edited it, using a three-dot diff.
+          #
+          # A branch that did not touch the floor is exempt, and that exemption
+          # is load-bearing: without it, a branch that merely fell behind a
+          # raised floor would fail a check it never provoked, with a message
+          # accusing it of lowering the bar. Whatever the base raised the floor
+          # to simply wins at merge.
           base_args=()
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}" || true
-            if git show "${{ github.event.pull_request.base.sha }}:backend/coverage-floor.json" \
+          if [ "${{ needs.changes.outputs.floor-backend }}" = "true" ]; then
+            base='${{ github.event.pull_request.base.sha }}'
+            git fetch --no-tags --depth=1 origin "${base}" 2>/dev/null || true
+            if git show "${base}:backend/coverage-floor.json" \
                  > /tmp/base-backend-floor.json 2>/dev/null; then
               base_args=(--base-floor "/tmp/base-backend-floor.json")
             fi
@@ -314,12 +345,20 @@ jobs:
         if: env.RUN == 'true'
         working-directory: .
         run: |
-          # The floor may only ratchet upward, so a pull request is also checked
-          # against the floor recorded on its base branch.
+          # The floor may only ratchet upward, so a branch that EDITS the floor
+          # is also checked against the base branch's copy. The `changes` job
+          # decided whether this branch edited it, using a three-dot diff.
+          #
+          # A branch that did not touch the floor is exempt, and that exemption
+          # is load-bearing: without it, a branch that merely fell behind a
+          # raised floor would fail a check it never provoked, with a message
+          # accusing it of lowering the bar. Whatever the base raised the floor
+          # to simply wins at merge.
           base_args=()
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}" || true
-            if git show "${{ github.event.pull_request.base.sha }}:frontend/coverage-floor.json" \
+          if [ "${{ needs.changes.outputs.floor-frontend }}" = "true" ]; then
+            base='${{ github.event.pull_request.base.sha }}'
+            git fetch --no-tags --depth=1 origin "${base}" 2>/dev/null || true
+            if git show "${base}:frontend/coverage-floor.json" \
                  > /tmp/base-frontend-floor.json 2>/dev/null; then
               base_args=(--base-floor "/tmp/base-frontend-floor.json")
             fi
@@ -411,12 +450,20 @@ jobs:
         if: env.RUN == 'true'
         working-directory: .
         run: |
-          # The floor may only ratchet upward, so a pull request is also checked
-          # against the floor recorded on its base branch.
+          # The floor may only ratchet upward, so a branch that EDITS the floor
+          # is also checked against the base branch's copy. The `changes` job
+          # decided whether this branch edited it, using a three-dot diff.
+          #
+          # A branch that did not touch the floor is exempt, and that exemption
+          # is load-bearing: without it, a branch that merely fell behind a
+          # raised floor would fail a check it never provoked, with a message
+          # accusing it of lowering the bar. Whatever the base raised the floor
+          # to simply wins at merge.
           base_args=()
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}" || true
-            if git show "${{ github.event.pull_request.base.sha }}:mobile/coverage-floor.json" \
+          if [ "${{ needs.changes.outputs.floor-mobile }}" = "true" ]; then
+            base='${{ github.event.pull_request.base.sha }}'
+            git fetch --no-tags --depth=1 origin "${base}" 2>/dev/null || true
+            if git show "${base}:mobile/coverage-floor.json" \
                  > /tmp/base-mobile-floor.json 2>/dev/null; then
               base_args=(--base-floor "/tmp/base-mobile-floor.json")
             fi
