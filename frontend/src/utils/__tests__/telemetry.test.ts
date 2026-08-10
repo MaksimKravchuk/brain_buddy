@@ -32,4 +32,25 @@ describe("telemetry edge cases", () => {
     vi.unstubAllGlobals();
     expect(typeof nowMs()).toBe("number");
   });
+
+  it("prefers the high-resolution clock when the host provides one", () => {
+    const now = vi.fn(() => 1234.5);
+    vi.stubGlobal("performance", { now });
+
+    // A wall-clock fallback would return a millisecond timestamp, not this.
+    expect(nowMs()).toBe(1234.5);
+    expect(now).toHaveBeenCalledTimes(1);
+
+    vi.unstubAllGlobals();
+  });
+
+  it("falls back when performance exists but carries no now(), rather than throwing", () => {
+    vi.stubGlobal("performance", {});
+    const dateSpy = vi.spyOn(Date, "now").mockReturnValue(7);
+
+    expect(nowMs()).toBe(7);
+
+    vi.unstubAllGlobals();
+    dateSpy.mockRestore();
+  });
 });

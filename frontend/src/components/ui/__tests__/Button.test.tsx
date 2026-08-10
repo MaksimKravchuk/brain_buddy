@@ -98,4 +98,12 @@ describe("Button", () => {
     const button = screen.getByRole("button", { name: "Close" });
     expect(button.className).toMatch(/h-\d|w-\d/);
   });
+
+  it("renders an icon-only button without an empty label slot", () => {
+    render(<Button aria-label="Refresh" leftIcon={<svg data-testid="only-icon" />} />);
+
+    const button = screen.getByRole("button", { name: "Refresh" });
+    expect(screen.getByTestId("only-icon")).toBeInTheDocument();
+    expect(button.querySelectorAll("span")).toHaveLength(1);
+  });
 });

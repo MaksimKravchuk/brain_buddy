@@ -8,7 +8,7 @@ import { AuthLayout } from "./LoginPage";
 
 const PASSWORD_MIN_LENGTH = 12;
 
-export default function SignupPage(): JSX.Element {
+export default function SignupPage(): React.JSX.Element {
   const status = useAuthStore((state) => state.status);
   const signup = useAuthStore((state) => state.signup);
   const navigate = useNavigate();

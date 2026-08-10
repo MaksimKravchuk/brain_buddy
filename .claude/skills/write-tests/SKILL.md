@@ -255,6 +255,54 @@ exported function, `it` names stating the behaviour, and assertions on exact
 strings rather than `toContain`. Playwright e2e lives in `frontend/tests/` and
 must import `{ expect, test }` from `./allure.fixtures`.
 
+**There is no coverage escape hatch.** `validate_ci_artifacts.py
+coverage-suppressions` rejects `istanbul ignore file` and every range form in
+`frontend/src` and `mobile/src`, and requires a written justification on a
+narrow `ignore next`. Four modules once carried a file-level pragma: 2,385 lines
+went unmeasured while the floor read green, because an excluded file is not
+reported as uncovered — it is not reported at all.
+
+### Frontend mutation testing
+
+ADR-0013 gives the frontend the same two tiers as the backend. Stryker replaces
+mutmut; everything else about the discipline is identical.
+
+```bash
+cd frontend && npm run test:mutation                          # observed scope
+cd frontend && npx stryker run --mutate 'src/utils/error.ts'  # one module
+```
+
+- **Observed** — `mutate` in `frontend/stryker.config.json`: the deterministic
+  modules (`api/client.ts`, `api/account.ts`, `api/auth.ts`, `api/taskHooks.ts`,
+  `features/tasks/smartAdd.ts`, `features/brain-dump/brainDumpNavigation.ts`,
+  `stores/authStore.ts`, `utils/error.ts`, `utils/telemetry.ts`). The nightly
+  `mutation-quality.yml` runs it report-only.
+- **Enforced** — `frontend/mutation-enforced-scope.txt`. Same graduation rule:
+  95% on its own across two consecutive successful scheduled runs.
+
+React component trees are in neither tier. A mutant inside a component is as
+likely to be caught by a snapshot as by an assertion, so the score would measure
+the rendering, not the tests.
+
+`npm run test:mutation` runs the suite thousands of times, so Allure evidence is
+switched off for those runs — `vite.config.ts` keys that off
+`STRYKER_MUTATOR_WORKER`, mirroring ADR-0004's rule that a mutant run is not a
+product test. Read the survivors with the report Stryker writes to
+`frontend/mutation-artifacts/mutation-report.json`:
+
+```bash
+python3 scripts/mutation_gate.py summarize-stryker \
+  --report frontend/mutation-artifacts/mutation-report.json \
+  --summary-out /tmp/summary.txt --survivors-out /tmp/survivors.txt
+```
+
+The same two remedies apply as on the backend: kill the survivor with a focused
+test, or establish that it is equivalent. A third one shows up more often in
+TypeScript than in Python — **delete the mutant's home**. An unreachable default
+parameter, a defensive `?? ""` behind a value that cannot be null, a guard no
+caller can trigger: each produces a mutant no test can ever kill, and removing it
+is a simplification the type system was already asking for.
+
 ## Mobile Jest
 
 `mobile/jest.config.js` uses the `jest-expo` preset, matches

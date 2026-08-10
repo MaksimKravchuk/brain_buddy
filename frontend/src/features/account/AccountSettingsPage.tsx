@@ -31,7 +31,7 @@ function useAccountSync() {
   };
 }
 
-export function AccountSettingsPage(): JSX.Element {
+export function AccountSettingsPage(): React.JSX.Element {
   const countsQuery = useTaskList({ state: "next", limit: 1 });
   const projectsQuery = useProjects();
   const tagsQuery = useTags();
@@ -70,7 +70,7 @@ function SectionCard({
   description: string;
   children: ReactNode;
   tone?: "default" | "danger";
-}): JSX.Element {
+}): React.JSX.Element {
   const border = tone === "danger" ? "border-rose-200" : "border-slate-200";
   return (
     <section className={`rounded-2xl border ${border} bg-white p-5 shadow-soft`}>
@@ -95,7 +95,7 @@ function Field({
   onChange: (value: string) => void;
   autoComplete?: string;
   name: string;
-}): JSX.Element {
+}): React.JSX.Element {
   return (
     <label className="flex flex-col gap-1 text-sm">
       <span className="font-medium text-slate-700">{label}</span>
@@ -117,7 +117,7 @@ function Feedback({
 }: {
   error: string | null;
   success: string | null;
-}): JSX.Element | null {
+}): React.JSX.Element | null {
   if (error) {
     return (
       <p role="alert" className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
@@ -135,7 +135,7 @@ function Feedback({
   return null;
 }
 
-function ProfileSection(): JSX.Element {
+function ProfileSection(): React.JSX.Element {
   const account = useAccountQuery();
   const syncAccount = useAccountSync();
   const [draft, setDraft] = useState<string | null>(null);
@@ -188,7 +188,7 @@ function ProfileSection(): JSX.Element {
   );
 }
 
-function EmailSection(): JSX.Element {
+function EmailSection(): React.JSX.Element {
   const account = useAccountQuery();
   const syncAccount = useAccountSync();
   const [newEmail, setNewEmail] = useState("");
@@ -249,7 +249,7 @@ function EmailSection(): JSX.Element {
   );
 }
 
-function PasswordSection(): JSX.Element {
+function PasswordSection(): React.JSX.Element {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -322,7 +322,7 @@ function PasswordSection(): JSX.Element {
   );
 }
 
-function DataSection(): JSX.Element {
+function DataSection(): React.JSX.Element {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -358,7 +358,7 @@ function DataSection(): JSX.Element {
   );
 }
 
-function DangerZone(): JSX.Element {
+function DangerZone(): React.JSX.Element {
   const [dialogOpen, setDialogOpen] = useState(false);
 
   return (
@@ -375,7 +375,7 @@ function DangerZone(): JSX.Element {
   );
 }
 
-function DeleteAccountDialog({ onClose }: { onClose: () => void }): JSX.Element {
+function DeleteAccountDialog({ onClose }: { onClose: () => void }): React.JSX.Element {
   const navigate = useNavigate();
   const clearSession = useAuthStore((state) => state.clearSession);
   const scheduleDeletionNotice = useAuthStore((state) => state.scheduleDeletionNotice);

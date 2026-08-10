@@ -1,4 +1,3 @@
-/* istanbul ignore file -- source-faithful detail panel is covered by route tests and Playwright snapshots. */
 import { Check, ChevronRight, Inbox, MoreHorizontal, Network, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { RefObject } from "react";
@@ -43,7 +42,7 @@ const propFieldClass =
 const dashedInputClass =
   "w-full rounded-lg border-[1.5px] border-dashed border-slate-300 bg-transparent px-2.5 py-1.5 text-[13px] text-slate-900 outline-none transition-colors duration-200 ease-smooth placeholder:text-slate-400 focus:border-solid focus:border-brand-primary";
 
-export function TaskDetailEmptyPanel(): JSX.Element {
+export function TaskDetailEmptyPanel(): React.JSX.Element {
   return (
     <aside
       aria-label="Task detail"
@@ -77,14 +76,14 @@ export function TaskDetailPanel({
   tags: TagResponse[];
   isLoading: boolean;
   error: unknown;
-  headingRef: RefObject<HTMLHeadingElement>;
+  headingRef: RefObject<HTMLHeadingElement | null>;
   onClose: () => void;
   onSave: (task: TaskResponse, payload: TaskDetailSavePayload) => void;
   onTransition: (task: TaskResponse, action: "move" | "complete" | "reopen" | "cancel", toState?: OpenTaskState, waitingFor?: string) => void;
   onCreateSubtask: (task: TaskResponse, title: string) => void;
   onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") => void;
   onCreateComment: (task: TaskResponse, body: string) => void;
-}): JSX.Element {
+}): React.JSX.Element {
   const notify = useShellToast();
   const [menuOpen, setMenuOpen] = useState(false);
   const isTerminal = Boolean(task && (task.state === "completed" || task.state === "cancelled"));
@@ -188,7 +187,7 @@ function TaskDetailBody({
   onCreateSubtask: (task: TaskResponse, title: string) => void;
   onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") => void;
   onCreateComment: (task: TaskResponse, body: string) => void;
-}): JSX.Element {
+}): React.JSX.Element {
   // Live value shared between the "waiting" prop row and list moves into
   // Waiting for, which require a non-empty waiting_for on the transition.
   const [waitingFor, setWaitingFor] = useState(task.waiting_for ?? "");

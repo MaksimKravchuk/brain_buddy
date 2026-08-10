@@ -19,7 +19,7 @@ import { BrainDumpRoute } from "./BrainDumpRoute";
 // screen for any existing operation the URL references — the only operation
 // reference the client recovers across reloads. Only when there is no such
 // operation do we fall back to the friendly "off" notice.
-export function BrainDumpGate(): JSX.Element {
+export function BrainDumpGate(): React.JSX.Element {
   const user = useAuthStore((state) => state.user);
   const params = useParams();
   const closeOverlay = useCloseBrainDump();

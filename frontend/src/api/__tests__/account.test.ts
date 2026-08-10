@@ -39,7 +39,7 @@ describe("downloadAccountExport", () => {
 
   it("downloads the archive and resolves with the served filename", async () => {
     fetchMock.mockResolvedValue(
-      new Response(new Blob(["zip-bytes"]), {
+      new Response("zip-bytes", {
         status: 200,
         headers: {
           "Content-Type": "application/zip",
@@ -86,5 +86,13 @@ describe("downloadAccountExport", () => {
     expect(failure).toBeInstanceOf(ApiError);
     expect(failure.status).toBe(502);
     expect(failure.payload).toBeNull();
+  });
+
+  it("names the failure itself when the response carries no status text", async () => {
+    fetchMock.mockResolvedValue(new Response("", { status: 500, statusText: "" }));
+
+    const failure = await downloadAccountExport().catch((error) => error);
+    expect(failure).toBeInstanceOf(ApiError);
+    expect(failure.message).toBe("Export failed");
   });
 });

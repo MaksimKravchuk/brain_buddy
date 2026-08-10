@@ -1,11 +1,19 @@
 name: Mutation quality (report-only)
 
-# Scope is intentionally limited to the deterministic core configured in
+# Backend scope is intentionally limited to the deterministic core configured in
 # backend/pyproject.toml: app/services/tree_service.py,
 # app/services/version_service.py, app/services/relation_service.py,
 # app/repositories/tree.py, app/repositories/version.py, and
 # app/repositories/index.py.
 # LLM/provider, async, and other I/O boundaries are not part of this campaign.
+#
+# Frontend scope is the deterministic observed tier configured in
+# frontend/stryker.config.json: src/api/client.ts, src/api/account.ts,
+# src/api/auth.ts, src/api/taskHooks.ts, src/features/tasks/smartAdd.ts,
+# src/features/brain-dump/brainDumpNavigation.ts, src/stores/authStore.ts,
+# src/utils/error.ts and src/utils/telemetry.ts (ADR-0013). React component
+# trees are outside it: a mutant there is as likely to be caught by a snapshot
+# as by an assertion, which says nothing about the tests.
 
 on:
   schedule:
@@ -25,10 +33,10 @@ jobs:
         working-directory: backend
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -77,7 +85,7 @@ jobs:
 
       - name: Upload raw mutmut state
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-raw-results
           path: backend/mutants
@@ -86,7 +94,7 @@ jobs:
 
       - name: Upload mutation summary and survivors
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-summary-and-survivors
           path: backend/mutation-artifacts
@@ -95,7 +103,7 @@ jobs:
 
       - name: Upload report-only Allure evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-evidence-allure-results
           path: backend/mutation-allure-results
@@ -108,6 +116,94 @@ jobs:
           echo "mutmut could not finish; raw evidence was uploaded for diagnosis." >&2
           exit 1
 
+  frontend-observed-mutation:
+    name: Frontend observed-scope mutation evidence
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20.19.0"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run frontend observed-scope mutation campaign
+        id: mutation
+        continue-on-error: true
+        run: |
+          rm -rf mutation-artifacts .stryker-tmp reports
+          npx stryker run
+
+      # Rendered from the same report the gate reads, so the evidence a human
+      # looks at and the number a pull request would be judged on cannot drift.
+      - name: Summarize observed and enforced scopes
+        if: always()
+        working-directory: .
+        run: |
+          mkdir -p frontend/mutation-artifacts frontend/mutation-allure-results
+          python3 scripts/mutation_gate.py summarize-stryker \
+            --report frontend/mutation-artifacts/mutation-report.json \
+            --summary-out frontend/mutation-allure-results/mutation-summary.txt \
+            --survivors-out frontend/mutation-allure-results/mutation-survivors.txt
+          python3 scripts/mutation_gate.py summarize-stryker \
+            --report frontend/mutation-artifacts/mutation-report.json \
+            --enforced frontend/mutation-enforced-scope.txt \
+            --summary-out frontend/mutation-artifacts/enforced-summary.txt \
+            --survivors-out frontend/mutation-artifacts/enforced-survivors.txt
+          {
+            echo "### Frontend mutation campaign (report-only)"
+            echo '```'
+            cat frontend/mutation-allure-results/mutation-summary.txt
+            echo
+            echo "Enforced tier (not yet gating):"
+            cat frontend/mutation-artifacts/enforced-summary.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create report-only Allure evidence
+        if: always()
+        working-directory: .
+        run: |
+          python3 scripts/create_mutation_allure_evidence.py \
+            --summary frontend/mutation-allure-results/mutation-summary.txt \
+            --survivors frontend/mutation-allure-results/mutation-survivors.txt \
+            --scope-label frontend \
+            --output frontend/mutation-allure-results/mutation-evidence-result.json
+
+      - name: Upload frontend mutation report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-mutation-report
+          path: frontend/mutation-artifacts
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload frontend report-only Allure evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-mutation-evidence-allure-results
+          path: frontend/mutation-allure-results
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Fail on mutation runner infrastructure errors
+        if: steps.mutation.outcome == 'failure'
+        run: |
+          echo "Stryker could not finish; raw evidence was uploaded for diagnosis." >&2
+          exit 1
+
   mutation-allure-report:
     name: Mutation Allure evidence report
     runs-on: ubuntu-latest
@@ -115,16 +211,16 @@ jobs:
     if: always()
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download report-only Allure evidence
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: mutation-evidence-allure-results
           path: mutation-allure-results
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "18"
           cache: npm
@@ -140,7 +236,7 @@ jobs:
           npx allure generate ../mutation-allure-results -o ../mutation-allure-report
 
       - name: Upload Allure evidence report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-allure-report-html
           path: mutation-allure-report

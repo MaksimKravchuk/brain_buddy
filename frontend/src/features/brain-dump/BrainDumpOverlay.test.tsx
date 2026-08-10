@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import { BrainDumpOverlay, BrainDumpOverlayHeader } from "./BrainDumpOverlay";
@@ -173,7 +173,15 @@ function CloseTrigger() {
 
 function RouteProbe() {
   const location = useLocation();
-  return <output aria-label="current route">{location.pathname}</output>;
+  const navigate = useNavigate();
+  return (
+    <>
+      <output aria-label="current route">{location.pathname}</output>
+      <button type="button" onClick={() => navigate(-1)}>
+        go back
+      </button>
+    </>
+  );
 }
 
 function renderCloseHarness(entries: Parameters<typeof MemoryRouter>[0]["initialEntries"], initialIndex: number) {
@@ -211,5 +219,17 @@ describe("useCloseBrainDump", () => {
     await user.click(screen.getByRole("button", { name: "close overlay" }));
 
     expect(screen.getByLabelText("current route")).toHaveTextContent("/tasks/next");
+  });
+
+  it("replaces the deep-linked overlay in history rather than stacking on top of it", async () => {
+    const user = userEvent.setup();
+    renderCloseHarness([{ pathname: "/brain-dump/new" }], 0);
+
+    await user.click(screen.getByRole("button", { name: "close overlay" }));
+    await user.click(screen.getByRole("button", { name: "go back" }));
+
+    // Back must not resurrect the panel the user just dismissed.
+    expect(screen.getByLabelText("current route")).toHaveTextContent("/tasks/next");
+    expect(screen.queryByRole("button", { name: "close overlay" })).not.toBeInTheDocument();
   });
 });

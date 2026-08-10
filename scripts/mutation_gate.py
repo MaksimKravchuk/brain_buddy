@@ -3,7 +3,8 @@
 
 ADR-0004 specified this gate and its calibration precondition; ADR-0011 split
 scope into an observed tier (what the nightly campaign measures) and an enforced
-tier (what may block a pull request). This script implements the enforced tier.
+tier (what may block a pull request). ADR-0013 extends both tiers to the
+frontend. This script implements the enforced tier for either stack.
 
 It runs only over the intersection of the enforced scope and the files a pull
 request actually changed, so a change that touches none of them costs nothing,
@@ -16,6 +17,12 @@ that silently mutates nothing reports a perfect score, which is exactly how a
 gate comes to mean nothing. The base comparison matters for the opposite
 reason: an absolute floor alone lets a module sitting at 99% shed four points
 of assertion strength without anyone noticing.
+
+The backend campaign runs mutmut and reports CI/CD stats; the frontend campaign
+runs Stryker and reports a mutation-report.json holding per-file mutants. Both
+reduce to the same question -- of the mutants that got a verdict, what fraction
+died -- so ``check`` reads mutmut stats and ``check-stryker`` reads a Stryker
+report, and both apply the identical threshold.
 """
 
 from __future__ import annotations
@@ -66,21 +73,22 @@ def mutation_score(stats: dict[str, object]) -> tuple[int, int, float]:
     return killed, checked, killed / checked
 
 
-def validate_stats(
-    stats: dict[str, object],
+def validate_score(
+    killed: int,
+    checked: int,
+    score: float,
     *,
     threshold: float = DEFAULT_THRESHOLD,
-    base_stats: dict[str, object] | None = None,
+    base: tuple[int, int, float] | None = None,
 ) -> None:
-    """Raise when the campaign checked nothing, scored below ``threshold``, or
-    scored below the base revision measured over the same scope.
+    """Raise when nothing was checked, the score is below ``threshold``, or the
+    score is below ``base`` -- the same measurement taken at the base revision.
 
-    ``base_stats`` that checked no mutants means the base revision had nothing
+    A ``base`` that checked no mutants means the base revision had nothing
     comparable to measure -- a scoped file it does not contain, most obviously
     -- so the comparison is skipped rather than treated as a score of zero.
     """
 
-    killed, checked, score = mutation_score(stats)
     if checked == 0:
         raise ValueError(
             "mutation gate checked no mutants; a campaign that mutates nothing "
@@ -91,8 +99,8 @@ def validate_stats(
             f"mutation score {score:.2%} ({killed}/{checked} killed) is below "
             f"the required {threshold:.2%}."
         )
-    if base_stats is not None:
-        base_killed, base_checked, base_score = mutation_score(base_stats)
+    if base is not None:
+        base_killed, base_checked, base_score = base
         if base_checked and score < base_score:
             raise ValueError(
                 f"mutation score {score:.2%} ({killed}/{checked} killed) is below "
@@ -100,6 +108,131 @@ def validate_stats(
                 f"({base_killed}/{base_checked} killed) over the same scope; "
                 "the enforced scope may not regress."
             )
+
+
+def validate_stats(
+    stats: dict[str, object],
+    *,
+    threshold: float = DEFAULT_THRESHOLD,
+    base_stats: dict[str, object] | None = None,
+) -> None:
+    """Raise when the campaign checked nothing, scored below ``threshold``, or
+    regressed against the base revision."""
+
+    validate_score(
+        *mutation_score(stats),
+        threshold=threshold,
+        base=mutation_score(base_stats) if base_stats is not None else None,
+    )
+
+
+def validate_stryker(
+    report: dict[str, object],
+    scope: list[str] | None = None,
+    *,
+    threshold: float = DEFAULT_THRESHOLD,
+) -> None:
+    """Raise when a Stryker report misses ``threshold`` over ``scope``."""
+
+    validate_score(*stryker_score(report, scope), threshold=threshold)
+
+
+#: Stryker statuses that constitute a verdict about the tests. ``Killed`` and
+#: ``Timeout`` mean the tests noticed; ``Survived`` and ``NoCoverage`` mean they
+#: did not. ``CompileError``, ``Ignored`` and ``RuntimeError`` say nothing about
+#: assertion strength, so they are left out of the denominator entirely --
+#: except that ``NoCoverage`` is counted as a survivor, because a mutant no test
+#: even reaches is the strongest possible statement that nothing would notice.
+STRYKER_KILLED = ("Killed", "Timeout")
+STRYKER_SURVIVED = ("Survived", "NoCoverage")
+
+
+def stryker_score(
+    report: dict[str, object], scope: list[str] | None = None
+) -> tuple[int, int, float]:
+    """Return (killed, checked, score) from a Stryker mutation report.
+
+    ``scope`` restricts the count to those repository-relative file keys; an
+    empty intersection is reported as zero checked mutants rather than as a
+    perfect score, which ``validate_stats`` then rejects.
+    """
+
+    files = report.get("files")
+    if not isinstance(files, dict):
+        raise ValueError("Stryker report has no 'files' object")
+
+    selected = files if scope is None else {path: files[path] for path in scope if path in files}
+    if scope is not None:
+        missing = [path for path in scope if path not in files]
+        if missing:
+            raise ValueError(
+                "Stryker report is missing enforced-scope file(s): " + ", ".join(missing)
+            )
+
+    killed = 0
+    survived = 0
+    for entry in selected.values():
+        mutants = entry.get("mutants", []) if isinstance(entry, dict) else []
+        for mutant in mutants:
+            status = mutant.get("status") if isinstance(mutant, dict) else None
+            if status in STRYKER_KILLED:
+                killed += 1
+            elif status in STRYKER_SURVIVED:
+                survived += 1
+
+    checked = killed + survived
+    if checked == 0:
+        return killed, 0, 0.0
+    return killed, checked, killed / checked
+
+
+def stryker_summary(report: dict[str, object], scope: list[str] | None = None) -> str:
+    """Render the per-file and overall score of a Stryker report as text."""
+
+    files = report.get("files")
+    if not isinstance(files, dict):
+        raise ValueError("Stryker report has no 'files' object")
+
+    lines = []
+    for path in sorted(files):
+        if scope is not None and path not in scope:
+            continue
+        killed, checked, score = stryker_score(report, [path])
+        lines.append(f"{path}: {score:.2%} ({killed}/{checked} killed)")
+
+    killed, checked, score = stryker_score(report, scope)
+    tier = "enforced scope" if scope is not None else "observed scope"
+    lines.append(f"TOTAL ({tier}): {score:.2%} ({killed}/{checked} killed)")
+    return "\n".join(lines) + "\n"
+
+
+def stryker_survivors(report: dict[str, object], scope: list[str] | None = None) -> str:
+    """Render every surviving mutant as one reviewable line."""
+
+    files = report.get("files")
+    if not isinstance(files, dict):
+        raise ValueError("Stryker report has no 'files' object")
+
+    lines: list[str] = []
+    for path in sorted(files):
+        if scope is not None and path not in scope:
+            continue
+        entry = files[path]
+        mutants = entry.get("mutants", []) if isinstance(entry, dict) else []
+        for mutant in mutants:
+            if not isinstance(mutant, dict) or mutant.get("status") not in STRYKER_SURVIVED:
+                continue
+            location = mutant.get("location", {})
+            start = location.get("start", {}) if isinstance(location, dict) else {}
+            replacement = str(mutant.get("replacement", "")).replace("\n", " ")[:160]
+            lines.append(
+                f"{path}:{start.get('line', '?')}:{start.get('column', '?')} "
+                f"{mutant.get('status')} {mutant.get('mutatorName')} -> {replacement}"
+            )
+
+    if not lines:
+        return "No surviving mutants\n"
+    return "\n".join(lines) + "\n"
 
 
 def rewrite_only_mutate(pyproject: Path, scope: list[str]) -> None:
@@ -158,7 +291,45 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
 
+    check_stryker = sub.add_parser(
+        "check-stryker", help="validate a Stryker mutation report over a scope"
+    )
+    check_stryker.add_argument("--report", type=Path, required=True)
+    check_stryker.add_argument(
+        "--enforced",
+        type=Path,
+        help="enforced scope file; omitted means score the whole report",
+    )
+    check_stryker.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
+
+    summarize = sub.add_parser(
+        "summarize-stryker",
+        help="write the score summary and survivor list of a Stryker report",
+    )
+    summarize.add_argument("--report", type=Path, required=True)
+    summarize.add_argument("--enforced", type=Path)
+    summarize.add_argument("--summary-out", type=Path, required=True)
+    summarize.add_argument("--survivors-out", type=Path, required=True)
+
     args = parser.parse_args(argv)
+
+    if args.command == "summarize-stryker":
+        if not args.report.is_file():
+            print(f"error: report does not exist: {args.report}", file=sys.stderr)
+            return 1
+        report = json.loads(args.report.read_text(encoding="utf-8"))
+        scope = load_enforced_scope(args.enforced) if args.enforced else None
+        try:
+            summary = stryker_summary(report, scope)
+            survivors = stryker_survivors(report, scope)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        for path, text in ((args.summary_out, summary), (args.survivors_out, survivors)):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        print(summary, end="")
+        return 0
 
     if args.command == "scope":
         enforced = load_enforced_scope(args.enforced)
@@ -168,6 +339,21 @@ def main(argv: list[str] | None = None) -> int:
             print(entry)
         if selected and args.apply_to is not None:
             rewrite_only_mutate(args.apply_to, selected)
+        return 0
+
+    if args.command == "check-stryker":
+        if not args.report.is_file():
+            print(f"error: report does not exist: {args.report}", file=sys.stderr)
+            return 1
+        report = json.loads(args.report.read_text(encoding="utf-8"))
+        scope = load_enforced_scope(args.enforced) if args.enforced else None
+        try:
+            validate_stryker(report, scope, threshold=args.threshold)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        killed, checked, score = stryker_score(report, scope)
+        print(f"mutation gate passed: {score:.2%} ({killed}/{checked} mutants killed)")
         return 0
 
     if not args.stats.is_file():

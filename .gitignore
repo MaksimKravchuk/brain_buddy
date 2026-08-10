@@ -36,6 +36,10 @@ coverage/
 /backend/pyproject.toml.mutation-bak
 /backend/.mutation-enforced-changed.txt
 /frontend/allure-results/
+/frontend/.stryker-tmp/
+/frontend/mutation-artifacts/
+/frontend/mutation-allure-results/
+/frontend/reports/
 /allure-report/
 *.log
 
