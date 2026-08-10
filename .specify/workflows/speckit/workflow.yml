@@ -10,11 +10,21 @@ requires:
   speckit_version: ">=0.14.2"
 
 inputs:
+  # Unknown risk is medium, never low. Derivation from the planning artifacts
+  # can only RAISE this class: at review time there is no diff, so all it can
+  # see is which paths are mentioned, and a mention is not a change. Lowering
+  # to `low` is an accountable operator declaration here.
   risk:
     type: string
-    default: "standard"
-    enum: ["standard", "high"]
-    prompt: "Planning risk: standard or high"
+    default: "medium"
+    enum: ["low", "medium", "high"]
+    prompt: "Planning risk class: low, medium or high (default medium)"
+  # There is deliberately NO human_signoff input. A caller-controlled boolean
+  # lets the same automated actor that runs the campaign self-certify the human
+  # gate on exactly the ASK-class surfaces the gate protects. High-risk sign-off
+  # is a separate run-bound record at
+  # .specify/workflows/runs/<run-id>/human-signoff.json, validated against the
+  # run id and a digest of the reviewed artifacts.
 
 steps:
   - id: planning-preflight

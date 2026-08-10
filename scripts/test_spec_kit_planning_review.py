@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 
 
@@ -30,7 +31,7 @@ class PlanningReviewCommandTests(unittest.TestCase):
     def test_codex_review_command_is_read_only_and_ephemeral(self) -> None:
         module = load_module()
         command, _env = module.build_review_command(
-            role="architecture-consistency",
+            role="requirements-consistency",
             prompt="Review the planning artifacts.",
             schema_path=ROOT / ".specify" / "workflows" / "speckit" / "review.schema.json",
         )
@@ -153,7 +154,7 @@ class PlanningReviewAggregationTests(unittest.TestCase):
             },
         ]
 
-        summary = self.module.aggregate_reviews(reviews, risk="standard")
+        summary = self.module.aggregate_reviews(reviews, risk="medium")
         self.assertEqual(summary["status"], "product-decision-required")
         self.assertEqual(len(summary["product_decisions"]), 1)
         self.assertEqual(len(summary["technical_findings"]), 1)
@@ -202,7 +203,7 @@ class PlanningReviewAggregationTests(unittest.TestCase):
             },
         ]
 
-        summary = self.module.aggregate_reviews(reviews, risk="standard")
+        summary = self.module.aggregate_reviews(reviews, risk="medium")
         self.assertEqual(summary["status"], "technical-changes-required")
 
     def test_aggregate_approves_only_when_every_reviewer_passes(self) -> None:
@@ -226,8 +227,55 @@ class PlanningReviewAggregationTests(unittest.TestCase):
             for role in self.module.STANDARD_ROLES
         ]
 
-        summary = self.module.aggregate_reviews(reviews, risk="standard")
+        summary = self.module.aggregate_reviews(reviews, risk="medium")
         self.assertEqual(summary["status"], "approved")
+
+    def _passing_panel(self) -> list[dict]:
+        return [
+            {
+                "role": role,
+                "verdict": "pass",
+                "summary": "No concerns.",
+                "reviewed_files": ["specs/123-example/spec.md"],
+                "findings": [],
+                "product_decisions": [],
+            }
+            for role in self.module.STANDARD_ROLES
+        ]
+
+    def test_missing_reviewer_escalates_and_never_passes(self) -> None:
+        """Missing mandatory evidence is Escalated, not majority-green."""
+        summary = self.module.aggregate_reviews(
+            self._passing_panel()[:-1],
+            risk="medium",
+            missing_roles=("ux-accessibility-mobile",),
+        )
+        self.assertEqual(summary["status"], "escalated")
+        self.assertIn("ux-accessibility-mobile", summary["architect_action"])
+
+    def test_high_risk_without_human_signoff_escalates(self) -> None:
+        summary = self.module.aggregate_reviews(self._passing_panel(), risk="high")
+        self.assertEqual(summary["status"], "escalated")
+        self.assertIn("human sign-off", summary["architect_action"])
+
+    def test_high_risk_with_human_signoff_can_approve(self) -> None:
+        summary = self.module.aggregate_reviews(
+            self._passing_panel(), risk="high", human_signoff=True
+        )
+        self.assertEqual(summary["status"], "approved")
+
+    def test_medium_risk_needs_no_signoff(self) -> None:
+        summary = self.module.aggregate_reviews(self._passing_panel(), risk="medium")
+        self.assertEqual(summary["status"], "approved")
+
+    def test_missing_evidence_outranks_a_clean_panel(self) -> None:
+        """A campaign cannot be clean when part of it never ran."""
+        summary = self.module.aggregate_reviews(
+            self._passing_panel(),
+            risk="low",
+            missing_roles=("privacy-consent-security",),
+        )
+        self.assertEqual(summary["status"], "escalated")
 
     def test_parse_workflow_inputs_uses_engine_envelope(self) -> None:
         self.assertEqual(
@@ -248,7 +296,7 @@ class PlanningReviewAggregationTests(unittest.TestCase):
             },
             "planning_review": {
                 "run_id": "abc123",
-                "risk": "standard",
+                "risk": "medium",
                 "status": "approved",
                 "reviewers": list(self.module.STANDARD_ROLES),
             },
@@ -292,6 +340,11 @@ class PlanningReviewAggregationTests(unittest.TestCase):
         acceptance = {
             "accepted_by": "maksim.v.kravchuk@gmail.com",
             "accepted_on": "2026-07-29",
+            "expires_on": "2026-10-29",
+            "compensating_measures": [
+                "Weekly manual smoke of the multilingual capture path.",
+                "Alert on transcription error rate above the INTERNAL floor.",
+            ],
             "rationale": (
                 "Five campaigns re-litigated the package from scratch without "
                 "converging; every verified defect was fixed and the remaining "
@@ -315,7 +368,7 @@ class PlanningReviewAggregationTests(unittest.TestCase):
             },
             "planning_review": {
                 "run_id": "abc123",
-                "risk": "standard",
+                "risk": "medium",
                 "status": "founder-accepted",
                 "reviewers": list(self.module.STANDARD_ROLES),
                 "founder_acceptance": acceptance,
@@ -336,7 +389,7 @@ class PlanningReviewAggregationTests(unittest.TestCase):
             "non_goals": ["No deployment change."],
         }
 
-        validated = self.module.validate_handoff(handoff)
+        validated = self.module.validate_handoff(handoff, today=date(2026, 8, 1))
         review = validated["planning_review"]
         self.assertEqual(review["status"], "founder-accepted")
         self.assertEqual(review["founder_acceptance"], acceptance)
@@ -348,7 +401,7 @@ class PlanningReviewAggregationTests(unittest.TestCase):
             "artifacts": {"spec": "s", "plan": "p", "tasks": "t", "checklist": "c", "adrs": []},
             "planning_review": {
                 "run_id": "abc123",
-                "risk": "standard",
+                "risk": "medium",
                 "status": "approved",
                 "reviewers": list(self.module.STANDARD_ROLES),
             },
@@ -378,6 +431,395 @@ class PlanningReviewAggregationTests(unittest.TestCase):
             self.module.write_json_atomic(target, {"status": "second"})
             self.assertEqual(json.loads(target.read_text()), {"status": "second"})
             self.assertEqual(list(target.parent.glob("*.tmp")), [])
+
+
+class HumanSignoffTests(unittest.TestCase):
+    """High-risk sign-off must be evidence, not a flag the caller sets.
+
+    Regression: `human_signoff` was a workflow input coerced with `bool(...)`,
+    so the same automated actor that ran the campaign could self-certify the
+    human gate on exactly the ASK-class surfaces the gate exists to protect.
+    """
+
+    def setUp(self) -> None:
+        self.module = load_module()
+
+    def build(self, tmp: str) -> tuple[Path, Path, str]:
+        root = Path(tmp)
+        feature_dir = root / "specs" / "006-example"
+        (feature_dir / "checklists").mkdir(parents=True)
+        (feature_dir / "spec.md").write_text("# Spec\n", encoding="utf-8")
+        (feature_dir / "plan.md").write_text("# Plan\n", encoding="utf-8")
+        run_dir = root / "runs" / "run1"
+        run_dir.mkdir(parents=True)
+        digest = self.module.review_artifacts_digest(feature_dir)
+        return feature_dir, run_dir, digest
+
+    def record(self, **overrides) -> dict:
+        base = {
+            "approved_by": "maksim.v.kravchuk@gmail.com",
+            "approved_on": "2026-08-10",
+            "run_id": "run1",
+            "artifacts_digest": "",
+            "rationale": "Reviewed the session-rotation surface personally and accept the residual risk.",
+        }
+        base.update(overrides)
+        return base
+
+    def write(self, run_dir: Path, record: dict) -> None:
+        (run_dir / "human-signoff.json").write_text(json.dumps(record), encoding="utf-8")
+
+    def load(self, run_dir: Path, digest: str):
+        return self.module.load_human_signoff(
+            run_dir, run_id="run1", artifacts_digest=digest
+        )
+
+    def test_absent_record_is_no_signoff(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _feature, run_dir, digest = self.build(tmp)
+            self.assertIsNone(self.load(run_dir, digest))
+
+    def test_valid_record_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _feature, run_dir, digest = self.build(tmp)
+            self.write(run_dir, self.record(artifacts_digest=digest))
+            loaded = self.load(run_dir, digest)
+            self.assertIsNotNone(loaded)
+            assert loaded is not None
+            self.assertEqual(loaded["approved_by"], "maksim.v.kravchuk@gmail.com")
+
+    def test_signoff_from_another_run_is_rejected(self) -> None:
+        """An approval must not be replayed across campaigns."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _feature, run_dir, digest = self.build(tmp)
+            self.write(run_dir, self.record(run_id="run-other", artifacts_digest=digest))
+            self.assertIsNone(self.load(run_dir, digest))
+
+    def test_signoff_goes_stale_when_the_artifacts_change(self) -> None:
+        """Approving one spec must not silently approve its rewrite."""
+        with tempfile.TemporaryDirectory() as tmp:
+            feature_dir, run_dir, digest = self.build(tmp)
+            self.write(run_dir, self.record(artifacts_digest=digest))
+            self.assertIsNotNone(self.load(run_dir, digest))
+
+            (feature_dir / "spec.md").write_text("# Spec, rewritten\n", encoding="utf-8")
+            new_digest = self.module.review_artifacts_digest(feature_dir)
+            self.assertNotEqual(new_digest, digest)
+            self.assertIsNone(self.load(run_dir, new_digest))
+
+    def test_anonymous_or_unreasoned_signoff_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _feature, run_dir, digest = self.build(tmp)
+            for bad in (
+                self.record(approved_by="", artifacts_digest=digest),
+                self.record(rationale="ok", artifacts_digest=digest),
+                self.record(approved_on="", artifacts_digest=digest),
+            ):
+                self.write(run_dir, bad)
+                self.assertIsNone(self.load(run_dir, digest))
+
+    def test_malformed_record_is_not_an_approval(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _feature, run_dir, digest = self.build(tmp)
+            (run_dir / "human-signoff.json").write_text("{not json", encoding="utf-8")
+            self.assertIsNone(self.load(run_dir, digest))
+
+    def test_digest_must_be_recomputed_not_trusted_from_preflight(self) -> None:
+        """Regression: the mechanism was defeated by its own cache.
+
+        `summarize()` used to compare the sign-off against the digest stored in
+        planning-context.json at preflight. Editing the spec afterwards left the
+        stored digest matching the sign-off, so the campaign approved content
+        nobody reviewed. The digest must be recomputed from the artifacts as
+        they stand at summarization time.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            feature_dir, run_dir, preflight_digest = self.build(tmp)
+            self.write(run_dir, self.record(artifacts_digest=preflight_digest))
+
+            (feature_dir / "spec.md").write_text("# Spec, edited\n", encoding="utf-8")
+            recomputed = self.module.review_artifacts_digest(feature_dir)
+
+            # Against the stale stored digest the sign-off still "matches" —
+            # that is the bug.
+            self.assertIsNotNone(self.load(run_dir, preflight_digest))
+            # Against the recomputed digest it is correctly rejected.
+            self.assertIsNone(self.load(run_dir, recomputed))
+
+    def test_digest_covers_every_reviewed_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            feature_dir, _run_dir, digest = self.build(tmp)
+            (feature_dir / "design.md").write_text("# Design\n", encoding="utf-8")
+            self.assertNotEqual(
+                self.module.review_artifacts_digest(feature_dir),
+                digest,
+                "adding a reviewed artifact must change the digest",
+            )
+
+
+class HighRiskHandoffSignoffTests(unittest.TestCase):
+    """A high-risk handoff must carry the approval, not merely allow it.
+
+    Regression: `human_signoff` was added to handoff.schema.json but
+    `validate_handoff()` never checked it, so a hand-written handoff with
+    risk `high` and status `approved` validated with no approval record at
+    all — reachable from CI, since check_spec_kit_specs.py delegates here.
+    """
+
+    def setUp(self) -> None:
+        self.module = load_module()
+
+    def signoff(self, **overrides) -> dict:
+        record = {
+            "approved_by": "maksim.v.kravchuk@gmail.com",
+            "approved_on": "2026-08-10",
+            "run_id": "run123",
+            "artifacts_digest": "a" * 64,
+            "rationale": "Reviewed the session-rotation surface and accept the residual risk.",
+        }
+        record.update(overrides)
+        return record
+
+    def handoff(self, *, risk: str, signoff: object = "omit") -> dict:
+        review: dict = {
+            "run_id": "run123",
+            "risk": risk,
+            "status": "approved",
+            "reviewers": [*self.module.STANDARD_ROLES, "adversarial-high-risk"],
+        }
+        if signoff != "omit":
+            review["human_signoff"] = signoff
+        return {
+            "schema_version": "speckit-hermes-handoff/v1",
+            "root_outcome": "Deliver a reviewed planning change.",
+            "artifacts": {
+                "spec": "specs/123-example/spec.md",
+                "plan": "specs/123-example/plan.md",
+                "tasks": "specs/123-example/tasks.md",
+                "checklist": "specs/123-example/checklists/requirements.md",
+                "adrs": [],
+            },
+            "planning_review": review,
+            "product_decisions": [],
+            "lanes": [
+                {
+                    "id": "backend-contract",
+                    "outcome": "Implement the backend contract.",
+                    "depends_on": [],
+                    "task_refs": ["T001"],
+                    "scope_paths": ["backend/app/example.py"],
+                    "exclusive_writer_scope": ["backend/app/example.py"],
+                    "acceptance_evidence": ["Targeted backend tests pass."],
+                }
+            ],
+            "risks": [],
+            "non_goals": ["No deployment change."],
+        }
+
+    def test_high_risk_without_signoff_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "requires a human_signoff"):
+            self.module.validate_handoff(self.handoff(risk="high"))
+
+    def test_high_risk_with_signoff_is_accepted_and_carried(self) -> None:
+        record = self.signoff()
+        validated = self.module.validate_handoff(
+            self.handoff(risk="high", signoff=record)
+        )
+        self.assertEqual(validated["planning_review"]["human_signoff"], record)
+
+    def test_signoff_from_another_run_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            self.module.validate_handoff(
+                self.handoff(risk="high", signoff=self.signoff(run_id="other-run"))
+            )
+
+    def test_anonymous_or_unreasoned_signoff_is_rejected(self) -> None:
+        for bad, pattern in (
+            (self.signoff(approved_by=""), "approved_by"),
+            (self.signoff(rationale="ok"), "residual risk"),
+            (self.signoff(artifacts_digest="not-a-digest"), "sha256"),
+        ):
+            with self.assertRaisesRegex(ValueError, pattern):
+                self.module.validate_handoff(self.handoff(risk="high", signoff=bad))
+
+    def test_medium_risk_needs_no_signoff(self) -> None:
+        validated = self.module.validate_handoff(self.handoff(risk="medium"))
+        self.assertNotIn("human_signoff", validated["planning_review"])
+
+
+class ArtifactDriftTests(unittest.TestCase):
+    """Reviews describe the artifacts as they stood when they ran."""
+
+    def setUp(self) -> None:
+        self.module = load_module()
+
+    def passing_panel(self) -> list[dict]:
+        return [
+            {
+                "role": role,
+                "verdict": "pass",
+                "summary": "No concerns.",
+                "reviewed_files": ["specs/123-example/spec.md"],
+                "findings": [],
+                "product_decisions": [],
+            }
+            for role in self.module.STANDARD_ROLES
+        ]
+
+    def test_artifacts_changing_after_preflight_escalates(self) -> None:
+        summary = self.module.aggregate_reviews(
+            self.passing_panel(), risk="medium", artifacts_changed=True
+        )
+        self.assertEqual(summary["status"], "escalated")
+        self.assertIn("changed after preflight", summary["architect_action"])
+
+    def test_drift_outranks_a_clean_signed_panel(self) -> None:
+        summary = self.module.aggregate_reviews(
+            self.passing_panel(),
+            risk="high",
+            human_signoff=True,
+            artifacts_changed=True,
+        )
+        self.assertEqual(summary["status"], "escalated")
+
+
+class FounderAcceptanceBoundsTests(unittest.TestCase):
+    """A risk acceptance must be bounded in time and carry mitigations.
+
+    Without an expiry it is not an acceptance, it is a permanent hole in the
+    gate signed once by whoever happened to be blocked that day.
+    """
+
+    def setUp(self) -> None:
+        self.module = load_module()
+
+    def acceptance(self, **overrides) -> dict:
+        record = {
+            "accepted_by": "maksim.v.kravchuk@gmail.com",
+            "accepted_on": "2026-07-29",
+            "expires_on": "2026-10-29",
+            "rationale": (
+                "Five campaigns re-litigated the package from scratch without "
+                "converging; every verified defect was fixed and the remaining "
+                "findings were re-raised duplicates, so the founder closed the "
+                "loop for a single-user deployment."
+            ),
+            "compensating_measures": [
+                "Weekly manual smoke of the multilingual capture path.",
+            ],
+            "campaign_history": [{"run_id": "run1", "status": "changes-required"}],
+        }
+        record.update(overrides)
+        return record
+
+    def handoff(self, acceptance: dict | None) -> dict:
+        review: dict = {
+            "run_id": "abc123",
+            "risk": "medium",
+            "status": "founder-accepted",
+            "reviewers": list(self.module.STANDARD_ROLES),
+        }
+        if acceptance is not None:
+            review["founder_acceptance"] = acceptance
+        return {
+            "schema_version": "speckit-hermes-handoff/v1",
+            "root_outcome": "Deliver a reviewed planning change.",
+            "artifacts": {
+                "spec": "specs/123-example/spec.md",
+                "plan": "specs/123-example/plan.md",
+                "tasks": "specs/123-example/tasks.md",
+                "checklist": "specs/123-example/checklists/requirements.md",
+                "adrs": [],
+            },
+            "planning_review": review,
+            "product_decisions": [],
+            "lanes": [
+                {
+                    "id": "backend-contract",
+                    "outcome": "Implement the backend contract.",
+                    "depends_on": [],
+                    "task_refs": ["T001"],
+                    "scope_paths": ["backend/app/example.py"],
+                    "exclusive_writer_scope": ["backend/app/example.py"],
+                    "acceptance_evidence": ["Targeted backend tests pass."],
+                }
+            ],
+            "risks": [],
+            "non_goals": ["No deployment change."],
+        }
+
+    def validate(self, acceptance: dict | None, *, today=date(2026, 8, 1)):
+        return self.module.validate_handoff(self.handoff(acceptance), today=today)
+
+    def test_bounded_acceptance_is_accepted(self) -> None:
+        validated = self.validate(self.acceptance())
+        self.assertEqual(validated["planning_review"]["status"], "founder-accepted")
+
+    def test_missing_expiry_is_rejected(self) -> None:
+        record = self.acceptance()
+        del record["expires_on"]
+        with self.assertRaisesRegex(ValueError, "expires_on"):
+            self.validate(record)
+
+    def test_missing_compensating_measures_is_rejected(self) -> None:
+        record = self.acceptance()
+        del record["compensating_measures"]
+        with self.assertRaisesRegex(ValueError, "compensating_measures"):
+            self.validate(record)
+
+    def test_placeholder_compensating_measure_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "concrete mitigation"):
+            self.validate(self.acceptance(compensating_measures=["TBD"]))
+
+    def test_expiry_before_acceptance_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "after accepted_on"):
+            self.validate(self.acceptance(expires_on="2026-07-01"))
+
+    def test_expired_acceptance_no_longer_closes_the_review(self) -> None:
+        with self.assertRaisesRegex(ValueError, "expired"):
+            self.validate(self.acceptance(), today=date(2026, 12, 1))
+
+    def test_non_iso_dates_are_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "ISO date"):
+            self.validate(self.acceptance(expires_on="next quarter"))
+
+
+class ReviewerIndependenceTests(unittest.TestCase):
+    """Formal plurality is not independence.
+
+    Three lenses on one model produce one opinion counted three times, and the
+    aggregation rule would read correlated blind spots as corroboration.
+    """
+
+    def setUp(self) -> None:
+        self.module = load_module()
+
+    def test_no_model_carries_a_majority_of_the_panel(self) -> None:
+        models: dict[str, int] = {}
+        for role in self.module.STANDARD_ROLES:
+            model = self.module.ROLE_CONFIGS[role]["model"]
+            models[model] = models.get(model, 0) + 1
+        worst = max(models.values())
+        self.assertLessEqual(
+            worst,
+            len(self.module.STANDARD_ROLES) // 2,
+            f"one model covers {worst} of {len(self.module.STANDARD_ROLES)} lenses: {models}",
+        )
+
+    def test_panel_spans_more_than_one_provider(self) -> None:
+        providers = {
+            self.module.ROLE_CONFIGS[role]["integration"]
+            for role in self.module.STANDARD_ROLES
+        }
+        self.assertGreater(len(providers), 1, providers)
+
+    def test_every_claude_lens_points_at_an_existing_rubric_file(self) -> None:
+        for role, config in self.module.ROLE_CONFIGS.items():
+            agent = config.get("agent")
+            if agent is None:
+                continue
+            path = ROOT / ".claude" / "agents" / f"{agent}.md"
+            self.assertTrue(path.is_file(), f"{role} points at missing {path}")
 
 
 class DeterministicPreflightTests(unittest.TestCase):
@@ -460,11 +902,54 @@ class DeterministicPreflightTests(unittest.TestCase):
             feature_dir = self.write_feature(tmp, spec=spec)
             self.assertEqual(self.module.derive_risk(feature_dir), "high")
 
-    def test_ship_class_surface_stays_standard_risk(self) -> None:
+    def test_unclassifiable_change_has_no_derived_opinion(self) -> None:
+        """Derivation stays silent; the campaign then runs at the default.
+
+        Treating silence as safety would let exactly the work nobody could
+        classify take the cheapest path through the gate, so the default is
+        medium and derivation never argues it down.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            feature_dir = self.write_feature(tmp, spec=self.clean_spec())
+            self.assertIsNone(self.module.derive_risk(feature_dir))
+            self.assertEqual(self.module.DEFAULT_RISK, "medium")
+
+    def test_derivation_never_lowers_the_class(self) -> None:
+        """Regression: a real false low on the worst possible surface.
+
+        An earlier version returned `low` when every mentioned path was inert.
+        A spec rotating session tokens while merely *citing* docs/auth.md as
+        background therefore derived `low` — a mention is not a change, and at
+        spec-review time there is no diff to tell them apart.
+        """
+        spec = (
+            self.clean_spec()
+            + "Rotates session tokens. See docs/auth.md and docs/data-retention.md.\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            feature_dir = self.write_feature(tmp, spec=spec)
+            self.assertIsNone(self.module.derive_risk(feature_dir))
+        self.assertEqual(self.module.DERIVABLE_RISKS, ("high",))
+
+    def test_only_high_is_derivable(self) -> None:
+        for risk in self.module.DERIVABLE_RISKS:
+            self.assertEqual(
+                risk,
+                self.module.stricter_risk(risk, self.module.DEFAULT_RISK),
+                "a derivable class must be at least as strict as the default",
+            )
+
+    def test_plain_code_path_alone_does_not_raise_the_class(self) -> None:
         spec = self.clean_spec() + "Touches frontend/src/components/Canvas.tsx only.\n"
         with tempfile.TemporaryDirectory() as tmp:
             feature_dir = self.write_feature(tmp, spec=spec)
-            self.assertEqual(self.module.derive_risk(feature_dir), "standard")
+            self.assertIsNone(self.module.derive_risk(feature_dir))
+
+    def test_risk_escalates_and_never_de_escalates(self) -> None:
+        self.assertEqual(self.module.stricter_risk("low", "high"), "high")
+        self.assertEqual(self.module.stricter_risk("high", "low"), "high")
+        self.assertEqual(self.module.stricter_risk("medium", "low"), "medium")
+        self.assertEqual(self.module.stricter_risk("low", "low"), "low")
 
     def test_review_artifacts_include_optional_files_when_present(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

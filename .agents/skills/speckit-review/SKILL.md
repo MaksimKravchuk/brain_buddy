@@ -40,8 +40,10 @@ markers, missing mandatory spec sections, duplicate or malformed
 `FR-###`/`SC-###` ids, unchecked `checklists/requirements.md` items, and
 unfilled placeholders. Fix the spec and rerun; do not skip it.
 
-It also records `derived_risk` from `scripts/classify_path_risk.py`. An
-ASK-class surface derives `high`.
+It also records `derived_risk` from `scripts/classify_path_risk.py`, which
+may only **raise** the class: an ASK-class surface derives `high`,
+everything else derives nothing and the campaign runs at the declared
+class (default `medium`).
 
 ## Step 2 — fan out
 
@@ -50,20 +52,21 @@ Five lenses, `max_concurrency: 5`:
 | role | runtime |
 |---|---|
 | `requirements-consistency` | codex |
-| `architecture-consistency` | codex |
+| `architecture-consistency` | claude |
 | `testability-evidence` | codex |
 | `privacy-consent-security` | claude |
 | `ux-accessibility-mobile` | claude |
 
 Plus `adversarial-high-risk` when risk is `high`.
 
-**Runtime asymmetry cuts both ways.** On a Claude-only machine the three codex
-lenses cannot run. In a Codex-only session the two Claude lenses cannot run —
+**Runtime asymmetry cuts both ways.** On a Claude-only machine the two codex
+lenses cannot run. In a Codex-only session the three Claude lenses cannot run —
 `build_review_command` shells out to the `claude` CLI and fails closed via
-`shutil.which`. Their rubrics live in `.claude/agents/security-privacy-reviewer.md`
-and `.claude/agents/ux-a11y-reviewer.md`; those are plain markdown, so when the
-`claude` CLI is absent you may apply both rubrics yourself and write the
-resulting JSON to `.specify/workflows/runs/<run-id>/reviews/<role>.json`.
+`shutil.which`. Their rubrics live in `.claude/agents/architecture-consistency-reviewer.md`,
+`security-privacy-reviewer.md` and `ux-a11y-reviewer.md`; those are plain
+markdown, so when the `claude` CLI is absent you may apply the three rubrics
+yourself and write the resulting JSON to
+`.specify/workflows/runs/<run-id>/reviews/<role>.json`.
 
 Whichever lenses could not run independently, **say so by name in the report**.
 A partial campaign is never reported as a clean one.
@@ -74,16 +77,25 @@ A partial campaign is never reported as a clean one.
 python3 scripts/spec_kit_planning_review.py summarize --run-id "<run-id>"
 ```
 
-Gate rule, in order:
+Gate rule, in order (ADR-0012):
 
-1. Any `product_decisions`, or a `product-decision-required` verdict →
+1. Any configured lens produced no review → **`escalated`**. Missing mandatory
+   evidence never resolves to a pass.
+2. Any `product_decisions`, or a `product-decision-required` verdict →
    **`product-decision-required`**. Needs the human.
-2. Any `changes-required` verdict, or any `blocking` finding →
+3. Any `changes-required` verdict, or any `blocking` finding →
    **`technical-changes-required`**.
-3. Otherwise → **`approved`**.
+4. Risk `high` with no recorded human sign-off → **`escalated`**.
+5. Otherwise → **`approved`**.
 
 A reviewer's verdict blocks on its own; the aggregator does not re-derive it
-from severities. Every configured role must return schema-valid JSON.
+from severities. A malformed review still raises — absence and corruption are
+different.
+
+Risk classes are `low | medium | high`. Unknown risk is **medium**, never low.
+`low` is an operator declaration; derivation never produces it, because at
+review time there is no diff and a *mentioned* path is not a changed one.
+Risk escalates and never de-escalates.
 
 ## Step 4 — campaign cap
 
@@ -91,15 +103,18 @@ from severities. Every configured role must return schema-valid JSON.
 so counts diverge between runs even as every verified defect is fixed. Carry
 campaign 1's findings forward into campaign 2. After campaign 2: land the
 fixes, defer the residue into explicit open lanes, or close by founder
-acceptance with the full record (`accepted_by`, `accepted_on`, a substantive
-rationale of at least 120 characters, and the complete `campaign_history`).
-Fabricating `approved` is prohibited.
+acceptance with the full record: `accepted_by`, `accepted_on`, `expires_on`,
+at least one concrete `compensating_measures` entry, a substantive rationale of
+at least 120 characters, and the complete `campaign_history`. The acceptance
+expires — validation fails once `expires_on` has passed, because an acceptance
+with no end date is a permanent hole in the gate. Fabricating `approved` is
+prohibited.
 
 ## Step 5 — report
 
 ```
-REVIEW VERDICT: approved | technical-changes-required | product-decision-required | founder-accepted
-run id: <run-id>   campaign: <1|2>   risk: standard | high (derived | operator-set)
+REVIEW VERDICT: approved | escalated | technical-changes-required | product-decision-required | founder-accepted
+run id: <run-id>   campaign: <1|2>   risk: low | medium | high (derived | operator-set)
 lenses: <n>/<n> ran     MISSING: <roles + why>
 
 BLOCKING (<n>) / IMPORTANT (<n>) / ADVISORY (<n>)
