@@ -16,7 +16,7 @@ The scenarios below are based on the current code and docs:
 - All tree routes require `get_current_user`; tree reads/mutations call `TreeService.get_tree_for_owner` or `assert_owner`, returning indistinguishable 404 for missing vs cross-owner tree IDs. See `backend/app/api/routes.py` and `backend/app/services/tree_service.py`.
 - The UI routes `/login`, `/signup`, and `/`; `/` is protected by `ProtectedRoute`, hydrates `/api/auth/me`, lists the signed-in user's trees, and shows `TreeWorkspace`. See `frontend/src/App.tsx`, `frontend/src/components/auth/ProtectedRoute.tsx`, and `frontend/src/pages/TreeWorkspace.tsx`.
 - Versioning supports create/list/delete/restore and JSON export for live or historic tree state. Browser workflows must cover the version panel UX; API suites own byte-level export payload validation. See `backend/app/api/routes.py`, `backend/app/services/version_service.py`, and `frontend/src/api/hooks.ts`.
-- Compose exposes backend on `${BRAIN_BUDDY_PORT:-8000}` and frontend on `${FRONTEND_PORT:-8080}`. For browser session tests over local HTTP, Compose must run with `BRAIN_BUDDY_ENV=development`; production mode marks cookies `Secure` and local HTTP browser auth will fail by design. See `compose.yaml` and `backend/app/core/config.py`.
+- Compose exposes backend on `${BRAIN_BUDDY_PORT:-8000}` and frontend on `${FRONTEND_PORT:-8080}`. Browser session tests over local HTTP must not run in production mode: `secure=environment is AppEnvironment.PRODUCTION` (`backend/app/core/config.py`), so production marks cookies `Secure` and local HTTP browser auth fails by design. The shipped harness uses `BRAIN_BUDDY_ENV=test` (`scripts/run_playwright_e2e.sh`); `development` also works. See `compose.yaml`.
 - ADR-0001/0002 require owner-scoped records, explicit confirmation before routing/deletion/CRT promotion, idempotency, redacted events/telemetry, and no model/provider output directly mutating canonical records. Browser E2E should cover user-visible gates; API/contract tests own state-machine exhaustiveness and idempotency matrices.
 
 ## Execution target
@@ -28,7 +28,8 @@ Required harness behavior:
 1. Create an isolated Compose project name per run, for example `brainbuddy-e2e-${GITHUB_RUN_ID:-local}-$(date +%s)`.
 2. Start with an empty backend data volume.
 3. Set:
-   - `BRAIN_BUDDY_ENV=development`
+   - `BRAIN_BUDDY_ENV=test` (anything other than `production`; the shipped
+     harness uses `test`)
    - `BRAIN_BUDDY_PORT` and `FRONTEND_PORT` to run-specific free ports
    - `VITE_API_BASE_URL=/api`
 4. Wait on `/health` before opening the browser.
@@ -36,15 +37,27 @@ Required harness behavior:
 6. Create browser users only through the UI when the scenario is about auth UX; use Playwright `request` fixtures only for preconditions and teardown.
 7. Tear down with `docker compose down -v --remove-orphans` even after failures.
 
-Recommended commands for the later implementation card:
+The harness now exists. Run it with:
 
 ```bash
-COMPOSE_PROJECT_NAME=brainbuddy-e2e BRAIN_BUDDY_ENV=development BRAIN_BUDDY_PORT=8001 FRONTEND_PORT=8081 docker compose up -d --build
+make test-e2e
+```
+
+which invokes `scripts/run_playwright_e2e.sh` and then the three validators
+(result freshness, Allure taxonomy, product-E2E story matrix). Requires
+`cd frontend && npx playwright install --with-deps chromium` once.
+
+To drive Compose by hand for debugging:
+
+```bash
+COMPOSE_PROJECT_NAME=brainbuddy-e2e BRAIN_BUDDY_ENV=test BRAIN_BUDDY_PORT=8001 FRONTEND_PORT=8081 docker compose up -d --build
 cd frontend && npx playwright test --config playwright.config.ts
 COMPOSE_PROJECT_NAME=brainbuddy-e2e docker compose down -v --remove-orphans
 ```
 
-The implementation may wrap these in `make test-e2e` once the harness exists.
+**Concurrency hazard**: `scripts/run_playwright_e2e.sh` deletes the shared
+Playwright allure and report directories on start, destroying a concurrent
+agent's in-flight evidence. Set `BRAIN_BUDDY_E2E_PROJECT`, or serialize.
 
 ## Fixture model
 
@@ -85,11 +98,19 @@ this matrix.
 | Mobile-first usability at representative 390x844 keeps capture/review/save primary controls visible with no horizontal overflow, while desktop task navigation remains covered by the native shell scenario. | Covered inside the Voice Brain Dump happy-path and native shell scenarios | Same active Allure product labels plus Playwright viewport assertions |
 
 CI enforces the durable evidence contract in `.github/workflows/ci.yml` via the
-`Native Product Compose E2E` job. The job must run `npm run test:e2e:compose`,
-publish `native-product-e2e-allure-results`, and validate the active story-label
-matrix with `scripts/validate_ci_artifacts.py product-e2e-results`. The validator
-fails if no native product scenarios execute, if only skipped/stale results exist,
-or if CRT-labeled evidence is presented as this product suite.
+`e2e` job, named **`Compose Playwright E2E`**. The job runs
+`scripts/run_playwright_e2e.sh` (locally: `make test-e2e`), publishes the
+**`playwright-allure-results`** artifact from
+`frontend/allure-results/playwright`, and validates the active story-label
+matrix with `scripts/validate_ci_artifacts.py product-e2e-results`. The
+validator fails if no native product scenarios execute, if only skipped/stale
+results exist, or if CRT-labeled evidence is presented as this product suite.
+
+An acceptance auditor enforcing this charter must use the names above. Earlier
+revisions of this section named a `Native Product Compose E2E` job, an
+`npm run test:e2e:compose` script and a `native-product-e2e-allure-results`
+artifact; none of the three has ever existed in this repository, and grading
+against them produces false violations.
 
 ### E2E-AUTH-01: invite signup creates a session and reaches the workspace
 

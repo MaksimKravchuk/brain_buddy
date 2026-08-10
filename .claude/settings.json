@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(make:*)",
+      "Bash(pytest:*)",
+      "Bash(cd backend && pytest:*)",
+      "Bash(cd backend && ruff check:*)",
+      "Bash(cd backend && ruff format:*)",
+      "Bash(cd backend && black:*)",
+      "Bash(cd backend && mypy:*)",
+      "Bash(cd backend && python -m app.cli:*)",
+      "Bash(ruff check:*)",
+      "Bash(ruff format:*)",
+      "Bash(black:*)",
+      "Bash(mypy:*)",
+      "Bash(python3 scripts/check_requirement_coverage.py:*)",
+      "Bash(python3 scripts/check_spec_kit_specs.py:*)",
+      "Bash(python3 scripts/check_speckit_manifests.py:*)",
+      "Bash(python3 scripts/classify_path_risk.py:*)",
+      "Bash(python3 scripts/render_feature_report.py:*)",
+      "Bash(python3 scripts/spec_kit_planning_review.py:*)",
+      "Bash(python3 scripts/validate_allure_taxonomy.py:*)",
+      "Bash(python3 scripts/validate_backend_coverage.py:*)",
+      "Bash(python3 scripts/validate_ci_artifacts.py:*)",
+      "Bash(python3 scripts/validate_trunk_delivery.py:*)",
+      "Bash(python3 -m unittest scripts/:*)",
+      "Bash(cd frontend && npm run:*)",
+      "Bash(cd frontend && npx tsc:*)",
+      "Bash(cd frontend && npx vitest:*)",
+      "Bash(cd frontend && npx playwright:*)",
+      "Bash(cd mobile && npm run:*)",
+      "Bash(cd mobile && npx tsc:*)",
+      "Bash(cd mobile && npx jest:*)",
+      "Bash(cd mobile && npx expo:*)",
+      "Bash(npm run:*)",
+      "Bash(npx playwright:*)",
+      "Bash(docker compose:*)",
+      "Bash(./scripts/run_playwright_e2e.sh:*)",
+      "Bash(./scripts/smoke_test.sh:*)",
+      "Bash(bash .specify/scripts/bash/:*)",
+      "Bash(git worktree:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git fetch:*)",
+      "Read(//home/user/brain_buddy/**)",
+      "Grep",
+      "Glob"
+    ],
+    "ask": [
+      "Bash(./scripts/submit_to_trunk.sh:*)",
+      "Bash(git push:*)",
+      "Bash(fly:*)",
+      "Bash(flyctl:*)"
+    ],
+    "deny": [
+      "Read(//home/user/brain_buddy/backend/data/**)",
+      "Read(//home/user/brain_buddy/.env)",
+      "Bash(rm -rf /:*)"
+    ]
+  },
+  "env": {
+    "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "2"
+  }
+}

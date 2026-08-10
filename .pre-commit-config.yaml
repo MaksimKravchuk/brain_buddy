@@ -4,12 +4,14 @@ repos:
     hooks:
       - id: black
         additional_dependencies: ["click==8.1.7"]
+  # ruff lints; it does NOT format. Black is the documented formatter
+  # (CLAUDE.md: "Black 88-col + Ruff"), and running ruff-format alongside black
+  # makes the two rewrite each other's output on alternating commits.
   - repo: https://github.com/charliermarsh/ruff-pre-commit
     rev: v0.4.1
     hooks:
       - id: ruff
         args: ["--fix"]
-      - id: ruff-format
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.8.0
     hooks:
