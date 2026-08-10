@@ -106,4 +106,12 @@ describe("SignupPage", () => {
     });
     await waitFor(() => expect(screen.getByText(/signup failed. please try again/i)).toBeInTheDocument());
   });
+
+  it("sends an already-signed-in visitor straight to the workspace", () => {
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    renderSignup();
+
+    expect(screen.getByText("workspace")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /create account/i })).not.toBeInTheDocument();
+  });
 });

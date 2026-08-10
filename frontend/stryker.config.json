@@ -1,0 +1,37 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "_comment": "Frontend mutation campaign. `mutate` is the OBSERVED scope -- what the nightly report-only campaign measures. mutation-enforced-scope.txt is the narrower ENFORCED tier that may gate a pull request. See docs/decisions/0013-frontend-mutation-tiers.md.",
+  "packageManager": "npm",
+  "testRunner": "vitest",
+  "vitest_comment": "`related` narrows each run with `vitest related`, which resolves nothing here -- the dry run then finds no tests at all -- so it stays off and perTest coverage does the narrowing instead.",
+  "vitest": {
+    "configFile": "vite.config.ts",
+    "related": false
+  },
+  "reporters": ["progress", "clear-text", "json"],
+  "jsonReporter": {
+    "fileName": "mutation-artifacts/mutation-report.json"
+  },
+  "coverageAnalysis": "perTest",
+  "timeoutMS": 20000,
+  "concurrency_comment": "Left to Stryker's default of one runner per core minus one, so the nightly adapts to whatever the runner has. Pass --concurrency to override on a busy machine.",
+  "mutate": [
+    "src/api/account.ts",
+    "src/api/auth.ts",
+    "src/api/client.ts",
+    "src/api/taskHooks.ts",
+    "src/features/brain-dump/brainDumpNavigation.ts",
+    "src/features/tasks/smartAdd.ts",
+    "src/stores/authStore.ts",
+    "src/utils/error.ts",
+    "src/utils/telemetry.ts"
+  ],
+  "thresholds_comment": "Reporting only. The pull-request gate lives in scripts/mutation_gate.py, which reads mutation-report.json for the enforced scope; `break` stays null so the nightly observed campaign cannot fail on a score.",
+  "thresholds": {
+    "high": 95,
+    "low": 90,
+    "break": null
+  },
+  "tempDirName": ".stryker-tmp",
+  "cleanTempDir": true
+}

@@ -227,7 +227,7 @@ INVARIANTS: tuple[Invariant, ...] = (
         "both codex lenses keep a fallback",
         r'"fallback":\s*CODEX_FALLBACK(?:(?!\ndef ).)*?"fallback":\s*CODEX_FALLBACK',
         "Removing a fallback returns that lens to writing no review when its "
-        "CLI is absent, which is the permanent `escalated` ADR-0013 removed.",
+        "CLI is absent, which is the permanent `escalated` ADR-0014 removed.",
     ),
     MustMatch(
         "scripts/spec_kit_planning_review.py",
@@ -265,7 +265,7 @@ INVARIANTS: tuple[Invariant, ...] = (
         "Only an absent runtime may be substituted. Retrying a failed "
         "reviewer on another oracle launders a defect into a clean verdict.",
     ),
-    # ADR-0013 trades blocking for visibility: a degraded campaign may reach
+    # ADR-0014 trades blocking for visibility: a degraded campaign may reach
     # `approved` because the human will see the degradation. After that trade
     # the seeing happens here, so the renderer became load-bearing for the
     # decision not to block. Four invariants assert `summarize` *writes* the

@@ -154,7 +154,7 @@ def _digest(value: object) -> str:
 def panel_provenance(summary: dict[str, Any]) -> tuple[str, list[str]]:
     """The verdict caveat and the panel-composition block, from provenance only.
 
-    ADR-0013 deliberately lets a degraded campaign reach `approved`, and rests
+    ADR-0014 deliberately lets a degraded campaign reach `approved`, and rests
     that entire choice on the human seeing the degradation. Printing five
     verdicts without saying which oracles produced them makes a fully degraded
     single-provider panel indistinguishable from the configured one, which

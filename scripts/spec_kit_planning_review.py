@@ -1271,7 +1271,7 @@ def validate_handoff(payload: object, *, today: date | None = None) -> dict[str,
     if risk == "high" and "adversarial-high-risk" not in reviewers:
         raise ValueError("high-risk handoff requires adversarial-high-risk reviewer")
 
-    # Panel provenance. ADR-0013 lets a degraded campaign reach `approved` on
+    # Panel provenance. ADR-0014 lets a degraded campaign reach `approved` on
     # purpose — blocking on degradation gives back, on a machine without the
     # codex CLI, the permanently `escalated` gate that record exists to escape.
     # What a degraded campaign may not do is arrive here unsaid.

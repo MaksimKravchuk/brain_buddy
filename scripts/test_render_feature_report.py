@@ -108,7 +108,7 @@ class RendersSectionFive:
 class ReviewSectionTests(RendersSectionFive, unittest.TestCase):
     """The review section is where a degraded campaign is either seen or lost.
 
-    ADR-0013 does not block the gate on degradation; it argues the human will
+    ADR-0014 does not block the gate on degradation; it argues the human will
     read about it in the report. These tests are what makes that argument true.
     """
 

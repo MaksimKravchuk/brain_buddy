@@ -1,4 +1,4 @@
-# ADR-0013: Hybrid reviewer fallback with recorded degradation
+# ADR-0014: Hybrid reviewer fallback with recorded degradation
 
 - **Status**: Accepted
 - **Date**: 2026-08-10

@@ -1,4 +1,3 @@
-/* istanbul ignore file -- source-faithful responsive shell is covered by Playwright visual snapshots. */
 import {
   AlertTriangle,
   Archive,

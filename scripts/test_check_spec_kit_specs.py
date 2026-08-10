@@ -344,7 +344,7 @@ class CheckSpecKitSpecsTests(unittest.TestCase):
         self.assertIn("requires a human_signoff record", stderr)
 
     def test_high_risk_degraded_handoff_carries_the_degradation(self) -> None:
-        """ADR-0013: a degraded panel may pass the gate. It may not pass unsaid."""
+        """ADR-0014: a degraded panel may pass the gate. It may not pass unsaid."""
         handoff = _high_risk_handoff()
         handoff["planning_review"]["degraded_lenses"] = [
             "requirements-consistency",

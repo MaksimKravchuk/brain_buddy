@@ -112,6 +112,8 @@ See `docs/api_usage.md` for request/response details and examples.
 - Spec Kit artifact check: `python3 scripts/check_spec_kit_specs.py` or `make check-specs`
 - Linting/formatting: Black, Ruff, and Mypy on the backend; ESLint/Prettier via Vite on the frontend.
 - Continuous improvement scripts live in the root `Makefile` (`make test-backend`, `make test-frontend`).
+- **Coverage floors** are recorded per stack in `<stack>/coverage-floor.json` and may only ratchet upward (`scripts/validate_coverage_floor.py`). Source may not exclude itself from the measurement: `scripts/validate_ci_artifacts.py coverage-suppressions` rejects `istanbul ignore file` and every range form.
+- **Mutation testing** runs nightly and report-only on both stacks — mutmut over the backend deterministic core (ADR-0004, ADR-0011) and Stryker over the frontend deterministic modules (ADR-0013): `make mutation-backend`, `make mutation-frontend`. Each stack keeps an *observed* scope it measures and a narrower *enforced* scope allowed to gate a pull request once calibrated; neither gate is connected yet.
 
 ## Feature Specs
 GitHub Spec Kit v0.15.0 is mandatory for new or materially changed feature

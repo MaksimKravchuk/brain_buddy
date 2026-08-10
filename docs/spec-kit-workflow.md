@@ -250,7 +250,7 @@ founder acceptance with the full record (see below).
 
 **Degraded runs.** Two of the five lenses shell out to the `codex` CLI. Where
 it is absent they fall back to `claude`/`sonnet` rather than failing, because a
-gate that can never be reached is a gate people route around (ADR-0013). The
+gate that can never be reached is a gate people route around (ADR-0014). The
 substitution is never silent: each review records which oracle actually ran,
 and the summary carries `degraded_lenses`, `panel_correlated` and
 `panel_oracles`. A degraded campaign may reach `approved`, but it cannot look

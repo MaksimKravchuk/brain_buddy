@@ -87,4 +87,12 @@ describe("downloadAccountExport", () => {
     expect(failure.status).toBe(502);
     expect(failure.payload).toBeNull();
   });
+
+  it("names the failure itself when the response carries no status text", async () => {
+    fetchMock.mockResolvedValue(new Response("", { status: 500, statusText: "" }));
+
+    const failure = await downloadAccountExport().catch((error) => error);
+    expect(failure).toBeInstanceOf(ApiError);
+    expect(failure.message).toBe("Export failed");
+  });
 });

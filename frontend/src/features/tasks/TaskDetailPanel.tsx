@@ -1,4 +1,3 @@
-/* istanbul ignore file -- source-faithful detail panel is covered by route tests and Playwright snapshots. */
 import { Check, ChevronRight, Inbox, MoreHorizontal, Network, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { RefObject } from "react";

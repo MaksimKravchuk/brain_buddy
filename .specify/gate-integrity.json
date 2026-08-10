@@ -6,12 +6,12 @@
     ".specify/workflows/speckit/handoff.schema.json": "089076b6df81ada79d7ba596b873c686a9d1748b8a921c592cce31f98dc82bf1",
     ".specify/workflows/speckit/review.schema.json": "59ddb9c1a8b3bdf2c0a572c12131426a7beea5fd68673d5d12a91251ee24b3c0",
     ".specify/workflows/speckit/workflow.yml": "36bc2cd22856cc254b55848133303e66cba2989589eea20bd835e8b89e50be74",
-    "Makefile": "ddf0bad6a70eae1846cf2d8cf8595724a751b181bb148b87abd9cfb43a249825",
-    "scripts/check_gate_integrity.py": "a35cf23451e3bc8fb9d5bd5db16c37c09ad9e4f7f4db15184048c3f19a32e4a5",
+    "Makefile": "551615adc905c2c34f2c7f5f446cda55a4d2a8c3c6b149d525bc9ee710b408eb",
+    "scripts/check_gate_integrity.py": "8aa59402d1eb37a8c17adccce7df18a23fd8401e1e8729a809917224d3f4f372",
     "scripts/check_requirement_coverage.py": "d3bbfac84046d293e97e8ec5b5ffdcc430be23739c458167c5e0a0281c997268",
     "scripts/check_spec_kit_specs.py": "1b5d2bc387d2224ddccf13bed88a04da175d48827784612045d75b427ec697ad",
     "scripts/check_speckit_manifests.py": "0ae661a301204fdf076364a3286806bb5781e19842a133727522e6418cf9e601",
     "scripts/classify_path_risk.py": "a51e4bf3821c60e6e8aa1829475449e388f1c72bcf33327febb9c87bee5cce7a",
-    "scripts/spec_kit_planning_review.py": "bee2bc5cd67260b47c680062debac113822cca84ac8895107295e3e78e4bb73e"
+    "scripts/spec_kit_planning_review.py": "57cccc67a2cb543206157b82a439354bb7508bb04b17f837372c461ee62a31e2"
   }
 }

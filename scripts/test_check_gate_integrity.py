@@ -264,7 +264,7 @@ class InvariantEnforcementTests(unittest.TestCase):
             self.assertIn("not routed to a fallback", report)
 
     def test_dropping_provenance_from_the_report_is_caught(self) -> None:
-        """Keep the write, drop the render: the trade ADR-0013 made, undone."""
+        """Keep the write, drop the render: the trade ADR-0014 made, undone."""
         with tempfile.TemporaryDirectory() as tmp:
             report = self._assert_invariant_fires(
                 tmp,
@@ -420,7 +420,7 @@ class BehaviouralMutationTests(unittest.TestCase):
             self.assertNotEqual(self._degraded_lenses(Path(tmp), mutate), self.EXPECTED)
 
     def test_dropping_the_oracle_carry_across_is_caught(self) -> None:
-        """ADR-0013 names this as the easy-to-get-wrong step. Nothing textual
+        """ADR-0014 names this as the easy-to-get-wrong step. Nothing textual
         guards it: the write to disk stays, only the read back is lost."""
 
         def mutate(text: str) -> str:

@@ -75,7 +75,7 @@ that actually runs can differ, which is what the next section is about.
 **The `codex` CLI is not installed everywhere.** `resolve_oracle` routes around
 an absent runtime instead of failing closed on it: the two codex lenses fall
 back to `claude`/`sonnet`, and the campaign can reach `approved` on a
-single-runtime machine (ADR-0013). Before that fallback existed those lenses
+single-runtime machine (ADR-0014). Before that fallback existed those lenses
 wrote no review, the aggregator counted missing mandatory evidence, and every
 campaign returned `escalated` regardless of the artifacts.
 
