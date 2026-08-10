@@ -59,7 +59,10 @@ def test_structural_lineage_requires_meaningful_textual_evidence() -> None:
         "Untranscribed sealed audio",
     )
     assert not VoiceBrainDumpService._titles_form_merge(["and the"], "Call dentist")
-    assert VoiceBrainDumpService._title_content_words("The call to Anna") == {"call", "anna"}
+    assert VoiceBrainDumpService._title_content_words("The call to Anna") == {
+        "call",
+        "anna",
+    }
     assert VoiceBrainDumpService._extract_task_titles("купить хлеб и молоко") == [
         "Купить хлеб и молоко"
     ]
@@ -235,7 +238,9 @@ def test_operation_recovery_budget_terminally_exhausts_before_a_new_provider_cal
 
     exhausted = _advance_persisted_provider_runs(service, exhausted.id)
     assert exhausted.status == "terminal_error"
-    assert exhausted.provider_runs[-1].error_code == "OPERATION_RECOVERY_BUDGET_EXHAUSTED"
+    assert (
+        exhausted.provider_runs[-1].error_code == "OPERATION_RECOVERY_BUDGET_EXHAUSTED"
+    )
     assert exhausted.provider_runs[-1].recovery_count == 1
 
 

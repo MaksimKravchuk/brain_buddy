@@ -61,7 +61,9 @@ def inspect_audio(audio: bytes, *, declared_mime_type: str) -> InspectedAudio:
                     "AUDIO_CHUNK_FORMAT_MISMATCH: declared MIME type does not "
                     "match the uploaded media container."
                 )
-            audio_streams = [stream for stream in container.streams if stream.type == "audio"]
+            audio_streams = [
+                stream for stream in container.streams if stream.type == "audio"
+            ]
             if not audio_streams:
                 raise ValidationFailure(
                     "AUDIO_CHUNK_FORMAT_MISMATCH: uploaded media has no audio stream."

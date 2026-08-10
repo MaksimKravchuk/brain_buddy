@@ -38,7 +38,11 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
         "Version repository",
         "Version persistence",
     ),
-    "index_repository": (EPIC_REALITY_TREE, "Index repository", "Tree index persistence"),
+    "index_repository": (
+        EPIC_REALITY_TREE,
+        "Index repository",
+        "Tree index persistence",
+    ),
     "repository_and_cli_edges": (
         EPIC_REALITY_TREE,
         "Repositories & CLI",
@@ -78,6 +82,11 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
     "auth_service": (EPIC_AUTH, "Auth service", "Credential and session logic"),
     "auth_routes": (EPIC_AUTH, "Auth API", "Auth HTTP endpoints"),
     "ownership": (EPIC_AUTH, "Ownership", "Per-user data isolation"),
+    "task_owner_isolation": (
+        EPIC_AUTH,
+        "Ownership",
+        "Task repository cross-owner isolation",
+    ),
     "account_api": (
         EPIC_AUTH,
         "Account API",

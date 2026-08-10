@@ -96,24 +96,28 @@ def test_list_is_authoritative_and_never_unions_a_disagreeing_legacy_provider() 
 
 
 def test_matching_dual_field_consent_is_accepted(data_dir: Path) -> None:
-    service = _service(data_dir, allowed_external_provider_categories=frozenset({"openai"}))
+    service = _service(
+        data_dir, allowed_external_provider_categories=frozenset({"openai"})
+    )
     service._assert_external_provider_consent(
         _consent(providers=["openai"], provider="openai")
     )
 
 
 def test_list_only_consent_is_accepted(data_dir: Path) -> None:
-    service = _service(data_dir, allowed_external_provider_categories=frozenset({"openai"}))
+    service = _service(
+        data_dir, allowed_external_provider_categories=frozenset({"openai"})
+    )
     service._assert_external_provider_consent(
         _consent(providers=["openai"], provider=None)
     )
 
 
 def test_legacy_only_consent_is_accepted(data_dir: Path) -> None:
-    service = _service(data_dir, allowed_external_provider_categories=frozenset({"openai"}))
-    service._assert_external_provider_consent(
-        _consent(providers=[], provider="openai")
+    service = _service(
+        data_dir, allowed_external_provider_categories=frozenset({"openai"})
     )
+    service._assert_external_provider_consent(_consent(providers=[], provider="openai"))
 
 
 def test_conflicting_dual_field_consent_is_rejected(data_dir: Path) -> None:
@@ -130,7 +134,9 @@ def test_conflicting_dual_field_consent_is_rejected(data_dir: Path) -> None:
     assert "AUDIO_UPLOAD_PROVIDER_CONSENT_CONFLICT" in str(excinfo.value)
 
 
-def test_precedence_does_not_weaken_the_complete_vendor_set_guard(data_dir: Path) -> None:
+def test_precedence_does_not_weaken_the_complete_vendor_set_guard(
+    data_dir: Path,
+) -> None:
     # Split-vendor pipeline: consent whose (matching) legacy provider is in the
     # list but whose list omits the second required vendor still fails closed.
     service = _service(

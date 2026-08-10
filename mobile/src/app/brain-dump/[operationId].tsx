@@ -284,7 +284,7 @@ export default function BrainDumpOperationScreen() {
             {provisionalOnly ? (
               <View style={styles.warnCard}>
                 <BBText variant="body" color={colors.warningFg}>
-                  Provisional only — the accurate transcript wasn't available, so these come from
+                  Provisional only — the accurate transcript wasn&apos;t available, so these come from
                   the live preview. Review them carefully.
                 </BBText>
               </View>
@@ -374,7 +374,7 @@ export default function BrainDumpOperationScreen() {
             {`Saved ${operation.committed_task_ids.length} to inbox`}
           </BBText>
           <BBText variant="body" color={colors.fg5} style={styles.centerText}>
-            Clarify them into next actions when you're ready.
+            Clarify them into next actions when you&apos;re ready.
           </BBText>
           <Button onPress={() => leave()}>Done</Button>
         </View>

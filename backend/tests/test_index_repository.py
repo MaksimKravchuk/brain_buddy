@@ -51,7 +51,9 @@ def test_concurrent_upserts_preserve_entries_for_different_trees(
     assert {entry.id for entry in repository.load_all()} == {"tree_a", "tree_b"}
 
 
-def test_upsert_replaces_existing_entry_and_serializes_optional_defaults(tmp_path) -> None:
+def test_upsert_replaces_existing_entry_and_serializes_optional_defaults(
+    tmp_path,
+) -> None:
     repository = IndexRepository(tmp_path)
     first = IndexEntry(
         id="tree_a",

@@ -62,7 +62,10 @@ def test_get_config_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     assert config.environment.value == "development"
     assert config.data_dir == tmp_path.resolve()
     assert config.data.schema_version == DEFAULT_SCHEMA_VERSION
-    assert "audio/x-brain-buddy-test-text" not in config.voice.audio_limits.allowed_mime_types
+    assert (
+        "audio/x-brain-buddy-test-text"
+        not in config.voice.audio_limits.allowed_mime_types
+    )
 
 
 def test_voice_stt_configuration_is_bounded_and_resolves_credentials(
@@ -196,8 +199,9 @@ def test_compose_e2e_configures_a_genuinely_allowlisted_openai_category(
     # accurate-STT category the discovery endpoint now reports and the client
     # names) and "openai" (the reconciler category), the latter kept as legacy
     # compatibility for the deterministic accurate STT as well.
-    assert container.voice_brain_dump_service.allowed_external_provider_categories == frozenset(
-        {"deterministic", "openai"}
+    assert (
+        container.voice_brain_dump_service.allowed_external_provider_categories
+        == frozenset({"deterministic", "openai"})
     )
     assert isinstance(
         container.voice_brain_dump_service.text_reconciler, DeterministicTextReconciler
@@ -219,7 +223,9 @@ def test_build_container_uses_openai_reconciler_outside_test(
 
     container = build_container(get_config())
 
-    assert isinstance(container.voice_brain_dump_service.text_reconciler, OpenAITextReconciler)
+    assert isinstance(
+        container.voice_brain_dump_service.text_reconciler, OpenAITextReconciler
+    )
     assert container.voice_brain_dump_service.text_reconciler.model == "gpt-4o"
 
 
@@ -235,9 +241,7 @@ def test_voice_reconciler_configuration_is_bounded_and_resolves_credentials(
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_MAX_RETRIES", "3")
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_RETRY_BACKOFF_SECONDS", "1,4")
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_MAX_COST_USD", "0.10")
-    monkeypatch.setenv(
-        "BRAIN_BUDDY_VOICE_RECONCILER_ESTIMATED_COST_USD_PER_MB", "0.02"
-    )
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_ESTIMATED_COST_USD_PER_MB", "0.02")
     monkeypatch.setenv("RECONCILER_API_KEY", "not-returned-from-config")
 
     config = get_config()
@@ -264,9 +268,7 @@ def test_build_container_forwards_bounded_reconciler_settings_to_the_adapter(
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_MAX_RETRIES", "4")
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_RETRY_BACKOFF_SECONDS", "0.5,1.5")
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_MAX_COST_USD", "0.05")
-    monkeypatch.setenv(
-        "BRAIN_BUDDY_VOICE_RECONCILER_ESTIMATED_COST_USD_PER_MB", "0.03"
-    )
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_RECONCILER_ESTIMATED_COST_USD_PER_MB", "0.03")
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_RAW_AUDIO_RETENTION_SECONDS", "123")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     get_config.cache_clear()  # type: ignore[attr-defined]
@@ -309,7 +311,10 @@ def test_build_container_derives_recovery_lease_from_worst_case_provider_timing(
     # accurate_stt worst case: 3 attempts * 10s timeout + (1 + 2)s backoff = 33s
     # reconciler worst case: 2 attempts * 5s timeout + 3s backoff = 13s
     # lease = max(33, 13) + 30s margin = 63s
-    assert container.voice_brain_dump_service.provider_run_lease_seconds == pytest.approx(63.0)
+    assert (
+        container.voice_brain_dump_service.provider_run_lease_seconds
+        == pytest.approx(63.0)
+    )
 
 
 def test_unsupported_reconciler_provider_fails_closed(

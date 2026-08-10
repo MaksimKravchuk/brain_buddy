@@ -733,7 +733,9 @@ def test_task_priority_search_date_sort_and_cursor_filters_compose(api_client) -
         },
     )
     assert next_page.status_code == 200, next_page.text
-    assert [item["title"] for item in next_page.json()["items"]] == ["Write alpha notes"]
+    assert [item["title"] for item in next_page.json()["items"]] == [
+        "Write alpha notes"
+    ]
     assert (
         api_client.get(
             "/api/tasks",
@@ -758,21 +760,33 @@ def test_project_archive_clears_assignments_from_all_task_states(api_client) -> 
         api_client, "Open member", key="archive-open", project_id=project["id"]
     )
     completed = _create_task(
-        api_client, "Completed member", key="archive-completed", project_id=project["id"]
+        api_client,
+        "Completed member",
+        key="archive-completed",
+        project_id=project["id"],
     )
     cancelled = _create_task(
-        api_client, "Cancelled member", key="archive-cancelled", project_id=project["id"]
+        api_client,
+        "Cancelled member",
+        key="archive-cancelled",
+        project_id=project["id"],
     )
-    assert api_client.post(
-        f"/api/tasks/{completed['id']}/transitions",
-        headers={"Idempotency-Key": "archive-complete"},
-        json={"action": "complete", "expected_revision": 1},
-    ).status_code == 200
-    assert api_client.post(
-        f"/api/tasks/{cancelled['id']}/transitions",
-        headers={"Idempotency-Key": "archive-cancel"},
-        json={"action": "cancel", "expected_revision": 1},
-    ).status_code == 200
+    assert (
+        api_client.post(
+            f"/api/tasks/{completed['id']}/transitions",
+            headers={"Idempotency-Key": "archive-complete"},
+            json={"action": "complete", "expected_revision": 1},
+        ).status_code
+        == 200
+    )
+    assert (
+        api_client.post(
+            f"/api/tasks/{cancelled['id']}/transitions",
+            headers={"Idempotency-Key": "archive-cancel"},
+            json={"action": "cancel", "expected_revision": 1},
+        ).status_code
+        == 200
+    )
 
     archived = api_client.post(
         f"/api/projects/{project['id']}/archive",
@@ -810,13 +824,23 @@ def test_waiting_patch_priority_and_same_state_move_invariants(api_client) -> No
     assert updated_waiting.json()["waiting_since"] == waiting["waiting_since"]
     assert updated_waiting.json()["priority"] == "medium"
 
-    assert api_client.post(
-        f"/api/tasks/{waiting['id']}/transitions",
-        headers={"Idempotency-Key": "same-state-move"},
-        json={"action": "move", "to_state": "waiting", "waiting_for": "Bob", "expected_revision": 2},
-    ).status_code == 400
+    assert (
+        api_client.post(
+            f"/api/tasks/{waiting['id']}/transitions",
+            headers={"Idempotency-Key": "same-state-move"},
+            json={
+                "action": "move",
+                "to_state": "waiting",
+                "waiting_for": "Bob",
+                "expected_revision": 2,
+            },
+        ).status_code
+        == 400
+    )
 
-    next_task = _create_task(api_client, "Next task", key="patch-non-waiting", state="next")
+    next_task = _create_task(
+        api_client, "Next task", key="patch-non-waiting", state="next"
+    )
     rejected_waiting_patch = api_client.patch(
         f"/api/tasks/{next_task['id']}",
         headers={"Idempotency-Key": "patch-non-waiting-for"},

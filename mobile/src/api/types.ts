@@ -268,7 +268,7 @@ export interface BrainDumpOperationResponse {
     vocabulary: string[];
     recorded_at: string;
   };
-  segments: Array<{
+  segments: {
     id: string;
     sequence: number;
     text: string;
@@ -280,7 +280,7 @@ export interface BrainDumpOperationResponse {
     model?: string | null;
     supersedes_segment_ids?: string[];
     created_at: string;
-  }>;
+  }[];
   proposals: BrainDumpProposal[];
   media_ref?: string | null;
   audio_chunks?: BrainDumpAudioChunkMeta[];
@@ -290,8 +290,8 @@ export interface BrainDumpOperationResponse {
   working_artifacts_expires_at?: string | null;
   reconciliation_quality?: "none" | "provisional_only" | "accurate" | "conflicted";
   committable?: boolean;
-  available_recovery_actions?: Array<"retry" | "review_provisional" | "cancel">;
-  provider_runs?: Array<{
+  available_recovery_actions?: ("retry" | "review_provisional" | "cancel")[];
+  provider_runs?: {
     id: string;
     role: "accurate_stt" | "reconciler";
     status: "pending" | "running" | "succeeded" | "retryable_error" | "terminal_error";
@@ -306,7 +306,7 @@ export interface BrainDumpOperationResponse {
     estimated_cost_usd: number;
     reserved_cost_usd?: number;
     consumed_cost_usd?: number;
-  }>;
+  }[];
   status_history?: BrainDumpStatus[];
   committed_task_ids: string[];
   created_at: string;
@@ -331,7 +331,7 @@ export interface BrainDumpProvidersResponse {
 }
 
 export interface BrainDumpTranscriptAppendRequest {
-  segments: Array<{ sequence: number; text: string; stability: "interim" | "stable" }>;
+  segments: { sequence: number; text: string; stability: "interim" | "stable" }[];
 }
 
 export type BrainDumpAction =

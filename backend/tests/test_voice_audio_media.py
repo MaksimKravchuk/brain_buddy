@@ -57,9 +57,7 @@ def test_media_inspection_rejects_unknown_container_and_missing_audio_stream(
     monkeypatch.setattr(
         audio_media.av,
         "open",
-        lambda *_args, **_kwargs: _Container(
-            streams=[SimpleNamespace(type="video")]
-        ),
+        lambda *_args, **_kwargs: _Container(streams=[SimpleNamespace(type="video")]),
     )
     with pytest.raises(ValidationFailure, match="no audio stream"):
         audio_media.inspect_audio(b"video only", declared_mime_type="audio/wav")
@@ -79,7 +77,9 @@ def test_media_inspection_derives_progressive_duration_from_packet_timestamps(
         lambda *_args, **_kwargs: _Container(streams=[stream], packets=packets),
     )
 
-    inspected = audio_media.inspect_audio(b"progressive", declared_mime_type="audio/wav")
+    inspected = audio_media.inspect_audio(
+        b"progressive", declared_mime_type="audio/wav"
+    )
 
     assert inspected.mime_type == "audio/wav"
     assert inspected.duration_seconds == pytest.approx(1.1)
@@ -89,7 +89,9 @@ def test_media_inspection_rejects_non_positive_or_unavailable_duration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     stream = SimpleNamespace(type="audio", duration=None, time_base=None)
-    packet = SimpleNamespace(pts=0, dts=None, duration=None, time_base=Fraction(1, 1000))
+    packet = SimpleNamespace(
+        pts=0, dts=None, duration=None, time_base=Fraction(1, 1000)
+    )
     monkeypatch.setattr(
         audio_media.av,
         "open",

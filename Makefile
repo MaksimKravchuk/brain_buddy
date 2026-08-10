@@ -15,17 +15,20 @@ dev-frontend:
 
 test-backend:
 	cd backend && pytest --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results
-	python3 scripts/validate_backend_coverage.py backend/coverage.xml
+	python3 scripts/validate_coverage_floor.py --stack backend --format cobertura \
+		--report backend/coverage.xml --floor backend/coverage-floor.json
 	python3 scripts/validate_allure_taxonomy.py --path backend/allure-results --label backend-pytest
 
 lint-backend:
 	cd backend && ruff check app tests
+	cd backend && black --check app tests
 	cd backend && mypy app
+	cd backend && lint-imports
 
-# Black is the documented formatter (CLAUDE.md: "Black 88-col + Ruff").
-# NOT wired into lint-backend yet: the tree currently has a backlog of files
-# black would reformat, and gating on it would block every unrelated change
-# behind one large mechanical diff. Run format-backend to fix a file you touch.
+# Black is the documented formatter (CLAUDE.md: "Black 88-col + Ruff"). The
+# backlog that once kept it out of lint-backend is gone -- the tree was
+# reformatted in one mechanical commit -- so `black --check` now gates there and
+# in CI. Use format-backend to fix a file rather than hand-wrapping it.
 format-backend:
 	cd backend && black app tests
 
@@ -36,6 +39,8 @@ ci-backend: lint-backend test-backend
 
 test-frontend:
 	cd frontend && npm run test:coverage
+	python3 scripts/validate_coverage_floor.py --stack frontend --format istanbul-summary \
+		--report frontend/coverage/coverage-summary.json --floor frontend/coverage-floor.json
 	python3 scripts/validate_allure_taxonomy.py --path frontend/allure-results/vitest --label frontend-vitest
 
 test-e2e:
@@ -65,6 +70,8 @@ validate-ci:
 	python3 -m unittest scripts/test_validate_brain_buddy_design_skill.py -v
 	python3 -m unittest scripts/test_validate_ci_artifacts.py -v
 	python3 -m unittest scripts/test_validate_allure_taxonomy.py -v
+	python3 -m unittest scripts/test_validate_coverage_floor.py -v
+	python3 -m unittest scripts/test_mutation_gate.py -v
 	python3 -m unittest scripts/test_validate_trunk_delivery.py -v
 	python3 -m unittest scripts/test_submit_to_trunk.py -v
 	python3 -m unittest scripts/test_production_smoke.py -v
@@ -94,10 +101,12 @@ typecheck-mobile:
 	cd mobile && npx tsc --noEmit
 
 lint-mobile:
-	cd mobile && npx expo lint
+	cd mobile && npx eslint .
 
 test-mobile:
-	cd mobile && npx jest
+	cd mobile && npx jest --coverage
+	python3 scripts/validate_coverage_floor.py --stack mobile --format istanbul-summary \
+		--report mobile/coverage/coverage-summary.json --floor mobile/coverage-floor.json
 
 # Boots its own disposable backend (requires backend deps: make install-backend)
 integration-mobile:
