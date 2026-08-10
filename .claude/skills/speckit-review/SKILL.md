@@ -138,19 +138,25 @@ gap, the other is a defect in evidence that was actually produced.
 
 ## Risk classes
 
-`low | medium | high`, derived by the preflight from the paths the planning
-artifacts name:
+`low | medium | high`. The preflight reads the paths the planning artifacts
+name, but **it may only raise the class, never lower it**:
 
-- **high** — any ASK-class surface (auth, migrations, CI, deploy, secrets).
-  Adds `adversarial-high-risk` and requires human sign-off.
-- **low** — every named path is inert (`docs/`, `specs/`, `requirements/`,
-  `*.md`) and at least one path was found.
-- **medium** — everything else, **including "no paths could be extracted"**.
+- **high** — derived when any ASK-class surface is named (auth, migrations,
+  CI, deploy, secrets). Adds `adversarial-high-risk` and requires human
+  sign-off.
+- **medium** — the default, and what every campaign runs at unless something
+  raises or an operator declares otherwise.
+- **low** — an operator declaration only. Derivation never produces it.
 
-Unknown risk is `medium`, never `low`. Treating silence as safety would let
-exactly the work nobody could classify take the cheapest path. Risk escalates
-and never de-escalates: raise the class if you disagree, but you cannot argue
-the classifier down.
+Why derivation cannot lower a class: at review time **there is no diff**, so
+all it can see is which paths are *mentioned*, and a mention is not a change. A
+spec rotating session tokens while merely citing `docs/auth.md` as background
+reads identically to a documentation edit — an earlier version derived `low`
+for exactly that. Lowering a class is an accountable declaration, not an
+inference from prose.
+
+Unknown risk is `medium`, never `low`: treating silence as safety would let
+exactly the work nobody could classify take the cheapest path.
 
 ## Step 4 — the campaign cap
 

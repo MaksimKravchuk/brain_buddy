@@ -40,9 +40,10 @@ markers, missing mandatory spec sections, duplicate or malformed
 `FR-###`/`SC-###` ids, unchecked `checklists/requirements.md` items, and
 unfilled placeholders. Fix the spec and rerun; do not skip it.
 
-It also records `derived_risk` from `scripts/classify_path_risk.py`. An
-ASK-class surface derives `high`; an entirely inert change derives `low`;
-everything else, including an unclassifiable change, derives `medium`.
+It also records `derived_risk` from `scripts/classify_path_risk.py`, which
+may only **raise** the class: an ASK-class surface derives `high`,
+everything else derives nothing and the campaign runs at the declared
+class (default `medium`).
 
 ## Step 2 — fan out
 
@@ -91,9 +92,10 @@ A reviewer's verdict blocks on its own; the aggregator does not re-derive it
 from severities. A malformed review still raises — absence and corruption are
 different.
 
-Risk classes are `low | medium | high`. Unknown risk is **medium**, never low:
-`low` requires positive evidence that every named path is inert. Risk escalates
-and never de-escalates.
+Risk classes are `low | medium | high`. Unknown risk is **medium**, never low.
+`low` is an operator declaration; derivation never produces it, because at
+review time there is no diff and a *mentioned* path is not a changed one.
+Risk escalates and never de-escalates.
 
 ## Step 4 — campaign cap
 

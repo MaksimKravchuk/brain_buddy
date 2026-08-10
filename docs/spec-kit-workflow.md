@@ -207,13 +207,20 @@ product decision raised by review, ASK-class landing, and the final report.
 `/speckit-review` is the single front door; do not invoke
 `scripts/spec_kit_planning_review.py` ad hoc. ADR-0011 governs it.
 
-**Risk classes** (ADR-0012): `low | medium | high`, derived by the preflight.
-An ASK-class surface derives `high` and additionally requires a recorded human
-sign-off. An entirely inert change — every named path under `docs/`, `specs/`,
-`requirements/` or `*.md` — derives `low`. **Everything else, including a
-change no path could be extracted from, derives `medium`.** Unknown risk is
-never `low`: treating silence as safety would let exactly the work nobody could
-classify take the cheapest path. Risk escalates and never de-escalates.
+**Risk classes** (ADR-0012): `low | medium | high`. The preflight may only
+**raise** the class. An ASK-class surface derives `high`, which additionally
+requires a recorded human sign-off; everything else derives nothing and the
+campaign runs at the declared class, defaulting to `medium`. `low` is an
+operator declaration and is never derived — at review time there is no diff, so
+the classifier only sees which paths are *mentioned*, and a mention is not a
+change. Unknown risk is `medium`, never `low`: treating silence as safety would
+let exactly the work nobody could classify take the cheapest path. Risk
+escalates and never de-escalates.
+
+High-risk sign-off is not a flag the campaign caller sets. It is a record at
+`.specify/workflows/runs/<run-id>/human-signoff.json` naming the approver and
+bound to both the run id and a digest of the reviewed artifacts, so it cannot
+be replayed into another campaign and goes stale when the spec is edited.
 
 **Aggregation rule**, in order:
 
