@@ -37,7 +37,7 @@ def _valid_handoff() -> dict[str, Any]:
         },
         "planning_review": {
             "run_id": "run123",
-            "risk": "standard",
+            "risk": "medium",
             "status": "approved",
             "reviewers": [
                 "requirements-consistency",

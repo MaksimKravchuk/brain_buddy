@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,20 @@ PRODUCT_DECISION_CATEGORIES = {
 }
 VERDICTS = {"pass", "changes-required", "product-decision-required"}
 SEVERITIES = {"blocking", "important", "advisory"}
+
+# Risk classes, ordered least to most strict.
+#
+# `medium` is the default for a reason: an unclassifiable change gets the
+# middle class, never the lowest. Lowering to `low` requires the objective
+# rules in derive_risk() to actually fire; silence is not evidence of safety.
+RISK_CLASSES: tuple[str, ...] = ("low", "medium", "high")
+DEFAULT_RISK = "medium"
+# `high` additionally requires a recorded human sign-off: at that class an
+# uncorrelated automated mechanism alone is not sufficient evidence.
+HUMAN_SIGNOFF_REQUIRED_AT = "high"
+# Paths that cannot change runtime or CI behavior. Only a change confined
+# entirely to these may fall to `low`.
+INERT_PATH_RE = re.compile(r"^(docs/|specs/|requirements/)|\.md$")
 STANDARD_ROLES = (
     "requirements-consistency",
     "architecture-consistency",
@@ -72,9 +87,15 @@ ROLE_CONFIGS: dict[str, dict[str, str]] = {
             "and mismatches between spec.md and plan.md."
         ),
     },
+    # Moved off codex/gpt-5.6-sol deliberately. Three lenses on one model do
+    # not give three independent opinions — they give one opinion counted three
+    # times, and the aggregation rule would treat correlated blind spots as
+    # corroboration. Moving this lens also means three of five run without the
+    # codex CLI, which is what a single-runtime machine actually has.
     "architecture-consistency": {
-        "integration": "codex",
-        "model": "gpt-5.6-sol",
+        "integration": "claude",
+        "model": "opus",
+        "agent": "architecture-consistency-reviewer",
         "focus": (
             "Challenge boundaries, contracts, data ownership, failure handling, "
             "migration/rollback, ADR alignment, and repository factual claims."
@@ -464,7 +485,13 @@ def run_review(*, root: Path, run_id: str, role: str) -> Path:
     return target
 
 
-def aggregate_reviews(reviews: list[dict[str, Any]], *, risk: str) -> dict[str, Any]:
+def aggregate_reviews(
+    reviews: list[dict[str, Any]],
+    *,
+    risk: str,
+    missing_roles: tuple[str, ...] = (),
+    human_signoff: bool = False,
+) -> dict[str, Any]:
     technical_findings: list[dict[str, Any]] = []
     product_decisions: list[dict[str, Any]] = []
     reviewers: list[dict[str, str]] = []
@@ -484,7 +511,19 @@ def aggregate_reviews(reviews: list[dict[str, Any]], *, risk: str) -> dict[str, 
     # discards the exact judgement the reviewer was asked to make.
     verdicts = {str(review["verdict"]) for review in reviews}
 
-    if product_decisions or "product-decision-required" in verdicts:
+    # `escalated` is not a softer `changes-required`; it means the campaign
+    # cannot produce a trustworthy verdict at all. Missing mandatory evidence
+    # must never resolve to majority-green, and an unsigned high-risk campaign
+    # must not pass on automated agreement alone.
+    if missing_roles:
+        status = "escalated"
+        action = (
+            "Mandatory review evidence is missing for "
+            f"{', '.join(missing_roles)}. This is not a pass: rerun those "
+            "lenses, or record an explicit human decision to proceed without "
+            "them. A partial campaign is never reported as a clean one."
+        )
+    elif product_decisions or "product-decision-required" in verdicts:
         status = "product-decision-required"
         action = "Block only the Architect Kanban card with this decision packet."
     elif "changes-required" in verdicts or any(
@@ -492,6 +531,13 @@ def aggregate_reviews(reviews: list[dict[str, Any]], *, risk: str) -> dict[str, 
     ):
         status = "technical-changes-required"
         action = "Architect resolves technical findings and reruns the review campaign once."
+    elif risk == HUMAN_SIGNOFF_REQUIRED_AT and not human_signoff:
+        status = "escalated"
+        action = (
+            "Every lens passed, but a high-risk campaign requires a recorded "
+            "human sign-off in addition to the automated mechanisms. A named "
+            "human must accept the residual risk before this becomes approved."
+        )
     else:
         status = "approved"
         action = "Architect may finalize tasks.md, analyze, and the compact Kanban handoff."
@@ -584,18 +630,25 @@ def deterministic_defects(feature_dir: Path) -> list[str]:
 
 
 def derive_risk(feature_dir: Path) -> str:
-    """Derive campaign risk from the surfaces the planning artifacts name.
+    """Derive the campaign risk class from the surfaces the artifacts name.
 
-    Defaulting to `standard` meant a feature touching auth, migrations, CI, or
-    deploy config got the same three reviewers as a copy change. ADR-0008
-    already classifies those surfaces; reuse that classifier rather than
-    inventing a second risk vocabulary.
+    Three outcomes, and the default matters more than the extremes:
+
+    - `high`   — any ASK-class surface (auth, migrations, CI, deploy, secrets).
+    - `low`    — every named path is inert (docs, specs, markdown) AND at least
+                 one path was actually found. This is the only branch that may
+                 lower the class, and it fires only on positive evidence.
+    - `medium` — everything else, including "no paths could be extracted".
+
+    An unclassifiable change is `medium`, never `low`. Treating silence as
+    safety is exactly the inversion that lets a risky change take the cheapest
+    path, so the absence of evidence must cost strictness rather than save it.
     """
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     try:
         from classify_path_risk import ASK, classify_path
     except ImportError:  # pragma: no cover - classifier is repo-local
-        return "standard"
+        return DEFAULT_RISK
 
     path_like = re.compile(r"\b[\w./-]+\.(?:py|ts|tsx|js|jsx|yml|yaml|toml|sql|md)\b")
     candidates: set[str] = set()
@@ -604,12 +657,22 @@ def derive_risk(feature_dir: Path) -> str:
         if path.is_file():
             candidates.update(path_like.findall(path.read_text(encoding="utf-8")))
 
-    for candidate in candidates:
-        if "\\" in candidate:
-            continue
+    classifiable = [candidate for candidate in candidates if "\\" not in candidate]
+    if not classifiable:
+        return DEFAULT_RISK
+
+    for candidate in classifiable:
         if classify_path(candidate)[0] == ASK:
             return "high"
-    return "standard"
+
+    if all(INERT_PATH_RE.search(candidate) for candidate in classifiable):
+        return "low"
+    return DEFAULT_RISK
+
+
+def stricter_risk(left: str, right: str) -> str:
+    """The stricter of two risk classes. Risk escalates and never de-escalates."""
+    return max(left, right, key=RISK_CLASSES.index)
 
 
 def preflight(*, root: Path, run_id: str) -> Path:
@@ -648,52 +711,63 @@ def summarize(*, root: Path, run_id: str) -> Path:
     if not inputs_path.is_file():
         raise ReviewError("Workflow inputs.json is missing")
     inputs = parse_workflow_inputs(json.loads(inputs_path.read_text(encoding="utf-8")))
-    risk = inputs.get("risk", "standard")
-    if risk not in {"standard", "high"}:
+    risk = inputs.get("risk", DEFAULT_RISK)
+    if risk not in RISK_CLASSES:
         raise ReviewError(f"Unsupported risk value: {risk!r}")
 
-    # Risk escalates, never de-escalates: an operator may raise a standard
-    # feature to high, but may not talk the classifier out of an ASK-class
-    # surface it detected in the planning artifacts.
+    # Risk escalates, never de-escalates: an operator may raise a class, but
+    # may not talk the classifier out of a surface it detected in the planning
+    # artifacts.
     context_path = run_dir / "planning-context.json"
-    escalated = False
+    declared_risk = risk
+    human_signoff = bool(inputs.get("human_signoff", False))
     if context_path.is_file():
         context = json.loads(context_path.read_text(encoding="utf-8"))
-        if context.get("derived_risk") == "high" and risk != "high":
-            risk = "high"
-            escalated = True
+        derived = context.get("derived_risk")
+        if isinstance(derived, str) and derived in RISK_CLASSES:
+            risk = stricter_risk(risk, derived)
+    escalated = risk != declared_risk
 
     roles: list[str] = list(STANDARD_ROLES)
     if risk == "high":
         roles.append("adversarial-high-risk")
+    # A missing review is missing mandatory evidence, which is `escalated`, not
+    # a crash and never a pass. Recording it in the summary is strictly more
+    # useful than aborting: the incomplete campaign becomes an auditable fact
+    # instead of a stack trace someone can rerun away.
+    #
+    # A malformed review still raises. Absence and corruption are different:
+    # one is a gap, the other is a defect in evidence that was produced.
     reviews: list[dict[str, Any]] = []
+    missing: list[str] = []
     for role in roles:
         path = run_dir / "reviews" / f"{role}.json"
         if not path.is_file():
-            if escalated and role == "adversarial-high-risk":
-                # Fail closed rather than quietly summarizing a high-risk
-                # feature with the standard panel: the classifier found an
-                # ASK-class surface the campaign was never told about.
-                raise ReviewError(
-                    "Planning artifacts name an ASK-class surface, so this "
-                    "campaign requires the adversarial-high-risk reviewer, but "
-                    "it was launched with risk=standard. Rerun the campaign "
-                    "with risk=high."
-                )
-            raise ReviewError(f"Required review output is missing: {path}")
+            missing.append(role)
+            continue
         reviews.append(
             validate_review(json.loads(path.read_text(encoding="utf-8")), expected_role=role)
         )
 
-    summary = aggregate_reviews(reviews, risk=risk)
+    summary = aggregate_reviews(
+        reviews,
+        risk=risk,
+        missing_roles=tuple(missing),
+        human_signoff=human_signoff,
+    )
     summary["run_id"] = run_id
+    summary["declared_risk"] = declared_risk
+    summary["risk_escalated_by_classifier"] = escalated
+    summary["missing_reviewers"] = missing
+    summary["human_signoff"] = human_signoff
     target = run_dir / "planning-review-summary.json"
     write_json_atomic(target, summary)
     print(target)
     return target
 
 
-def validate_handoff(payload: object) -> dict[str, Any]:
+def validate_handoff(payload: object, *, today: date | None = None) -> dict[str, Any]:
+    today = today or date.today()
     if not isinstance(payload, dict):
         raise ValueError("handoff must be a JSON object")
     if payload.get("schema_version") != "speckit-hermes-handoff/v1":
@@ -716,7 +790,7 @@ def validate_handoff(payload: object) -> dict[str, Any]:
     if not RUN_ID_RE.fullmatch(run_id):
         raise ValueError("planning_review.run_id is invalid")
     risk = _required_string(raw_review.get("risk"), "planning_review.risk")
-    if risk not in {"standard", "high"}:
+    if risk not in RISK_CLASSES:
         raise ValueError("planning_review.risk is unsupported")
     status = raw_review.get("status")
     founder_acceptance: dict[str, Any] | None = None
@@ -736,9 +810,6 @@ def validate_handoff(payload: object) -> dict[str, Any]:
         _required_string(
             acceptance.get("accepted_by"), "founder_acceptance.accepted_by"
         )
-        _required_string(
-            acceptance.get("accepted_on"), "founder_acceptance.accepted_on"
-        )
         rationale = _required_string(
             acceptance.get("rationale"), "founder_acceptance.rationale"
         )
@@ -752,6 +823,49 @@ def validate_handoff(payload: object) -> dict[str, Any]:
             raise ValueError(
                 "founder_acceptance.campaign_history must list every campaign run"
             )
+        # An acceptance without an end date is not an acceptance, it is a
+        # permanent hole in the gate. Risk acceptance is bounded in time and
+        # carries compensating measures, or it is simply the rule being
+        # rewritten by whoever happened to be blocked that day.
+        expires_on = _required_string(
+            acceptance.get("expires_on"), "founder_acceptance.expires_on"
+        )
+        try:
+            expiry = date.fromisoformat(expires_on)
+        except ValueError as exc:
+            raise ValueError(
+                "founder_acceptance.expires_on must be an ISO date (YYYY-MM-DD)"
+            ) from exc
+        accepted_on = _required_string(
+            acceptance.get("accepted_on"), "founder_acceptance.accepted_on"
+        )
+        try:
+            accepted = date.fromisoformat(accepted_on)
+        except ValueError as exc:
+            raise ValueError(
+                "founder_acceptance.accepted_on must be an ISO date (YYYY-MM-DD)"
+            ) from exc
+        if expiry <= accepted:
+            raise ValueError(
+                "founder_acceptance.expires_on must be after accepted_on"
+            )
+        if expiry < today:
+            raise ValueError(
+                f"founder_acceptance expired on {expires_on}; an expired risk "
+                "acceptance no longer closes the review. Re-run the campaign "
+                "or record a new, bounded acceptance."
+            )
+        measures = _string_list(
+            acceptance.get("compensating_measures"),
+            "founder_acceptance.compensating_measures",
+            minimum=1,
+        )
+        if any(len(measure) < 20 for measure in measures):
+            raise ValueError(
+                "each founder_acceptance.compensating_measures entry must name "
+                "a concrete mitigation, not a placeholder"
+            )
+
         for index, entry in enumerate(history):
             if not isinstance(entry, dict):
                 raise ValueError(

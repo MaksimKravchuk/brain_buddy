@@ -10,11 +10,21 @@ requires:
   speckit_version: ">=0.14.2"
 
 inputs:
+  # Unknown risk is medium, never low. The classifier may raise this class from
+  # the planning artifacts but never lower it, and `low` requires positive
+  # evidence that every named path is inert.
   risk:
     type: string
-    default: "standard"
-    enum: ["standard", "high"]
-    prompt: "Planning risk: standard or high"
+    default: "medium"
+    enum: ["low", "medium", "high"]
+    prompt: "Planning risk class: low, medium or high (default medium)"
+  # High-risk campaigns need a recorded human decision in addition to the
+  # automated mechanisms; without it the gate returns `escalated`, not
+  # `approved`.
+  human_signoff:
+    type: boolean
+    default: false
+    prompt: "Has a named human accepted the residual risk? (high risk only)"
 
 steps:
   - id: planning-preflight
