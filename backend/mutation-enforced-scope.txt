@@ -7,11 +7,13 @@
 # unchanged allow-list. Adding one without that evidence defeats the point of
 # having two tiers.
 #
-# NOT YET ENFORCING. Nothing reads this list in CI yet. The nightly campaign
-# has completed successfully on twelve consecutive runs, which satisfies half of
-# ADR-0004's precondition; the other half is a recorded score of at least 95%
-# for this unchanged list, and that number has not been established. Wire the
-# gate up only once it has.
+# NOT YET ENFORCING. Nothing reads this list in CI yet, and it must stay that
+# way until the score clears ADR-0004's bar.
+#
+# Measured over exactly this list on 2026-08-10: 1280 killed, 70 survived of
+# 1350 mutants — 94.81%, against a required 95%. Three more killed mutants
+# would clear it (1283/1350 = 95.04%). Twelve consecutive successful nightlies
+# satisfy the other half of the precondition.
 app/services/tree_service.py
 app/services/version_service.py
 app/services/relation_service.py
