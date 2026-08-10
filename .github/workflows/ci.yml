@@ -581,9 +581,13 @@ jobs:
   # the gate job, and that is the whole point of splitting them: `pip install
   # -e` points at exactly one checkout, so measuring both revisions from one
   # job risks running the base's tests against the head's code and reporting a
-  # comparison that is silently meaningless. Separate jobs also measure both
-  # revisions concurrently, so the comparison costs runner minutes but not
-  # wall-clock.
+  # comparison that is silently meaningless.
+  #
+  # These two run in SEQUENCE, not in parallel: mutation-gate needs this job's
+  # artifact, and `needs` gates when a job starts. A pull request pays for both
+  # campaigns end to end. Overlapping them needs a third job that consumes both
+  # artifacts and renders the verdict; correctness came first here. A push is
+  # unaffected -- there is no base to measure, so every step below skips.
   mutation-base:
     name: Backend mutation base measurement
     runs-on: ubuntu-latest

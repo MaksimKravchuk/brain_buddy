@@ -105,8 +105,17 @@ ADR-0004 asked for.
 exactly one checkout, so measuring both revisions from a single job risks
 running the base's tests against the head's code and reporting a comparison
 that is silently meaningless — the worst failure available to a gate, because
-it still shows green. Two jobs cost runner minutes and no wall-clock, since
-they measure concurrently.
+it still shows green.
+
+The two jobs run in sequence, not in parallel: `mutation-gate` declares
+`needs: mutation-base` so it can download the base measurement as an artifact,
+and `needs` gates when a job *starts*. A pull request therefore pays for both
+campaigns end to end — the first run of this gate measured 623 mutants twice,
+seven minutes each. Making them concurrent needs a third job that consumes both
+artifacts and renders the verdict; the two-job shape was chosen for correctness
+first and has not been optimised. The landing path is unaffected, because there
+is no base revision to measure on a push and `mutation-base` finishes in
+seconds.
 
 A module enters the observed scope as soon as it has mutation-compatible tests
 worth measuring. It moves to the enforced scope only once it independently
