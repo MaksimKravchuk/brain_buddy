@@ -12,7 +12,7 @@ type LocationState = {
   deletionScheduled?: string;
 } | null;
 
-export default function LoginPage(): JSX.Element {
+export default function LoginPage(): React.JSX.Element {
   const status = useAuthStore((state) => state.status);
   const login = useAuthStore((state) => state.login);
   const navigate = useNavigate();
@@ -105,7 +105,7 @@ export function AuthLayout({
 }: {
   title: string;
   children: React.ReactNode;
-}): JSX.Element {
+}): React.JSX.Element {
   return (
     <div className="flex min-h-screen items-center justify-center bg-surface-base px-4">
       <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-surface-raised p-7 shadow-raised">

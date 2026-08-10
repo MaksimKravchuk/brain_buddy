@@ -23,7 +23,9 @@ def _transition(api_client, task, *, key: str, action: str, **payload):
     return response.json()
 
 
-def test_priority_waiting_detail_fields_search_dates_and_sort_persist(api_client) -> None:
+def test_priority_waiting_detail_fields_search_dates_and_sort_persist(
+    api_client,
+) -> None:
     project = api_client.post(
         "/api/projects",
         headers={"Idempotency-Key": "detail-project"},
@@ -89,14 +91,31 @@ def test_priority_waiting_detail_fields_search_dates_and_sort_persist(api_client
     assert task["waiting_for"] == "Ada via email"
     assert task["waiting_since"] == waiting_since
 
-    assert api_client.get("/api/tasks", params={"q": "searchable"}).json()["items"][0]["id"] == task["id"]
-    assert api_client.get("/api/tasks", params={"due_after": "2026-08-01"}).json()["items"][0]["id"] == task["id"]
-    assert api_client.get("/api/tasks", params={"priority": "low"}).json()["items"][0]["id"] == task["id"]
+    assert (
+        api_client.get("/api/tasks", params={"q": "searchable"}).json()["items"][0][
+            "id"
+        ]
+        == task["id"]
+    )
+    assert (
+        api_client.get("/api/tasks", params={"due_after": "2026-08-01"}).json()[
+            "items"
+        ][0]["id"]
+        == task["id"]
+    )
+    assert (
+        api_client.get("/api/tasks", params={"priority": "low"}).json()["items"][0][
+            "id"
+        ]
+        == task["id"]
+    )
 
     _create_task(api_client, "Medium task", key="detail-medium", priority="medium")
     sorted_titles = [
         item["title"]
-        for item in api_client.get("/api/tasks", params={"sort": "priority"}).json()["items"]
+        for item in api_client.get("/api/tasks", params={"sort": "priority"}).json()[
+            "items"
+        ]
     ]
     assert sorted_titles[:2] == ["Medium task", "Call Ada about launch"]
 
@@ -106,18 +125,26 @@ def test_priority_waiting_detail_fields_search_dates_and_sort_persist(api_client
     assert reloaded.json()["waiting_for"] == "Ada via email"
 
 
-def test_lifecycle_matrix_rejects_same_state_and_forbidden_terminal_commands(api_client) -> None:
+def test_lifecycle_matrix_rejects_same_state_and_forbidden_terminal_commands(
+    api_client,
+) -> None:
     task = _create_task(api_client, "Lifecycle", key="lifecycle-create", state="next")
 
     same_state = api_client.post(
         f"/api/tasks/{task['id']}/transitions",
         headers={"Idempotency-Key": "same-state-move"},
-        json={"action": "move", "to_state": "next", "expected_revision": task["revision"]},
+        json={
+            "action": "move",
+            "to_state": "next",
+            "expected_revision": task["revision"],
+        },
     )
     assert same_state.status_code == 400
     assert "different open destination" in same_state.json()["message"]
 
-    completed = _transition(api_client, task, key="lifecycle-complete", action="complete")
+    completed = _transition(
+        api_client, task, key="lifecycle-complete", action="complete"
+    )
     for action, payload in (
         ("complete", {}),
         ("cancel", {}),
@@ -126,14 +153,22 @@ def test_lifecycle_matrix_rejects_same_state_and_forbidden_terminal_commands(api
         rejected = api_client.post(
             f"/api/tasks/{task['id']}/transitions",
             headers={"Idempotency-Key": f"terminal-{action}"},
-            json={"action": action, "expected_revision": completed["revision"], **payload},
+            json={
+                "action": action,
+                "expected_revision": completed["revision"],
+                **payload,
+            },
         )
         assert rejected.status_code == 400
 
     reopened = api_client.post(
         f"/api/tasks/{task['id']}/transitions",
         headers={"Idempotency-Key": "explicit-reopen"},
-        json={"action": "reopen", "to_state": "inbox", "expected_revision": completed["revision"]},
+        json={
+            "action": "reopen",
+            "to_state": "inbox",
+            "expected_revision": completed["revision"],
+        },
     )
     assert reopened.status_code == 200, reopened.text
     assert reopened.json()["state"] == "inbox"
@@ -190,7 +225,10 @@ def test_subtask_comment_idempotency_and_transition_edges(api_client) -> None:
         headers={"Idempotency-Key": "nested-edge-subtask"},
         json={"title": "Collect examples"},
     ).json()
-    edit_payload = {"title": "Collect final examples", "expected_revision": subtask["revision"]}
+    edit_payload = {
+        "title": "Collect final examples",
+        "expected_revision": subtask["revision"],
+    }
     edited = api_client.patch(
         f"/api/tasks/{task['id']}/subtasks/{subtask['id']}",
         headers={"Idempotency-Key": "nested-edge-subtask-edit"},
@@ -261,7 +299,10 @@ def test_subtask_comment_idempotency_and_transition_edges(api_client) -> None:
         headers={"Idempotency-Key": "nested-edge-comment"},
         json={"body": "Initial edge note"},
     ).json()
-    comment_payload = {"body": "Edited edge note", "expected_revision": comment["revision"]}
+    comment_payload = {
+        "body": "Edited edge note",
+        "expected_revision": comment["revision"],
+    }
     edited_comment = api_client.patch(
         f"/api/tasks/{task['id']}/comments/{comment['id']}",
         headers={"Idempotency-Key": "nested-edge-comment-edit"},
@@ -323,17 +364,27 @@ def test_task_query_and_update_validation_edges(api_client) -> None:
     assert rejected_null_priority.status_code == 400
 
 
-def test_project_archive_clears_assignments_from_all_lifecycle_states(api_client) -> None:
+def test_project_archive_clears_assignments_from_all_lifecycle_states(
+    api_client,
+) -> None:
     project = api_client.post(
         "/api/projects",
         headers={"Idempotency-Key": "archive-all-project"},
         json={"name": "Archive me"},
     ).json()
-    open_task = _create_task(api_client, "Open", key="archive-open", project_id=project["id"])
-    done = _create_task(api_client, "Done", key="archive-done", project_id=project["id"])
+    open_task = _create_task(
+        api_client, "Open", key="archive-open", project_id=project["id"]
+    )
+    done = _create_task(
+        api_client, "Done", key="archive-done", project_id=project["id"]
+    )
     done = _transition(api_client, done, key="archive-done-complete", action="complete")
-    cancelled = _create_task(api_client, "Cancelled", key="archive-cancelled", project_id=project["id"])
-    cancelled = _transition(api_client, cancelled, key="archive-cancelled-cancel", action="cancel")
+    cancelled = _create_task(
+        api_client, "Cancelled", key="archive-cancelled", project_id=project["id"]
+    )
+    cancelled = _transition(
+        api_client, cancelled, key="archive-cancelled-cancel", action="cancel"
+    )
 
     archived = api_client.post(
         f"/api/projects/{project['id']}/archive",

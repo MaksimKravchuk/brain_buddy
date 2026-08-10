@@ -133,7 +133,9 @@ class DeterministicFastStt:
             language=",".join(request.language_hints) or None,
             model="deterministic-fast-v1",
         )
-        return SttResult(role="fast", input_hash=_input_hash(key, text), segments=[segment])
+        return SttResult(
+            role="fast", input_hash=_input_hash(key, text), segments=[segment]
+        )
 
 
 class DeterministicAccurateStt:
@@ -193,7 +195,9 @@ class DeterministicAccurateStt:
         return SttResult(
             role="accurate",
             provider=self.provider_name,
-            input_hash=_input_hash(request.media_ref, text, ",".join(request.supersedes_segment_ids)),
+            input_hash=_input_hash(
+                request.media_ref, text, ",".join(request.supersedes_segment_ids)
+            ),
             segments=[segment],
         )
 
@@ -239,7 +243,9 @@ class DeterministicTextReconciler:
         return ReconcileResult(
             input_hash=_input_hash(
                 request.operation_id,
-                "|".join(segment.id + segment.text for segment in request.transcript_segments),
+                "|".join(
+                    segment.id + segment.text for segment in request.transcript_segments
+                ),
             ),
             patches=patches,
         )
@@ -266,11 +272,19 @@ def _extract_titles(text: str) -> list[str]:
     if ("brainbuddy" in lower or "brain body" in lower) and not re.search(
         r"[.;\n]|\bthen\b|\bпотом\b", normalized, flags=re.IGNORECASE
     ):
-        return ["Починить BrainBuddy" if "brainbuddy" in lower else "Починить brain body"]
+        return [
+            "Починить BrainBuddy" if "brainbuddy" in lower else "Починить brain body"
+        ]
     if lower == "купить хлеб и молоко":
         return ["Купить хлеб и молоко"]
 
-    raw_parts = [part.strip() for part in re.split(r"[.;\n]+|\bthen\b|\bпотом\b", normalized, flags=re.IGNORECASE) if part.strip()]
+    raw_parts = [
+        part.strip()
+        for part in re.split(
+            r"[.;\n]+|\bthen\b|\bпотом\b", normalized, flags=re.IGNORECASE
+        )
+        if part.strip()
+    ]
     titles: list[str] = []
     for part in raw_parts:
         part = re.sub(
@@ -285,7 +299,9 @@ def _extract_titles(text: str) -> list[str]:
 
 
 def _stable_id(prefix: str, *parts: str) -> str:
-    return f"{prefix}_{hashlib.sha256('|'.join(parts).encode('utf-8')).hexdigest()[:12]}"
+    return (
+        f"{prefix}_{hashlib.sha256('|'.join(parts).encode('utf-8')).hexdigest()[:12]}"
+    )
 
 
 def _stable_proposal_id(operation_id: str, title: str) -> str:

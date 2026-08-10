@@ -170,9 +170,7 @@ def test_version_lifecycle_restores_exact_snapshot_then_deletes_its_storage(
     )
     node, _ = node_service.create_node(
         tree.id,
-        NodeCreateRequest(
-            label="Before", type="child", position=Position(x=1, y=2)
-        ),
+        NodeCreateRequest(label="Before", type="child", position=Position(x=1, y=2)),
     )
     baseline = version_service.create_version(
         tree.id,
@@ -183,9 +181,7 @@ def test_version_lifecycle_restores_exact_snapshot_then_deletes_its_storage(
         node.id,
         NodeUpdateRequest(label="After", position=Position(x=9, y=9)),
     )
-    later = version_service.create_version(
-        tree.id, VersionCreateRequest(label="Later")
-    )
+    later = version_service.create_version(tree.id, VersionCreateRequest(label="Later"))
 
     assert [ref.id for ref in version_service.list_versions(tree.id)] == [
         later.id,

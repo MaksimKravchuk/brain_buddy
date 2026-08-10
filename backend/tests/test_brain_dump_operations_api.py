@@ -240,8 +240,8 @@ def test_seal_uses_semantic_reconciler_when_external_processing_is_allowed(
             ]
         }
 
-    api_client.app.state.container.voice_brain_dump_service.text_reconciler = OpenAITextReconciler(
-        api_key="test-key", complete=complete
+    api_client.app.state.container.voice_brain_dump_service.text_reconciler = (
+        OpenAITextReconciler(api_key="test-key", complete=complete)
     )
     sealed = _upload_and_seal(
         api_client,
@@ -306,8 +306,8 @@ def test_semantic_reconciler_updates_and_removes_existing_proposals(
             ]
         }
 
-    api_client.app.state.container.voice_brain_dump_service.text_reconciler = OpenAITextReconciler(
-        api_key="test-key", complete=complete
+    api_client.app.state.container.voice_brain_dump_service.text_reconciler = (
+        OpenAITextReconciler(api_key="test-key", complete=complete)
     )
     sealed = _upload_and_seal(
         api_client,
@@ -607,8 +607,8 @@ def test_terminal_accurate_stt_failure_allows_explicit_provisional_review(
         },
     )
     assert preview.status_code == 200, preview.text
-    api_client.app.state.container.voice_brain_dump_service.accurate_stt = _real_adapter(
-        httpx.MockTransport(lambda _request: httpx.Response(400))
+    api_client.app.state.container.voice_brain_dump_service.accurate_stt = (
+        _real_adapter(httpx.MockTransport(lambda _request: httpx.Response(400)))
     )
 
     failed = _upload_and_seal(
@@ -661,8 +661,8 @@ def test_accurate_stt_failure_records_a_conservative_cost_estimate(api_client) -
     operation-wide cost cap sees it, rather than silently recording zero for
     every failed attempt."""
 
-    api_client.app.state.container.voice_brain_dump_service.accurate_stt = _real_adapter(
-        httpx.MockTransport(lambda _request: httpx.Response(503))
+    api_client.app.state.container.voice_brain_dump_service.accurate_stt = (
+        _real_adapter(httpx.MockTransport(lambda _request: httpx.Response(503)))
     )
     operation = _start_operation(
         api_client, key="start-stt-failure-cost", external_processing_allowed=True
@@ -690,10 +690,12 @@ def test_reconciler_success_records_its_estimated_cost_in_the_operation(
     operation = _start_operation(
         api_client, key="start-reconciler-cost", external_processing_allowed=True
     )
-    api_client.app.state.container.voice_brain_dump_service.text_reconciler = OpenAITextReconciler(
-        api_key="test-key",
-        estimated_cost_usd_per_megabyte=1.0,
-        complete=lambda _payload: {"operations": []},
+    api_client.app.state.container.voice_brain_dump_service.text_reconciler = (
+        OpenAITextReconciler(
+            api_key="test-key",
+            estimated_cost_usd_per_megabyte=1.0,
+            complete=lambda _payload: {"operations": []},
+        )
     )
     sealed = _upload_and_seal(
         api_client, operation, b"Buy milk", "seal-reconciler-cost"
@@ -955,16 +957,26 @@ def test_retryable_reconciler_failure_resumes_without_rerunning_accurate_stt(
     assert body["status"] == "awaiting_confirmation"
     assert stt_calls == 1
     assert reconcile_calls == 2
-    assert len(
-        [segment for segment in body["segments"] if segment["provider_role"] == "accurate"]
-    ) == 1
-    assert len(
-        [
-            run
-            for run in body["provider_runs"]
-            if run["role"] == "accurate_stt" and run["status"] == "succeeded"
-        ]
-    ) == 1
+    assert (
+        len(
+            [
+                segment
+                for segment in body["segments"]
+                if segment["provider_role"] == "accurate"
+            ]
+        )
+        == 1
+    )
+    assert (
+        len(
+            [
+                run
+                for run in body["provider_runs"]
+                if run["role"] == "accurate_stt" and run["status"] == "succeeded"
+            ]
+        )
+        == 1
+    )
 
 
 def test_schema_v2_conflict_resolution_requires_a_visible_title_conflict(
@@ -1015,8 +1027,8 @@ def test_seal_rejects_external_reconciliation_without_explicit_consent(
         key="start-reconciler-without-consent",
         external_processing_allowed=True,
     )
-    api_client.app.state.container.voice_brain_dump_service.text_reconciler = OpenAITextReconciler(
-        api_key="test-key", complete=complete
+    api_client.app.state.container.voice_brain_dump_service.text_reconciler = (
+        OpenAITextReconciler(api_key="test-key", complete=complete)
     )
     audio = b"no external consent"
     digest = hashlib.sha256(audio).hexdigest()
@@ -1097,11 +1109,14 @@ def test_user_resolves_visible_semantic_title_conflict(
             ]
         }
 
-    api_client.app.state.container.voice_brain_dump_service.text_reconciler = OpenAITextReconciler(
-        api_key="test-key", complete=complete
+    api_client.app.state.container.voice_brain_dump_service.text_reconciler = (
+        OpenAITextReconciler(api_key="test-key", complete=complete)
     )
     sealed = _upload_and_seal(
-        api_client, edited, "Починить BrainBuddy".encode(), f"seal-conflict-{resolution}"
+        api_client,
+        edited,
+        "Починить BrainBuddy".encode(),
+        f"seal-conflict-{resolution}",
     ).json()
     conflicted = sealed["proposals"][0]
     assert conflicted["conflicts"][0]["suggested_value"] == "Починить BrainBuddy"
@@ -1109,9 +1124,7 @@ def test_user_resolves_visible_semantic_title_conflict(
     if resolution == "accept":
         service = api_client.app.state.container.voice_brain_dump_service
         owner_id = api_client.get("/api/auth/me").json()["id"]
-        persisted = service.get_brain_dump_operation(
-            operation["id"], owner_id=owner_id
-        )
+        persisted = service.get_brain_dump_operation(operation["id"], owner_id=owner_id)
         persisted_proposal = persisted.proposals[0]
         malformed_proposal = persisted_proposal.model_copy(
             update={
@@ -1135,7 +1148,9 @@ def test_user_resolves_visible_semantic_title_conflict(
         )
         assert malformed.status_code == 400
         assert "no suggestion to accept" in malformed.text
-        api_client.app.state.container.voice_operation_repo.save_brain_dump_operation(persisted)
+        api_client.app.state.container.voice_operation_repo.save_brain_dump_operation(
+            persisted
+        )
 
     resolved = api_client.patch(
         f"/api/brain-dump-operations/{operation['id']}/proposals/{conflicted['id']}",
@@ -1160,8 +1175,8 @@ def test_external_stt_receives_declared_hints_through_the_real_decision_path(
         bodies.append(request.read())
         return httpx.Response(200, json={"text": "Починить BrainBuddy"})
 
-    api_client.app.state.container.voice_brain_dump_service.accurate_stt = _real_adapter(
-        httpx.MockTransport(handler)
+    api_client.app.state.container.voice_brain_dump_service.accurate_stt = (
+        _real_adapter(httpx.MockTransport(handler))
     )
     started = api_client.post(
         "/api/brain-dump-operations",
@@ -1210,8 +1225,8 @@ def test_external_stt_pins_a_single_declared_language_hint_through_the_real_path
         bodies.append(request.read())
         return httpx.Response(200, json={"text": "Починить BrainBuddy"})
 
-    api_client.app.state.container.voice_brain_dump_service.accurate_stt = _real_adapter(
-        httpx.MockTransport(handler)
+    api_client.app.state.container.voice_brain_dump_service.accurate_stt = (
+        _real_adapter(httpx.MockTransport(handler))
     )
     started = api_client.post(
         "/api/brain-dump-operations",
@@ -1293,8 +1308,8 @@ def test_external_stt_is_not_called_without_operation_consent(api_client) -> Non
         calls += 1
         return httpx.Response(200, json={"text": "must not be called"})
 
-    api_client.app.state.container.voice_brain_dump_service.accurate_stt = _real_adapter(
-        httpx.MockTransport(handler)
+    api_client.app.state.container.voice_brain_dump_service.accurate_stt = (
+        _real_adapter(httpx.MockTransport(handler))
     )
     # Audio can only be uploaded with consent (see the upload-consent-gate
     # tests below), so this exercises a consent withdrawal that happens after
@@ -1339,8 +1354,12 @@ def test_external_stt_consent_is_bound_to_the_named_provider(api_client) -> None
         calls += 1
         return httpx.Response(200, json={"text": "must not be called"})
 
-    api_client.app.state.container.voice_brain_dump_service.accurate_stt = OpenAiAccurateStt(
-        api_key="test-key", transport=httpx.MockTransport(handler), sleep=lambda _: None
+    api_client.app.state.container.voice_brain_dump_service.accurate_stt = (
+        OpenAiAccurateStt(
+            api_key="test-key",
+            transport=httpx.MockTransport(handler),
+            sleep=lambda _: None,
+        )
     )
     response = api_client.post(
         "/api/brain-dump-operations",
@@ -1368,6 +1387,7 @@ def test_external_stt_consent_is_bound_to_the_named_provider(api_client) -> None
     assert "AUDIO_UPLOAD_PROVIDER_CONSENT_REQUIRED" in rejected.text
     assert calls == 0
 
+
 def test_reconciler_consent_is_bound_to_the_named_provider(api_client) -> None:
     from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
 
@@ -1378,8 +1398,8 @@ def test_reconciler_consent_is_bound_to_the_named_provider(api_client) -> None:
         calls += 1
         return {"operations": []}
 
-    api_client.app.state.container.voice_brain_dump_service.text_reconciler = OpenAITextReconciler(
-        api_key="test-key", complete=complete
+    api_client.app.state.container.voice_brain_dump_service.text_reconciler = (
+        OpenAITextReconciler(api_key="test-key", complete=complete)
     )
     response = api_client.post(
         "/api/brain-dump-operations",
@@ -1406,6 +1426,7 @@ def test_reconciler_consent_is_bound_to_the_named_provider(api_client) -> None:
     assert rejected.status_code == 400
     assert "AUDIO_UPLOAD_PROVIDER_CONSENT_REQUIRED" in rejected.text
     assert calls == 0
+
 
 def test_audio_upload_fails_closed_and_persists_nothing_without_external_consent(
     api_client,
@@ -1434,8 +1455,12 @@ def test_audio_upload_fails_closed_and_persists_nothing_without_external_consent
 
 
 def test_audio_upload_succeeds_with_explicit_external_consent(api_client) -> None:
-    api_client.app.state.container.voice_brain_dump_service.accurate_stt = _real_adapter(
-        httpx.MockTransport(lambda _request: httpx.Response(200, json={"text": "ok"}))
+    api_client.app.state.container.voice_brain_dump_service.accurate_stt = (
+        _real_adapter(
+            httpx.MockTransport(
+                lambda _request: httpx.Response(200, json={"text": "ok"})
+            )
+        )
     )
     operation = _start_operation(
         api_client, key="start-upload-with-consent", external_processing_allowed=True
@@ -1465,8 +1490,12 @@ def test_explicit_empty_provider_allowlist_fails_closed_before_audio_upload(
     never persist raw audio -- distinct from the unit-test-only default of
     ``None``, which permits "openai" for isolated deterministic tests."""
 
-    api_client.app.state.container.voice_brain_dump_service.accurate_stt = _real_adapter(
-        httpx.MockTransport(lambda _request: httpx.Response(200, json={"text": "ok"}))
+    api_client.app.state.container.voice_brain_dump_service.accurate_stt = (
+        _real_adapter(
+            httpx.MockTransport(
+                lambda _request: httpx.Response(200, json={"text": "ok"})
+            )
+        )
     )
     api_client.app.state.container.voice_brain_dump_service.allowed_external_provider_categories = (
         frozenset()
@@ -1860,14 +1889,14 @@ def test_accurate_reconciliation_preserves_unmatched_locked_and_deleted_proposal
         "Починить brain body",
         "Починить BrainBuddy",
     ]
-    edited_after = next(proposal for proposal in proposals if proposal["id"] == bread["id"])
+    edited_after = next(
+        proposal for proposal in proposals if proposal["id"] == bread["id"]
+    )
     deleted_after = next(
         proposal for proposal in proposals if proposal["id"] == disposable["id"]
     )
     stale_preview_after = next(
-        proposal
-        for proposal in proposals
-        if proposal["title"] == "Починить brain body"
+        proposal for proposal in proposals if proposal["title"] == "Починить brain body"
     )
     assert edited_after["title"] == edited_title
     assert edited_after["locked_fields"] == ["title"]
@@ -2053,9 +2082,9 @@ def test_user_edits_survive_later_transcript_reconciliation_and_delete_before_sa
         json={"deleted": True, "expected_revision": deleted.json()["revision"]},
     )
     assert repeated_delete.status_code == 200, repeated_delete.text
-    assert repeated_delete.json()["proposal_patches"] == deleted.json()[
-        "proposal_patches"
-    ]
+    assert (
+        repeated_delete.json()["proposal_patches"] == deleted.json()["proposal_patches"]
+    )
 
     later = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/transcript",
@@ -2172,9 +2201,7 @@ def test_commit_rejects_a_finished_operation_that_was_never_sealed_or_reconciled
         f"/api/brain-dump-operations/{operation['id']}/transcript",
         headers={"Idempotency-Key": "append-unreconciled-finish"},
         json={
-            "segments": [
-                {"sequence": 1, "text": "Buy milk.", "stability": "stable"}
-            ]
+            "segments": [{"sequence": 1, "text": "Buy milk.", "stability": "stable"}]
         },
     ).json()
     finished = api_client.post(
@@ -2243,8 +2270,8 @@ def test_commit_rejects_an_untouched_fast_proposal_after_a_successful_reconcile(
             ]
         }
 
-    api_client.app.state.container.voice_brain_dump_service.text_reconciler = OpenAITextReconciler(
-        api_key="test-key", complete=complete
+    api_client.app.state.container.voice_brain_dump_service.text_reconciler = (
+        OpenAITextReconciler(api_key="test-key", complete=complete)
     )
     sealed = _upload_and_seal(
         api_client, operation, b"Buy milk", "seal-untouched-fast-sibling"
@@ -2346,7 +2373,9 @@ def test_withdraw_consent_is_not_cancel_and_does_not_discard_a_reconciled_batch(
     batch stays committable even after raw audio is purged by withdrawal."""
 
     operation = _start_operation(
-        api_client, key="start-withdraw-after-reconcile", external_processing_allowed=True
+        api_client,
+        key="start-withdraw-after-reconcile",
+        external_processing_allowed=True,
     )
     sealed = _upload_and_seal(
         api_client, operation, b"Buy milk.", "seal-withdraw-after-reconcile"
@@ -2543,9 +2572,12 @@ def test_schema_v2_upload_seal_runs_accurate_reconciliation_from_original_audio(
     body = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
     assert body["status"] == "awaiting_confirmation"
     assert "fast_processing" in body["status_history"]
-    assert {"sealing", "accurate_transcribing", "reconciling", "awaiting_confirmation"} <= set(
-        body["status_history"]
-    )
+    assert {
+        "sealing",
+        "accurate_transcribing",
+        "reconciling",
+        "awaiting_confirmation",
+    } <= set(body["status_history"])
     assert body["status_history"][-2:] == ["reconciling", "awaiting_confirmation"]
     assert [proposal["title"] for proposal in body["proposals"]] == [
         "Починить BrainBuddy",
@@ -2591,9 +2623,12 @@ def test_schema_v2_accurate_correction_supersedes_fast_preview_without_canonical
     stale = preview.json()["proposals"][0]
     assert preview.json()["proposal_patches"][-1]["operation"] == "add"
     assert preview.json()["proposal_patches"][-1]["producer"] == "fast"
-    assert api_client.get("/api/tasks", params={"state": "inbox"}).json()[
-        "counts_by_state"
-    ]["inbox"] == 0
+    assert (
+        api_client.get("/api/tasks", params={"state": "inbox"}).json()[
+            "counts_by_state"
+        ]["inbox"]
+        == 0
+    )
 
     audio = "починить BrainBuddy".encode()
     uploaded = api_client.put(
@@ -2622,9 +2657,12 @@ def test_schema_v2_accurate_correction_supersedes_fast_preview_without_canonical
     assert active[0]["predecessor_ids"] == [old["id"]]
     assert sealed.json()["proposal_patches"][-1]["operation"] == "supersede"
     assert sealed.json()["proposal_patches"][-1]["proposal_id"] == active[0]["id"]
-    assert api_client.get("/api/tasks", params={"state": "inbox"}).json()[
-        "counts_by_state"
-    ]["inbox"] == 0
+    assert (
+        api_client.get("/api/tasks", params={"state": "inbox"}).json()[
+            "counts_by_state"
+        ]["inbox"]
+        == 0
+    )
 
 
 def test_schema_v2_audio_upload_rejects_missing_bad_hash_and_inactive_state(
@@ -2711,7 +2749,9 @@ def test_schema_v2_seal_rejects_missing_chunks_and_replays_success(api_client) -
     assert replay.json()["id"] == sealed.json()["id"]
     assert replay.json()["revision"] == sealed.json()["revision"]
     assert replay.json()["status"] == "accurate_transcribing"
-    completed = _advance_persisted_provider_runs(api_client, str(operation["id"])).json()
+    completed = _advance_persisted_provider_runs(
+        api_client, str(operation["id"])
+    ).json()
     assert completed["status"] == "awaiting_confirmation"
 
     reseal_inactive = api_client.post(
@@ -3084,7 +3124,11 @@ def test_transcript_append_fails_closed_and_persists_nothing_without_external_co
         headers={"Idempotency-Key": "append-transcript-without-consent"},
         json={
             "segments": [
-                {"sequence": 1, "text": "never persist this preview", "stability": "stable"}
+                {
+                    "sequence": 1,
+                    "text": "never persist this preview",
+                    "stability": "stable",
+                }
             ]
         },
     )
@@ -3097,7 +3141,9 @@ def test_transcript_append_fails_closed_and_persists_nothing_without_external_co
     assert fetched.json()["proposals"] == []
 
 
-def test_cancel_deletes_stored_raw_audio_and_clears_media_references(api_client) -> None:
+def test_cancel_deletes_stored_raw_audio_and_clears_media_references(
+    api_client,
+) -> None:
     operation = _start_operation(
         api_client, key="start-cancel-audio-delete", external_processing_allowed=True
     )
@@ -3112,7 +3158,9 @@ def test_cancel_deletes_stored_raw_audio_and_clears_media_references(api_client)
 
     owner_id = api_client.get("/api/auth/me").json()["id"]
     repository = api_client.app.state.container.voice_operation_repo
-    chunk_path = repository.brain_dump_audio_chunk_path(owner_id, operation["id"], 0, digest)
+    chunk_path = repository.brain_dump_audio_chunk_path(
+        owner_id, operation["id"], 0, digest
+    )
     assert chunk_path.exists()
 
     cancelled = api_client.post(
@@ -3236,7 +3284,10 @@ def test_raw_audio_sweep_defers_expired_pending_provider_work(api_client) -> Non
     container = api_client.app.state.container
     # Periodic workers honour their bounded batch size, and a queued run is
     # not an expired lease eligible for recovery.
-    assert container.voice_brain_dump_service.run_due_brain_dump_provider_runs(limit=0) == 0
+    assert (
+        container.voice_brain_dump_service.run_due_brain_dump_provider_runs(limit=0)
+        == 0
+    )
     assert container.voice_brain_dump_service.recover_due_provider_leases(limit=0) == 0
     assert container.voice_brain_dump_service.recover_due_provider_leases() == 0
 
@@ -3264,7 +3315,9 @@ def test_proposal_helpers_keep_empty_preview_and_semantic_match_paths_explicit(
     from app.workflows.voice_brain_dump.domain import BrainDumpProposalDocument
 
     service = api_client.app.state.container.voice_brain_dump_service
-    now = _start_operation(api_client, key="start-proposal-helper-coverage")["created_at"]
+    now = _start_operation(api_client, key="start-proposal-helper-coverage")[
+        "created_at"
+    ]
     proposal = BrainDumpProposalDocument(
         id="proposal_helper",
         ordinal=1,
@@ -3450,9 +3503,7 @@ def test_working_artifact_retention_sweep_clears_uncommitted_data_but_not_commit
         f"/api/brain-dump-operations/{abandoned['id']}/transcript",
         headers={"Idempotency-Key": "append-working-artifact-abandoned"},
         json={
-            "segments": [
-                {"sequence": 1, "text": "Buy milk.", "stability": "stable"}
-            ]
+            "segments": [{"sequence": 1, "text": "Buy milk.", "stability": "stable"}]
         },
     )
     assert appended.status_code == 200, appended.text
@@ -3592,9 +3643,7 @@ def test_task_port_is_a_real_adapter_not_the_service_self_adapting(api_client) -
     assert committed.json()["committed_task_ids"]
 
 
-def test_voice_workflow_requires_an_explicit_real_task_port() -> (
-    None
-):
+def test_voice_workflow_requires_an_explicit_real_task_port() -> None:
     """The workflow boundary owns voice orchestration and crosses Tasks via a port."""
 
     import tempfile
@@ -3673,7 +3722,9 @@ def test_recover_due_provider_leases_resumes_an_expired_in_flight_lease(
     recovered = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
     assert recovered["status"] == "awaiting_confirmation"
     resumed_run = next(
-        run for run in reversed(recovered["provider_runs"]) if run["role"] == "accurate_stt"
+        run
+        for run in reversed(recovered["provider_runs"])
+        if run["role"] == "accurate_stt"
     )
     assert resumed_run["status"] == "succeeded"
     assert resumed_run["recovery_count"] == 1
@@ -3712,8 +3763,8 @@ def test_commit_does_not_restamp_raw_audio_clock_after_explicit_deletion(
             ]
         }
 
-    api_client.app.state.container.voice_brain_dump_service.text_reconciler = OpenAITextReconciler(
-        api_key="test-key", complete=complete
+    api_client.app.state.container.voice_brain_dump_service.text_reconciler = (
+        OpenAITextReconciler(api_key="test-key", complete=complete)
     )
     sealed = _upload_and_seal(api_client, operation, b"Buy milk", "seal-no-restamp")
     assert sealed.status_code == 200, sealed.text
@@ -4265,9 +4316,7 @@ def test_config_audio_limits_env_overrides(
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_AUDIO_MAX_TOTAL_BYTES", "2048")
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_AUDIO_MAX_CHUNK_COUNT", "3")
     monkeypatch.setenv("BRAIN_BUDDY_VOICE_AUDIO_MAX_DURATION_SECONDS", "42")
-    monkeypatch.setenv(
-        "BRAIN_BUDDY_VOICE_AUDIO_ASSUMED_CHUNK_DURATION_SECONDS", "2"
-    )
+    monkeypatch.setenv("BRAIN_BUDDY_VOICE_AUDIO_ASSUMED_CHUNK_DURATION_SECONDS", "2")
     get_config.cache_clear()
     try:
         limits = get_config().voice.audio_limits

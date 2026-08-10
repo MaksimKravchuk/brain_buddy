@@ -57,6 +57,19 @@ E2E_CI_REQUIREMENTS = (
     ),
     ("native product E2E Allure validator", "product-e2e-results"),
 )
+# Path filtering must never be expressed as a job-level ``if``. A skipped job
+# is exactly what ADR-0008 requires Full CI to treat as a failure, so the stack
+# jobs always run and gate their expensive *steps* on the ``changes`` outputs
+# instead. These requirements keep that shape from being "simplified" back into
+# job-level conditions, which would look tidier and silently let a candidate
+# land on checks that never executed.
+PATH_FILTER_REQUIREMENTS = (
+    ("changed-stacks job", "  changes:"),
+    ("changed-stacks outputs", "backend: ${{ steps.decide.outputs.backend }}"),
+    ("step-level path guard", "if: env.RUN == 'true'"),
+    ("full-CI gate covers the filter job", "      - changes\n"),
+)
+
 PR_SCOPED_CANCEL_EXPRESSION = "${{ github.event_name == 'pull_request' }}"
 PR_SCOPED_RETENTION_EXPRESSION = "${{ github.event_name == 'pull_request' && 7 || 30 }}"
 REQUIRED_STATUS_CONTEXTS = ("Docker Images",)
@@ -373,6 +386,34 @@ def _status_context_errors(workflow_text: str) -> list[str]:
     return errors
 
 
+def _path_filter_errors(workflow_text: str) -> list[str]:
+    errors: list[str] = []
+    for label, snippet in PATH_FILTER_REQUIREMENTS:
+        if snippet not in workflow_text:
+            errors.append(f"missing {label}: {snippet!r}")
+    for job in ("backend", "frontend", "mobile", "docker"):
+        block = _job_block(workflow_text, job)
+        if block is None:
+            errors.append(f"missing {job} job")
+        elif re.search(r"^    if:", block, flags=re.MULTILINE):
+            errors.append(
+                f"{job} job uses a job-level 'if'; path filtering must gate "
+                "steps so the job still reports success rather than skipped"
+            )
+    return errors
+
+
+def _job_block(workflow_text: str, job: str) -> str | None:
+    """Return the text of one top-level job, excluding the next job's header."""
+
+    match = re.search(
+        rf"^  {re.escape(job)}:$(?P<body>.*?)(?=^  [a-z0-9-]+:$|\Z)",
+        workflow_text,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    return match.group("body") if match else None
+
+
 def _missing_e2e_ci_errors(workflow_text: str) -> list[str]:
     errors: list[str] = []
     for label, snippet in E2E_CI_REQUIREMENTS:
@@ -393,6 +434,7 @@ def validate_workflow(
         errors.extend(_missing_artifact_errors(workflow_text))
         errors.extend(_missing_frontend_ci_errors(workflow_text))
         errors.extend(_missing_e2e_ci_errors(workflow_text))
+        errors.extend(_path_filter_errors(workflow_text))
         errors.extend(_concurrency_errors(workflow_text))
         errors.extend(_retention_errors(workflow_text))
         errors.extend(_status_context_errors(workflow_text))

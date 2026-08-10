@@ -115,7 +115,9 @@ def test_startup_migrates_legacy_voice_json_before_loading_owner_operation(
         assert conn.execute("SELECT COUNT(*) FROM migration_ledger").fetchone()[0] == 1
 
 
-def test_voice_operation_repository_rejects_boolean_schema_version(data_dir: Path) -> None:
+def test_voice_operation_repository_rejects_boolean_schema_version(
+    data_dir: Path,
+) -> None:
     """A JSON boolean cannot masquerade as a supported schema-version integer."""
 
     service = _service(data_dir)
@@ -125,10 +127,14 @@ def test_voice_operation_repository_rejects_boolean_schema_version(data_dir: Pat
     _replace_operation_payload(repository, payload)
 
     with pytest.raises(RepositoryError, match="schema version must be an integer"):
-        repository.get_brain_dump_operation_for_owner(str(payload["id"]), owner_id=OWNER)
+        repository.get_brain_dump_operation_for_owner(
+            str(payload["id"]), owner_id=OWNER
+        )
 
 
-def test_voice_operation_repository_rejects_absent_owner_scoped_audio(data_dir: Path) -> None:
+def test_voice_operation_repository_rejects_absent_owner_scoped_audio(
+    data_dir: Path,
+) -> None:
     """Audio assembly fails closed rather than reading a similarly named chunk
     from another operation or owner path."""
 
@@ -148,9 +154,7 @@ def test_voice_operation_repository_purges_only_untracked_media(data_dir: Path) 
 
     service = _service(data_dir)
     repository = service.operation_repo
-    operation = _start(
-        service, key="orphan-media", external_processing_allowed=True
-    )
+    operation = _start(service, key="orphan-media", external_processing_allowed=True)
     content = b"known-owner-audio"
     service.upload_brain_dump_audio_chunk(
         operation.id,
@@ -160,7 +164,9 @@ def test_voice_operation_repository_purges_only_untracked_media(data_dir: Path) 
         content_sha256=sha256(content).hexdigest(),
         content_type="audio/x-brain-buddy-test-text",
     )
-    persisted = repository.get_brain_dump_operation_for_owner(operation.id, owner_id=OWNER)
+    persisted = repository.get_brain_dump_operation_for_owner(
+        operation.id, owner_id=OWNER
+    )
     known_chunk = persisted.audio_chunks[0]
     known_path = repository.brain_dump_audio_chunk_path(
         OWNER, operation.id, known_chunk.chunk_number, known_chunk.sha256
@@ -238,7 +244,9 @@ def test_migration_reader_uses_concurrently_persisted_v2_record(
     )
 
     assert (
-        repository.get_brain_dump_operation_for_owner(str(payload["id"]), owner_id=OWNER)
+        repository.get_brain_dump_operation_for_owner(
+            str(payload["id"]), owner_id=OWNER
+        )
         == migrated
     )
 
@@ -286,7 +294,9 @@ def test_migration_reader_reports_concurrent_operation_delete(
             return None
         return original_load(current_id, owner_id=owner_id)
 
-    monkeypatch.setattr(repository, "_load_brain_dump_operation", load_with_concurrent_delete)
+    monkeypatch.setattr(
+        repository, "_load_brain_dump_operation", load_with_concurrent_delete
+    )
 
     with pytest.raises(NotFoundError, match="Brain dump operation"):
         repository.get_brain_dump_operation_for_owner(operation_id, owner_id=OWNER)

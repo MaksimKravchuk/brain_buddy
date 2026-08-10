@@ -5,7 +5,7 @@ import { Link } from "react-router-dom";
 const CONTACT_EMAIL = "maksim.v.kravchuk@gmail.com";
 const LAST_UPDATED = "August 6, 2026";
 
-function Section({ title, children }: { title: string; children: React.ReactNode }): JSX.Element {
+function Section({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
   return (
     <section className="mt-8">
       <h2 className="text-subtitle font-semibold text-slate-900">{title}</h2>
@@ -14,7 +14,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-export default function PrivacyPolicyPage(): JSX.Element {
+export default function PrivacyPolicyPage(): React.JSX.Element {
   return (
     <main className="min-h-screen bg-surface-base px-4 py-10">
       <article className="mx-auto max-w-[720px] rounded-2xl border border-slate-200 bg-surface-raised p-8 shadow-raised">

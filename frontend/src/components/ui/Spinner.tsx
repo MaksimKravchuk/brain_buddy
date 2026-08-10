@@ -12,7 +12,7 @@ const sizeMap = {
   lg: "h-8 w-8 border-[3px]",
 };
 
-export function Spinner({ size = "md", className, label }: SpinnerProps): JSX.Element {
+export function Spinner({ size = "md", className, label }: SpinnerProps): React.JSX.Element {
   return (
     <div
       className={twMerge(

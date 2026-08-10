@@ -129,8 +129,7 @@ class OperationRepository(BaseRepository):
 
     def _initialize_database(self) -> None:
         with self._owned_connection() as conn:
-            conn.executescript(
-                """
+            conn.executescript("""
                 CREATE TABLE IF NOT EXISTS brain_dump_operations (
                     owner_id TEXT NOT NULL,
                     id TEXT NOT NULL,
@@ -159,8 +158,7 @@ class OperationRepository(BaseRepository):
                     ON brain_dump_operations(owner_id, status, updated_at, id);
                 CREATE INDEX IF NOT EXISTS idx_idempotency_owner_created
                     ON idempotency_records(owner_id, created_at);
-                """
-            )
+                """)
 
     def _migrate_legacy_json_once(self) -> None:
         with self._owned_connection() as conn:
@@ -199,7 +197,10 @@ class OperationRepository(BaseRepository):
         self, owner_id: str, operation_id: str, chunk_number: int, sha256: str
     ) -> Path:
         return self.resolve(
-            "brain-dump-media", owner_id, operation_id, f"{chunk_number:06d}-{sha256}.bin"
+            "brain-dump-media",
+            owner_id,
+            operation_id,
+            f"{chunk_number:06d}-{sha256}.bin",
         )
 
     def brain_dump_audio_operation_path(self, owner_id: str, operation_id: str) -> Path:
@@ -211,7 +212,9 @@ class OperationRepository(BaseRepository):
 
     @staticmethod
     def _payload(model: BrainDumpOperationDocument) -> str:
-        return json.dumps(model.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+        return json.dumps(
+            model.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+        )
 
     @staticmethod
     def _legacy_patch_id(operation_id: str, proposal_id: str, operation: str) -> str:
@@ -228,7 +231,9 @@ class OperationRepository(BaseRepository):
 
         raw_version = payload.get("schema_version", 1)
         if not isinstance(raw_version, int) or isinstance(raw_version, bool):
-            raise RepositoryError("Brain dump operation schema version must be an integer.")
+            raise RepositoryError(
+                "Brain dump operation schema version must be an integer."
+            )
         if raw_version not in {1, _BRAIN_DUMP_SCHEMA_VERSION}:
             raise RepositoryError(
                 f"Brain dump operation has unsupported schema version {raw_version}."
@@ -337,9 +342,17 @@ class OperationRepository(BaseRepository):
             self._upsert_brain_dump_operation(conn, operation)
 
     def save_brain_dump_audio_chunk(
-        self, *, owner_id: str, operation_id: str, chunk_number: int, sha256: str, content: bytes
+        self,
+        *,
+        owner_id: str,
+        operation_id: str,
+        chunk_number: int,
+        sha256: str,
+        content: bytes,
     ) -> None:
-        path = self.brain_dump_audio_chunk_path(owner_id, operation_id, chunk_number, sha256)
+        path = self.brain_dump_audio_chunk_path(
+            owner_id, operation_id, chunk_number, sha256
+        )
         path.parent.mkdir(parents=True, exist_ok=True)
         staging_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
         try:
@@ -353,9 +366,13 @@ class OperationRepository(BaseRepository):
     ) -> bytes:
         parts: list[bytes] = []
         for chunk_number, sha256 in sorted(chunks):
-            path = self.brain_dump_audio_chunk_path(owner_id, operation_id, chunk_number, sha256)
+            path = self.brain_dump_audio_chunk_path(
+                owner_id, operation_id, chunk_number, sha256
+            )
             if not path.exists():
-                raise NotFoundError("Brain dump audio chunk", f"{operation_id}:{chunk_number}")
+                raise NotFoundError(
+                    "Brain dump audio chunk", f"{operation_id}:{chunk_number}"
+                )
             parts.append(path.read_bytes())
         return b"".join(parts)
 
@@ -393,11 +410,9 @@ class OperationRepository(BaseRepository):
         # it is actually due, exactly like the provider-lease sweep does for
         # ``lease_expires_at``.
         with self._connection() as conn:
-            rows = conn.execute(
-                """
+            rows = conn.execute("""
                 SELECT payload FROM brain_dump_operations
-                """
-            ).fetchall()
+                """).fetchall()
         return [
             self._decode_brain_dump_operation(json.loads(row["payload"]))[0]
             for row in rows
@@ -416,12 +431,10 @@ class OperationRepository(BaseRepository):
         """
 
         with self._connection() as conn:
-            rows = conn.execute(
-                """
+            rows = conn.execute("""
                 SELECT payload FROM brain_dump_operations
                 WHERE status IN ('accurate_transcribing', 'reconciling')
-                """
-            ).fetchall()
+                """).fetchall()
         return [
             self._decode_brain_dump_operation(json.loads(row["payload"]))[0]
             for row in rows
@@ -436,12 +449,10 @@ class OperationRepository(BaseRepository):
         """
 
         with self._connection() as conn:
-            rows = conn.execute(
-                """
+            rows = conn.execute("""
                 SELECT payload FROM brain_dump_operations
                 WHERE status = 'committing'
-                """
-            ).fetchall()
+                """).fetchall()
         return [
             self._decode_brain_dump_operation(json.loads(row["payload"]))[0]
             for row in rows

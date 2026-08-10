@@ -109,7 +109,9 @@ def start_brain_dump_operation(
     payload: BrainDumpOperationStartRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(require_voice_brain_dump_enabled),
-    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(
+        get_voice_brain_dump_service
+    ),
 ) -> BrainDumpOperationResponse:
     return _to_brain_dump_response(
         voice_brain_dump_service.start_brain_dump_operation(
@@ -160,13 +162,17 @@ def get_brain_dump_providers(
 def get_brain_dump_operation(
     operation_id: str,
     current_user: User = Depends(get_current_user),
-    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(
+        get_voice_brain_dump_service
+    ),
 ) -> BrainDumpOperationResponse:
     # Read/status of an existing operation stays reachable with the flag OFF:
     # exposure control must not remove an owner's ability to see the operation
     # they still hold privacy controls over.
     return _to_brain_dump_response(
-        voice_brain_dump_service.get_brain_dump_operation(operation_id, owner_id=current_user.id)
+        voice_brain_dump_service.get_brain_dump_operation(
+            operation_id, owner_id=current_user.id
+        )
     )
 
 
@@ -180,7 +186,9 @@ def append_brain_dump_transcript(
     payload: BrainDumpTranscriptAppendRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(require_voice_brain_dump_enabled),
-    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(
+        get_voice_brain_dump_service
+    ),
 ) -> BrainDumpOperationResponse:
     return _to_brain_dump_response(
         voice_brain_dump_service.append_brain_dump_transcript(
@@ -203,7 +211,9 @@ async def upload_brain_dump_audio_chunk(
     request: Request,
     x_content_sha256: str | None = Header(default=None, alias="X-Content-SHA256"),
     current_user: User = Depends(require_voice_brain_dump_enabled),
-    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(
+        get_voice_brain_dump_service
+    ),
 ) -> BrainDumpOperationResponse:
     if not x_content_sha256:
         raise ValidationFailure("X-Content-SHA256 header is required.")
@@ -267,7 +277,9 @@ def seal_brain_dump_operation(
     payload: BrainDumpSealRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(require_voice_brain_dump_enabled),
-    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(
+        get_voice_brain_dump_service
+    ),
 ) -> BrainDumpOperationResponse:
     return _to_brain_dump_response(
         voice_brain_dump_service.seal_brain_dump_operation(
@@ -290,7 +302,9 @@ def update_brain_dump_proposal(
     payload: BrainDumpProposalUpdateRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(require_voice_brain_dump_enabled),
-    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(
+        get_voice_brain_dump_service
+    ),
 ) -> BrainDumpOperationResponse:
     return _to_brain_dump_response(
         voice_brain_dump_service.update_brain_dump_proposal(
@@ -315,7 +329,9 @@ def command_brain_dump_operation(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
     config: AppConfig = Depends(get_config_dep),
-    voice_brain_dump_service: VoiceBrainDumpService = Depends(get_voice_brain_dump_service),
+    voice_brain_dump_service: VoiceBrainDumpService = Depends(
+        get_voice_brain_dump_service
+    ),
 ) -> BrainDumpOperationResponse:
     # Privacy authority over an existing operation stays reachable with the flag
     # OFF (ADR-0002 reversible withdrawal/deletion): withdraw consent, cancel,
@@ -944,7 +960,6 @@ def _brain_dump_available_recovery_actions(
     return actions
 
 
-
 def _to_brain_dump_segment_response(
     segment: BrainDumpTranscriptSegmentDocument,
 ) -> BrainDumpTranscriptSegmentResponse:
@@ -1035,7 +1050,7 @@ def _to_smart_add_response(
             _to_project_response(
                 result.project, task_service=task_service, owner_id=owner_id
             )
-        if result.project
+            if result.project
             else None
         ),
         tags=[

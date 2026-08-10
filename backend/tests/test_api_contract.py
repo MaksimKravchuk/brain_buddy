@@ -50,7 +50,10 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
             "409",
             "422",
         },
-        ("/api/brain-dump-operations/{operation_id}/proposals/{proposal_id}", "patch"): {
+        (
+            "/api/brain-dump-operations/{operation_id}/proposals/{proposal_id}",
+            "patch",
+        ): {
             "400",
             "401",
             "404",

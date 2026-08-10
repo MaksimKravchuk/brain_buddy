@@ -90,7 +90,7 @@ function conflict(field: string, currentValue: string, suggestedValue: string) {
   };
 }
 
-function TaskListProbe(): JSX.Element {
+function TaskListProbe(): React.JSX.Element {
   const routeParams = useParams();
   return <div>{`Task list route: ${routeParams.state ?? "unknown"}`}</div>;
 }
@@ -135,7 +135,7 @@ function renderBrainDump(
   return rendered;
 }
 
-function LocationProbe(): JSX.Element {
+function LocationProbe(): React.JSX.Element {
   const location = useLocation();
   return <output aria-label="current route">{location.pathname}</output>;
 }
@@ -1211,13 +1211,13 @@ describe("BrainDumpRoute", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Stop & review" }));
 
     const review = await screen.findByRole("main", { name: "Review brain dump proposals" });
-    const titleInput = within(review).getByDisplayValue("Renew car insurance");
+    const titleInput = await within(review).findByDisplayValue("Renew car insurance");
     await userEvent.clear(titleInput);
     await userEvent.type(titleInput, "Renew car insurance before Friday");
     await userEvent.tab();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/proposals/proposal_1"), expect.anything()));
 
-    await userEvent.click(within(review).getByRole("button", { name: "Delete Reply to Anna" }));
+    await userEvent.click(await within(review).findByRole("button", { name: "Delete Reply to Anna" }));
     expect(within(review).queryByText("Reply to Anna")).not.toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/tasks"), expect.anything());
 
@@ -2207,12 +2207,12 @@ describe("BrainDumpRoute", () => {
     renderBrainDump("/brain-dump/brain_dump_citations/review");
 
     const review = await screen.findByRole("main", { name: "Review brain dump proposals" });
-    const firstCard = within(review).getByRole("textbox", { name: "Task title #1" }).closest("article") as HTMLElement;
+    const firstCard = (await within(review).findByRole("textbox", { name: "Task title #1" })).closest("article") as HTMLElement;
     expect(within(firstCard).getByText(/Renew the car insurance before Friday/)).toBeInTheDocument();
     // Each proposal cites only its own utterance, never a sibling's.
     expect(within(firstCard).queryByText(/Reply to Anna about the offsite/)).not.toBeInTheDocument();
 
-    const secondCard = within(review).getByRole("textbox", { name: "Task title #2" }).closest("article") as HTMLElement;
+    const secondCard = (await within(review).findByRole("textbox", { name: "Task title #2" })).closest("article") as HTMLElement;
     expect(within(secondCard).getByText(/Reply to Anna about the offsite/)).toBeInTheDocument();
   });
 
@@ -2238,7 +2238,7 @@ describe("BrainDumpRoute", () => {
     renderBrainDump("/brain-dump/brain_dump_citations_multi/review");
 
     const review = await screen.findByRole("main", { name: "Review brain dump proposals" });
-    const card = within(review).getByRole("textbox", { name: "Task title #1" }).closest("article") as HTMLElement;
+    const card = (await within(review).findByRole("textbox", { name: "Task title #1" })).closest("article") as HTMLElement;
     expect(within(card).getByText(/Call the plumber about the leak/)).toBeInTheDocument();
     expect(within(card).getByText(/and ask when he can come by/)).toBeInTheDocument();
   });
@@ -2264,7 +2264,7 @@ describe("BrainDumpRoute", () => {
     renderBrainDump("/brain-dump/brain_dump_citations_stale/review");
 
     const review = await screen.findByRole("main", { name: "Review brain dump proposals" });
-    const card = within(review).getByRole("textbox", { name: "Task title #1" }).closest("article") as HTMLElement;
+    const card = (await within(review).findByRole("textbox", { name: "Task title #1" })).closest("article") as HTMLElement;
     expect(within(card).getByText("Source utterance no longer available")).toBeInTheDocument();
     // The proposal itself still renders — one bad citation never breaks review.
     expect(within(card).getByDisplayValue("Buy oat milk")).toBeInTheDocument();
@@ -2289,7 +2289,7 @@ describe("BrainDumpRoute", () => {
     renderBrainDump("/brain-dump/brain_dump_no_citation/review");
 
     const review = await screen.findByRole("main", { name: "Review brain dump proposals" });
-    expect(within(review).getByDisplayValue("Book the dentist")).toBeInTheDocument();
+    expect(await within(review).findByDisplayValue("Book the dentist")).toBeInTheDocument();
     expect(within(review).queryByText("Cited from what you said")).not.toBeInTheDocument();
   });
 

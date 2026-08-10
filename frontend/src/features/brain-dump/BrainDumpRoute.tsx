@@ -72,7 +72,7 @@ function idempotencyKey(suffix: string) {
   return `brain-dump-${suffix}-${Date.now()}`;
 }
 
-export function BrainDumpRoute(): JSX.Element {
+export function BrainDumpRoute(): React.JSX.Element {
   const location = useLocation();
   const params = useParams();
   const navigate = useNavigate();
@@ -711,7 +711,7 @@ function RecoverySurface({
   onDelete: () => void;
   onReview: () => void;
   onRetry: () => void;
-}): JSX.Element {
+}): React.JSX.Element {
   const availableActions = new Set(operation.available_recovery_actions ?? []);
   const retryable = availableActions.has("retry");
   const providerRuns = operation.provider_runs ?? [];
@@ -801,7 +801,7 @@ function RecordingSurface({
   onWithdrawConsent: () => void;
   onVocabularyTextChange: (value: string) => void;
   vocabularyText: string;
-}): JSX.Element {
+}): React.JSX.Element {
   const count = proposals.length;
   // A stopped recorder must never keep showing Recording/Paused: consent
   // withdrawal already stopped local capture (see `stopMediaRecorder` in
@@ -975,7 +975,7 @@ function RecordingSurface({
 }
 
 /** Last words of the live transcript, with the tail emphasised like the prototype. */
-function TranscriptTail({ transcript }: { transcript: string }): JSX.Element {
+function TranscriptTail({ transcript }: { transcript: string }): React.JSX.Element {
   const words = transcript.split(/\s+/).filter(Boolean);
   const shown = words.slice(-18);
   const lead = shown.slice(0, Math.max(0, shown.length - 5)).join(" ");
@@ -991,7 +991,7 @@ function TranscriptTail({ transcript }: { transcript: string }): JSX.Element {
 
 const waveBarHeights = [0.45, 0.8, 0.4, 1, 0.6, 0.9, 0.5, 0.75, 0.35, 0.85, 0.55];
 
-function DumpWave({ active }: { active: boolean }): JSX.Element {
+function DumpWave({ active }: { active: boolean }): React.JSX.Element {
   return (
     <div className="flex h-[26px] items-center justify-center gap-[3px]" aria-hidden>
       {waveBarHeights.map((height, index) => (
@@ -1006,7 +1006,7 @@ function DumpWave({ active }: { active: boolean }): JSX.Element {
 }
 
 /** Elapsed capture time — freezes while paused, like the prototype's REC counter. */
-function RecordingTimer({ running }: { running: boolean }): JSX.Element {
+function RecordingTimer({ running }: { running: boolean }): React.JSX.Element {
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
     if (!running) {
@@ -1022,7 +1022,7 @@ function RecordingTimer({ running }: { running: boolean }): JSX.Element {
   );
 }
 
-function ProposalCard({ proposal }: { proposal: BrainDumpProposal }): JSX.Element {
+function ProposalCard({ proposal }: { proposal: BrainDumpProposal }): React.JSX.Element {
   if (proposal.status === "wording_changing") {
     // The prototype's "forming" card: dashed with a shimmer sweep while the
     // wording is still moving under the speaker.
@@ -1058,7 +1058,7 @@ function ProcessingSurface({
   error: string | null;
   operation: BrainDumpOperationResponse;
   proposals: BrainDumpProposal[];
-}): JSX.Element {
+}): React.JSX.Element {
   const label = processingStatusLabels.get(operation.status) ?? "Processing";
   return (
     // Not dismissible: the operation is mid-pipeline server-side and the panel is
@@ -1110,7 +1110,7 @@ function ReviewSurface({
   onResolveConflict: (proposal: BrainDumpProposal, resolution: "keep" | "accept") => void;
   onSave: () => void;
   onUpdateTitle: (proposal: BrainDumpProposal, title: string) => void;
-}): JSX.Element {
+}): React.JSX.Element {
   return (
     // Not dismissible: these drafts exist only inside the operation, so leaving
     // has to be an explicit Discard or Confirm.
@@ -1210,7 +1210,7 @@ function ProposalCitations({
 }: {
   segmentIds: string[];
   segmentsById: Map<string, BrainDumpOperationResponse["segments"][number]>;
-}): JSX.Element | null {
+}): React.JSX.Element | null {
   const uniqueIds = Array.from(new Set(segmentIds));
   if (uniqueIds.length === 0) {
     return null;

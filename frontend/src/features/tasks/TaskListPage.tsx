@@ -37,7 +37,7 @@ function idempotencyKey(action: string): string {
   return `task-shell-${action}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): JSX.Element {
+export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): React.JSX.Element {
   const params = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const dateView = mode === "state" || !mode ? parseTaskDateView(params.state) : undefined;
@@ -554,7 +554,7 @@ function groupTasksByProject(tasks: TaskResponse[], projects: ProjectResponse[])
   return groups.sort((left, right) => Number(left.key === "__none__") - Number(right.key === "__none__"));
 }
 
-function Chip({ variant = "neutral", children }: { variant?: "due" | "neutral"; children: ReactNode }): JSX.Element {
+function Chip({ variant = "neutral", children }: { variant?: "due" | "neutral"; children: ReactNode }): React.JSX.Element {
   const variantClass =
     variant === "due"
       ? "border-due-border bg-due-bg text-due-fg"
@@ -589,7 +589,7 @@ function TaskList({
   onComplete: (task: TaskResponse) => void;
   /** Names this list for assistive tech; each group supplies its project name. */
   label?: string;
-}): JSX.Element {
+}): React.JSX.Element {
   const tagById = new Map(tags.map((tag) => [tag.id, tag]));
 
   return (
@@ -623,7 +623,7 @@ function TaskRow({
   isSelected: boolean;
   registerRowLink: (taskId: string, el: HTMLAnchorElement | null) => void;
   onComplete: (task: TaskResponse) => void;
-}): JSX.Element {
+}): React.JSX.Element {
   const isTerminal = task.state === "completed" || task.state === "cancelled";
   const navigate = useNavigate();
   const subtasks = task.subtasks ?? [];
@@ -722,7 +722,7 @@ function TaskCreator({
   onCreate: (draft: SmartAddDraft) => void;
   onTitleChange: (title: string) => void;
   onWaitingForChange: (value: string) => void;
-}): JSX.Element {
+}): React.JSX.Element {
   const waitingForRequired = state === "waiting";
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [caret, setCaret] = useState(0);
@@ -879,7 +879,7 @@ function TaskCreator({
   );
 }
 
-function DateViewCaptureHint(): JSX.Element {
+function DateViewCaptureHint(): React.JSX.Element {
   return (
     <div className="mt-3 rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-800">
       Date views are filters over existing tasks. Add a task from Inbox, Next, Waiting, Someday, a Project, or a Tag, then set its due date in task detail.
@@ -887,7 +887,7 @@ function DateViewCaptureHint(): JSX.Element {
   );
 }
 
-function LoadingState({ label }: { label: string }): JSX.Element {
+function LoadingState({ label }: { label: string }): React.JSX.Element {
   return (
     <div className="space-y-[5px]" aria-label={`Loading ${label}`}>
       {[0, 1, 2, 3].map((item) => (
@@ -897,7 +897,7 @@ function LoadingState({ label }: { label: string }): JSX.Element {
   );
 }
 
-function EmptyState({ state }: { state?: OpenTaskState }): JSX.Element {
+function EmptyState({ state }: { state?: OpenTaskState }): React.JSX.Element {
   const label = state ? stateLabels[state] : "This view";
   return (
     <div className="rounded-xl border border-dashed border-slate-200 bg-white/70 px-5 py-8 text-center text-sm text-slate-600">
@@ -907,7 +907,7 @@ function EmptyState({ state }: { state?: OpenTaskState }): JSX.Element {
   );
 }
 
-function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }): JSX.Element {
+function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }): React.JSX.Element {
   return (
     <div className="rounded-xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-900" role="alert">
       <div className="flex items-start gap-3">

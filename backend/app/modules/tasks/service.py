@@ -81,7 +81,6 @@ class TaskService:
     def __init__(self, task_repo: TaskRepository) -> None:
         self.task_repo = task_repo
 
-
     @_serialized_write
     def create_project(
         self,
@@ -1188,7 +1187,6 @@ class TaskService:
             self.task_repo.save_project(project)
         return project
 
-
     def _tag_result(self, record: IdempotencyRecord, *, owner_id: str) -> TagDocument:
         tag = TagDocument.model_validate(record.response_body)
         try:
@@ -1310,7 +1308,6 @@ class TaskService:
         ).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
 
-
     @staticmethod
     def _assert_current(task: TaskDocument, expected_revision: int) -> None:
         if task.revision != expected_revision:
@@ -1338,7 +1335,6 @@ class TaskService:
     @staticmethod
     def _validated_task_update(task: TaskDocument, **updates: object) -> TaskDocument:
         return TaskDocument.model_validate({**task.model_dump(), **updates})
-
 
     def _assert_active_references(
         self,

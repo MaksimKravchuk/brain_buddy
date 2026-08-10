@@ -144,8 +144,7 @@ class TaskRepository(BaseRepository):
 
     def _initialize_database(self) -> None:
         with self._owned_connection() as conn:
-            conn.executescript(
-                """
+            conn.executescript("""
                 CREATE TABLE IF NOT EXISTS projects (
                     owner_id TEXT NOT NULL,
                     id TEXT NOT NULL,
@@ -229,8 +228,7 @@ class TaskRepository(BaseRepository):
                     ON task_tags(owner_id, tag_id, task_id);
                 CREATE INDEX IF NOT EXISTS idx_idempotency_owner_created
                     ON idempotency_records(owner_id, created_at);
-                """
-            )
+                """)
 
     def _migrate_legacy_json_once(self) -> None:
         with self._owned_connection() as conn:
@@ -260,7 +258,9 @@ class TaskRepository(BaseRepository):
                             "name": display_tag_name(tag.name),
                             "normalized_name": tag.normalized_name
                             or normalize_task_name(tag.name, strip_tag_prefix=True),
-                            "state": "deleted" if tag.state == "archived" else tag.state,
+                            "state": (
+                                "deleted" if tag.state == "archived" else tag.state
+                            ),
                         }
                     )
                     self._upsert_tag(conn, tag)
@@ -305,13 +305,17 @@ class TaskRepository(BaseRepository):
 
     @staticmethod
     def _payload(model: BaseModel) -> str:
-        return json.dumps(model.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+        return json.dumps(
+            model.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+        )
 
     @staticmethod
     def _model(row: sqlite3.Row, model_cls: type[ModelT]) -> ModelT:
         return model_cls.model_validate(json.loads(row["payload"]))
 
-    def _upsert_project(self, conn: sqlite3.Connection, project: ProjectDocument) -> None:
+    def _upsert_project(
+        self, conn: sqlite3.Connection, project: ProjectDocument
+    ) -> None:
         conn.execute(
             """
             INSERT INTO projects (owner_id, id, normalized_name, state, payload)
@@ -329,7 +333,9 @@ class TaskRepository(BaseRepository):
                 self._payload(project),
             ),
         )
-        BaseRepository.dump_model(self.project_path(project.owner_id, project.id), project)
+        BaseRepository.dump_model(
+            self.project_path(project.owner_id, project.id), project
+        )
 
     def _upsert_tag(self, conn: sqlite3.Connection, tag: TagDocument) -> None:
         conn.execute(
@@ -401,7 +407,9 @@ class TaskRepository(BaseRepository):
     def get_project_for_owner(
         self, project_id: str, *, owner_id: str
     ) -> ProjectDocument:
-        return self._get("projects", ProjectDocument, "Project", project_id, owner_id=owner_id)
+        return self._get(
+            "projects", ProjectDocument, "Project", project_id, owner_id=owner_id
+        )
 
     def get_tag_for_owner(self, tag_id: str, *, owner_id: str) -> TagDocument:
         return self._get("tags", TagDocument, "Tag", tag_id, owner_id=owner_id)
@@ -459,7 +467,10 @@ class TaskRepository(BaseRepository):
                 "SELECT payload FROM subtasks WHERE owner_id = ? AND task_id = ?",
                 (owner_id, task_id),
             ).fetchall()
-        return [TaskSubtaskDocument.model_validate(json.loads(row["payload"])) for row in rows]
+        return [
+            TaskSubtaskDocument.model_validate(json.loads(row["payload"]))
+            for row in rows
+        ]
 
     def get_subtask_for_owner(
         self, subtask_id: str, *, owner_id: str, task_id: str
@@ -507,7 +518,10 @@ class TaskRepository(BaseRepository):
                 "SELECT payload FROM comments WHERE owner_id = ? AND task_id = ?",
                 (owner_id, task_id),
             ).fetchall()
-        return [TaskCommentDocument.model_validate(json.loads(row["payload"])) for row in rows]
+        return [
+            TaskCommentDocument.model_validate(json.loads(row["payload"]))
+            for row in rows
+        ]
 
     def get_comment_for_owner(
         self, comment_id: str, *, owner_id: str, task_id: str
@@ -644,7 +658,14 @@ class TaskRepository(BaseRepository):
                 "projects",
                 "idempotency_records",
             ):
-                conn.execute(f"DELETE FROM {table} WHERE owner_id = ?", (owner_id,))
+                # noqa justification: `table` is bound by the literal tuple
+                # directly above, never by caller input. The owner filter is
+                # parameterised. If `table` ever becomes caller-controlled,
+                # this suppression must go.
+                conn.execute(
+                    f"DELETE FROM {table} WHERE owner_id = ?",  # noqa: S608
+                    (owner_id,),
+                )
         for dirname in (
             "tasks",
             "projects",
@@ -663,12 +684,18 @@ class TaskRepository(BaseRepository):
             ).fetchone()[0]
         return (value if value is not None else -1) + 1
 
+    # The three helpers below interpolate `table` into SQL. Every caller passes
+    # a string literal naming one of this module's own tables -- SQLite cannot
+    # parameterise a table name -- and the owner and id filters are always
+    # bound. The suppressions are valid only while `table` stays internal; if a
+    # caller ever forwards request data into it, they must be removed rather
+    # than carried forward.
     def _exists(
         self, conn: sqlite3.Connection, table: str, owner_id: str, record_id: str
     ) -> bool:
         return (
             conn.execute(
-                f"SELECT 1 FROM {table} WHERE owner_id = ? AND id = ?",
+                f"SELECT 1 FROM {table} WHERE owner_id = ? AND id = ?",  # noqa: S608
                 (owner_id, record_id),
             ).fetchone()
             is not None
@@ -685,7 +712,7 @@ class TaskRepository(BaseRepository):
     ) -> ModelT:
         with self._connection() as conn, _sqlite_guard(resource, record_id):
             row = conn.execute(
-                f"SELECT payload FROM {table} WHERE owner_id = ? AND id = ?",
+                f"SELECT payload FROM {table} WHERE owner_id = ? AND id = ?",  # noqa: S608
                 (owner_id, record_id),
             ).fetchone()
         if row is None:
@@ -700,6 +727,7 @@ class TaskRepository(BaseRepository):
     ) -> list[ModelT]:
         with self._connection() as conn, _sqlite_guard(table, owner_id):
             rows = conn.execute(
-                f"SELECT payload FROM {table} WHERE owner_id = ?", (owner_id,)
+                f"SELECT payload FROM {table} WHERE owner_id = ?",  # noqa: S608
+                (owner_id,),
             ).fetchall()
         return [model_cls.model_validate(json.loads(row["payload"])) for row in rows]

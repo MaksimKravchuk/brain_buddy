@@ -71,11 +71,11 @@ const navRowClass = (active: boolean): string =>
     active ? "bg-white text-slate-900 shadow-soft" : "text-slate-600 hover:bg-surface-sunken hover:text-slate-900"
   }`;
 
-function SectionLabel({ children }: { children: ReactNode }): JSX.Element {
+function SectionLabel({ children }: { children: ReactNode }): React.JSX.Element {
   return <div className="px-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">{children}</div>;
 }
 
-export function SoonChip(): JSX.Element {
+export function SoonChip(): React.JSX.Element {
   return (
     <span aria-hidden className="rounded-full border border-slate-200 bg-surface-sunken px-[7px] py-[2px] text-[10px] font-semibold text-slate-600">
       Soon
@@ -83,7 +83,7 @@ export function SoonChip(): JSX.Element {
   );
 }
 
-export function AppShell(props: AppShellProps): JSX.Element {
+export function AppShell(props: AppShellProps): React.JSX.Element {
   const { children, panel } = props;
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [weeklyReviewOpen, setWeeklyReviewOpen] = useState(false);
@@ -145,7 +145,7 @@ export function AppShell(props: AppShellProps): JSX.Element {
   );
 }
 
-function WeeklyReviewPlaceholder(): JSX.Element {
+function WeeklyReviewPlaceholder(): React.JSX.Element {
   return (
     <section aria-label="Weekly review placeholder" className="mx-auto max-w-[760px]">
       <div className="flex flex-col items-center gap-2 rounded-xl border-[1.5px] border-dashed border-slate-300 px-8 py-14 text-center">
@@ -167,7 +167,7 @@ function WeeklyReviewPlaceholder(): JSX.Element {
   );
 }
 
-function DeletionCancelledBanner(): JSX.Element | null {
+function DeletionCancelledBanner(): React.JSX.Element | null {
   const notice = useAuthStore((state) => state.deletionCancelledNotice);
   const dismiss = useAuthStore((state) => state.dismissDeletionNotice);
   if (!notice) {
@@ -191,7 +191,7 @@ function DeletionCancelledBanner(): JSX.Element | null {
   );
 }
 
-function AccountMenu(): JSX.Element {
+function AccountMenu(): React.JSX.Element {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
@@ -294,7 +294,7 @@ function AccountMenu(): JSX.Element {
   );
 }
 
-function TopBar({ onOpenDrawer }: { onOpenDrawer: () => void }): JSX.Element {
+function TopBar({ onOpenDrawer }: { onOpenDrawer: () => void }): React.JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -357,7 +357,7 @@ function TopBar({ onOpenDrawer }: { onOpenDrawer: () => void }): JSX.Element {
 
 type NavigationDrawerProps = SidebarProps & { open: boolean; onClose: () => void };
 
-function NavigationDrawer({ open, onClose, ...props }: NavigationDrawerProps): JSX.Element | null {
+function NavigationDrawer({ open, onClose, ...props }: NavigationDrawerProps): React.JSX.Element | null {
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
@@ -425,7 +425,7 @@ function Sidebar({
   onDeleteTag,
   weeklyReviewOpen,
   onOpenWeeklyReview
-}: SidebarProps): JSX.Element {
+}: SidebarProps): React.JSX.Element {
   const [newProjectName, setNewProjectName] = useState("");
   const [projectEdits, setProjectEdits] = useState<Record<string, string>>({});
   const [newTagName, setNewTagName] = useState("");

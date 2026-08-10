@@ -183,9 +183,11 @@ def evaluate_release_dataset(
 
     for case in cases:
         audio = _validated_audio(case)
-        signal_matches = case.expected_frequency_hz is None or abs(
-            _measured_frequency_hz(case.audio_path) - case.expected_frequency_hz
-        ) <= 2.0
+        signal_matches = (
+            case.expected_frequency_hz is None
+            or abs(_measured_frequency_hz(case.audio_path) - case.expected_frequency_hz)
+            <= 2.0
+        )
         audio_signal_hits += int(signal_matches)
         if not signal_matches:
             failures.append(f"{case.id}: audio signal mismatch")
@@ -246,7 +248,12 @@ def evaluate_release_dataset(
         for language in _case_languages(case):
             totals = language_counts.setdefault(
                 language,
-                {"cases": 0.0, "exact_count_hits": 0.0, "title_hits": 0.0, "titles": 0.0},
+                {
+                    "cases": 0.0,
+                    "exact_count_hits": 0.0,
+                    "title_hits": 0.0,
+                    "titles": 0.0,
+                },
             )
             totals["cases"] += 1
             totals["exact_count_hits"] += int(count_is_exact)
@@ -268,9 +275,7 @@ def evaluate_release_dataset(
         languages={language for case in cases for language in case.languages},
         modalities={"audio", "text"},
         provider_model_version=_PROVIDER_MODEL_VERSION,
-        audio_signal_accuracy=(
-            audio_signal_hits / case_count if case_count else 0.0
-        ),
+        audio_signal_accuracy=(audio_signal_hits / case_count if case_count else 0.0),
         task_boundary_precision=(
             matched_boundaries / predicted_total if predicted_total else 0.0
         ),
@@ -413,7 +418,10 @@ def build_semantic_extractor(
                 ),
                 "confidence": result.confidences.get(patch.proposal_id),
                 "source_spans": [
-                    [segments_by_id[segment_id].start_ms, segments_by_id[segment_id].end_ms]
+                    [
+                        segments_by_id[segment_id].start_ms,
+                        segments_by_id[segment_id].end_ms,
+                    ]
                     for segment_id in patch.source_segment_ids
                     if segment_id in segments_by_id
                 ],
@@ -430,10 +438,10 @@ def evaluate_real_audio_corpus(
     provider: Any,
     *,
     external_processing_allowed: bool,
-    extractor: Callable[
-        [EvaluationExtractionInput], list[str] | list[dict[str, object]]
-    ]
-    | None = None,
+    extractor: (
+        Callable[[EvaluationExtractionInput], list[str] | list[dict[str, object]]]
+        | None
+    ) = None,
     monotonic_values: Callable[[], float] = time.monotonic,
 ) -> RealAudioEvaluationReport:
     """Evaluate real audio without passing ground truth into the STT provider.
@@ -498,7 +506,11 @@ def evaluate_real_audio_corpus(
                     sealed_audio=audio,
                 )
             )
-        except (ValidationFailure, ProviderRetryableError, ProviderTerminalError) as exc:
+        except (
+            ValidationFailure,
+            ProviderRetryableError,
+            ProviderTerminalError,
+        ) as exc:
             latency = max(0.0, monotonic_values() - started)
             failed_metrics = _score_stt(
                 expected_transcript,
@@ -541,10 +553,13 @@ def evaluate_real_audio_corpus(
         aggregate.add(case_metrics)
         cohort = _language_cohort(case.language_hints)
         language_aggregates.setdefault(cohort, _MetricAccumulator()).add(case_metrics)
-        duration_seconds = case.duration_seconds or max(
-            (segment.end_ms for segment in result.segments), default=0
-        ) / 1000
-        latency_group = f"{_duration_cohort(duration_seconds)}|{cohort}|{provider_model}"
+        duration_seconds = (
+            case.duration_seconds
+            or max((segment.end_ms for segment in result.segments), default=0) / 1000
+        )
+        latency_group = (
+            f"{_duration_cohort(duration_seconds)}|{cohort}|{provider_model}"
+        )
         grouped_latencies.setdefault(latency_group, []).append(latency)
         if case_metrics.word_error_rate > 0 or case_metrics.critical_term_recall < 1:
             failures.append(EvaluationFailure(case.id, "stt", "TRANSCRIPT_MISMATCH"))
@@ -671,9 +686,7 @@ def evaluate_real_audio_corpus(
                 if expected_tasks
                 else 0.0
             ),
-            title_accuracy=(
-                matched_titles / expected_tasks if expected_tasks else 0.0
-            ),
+            title_accuracy=(matched_titles / expected_tasks if expected_tasks else 0.0),
             task_identity_accuracy=(
                 matched_task_identities / expected_tasks if expected_tasks else 0.0
             ),
@@ -745,7 +758,9 @@ class _MetricAccumulator:
         for key, value in metrics.provider_usage.items():
             safe_usage = redacted_provider_usage({key: value})
             if key in safe_usage:
-                self.provider_usage[key] = self.provider_usage.get(key, 0.0) + safe_usage[key]
+                self.provider_usage[key] = (
+                    self.provider_usage.get(key, 0.0) + safe_usage[key]
+                )
         self.count += 1
 
     def finish(self) -> SttQualityMetrics:
@@ -767,9 +782,7 @@ class _MetricAccumulator:
             p95_latency_seconds=_percentile_95(self.latency_samples),
             estimated_cost_usd=self.estimated_cost_usd,
             cost_estimate_bases=self.cost_estimate_bases,
-            actual_cost_usd=(
-                self.actual_cost_usd if self.actual_cost_count else None
-            ),
+            actual_cost_usd=(self.actual_cost_usd if self.actual_cost_count else None),
             provider_usage=self.provider_usage,
         )
 
@@ -811,7 +824,9 @@ def _score_stt(
     omissions = sum((expected_counts - predicted_counts).values())
     hallucinations = sum((predicted_counts - expected_counts).values())
     normalized_prediction = _normalized(predicted)
-    term_hits = sum(_normalized(term) in normalized_prediction for term in critical_terms)
+    term_hits = sum(
+        _normalized(term) in normalized_prediction for term in critical_terms
+    )
     return SttQualityMetrics(
         character_error_rate=_levenshtein(expected_chars, predicted_chars)
         / max(1, len(expected_chars)),
@@ -859,7 +874,10 @@ def _task_labels(
             kind = "expected tasks" if expected else "extracted tasks"
             raise ValueError(f"{case_id}: {kind} require string titles")
         structural_change = raw.get("structural_change")
-        if structural_change is not None and structural_change not in {"split", "merge"}:
+        if structural_change is not None and structural_change not in {
+            "split",
+            "merge",
+        }:
             raise ValueError(f"{case_id}: structural_change must be split or merge")
         confidence_value = raw.get("confidence")
         confidence = float(confidence_value) if confidence_value is not None else None
@@ -867,7 +885,9 @@ def _task_labels(
             raise ValueError(f"{case_id}: confidence must be between zero and one")
         source_spans_value = raw.get("source_spans", [])
         if not isinstance(source_spans_value, list):
-            raise ValueError(f"{case_id}: source_spans must be a list of [start_ms, end_ms]")
+            raise ValueError(
+                f"{case_id}: source_spans must be a list of [start_ms, end_ms]"
+            )
         source_spans: list[tuple[int, int]] = []
         for span in source_spans_value:
             if (
@@ -910,7 +930,11 @@ def _match_task_labels(
 ) -> list[tuple[int, int, float]]:
     candidates = sorted(
         (
-            (_semantic_similarity(wanted.title, actual.title), expected_index, predicted_index)
+            (
+                _semantic_similarity(wanted.title, actual.title),
+                expected_index,
+                predicted_index,
+            )
             for expected_index, wanted in enumerate(expected)
             for predicted_index, actual in enumerate(predicted)
         ),
@@ -938,7 +962,9 @@ def _match_task_boundaries(
     predicted_by_spans: dict[tuple[tuple[int, int], ...], list[int]] = {}
     for predicted_index, label in enumerate(predicted):
         if label.source_spans:
-            predicted_by_spans.setdefault(label.source_spans, []).append(predicted_index)
+            predicted_by_spans.setdefault(label.source_spans, []).append(
+                predicted_index
+            )
     matches: list[tuple[int, int, float]] = []
     for expected_index, label in enumerate(expected):
         if not label.source_spans:
@@ -1006,9 +1032,7 @@ def _load_real_audio_cases(corpus_root: Path) -> list[_RealAudioCase]:
             _RealAudioCase(
                 id=case_id,
                 audio_path=_corpus_path(root, raw["audio_file"]),
-                transcript_path=_corpus_path(
-                    root, raw["ground_truth_transcript_file"]
-                ),
+                transcript_path=_corpus_path(root, raw["ground_truth_transcript_file"]),
                 expected_tasks_path=(
                     _corpus_path(root, raw["expected_tasks_file"])
                     if raw.get("expected_tasks_file")
