@@ -139,6 +139,29 @@ INVARIANTS: tuple[Invariant, ...] = (
     ),
     MustMatch(
         "scripts/spec_kit_planning_review.py",
+        "the artifact digest is recomputed, not trusted from preflight",
+        r"current_digest\s*=\s*review_artifacts_digest\(feature_dir\)",
+        "Comparing a sign-off against the digest stored at preflight defeats "
+        "the mechanism with its own cache: edit the spec afterwards and the "
+        "stale stored digest still matches, approving unreviewed content.",
+    ),
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "artifact drift after preflight escalates",
+        r"if artifacts_changed:\s*\n\s*status\s*=\s*\"escalated\"",
+        "Reviews describe the artifacts as they stood when they ran. If those "
+        "moved, every verdict in the run is about different content.",
+    ),
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "high-risk handoffs require the sign-off record",
+        r"if risk == HUMAN_SIGNOFF_REQUIRED_AT:\s*\n\s*if not isinstance\(signoff, dict\):",
+        "Adding the shape to handoff.schema.json without checking it here left "
+        "a CI-reachable bypass: a hand-written high-risk handoff marked "
+        "approved validated with no approval record at all.",
+    ),
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
         "founder acceptance is time-bounded",
         r"founder_acceptance\.expires_on",
         "A risk acceptance with no expiry is a permanent hole in the gate.",

@@ -7,11 +7,11 @@
     ".specify/workflows/speckit/review.schema.json": "59ddb9c1a8b3bdf2c0a572c12131426a7beea5fd68673d5d12a91251ee24b3c0",
     ".specify/workflows/speckit/workflow.yml": "36bc2cd22856cc254b55848133303e66cba2989589eea20bd835e8b89e50be74",
     "Makefile": "3a07451acc5f6512b3303e4c38d3c1361ece57f3831114ba539bb73d50b478ee",
-    "scripts/check_gate_integrity.py": "b098c5c7b3a3edd4a9579e72b8c590980c88723273980a6dec69c5dee4f1208d",
+    "scripts/check_gate_integrity.py": "7e734de647cedd1477981ce95bd6267be6892189f457d6b930ffde44c2565ef0",
     "scripts/check_requirement_coverage.py": "d3bbfac84046d293e97e8ec5b5ffdcc430be23739c458167c5e0a0281c997268",
     "scripts/check_spec_kit_specs.py": "1b5d2bc387d2224ddccf13bed88a04da175d48827784612045d75b427ec697ad",
     "scripts/check_speckit_manifests.py": "0ae661a301204fdf076364a3286806bb5781e19842a133727522e6418cf9e601",
     "scripts/classify_path_risk.py": "a51e4bf3821c60e6e8aa1829475449e388f1c72bcf33327febb9c87bee5cce7a",
-    "scripts/spec_kit_planning_review.py": "f491849585a833dc81e3733e9438e477be7ab9a0bb2ced2fb5f9b4a0be651d15"
+    "scripts/spec_kit_planning_review.py": "b84fca0f103ce5ab738576f8cac14b837ddaabe47bd82246d50649da9b236b57"
   }
 }
