@@ -468,7 +468,6 @@ jobs:
       frontend: ${{ steps.decide.outputs.frontend }}
       mobile: ${{ steps.decide.outputs.mobile }}
     steps:
-      - uses: dorny/paths-filter@v3
       - id: decide
         run: echo decide
   backend:

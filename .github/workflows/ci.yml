@@ -83,45 +83,51 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Detect changed stacks
-        id: filter
-        if: github.event_name == 'pull_request'
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            shared: &shared
-              - '.github/workflows/ci.yml'
-              - 'scripts/**'
-              - 'Makefile'
-              - 'docker-compose*.yml'
-            backend:
-              - *shared
-              - 'backend/**'
-            frontend:
-              - *shared
-              - 'frontend/**'
-            # Mobile also runs on backend changes: its integration suite is the
-            # only check that exercises the backend<->mobile wire protocol
-            # (chunk hashing and the byte-identical manifest hash), so a
-            # backend-only change that breaks that contract must not slip past.
-            mobile:
-              - *shared
-              - 'mobile/**'
-              - 'backend/**'
-
+      # Computed with plain git rather than a paths-filter action. Such actions
+      # read the changed-file list from the pull-requests API, which this
+      # workflow's deliberately minimal `contents: read` token cannot do
+      # ("Resource not accessible by integration"). Widening the token to suit a
+      # convenience is the wrong trade on a candidate-controlled workflow
+      # (ADR-0008), and doing it in git costs nothing and adds no third-party
+      # action to the supply chain.
+      #
+      # Every branch of this fails safe toward running MORE: an unreadable diff
+      # exercises every stack.
       - name: Decide which stacks to exercise
         id: decide
         run: |
+          backend=true
+          frontend=true
+          mobile=true
+
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            backend='${{ steps.filter.outputs.backend }}'
-            frontend='${{ steps.filter.outputs.frontend }}'
-            mobile='${{ steps.filter.outputs.mobile }}'
+            base='${{ github.event.pull_request.base.sha }}'
+            if git fetch --no-tags --depth=1 origin "${base}" 2>/dev/null &&
+               changed=$(git diff --name-only "${base}" HEAD 2>/dev/null); then
+              printf '%s\n' "${changed}" | sed 's/^/  /'
+
+              # Shared surfaces exercise everything: a change to CI, the
+              # delivery scripts, the Makefile or the Compose stack can alter
+              # any stack's result.
+              if printf '%s\n' "${changed}" | grep -Eq \
+                   '^(\.github/|scripts/|Makefile$|docker-compose)'; then
+                echo "shared surface touched; exercising every stack"
+              else
+                printf '%s\n' "${changed}" | grep -q '^backend/'  || backend=false
+                printf '%s\n' "${changed}" | grep -q '^frontend/' || frontend=false
+                # Mobile also runs on backend changes: its integration suite is
+                # the only check exercising the backend<->mobile wire protocol
+                # (chunk hashing, the byte-identical manifest hash), so a
+                # backend-only change that breaks it must not slip past.
+                printf '%s\n' "${changed}" | grep -Eq '^(mobile|backend)/' || mobile=false
+              fi
+            else
+              echo "could not read the diff against ${base}; exercising every stack"
+            fi
           else
-            # Landing path: verify everything regardless of the diff.
-            backend=true
-            frontend=true
-            mobile=true
+            echo "landing path; exercising every stack regardless of the diff"
           fi
+
           {
             echo "backend=${backend}"
             echo "frontend=${frontend}"
