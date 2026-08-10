@@ -38,7 +38,31 @@ STANDARD_ROLES = (
     "requirements-consistency",
     "architecture-consistency",
     "testability-evidence",
+    "privacy-consent-security",
+    "ux-accessibility-mobile",
 )
+# Planning artifacts a reviewer may read. spec.md and plan.md are required to
+# exist; the rest are included when the feature produced them.
+REQUIRED_REVIEW_ARTIFACTS = ("spec.md", "plan.md")
+OPTIONAL_REVIEW_ARTIFACTS = (
+    "design.md",
+    "tasks.md",
+    "research.md",
+    "data-model.md",
+    "quickstart.md",
+    "checklists/requirements.md",
+)
+MANDATORY_SPEC_SECTIONS = (
+    "## User Scenarios & Testing",
+    "## Requirements",
+    "## Success Criteria",
+)
+NEEDS_CLARIFICATION_RE = re.compile(r"NEEDS[ _-]CLARIFICATION", re.IGNORECASE)
+PLACEHOLDER_RE = re.compile(r"\bTODO\b|\bTKTK\b|\?{3,}|<placeholder>", re.IGNORECASE)
+REQUIREMENT_DEFINITION_RE = re.compile(
+    r"^\s*[-*]\s*\*\*(FR|SC)-(\d+)\*\*", re.MULTILINE
+)
+UNCHECKED_ITEM_RE = re.compile(r"^\s*[-*]\s*\[ \]", re.MULTILINE)
 ROLE_CONFIGS: dict[str, dict[str, str]] = {
     "requirements-consistency": {
         "integration": "codex",
@@ -62,6 +86,26 @@ ROLE_CONFIGS: dict[str, dict[str, str]] = {
         "focus": (
             "Check that every acceptance outcome has proportionate automated or "
             "operational evidence and that tasks can be grouped into independent lanes."
+        ),
+    },
+    "privacy-consent-security": {
+        "integration": "claude",
+        "model": "opus",
+        "agent": "security-privacy-reviewer",
+        "focus": (
+            "Audit consent gating, data retention and purge coverage, export "
+            "disposition, per-owner scoping, 404-vs-403 semantics, and PII "
+            "leakage into logs, metrics, fixtures, or PR evidence."
+        ),
+    },
+    "ux-accessibility-mobile": {
+        "integration": "claude",
+        "model": "sonnet",
+        "agent": "ux-a11y-reviewer",
+        "focus": (
+            "Audit that every user-visible surface specifies loading, empty, "
+            "error, and partial-failure states, keyboard reachability and focus "
+            "restoration, mobile viability, and interruption/resume behavior."
         ),
     },
     "adversarial-high-risk": {
@@ -333,16 +377,48 @@ def resolve_feature_dir(root: Path) -> Path:
     return feature_dir
 
 
+def review_artifacts(feature_dir: Path) -> list[str]:
+    """Every planning artifact the feature actually produced.
+
+    Reviewers used to see only spec.md and plan.md, which made design, task
+    decomposition, and contract drift structurally invisible to the campaign.
+    """
+    names = [
+        name
+        for name in (*REQUIRED_REVIEW_ARTIFACTS, *OPTIONAL_REVIEW_ARTIFACTS)
+        if (feature_dir / name).is_file()
+    ]
+    contracts_dir = feature_dir / "contracts"
+    if contracts_dir.is_dir():
+        names.extend(
+            f"contracts/{path.name}" for path in sorted(contracts_dir.iterdir())
+        )
+    return names
+
+
 def build_prompt(*, role: str, feature_dir: Path, root: Path) -> str:
     config = ROLE_CONFIGS[role]
     relative_feature = feature_dir.relative_to(root)
     allowed_categories = ", ".join(sorted(PRODUCT_DECISION_CATEGORIES))
+    artifact_list = "\n".join(
+        f"- {relative_feature}/{name}" for name in review_artifacts(feature_dir)
+    )
+    agent_name = config.get("agent")
+    rubric = (
+        f"\nRubric: apply the review rubric in .claude/agents/{agent_name}.md "
+        "verbatim. That file is the single source of truth for this lens; do "
+        "not substitute your own checklist.\n"
+        if agent_name
+        else ""
+    )
     return f"""You are a read-only planning reviewer for BrainBuddy.
 
 Review role: {role}
 Focus: {config['focus']}
 Repository root: {root}
-Feature artifacts: {relative_feature}/spec.md and {relative_feature}/plan.md
+Feature artifacts:
+{artifact_list}
+{rubric}
 Also inspect relevant accepted/proposed ADRs and current code only where needed to verify factual claims.
 
 Hard boundaries:
@@ -402,10 +478,18 @@ def aggregate_reviews(reviews: list[dict[str, Any]], *, risk: str) -> dict[str, 
         for decision in review.get("product_decisions", []):
             product_decisions.append({"reviewer": role, **decision})
 
-    if product_decisions:
+    # A reviewer's own verdict is gate-blocking on its own. Deriving the gate
+    # solely from finding severity would launder a `changes-required` verdict
+    # carrying only `important` findings into `approved`, which silently
+    # discards the exact judgement the reviewer was asked to make.
+    verdicts = {str(review["verdict"]) for review in reviews}
+
+    if product_decisions or "product-decision-required" in verdicts:
         status = "product-decision-required"
         action = "Block only the Architect Kanban card with this decision packet."
-    elif any(item.get("severity") == "blocking" for item in technical_findings):
+    elif "changes-required" in verdicts or any(
+        item.get("severity") == "blocking" for item in technical_findings
+    ):
         status = "technical-changes-required"
         action = "Architect resolves technical findings and reruns the review campaign once."
     else:
@@ -422,10 +506,130 @@ def aggregate_reviews(reviews: list[dict[str, Any]], *, risk: str) -> dict[str, 
     }
 
 
+def deterministic_defects(feature_dir: Path) -> list[str]:
+    """Regex-findable spec defects, checked before any model runs.
+
+    Every defect here is cheaper to catch with a regex than with a reviewer
+    round, and letting one through burns a whole campaign on something no
+    judgement was required to see.
+    """
+    defects: list[str] = []
+    spec_path = feature_dir / "spec.md"
+    spec = spec_path.read_text(encoding="utf-8")
+
+    marker_lines = [
+        index
+        for index, line in enumerate(spec.splitlines(), start=1)
+        if NEEDS_CLARIFICATION_RE.search(line)
+    ]
+    if marker_lines:
+        defects.append(
+            f"spec.md still carries {len(marker_lines)} unresolved "
+            f"NEEDS CLARIFICATION marker(s) at line(s) "
+            f"{', '.join(str(line) for line in marker_lines)}; run /speckit-clarify"
+        )
+
+    missing_sections = [
+        section for section in MANDATORY_SPEC_SECTIONS if section not in spec
+    ]
+    if missing_sections:
+        defects.append(
+            f"spec.md is missing mandatory section(s): {', '.join(missing_sections)}"
+        )
+
+    # Count definitions (`- **FR-001**: ...`), not mentions — a requirement is
+    # expected to be referenced repeatedly, but defined exactly once.
+    defined: dict[str, int] = {}
+    for prefix, digits in REQUIREMENT_DEFINITION_RE.findall(spec):
+        key = f"{prefix}-{digits}"
+        defined[key] = defined.get(key, 0) + 1
+        if len(digits) != 3:
+            defects.append(
+                f"spec.md requirement id {key} is malformed; ids must be "
+                f"zero-padded to three digits ({prefix}-001)"
+            )
+    duplicates = sorted(key for key, count in defined.items() if count > 1)
+    if duplicates:
+        defects.append(
+            "spec.md defines duplicate requirement id(s): " + ", ".join(duplicates)
+        )
+    if not defined:
+        defects.append(
+            "spec.md defines no FR-### or SC-### requirements in the expected "
+            "`- **FR-001**: ...` form; acceptance cannot be traced to tests"
+        )
+
+    for name in (*REQUIRED_REVIEW_ARTIFACTS, "design.md", "tasks.md"):
+        path = feature_dir / name
+        if not path.is_file():
+            continue
+        hits = PLACEHOLDER_RE.findall(path.read_text(encoding="utf-8"))
+        if hits:
+            defects.append(
+                f"{name} contains {len(hits)} unfilled placeholder(s) "
+                f"({', '.join(sorted({hit.upper() for hit in hits}))})"
+            )
+
+    checklist = feature_dir / "checklists" / "requirements.md"
+    if not checklist.is_file():
+        defects.append("checklists/requirements.md is missing; run /speckit-checklist")
+    else:
+        unchecked = UNCHECKED_ITEM_RE.findall(checklist.read_text(encoding="utf-8"))
+        if unchecked:
+            defects.append(
+                f"checklists/requirements.md has {len(unchecked)} unchecked item(s)"
+            )
+
+    return defects
+
+
+def derive_risk(feature_dir: Path) -> str:
+    """Derive campaign risk from the surfaces the planning artifacts name.
+
+    Defaulting to `standard` meant a feature touching auth, migrations, CI, or
+    deploy config got the same three reviewers as a copy change. ADR-0008
+    already classifies those surfaces; reuse that classifier rather than
+    inventing a second risk vocabulary.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    try:
+        from classify_path_risk import ASK, classify_path
+    except ImportError:  # pragma: no cover - classifier is repo-local
+        return "standard"
+
+    path_like = re.compile(r"\b[\w./-]+\.(?:py|ts|tsx|js|jsx|yml|yaml|toml|sql|md)\b")
+    candidates: set[str] = set()
+    for name in (*REQUIRED_REVIEW_ARTIFACTS, "design.md", "tasks.md"):
+        path = feature_dir / name
+        if path.is_file():
+            candidates.update(path_like.findall(path.read_text(encoding="utf-8")))
+
+    for candidate in candidates:
+        if "\\" in candidate:
+            continue
+        if classify_path(candidate)[0] == ASK:
+            return "high"
+    return "standard"
+
+
 def preflight(*, root: Path, run_id: str) -> Path:
     feature_dir = resolve_feature_dir(root)
+    defects = deterministic_defects(feature_dir)
+    if defects:
+        raise ReviewError(
+            "Planning preflight failed; fix these before spending a review "
+            "campaign:\n" + "\n".join(f"  - {defect}" for defect in defects)
+        )
     target = run_directory(root, run_id) / "planning-context.json"
-    write_json_atomic(target, {"feature_dir": str(feature_dir), "project_root": str(root)})
+    write_json_atomic(
+        target,
+        {
+            "feature_dir": str(feature_dir),
+            "project_root": str(root),
+            "derived_risk": derive_risk(feature_dir),
+            "review_artifacts": review_artifacts(feature_dir),
+        },
+    )
     return target
 
 
@@ -448,6 +652,17 @@ def summarize(*, root: Path, run_id: str) -> Path:
     if risk not in {"standard", "high"}:
         raise ReviewError(f"Unsupported risk value: {risk!r}")
 
+    # Risk escalates, never de-escalates: an operator may raise a standard
+    # feature to high, but may not talk the classifier out of an ASK-class
+    # surface it detected in the planning artifacts.
+    context_path = run_dir / "planning-context.json"
+    escalated = False
+    if context_path.is_file():
+        context = json.loads(context_path.read_text(encoding="utf-8"))
+        if context.get("derived_risk") == "high" and risk != "high":
+            risk = "high"
+            escalated = True
+
     roles: list[str] = list(STANDARD_ROLES)
     if risk == "high":
         roles.append("adversarial-high-risk")
@@ -455,6 +670,16 @@ def summarize(*, root: Path, run_id: str) -> Path:
     for role in roles:
         path = run_dir / "reviews" / f"{role}.json"
         if not path.is_file():
+            if escalated and role == "adversarial-high-risk":
+                # Fail closed rather than quietly summarizing a high-risk
+                # feature with the standard panel: the classifier found an
+                # ASK-class surface the campaign was never told about.
+                raise ReviewError(
+                    "Planning artifacts name an ASK-class surface, so this "
+                    "campaign requires the adversarial-high-risk reviewer, but "
+                    "it was launched with risk=standard. Rerun the campaign "
+                    "with risk=high."
+                )
             raise ReviewError(f"Required review output is missing: {path}")
         reviews.append(
             validate_review(json.loads(path.read_text(encoding="utf-8")), expected_role=role)
@@ -494,6 +719,7 @@ def validate_handoff(payload: object) -> dict[str, Any]:
     if risk not in {"standard", "high"}:
         raise ValueError("planning_review.risk is unsupported")
     status = raw_review.get("status")
+    founder_acceptance: dict[str, Any] | None = None
     if status == "founder-accepted":
         # Founder-acceptance policy (authorized by the repo owner, 2026-07-29):
         # a review loop that does not converge to `approved` may be closed by
@@ -539,12 +765,18 @@ def validate_handoff(payload: object) -> dict[str, Any]:
                 entry.get("status"),
                 f"founder_acceptance.campaign_history[{index}].status",
             )
+        # Carry the record forward. Collapsing `founder-accepted` to
+        # `approved` here would erase the very evidence this status exists to
+        # preserve and would misreport an unconverged review as a clean one.
+        founder_acceptance = acceptance
     elif status != "approved":
         raise ValueError(
             "planning_review.status must be approved or founder-accepted"
         )
     reviewers = _string_list(
-        raw_review.get("reviewers"), "planning_review.reviewers", minimum=3
+        raw_review.get("reviewers"),
+        "planning_review.reviewers",
+        minimum=len(STANDARD_ROLES),
     )
     missing_standard = sorted(set(STANDARD_ROLES) - set(reviewers))
     if missing_standard:
@@ -650,16 +882,20 @@ def validate_handoff(payload: object) -> dict[str, Any]:
     for lane_id in adjacency:
         visit(lane_id)
 
+    planning_review: dict[str, Any] = {
+        "run_id": run_id,
+        "risk": risk,
+        "status": str(status),
+        "reviewers": reviewers,
+    }
+    if founder_acceptance is not None:
+        planning_review["founder_acceptance"] = founder_acceptance
+
     return {
         "schema_version": "speckit-hermes-handoff/v1",
         "root_outcome": root_outcome,
         "artifacts": artifacts,
-        "planning_review": {
-            "run_id": run_id,
-            "risk": risk,
-            "status": "approved",
-            "reviewers": reviewers,
-        },
+        "planning_review": planning_review,
         "product_decisions": product_decisions,
         "lanes": lanes,
         "risks": _string_list(payload.get("risks", []), "risks"),

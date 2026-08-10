@@ -16,6 +16,8 @@
         "requirements-consistency",
         "architecture-consistency",
         "testability-evidence",
+        "privacy-consent-security",
+        "ux-accessibility-mobile",
         "adversarial-high-risk"
       ]
     },

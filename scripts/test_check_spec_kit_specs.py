@@ -43,6 +43,8 @@ def _valid_handoff() -> dict[str, Any]:
                 "requirements-consistency",
                 "architecture-consistency",
                 "testability-evidence",
+                "privacy-consent-security",
+                "ux-accessibility-mobile",
             ],
         },
         "product_decisions": [],
@@ -141,12 +143,60 @@ class CheckSpecKitSpecsTests(unittest.TestCase):
         self.assertIn("missing tasks.md", stderr)
         self.assertIn("/speckit-checklist -> /speckit-tasks", stderr)
 
+    def _write_planned_feature(self, tasks_text: str) -> Path:
+        check_spec_kit_specs.GRANDFATHERED = {}
+        feature = self.specs_dir / "006-delivery-gate"
+        (feature / "checklists").mkdir(parents=True)
+        (feature / "intake.md").write_text("# Intake\n")
+        (feature / "spec.md").write_text("# Spec\n")
+        (feature / "checklists" / "requirements.md").write_text("# Checklist\n")
+        (feature / "design.md").write_text("# Design\n")
+        (feature / "plan.md").write_text("# Plan\n")
+        (feature / "tasks.md").write_text(tasks_text)
+        return feature
+
+    def test_planned_but_unbuilt_feature_does_not_require_acceptance(self) -> None:
+        """Demanding acceptance.md at planning time would force a fabricated verdict."""
+        self._write_planned_feature("# Tasks\n\n- [x] T001 done\n- [ ] T002 not yet\n")
+
+        result, _stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 0, stderr)
+
+    def test_delivered_feature_requires_acceptance_evidence(self) -> None:
+        self._write_planned_feature("# Tasks\n\n- [x] T001 done\n- [x] T002 done\n")
+
+        result, _stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 1)
+        for name in ("acceptance.md", "traceability.md", "report.md"):
+            self.assertIn(name, stderr)
+
+    def test_tasks_without_checkboxes_is_not_treated_as_delivered(self) -> None:
+        self._write_planned_feature("# Tasks\n\nProse plan with no checkboxes.\n")
+
+        result, _stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 0, stderr)
+
+    def test_delivered_feature_passes_with_full_evidence(self) -> None:
+        feature = self._write_planned_feature("# Tasks\n\n- [x] T001 done\n")
+        (feature / "acceptance.md").write_text("VERDICT: accept\n")
+        (feature / "traceability.md").write_text("| FR-001 | ... |\n")
+        (feature / "report.md").write_text("# Report\n")
+
+        result, _stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 0, stderr)
+
     def test_new_feature_does_not_require_legacy_handoff(self) -> None:
         check_spec_kit_specs.GRANDFATHERED = {}
         feature = self.specs_dir / "004-new-feature"
         (feature / "checklists").mkdir(parents=True)
+        (feature / "intake.md").write_text("# Intake\n")
         (feature / "spec.md").write_text("# Spec\n")
         (feature / "checklists" / "requirements.md").write_text("# Checklist\n")
+        (feature / "design.md").write_text("# Design\n")
         (feature / "plan.md").write_text("# Plan\n")
         (feature / "tasks.md").write_text("# Tasks\n")
 
@@ -159,8 +209,10 @@ class CheckSpecKitSpecsTests(unittest.TestCase):
         check_spec_kit_specs.GRANDFATHERED = {}
         feature = self.specs_dir / "005-new-feature"
         (feature / "checklists").mkdir(parents=True)
+        (feature / "intake.md").write_text("# Intake\n")
         (feature / "spec.md").write_text("# Spec\n")
         (feature / "checklists" / "requirements.md").write_text("# Checklist\n")
+        (feature / "design.md").write_text("# Design\n")
         (feature / "plan.md").write_text("# Plan\n")
         (feature / "tasks.md").write_text("# Tasks\n")
         (feature / "hermes-handoff.json").write_text(handoff_text)
@@ -217,6 +269,8 @@ class CheckSpecKitSpecsTests(unittest.TestCase):
         handoff["planning_review"]["reviewers"] = [
             "requirements-consistency",
             "architecture-consistency",
+            "privacy-consent-security",
+            "ux-accessibility-mobile",
             "some-other-role",
         ]
         self._write_feature_with_handoff(json.dumps(handoff))
@@ -288,7 +342,9 @@ class CheckSpecKitSpecsTests(unittest.TestCase):
         check_spec_kit_specs.GRANDFATHERED = {}
         feature = self.specs_dir / "003-new-feature"
         (feature / "checklists" / "requirements.md").mkdir(parents=True)
+        (feature / "intake.md").write_text("# Intake\n")
         (feature / "spec.md").write_text("# Spec\n")
+        (feature / "design.md").write_text("# Design\n")
         (feature / "plan.md").write_text("# Plan\n")
         (feature / "tasks.md").write_text("# Tasks\n")
 

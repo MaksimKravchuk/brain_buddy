@@ -26,7 +26,21 @@ independent verifier/runtime owner  Hermes
 release authority                   ADR-0008
 ```
 
-Never run `/speckit-implement`, the legacy `.specify/workflows/speckit/workflow.yml` campaign, or `hermes-handoff.json` generation for a new managed outcome. Never create delivery siblings manually.
+Inside a managed outcome, Hermes owns execution: do not generate
+`hermes-handoff.json` for a new managed outcome by hand, and never create
+delivery siblings manually. Implementation for a managed outcome flows through
+Kanban cards, not through a direct `/speckit-implement` run — the skill routes
+there itself when the invoking task carries explicit ADR-0010 activation.
+
+Two former prohibitions in this section no longer apply:
+
+- **`/speckit-implement` is no longer disabled.** It implements directly from
+  `tasks.md` outside a managed outcome, which is what `CLAUDE.md`, the
+  constitution and `docs/spec-kit-workflow.md` always said. The disabled
+  version contradicted all three and stalled any agent that read skills first.
+- **`.specify/workflows/speckit/workflow.yml` is no longer legacy.** ADR-0011
+  makes it the portable spec review gate that runs for every feature, managed
+  or not. Run it via `/speckit-review`.
 
 ## Create one root outcome
 
