@@ -126,11 +126,45 @@ def test_unresolvable_host_is_reported_as_unresolvable() -> None:
     assert excinfo.value.code == "destination_unresolvable"
 
 
+def test_system_dns_failure_is_translated_without_leaking_socket_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default DNS errors become the bounded external-agent rejection contract."""
+
+    def fail_resolution(*args: object, **kwargs: object) -> object:
+        raise OSError("sensitive resolver detail")
+
+    monkeypatch.setattr(socket, "getaddrinfo", fail_resolution)
+
+    with pytest.raises(DestinationRejected) as excinfo:
+        validate_destination("https://missing.example.com/hooks")
+
+    assert excinfo.value.code == "destination_unresolvable"
+    assert "sensitive resolver detail" not in str(excinfo.value)
+
+
+def test_system_dns_answers_are_pinned(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The non-injected resolver preserves every validated socket address."""
+
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))
+        ],
+    )
+
+    resolved = validate_destination("https://agent.example.com/hooks")
+
+    assert resolved.addresses == ("93.184.216.34",)
+
+
 @pytest.mark.parametrize(
     "url",
     [
         "https://user:secret@agent.example.com/hooks",
         "https://agent.example.com:0/hooks",
+        "https://agent.example.com:not-a-port/hooks",
         "https:///hooks",
         "not-a-url",
         "https://agent.example.com/hooks#fragment",

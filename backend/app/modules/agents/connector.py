@@ -111,7 +111,11 @@ class GenericHttpConnector:
     # --- shared plumbing ----------------------------------------------------
 
     def _send(
-        self, target: ConnectorTarget, envelope: dict[str, Any], *, extra_headers: dict[str, str] | None = None
+        self,
+        target: ConnectorTarget,
+        envelope: dict[str, Any],
+        *,
+        extra_headers: dict[str, str] | None = None,
     ) -> tuple[int, bytes]:
         """Validate, pin, and POST. Raises for every unsafe or failed attempt."""
 

@@ -164,7 +164,9 @@ class TestConnectionTest:
         """FR-006: no dedup guarantee means the connector cannot take a hand-off."""
 
         connector, _ = build_connector(
-            json_handler({"capabilities": {"progress": True}, "idempotent_start": False})
+            json_handler(
+                {"capabilities": {"progress": True}, "idempotent_start": False}
+            )
         )
 
         outcome = connector.test(TARGET)
@@ -227,7 +229,11 @@ class TestConnectionTest:
         connector, _ = build_connector(
             json_handler(
                 {
-                    "capabilities": {"progress": False, "reply": False, "cancel": False},
+                    "capabilities": {
+                        "progress": False,
+                        "reply": False,
+                        "cancel": False,
+                    },
                     "idempotent_start": True,
                     "idempotent_reply": True,
                     "idempotent_cancel": True,
@@ -389,6 +395,22 @@ class TestStart:
 
         assert outcome.status == "not_sent"
 
+    def test_destination_rejection_proves_start_was_not_sent(self) -> None:
+        """A revalidated unsafe destination cannot become ambiguous delivery."""
+
+        connector, seen = build_connector(json_handler({"accepted": True}, 202))
+        unsafe = ConnectorTarget(
+            endpoint_url="https://169.254.169.254/latest",
+            auth_header_name="Authorization",
+            credential="Bearer super-secret-token",
+        )
+
+        outcome = connector.start(unsafe, envelope=self._envelope())
+
+        assert outcome.status == "not_sent"
+        assert outcome.error_code == "destination_network_not_allowed"
+        assert seen == []
+
     def test_a_client_rejection_proves_nothing_was_started(self) -> None:
         """A 4xx is a definitive refusal, so the run was never accepted."""
 
@@ -460,6 +482,22 @@ class TestCommand:
         assert connector.command(TARGET, envelope=self._envelope()).status == (
             "unconfirmed"
         )
+
+    def test_destination_rejection_leaves_a_command_unconfirmed(self) -> None:
+        """A command blocked by egress policy is never claimed as delivered."""
+
+        connector, seen = build_connector(json_handler({"command_id": "agentcmd_1"}))
+        unsafe = ConnectorTarget(
+            endpoint_url="https://127.0.0.1/hooks",
+            auth_header_name="Authorization",
+            credential="Bearer super-secret-token",
+        )
+
+        outcome = connector.command(unsafe, envelope=self._envelope())
+
+        assert outcome.status == "unconfirmed"
+        assert outcome.error_code == "destination_network_not_allowed"
+        assert seen == []
 
 
 class TestResponseBounding:

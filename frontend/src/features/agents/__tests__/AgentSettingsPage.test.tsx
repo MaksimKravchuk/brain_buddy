@@ -340,6 +340,21 @@ describe("AgentSettingsPage", () => {
     expect(replace).not.toHaveBeenCalled();
   });
 
+  it("reacts to browser connectivity changes before allowing one-time secret rotation", async () => {
+    vi.mocked(apiClient.listAgentConnections).mockResolvedValue([ready]);
+    renderPage();
+
+    const card = await screen.findByRole("article", { name: "Hermes" });
+    const replace = within(card).getByRole("button", { name: /replace signing secret/i });
+    expect(replace).toBeEnabled();
+
+    act(() => window.dispatchEvent(new Event("offline")));
+    expect(replace).toBeDisabled();
+
+    act(() => window.dispatchEvent(new Event("online")));
+    expect(replace).toBeEnabled();
+  });
+
   it("warns that disconnecting does not cancel external work before it is confirmed", async () => {
     vi.mocked(apiClient.listAgentConnections).mockResolvedValue([ready]);
     const disconnect = vi
@@ -388,6 +403,45 @@ describe("AgentSettingsPage", () => {
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(disconnect).not.toHaveBeenCalled();
+  });
+
+  it("keeps a failed credential replacement visible for correction", async () => {
+    vi.mocked(apiClient.listAgentConnections).mockResolvedValue([ready]);
+    vi.spyOn(apiClient, "rotateAgentCredential").mockRejectedValue(
+      new ApiError("Forbidden", 403, { message: "Current password is incorrect." }, "corr-credential-2")
+    );
+    renderPage();
+
+    const card = await screen.findByRole("article", { name: "Hermes" });
+    const user = userEvent.setup();
+    await user.type(within(card).getByLabelText("New credential"), "token-def");
+    await user.type(within(card).getByLabelText("Current password"), "wrong-password");
+    await user.click(within(card).getByRole("button", { name: "Replace credential" }));
+
+    expect(await within(card).findByRole("alert")).toHaveTextContent(
+      /current password is incorrect.*corr-credential-2/i
+    );
+    expect(within(card).getByLabelText("New credential")).toHaveValue("token-def");
+  });
+
+  it("keeps disconnect confirmation open when re-authentication fails", async () => {
+    vi.mocked(apiClient.listAgentConnections).mockResolvedValue([ready]);
+    vi.spyOn(apiClient, "disconnectAgentConnection").mockRejectedValue(
+      new ApiError("Forbidden", 403, { message: "Current password is incorrect." }, "corr-disconnect-2")
+    );
+    renderPage();
+
+    const card = await screen.findByRole("article", { name: "Hermes" });
+    const user = userEvent.setup();
+    await user.click(within(card).getByRole("button", { name: /disconnect/i }));
+    const dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Confirm with your password"), "wrong-password");
+    await user.click(within(dialog).getByRole("button", { name: "Disconnect agent" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      /current password is incorrect.*corr-disconnect-2/i
+    );
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
   it("reports a failed connection load instead of showing an empty agent list", async () => {

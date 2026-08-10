@@ -262,6 +262,7 @@ def build_container(config: AppConfig) -> Container:
         task_port=InProcessTaskPort(task_service.create_native_inbox_task),
         voice_enabled_for_owner=_voice_enabled_for_owner,
     )
+
     def _task_snapshot(task_id: str, *, owner_id: str) -> TaskSnapshot:
         """Read-only view of a Task for the relay.
 

@@ -76,7 +76,13 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
         ("/api/agent-run-summaries", "get"): {"401", "404", "422"},
         ("/api/agent-runs/{run_id}", "get"): {"401", "404", "422"},
         ("/api/agent-runs/{run_id}/reply", "post"): {"400", "401", "404", "409", "422"},
-        ("/api/agent-runs/{run_id}/cancel", "post"): {"400", "401", "404", "409", "422"},
+        ("/api/agent-runs/{run_id}/cancel", "post"): {
+            "400",
+            "401",
+            "404",
+            "409",
+            "422",
+        },
         ("/api/agent-events", "post"): {"400", "403", "413", "422"},
         ("/api/brain-dump-operations", "post"): {"400", "401", "409", "422"},
         ("/api/brain-dump-providers", "get"): {"401"},
@@ -138,7 +144,12 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
         ("/api/tasks", "get"): {"400", "401", "404", "422"},
         ("/api/tasks", "post"): {"400", "401", "404", "409", "422"},
         ("/api/tasks/smart-add", "post"): {"400", "401", "404", "409", "422"},
-        ("/api/tasks/{task_id}/agent-runs/preview", "post"): {"400", "401", "404", "422"},
+        ("/api/tasks/{task_id}/agent-runs/preview", "post"): {
+            "400",
+            "401",
+            "404",
+            "422",
+        },
         ("/api/tasks/{task_id}/agent-runs", "post"): {
             "400",
             "401",
