@@ -42,7 +42,8 @@ export default defineConfig({
     exclude: ["tests/**"],
     coverage: {
       provider: "istanbul",
-      reporter: ["text", "lcov"],
+      // json-summary feeds scripts/validate_coverage_floor.py.
+      reporter: ["text", "lcov", "json-summary"],
       include: ["src/**/*.{ts,tsx}"],
       exclude: ["src/main.tsx", "src/test/allureTaxonomy.ts"],
       thresholds: {

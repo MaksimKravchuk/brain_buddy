@@ -1,0 +1,95 @@
+version: 2
+
+# Nothing watched dependency freshness before this file existed, so advisories
+# accumulated silently: a fresh audit reports findings against starlette,
+# urllib3 and pyjwt on the backend, and against the frontend and mobile
+# toolchains. Grouping the updates keeps the review load to a handful of pull
+# requests a week rather than one per package.
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(backend)"
+    groups:
+      backend-dev-tooling:
+        patterns:
+          - pytest*
+          - black
+          - ruff
+          - mypy
+          - mutmut
+          - hypothesis
+          - schemathesis
+          - allure-pytest
+          - import-linter
+      backend-runtime:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - pytest*
+          - black
+          - ruff
+          - mypy
+          - mutmut
+          - hypothesis
+          - schemathesis
+          - allure-pytest
+          - import-linter
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(frontend)"
+    groups:
+      frontend-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: /mobile
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(mobile)"
+    # Expo pins its SDK packages as a matched set, so they move together or not
+    # at all; a lone bumped expo-* package generally fails the Metro export.
+    groups:
+      expo-sdk:
+        patterns:
+          - expo
+          - expo-*
+          - "@expo/*"
+          - react-native
+          - react-native-*
+      mobile-other:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - expo
+          - expo-*
+          - "@expo/*"
+          - react-native
+          - react-native-*
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "ci"
+    groups:
+      github-actions:
+        patterns:
+          - "*"

@@ -50,7 +50,9 @@ def test_tags_are_first_class_task_assignments(api_client) -> None:
 
 
 def test_project_archive_and_tag_delete_unassign_tasks_atomically(api_client) -> None:
-    project = _post(api_client, "/api/projects", "project-home", {"name": "Home"}).json()
+    project = _post(
+        api_client, "/api/projects", "project-home", {"name": "Home"}
+    ).json()
     tag = _post(api_client, "/api/tags", "tag-home", {"name": "home"}).json()
     task = _post(
         api_client,
@@ -151,8 +153,13 @@ def test_task_repository_migrates_existing_json_contexts_to_sqlite_tags(
     assert container.task_repo.db_path.exists()
     migrated = container.task_service.get_task("task_legacy", owner_id=owner_id)
     assert migrated.tag_ids == ["context_legacy"]
-    assert container.task_service.get_tag("context_legacy", owner_id=owner_id).name == "Calls"
-    migrated_project = container.task_service.get_project("project_legacy", owner_id=owner_id)
+    assert (
+        container.task_service.get_tag("context_legacy", owner_id=owner_id).name
+        == "Calls"
+    )
+    migrated_project = container.task_service.get_project(
+        "project_legacy", owner_id=owner_id
+    )
     assert "linked_tree_ids" not in migrated_project.model_dump()
 
     get_config.cache_clear()

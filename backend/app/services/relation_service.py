@@ -14,7 +14,9 @@ from app.utils.time import utcnow
 class RelationService:
     """Manage relations between nodes."""
 
-    def __init__(self, tree_repo: TreeRepository, tree_service: TreeService) -> None:  # pragma: no mutate block
+    def __init__(
+        self, tree_repo: TreeRepository, tree_service: TreeService
+    ) -> None:  # pragma: no mutate block
         self.tree_repo = tree_repo
         self.tree_service = tree_service
 

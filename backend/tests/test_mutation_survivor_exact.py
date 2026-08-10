@@ -2247,7 +2247,9 @@ def test_relation_to_document_preserves_response_fields_and_legacy_defaults(
     assert response_document.metadata.updated_at == updated_at
     assert response_document.metadata.author is None
 
-    monkeypatch.setattr(tree_service_module, "generate_relation_id", lambda: "generated")
+    monkeypatch.setattr(
+        tree_service_module, "generate_relation_id", lambda: "generated"
+    )
     legacy_document = tree_service._relation_to_document(
         SimpleNamespace(source_node_id="legacy-source", target_node_id="legacy-target"),
         metadata,

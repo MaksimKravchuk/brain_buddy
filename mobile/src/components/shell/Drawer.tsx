@@ -30,11 +30,11 @@ import { colors, durations, fonts, minHitTarget, radii, space } from "@/theme/to
 const DRAWER_WIDTH = 300;
 const PROJECT_FALLBACK_COLOR = colors.brandSecondary;
 
-const GTD_ITEMS: Array<{
+const GTD_ITEMS: {
   state: OpenTaskState;
   label: string;
   icon: (color: string) => ReactNode;
-}> = [
+}[] = [
   { state: "inbox", label: "Inbox", icon: (c) => <Inbox size={16} color={c} strokeWidth={1.75} /> },
   {
     state: "next",

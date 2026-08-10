@@ -42,8 +42,12 @@ def _run_maintenance_sweep(container: Container) -> None:
         logger.exception("Account purge sweep iteration failed")
 
     try:
-        recovered_leases = container.voice_brain_dump_service.recover_due_provider_leases()
-        advanced_runs = container.voice_brain_dump_service.run_due_brain_dump_provider_runs()
+        recovered_leases = (
+            container.voice_brain_dump_service.recover_due_provider_leases()
+        )
+        advanced_runs = (
+            container.voice_brain_dump_service.run_due_brain_dump_provider_runs()
+        )
         resumed_commits = (
             container.voice_brain_dump_service.recover_committing_operations()
         )

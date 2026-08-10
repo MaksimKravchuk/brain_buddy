@@ -375,7 +375,9 @@ def test_voice_sweep_iteration_runs_all_three_duties_and_survives_a_failure(
         calls.append("working_artifacts")
         raise RuntimeError("transient repository error")
 
-    container.voice_brain_dump_service.recover_due_provider_leases = recover_due_provider_leases
+    container.voice_brain_dump_service.recover_due_provider_leases = (
+        recover_due_provider_leases
+    )
     container.voice_brain_dump_service.recover_committing_operations = (
         recover_committing_operations
     )
@@ -404,7 +406,9 @@ def test_voice_sweep_thread_wakes_immediately_and_stops_cleanly(container) -> No
         iterations.set()
         return original_recover(**kwargs)
 
-    container.voice_brain_dump_service.recover_due_provider_leases = recover_due_provider_leases
+    container.voice_brain_dump_service.recover_due_provider_leases = (
+        recover_due_provider_leases
+    )
 
     stop_event = threading.Event()
     wake_event = threading.Event()
@@ -443,8 +447,7 @@ def test_voice_sweep_logs_completed_recovery_and_retention_work(
 
     assert (
         "Maintenance sweep: recovered 1 lease(s), resumed 4 commit(s), purged 2 "
-        "raw-audio, 3 working-artifact"
-        in (caplog.text)
+        "raw-audio, 3 working-artifact" in (caplog.text)
     )
 
 

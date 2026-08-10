@@ -11,7 +11,9 @@ def _post(api_client, payload, key="smart-add-key"):
     )
 
 
-def test_smart_add_creates_unknown_classifications_and_clean_task_atomically(api_client) -> None:
+def test_smart_add_creates_unknown_classifications_and_clean_task_atomically(
+    api_client,
+) -> None:
     api_client.post(
         "/api/projects",
         headers={"Idempotency-Key": "unknown-nonmatch-project"},
@@ -50,7 +52,9 @@ def test_smart_add_creates_unknown_classifications_and_clean_task_atomically(api
     assert [item["title"] for item in listed.json()["items"]] == ["Call supplier"]
 
 
-def test_smart_add_resolves_existing_names_and_ids_and_deduplicates_tags(api_client) -> None:
+def test_smart_add_resolves_existing_names_and_ids_and_deduplicates_tags(
+    api_client,
+) -> None:
     api_client.post(
         "/api/projects",
         headers={"Idempotency-Key": "existing-project-nonmatch"},
@@ -110,23 +114,41 @@ def test_smart_add_accepts_absent_classifications_and_project_ids(api_client) ->
     assert by_id.json()["created"] == {"project_id": None, "tag_ids": []}
 
 
-def test_smart_add_replays_composite_result_and_rejects_conflicting_key(api_client) -> None:
-    payload = {"title": "Plan launch", "project": {"name": "Launch"}, "tags": [{"name": "work"}]}
+def test_smart_add_replays_composite_result_and_rejects_conflicting_key(
+    api_client,
+) -> None:
+    payload = {
+        "title": "Plan launch",
+        "project": {"name": "Launch"},
+        "tags": [{"name": "work"}],
+    }
 
     first = _post(api_client, payload, key="smart-add-replay")
     replay = _post(api_client, payload, key="smart-add-replay")
-    conflict = _post(api_client, {**payload, "title": "Plan something else"}, key="smart-add-replay")
+    conflict = _post(
+        api_client, {**payload, "title": "Plan something else"}, key="smart-add-replay"
+    )
 
     assert first.status_code == replay.status_code == 201
     assert replay.json()["task"]["id"] == first.json()["task"]["id"]
     assert conflict.status_code == 409
 
 
-def test_smart_add_validates_strict_refs_waiting_and_no_partial_writes(api_client) -> None:
-    invalid_ref = _post(api_client, {"title": "Bad ref", "project": {"id": "p1", "name": "Project"}}, key="bad-ref")
+def test_smart_add_validates_strict_refs_waiting_and_no_partial_writes(
+    api_client,
+) -> None:
+    invalid_ref = _post(
+        api_client,
+        {"title": "Bad ref", "project": {"id": "p1", "name": "Project"}},
+        key="bad-ref",
+    )
     assert invalid_ref.status_code == 422
 
-    invalid_waiting = _post(api_client, {"title": "Await reply", "state": "waiting", "tags": [{"name": "waiting"}]}, key="bad-waiting")
+    invalid_waiting = _post(
+        api_client,
+        {"title": "Await reply", "state": "waiting", "tags": [{"name": "waiting"}]},
+        key="bad-waiting",
+    )
     assert invalid_waiting.status_code == 400
     assert api_client.get("/api/tags").json() == []
     assert api_client.get("/api/tasks").json()["items"] == []
@@ -143,16 +165,22 @@ def test_smart_add_rejects_inactive_project_and_tag_refs(api_client) -> None:
         headers={"Idempotency-Key": "inactive-tag"},
         json={"name": "stale"},
     ).json()
-    assert api_client.post(
-        f"/api/projects/{project['id']}/archive",
-        headers={"Idempotency-Key": "archive-inactive-project"},
-        json={"expected_revision": project["revision"]},
-    ).status_code == 200
-    assert api_client.delete(
-        f"/api/tags/{tag['id']}",
-        params={"expected_revision": tag["revision"]},
-        headers={"Idempotency-Key": "delete-inactive-tag"},
-    ).status_code == 200
+    assert (
+        api_client.post(
+            f"/api/projects/{project['id']}/archive",
+            headers={"Idempotency-Key": "archive-inactive-project"},
+            json={"expected_revision": project["revision"]},
+        ).status_code
+        == 200
+    )
+    assert (
+        api_client.delete(
+            f"/api/tags/{tag['id']}",
+            params={"expected_revision": tag["revision"]},
+            headers={"Idempotency-Key": "delete-inactive-tag"},
+        ).status_code
+        == 200
+    )
 
     inactive_project = _post(
         api_client,

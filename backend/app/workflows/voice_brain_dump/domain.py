@@ -38,7 +38,9 @@ class TranscriptHypothesis:
         if self.sequence < 1:
             raise ValidationFailure("Transcript sequence must be positive.")
         if self.start_ms < 0 or self.end_ms < 0 or self.end_ms <= self.start_ms:
-            raise ValidationFailure("Transcript hypothesis requires a positive audio span.")
+            raise ValidationFailure(
+                "Transcript hypothesis requires a positive audio span."
+            )
         if not self.text.strip():
             raise ValidationFailure("Transcript hypothesis text is required.")
 
@@ -211,7 +213,12 @@ def active_transcript_hypotheses(
     }
     return sorted(
         [hypothesis for hypothesis in hypotheses if hypothesis.id not in superseded],
-        key=lambda segment: (segment.start_ms, segment.end_ms, segment.sequence, segment.id),
+        key=lambda segment: (
+            segment.start_ms,
+            segment.end_ms,
+            segment.sequence,
+            segment.id,
+        ),
     )
 
 
@@ -233,7 +240,9 @@ def apply_proposal_patches(
             for predecessor_id in patch.predecessor_ids:
                 predecessor = by_id.get(predecessor_id)
                 if predecessor is not None:
-                    successor_ids = sorted({*predecessor.successor_ids, patch.proposal_id})
+                    successor_ids = sorted(
+                        {*predecessor.successor_ids, patch.proposal_id}
+                    )
                     tombstone = _replace(
                         predecessor,
                         tombstoned=True,
@@ -248,7 +257,9 @@ def apply_proposal_patches(
                 title=patch.title,
                 source_segment_ids=patch.source_segment_ids,
                 predecessor_ids=patch.predecessor_ids,
-                status="reconciled" if patch.producer == "reconciler" else "provisional",
+                status=(
+                    "reconciled" if patch.producer == "reconciler" else "provisional"
+                ),
                 ordinal=ordinal,
             )
             by_id[proposal.id] = proposal
@@ -313,7 +324,11 @@ def apply_proposal_patches(
                 title_revision = current.title_revision + 1
             if patch.source_segment_ids:
                 source_segment_ids = patch.source_segment_ids
-        elif "title" in current.locked_fields and patch.title and patch.title != current.title:
+        elif (
+            "title" in current.locked_fields
+            and patch.title
+            and patch.title != current.title
+        ):
             status = "conflicted"
             conflicts.append(
                 ProposalConflict(
@@ -361,16 +376,26 @@ def apply_proposal_patches(
         by_id[current.id] = updated
         history[current.id] = updated
 
-    active = [by_id[item_id] for item_id in order if item_id in by_id and not by_id[item_id].tombstoned]
+    active = [
+        by_id[item_id]
+        for item_id in order
+        if item_id in by_id and not by_id[item_id].tombstoned
+    ]
     active.sort(key=lambda proposal: (proposal.ordinal, proposal.id))
-    active = [_replace(proposal, ordinal=index + 1) for index, proposal in enumerate(active)]
-    return ProposalProjection(active=active, history=list(history.values()), patches=patches)
+    active = [
+        _replace(proposal, ordinal=index + 1) for index, proposal in enumerate(active)
+    ]
+    return ProposalProjection(
+        active=active, history=list(history.values()), patches=patches
+    )
 
 
 def _insertion_ordinal(
     by_id: dict[str, ReconciledProposal], order: list[str], predecessor_ids: list[str]
 ) -> int:
-    predecessor_ordinals = [by_id[item_id].ordinal for item_id in predecessor_ids if item_id in by_id]
+    predecessor_ordinals = [
+        by_id[item_id].ordinal for item_id in predecessor_ids if item_id in by_id
+    ]
     if predecessor_ordinals:
         return min(predecessor_ordinals)
     return len([proposal for proposal in by_id.values() if not proposal.tombstoned]) + 1
@@ -567,7 +592,9 @@ class BrainDumpActionReceiptDocument(StorageBaseModel):
     reconciliation_quality: Literal[
         "none", "provisional_only", "accurate", "conflicted"
     ] = "none"
-    confirmed_title_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    confirmed_title_sha256: str | None = Field(
+        default=None, min_length=64, max_length=64
+    )
     proposal_revision: int | None = Field(default=None, ge=1)
     user_edited: bool = False
     confidence: Literal["unknown"] = "unknown"
