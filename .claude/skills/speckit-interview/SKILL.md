@@ -35,6 +35,39 @@ the main session. Do not try to delegate it.
 end. If the hook were mandatory, specify would call interview which would call
 specify, without end. Never change that hook to `optional: false`.
 
+## Stage 0 gate — check the assessment first
+
+The `assess` extension (`spec-kit-core`, installed) runs *upstream* of this
+skill: intake → research → define → shape → decide, writing
+`.specify/assessments/<slug>/decision.md` with a **go / needs-clarification /
+kill** verdict. It answers a question this skill does not: *should this be
+built at all?*
+
+Before asking the human anything:
+
+1. Look for `.specify/assessments/<slug>/decision.md` matching the ask.
+2. If it exists, read the `**Verdict**` line and obey it:
+   - **kill** — **stop.** Do not interview, do not create a feature directory.
+     Tell the human the idea was assessed and killed, quote the decisive
+     reason from `decision.md`, and ask whether they are deliberately
+     reopening it. Only an explicit human override restarts the pipeline; a
+     killed idea silently re-entering delivery defeats the entire stage.
+   - **needs-clarification** — say so and point at the stage that needs
+     rework (`/speckit-assess-research` or `/speckit-assess-shape`). Do not
+     launder it into a go by interviewing past it.
+   - **go** — proceed, and use the handoff summary in `decision.md` as your
+     starting context. Do not re-ask what the assessment already settled.
+3. If no assessment exists, judge the size of the ask. For anything
+   substantial or speculative, offer `/speckit-assess-intake` first — killing
+   an idea here costs one conversation, killing it at acceptance costs the
+   whole pipeline. For a small, obviously-wanted change, proceed and note in
+   `intake.md` that assessment was skipped and why.
+
+The assess skills are Claude-only; there are no `.agents/skills/` twins. That
+is why `assess` is not registered as a hook in `.specify/extensions.yml` — a
+hooked command with no Codex twin breaks Codex runs. This gate is enforced
+here in prose instead.
+
 ## Before you start
 
 Read, in this order:

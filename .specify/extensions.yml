@@ -1,19 +1,34 @@
 # BrainBuddy first-party stage chaining for Spec Kit.
 #
-# This is NOT a third-party Spec Kit extension install. `docs/spec-kit-workflow.md`
-# forbids `specify extension update` and community extensions; this file is
-# repository-local configuration that the v0.15.0 skills already read. It adds
-# no new runtime, no scheduler, and no upstream dependency.
+# Two kinds of entry live in this file:
+#
+#   hooks:     repository-local stage chaining (first-party, hand-written)
+#   installed: real Spec Kit extensions added with `specify extension add`
+#
+# `hooks` is NOT a third-party extension install. `docs/spec-kit-workflow.md`
+# restricts community extensions; this section is repository-local
+# configuration that the ten v0.15.0 skills already read. It adds no new
+# runtime, no scheduler, and no upstream dependency.
 #
 # Every one of the ten speckit skills checks `hooks.before_<stage>` and
 # `hooks.after_<stage>` here. Chaining stages through this file is what lets us
 # add the interview, design, review, acceptance and report stages WITHOUT
-# forking a single upstream skill body.
+# forking a single upstream skill.
 #
 # `optional: true`  -> the skill prints the suggestion and continues.
 # `optional: false` -> the skill emits EXECUTE_COMMAND and waits for the result.
 #
 # Command ids use dots; the skills translate `speckit.review` -> `/speckit-review`.
+#
+# WARNING: this file is shared by BOTH agent trees. Every hooked command must
+# resolve to a SKILL.md under `.claude/skills/` AND `.agents/skills/`, or a
+# Codex run emits EXECUTE_COMMAND for a command it cannot invoke and the
+# pipeline stops at that stage. `scripts/test_check_speckit_manifests.py`
+# enforces the parity — that is also why the `assess` extension below is not
+# registered as a hook: it installs Claude skills only.
+#
+# WARNING 2: `specify extension add` REWRITES this file and strips comments.
+# After any install, restore this header from git history.
 
 hooks:
   # Optional on purpose. /speckit-interview is the human front door and it
@@ -75,3 +90,21 @@ hooks:
         Run /speckit-report to aggregate intake, spec, design, plan, every
         reviewer verdict, verification results and the acceptance verdict into
         one report for the human.
+
+# Real Spec Kit extensions, managed by `specify extension`.
+#
+# assess (spec-kit-core, default catalog) is stage 0: intake -> research ->
+# define -> shape -> decide, writing `.specify/assessments/<slug>/decision.md`
+# with a go / needs-clarification / kill verdict. It supplies the one thing the
+# hand-built pipeline lacked — the ability to close an idea before any
+# requirement is elicited. /speckit-interview reads that verdict and refuses to
+# proceed on a `kill`, which is what makes the gate load-bearing rather than
+# advisory.
+#
+# It is deliberately NOT registered under `hooks` above: it ships Claude skills
+# only, and a hooked command with no Codex twin breaks Codex runs.
+installed:
+  - assess
+
+settings:
+  auto_execute_hooks: true
