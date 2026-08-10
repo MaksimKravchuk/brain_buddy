@@ -37,6 +37,18 @@
         "risk": {"enum": ["low", "medium", "high"]},
         "status": {"enum": ["approved", "founder-accepted"]},
         "reviewers": {"type": "array", "minItems": 5, "items": {"type": "string", "minLength": 1}},
+        "human_signoff": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["approved_by", "approved_on", "run_id", "artifacts_digest", "rationale"],
+          "properties": {
+            "approved_by": {"type": "string", "minLength": 1},
+            "approved_on": {"type": "string", "minLength": 1},
+            "run_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"},
+            "artifacts_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+            "rationale": {"type": "string", "minLength": 40}
+          }
+        },
         "founder_acceptance": {
           "type": "object",
           "additionalProperties": false,

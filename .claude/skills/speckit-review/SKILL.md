@@ -105,9 +105,28 @@ The gate rule, in order (ADR-0012):
    human.
 3. Any reviewer verdict of `changes-required`, or any `blocking` finding →
    **`technical-changes-required`**.
-4. Risk class `high` with no recorded human sign-off → **`escalated`**. At that
+4. Risk class `high` with no valid human sign-off → **`escalated`**. At that
    class an uncorrelated automated mechanism alone is not sufficient evidence;
    a named human must accept the residual risk.
+
+   The sign-off is **not** a flag you can pass to the campaign. It is a record
+   at `.specify/workflows/runs/<run-id>/human-signoff.json`:
+
+   ```json
+   {
+     "approved_by": "name or email of the human",
+     "approved_on": "2026-08-10",
+     "run_id": "<this campaign's run id>",
+     "artifacts_digest": "<from planning-context.json>",
+     "rationale": "what residual risk was accepted, and why"
+   }
+   ```
+
+   It is rejected if the run id does not match (no replaying an approval into
+   another campaign) or if the digest does not match the artifacts as they
+   stand now (editing the spec invalidates the approval). Write it only when a
+   human has actually approved; asserting it yourself is precisely the
+   self-certification this gate exists to prevent.
 5. Otherwise → **`approved`**.
 
 A reviewer's own verdict is gate-blocking on its own. The aggregator does not

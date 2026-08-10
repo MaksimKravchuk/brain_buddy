@@ -58,15 +58,12 @@ makes them worth stating plainly rather than folding into a changelog:
 `low | medium | high`, replacing `standard | high`.
 
 - `high` — any ASK-class surface per ADR-0008's classifier.
-- `low` — every path named in the planning artifacts is inert (`docs/`,
-  `specs/`, `requirements/`, `*.md`) **and at least one path was found**. This
-  is the only branch that lowers the class, and it fires only on positive
-  evidence.
-- `medium` — everything else, explicitly including "no paths could be
-  extracted".
+- `medium` — the default, and everything derivation does not raise.
+- `low` — declarable by an operator only. See the correction below for why it
+  cannot be inferred.
 
-Risk escalates and never de-escalates: an operator may raise the class, but the
-classifier's finding cannot be argued down.
+Derivation may only **raise** a class; it returns `"high"` or no opinion.
+Risk escalates and never de-escalates.
 
 `high` additionally requires a recorded human sign-off. At that class an
 uncorrelated automated mechanism alone is not sufficient evidence, so a clean
@@ -120,9 +117,11 @@ layers, because either alone is defeated:
 - **Invariants** — properties that must hold regardless of how a file changes:
   the aggregator reads reviewer verdicts, `changes-required` blocks,
   `DEFAULT_RISK` is `medium`, missing evidence escalates, acceptance is
-  time-bounded, the permission allowlist has no blanket `Bash` grant and never
-  pre-approves `git push`, `check-specs` runs its validators, and both mandatory
-  lenses remain in the role enum. **These are not waivable by `--update`.**
+  time-bounded, derivation can only raise a class, human sign-off is a
+  run-bound record rather than a caller flag, the permission allowlist has no
+  blanket `Bash` grant and never pre-approves `git push`, `check-specs` runs
+  its validators, and both mandatory lenses remain in the role enum.
+  **These are not waivable by `--update`.**
 - **A hash manifest** of twelve guarded files, including the guard's own
   source. Any edit fails until re-recorded, which puts the new hash in the diff
   where a reviewer sees it.
@@ -131,8 +130,50 @@ The guard cannot prevent these edits — the files must stay editable. It remove
 the word *silently*. Layer two alone would be defeated by updating the hash in
 the same commit; that is precisely why layer one exists and cannot be waived.
 
-Eight mutation tests assert each invariant actually fires when its property is
+Mutation tests assert that each invariant actually fires when its property is
 removed, so the guard cannot rot into a no-op.
+
+## Two corrections made during review of this record
+
+Both were defects in this ADR's own first implementation, found before it
+landed. They are recorded rather than quietly amended, because each is an
+instance of the failure mode this ADR is about — a gate that looks stricter
+while being weaker.
+
+### Derivation could lower a class, and did so on auth
+
+The first implementation returned `low` when every path mentioned in the
+planning artifacts was inert. A spec rotating session tokens while merely
+*citing* `docs/auth.md` as background therefore derived `low` — verified
+against the real code, not reasoned about.
+
+The mistake was instrumental: at spec-review time **there is no diff**, so all
+the classifier can see is which paths are *mentioned*, and a mention is not a
+change. Derivation now returns `"high"` or `None` — it may raise a class and
+never lower one. `low` stays in the vocabulary but is an accountable operator
+declaration, not an inference from prose.
+
+### High-risk sign-off was a boolean the caller controlled
+
+`human_signoff` was a workflow input coerced with `bool(...)`. The same
+automated actor that ran the campaign could set it and self-certify the human
+gate — on precisely the ASK-class surfaces that gate exists to protect. That is
+the exact violation this ADR claims to close, reintroduced one section later.
+
+The input is removed. Sign-off is now a separate record at
+`.specify/workflows/runs/<run-id>/human-signoff.json`, validated for a named
+approver, a date, a substantive rationale, a matching `run_id`, and an
+`artifacts_digest` over the artifact set the reviewers actually saw. An
+approval cannot be replayed into another campaign, and it goes stale the moment
+the spec is edited.
+
+**Honest limit:** nothing here is unforgeable. An actor with write access can
+write that file, as it can write any file in the repository — there is no
+cryptographic identity available at this layer. What changes is that the
+approval becomes a named, dated, auditable artifact bound to specific content
+rather than an invisible flag, and that it self-invalidates on edit. Real
+non-repudiation would need signed commits or an external approval system; that
+is deferred, not solved.
 
 ## Consequences
 
