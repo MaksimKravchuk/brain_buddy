@@ -242,13 +242,13 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "allure-pytest", marker = "extra == 'dev'", specifier = ">=2.15,<3.0" },
-    { name = "argon2-cffi", specifier = ">=23.1,<24" },
-    { name = "av", specifier = ">=12,<17" },
+    { name = "argon2-cffi", specifier = ">=23.1,<26" },
+    { name = "av", specifier = ">=12,<19" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=24.3,<25.0" },
     { name = "cryptography", specifier = ">=42.0,<47" },
     { name = "email-validator", specifier = ">=2.1,<3.0" },
     { name = "fastapi", specifier = ">=0.110,<1.0" },
-    { name = "httpx", specifier = ">=0.25,<0.28" },
+    { name = "httpx", specifier = ">=0.25,<0.29" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.0,<7.0" },
     { name = "import-linter", marker = "extra == 'dev'", specifier = ">=2.0,<3.0" },
     { name = "mutmut", marker = "extra == 'dev'", specifier = ">=3.6,<4.0" },
@@ -260,7 +260,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.16,<0.17" },
     { name = "schemathesis", marker = "extra == 'dev'", specifier = ">=3.34,<4.0" },
     { name = "typer", specifier = ">=0.9,<1.0" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.27,<0.28" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.27,<0.53" },
 ]
 provides-extras = ["dev"]
 
