@@ -5,9 +5,26 @@ description: "Task list template for feature implementation"
 
 # Tasks: [FEATURE NAME]
 
+<!--
+  BrainBuddy override: delivery gates. Upstream treats tasks.md as an
+  execution script; here it is portable planning input that never bypasses
+  isolated worktrees, tests-before-implementation, independent acceptance,
+  ADR-0008 landing classification, or CI. Those gates are restated below and
+  must survive any upstream refresh.
+-->
+
 **Input**: Design documents from `/specs/[###-feature-name]/`
 
-**Prerequisites**: plan.md (required), spec.md (required for user stories), research.md, data-model.md, contracts/
+**Prerequisites**: plan.md (required), spec.md (required for user stories), design.md (required when the feature has a user-visible surface), research.md, data-model.md, contracts/
+
+**Delivery gates** (non-negotiable, regardless of who executes these tasks):
+isolated worktree and feature branch; failing test written and observed failing
+before the implementation that satisfies it; Allure taxonomy on every product
+test with the covering feature-qualified id (`NNN-FR-###`/`NNN-SC-###`) in
+the test name or story; acceptance
+graded by an agent that did not write the code; landing class decided by
+`scripts/classify_path_risk.py`, with ASK-class changes landing only through a
+reviewed PR.
 
 **Tests**: Tests are expected for behavior changes; include backend pytest/FastAPI
 TestClient, frontend Vitest/Testing Library, operation-state, or deterministic
@@ -253,6 +270,5 @@ With multiple developers:
 - Commit after each task or logical group
 - Stop at any checkpoint to validate story independently
 - Avoid: vague tasks, same file conflicts, cross-story dependencies that break independence
-- Generated tasks.md is planning input only. Do not use it to bypass Hermes
-  Kanban ownership, isolated worktrees, TDD, independent review, CI, PR, merge,
-  or release gates.
+- Generated tasks.md is portable planning input only. Do not use it to bypass
+  isolated worktrees, TDD, independent review, CI, landing, or release gates.

@@ -38,6 +38,17 @@ class StorageUnavailableError(RepositoryError):
     """Raised when the storage backend is temporarily unable to serve requests."""
 
 
+class ReauthFailedError(BrainBuddyError):
+    """Raised when a sensitive account action's password re-check fails.
+
+    Mapped to 403 — deliberately not 401, because the frontend treats 401 as
+    "session gone" and would clear local auth state mid-form.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("Current password is incorrect.")
+
+
 class ValidationFailure(BrainBuddyError):
     """Raised when requested operation fails domain validation checks."""
 
@@ -75,6 +86,7 @@ __all__ = [
     "NotFoundError",
     "ProviderRetryableError",
     "ProviderTerminalError",
+    "ReauthFailedError",
     "RepositoryError",
     "StorageUnavailableError",
     "ValidationFailure",

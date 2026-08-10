@@ -3,6 +3,7 @@
 ## Project Structure & Module Organization
 - `backend/`: FastAPI app under `app/` with repositories, services, and `tests/` (pytest).
 - `frontend/`: Vite React client under `src/`; Vitest specs live in `src/**/__tests__/`.
+- `mobile/`: Expo (React Native) iOS-first client; Jest specs in `src/**/__tests__/`, real-backend integration suite in `integration/`. See `mobile/AGENTS.md`.
 - `docs/`: Architecture, API, troubleshooting, performance, and smoke runbooks.
 - `deploy/`: Container assets (nginx config).
 - `scripts/`: Utility scripts such as `smoke_test.sh`.
@@ -44,10 +45,10 @@
 - Verified trunk serial landing (PR-less SHIP/SHOW delivery, Ship/Show/Ask classification, feature-flag rollout, deploy rollback) is governed by `docs/decisions/0008-verified-trunk-serial-landing.md`, which partially supersedes ADR-0003.
 
 ## Mandatory Spec Kit Workflow
-- GitHub Spec Kit is the canonical authoring workflow for every new or materially changed BrainBuddy feature spec; use the repo-pinned official CLI version documented in `docs/spec-kit-workflow.md`. The architect profile uses the official Hermes planning skills; `speckit-implement` and `speckit-taskstoissues` are not part of the Kanban path.
-- The required sequence is constitution → `/speckit-specify` (what/why) → `/speckit-clarify` → `/speckit-plan` (how/architecture) → the bounded read-only `.specify/workflows/speckit/workflow.yml` review campaign → `/speckit-checklist` → `/speckit-tasks` → `/speckit-analyze` → validated `hermes-handoff.json` → one compact Hermes Kanban handoff. The Architect resolves technical findings; block the owning card only for product decisions. Checklist remains after planning because it requires `plan.md`. Amend the spec first whenever implementation intent changes; never publish one Kanban card per `tasks.md` line.
-- Spec Kit owns versioned planning artifacts under `specs/` plus `.specify/`; Hermes Kanban remains the execution/orchestration and PR-review system. Generated `tasks.md` is planning input, not permission to bypass isolated worktrees, TDD, review, CI, merge, or release gates. `/speckit-implement` is disabled for BrainBuddy.
-- Architect-profile agents own Spec Kit technical planning, module boundaries, ADR alignment, and architecture handoff for new/materially changed architecture or feature specs. Implementation agents consume those artifacts from their Kanban cards rather than inventing architecture.
+- GitHub Spec Kit is the canonical authoring workflow for every new or materially changed BrainBuddy feature spec; use the repo-pinned official CLI version documented in `docs/spec-kit-workflow.md`.
+- The portable artifact sequence is constitution → `/speckit-specify` (what/why) → `/speckit-clarify` → `/speckit-plan` (how/architecture) → `/speckit-checklist` → `/speckit-tasks` → `/speckit-analyze`. Amend the spec first whenever implementation intent changes.
+- Spec Kit owns versioned planning artifacts under `specs/` plus `.specify/`. Generated `tasks.md` is planning input, not permission to bypass isolated worktrees, TDD, independent review, CI, landing, or release gates.
+- Execution tooling is selected by the work context. Standalone agents may implement from the validated artifacts; opt-in Hermes-managed outcomes additionally follow `.hermes.md`, ADR-0010, and `docs/spec-driven-kanban.md`.
 - Before adding or changing a feature spec, run `python3 scripts/check_spec_kit_specs.py` (or `make check-specs`) and preserve documented grandfathering for historical specs.
 
 ## Agent Delivery Workflow

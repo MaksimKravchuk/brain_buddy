@@ -56,9 +56,15 @@ Amend the spec first when implementation intent changes.
 - Mobile/resilience/performance: How will mobile capture/review interruptions,
   offline windows, data-loss protections, and ~200-node canvas responsiveness be
   maintained?
-- Delivery boundary: Confirm Spec Kit tasks are planning input only; Hermes
-  Kanban, isolated worktrees, TDD, review, CI, PR, and Fly release gates remain
-  authoritative.
+- Delivery boundary: Confirm Spec Kit tasks are portable planning input only;
+  isolated worktrees, TDD, independent verification, ADR-0008 landing, CI, and
+  Fly release gates remain authoritative regardless of execution tooling.
+- Design citation: For any feature with a user-visible surface, this plan MUST
+  cite `specs/[###-feature]/design.md` and name the specific screen and state
+  ids (`D-01`, `M-01`, …) each implementation section realizes. A feature with
+  no user-visible surface MUST say so explicitly here. Silence fails the gate:
+  the acceptance auditor traces criteria through those ids, and an uncited
+  design cannot be graded.
 
 ## Project Structure
 
@@ -76,50 +82,46 @@ specs/[###-feature]/
 
 ### Source Code (repository root)
 <!--
-  ACTION REQUIRED: Replace the placeholder tree below with the concrete layout
-  for this feature. Delete unused options and expand the chosen structure with
-  real paths (e.g., apps/admin, packages/something). The delivered plan must
-  not include Option labels.
+  BrainBuddy override: real repository layout. Upstream ships a generic
+  Option 1/2/3 placeholder tree that matches nothing in this repo; a plan built
+  from it names directories that do not exist, which the architecture-consistency
+  reviewer then rejects. Delete the branches this feature does not touch and
+  expand the ones it does with real file paths.
 -->
 
 ```text
-# [REMOVE IF UNUSED] Option 1: Single project (DEFAULT)
-src/
-├── models/
-├── services/
-├── cli/
-└── lib/
-
-tests/
-├── contract/
-├── integration/
-└── unit/
-
-# [REMOVE IF UNUSED] Option 2: Web application (when "frontend" + "backend" detected)
 backend/
-├── src/
-│   ├── models/
-│   ├── services/
-│   └── api/
-└── tests/
+├── app/
+│   ├── api/            # FastAPI routes, request/response coercion
+│   ├── services/       # business logic, orchestration, LRU cache
+│   ├── repositories/   # file I/O under backend/data/
+│   ├── schemas/        # domain.py (Pydantic domain) + api.py (contracts)
+│   ├── ai/providers/   # base.py | mock.py | openai.py
+│   ├── modules/tasks/  # self-contained GTD module (service, repo, domain)
+│   └── container.py    # dependency injection: repositories -> services -> routers
+└── tests/              # pytest, mirrors module name (test_tree_service.py)
 
 frontend/
 ├── src/
-│   ├── components/
-│   ├── pages/
-│   └── services/
-└── tests/
+│   ├── api/            # typed client + React Query hooks (useTree, useTrees)
+│   ├── stores/         # treeStore.ts, uiStore.ts (Zustand)
+│   ├── components/     # TreeCanvas, InspectorTabs, NodeInspector, ...
+│   └── **/__tests__/   # Vitest + Testing Library
+└── tests/              # Playwright e2e
 
-# [REMOVE IF UNUSED] Option 3: Mobile + API (when "iOS/Android" detected)
-api/
-└── [same as backend above]
+mobile/
+├── src/                # Expo / React Native, iOS-first
+│   └── **/__tests__/   # Jest
+└── integration/        # real api client vs a disposable local backend
 
-ios/ or android/
-└── [platform-specific structure: feature modules, UI flows, platform tests]
+specs/[###-feature]/    # this feature's Spec Kit artifacts
+docs/decisions/         # ADRs — accepted records bind the plan
+scripts/                # delivery, validation and evidence tooling (ASK class)
 ```
 
-**Structure Decision**: [Document the selected structure and reference the real
-directories captured above]
+**Structure Decision**: [Name the directories this feature actually touches and
+why. Every path listed must exist or be created by this plan; the
+architecture-consistency reviewer verifies them against the repository.]
 
 ## Complexity Tracking
 

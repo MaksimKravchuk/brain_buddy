@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import sqlite3
 import threading
 import unicodedata
@@ -622,6 +623,37 @@ class TaskRepository(BaseRepository):
             )
             for row in rows
         ]
+
+    def delete_all_for_owner(self, *, owner_id: str) -> None:
+        """Erase every record and JSON mirror belonging to one owner.
+
+        GDPR account-purge support. Runs under ``command_lock`` so it
+        serializes with normal commands; both the SQLite deletes and the
+        mirror-directory removals are idempotent, so an interrupted purge can
+        simply run again. Table order respects the RESTRICT foreign keys
+        (tasks before tags/projects).
+        """
+
+        with self.command_lock(owner_id), self._connection() as conn:
+            for table in (
+                "task_tags",
+                "subtasks",
+                "comments",
+                "tasks",
+                "tags",
+                "projects",
+                "idempotency_records",
+            ):
+                conn.execute(f"DELETE FROM {table} WHERE owner_id = ?", (owner_id,))
+        for dirname in (
+            "tasks",
+            "projects",
+            "contexts",
+            "task-subtasks",
+            "task-comments",
+            "task-commands",
+        ):
+            shutil.rmtree(self.resolve(dirname, owner_id), ignore_errors=True)
 
     def next_order_key(self, *, owner_id: str, state: str) -> int:
         with self._connection() as conn:

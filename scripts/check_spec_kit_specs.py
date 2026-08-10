@@ -3,12 +3,11 @@
 
 This check is intentionally deterministic and offline. It does not regenerate
 Spec Kit output; it only rejects new feature-spec directories that omit the
-minimum artifacts BrainBuddy requires after adopting github/spec-kit v0.12.17.
+minimum artifacts BrainBuddy requires with github/spec-kit v0.15.0.
 
-Present `hermes-handoff.json` files are additionally validated against the
-canonical contract in `scripts/spec_kit_planning_review.py` (schema version,
-approved planning-review status, required reviewer roles, and the acyclic lane
-DAG), so the mandatory CI spec gate fails closed on an unreviewed handoff.
+Legacy `hermes-handoff.json` files are validated when present. The repository
+check enforces only the portable Spec Kit minimum; an explicitly managed outcome
+has additional runtime gates outside this checker.
 """
 
 from __future__ import annotations
@@ -31,13 +30,29 @@ HANDOFF_VALIDATOR_PATH = Path(__file__).resolve().with_name("spec_kit_planning_r
 HANDOFF_VALIDATOR_MODULE = "spec_kit_planning_review"
 HANDOFF_ARTIFACT = "hermes-handoff.json"
 
+# Always required, because every one of these exists by the end of planning.
+# An artifact that is not listed here is advisory, and this repository's history
+# shows advisory artifacts get produced once and then never again.
 REQUIRED_FILES = (
+    "intake.md",
     "spec.md",
     "checklists/requirements.md",
+    "design.md",
     "plan.md",
     "tasks.md",
-    HANDOFF_ARTIFACT,
 )
+
+# Required only once the feature is actually delivered. Demanding these at
+# planning time would force an agent to fabricate an acceptance verdict for
+# work that does not exist yet, which is worse than not requiring them.
+# "Delivered" is read mechanically off tasks.md: no unchecked task lines left.
+DELIVERED_FILES = (
+    "acceptance.md",
+    "traceability.md",
+    "report.md",
+)
+
+UNCHECKED_TASK_RE = re.compile(r"^\s*[-*]\s*\[ \]", re.MULTILINE)
 
 GRANDFATHERED = {
     "001-relation-linking-refactor": {
@@ -89,6 +104,19 @@ GRANDFATHERED = {
             "checklists/requirements.md": "011d5b92f61665c240338fcddc5e695d14efd37f28a3c5fc869470b82cc6e20e",
             "plan.md": "29ab1115aa95251e08027fdf24e11845ea7ac0ea48b40a2c28b1bded1705358b",
             "tasks.md": "90b86a53c634d1643bdec4028a43e0360d14c2044645a0cf6234433e44bdab88",
+        },
+    },
+    "005-multilingual-voice-brain-dump": {
+        "reason": (
+            "Completed and founder-accepted before ADR-0011 added the intake, "
+            "design, acceptance and report artifacts to the required minimum; "
+            "do not retrofit those artifacts onto delivered history."
+        ),
+        "baseline_sha256": {
+            "spec.md": "cf79ead1acab5402c68845487eab658c38f8a29123f1ea335ed58bc38193ed0b",
+            "checklists/requirements.md": "2028a3279aad70c519224b369968ca0265ed21bb24813dd19f810e2eace3f4a9",
+            "plan.md": "c44d6eec7760b55167704655a6205dd5de798f0ff52c4f912576666c3468fb5a",
+            "tasks.md": "d59adc5dfa0b94ca2bfcaf20b9d8cd2e279ac8489affba949d49a722486e0a98",
         },
     },
 }
@@ -163,13 +191,38 @@ def _validate_handoff_contents(path: Path, failures: list[str]) -> None:
         failures.append(f"{_relative(path)}: invalid Hermes handoff ({exc})")
 
 
+def _feature_is_delivered(spec_dir: Path) -> bool:
+    """True when tasks.md has no unchecked task left."""
+    tasks = spec_dir / "tasks.md"
+    if not tasks.is_file():
+        return False
+    text = tasks.read_text(encoding="utf-8")
+    if not UNCHECKED_TASK_RE.search(text):
+        # A tasks.md with no checkboxes at all has not been worked, it is just
+        # not written as a checklist. Only treat it as delivered if it had
+        # checkboxes and they are all ticked.
+        return "- [x]" in text or "- [X]" in text
+    return False
+
+
 def _validate_required_files(spec_dir: Path, failures: list[str]) -> None:
     for required_file in REQUIRED_FILES:
-        present = _require_regular_nonempty(
-            spec_dir / required_file, failures, required_file
-        )
-        if present and required_file == HANDOFF_ARTIFACT:
-            _validate_handoff_contents(spec_dir / required_file, failures)
+        _require_regular_nonempty(spec_dir / required_file, failures, required_file)
+
+    if _feature_is_delivered(spec_dir):
+        for delivered_file in DELIVERED_FILES:
+            _require_regular_nonempty(
+                spec_dir / delivered_file,
+                failures,
+                f"{delivered_file} (every task in tasks.md is complete, so the "
+                f"feature is delivered and must carry its acceptance evidence)",
+            )
+
+    legacy_handoff = spec_dir / HANDOFF_ARTIFACT
+    if legacy_handoff.exists() and _require_regular_nonempty(
+        legacy_handoff, failures, HANDOFF_ARTIFACT
+    ):
+        _validate_handoff_contents(legacy_handoff, failures)
 
 
 def _grandfathered_baseline_matches(spec_dir: Path, failures: list[str]) -> bool:
@@ -243,8 +296,7 @@ def main() -> int:
         print(
             "\nNew or materially changed features must follow: constitution -> "
             "/speckit-specify -> /speckit-clarify -> /speckit-plan -> "
-            "bounded planning review -> /speckit-checklist -> /speckit-tasks -> "
-            "/speckit-analyze -> validated Hermes Kanban handoff.",
+            "/speckit-checklist -> /speckit-tasks -> /speckit-analyze.",
             file=sys.stderr,
         )
         return 1

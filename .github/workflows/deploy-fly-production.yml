@@ -225,10 +225,63 @@ jobs:
             exit 1
           fi
 
+      # The Fly apps serve only the backend and frontend; landings that touch
+      # nothing they are built from (the mobile app, docs, specs, agent
+      # config, root markdown) do not need a production release. The gate is
+      # fail-open: an unreadable parent, an empty listing, or ANY path
+      # outside the known-inert set falls through to a normal deploy.
+      # Deploy-relevant paths are matched first so they always win.
+      - name: Classify whether this landing needs a production deploy
+        id: classify
+        shell: bash
+        env:
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if ! git fetch --quiet --deepen=1 origin; then
+            echo "Could not deepen history; deploying (fail-open)."
+            echo "needed=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          if ! git cat-file -e "${TESTED_SHA}^" 2>/dev/null; then
+            echo "Parent of ${TESTED_SHA} unavailable; deploying (fail-open)."
+            echo "needed=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          needed=false
+          seen=false
+          while IFS= read -r -d '' path; do
+            seen=true
+            case "${path}" in
+              backend/*|frontend/*|fly.*|docker-compose*|scripts/*|.github/*|Makefile)
+                needed=true
+                echo "Deploy-relevant change: ${path}"
+                break
+                ;;
+              mobile/*|docs/*|specs/*|.claude/*|.design-sync/*|*.md|.gitignore|LICENSE|.env.example)
+                ;;
+              *)
+                needed=true
+                echo "Unclassified change (deploying to stay safe): ${path}"
+                break
+                ;;
+            esac
+          done < <(git diff --no-renames --name-only -z "${TESTED_SHA}^" "${TESTED_SHA}")
+          if [ "${seen}" = "false" ]; then
+            echo "Empty change listing; deploying (fail-open)."
+            needed=true
+          fi
+          if [ "${needed}" = "false" ]; then
+            echo "Every changed path is deploy-inert; skipping the production release."
+          fi
+          echo "needed=${needed}" >> "${GITHUB_OUTPUT}"
+
       - name: Set up Flyctl
+        if: steps.classify.outputs.needed == 'true'
         uses: superfly/flyctl-actions/setup-flyctl@v1
 
       - name: Capture previous release images for rollback
+        if: steps.classify.outputs.needed == 'true'
         id: capture
         shell: bash
         run: |
@@ -274,6 +327,7 @@ jobs:
       # so a manual `flyctl secrets set BRAIN_BUDDY_FEATURE_FLAGS` is reverted
       # by the next release. Change the rollout here, not out of band.
       - name: Stage the smoke identity and feature-flag rollout
+        if: steps.classify.outputs.needed == 'true'
         shell: bash
         env:
           BRAIN_BUDDY_ADMIN_EMAIL: ${{ secrets.BRAIN_BUDDY_ADMIN_EMAIL }}
@@ -299,12 +353,15 @@ jobs:
           echo "Staged smoke identity, delivery_canary=internal and voice_brain_dump=on for ${BACKEND_APP}."
 
       - name: Deploy backend
+        if: steps.classify.outputs.needed == 'true'
         run: flyctl deploy --config fly.backend.toml --remote-only
 
       - name: Deploy frontend
+        if: steps.classify.outputs.needed == 'true'
         run: flyctl deploy --config fly.frontend.toml --remote-only
 
       - name: Reachability smoke test
+        if: steps.classify.outputs.needed == 'true'
         id: reach
         shell: bash
         run: |
@@ -327,6 +384,7 @@ jobs:
       # The smoke identity is the admin account staged above; the script also
       # asserts delivery_canary is effectively TRUE for this internal user.
       - name: Authenticated production smoke
+        if: steps.classify.outputs.needed == 'true'
         id: smoke
         shell: bash
         env:
