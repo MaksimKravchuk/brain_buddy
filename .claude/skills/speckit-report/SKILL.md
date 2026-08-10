@@ -74,8 +74,11 @@ same URL instead of minting a new one.
 These are the whole point of the stage:
 
 - A stage that did not run is reported as **not run**, never omitted.
-- A reviewer lens that could not run (no `codex` CLI, for instance) is named,
-  with the reason.
+- A reviewer lens that could not run is named, with the reason.
+- A lens that ran on a **fallback** oracle is named too. Read
+  `degraded_lenses`, `panel_correlated` and `panel_oracles` from the summary
+  and state them; a campaign that passed on a correlated panel is not reported
+  as though it passed on the configured one (ADR-0014).
 - `founder-accepted` is never rendered as `approved`.
 - Coverage below a floor is stated as a failure even when the change landed.
 - If the pipeline was entered mid-way — spec written by hand, no interview —
