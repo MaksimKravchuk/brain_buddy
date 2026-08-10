@@ -110,4 +110,12 @@ describe("LoginPage", () => {
       "/privacy"
     );
   });
+
+  it("sends an already-signed-in visitor straight to the workspace", () => {
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    renderLogin();
+
+    expect(screen.getByText("workspace")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /sign in/i })).not.toBeInTheDocument();
+  });
 });

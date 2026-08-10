@@ -63,6 +63,21 @@ describe("authStore", () => {
     expect(useAuthStore.getState().deletionCancelledNotice).toBe(false);
   });
 
+  it("starts as loading, so no route decides anything before hydration", () => {
+    expect(useAuthStore.getInitialState().status).toBe("loading");
+    expect(useAuthStore.getInitialState().user).toBeNull();
+  });
+
+  it("logout ends the server session as well as the local one", async () => {
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    const logoutSpy = vi.spyOn(authApi, "logout").mockResolvedValue(undefined);
+
+    await useAuthStore.getState().logout();
+
+    expect(logoutSpy).toHaveBeenCalledTimes(1);
+    expect(useAuthStore.getState().status).toBe("anon");
+  });
+
   it("logout clears the session even when the API call fails", async () => {
     useAuthStore.setState({
       user: { id: "u1", email: "a@b.c" },

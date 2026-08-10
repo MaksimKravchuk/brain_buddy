@@ -15,6 +15,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--summary", type=Path, required=True)
     parser.add_argument("--survivors", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--scope-label",
+        default=None,
+        help="which campaign this evidence came from, e.g. 'frontend'; two "
+        "campaigns otherwise produce indistinguishable Allure entries",
+    )
     return parser
 
 
@@ -24,11 +30,13 @@ def main() -> int:
         if not evidence.is_file():
             raise SystemExit(f"evidence file does not exist: {evidence}")
 
+    scope = f" — {args.scope_label}" if args.scope_label else ""
+    slug = f".{args.scope_label}" if args.scope_label else ""
     timestamp = int(datetime.now(UTC).timestamp() * 1000)
     result = {
         "uuid": str(uuid4()),
-        "name": "Mutation campaign evidence (report-only; not a product test)",
-        "fullName": "quality.mutation.report_only_evidence",
+        "name": f"Mutation campaign evidence{scope} (report-only; not a product test)",
+        "fullName": f"quality.mutation{slug}.report_only_evidence",
         "status": "unknown",
         "stage": "finished",
         "start": timestamp,

@@ -1,4 +1,3 @@
-/* istanbul ignore file -- task shell rendering is covered by route tests and Playwright snapshots. */
 import { AlertTriangle, CalendarDays, Check, ChevronDown, Layers, Plus, RotateCcw, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -36,6 +35,19 @@ const emptyTags: TagResponse[] = [];
 function idempotencyKey(action: string): string {
   return `task-shell-${action}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
+
+// Sidebar writes are modelled as commands rather than one loose bag of optional
+// fields, so "rename without a project" cannot be constructed at all instead of
+// being caught by a runtime guard no caller can reach.
+type ProjectCommand =
+  | { action: "create"; name: string }
+  | { action: "rename"; project: ProjectResponse; name: string }
+  | { action: "archive"; project: ProjectResponse };
+
+type TagCommand =
+  | { action: "create"; name: string }
+  | { action: "rename"; tag: TagResponse; name: string }
+  | { action: "delete"; tag: TagResponse };
 
 export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): React.JSX.Element {
   const params = useParams();
@@ -249,23 +261,24 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   });
 
   const projectMutation = useMutation({
-    mutationFn: ({ action, project, name }: { action: "create" | "rename" | "archive"; project?: ProjectResponse; name?: string }) => {
-      if (action === "create") {
-        return apiClient.createProject({ name: name ?? "" }, idempotencyKey("create-project"));
+    mutationFn: (command: ProjectCommand) => {
+      if (command.action === "create") {
+        return apiClient.createProject({ name: command.name }, idempotencyKey("create-project"));
       }
-      if (!project) {
-        throw new Error("Project is required.");
+      if (command.action === "archive") {
+        return apiClient.archiveProject(command.project.id, command.project.revision, idempotencyKey("archive-project"));
       }
-      if (action === "archive") {
-        return apiClient.archiveProject(project.id, project.revision, idempotencyKey("archive-project"));
-      }
-      return apiClient.updateProject(project.id, { name, expected_revision: project.revision }, idempotencyKey("rename-project"));
+      return apiClient.updateProject(
+        command.project.id,
+        { name: command.name, expected_revision: command.project.revision },
+        idempotencyKey("rename-project")
+      );
     },
-    onSuccess: (_project, variables) => {
+    onSuccess: (_project, command) => {
       setMutationError(null);
       void invalidateTasks();
       void queryClient.invalidateQueries({ queryKey: ["tasks", "projects"] });
-      if (variables.action === "archive" && variables.project?.id === projectId) {
+      if (command.action === "archive" && command.project.id === projectId) {
         navigate("/tasks/next");
       }
     },
@@ -273,23 +286,24 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   });
 
   const tagMutation = useMutation({
-    mutationFn: ({ action, tag, name }: { action: "create" | "rename" | "delete"; tag?: TagResponse; name?: string }) => {
-      if (action === "create") {
-        return apiClient.createTag({ name: name ?? "" }, idempotencyKey("create-tag"));
+    mutationFn: (command: TagCommand) => {
+      if (command.action === "create") {
+        return apiClient.createTag({ name: command.name }, idempotencyKey("create-tag"));
       }
-      if (!tag) {
-        throw new Error("Tag is required.");
+      if (command.action === "delete") {
+        return apiClient.deleteTag(command.tag.id, command.tag.revision, idempotencyKey("delete-tag"));
       }
-      if (action === "delete") {
-        return apiClient.deleteTag(tag.id, tag.revision, idempotencyKey("delete-tag"));
-      }
-      return apiClient.updateTag(tag.id, { name, expected_revision: tag.revision }, idempotencyKey("rename-tag"));
+      return apiClient.updateTag(
+        command.tag.id,
+        { name: command.name, expected_revision: command.tag.revision },
+        idempotencyKey("rename-tag")
+      );
     },
-    onSuccess: (_tag, variables) => {
+    onSuccess: (_tag, command) => {
       setMutationError(null);
       void invalidateTasks();
       void queryClient.invalidateQueries({ queryKey: ["tasks", "tags"] });
-      if (variables.action === "delete" && variables.tag?.id === tagId) {
+      if (command.action === "delete" && command.tag.id === tagId) {
         navigate("/tasks/next");
       }
     },
@@ -554,7 +568,9 @@ function groupTasksByProject(tasks: TaskResponse[], projects: ProjectResponse[])
   return groups.sort((left, right) => Number(left.key === "__none__") - Number(right.key === "__none__"));
 }
 
-function Chip({ variant = "neutral", children }: { variant?: "due" | "neutral"; children: ReactNode }): React.JSX.Element {
+// Every call site names its variant, so there is deliberately no default: a
+// silent fallback would let a new call site render the wrong chip unnoticed.
+function Chip({ variant, children }: { variant: "due" | "neutral"; children: ReactNode }): React.JSX.Element {
   const variantClass =
     variant === "due"
       ? "border-due-border bg-due-bg text-due-fg"
