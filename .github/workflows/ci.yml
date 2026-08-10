@@ -519,7 +519,7 @@ jobs:
           python3 scripts/validate_ci_artifacts.py product-e2e-results --path frontend/allure-results/playwright
 
       - name: Upload Playwright Allure results
-        if: always() && env.RUN == 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-allure-results
@@ -528,7 +528,7 @@ jobs:
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
       - name: Upload Playwright HTML report
-        if: always() && env.RUN == 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-html-report
@@ -537,7 +537,7 @@ jobs:
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
       - name: Upload Playwright failure artifacts and Compose logs
-        if: always() && env.RUN == 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-test-results

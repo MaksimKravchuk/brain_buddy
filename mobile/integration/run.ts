@@ -56,8 +56,25 @@ async function pollUntilSettled(
   return operation;
 }
 
+// A random port in a 200-wide window still collides when several agents run
+// the integration suite at once, and a collision surfaces as an opaque backend
+// boot failure. BRAIN_BUDDY_MOBILE_IT_PORT lets a caller pin a lane.
+function resolvePort(): number {
+  const override = process.env.BRAIN_BUDDY_MOBILE_IT_PORT;
+  if (override === undefined || override === "") {
+    return 8700 + Math.floor(Math.random() * 200);
+  }
+  const parsed = Number.parseInt(override, 10);
+  if (!Number.isInteger(parsed) || parsed < 1024 || parsed > 65535) {
+    throw new Error(
+      `BRAIN_BUDDY_MOBILE_IT_PORT must be an integer in 1024..65535, got "${override}"`,
+    );
+  }
+  return parsed;
+}
+
 async function main() {
-  const port = 8700 + Math.floor(Math.random() * 200);
+  const port = resolvePort();
   console.log("Booting backend…");
   const backend = await startBackend(port);
 
