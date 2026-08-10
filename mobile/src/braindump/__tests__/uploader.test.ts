@@ -19,8 +19,8 @@ function makeBytes(size: number): Uint8Array {
 describe("uploadChunks", () => {
   it("uploads sequential chunks with correct hashes and reports progress", async () => {
     const data = makeBytes(2500);
-    const puts: Array<{ chunkNumber: number; sha: string; size: number; mime: string }> = [];
-    const progress: Array<[number, number]> = [];
+    const puts: { chunkNumber: number; sha: string; size: number; mime: string }[] = [];
+    const progress: [number, number][] = [];
 
     const result = await uploadChunks({
       reader: bufferReader(data),

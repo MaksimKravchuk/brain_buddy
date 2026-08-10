@@ -10,7 +10,7 @@ import { StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BBText } from "@/components/BBText";
-import { colors, radii, shadows, space } from "@/theme/tokens";
+import { colors, shadows, space } from "@/theme/tokens";
 
 const ToastContext = createContext<(message: string) => void>(() => {});
 
