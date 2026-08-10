@@ -5,9 +5,25 @@ description: "Task list template for feature implementation"
 
 # Tasks: [FEATURE NAME]
 
+<!--
+  BrainBuddy override: delivery gates. Upstream treats tasks.md as an
+  execution script; here it is portable planning input that never bypasses
+  isolated worktrees, tests-before-implementation, independent acceptance,
+  ADR-0008 landing classification, or CI. Those gates are restated below and
+  must survive any upstream refresh.
+-->
+
 **Input**: Design documents from `/specs/[###-feature-name]/`
 
-**Prerequisites**: plan.md (required), spec.md (required for user stories), research.md, data-model.md, contracts/
+**Prerequisites**: plan.md (required), spec.md (required for user stories), design.md (required when the feature has a user-visible surface), research.md, data-model.md, contracts/
+
+**Delivery gates** (non-negotiable, regardless of who executes these tasks):
+isolated worktree and feature branch; failing test written and observed failing
+before the implementation that satisfies it; Allure taxonomy on every product
+test with the covering `FR-###`/`SC-###` in the test name or story; acceptance
+graded by an agent that did not write the code; landing class decided by
+`scripts/classify_path_risk.py`, with ASK-class changes landing only through a
+reviewed PR.
 
 **Tests**: Tests are expected for behavior changes; include backend pytest/FastAPI
 TestClient, frontend Vitest/Testing Library, operation-state, or deterministic

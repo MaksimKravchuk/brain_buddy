@@ -93,6 +93,45 @@ Claude Code uses the skills installed under `.claude/skills/`:
 /speckit-analyze
 ```
 
+### The full delivery pipeline
+
+`.specify/extensions.yml` chains five BrainBuddy stages onto the Spec Kit core,
+using the `hooks.before_*` / `hooks.after_*` keys the upstream skills already
+read — no upstream skill is forked. Front door for an abstract ask:
+
+```text
+/speckit-interview   business requirements from the human -> intake.md   [human]
+/speckit-specify     what and why -> spec.md
+/speckit-clarify     disambiguate                                        [human]
+/speckit-design      screens + numbered state inventory -> design.md     [human sign-off]
+/speckit-plan        how and architecture -> plan.md  (MUST cite design.md)
+/speckit-review      five-lens review gate (ADR-0011) -> verdict         [human on product decisions]
+/speckit-checklist   requirements quality
+/speckit-tasks       -> tasks.md
+/speckit-analyze     cross-artifact consistency
+/speckit-implement   direct implementation in an isolated worktree
+/speckit-accept      criterion -> test traceability -> accept | reject
+/speckit-report      the end-to-end report for the human                 [human]
+```
+
+Subagents live in `.claude/agents/`: `design-architect`,
+`security-privacy-reviewer`, `ux-a11y-reviewer`, `feature-implementer`,
+`delivery-verifier`, `acceptance-auditor`. The two reviewer agent files are the
+**single source of rubric truth** for their lenses — `spec_kit_planning_review.py`
+points at them rather than restating the rubric.
+
+The interview cannot be a subagent: `AskUserQuestion` is stripped from every
+subagent, so human elicitation must run in the main session.
+
+Verification: `/self-verify` (free, deterministic, `make verify-all`) versus
+`/verify-live` (**approval-gated, spends real provider money**, never run
+unattended).
+
+`/speckit-implement` implements directly, matching this file, the constitution
+and `docs/spec-kit-workflow.md`. It is a preserved override guarded by
+`scripts/check_speckit_manifests.py`; `specify integration upgrade --force`
+must not revert it.
+
 Read `docs/spec-kit-workflow.md` before authoring specs. Spec Kit maintains
 versioned artifacts under `specs/`. Generated `tasks.md` is portable planning
 input: implement it directly when the user's request includes implementation,
