@@ -556,7 +556,10 @@ describe("smartAdd", () => {
   });
 
   it("caps the ranked entities at eight before appending the create option", () => {
-    // 003-FR-004: suggestions are "capped at eight visible results".
+    // contracts/smart-add.md: "Show at most eight entities", and separately
+    // "append one" Create option when the query has no exact match -- so the
+    // cap bounds the entities, and nine rows is the intended shape, not eight.
+    // 003-FR-004 words the same rule as "capped at eight visible results".
     const many: TagResponse[] = "abcdefghijk".split("").map((suffix) => ({
       id: `tag-${suffix}`,
       name: `work${suffix}`,
