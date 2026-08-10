@@ -1,7 +1,22 @@
 ---
-name: verify
-description: Build/launch/drive recipe for verifying BrainBuddy backend changes end-to-end against the live API.
+name: verify-live
+description: APPROVAL-GATED, COSTS MONEY. Build/launch/drive recipe for verifying BrainBuddy backend changes end-to-end against the live API with real Deepgram and OpenAI traffic. Use only when a human has explicitly approved a live drive. For the free deterministic chain use the self-verify skill instead.
+user-invocable: true
+disable-model-invocation: true
 ---
+
+# Verifying BrainBuddy end-to-end (live)
+
+> **Cost and approval gate.** This recipe drives the real Deepgram and OpenAI
+> providers and spends money on every run. **No unattended agent may invoke
+> it** — not `feature-implementer`, not `delivery-verifier`, not a scheduled
+> or background session. A human must explicitly approve each live drive.
+>
+> The free, deterministic, key-free equivalent for everyday verification is
+> the **`self-verify`** skill; `make integration-mobile` covers the real API
+> client against a disposable local backend with no paid provider involved.
+> Reach for this skill only when the thing under test *is* the live provider
+> integration.
 
 # Verifying BrainBuddy end-to-end
 

@@ -1,4 +1,5 @@
-.PHONY: install-backend install-frontend dev-backend dev-frontend lint-backend lint-frontend test-backend ci-backend test-frontend test-e2e build-frontend ci-frontend validate-ci check-specs install-mobile typecheck-mobile lint-mobile test-mobile integration-mobile build-mobile ci-mobile
+.PHONY: install-backend install-frontend dev-backend dev-frontend lint-backend lint-frontend test-backend ci-backend test-frontend test-e2e build-frontend ci-frontend validate-ci check-specs install-mobile typecheck-mobile test-mobile integration-mobile build-mobile ci-mobile \
+	verify-all verify-backend verify-frontend verify-mobile typecheck-frontend lint-mobile format-backend format-check-backend mutation-backend
 
 install-backend:
 	cd backend && python -m pip install -e .[dev]
@@ -24,6 +25,16 @@ lint-backend:
 	cd backend && mypy app
 	cd backend && lint-imports
 
+# Black is the documented formatter (CLAUDE.md: "Black 88-col + Ruff"). The
+# backlog that once kept it out of lint-backend is gone -- the tree was
+# reformatted in one mechanical commit -- so `black --check` now gates there and
+# in CI. Use format-backend to fix a file rather than hand-wrapping it.
+format-backend:
+	cd backend && black app tests
+
+format-check-backend:
+	cd backend && black --check app tests
+
 ci-backend: lint-backend test-backend
 
 test-frontend:
@@ -41,12 +52,21 @@ test-e2e:
 lint-frontend:
 	cd frontend && npm run lint
 
+typecheck-frontend:
+	cd frontend && npx tsc --noEmit
+
 build-frontend:
 	cd frontend && npm run build
 
-ci-frontend: lint-frontend test-frontend build-frontend
+ci-frontend: lint-frontend typecheck-frontend test-frontend build-frontend
+
+mutation-backend:
+	cd backend && rm -rf mutants mutation-artifacts
+	cd backend && mutmut run || true
+	cd backend && mutmut results
 
 validate-ci:
+	python3 -m unittest scripts/test_check_requirement_coverage.py -v
 	python3 -m unittest scripts/test_validate_brain_buddy_design_skill.py -v
 	python3 -m unittest scripts/test_validate_ci_artifacts.py -v
 	python3 -m unittest scripts/test_validate_allure_taxonomy.py -v
@@ -64,7 +84,10 @@ validate-ci:
 
 check-specs:
 	python3 -m unittest scripts/test_check_spec_kit_specs.py -v
+	python3 -m unittest scripts/test_check_speckit_manifests.py -v
+	python3 -m unittest scripts/test_spec_kit_planning_review.py -v
 	python3 scripts/check_spec_kit_specs.py
+	python3 scripts/check_speckit_manifests.py
 
 # --- Mobile (Expo / React Native, mobile/) ---
 
@@ -89,4 +112,21 @@ integration-mobile:
 build-mobile:
 	cd mobile && npx expo export --platform ios
 
-ci-mobile: typecheck-mobile lint-mobile test-mobile build-mobile
+# Includes integration-mobile: the CI mobile job runs it, and omitting it here
+# let a locally-green change still fail CI. Requires make install-backend —
+# the integration harness boots its own disposable backend.
+ci-mobile: typecheck-mobile lint-mobile test-mobile integration-mobile build-mobile
+
+# --- Aggregate verification (mirrors the CI job graph) ---
+
+verify-backend: ci-backend
+
+verify-frontend: ci-frontend
+
+verify-mobile: ci-mobile
+
+# The chain an implementation or verification agent runs before reporting done.
+# Prerequisites the individual targets do not install:
+#   make install-backend                                       (integration-mobile)
+#   cd frontend && npx playwright install --with-deps chromium (test-e2e)
+verify-all: check-specs validate-ci verify-backend verify-frontend verify-mobile test-e2e

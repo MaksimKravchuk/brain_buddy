@@ -4,11 +4,13 @@ repos:
     hooks:
       - id: black
         additional_dependencies: ["click==8.1.7"]
-  # Matches the range pinned in backend/pyproject.toml so the hook and CI apply
-  # the same rules. `ruff-format` is deliberately absent: black is this repo's
-  # formatter, and running both means whichever hook goes last wins, so they
-  # rewrite each other's output. At these versions ruff-format disagrees with
-  # black on 35 files.
+  # ruff lints; it does NOT format. Black is the documented formatter
+  # (CLAUDE.md: "Black 88-col + Ruff"), and running ruff-format alongside black
+  # makes the two rewrite each other's output on alternating commits -- at these
+  # versions they disagree on 35 files.
+  #
+  # The rev matches the range pinned in backend/pyproject.toml so the hook and
+  # CI apply the same rules.
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.2
     hooks:
