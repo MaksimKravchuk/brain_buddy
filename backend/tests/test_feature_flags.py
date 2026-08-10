@@ -290,7 +290,7 @@ def test_me_includes_default_off_flag_payload(
 
     client = _signed_up_client(tmp_path, monkeypatch, email=OUTSIDER_EMAIL)
     body = client.get("/api/auth/me").json()
-    assert body["feature_flags"] == {name: False for name in KNOWN_FEATURE_FLAGS}
+    assert body["feature_flags"] == dict.fromkeys(KNOWN_FEATURE_FLAGS, False)
 
 
 def test_signup_and_login_payloads_include_feature_flags(
