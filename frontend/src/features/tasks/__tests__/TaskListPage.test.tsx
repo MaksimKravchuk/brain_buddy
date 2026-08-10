@@ -95,7 +95,7 @@ function lastListFilters(): TaskListFilters {
   return calls[calls.length - 1]?.[0] as TaskListFilters;
 }
 
-function LocationProbe(): JSX.Element {
+function LocationProbe(): React.JSX.Element {
   const { pathname, search } = useLocation();
   return <div data-testid="location">{`${pathname}${search}`}</div>;
 }

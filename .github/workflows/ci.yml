@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Run actionlint
         uses: raven-actions/actionlint@v2
@@ -93,9 +93,16 @@ jobs:
       backend: ${{ steps.decide.outputs.backend }}
       frontend: ${{ steps.decide.outputs.frontend }}
       mobile: ${{ steps.decide.outputs.mobile }}
+      floor-backend: ${{ steps.decide.outputs.floor-backend }}
+      floor-frontend: ${{ steps.decide.outputs.floor-frontend }}
+      floor-mobile: ${{ steps.decide.outputs.floor-mobile }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+        with:
+          # Full history: the floor comparison below needs a merge base, and
+          # this is the one job that pays for it on behalf of the others.
+          fetch-depth: 0
 
       # Computed with plain git rather than a paths-filter action. Such actions
       # read the changed-file list from the pull-requests API, which this
@@ -142,6 +149,22 @@ jobs:
             echo "landing path; exercising every stack regardless of the diff"
           fi
 
+          # Did this branch itself edit a coverage floor? Three-dot, so the
+          # answer is about what the BRANCH changed since it diverged, not what
+          # the base branch has done meanwhile. A branch that merely fell behind
+          # a raised floor must not be accused of lowering it.
+          for stack in backend frontend mobile; do
+            touched=false
+            if [ "${{ github.event_name }}" = "pull_request" ] &&
+               git diff --name-only \
+                 '${{ github.event.pull_request.base.sha }}...HEAD' \
+                 -- "${stack}/coverage-floor.json" 2>/dev/null | grep -q .; then
+              touched=true
+            fi
+            echo "floor-${stack}=${touched}" >> "$GITHUB_OUTPUT"
+            echo "floor-${stack}=${touched}"
+          done
+
           {
             echo "backend=${backend}"
             echo "frontend=${frontend}"
@@ -155,7 +178,7 @@ jobs:
     needs: workflow-lint
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Validate feature specs
         run: |
@@ -179,11 +202,11 @@ jobs:
         working-directory: backend
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
         if: env.RUN == 'true'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -239,12 +262,20 @@ jobs:
         if: env.RUN == 'true'
         working-directory: .
         run: |
-          # The floor may only ratchet upward, so a pull request is also checked
-          # against the floor recorded on its base branch.
+          # The floor may only ratchet upward, so a branch that EDITS the floor
+          # is also checked against the base branch's copy. The `changes` job
+          # decided whether this branch edited it, using a three-dot diff.
+          #
+          # A branch that did not touch the floor is exempt, and that exemption
+          # is load-bearing: without it, a branch that merely fell behind a
+          # raised floor would fail a check it never provoked, with a message
+          # accusing it of lowering the bar. Whatever the base raised the floor
+          # to simply wins at merge.
           base_args=()
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}" || true
-            if git show "${{ github.event.pull_request.base.sha }}:backend/coverage-floor.json" \
+          if [ "${{ needs.changes.outputs.floor-backend }}" = "true" ]; then
+            base='${{ github.event.pull_request.base.sha }}'
+            git fetch --no-tags --depth=1 origin "${base}" 2>/dev/null || true
+            if git show "${base}:backend/coverage-floor.json" \
                  > /tmp/base-backend-floor.json 2>/dev/null; then
               base_args=(--base-floor "/tmp/base-backend-floor.json")
             fi
@@ -259,7 +290,7 @@ jobs:
 
       - name: Upload backend Allure results
         if: always() && env.RUN == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-allure-results
           path: backend/allure-results
@@ -268,7 +299,7 @@ jobs:
 
       - name: Upload coverage artifact
         if: always() && env.RUN == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-coverage
           path: backend/coverage.xml
@@ -290,11 +321,11 @@ jobs:
         working-directory: frontend
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
         if: env.RUN == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20.19.0"
           cache: npm
@@ -328,12 +359,20 @@ jobs:
         if: env.RUN == 'true'
         working-directory: .
         run: |
-          # The floor may only ratchet upward, so a pull request is also checked
-          # against the floor recorded on its base branch.
+          # The floor may only ratchet upward, so a branch that EDITS the floor
+          # is also checked against the base branch's copy. The `changes` job
+          # decided whether this branch edited it, using a three-dot diff.
+          #
+          # A branch that did not touch the floor is exempt, and that exemption
+          # is load-bearing: without it, a branch that merely fell behind a
+          # raised floor would fail a check it never provoked, with a message
+          # accusing it of lowering the bar. Whatever the base raised the floor
+          # to simply wins at merge.
           base_args=()
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}" || true
-            if git show "${{ github.event.pull_request.base.sha }}:frontend/coverage-floor.json" \
+          if [ "${{ needs.changes.outputs.floor-frontend }}" = "true" ]; then
+            base='${{ github.event.pull_request.base.sha }}'
+            git fetch --no-tags --depth=1 origin "${base}" 2>/dev/null || true
+            if git show "${base}:frontend/coverage-floor.json" \
                  > /tmp/base-frontend-floor.json 2>/dev/null; then
               base_args=(--base-floor "/tmp/base-frontend-floor.json")
             fi
@@ -348,7 +387,7 @@ jobs:
 
       - name: Upload frontend Allure results
         if: always() && env.RUN == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: frontend-allure-results
           path: frontend/allure-results/vitest
@@ -361,7 +400,7 @@ jobs:
 
       - name: Upload coverage artifact
         if: always() && env.RUN == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: frontend-coverage
           path: frontend/coverage/lcov.info
@@ -383,11 +422,11 @@ jobs:
         working-directory: mobile
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
         if: env.RUN == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           # Expo SDK 57 requires Node.js 22.13.x or newer.
           node-version: "22.13.1"
@@ -425,12 +464,20 @@ jobs:
         if: env.RUN == 'true'
         working-directory: .
         run: |
-          # The floor may only ratchet upward, so a pull request is also checked
-          # against the floor recorded on its base branch.
+          # The floor may only ratchet upward, so a branch that EDITS the floor
+          # is also checked against the base branch's copy. The `changes` job
+          # decided whether this branch edited it, using a three-dot diff.
+          #
+          # A branch that did not touch the floor is exempt, and that exemption
+          # is load-bearing: without it, a branch that merely fell behind a
+          # raised floor would fail a check it never provoked, with a message
+          # accusing it of lowering the bar. Whatever the base raised the floor
+          # to simply wins at merge.
           base_args=()
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}" || true
-            if git show "${{ github.event.pull_request.base.sha }}:mobile/coverage-floor.json" \
+          if [ "${{ needs.changes.outputs.floor-mobile }}" = "true" ]; then
+            base='${{ github.event.pull_request.base.sha }}'
+            git fetch --no-tags --depth=1 origin "${base}" 2>/dev/null || true
+            if git show "${base}:mobile/coverage-floor.json" \
                  > /tmp/base-mobile-floor.json 2>/dev/null; then
               base_args=(--base-floor "/tmp/base-mobile-floor.json")
             fi
@@ -440,7 +487,7 @@ jobs:
 
       - name: Set up Python for the integration backend
         if: env.RUN == 'true'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -477,11 +524,11 @@ jobs:
       RUN: ${{ (needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true') && 'true' || 'false' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
         if: env.RUN == 'true'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build backend image
         if: env.RUN == 'true'
@@ -510,10 +557,10 @@ jobs:
       - docker
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20.19.0"
           cache: npm
@@ -540,7 +587,7 @@ jobs:
 
       - name: Upload Playwright Allure results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-allure-results
           path: frontend/allure-results/playwright
@@ -549,7 +596,7 @@ jobs:
 
       - name: Upload Playwright HTML report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-html-report
           path: frontend/playwright-report
@@ -558,7 +605,7 @@ jobs:
 
       - name: Upload Playwright failure artifacts and Compose logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-test-results
           path: frontend/test-results
@@ -578,10 +625,10 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download Allure results
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: '*-allure-results'
           path: allure-results
@@ -591,7 +638,7 @@ jobs:
         run: python3 scripts/validate_allure_taxonomy.py --path allure-results --label aggregate-allure
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20.19.0"
           cache: npm
@@ -607,7 +654,7 @@ jobs:
           npx allure generate ../allure-results -o ../allure-report
 
       - name: Upload Allure HTML report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: allure-report-html
           path: allure-report
@@ -616,7 +663,7 @@ jobs:
 
       - name: Post PR Allure report link
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const marker = '<!-- brain-buddy-allure-report -->';

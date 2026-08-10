@@ -33,10 +33,10 @@ jobs:
         working-directory: backend
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -81,7 +81,7 @@ jobs:
 
       - name: Upload raw mutmut state
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-raw-results
           path: backend/mutants
@@ -90,7 +90,7 @@ jobs:
 
       - name: Upload mutation summary and survivors
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-summary-and-survivors
           path: backend/mutation-artifacts
@@ -99,7 +99,7 @@ jobs:
 
       - name: Upload report-only Allure evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-evidence-allure-results
           path: backend/mutation-allure-results
@@ -207,16 +207,16 @@ jobs:
     if: always()
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download report-only Allure evidence
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: mutation-evidence-allure-results
           path: mutation-allure-results
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "18"
           cache: npm
@@ -232,7 +232,7 @@ jobs:
           npx allure generate ../mutation-allure-results -o ../mutation-allure-report
 
       - name: Upload Allure evidence report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-allure-report-html
           path: mutation-allure-report

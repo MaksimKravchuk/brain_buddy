@@ -40,7 +40,7 @@ function privacyIdempotencyKey(action: string) {
 // status, withdraw cloud-processing consent, delete retained raw audio, and
 // discard — all of which the backend keeps reachable with the flag OFF. It
 // deliberately renders no Record button and no new-capture consent checkbox.
-export function BrainDumpPrivacyControls(): JSX.Element {
+export function BrainDumpPrivacyControls(): React.JSX.Element {
   const params = useParams();
   const closeOverlay = useCloseBrainDump();
   const operationId = params.operationId && params.operationId !== "new" ? params.operationId : null;

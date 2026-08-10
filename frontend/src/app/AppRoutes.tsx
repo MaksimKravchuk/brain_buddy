@@ -16,7 +16,7 @@ import SignupPage from "../pages/SignupPage";
 // was on stays visible underneath. A deep link or reload has no such state —
 // then the first <Routes> falls back to the default list as the backdrop, which
 // keeps the operation recoverable from its URL alone.
-export function AppRoutes(): JSX.Element {
+export function AppRoutes(): React.JSX.Element {
   const location = useLocation();
   const backgroundLocation = (location.state as BrainDumpLocationState | null)?.backgroundLocation;
 
@@ -45,7 +45,7 @@ export function AppRoutes(): JSX.Element {
   );
 }
 
-function workspaceRoutes(): JSX.Element {
+function workspaceRoutes(): React.JSX.Element {
   return (
     <>
       <Route path="/login" element={<LoginPage />} />
@@ -147,7 +147,7 @@ function workspaceRoutes(): JSX.Element {
   );
 }
 
-function ComingLater({ title }: { title: string }): JSX.Element {
+function ComingLater({ title }: { title: string }): React.JSX.Element {
   return (
     <main className="flex min-h-screen items-center justify-center bg-surface-base px-6 text-center">
       <section className="rounded-2xl border border-slate-200 bg-white px-8 py-10 shadow-raised">

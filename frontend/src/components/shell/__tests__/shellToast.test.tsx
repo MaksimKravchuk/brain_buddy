@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ShellToastContext, useShellToast } from "../shellToast";
 
-function Notifier(): JSX.Element {
+function Notifier(): React.JSX.Element {
   const notify = useShellToast();
 
   return (

@@ -7,7 +7,7 @@ interface Props {
   children: ReactNode;
 }
 
-export function ProtectedRoute({ children }: Props): JSX.Element {
+export function ProtectedRoute({ children }: Props): React.JSX.Element {
   const status = useAuthStore((state) => state.status);
   const location = useLocation();
 

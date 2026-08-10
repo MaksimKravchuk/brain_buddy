@@ -39,7 +39,7 @@ describe("downloadAccountExport", () => {
 
   it("downloads the archive and resolves with the served filename", async () => {
     fetchMock.mockResolvedValue(
-      new Response(new Blob(["zip-bytes"]), {
+      new Response("zip-bytes", {
         status: 200,
         headers: {
           "Content-Type": "application/zip",

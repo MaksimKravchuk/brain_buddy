@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -345,19 +345,21 @@ describe("AppShell top bar", () => {
     expect(screen.getByTestId("location-state").textContent).toContain("backgroundLocation");
   });
 
-  it("shows a shell toast raised by a child and lets a later one replace it", async () => {
+  it("shows a shell toast raised by a child and lets a later one replace it", () => {
+    // fireEvent rather than userEvent: the toast's own dismissal timer is what
+    // is under test, and driving the pointer through a faked clock only adds a
+    // second thing that can hang.
     vi.useFakeTimers();
     try {
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       renderShell();
 
       const trigger = screen.getByRole("button", { name: "Raise shell toast" });
-      await user.click(trigger);
+      fireEvent.click(trigger);
       expect(screen.getByRole("status")).toHaveTextContent("Thinking canvas isn't built yet — placeholder");
 
       // A second toast restarts the timer rather than letting the first one
       // dismiss the replacement early.
-      await user.click(trigger);
+      fireEvent.click(trigger);
       act(() => {
         vi.advanceTimersByTime(2599);
       });
