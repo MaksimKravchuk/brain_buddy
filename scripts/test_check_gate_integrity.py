@@ -114,6 +114,42 @@ class InvariantEnforcementTests(unittest.TestCase):
             )
             self.assertIn("time-bounded", report)
 
+    def test_trusting_the_stored_digest_is_caught(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._assert_invariant_fires(
+                tmp,
+                "scripts/spec_kit_planning_review.py",
+                lambda text: text.replace(
+                    "current_digest = review_artifacts_digest(feature_dir)",
+                    "current_digest = recorded_digest",
+                ),
+            )
+            self.assertIn("recomputed, not trusted", report)
+
+    def test_dropping_the_artifact_drift_escalation_is_caught(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._assert_invariant_fires(
+                tmp,
+                "scripts/spec_kit_planning_review.py",
+                lambda text: text.replace(
+                    'if artifacts_changed:\n        status = "escalated"',
+                    'if False:\n        status = "escalated"',
+                ),
+            )
+            self.assertIn("drift after preflight", report)
+
+    def test_dropping_the_high_risk_signoff_requirement_is_caught(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._assert_invariant_fires(
+                tmp,
+                "scripts/spec_kit_planning_review.py",
+                lambda text: text.replace(
+                    "if risk == HUMAN_SIGNOFF_REQUIRED_AT:\n        if not isinstance(signoff, dict):",
+                    "if False:\n        if not isinstance(signoff, dict):",
+                ),
+            )
+            self.assertIn("require the sign-off record", report)
+
     def test_blanket_shell_permission_is_caught(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             report = self._assert_invariant_fires(

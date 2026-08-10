@@ -118,7 +118,9 @@ layers, because either alone is defeated:
   the aggregator reads reviewer verdicts, `changes-required` blocks,
   `DEFAULT_RISK` is `medium`, missing evidence escalates, acceptance is
   time-bounded, derivation can only raise a class, human sign-off is a
-  run-bound record rather than a caller flag, the permission allowlist has no
+  run-bound record rather than a caller flag, the artifact digest is
+  recomputed rather than trusted from preflight, artifact drift escalates,
+  high-risk handoffs require the record, the permission allowlist has no
   blanket `Bash` grant and never pre-approves `git push`, `check-specs` runs
   its validators, and both mandatory lenses remain in the role enum.
   **These are not waivable by `--update`.**
@@ -133,12 +135,13 @@ the same commit; that is precisely why layer one exists and cannot be waived.
 Mutation tests assert that each invariant actually fires when its property is
 removed, so the guard cannot rot into a no-op.
 
-## Two corrections made during review of this record
+## Corrections made during review of this record
 
-Both were defects in this ADR's own first implementation, found before it
+All four were defects in this ADR's own implementation, found before it
 landed. They are recorded rather than quietly amended, because each is an
 instance of the failure mode this ADR is about — a gate that looks stricter
-while being weaker.
+while being weaker. Two were found by an independent reviewer, which is the
+argument for having one.
 
 ### Derivation could lower a class, and did so on auth
 
@@ -174,6 +177,39 @@ approval becomes a named, dated, auditable artifact bound to specific content
 rather than an invisible flag, and that it self-invalidates on edit. Real
 non-repudiation would need signed commits or an external approval system; that
 is deferred, not solved.
+
+### The digest was compared against its own cache
+
+`summarize()` read the `artifacts_digest` persisted by `preflight` and compared
+the sign-off against that, rather than hashing the artifacts as they stood at
+summarization time. Editing the spec after preflight left the stored digest
+matching the sign-off, so a high-risk campaign could reach `approved` for
+content the human never saw.
+
+The digest exists precisely to make "editing the spec invalidates the approval"
+true. Comparing it to a snapshot of the pre-edit state defeats the mechanism
+with its own storage. It is now recomputed at summarization.
+
+The same recomputation exposed a second, larger problem it also fixes: if the
+artifacts moved after preflight, **every review in the run describes different
+content**. That is not merely an unsigned campaign, it is stale evidence, and
+it now escalates on its own — ahead of the missing-evidence check, because a
+verdict about superseded content is not a verdict about this one.
+
+### The handoff schema described a sign-off nothing enforced
+
+`human_signoff` was added to `handoff.schema.json` as an optional field, and
+`validate_handoff()` never looked at it. A hand-written handoff with
+`risk: "high"`, `status: "approved"` and the adversarial reviewer listed
+validated with no approval record at all — and `check_spec_kit_specs.py`
+delegates to that function, so the bypass was reachable from CI.
+
+`validate_handoff()` now requires the record at `high`, and validates the
+approver, the date, a substantive rationale, the digest's shape, and that
+`run_id` matches the handoff's own — an approval from one campaign cannot close
+another. The digest's *content* is still verified only by `summarize()`, which
+is the only layer holding the artifacts; the handoff alone cannot prove what
+was hashed, and this record says so rather than implying otherwise.
 
 ## Consequences
 
