@@ -129,7 +129,8 @@ class OperationRepository(BaseRepository):
 
     def _initialize_database(self) -> None:
         with self._owned_connection() as conn:
-            conn.executescript("""
+            conn.executescript(
+                """
                 CREATE TABLE IF NOT EXISTS brain_dump_operations (
                     owner_id TEXT NOT NULL,
                     id TEXT NOT NULL,
@@ -158,7 +159,8 @@ class OperationRepository(BaseRepository):
                     ON brain_dump_operations(owner_id, status, updated_at, id);
                 CREATE INDEX IF NOT EXISTS idx_idempotency_owner_created
                     ON idempotency_records(owner_id, created_at);
-                """)
+                """
+            )
 
     def _migrate_legacy_json_once(self) -> None:
         with self._owned_connection() as conn:
@@ -410,9 +412,11 @@ class OperationRepository(BaseRepository):
         # it is actually due, exactly like the provider-lease sweep does for
         # ``lease_expires_at``.
         with self._connection() as conn:
-            rows = conn.execute("""
+            rows = conn.execute(
+                """
                 SELECT payload FROM brain_dump_operations
-                """).fetchall()
+                """
+            ).fetchall()
         return [
             self._decode_brain_dump_operation(json.loads(row["payload"]))[0]
             for row in rows
@@ -431,10 +435,12 @@ class OperationRepository(BaseRepository):
         """
 
         with self._connection() as conn:
-            rows = conn.execute("""
+            rows = conn.execute(
+                """
                 SELECT payload FROM brain_dump_operations
                 WHERE status IN ('accurate_transcribing', 'reconciling')
-                """).fetchall()
+                """
+            ).fetchall()
         return [
             self._decode_brain_dump_operation(json.loads(row["payload"]))[0]
             for row in rows
@@ -449,10 +455,12 @@ class OperationRepository(BaseRepository):
         """
 
         with self._connection() as conn:
-            rows = conn.execute("""
+            rows = conn.execute(
+                """
                 SELECT payload FROM brain_dump_operations
                 WHERE status = 'committing'
-                """).fetchall()
+                """
+            ).fetchall()
         return [
             self._decode_brain_dump_operation(json.loads(row["payload"]))[0]
             for row in rows

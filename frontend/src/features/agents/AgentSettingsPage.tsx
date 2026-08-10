@@ -30,7 +30,7 @@ const emptyCounts: TaskCounts = { inbox: 0, next: 0, waiting: 0, someday: 0 };
  * contact, the disclosed capabilities) and never implies a connection works
  * before the server says `ready_for_handoff`.
  */
-export function AgentSettingsPage(): JSX.Element {
+export function AgentSettingsPage(): React.JSX.Element {
   const countsQuery = useTaskList({ state: "next", limit: 1 });
   const projectsQuery = useProjects();
   const tagsQuery = useTags();
@@ -98,7 +98,7 @@ export function AgentSettingsPage(): JSX.Element {
   );
 }
 
-function AddConnectionSection(): JSX.Element {
+function AddConnectionSection(): React.JSX.Element {
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [endpointUrl, setEndpointUrl] = useState("");
@@ -223,7 +223,7 @@ function SigningSecretPanel({
   onDismiss: () => void;
   title?: string;
   lead?: string;
-}): JSX.Element {
+}): React.JSX.Element {
   const titleId = useId();
   return (
     <section
@@ -255,7 +255,7 @@ function ConnectionCard({
 }: {
   connection: AgentConnectionResponse;
   online: boolean;
-}): JSX.Element {
+}): React.JSX.Element {
   const titleId = useId();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
@@ -419,7 +419,7 @@ function ConnectionCard({
   );
 }
 
-function StatusBadge({ connection }: { connection: AgentConnectionResponse }): JSX.Element {
+function StatusBadge({ connection }: { connection: AgentConnectionResponse }): React.JSX.Element {
   const label = connectionStatusLabel(connection);
   const tone =
     label === "Tested ready"
@@ -446,7 +446,7 @@ function RotateCredentialForm({
   connection: AgentConnectionResponse;
   onDone: (message: string) => void;
   onFailed: (message: string) => void;
-}): JSX.Element {
+}): React.JSX.Element {
   const [credential, setCredential] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
 
@@ -523,7 +523,7 @@ function ReplaceSigningSecretDialog({
   intentKey: IntentKey;
   onClose: () => void;
   onReplaced: (secret: string) => void;
-}): JSX.Element {
+}): React.JSX.Element {
   const titleId = useId();
   const [currentPassword, setCurrentPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -610,7 +610,7 @@ function DisconnectDialog({
   connection: AgentConnectionResponse;
   onClose: () => void;
   onDisconnected: () => void;
-}): JSX.Element {
+}): React.JSX.Element {
   const titleId = useId();
   const [currentPassword, setCurrentPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
