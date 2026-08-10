@@ -2207,12 +2207,12 @@ describe("BrainDumpRoute", () => {
     renderBrainDump("/brain-dump/brain_dump_citations/review");
 
     const review = await screen.findByRole("main", { name: "Review brain dump proposals" });
-    const firstCard = within(review).getByRole("textbox", { name: "Task title #1" }).closest("article") as HTMLElement;
+    const firstCard = (await within(review).findByRole("textbox", { name: "Task title #1" })).closest("article") as HTMLElement;
     expect(within(firstCard).getByText(/Renew the car insurance before Friday/)).toBeInTheDocument();
     // Each proposal cites only its own utterance, never a sibling's.
     expect(within(firstCard).queryByText(/Reply to Anna about the offsite/)).not.toBeInTheDocument();
 
-    const secondCard = within(review).getByRole("textbox", { name: "Task title #2" }).closest("article") as HTMLElement;
+    const secondCard = (await within(review).findByRole("textbox", { name: "Task title #2" })).closest("article") as HTMLElement;
     expect(within(secondCard).getByText(/Reply to Anna about the offsite/)).toBeInTheDocument();
   });
 
@@ -2238,7 +2238,7 @@ describe("BrainDumpRoute", () => {
     renderBrainDump("/brain-dump/brain_dump_citations_multi/review");
 
     const review = await screen.findByRole("main", { name: "Review brain dump proposals" });
-    const card = within(review).getByRole("textbox", { name: "Task title #1" }).closest("article") as HTMLElement;
+    const card = (await within(review).findByRole("textbox", { name: "Task title #1" })).closest("article") as HTMLElement;
     expect(within(card).getByText(/Call the plumber about the leak/)).toBeInTheDocument();
     expect(within(card).getByText(/and ask when he can come by/)).toBeInTheDocument();
   });
@@ -2264,7 +2264,7 @@ describe("BrainDumpRoute", () => {
     renderBrainDump("/brain-dump/brain_dump_citations_stale/review");
 
     const review = await screen.findByRole("main", { name: "Review brain dump proposals" });
-    const card = within(review).getByRole("textbox", { name: "Task title #1" }).closest("article") as HTMLElement;
+    const card = (await within(review).findByRole("textbox", { name: "Task title #1" })).closest("article") as HTMLElement;
     expect(within(card).getByText("Source utterance no longer available")).toBeInTheDocument();
     // The proposal itself still renders — one bad citation never breaks review.
     expect(within(card).getByDisplayValue("Buy oat milk")).toBeInTheDocument();
