@@ -1,0 +1,20 @@
+# The ENFORCED mutation tier (ADR-0011): modules whose score may block a pull
+# request. Narrower than `only_mutate` in pyproject.toml, which is the OBSERVED
+# tier the nightly campaign measures.
+#
+# A module joins this list only after clearing ADR-0004's bar on its own — at
+# least 95% across two consecutive successful scheduled runs against an
+# unchanged allow-list. Adding one without that evidence defeats the point of
+# having two tiers.
+#
+# NOT YET ENFORCING. Nothing reads this list in CI yet. The nightly campaign
+# has completed successfully on twelve consecutive runs, which satisfies half of
+# ADR-0004's precondition; the other half is a recorded score of at least 95%
+# for this unchanged list, and that number has not been established. Wire the
+# gate up only once it has.
+app/services/tree_service.py
+app/services/version_service.py
+app/services/relation_service.py
+app/repositories/tree.py
+app/repositories/version.py
+app/repositories/index.py
