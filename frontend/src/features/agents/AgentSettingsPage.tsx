@@ -109,6 +109,8 @@ function AddConnectionSection(): JSX.Element {
   // Held in component state on purpose: navigating away unmounts this and the
   // secret is gone for good, because the server will never return it again.
   const [signingSecret, setSigningSecret] = useState<string | null>(null);
+  const [createdWithoutSecret, setCreatedWithoutSecret] = useState<string | null>(null);
+  const createKey = useIntentKey("agent-connection-create");
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -120,11 +122,14 @@ function AddConnectionSection(): JSX.Element {
           credential,
           current_password: currentPassword
         },
-        newIdempotencyKey("agent-connection-create")
+        createKey.current(JSON.stringify([name, endpointUrl, authHeaderName, credential, currentPassword]))
       ),
     onSuccess: (created) => {
+      createKey.settle();
       setError(null);
-      setSigningSecret(created.inbound_signing_secret);
+      const returnedSecret = created.inbound_signing_secret.trim();
+      setSigningSecret(returnedSecret || null);
+      setCreatedWithoutSecret(returnedSecret ? null : created.name);
       setName("");
       setEndpointUrl("");
       setAuthHeaderName("Authorization");
@@ -133,6 +138,9 @@ function AddConnectionSection(): JSX.Element {
       void queryClient.invalidateQueries({ queryKey: agentKeys.connections() });
     },
     onError: (caught: unknown) => {
+      if (caught instanceof ApiError && caught.status >= 400 && caught.status < 500) {
+        createKey.settle();
+      }
       setSigningSecret(null);
       setError(getErrorMessage(caught));
     }
@@ -191,6 +199,12 @@ function AddConnectionSection(): JSX.Element {
           </Button>
         </div>
       </form>
+      {createdWithoutSecret ? (
+        <p role="status" className="mt-3 text-sm text-needs-you-fg">
+          {createdWithoutSecret} was added, but its one-time signing secret is no longer
+          available. In Your agents below, choose Replace signing secret to issue a new one.
+        </p>
+      ) : null}
       {signingSecret ? (
         <SigningSecretPanel secret={signingSecret} onDismiss={() => setSigningSecret(null)} />
       ) : null}
@@ -519,17 +533,23 @@ function ReplaceSigningSecretDialog({
       apiClient.rotateAgentSigningSecret(
         connection.id,
         { current_password: currentPassword, expected_revision: connection.revision },
-        // Same key on every retry of this attempt: a failure the client cannot
-        // interpret may still have rotated, and a fresh key would rotate again
-        // and strand the secret the first attempt issued.
-        intentKey.current(`${connection.id}:${connection.revision}`)
+        // The in-memory intent includes every material request value, including
+        // the password, so only an exact ambiguous replay can reuse the key.
+        // Closing the dialog clears the UI value but not this card-owned intent;
+        // retyping the exact payload safely resumes it, while any change mints.
+        intentKey.current(JSON.stringify([connection.id, connection.revision, currentPassword]))
       ),
     onSuccess: (replaced) => {
       intentKey.settle();
       setCurrentPassword("");
       onReplaced(replaced.inbound_signing_secret);
     },
-    onError: (caught: unknown) => setError(getErrorMessage(caught))
+    onError: (caught: unknown) => {
+      if (caught instanceof ApiError && caught.status >= 400 && caught.status < 500) {
+        intentKey.settle();
+      }
+      setError(getErrorMessage(caught));
+    }
   });
 
   return (

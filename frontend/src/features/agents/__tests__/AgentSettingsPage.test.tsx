@@ -128,6 +128,138 @@ describe("AgentSettingsPage", () => {
     expect(screen.queryByText("sk-inbound-9f2c")).not.toBeInTheDocument();
   });
 
+  it("retries an ambiguous unchanged add under the exact same idempotency key", async () => {
+    const create = vi
+      .spyOn(apiClient, "createAgentConnection")
+      .mockRejectedValueOnce(new ApiError("Bad Gateway", 502, { message: "No answer." }, "corr-add-ambiguous"))
+      .mockResolvedValue({
+        ...connection({ id: "conn-new", status: "untested", ready_for_handoff: false, revision: 1 }),
+        inbound_signing_secret: "secret-on-replay"
+      });
+    renderPage();
+
+    const user = userEvent.setup();
+    const form = await screen.findByRole("form", { name: /add an agent/i });
+    await user.type(within(form).getByLabelText("Agent name"), "Hermes");
+    await user.type(within(form).getByLabelText("Endpoint URL"), "https://agent.example.com/hooks");
+    await user.type(within(form).getByLabelText("Credential"), "token-abc");
+    await user.type(within(form).getByLabelText("Current password"), "hunter2hunter2");
+    await user.click(within(form).getByRole("button", { name: "Add agent" }));
+    await waitFor(() => expect(within(form).getByRole("alert")).toHaveTextContent(/no answer/i));
+
+    await user.click(within(form).getByRole("button", { name: "Add agent" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+
+    expect(create.mock.calls[1][1]).toBe(create.mock.calls[0][1]);
+  });
+
+  it("mints a new add key after a definitive 4xx response", async () => {
+    const create = vi
+      .spyOn(apiClient, "createAgentConnection")
+      .mockRejectedValueOnce(new ApiError("Bad Request", 400, { message: "Invalid endpoint." }, "corr-add-4xx"))
+      .mockResolvedValue({
+        ...connection({ id: "conn-new", status: "untested", ready_for_handoff: false, revision: 1 }),
+        inbound_signing_secret: "new-secret"
+      });
+    renderPage();
+
+    const user = userEvent.setup();
+    const form = await screen.findByRole("form", { name: /add an agent/i });
+    await user.type(within(form).getByLabelText("Agent name"), "Hermes");
+    await user.type(within(form).getByLabelText("Endpoint URL"), "https://agent.example.com/hooks");
+    await user.type(within(form).getByLabelText("Credential"), "token-abc");
+    await user.type(within(form).getByLabelText("Current password"), "hunter2hunter2");
+    await user.click(within(form).getByRole("button", { name: "Add agent" }));
+    await waitFor(() => expect(within(form).getByRole("alert")).toHaveTextContent(/invalid endpoint/i));
+
+    await user.click(within(form).getByRole("button", { name: "Add agent" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+
+    expect(create.mock.calls[1][1]).not.toBe(create.mock.calls[0][1]);
+  });
+
+  it.each([
+    ["Agent name", " 2"],
+    ["Endpoint URL", "/changed"],
+    ["Auth header name", "-Changed"],
+    ["Credential", "-changed"],
+    ["Current password", "-changed"]
+  ])("mints a new add key when material field %s changes", async (label, suffix) => {
+    const create = vi
+      .spyOn(apiClient, "createAgentConnection")
+      .mockRejectedValue(new ApiError("Bad Gateway", 502, { message: "No answer." }, "corr-add-change"));
+    renderPage();
+
+    const user = userEvent.setup();
+    const form = await screen.findByRole("form", { name: /add an agent/i });
+    await user.type(within(form).getByLabelText("Agent name"), "Hermes");
+    await user.type(within(form).getByLabelText("Endpoint URL"), "https://agent.example.com/hooks");
+    await user.type(within(form).getByLabelText("Credential"), "token-abc");
+    await user.type(within(form).getByLabelText("Current password"), "hunter2hunter2");
+    await user.click(within(form).getByRole("button", { name: "Add agent" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+
+    await user.type(within(form).getByLabelText(label), suffix);
+    await user.click(within(form).getByRole("button", { name: "Add agent" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+
+    expect(create.mock.calls[1][1]).not.toBe(create.mock.calls[0][1]);
+  });
+
+  it("retires the add key after success settlement", async () => {
+    const created = {
+      ...connection({ id: "conn-new", status: "untested", ready_for_handoff: false, revision: 1 }),
+      inbound_signing_secret: "new-secret"
+    };
+    const create = vi.spyOn(apiClient, "createAgentConnection").mockResolvedValue(created);
+    renderPage();
+
+    const user = userEvent.setup();
+    const form = await screen.findByRole("form", { name: /add an agent/i });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await user.type(within(form).getByLabelText("Agent name"), "Hermes");
+      await user.type(within(form).getByLabelText("Endpoint URL"), "https://agent.example.com/hooks");
+      await user.type(within(form).getByLabelText("Credential"), "token-abc");
+      await user.type(within(form).getByLabelText("Current password"), "hunter2hunter2");
+      await user.click(within(form).getByRole("button", { name: "Add agent" }));
+      await waitFor(() => expect(create).toHaveBeenCalledTimes(attempt + 1));
+      await waitFor(() => expect(within(form).getByLabelText("Agent name")).toHaveValue(""));
+    }
+
+    expect(create.mock.calls[1][1]).not.toBe(create.mock.calls[0][1]);
+  });
+
+  it("directs an empty-secret replay to explicit signing-secret recovery", async () => {
+    const replayed = connection({
+      id: "conn-replayed",
+      name: "Hermes replayed",
+      status: "untested",
+      ready_for_handoff: false,
+      revision: 1
+    });
+    vi.mocked(apiClient.listAgentConnections).mockResolvedValueOnce([]).mockResolvedValue([replayed]);
+    vi.spyOn(apiClient, "createAgentConnection").mockResolvedValue({
+      ...replayed,
+      inbound_signing_secret: ""
+    });
+    renderPage();
+
+    const user = userEvent.setup();
+    const form = await screen.findByRole("form", { name: /add an agent/i });
+    await user.type(within(form).getByLabelText("Agent name"), "Hermes replayed");
+    await user.type(within(form).getByLabelText("Endpoint URL"), "https://agent.example.com/hooks");
+    await user.type(within(form).getByLabelText("Credential"), "token-abc");
+    await user.type(within(form).getByLabelText("Current password"), "hunter2hunter2");
+    await user.click(within(form).getByRole("button", { name: "Add agent" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      /Hermes replayed was added.*signing secret.*replace signing secret/i
+    );
+    expect(screen.queryByRole("region", { name: /inbound signing secret/i })).not.toBeInTheDocument();
+    const card = await screen.findByRole("article", { name: "Hermes replayed" });
+    expect(within(card).getByRole("button", { name: /replace signing secret/i })).toBeEnabled();
+  });
+
   it("masks the credential field and never echoes a saved secret in the list", async () => {
     vi.mocked(apiClient.listAgentConnections).mockResolvedValue([ready]);
     renderPage();
@@ -317,6 +449,162 @@ describe("AgentSettingsPage", () => {
     // A 502 is ambiguous: the rotation may already have happened, so the retry
     // must be the same request rather than a second one.
     expect(replace.mock.calls[1][2]).toBe(replace.mock.calls[0][2]);
+  });
+
+  it("mints a new signing-secret key when the password changes after an ambiguous failure", async () => {
+    vi.mocked(apiClient.listAgentConnections).mockResolvedValue([ready]);
+    const replace = vi
+      .spyOn(apiClient, "rotateAgentSigningSecret")
+      .mockRejectedValue(new ApiError("Bad Gateway", 502, { message: "No answer." }, "corr-sign-password"));
+    renderPage();
+
+    const user = userEvent.setup();
+    const card = await screen.findByRole("article", { name: "Hermes" });
+    await user.click(within(card).getByRole("button", { name: /replace signing secret/i }));
+    let dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Confirm with your password"), "wrong-password");
+    await user.click(within(dialog).getByRole("button", { name: "Replace signing secret" }));
+    await waitFor(() => expect(replace).toHaveBeenCalledTimes(1));
+
+    await user.clear(within(dialog).getByLabelText("Confirm with your password"));
+    await user.type(within(dialog).getByLabelText("Confirm with your password"), "correct-password");
+    await user.click(within(dialog).getByRole("button", { name: "Replace signing secret" }));
+    await waitFor(() => expect(replace).toHaveBeenCalledTimes(2));
+
+    expect(replace.mock.calls[1][2]).not.toBe(replace.mock.calls[0][2]);
+    dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByLabelText("Confirm with your password")).toHaveValue("correct-password");
+  });
+
+  it("retires a signing-secret key after a definitive 4xx before a corrected retry", async () => {
+    vi.mocked(apiClient.listAgentConnections).mockResolvedValue([ready]);
+    const replace = vi
+      .spyOn(apiClient, "rotateAgentSigningSecret")
+      .mockRejectedValueOnce(
+        new ApiError("Forbidden", 403, { message: "Current password is incorrect." }, "corr-sign-4xx"),
+      )
+      .mockResolvedValue({ ...ready, revision: 3, inbound_signing_secret: "replacement-secret" });
+    renderPage();
+
+    const user = userEvent.setup();
+    const card = await screen.findByRole("article", { name: "Hermes" });
+    await user.click(within(card).getByRole("button", { name: /replace signing secret/i }));
+    const dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Confirm with your password"), "wrong-password");
+    await user.click(within(dialog).getByRole("button", { name: "Replace signing secret" }));
+    await waitFor(() => expect(within(dialog).getByRole("alert")).toHaveTextContent(/incorrect/i));
+
+    await user.clear(within(dialog).getByLabelText("Confirm with your password"));
+    await user.type(within(dialog).getByLabelText("Confirm with your password"), "correct-password");
+    await user.click(within(dialog).getByRole("button", { name: "Replace signing secret" }));
+    await waitFor(() => expect(replace).toHaveBeenCalledTimes(2));
+
+    expect(replace.mock.calls[1][2]).not.toBe(replace.mock.calls[0][2]);
+  });
+
+  it("reuses the ambiguous signing-secret intent after close and reopen for the exact same payload", async () => {
+    vi.mocked(apiClient.listAgentConnections).mockResolvedValue([ready]);
+    const replace = vi
+      .spyOn(apiClient, "rotateAgentSigningSecret")
+      .mockRejectedValue(new ApiError("Bad Gateway", 502, { message: "No answer." }, "corr-sign-reopen"));
+    renderPage();
+
+    const user = userEvent.setup();
+    const card = await screen.findByRole("article", { name: "Hermes" });
+    await user.click(within(card).getByRole("button", { name: /replace signing secret/i }));
+    let dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Confirm with your password"), "same-password");
+    await user.click(within(dialog).getByRole("button", { name: "Replace signing secret" }));
+    await waitFor(() => expect(replace).toHaveBeenCalledTimes(1));
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    await user.click(within(cardFor("Hermes")).getByRole("button", { name: /replace signing secret/i }));
+    dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Confirm with your password"), "same-password");
+    await user.click(within(dialog).getByRole("button", { name: "Replace signing secret" }));
+    await waitFor(() => expect(replace).toHaveBeenCalledTimes(2));
+
+    expect(replace.mock.calls[1][2]).toBe(replace.mock.calls[0][2]);
+  });
+
+  it("mints a new signing-secret key when the connection revision changes", async () => {
+    vi.mocked(apiClient.listAgentConnections)
+      .mockResolvedValueOnce([ready])
+      .mockResolvedValue([connection({ revision: 3 })]);
+    vi.spyOn(apiClient, "testAgentConnection").mockResolvedValue(connection({ revision: 3 }));
+    const replace = vi
+      .spyOn(apiClient, "rotateAgentSigningSecret")
+      .mockRejectedValue(new ApiError("Bad Gateway", 502, { message: "No answer." }, "corr-sign-revision"));
+    renderPage();
+
+    const user = userEvent.setup();
+    let card = await screen.findByRole("article", { name: "Hermes" });
+    await user.click(within(card).getByRole("button", { name: /replace signing secret/i }));
+    let dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Confirm with your password"), "same-password");
+    await user.click(within(dialog).getByRole("button", { name: "Replace signing secret" }));
+    await waitFor(() => expect(replace).toHaveBeenCalledTimes(1));
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    card = cardFor("Hermes");
+    await user.click(within(card).getByRole("button", { name: "Test connection" }));
+    await waitFor(() => expect(apiClient.listAgentConnections).toHaveBeenCalledTimes(2));
+    await user.click(within(cardFor("Hermes")).getByRole("button", { name: /replace signing secret/i }));
+    dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Confirm with your password"), "same-password");
+    await user.click(within(dialog).getByRole("button", { name: "Replace signing secret" }));
+    await waitFor(() => expect(replace).toHaveBeenCalledTimes(2));
+
+    expect(replace.mock.calls[1][1].expected_revision).toBe(3);
+    expect(replace.mock.calls[1][2]).not.toBe(replace.mock.calls[0][2]);
+  });
+
+  it("retires a signing-secret key after success settlement", async () => {
+    vi.mocked(apiClient.listAgentConnections).mockResolvedValue([ready]);
+    const replace = vi
+      .spyOn(apiClient, "rotateAgentSigningSecret")
+      .mockResolvedValue({ ...ready, revision: 3, inbound_signing_secret: "replacement-secret" });
+    renderPage();
+
+    const user = userEvent.setup();
+    let card = await screen.findByRole("article", { name: "Hermes" });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await user.click(within(card).getByRole("button", { name: /replace signing secret/i }));
+      const dialog = screen.getByRole("dialog");
+      await user.type(within(dialog).getByLabelText("Confirm with your password"), "same-password");
+      await user.click(within(dialog).getByRole("button", { name: "Replace signing secret" }));
+      await waitFor(() => expect(replace).toHaveBeenCalledTimes(attempt + 1));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      const panel = screen.getByRole("region", { name: /replacement signing secret/i });
+      await user.click(within(panel).getByRole("button", { name: /i've saved it/i }));
+      card = cardFor("Hermes");
+    }
+
+    expect(replace.mock.calls[1][2]).not.toBe(replace.mock.calls[0][2]);
+  });
+
+  it("uses distinct signing-secret keys for different connections", async () => {
+    vi.mocked(apiClient.listAgentConnections).mockResolvedValue([
+      ready,
+      connection({ id: "conn-second", name: "Second agent" }),
+    ]);
+    const replace = vi
+      .spyOn(apiClient, "rotateAgentSigningSecret")
+      .mockRejectedValue(new ApiError("Bad Gateway", 502, { message: "No answer." }, "corr-sign-connection"));
+    renderPage();
+
+    const user = userEvent.setup();
+    for (const name of ["Hermes", "Second agent"]) {
+      const card = await screen.findByRole("article", { name });
+      await user.click(within(card).getByRole("button", { name: /replace signing secret/i }));
+      const dialog = screen.getByRole("dialog");
+      await user.type(within(dialog).getByLabelText("Confirm with your password"), "same-password");
+      await user.click(within(dialog).getByRole("button", { name: "Replace signing secret" }));
+      await waitFor(() => expect(replace).toHaveBeenCalledTimes(name === "Hermes" ? 1 : 2));
+      await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    }
+
+    expect(replace.mock.calls[1][2]).not.toBe(replace.mock.calls[0][2]);
   });
 
   it("does not offer a signing-secret replacement on a disconnected connection", async () => {
