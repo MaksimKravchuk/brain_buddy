@@ -1,4 +1,4 @@
-.PHONY: install-backend install-frontend dev-backend dev-frontend lint-backend lint-frontend test-backend ci-backend test-frontend test-e2e build-frontend ci-frontend validate-ci check-specs install-mobile typecheck-mobile test-mobile integration-mobile build-mobile ci-mobile
+.PHONY: install-backend install-frontend dev-backend dev-frontend lint-backend lint-frontend test-backend ci-backend test-frontend test-e2e build-frontend ci-frontend validate-ci check-specs install-mobile typecheck-mobile lint-mobile test-mobile integration-mobile build-mobile ci-mobile
 
 install-backend:
 	cd backend && python -m pip install -e .[dev]
@@ -14,7 +14,8 @@ dev-frontend:
 
 test-backend:
 	cd backend && pytest --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results
-	python3 scripts/validate_backend_coverage.py backend/coverage.xml
+	python3 scripts/validate_coverage_floor.py --stack backend --format cobertura \
+		--report backend/coverage.xml --floor backend/coverage-floor.json
 	python3 scripts/validate_allure_taxonomy.py --path backend/allure-results --label backend-pytest
 
 lint-backend:
@@ -27,6 +28,8 @@ ci-backend: lint-backend test-backend
 
 test-frontend:
 	cd frontend && npm run test:coverage
+	python3 scripts/validate_coverage_floor.py --stack frontend --format istanbul-summary \
+		--report frontend/coverage/coverage-summary.json --floor frontend/coverage-floor.json
 	python3 scripts/validate_allure_taxonomy.py --path frontend/allure-results/vitest --label frontend-vitest
 
 test-e2e:
@@ -47,6 +50,7 @@ validate-ci:
 	python3 -m unittest scripts/test_validate_brain_buddy_design_skill.py -v
 	python3 -m unittest scripts/test_validate_ci_artifacts.py -v
 	python3 -m unittest scripts/test_validate_allure_taxonomy.py -v
+	python3 -m unittest scripts/test_validate_coverage_floor.py -v
 	python3 -m unittest scripts/test_validate_trunk_delivery.py -v
 	python3 -m unittest scripts/test_submit_to_trunk.py -v
 	python3 -m unittest scripts/test_production_smoke.py -v
@@ -70,8 +74,13 @@ install-mobile:
 typecheck-mobile:
 	cd mobile && npx tsc --noEmit
 
+lint-mobile:
+	cd mobile && npx eslint .
+
 test-mobile:
-	cd mobile && npx jest
+	cd mobile && npx jest --coverage
+	python3 scripts/validate_coverage_floor.py --stack mobile --format istanbul-summary \
+		--report mobile/coverage/coverage-summary.json --floor mobile/coverage-floor.json
 
 # Boots its own disposable backend (requires backend deps: make install-backend)
 integration-mobile:
@@ -80,4 +89,4 @@ integration-mobile:
 build-mobile:
 	cd mobile && npx expo export --platform ios
 
-ci-mobile: typecheck-mobile test-mobile build-mobile
+ci-mobile: typecheck-mobile lint-mobile test-mobile build-mobile

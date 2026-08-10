@@ -215,9 +215,22 @@ jobs:
         run: |
           pytest --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results
 
-      - name: Enforce backend line and branch coverage
+      - name: Enforce backend coverage floor
         if: env.RUN == 'true'
-        run: python3 ../scripts/validate_backend_coverage.py coverage.xml
+        working-directory: .
+        run: |
+          # The floor may only ratchet upward, so a pull request is also checked
+          # against the floor recorded on its base branch.
+          base_args=()
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}" || true
+            if git show "${{ github.event.pull_request.base.sha }}:backend/coverage-floor.json" \
+                 > /tmp/base-backend-floor.json 2>/dev/null; then
+              base_args=(--base-floor "/tmp/base-backend-floor.json")
+            fi
+          fi
+          python3 scripts/validate_coverage_floor.py --stack backend --format cobertura \
+            --report backend/coverage.xml --floor backend/coverage-floor.json "${base_args[@]}"
 
       - name: Validate backend Allure results
         if: always() && env.RUN == 'true'
@@ -291,6 +304,23 @@ jobs:
         if: env.RUN == 'true'
         run: npm run test:coverage
 
+      - name: Enforce frontend coverage floor
+        if: env.RUN == 'true'
+        working-directory: .
+        run: |
+          # The floor may only ratchet upward, so a pull request is also checked
+          # against the floor recorded on its base branch.
+          base_args=()
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}" || true
+            if git show "${{ github.event.pull_request.base.sha }}:frontend/coverage-floor.json" \
+                 > /tmp/base-frontend-floor.json 2>/dev/null; then
+              base_args=(--base-floor "/tmp/base-frontend-floor.json")
+            fi
+          fi
+          python3 scripts/validate_coverage_floor.py --stack frontend --format istanbul-summary \
+            --report frontend/coverage/coverage-summary.json --floor frontend/coverage-floor.json "${base_args[@]}"
+
       - name: Validate frontend Allure results
         if: always() && env.RUN == 'true'
         working-directory: .
@@ -360,13 +390,33 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: ESLint lint
+        if: env.RUN == 'true'
+        run: npm run lint
+
       - name: Type check
         if: env.RUN == 'true'
         run: npm run typecheck
 
-      - name: Run unit tests
+      - name: Run unit tests with coverage
         if: env.RUN == 'true'
-        run: npm test
+        run: npm test -- --coverage
+      - name: Enforce mobile coverage floor
+        if: env.RUN == 'true'
+        working-directory: .
+        run: |
+          # The floor may only ratchet upward, so a pull request is also checked
+          # against the floor recorded on its base branch.
+          base_args=()
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}" || true
+            if git show "${{ github.event.pull_request.base.sha }}:mobile/coverage-floor.json" \
+                 > /tmp/base-mobile-floor.json 2>/dev/null; then
+              base_args=(--base-floor "/tmp/base-mobile-floor.json")
+            fi
+          fi
+          python3 scripts/validate_coverage_floor.py --stack mobile --format istanbul-summary \
+            --report mobile/coverage/coverage-summary.json --floor mobile/coverage-floor.json "${base_args[@]}"
 
       - name: Set up Python for the integration backend
         if: env.RUN == 'true'
