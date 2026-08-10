@@ -300,10 +300,14 @@ function findActiveToken(input: string, caret: number): ActiveToken | null {
 function scoreEntity(query: string, name: string): number | null {
   const normalizedQuery = normalize(query);
   const normalizedName = normalize(name);
-  // An empty query needs no rank of its own: every name is prefixed by "", so
-  // they all tie at rank 1 and fall through to the name/id tie-break, which is
-  // the deterministic name order the contract asks for. A dedicated fifth rank
-  // would score the same entities identically by a different number.
+  // Equivalent-mutant note: emptying or inverting this guard cannot be caught.
+  // Every name is prefixed by "", so with the guard gone all entities tie at
+  // rank 1 instead of rank 4 and fall through to the same name/id tie-break --
+  // the deterministic name order the contract asks for either way. The rank is
+  // kept because it states the intent, not because a test can see it.
+  if (!normalizedQuery) {
+    return 4;
+  }
   if (normalizedName === normalizedQuery) {
     return 0;
   }
