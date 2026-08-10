@@ -58,22 +58,30 @@ Five lenses run in parallel, capped at `max_concurrency: 5`:
 | role | lens | runtime |
 |---|---|---|
 | `requirements-consistency` | contradictions, missing acceptance behavior, spec↔plan drift | codex |
-| `architecture-consistency` | boundaries, contracts, data ownership, ADR alignment | codex |
+| `architecture-consistency` | boundaries, contracts, data ownership, ADR alignment | Claude subagent |
 | `testability-evidence` | proportionate evidence per acceptance outcome | codex |
 | `privacy-consent-security` | consent, retention, purge, export, owner scoping, PII | Claude subagent |
 | `ux-accessibility-mobile` | states, keyboard/focus, mobile viability, ADR-0002 resume | Claude subagent |
 
 Plus `adversarial-high-risk` when risk is `high`.
 
+The split is deliberate, not incidental. Three lenses used to share one model,
+which is one opinion counted three times rather than three independent
+opinions; ADR-0012 moved `architecture-consistency` off codex so that no model
+covers a majority of the panel. Tests assert that property rather than leaving
+it to convention.
+
 **The `codex` CLI is not installed everywhere.** The driver fails closed via
-`shutil.which`, so on a Claude-only machine the three codex lenses cannot run.
-The two Claude lenses are deliberately routed to in-session subagents
-(`.claude/agents/security-privacy-reviewer.md`,
-`.claude/agents/ux-a11y-reviewer.md`) so the mandatory privacy and UX lenses
-still run. When codex is absent: run the two Claude lenses via the Agent tool,
-write their JSON to `.specify/workflows/runs/<run-id>/reviews/<role>.json`,
-and **report the three missing lenses explicitly**. A partial campaign is
-never reported as a clean one.
+`shutil.which`, so on a Claude-only machine the two codex lenses cannot run.
+The three Claude lenses run as in-session subagents
+(`.claude/agents/architecture-consistency-reviewer.md`,
+`security-privacy-reviewer.md`, `ux-a11y-reviewer.md`), so a majority of the
+panel — including both mandatory constitutional lenses — survives a
+single-runtime machine. When codex is absent: run the three Claude lenses via
+the Agent tool, write their JSON to
+`.specify/workflows/runs/<run-id>/reviews/<role>.json`, and let the aggregator
+record the missing two. It returns **`escalated`**, not a pass — a partial
+campaign is never reported as a clean one.
 
 Each reviewer returns JSON valid against
 `.specify/workflows/speckit/review.schema.json`. The agent files are the
@@ -86,21 +94,44 @@ than restating the rubric, so the two cannot drift.
 python3 scripts/spec_kit_planning_review.py summarize --run-id "<run-id>"
 ```
 
-The gate rule, in order:
+The gate rule, in order (ADR-0012):
 
-1. Any `product_decisions`, or any reviewer verdict of
-   `product-decision-required` → **`product-decision-required`**. Blocks;
-   needs the human.
-2. Any reviewer verdict of `changes-required`, or any `blocking` finding →
+1. Any configured lens produced no review → **`escalated`**. Missing mandatory
+   evidence never resolves to a pass, and it is checked first: a campaign that
+   did not fully run cannot be trusted to have surfaced the product decisions
+   either.
+2. Any `product_decisions`, or any reviewer verdict of
+   `product-decision-required` → **`product-decision-required`**. Needs the
+   human.
+3. Any reviewer verdict of `changes-required`, or any `blocking` finding →
    **`technical-changes-required`**.
-3. Otherwise → **`approved`**.
+4. Risk class `high` with no recorded human sign-off → **`escalated`**. At that
+   class an uncorrelated automated mechanism alone is not sufficient evidence;
+   a named human must accept the residual risk.
+5. Otherwise → **`approved`**.
 
 A reviewer's own verdict is gate-blocking on its own. The aggregator does not
 re-derive the verdict from finding severities — doing so used to launder
 `changes-required` into `approved`.
 
-Fail-closed quorum: every configured role must return schema-valid JSON. A
-reviewer that crashed is not a reviewer that passed.
+A malformed review still raises. Absence and corruption are different: one is a
+gap, the other is a defect in evidence that was actually produced.
+
+## Risk classes
+
+`low | medium | high`, derived by the preflight from the paths the planning
+artifacts name:
+
+- **high** — any ASK-class surface (auth, migrations, CI, deploy, secrets).
+  Adds `adversarial-high-risk` and requires human sign-off.
+- **low** — every named path is inert (`docs/`, `specs/`, `requirements/`,
+  `*.md`) and at least one path was found.
+- **medium** — everything else, **including "no paths could be extracted"**.
+
+Unknown risk is `medium`, never `low`. Treating silence as safety would let
+exactly the work nobody could classify take the cheapest path. Risk escalates
+and never de-escalates: raise the class if you disagree, but you cannot argue
+the classifier down.
 
 ## Step 4 — the campaign cap
 
@@ -115,17 +146,21 @@ decisions, and `founder-accepted` had to be invented mid-flight.
 - After campaign 2, the remaining options are: land the fixes and stop, defer
   the residue into explicit open lanes, or close by **founder acceptance**.
 - Founder acceptance requires a full `founder_acceptance` record —
-  `accepted_by`, `accepted_on`, a substantive rationale of at least 120
+  `accepted_by`, `accepted_on`, `expires_on`, at least one concrete
+  `compensating_measures` entry, a substantive rationale of at least 120
   characters, and the complete `campaign_history` with every run id and its
   true status. It documents *more* than an approval, never less. Fabricating
   `approved` is prohibited.
+- **The acceptance expires.** Validation fails once `expires_on` has passed —
+  an acceptance with no end date is not an acceptance, it is a permanent hole
+  in the gate.
 
 ## Step 5 — report
 
 ```
-REVIEW VERDICT: approved | technical-changes-required | product-decision-required | founder-accepted
+REVIEW VERDICT: approved | escalated | technical-changes-required | product-decision-required | founder-accepted
 run id:    <run-id>       campaign: <1|2>
-risk:      standard | high   (derived | operator-set)
+risk:      low | medium | high   (derived | operator-set)   human sign-off: yes|no|n/a
 lenses:    <n>/<n> ran      MISSING: <roles + why>
 
 BLOCKING (<n>)

@@ -207,17 +207,33 @@ product decision raised by review, ASK-class landing, and the final report.
 `/speckit-review` is the single front door; do not invoke
 `scripts/spec_kit_planning_review.py` ad hoc. ADR-0011 governs it.
 
+**Risk classes** (ADR-0012): `low | medium | high`, derived by the preflight.
+An ASK-class surface derives `high` and additionally requires a recorded human
+sign-off. An entirely inert change — every named path under `docs/`, `specs/`,
+`requirements/` or `*.md` — derives `low`. **Everything else, including a
+change no path could be extracted from, derives `medium`.** Unknown risk is
+never `low`: treating silence as safety would let exactly the work nobody could
+classify take the cheapest path. Risk escalates and never de-escalates.
+
 **Aggregation rule**, in order:
 
-1. Any `product_decisions`, or any reviewer verdict of
+1. Any configured lens produced no review → `escalated`. Missing mandatory
+   evidence never resolves to a pass, and it is checked first.
+2. Any `product_decisions`, or any reviewer verdict of
    `product-decision-required` → `product-decision-required`. Needs the human.
-2. Any reviewer verdict of `changes-required`, or any `blocking` finding →
+3. Any reviewer verdict of `changes-required`, or any `blocking` finding →
    `technical-changes-required`.
-3. Otherwise → `approved`.
+4. Risk `high` with no recorded human sign-off → `escalated`.
+5. Otherwise → `approved`.
 
 A reviewer's verdict is gate-blocking on its own; the aggregator does not
-re-derive it from finding severities. Every configured role must return
-schema-valid JSON — a reviewer that crashed is not a reviewer that passed.
+re-derive it from finding severities. A malformed review still raises — absence
+and corruption are different.
+
+**Panel independence.** No model covers a majority of the five lenses and the
+panel spans two providers, both asserted by tests. Three lenses sharing one
+model is one opinion counted three times, which the aggregation rule would read
+as corroboration.
 
 **Campaign cap: two.** Fresh reviewer sessions re-litigate artifacts from
 scratch, so finding counts diverge between runs even as every verified defect
@@ -225,9 +241,9 @@ is fixed. Carry campaign 1's findings forward into campaign 2. After campaign
 2: land the fixes, defer the residue into explicit open lanes, or close by
 founder acceptance with the full record (see below).
 
-**Degraded runs.** Three of the five lenses shell out to the `codex` CLI. Where
-it is absent they cannot run, and the campaign must report exactly which
-lenses were missing. A partial campaign is never reported as a clean one.
+**Degraded runs.** Two of the five lenses shell out to the `codex` CLI. Where
+it is absent they cannot run and the campaign returns `escalated`, naming the
+missing lenses. A partial campaign is never reported as a clean one.
 
 For Claude Code and Hermes Agent in this repository, Spec Kit is installed as
 skills, so the invocation names use hyphens:
