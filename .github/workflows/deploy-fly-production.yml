@@ -78,7 +78,7 @@ jobs:
       # below authenticates as the dedicated landing identity, never as the
       # (read-only) workflow token.
       - name: Check out the CI-tested revision
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
@@ -189,7 +189,7 @@ jobs:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
     steps:
       - name: Check out the CI-tested revision
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 

@@ -118,12 +118,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact PR head
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20.19.0"
           cache: npm
@@ -145,7 +145,7 @@ jobs:
       VITE_API_BASE_URL: /api
     steps:
       - name: Checkout exact PR head
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
@@ -229,7 +229,7 @@ jobs:
         run: curl --fail --retry 10 --retry-all-errors --retry-delay 3 "$PREVIEW_URL/" >/dev/null
 
       - name: Publish stable preview evidence
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           PREVIEW_URL: ${{ env.PREVIEW_URL }}
           DEPLOYED_SHA: ${{ github.event.pull_request.head.sha }}
@@ -307,7 +307,7 @@ jobs:
           echo "Cleanup verified for $APP_NAME" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Publish cleanup evidence
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           APP_NAME: ${{ env.APP_NAME }}
         with:
