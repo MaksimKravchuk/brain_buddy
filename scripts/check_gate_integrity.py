@@ -245,6 +245,137 @@ INVARIANTS: tuple[Invariant, ...] = (
         "The privacy and UX lenses cover constitution principles I and V. "
         "Removing either leaves a principle with no reviewer.",
     ),
+    # The fallback exists so an absent runtime cannot lock the gate shut. That
+    # is only acceptable while the substitution stays visible: a fallback that
+    # stops recording degradation is a panel silently running on one oracle
+    # while reporting the diversity it was configured with.
+    # Every pattern below is right-bounded to the enclosing function with
+    # `(?:(?!\ndef ).)*?`. An unbounded DOTALL `.*?` runs to the end of the
+    # file and happily terminates on an identical token in an unrelated
+    # function — the exact hazard flagged for the Makefile invariants above,
+    # and one these reintroduced on their first draft: deleting run_review's
+    # own `raise` still matched `preflight`'s three hundred lines later.
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "a fallback oracle is recorded as degraded",
+        r'def resolve_oracle\((?:(?!\ndef ).)*?"degraded":\s*True',
+        "Substituting a reviewer runtime without marking it degraded hides a "
+        "correlated panel behind a configuration that no longer describes it.",
+    ),
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "both codex lenses keep a fallback",
+        r'"fallback":\s*CODEX_FALLBACK(?:(?!\ndef ).)*?"fallback":\s*CODEX_FALLBACK',
+        "Removing a fallback returns that lens to writing no review when its "
+        "CLI is absent, which is the permanent `escalated` ADR-0014 removed.",
+    ),
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "the harness stamps reviewer provenance",
+        r'review\["oracle"\]\s*=\s*oracle',
+        "Provenance must be written by the harness. Dropping the stamp leaves "
+        "no record of which runtime produced a verdict.",
+    ),
+    # Guards the call site, not the resolver. `resolve_oracle` can be left
+    # perfectly correct and its verdict overwritten one line later.
+    MustNotMatch(
+        "scripts/spec_kit_planning_review.py",
+        "resolved provenance is not rewritten after the fact",
+        r"oracle\s*=\s*\{\*\*oracle",
+        "Rebuilding the oracle after resolution can flip `degraded` without "
+        "touching the resolver any invariant is watching.",
+    ),
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "degradation reaches the summary",
+        r'summary\["degraded_lenses"\]\s*=\s*degraded',
+        "A degradation recorded on the review but absent from the summary is "
+        "invisible to every consumer of the gate. Bound to the collected list "
+        "so assigning a constant empty list does not satisfy it.",
+    ),
+    # Anchored inside run_review on purpose, and bounded on both sides. The
+    # first draft bounded only the left edge, so deleting run_review's raise
+    # let the match run on to preflight's — seeing the hazard and fixing half
+    # of it.
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "a failing reviewer is not routed to a fallback",
+        r"def run_review\((?:(?!\ndef ).)*?if result\.returncode != 0:"
+        r"(?:(?!\ndef ).)*?raise ReviewError",
+        "Only an absent runtime may be substituted. Retrying a failed "
+        "reviewer on another oracle launders a defect into a clean verdict.",
+    ),
+    # ADR-0014 trades blocking for visibility: a degraded campaign may reach
+    # `approved` because the human will see the degradation. After that trade
+    # the seeing happens here, so the renderer became load-bearing for the
+    # decision not to block. Four invariants assert `summarize` *writes* the
+    # facts; none asserted anything *reads* them, and the cheapest future edit
+    # — keep the write, drop the render — restores the exact defect in a diff
+    # nobody would flag.
+    #
+    # An invariant rather than a hashed file, for the same reason as ci.yml:
+    # this file changes for ordinary reporting reasons.
+    MustMatch(
+        "scripts/render_feature_report.py",
+        "the report renders panel provenance",
+        r'"degraded_lenses"(?:.*?)"oracle_unknown_lenses"(?:.*?)"stale_reviews"',
+        "A degradation written to the summary and never rendered is invisible "
+        "to the human whose reading is the whole justification for letting a "
+        "degraded campaign pass.",
+    ),
+    # Found by review on this PR's own second commit, and the same shape as
+    # the `panel_correlated` correction one field over: an insufficiency
+    # rendered as a finding. With fewer than two lenses carrying provenance
+    # there is nothing to answer "did the panel span providers" with, and the
+    # answer must not be the one a verified cross-provider panel gets.
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "the single-provider flag is tri-state, not two-valued",
+        r"None if known_oracles < 2",
+        "`len(providers) == 1 and known > 1` reports both a diverse panel and "
+        "an unmeasured one as `false`, and the report renders `false` as "
+        "'more than one provider is represented'.",
+    ),
+    MustMatch(
+        "scripts/render_feature_report.py",
+        "an unmeasurable provider question is rendered, not skipped",
+        r"\*\*Single-provider panel\*\*: not recorded",
+        "Silence on the third state leaves the reader to infer a diverse "
+        "panel from an absent line, which is the false claim this branch "
+        "exists to replace.",
+    ),
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "high-risk handoffs must state panel provenance",
+        r"a high-risk planning_review must state planning_review\.\{field\}",
+        "The gate measures degradation and unknown provenance; a handoff that "
+        "may omit them lets an authorized high-risk change be indistinguishable "
+        "from one reviewed by a panel that ran as configured.",
+    ),
+    # The Makefile invariants above assert that `check-specs` runs the guards.
+    # They said nothing about whether anything runs `check-specs`, and the CI
+    # spec-kit job ran only the feature-spec validator — so this guard, its
+    # invariants and the preserved-override check were absent from every build.
+    # An actor could weaken its own gate and watch CI go green. Guarding the
+    # Makefile without guarding the caller is a guard with no reader.
+    #
+    # Deliberately an invariant and not a hashed file: ci.yml changes for
+    # unrelated reasons constantly, and a hash here would spend the manifest's
+    # friction budget on noise instead of on the gate.
+    MustMatch(
+        ".github/workflows/ci.yml",
+        "CI runs the gate-integrity guard",
+        r"python3 scripts/check_gate_integrity\.py",
+        "A guard that never executes in CI protects nothing. The Makefile "
+        "target is only enforcement if something actually invokes it.",
+    ),
+    MustMatch(
+        ".github/workflows/ci.yml",
+        "CI runs the preserved-override guard",
+        r"python3 scripts/check_speckit_manifests\.py",
+        "Preserved Spec Kit overrides can otherwise be reverted by an "
+        "integration upgrade with no build failure.",
+    ),
 )
 
 

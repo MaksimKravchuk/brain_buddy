@@ -230,6 +230,20 @@ jobs:
           python3 -m unittest scripts/test_check_spec_kit_specs.py -v
           python3 scripts/check_spec_kit_specs.py
 
+      # The gate-integrity guard asserts that `make check-specs` runs it, but
+      # nothing ran `make check-specs` here — so the guard, its invariants and
+      # the preserved-override check were all absent from CI and an actor could
+      # weaken its own gate on a green build. That is the exact defect class the
+      # guard exists for, reintroduced by omission one layer up.
+      - name: Validate the gates themselves
+        run: |
+          python3 -m unittest scripts/test_check_speckit_manifests.py -v
+          python3 -m unittest scripts/test_check_gate_integrity.py -v
+          python3 -m unittest scripts/test_spec_kit_planning_review.py -v
+          python3 -m unittest scripts/test_render_feature_report.py -v
+          python3 scripts/check_speckit_manifests.py
+          python3 scripts/check_gate_integrity.py
+
   backend:
     name: Backend
     runs-on: ubuntu-latest

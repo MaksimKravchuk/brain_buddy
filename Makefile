@@ -133,6 +133,7 @@ check-specs:
 	python3 -m unittest scripts/test_check_speckit_manifests.py -v
 	python3 -m unittest scripts/test_check_gate_integrity.py -v
 	python3 -m unittest scripts/test_spec_kit_planning_review.py -v
+	python3 -m unittest scripts/test_render_feature_report.py -v
 	python3 scripts/check_spec_kit_specs.py
 	python3 scripts/check_speckit_manifests.py
 	python3 scripts/check_gate_integrity.py

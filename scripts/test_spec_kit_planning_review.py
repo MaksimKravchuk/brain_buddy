@@ -11,6 +11,7 @@ import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,9 +32,9 @@ class PlanningReviewCommandTests(unittest.TestCase):
     def test_codex_review_command_is_read_only_and_ephemeral(self) -> None:
         module = load_module()
         command, _env = module.build_review_command(
-            role="requirements-consistency",
             prompt="Review the planning artifacts.",
             schema_path=ROOT / ".specify" / "workflows" / "speckit" / "review.schema.json",
+            config=module.ROLE_CONFIGS["requirements-consistency"],
         )
 
         self.assertEqual(command[0:2], ["codex", "exec"])
@@ -46,9 +47,9 @@ class PlanningReviewCommandTests(unittest.TestCase):
     def test_fable_review_command_uses_plan_mode_and_read_only_tools(self) -> None:
         module = load_module()
         command, env = module.build_review_command(
-            role="adversarial-high-risk",
             prompt="Challenge the plan.",
             schema_path=ROOT / ".specify" / "workflows" / "speckit" / "review.schema.json",
+            config=module.ROLE_CONFIGS["adversarial-high-risk"],
         )
 
         self.assertEqual(command[0:2], ["claude", "-p"])
@@ -586,6 +587,12 @@ class HighRiskHandoffSignoffTests(unittest.TestCase):
             "risk": risk,
             "status": "approved",
             "reviewers": [*self.module.STANDARD_ROLES, "adversarial-high-risk"],
+            # Panel provenance is required at `high`. These are the clean-panel
+            # values, so the assertions below fail on the sign-off rather than
+            # on whichever high-risk requirement the validator reaches first.
+            "degraded_lenses": [],
+            "oracle_unknown_lenses": [],
+            "single_provider_panel": False,
         }
         if signoff != "omit":
             review["human_signoff"] = signoff
@@ -645,6 +652,85 @@ class HighRiskHandoffSignoffTests(unittest.TestCase):
     def test_medium_risk_needs_no_signoff(self) -> None:
         validated = self.module.validate_handoff(self.handoff(risk="medium"))
         self.assertNotIn("human_signoff", validated["planning_review"])
+
+
+class HandoffProvenanceTests(unittest.TestCase):
+    """The authorizing artifact must be able to repeat what the gate measured.
+
+    ADR-0012 correction D was a schema describing a sign-off that nothing
+    enforced. This is the mirror image: a gate measuring degradation that the
+    handoff could not carry. The spec-gate tests cover the rejections; these
+    cover carry-through, which a subprocess exit code cannot assert.
+    """
+
+    def setUp(self) -> None:
+        self.module = load_module()
+
+    def handoff(self, **review_overrides) -> dict:
+        review: dict = {
+            "run_id": "run123",
+            "risk": "medium",
+            "status": "approved",
+            "reviewers": list(self.module.STANDARD_ROLES),
+        }
+        review.update(review_overrides)
+        return {
+            "schema_version": "speckit-hermes-handoff/v1",
+            "root_outcome": "Deliver a reviewed planning change.",
+            "artifacts": {
+                "spec": "specs/123-example/spec.md",
+                "plan": "specs/123-example/plan.md",
+                "tasks": "specs/123-example/tasks.md",
+                "checklist": "specs/123-example/checklists/requirements.md",
+                "adrs": [],
+            },
+            "planning_review": review,
+            "product_decisions": [],
+            "lanes": [
+                {
+                    "id": "backend-contract",
+                    "outcome": "Implement the backend contract.",
+                    "depends_on": [],
+                    "task_refs": ["T001"],
+                    "scope_paths": ["backend/app/example.py"],
+                    "exclusive_writer_scope": ["backend/app/example.py"],
+                    "acceptance_evidence": ["Targeted backend tests pass."],
+                }
+            ],
+            "risks": [],
+            "non_goals": ["No deployment change."],
+        }
+
+    def test_degradation_is_carried_into_the_validated_handoff(self) -> None:
+        validated = self.module.validate_handoff(
+            self.handoff(
+                degraded_lenses=["requirements-consistency"],
+                oracle_unknown_lenses=[],
+                single_provider_panel=True,
+            )
+        )
+        review = validated["planning_review"]
+        self.assertEqual(review["degraded_lenses"], ["requirements-consistency"])
+        self.assertIs(review["single_provider_panel"], True)
+
+    def test_a_false_single_provider_flag_is_carried_not_dropped(self) -> None:
+        """`false` is a measurement. Truthiness would silently discard it."""
+        validated = self.module.validate_handoff(
+            self.handoff(degraded_lenses=[], single_provider_panel=False)
+        )
+        self.assertIs(validated["planning_review"]["single_provider_panel"], False)
+
+    def test_a_degraded_lens_absent_from_the_panel_is_rejected(self) -> None:
+        with self.assertRaises(ValueError) as caught:
+            self.module.validate_handoff(
+                self.handoff(degraded_lenses=["testability_evidence"])
+            )
+        self.assertIn("cannot have been degraded", str(caught.exception))
+
+    def test_medium_risk_may_omit_provenance(self) -> None:
+        """Below high the panel is accepted as sufficient on its own."""
+        validated = self.module.validate_handoff(self.handoff())
+        self.assertNotIn("degraded_lenses", validated["planning_review"])
 
 
 class ArtifactDriftTests(unittest.TestCase):
@@ -794,7 +880,13 @@ class ReviewerIndependenceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.module = load_module()
 
-    def test_no_model_carries_a_majority_of_the_panel(self) -> None:
+    def test_no_model_carries_a_majority_of_the_configured_panel(self) -> None:
+        """The panel as configured. The panel that RUNS may differ.
+
+        A fallback can turn this into a correlated panel at run time, which is
+        why the assertion is scoped to configuration and why `summarize()`
+        reports `panel_correlated` from the oracles that actually ran.
+        """
         models: dict[str, int] = {}
         for role in self.module.STANDARD_ROLES:
             model = self.module.ROLE_CONFIGS[role]["model"]
@@ -806,12 +898,23 @@ class ReviewerIndependenceTests(unittest.TestCase):
             f"one model covers {worst} of {len(self.module.STANDARD_ROLES)} lenses: {models}",
         )
 
-    def test_panel_spans_more_than_one_provider(self) -> None:
+    def test_configured_panel_spans_more_than_one_provider(self) -> None:
         providers = {
             self.module.ROLE_CONFIGS[role]["integration"]
             for role in self.module.STANDARD_ROLES
         }
         self.assertGreater(len(providers), 1, providers)
+
+    def test_every_codex_lens_has_a_fallback_so_the_gate_can_be_reached(self) -> None:
+        """A lens with no fallback locks the gate when its CLI is absent."""
+        for role in self.module.STANDARD_ROLES:
+            config = self.module.ROLE_CONFIGS[role]
+            if config["integration"] != "codex":
+                continue
+            fallback = config.get("fallback")
+            self.assertIsInstance(fallback, dict, f"{role} has no fallback")
+            assert isinstance(fallback, dict)
+            self.assertIn(fallback["integration"], self.module.INTEGRATION_CLI)
 
     def test_every_claude_lens_points_at_an_existing_rubric_file(self) -> None:
         for role, config in self.module.ROLE_CONFIGS.items():
@@ -820,6 +923,381 @@ class ReviewerIndependenceTests(unittest.TestCase):
                 continue
             path = ROOT / ".claude" / "agents" / f"{agent}.md"
             self.assertTrue(path.is_file(), f"{role} points at missing {path}")
+
+
+class OracleFallbackTests(unittest.TestCase):
+    """An absent runtime is routed around; the substitution is never silent.
+
+    Before the fallback existed, two of five lenses shelled out to `codex`, so
+    a machine without that CLI wrote no review for them, `summarize()` counted
+    missing mandatory evidence, and every campaign returned `escalated`. The
+    gate could not be passed rather than merely being hard to pass.
+
+    The danger in fixing that is the opposite failure: a panel quietly running
+    on one oracle while reporting the diversity it was configured with.
+    """
+
+    def setUp(self) -> None:
+        self.module = load_module()
+
+    def which(self, *installed: str):
+        """Patch PATH lookup so only the named executables exist."""
+        return mock.patch.object(
+            self.module.shutil,
+            "which",
+            lambda name: f"/usr/bin/{name}" if name in installed else None,
+        )
+
+    def test_primary_runtime_is_used_and_not_marked_degraded(self) -> None:
+        with self.which("codex", "claude"):
+            config, oracle = self.module.resolve_oracle("requirements-consistency")
+        self.assertEqual(config["integration"], "codex")
+        self.assertEqual(oracle["model"], "gpt-5.6-sol")
+        self.assertFalse(oracle["degraded"])
+
+    def test_absent_primary_falls_back_and_records_the_substitution(self) -> None:
+        with self.which("claude"):
+            config, oracle = self.module.resolve_oracle("requirements-consistency")
+        self.assertEqual(config["integration"], "claude")
+        self.assertEqual(config["model"], "sonnet")
+        self.assertTrue(oracle["degraded"])
+        self.assertIn("codex", oracle["reason"])
+        # The configured oracle stays on the record. Knowing what a lens was
+        # meant to run on is what makes the substitution auditable later.
+        self.assertEqual(oracle["configured_integration"], "codex")
+        self.assertEqual(oracle["configured_model"], "gpt-5.6-sol")
+
+    def test_the_fallback_keeps_the_lens_focus(self) -> None:
+        """A fallback must review the same thing, not a weaker brief."""
+        with self.which("claude"):
+            config, _oracle = self.module.resolve_oracle("testability-evidence")
+        self.assertEqual(
+            config["focus"],
+            self.module.ROLE_CONFIGS["testability-evidence"]["focus"],
+        )
+
+    def test_a_lens_without_a_fallback_still_raises(self) -> None:
+        with self.which("codex"):
+            with self.assertRaises(self.module.ReviewError) as caught:
+                self.module.resolve_oracle("privacy-consent-security")
+        self.assertIn("not installed", str(caught.exception))
+
+    def test_raises_when_neither_primary_nor_fallback_is_installed(self) -> None:
+        with self.which():
+            with self.assertRaises(self.module.ReviewError) as caught:
+                self.module.resolve_oracle("requirements-consistency")
+        self.assertIn("fallback", str(caught.exception))
+
+    def test_a_reviewer_cannot_author_its_own_provenance(self) -> None:
+        """Provenance is stamped by the harness, never by the model.
+
+        `validate_review` rebuilds the payload from known keys, so an `oracle`
+        block emitted by the reviewer is discarded before the harness writes
+        the real one.
+        """
+        forged = {
+            "role": "requirements-consistency",
+            "verdict": "pass",
+            "summary": "No concerns.",
+            "reviewed_files": ["specs/006-example/spec.md"],
+            "findings": [],
+            "product_decisions": [],
+            "oracle": {"integration": "codex", "model": "gpt-5.6-sol", "degraded": False},
+        }
+        validated = self.module.validate_review(
+            forged, expected_role="requirements-consistency"
+        )
+        self.assertNotIn("oracle", validated)
+
+
+class DegradationVisibilityTests(unittest.TestCase):
+    """A degraded panel may pass, but it may never pass quietly."""
+
+    def setUp(self) -> None:
+        self.module = load_module()
+
+    def high_risk_roles(self) -> list[str]:
+        return [*self.module.STANDARD_ROLES, "adversarial-high-risk"]
+
+    def panel(
+        self, oracles: dict[str, dict] | None = None, roles: list[str] | None = None
+    ) -> list[dict]:
+        reviews = []
+        for role in roles or list(self.module.STANDARD_ROLES):
+            review = {
+                "role": role,
+                "verdict": "pass",
+                "summary": "No concerns.",
+                "reviewed_files": ["specs/006-example/spec.md"],
+                "findings": [],
+                "product_decisions": [],
+            }
+            if oracles and role in oracles:
+                review["oracle"] = oracles[role]
+            reviews.append(review)
+        return reviews
+
+    def test_degradation_does_not_block_but_is_named_in_the_action(self) -> None:
+        summary = self.module.aggregate_reviews(
+            self.panel(),
+            risk="medium",
+            degraded_roles=("requirements-consistency",),
+        )
+        self.assertEqual(summary["status"], "approved")
+        self.assertIn("requirements-consistency", summary["architect_action"])
+        self.assertIn("fallback oracle", summary["architect_action"])
+        self.assertEqual(summary["degraded_lenses"], ["requirements-consistency"])
+
+    def test_an_undegraded_panel_says_nothing_about_fallbacks(self) -> None:
+        summary = self.module.aggregate_reviews(self.panel(), risk="medium")
+        self.assertNotIn("fallback oracle", summary["architect_action"])
+        self.assertEqual(summary["degraded_lenses"], [])
+
+    def build_run(
+        self,
+        tmp: str,
+        oracles: dict[str, dict] | None,
+        risk: str = "medium",
+        roles: list[str] | None = None,
+    ) -> Path:
+        root = Path(tmp)
+        run_dir = root / ".specify" / "workflows" / "runs" / "run1"
+        (run_dir / "reviews").mkdir(parents=True)
+        (run_dir / "inputs.json").write_text(
+            json.dumps({"inputs": {"risk": risk}}), encoding="utf-8"
+        )
+        for review in self.panel(oracles, roles):
+            path = run_dir / "reviews" / f"{review['role']}.json"
+            path.write_text(json.dumps(review), encoding="utf-8")
+        return root
+
+    def all_degraded_to_sonnet(self) -> dict[str, dict]:
+        oracles: dict[str, dict] = {}
+        for role in self.module.STANDARD_ROLES:
+            config = self.module.ROLE_CONFIGS[role]
+            if config["integration"] == "codex":
+                oracles[role] = {
+                    "integration": "claude",
+                    "model": "sonnet",
+                    "degraded": True,
+                    "reason": "the codex CLI is not installed",
+                }
+            else:
+                oracles[role] = {
+                    "integration": "claude",
+                    "model": config["model"],
+                    "degraded": False,
+                }
+        return oracles
+
+    def test_summarize_reports_degraded_lenses_and_a_correlated_panel(self) -> None:
+        """The end-to-end path: oracle on disk -> facts in the summary.
+
+        Regression for a defect found while implementing this: `summarize()`
+        reloads each review through `validate_review`, which rebuilds the
+        payload from known keys. Without an explicit carry-across the oracle
+        survived to disk and was dropped on the way back in, so degradation
+        vanished from the one artifact meant to report it.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.build_run(tmp, self.all_degraded_to_sonnet())
+            target = self.module.summarize(root=root, run_id="run1")
+            summary = json.loads(target.read_text(encoding="utf-8"))
+
+        self.assertEqual(summary["status"], "approved")
+        self.assertEqual(
+            sorted(summary["degraded_lenses"]),
+            ["requirements-consistency", "testability-evidence"],
+        )
+        # opus x2 + sonnet x3 out of five: sonnet holds a strict majority, so
+        # the panel's agreement is worth less than its size suggests.
+        self.assertTrue(summary["panel_correlated"])
+        self.assertEqual(summary["panel_oracles"]["claude/sonnet"], 3)
+        self.assertEqual(summary["oracle_unknown_lenses"], [])
+
+    def test_a_fully_configured_panel_is_not_reported_as_correlated(self) -> None:
+        oracles = {
+            role: {
+                "integration": self.module.ROLE_CONFIGS[role]["integration"],
+                "model": self.module.ROLE_CONFIGS[role]["model"],
+                "degraded": False,
+            }
+            for role in self.module.STANDARD_ROLES
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.build_run(tmp, oracles)
+            target = self.module.summarize(root=root, run_id="run1")
+            summary = json.loads(target.read_text(encoding="utf-8"))
+
+        self.assertEqual(summary["degraded_lenses"], [])
+        self.assertFalse(summary["panel_correlated"])
+
+    def test_a_review_with_no_oracle_is_unknown_not_clean(self) -> None:
+        """Silence is not evidence that a lens ran as configured.
+
+        Treating an absent oracle as undegraded would repeat the defect
+        ADR-0012 removed from risk derivation.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.build_run(tmp, None)
+            target = self.module.summarize(root=root, run_id="run1")
+            summary = json.loads(target.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            sorted(summary["oracle_unknown_lenses"]),
+            sorted(self.module.STANDARD_ROLES),
+        )
+        self.assertEqual(summary["degraded_lenses"], [])
+        # `null`, not `false`. An unmeasured panel and a measured-and-diverse
+        # one must not share a value, or the field answers a question it never
+        # asked.
+        self.assertIsNone(summary["panel_correlated"])
+        # The same rule, and it was not applied to this field: with no lens
+        # carrying provenance `provider_counts` is empty, so the old
+        # `len(...) == 1 and known > 1` returned `false` and the report
+        # rendered "more than one provider is represented" for a panel where
+        # nothing at all was measured.
+        self.assertIsNone(summary["single_provider_panel"])
+        self.assertIn("Provenance note", summary["architect_action"])
+        self.assertIn("unmeasured, not verified", summary["architect_action"])
+
+    def test_one_lens_with_provenance_cannot_answer_the_provider_question(
+        self,
+    ) -> None:
+        """One known oracle is not a measurement of panel diversity.
+
+        The boundary the old expression got wrong: `known_oracles > 1` is the
+        right guard against claiming collapse from a single data point, but
+        routing that insufficiency into `false` put it in the same bucket as a
+        verified cross-provider panel.
+        """
+        role = self.module.STANDARD_ROLES[0]
+        oracles = {role: {"integration": "claude", "model": "opus", "degraded": False}}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.build_run(tmp, oracles)
+            target = self.module.summarize(root=root, run_id="run1")
+            summary = json.loads(target.read_text(encoding="utf-8"))
+
+        self.assertEqual(summary["panel_providers"], {"claude": 1})
+        self.assertIsNone(summary["single_provider_panel"])
+        self.assertEqual(
+            sorted(summary["oracle_unknown_lenses"]),
+            sorted(set(self.module.STANDARD_ROLES) - {role}),
+        )
+        # Not claimed as collapsed either — unknown is unknown in both
+        # directions, so the action must not assert one vendor.
+        self.assertNotIn("one vendor", summary["architect_action"])
+
+    def test_two_providers_are_still_reported_as_not_collapsed(self) -> None:
+        """The true negative the tri-state must preserve."""
+        oracles = {
+            role: {
+                "integration": self.module.ROLE_CONFIGS[role]["integration"],
+                "model": self.module.ROLE_CONFIGS[role]["model"],
+                "degraded": False,
+            }
+            for role in self.module.STANDARD_ROLES
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.build_run(tmp, oracles)
+            target = self.module.summarize(root=root, run_id="run1")
+            summary = json.loads(target.read_text(encoding="utf-8"))
+
+        self.assertGreater(len(summary["panel_providers"]), 1)
+        self.assertIs(summary["single_provider_panel"], False)
+        self.assertEqual(summary["oracle_unknown_lenses"], [])
+
+    def test_a_fully_degraded_high_risk_panel_reports_single_provider(self) -> None:
+        """The 3-of-6 case where a model-majority test reads `false`.
+
+        A high-risk panel is six lenses; fully degraded it is sonnet x3,
+        opus x2, fable x1. Under a strict `> known // 2` majority that is not
+        correlated — the signal inverted at exactly the class where ADR-0012
+        scopes the human sign-off as the increment on top of an uncorrelated
+        mechanism.
+        """
+        oracles = self.all_degraded_to_sonnet()
+        oracles["adversarial-high-risk"] = {
+            "integration": "claude",
+            "model": "fable",
+            "degraded": False,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.build_run(tmp, oracles, risk="high", roles=self.high_risk_roles())
+            target = self.module.summarize(root=root, run_id="run1")
+            summary = json.loads(target.read_text(encoding="utf-8"))
+
+        self.assertEqual(sum(summary["panel_oracles"].values()), 6)
+        self.assertEqual(summary["panel_oracles"]["claude/sonnet"], 3)
+        self.assertTrue(summary["panel_correlated"])
+        self.assertTrue(summary["single_provider_panel"])
+        self.assertEqual(summary["panel_providers"], {"claude": 6})
+        self.assertIn("one provider", summary["architect_action"])
+
+    def test_a_review_stamped_with_another_digest_escalates(self) -> None:
+        """Re-running preflight on one run id used to clear the drift flag.
+
+        `summarize` compared a single recorded digest against the artifacts on
+        disk, and `preflight` rewrites that record without touching
+        `reviews/`. Editing the spec, re-running preflight and summarizing
+        therefore reported no drift over reviews of the original content. The
+        per-review stamp survives that, and also catches a panel of mixed
+        vintage when one lens is rerun on its own.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            feature_dir = root / "specs" / "006-example"
+            feature_dir.mkdir(parents=True)
+            (feature_dir / "spec.md").write_text("# Spec\n", encoding="utf-8")
+            (feature_dir / "plan.md").write_text("# Plan\n", encoding="utf-8")
+            digest = self.module.review_artifacts_digest(feature_dir)
+
+            oracles = {
+                role: {
+                    "integration": "claude",
+                    "model": "opus",
+                    "degraded": False,
+                    # What a review written before the spec was edited carries.
+                    "artifacts_digest": "0" * 64,
+                }
+                for role in self.module.STANDARD_ROLES
+            }
+            self.build_run(tmp, oracles)
+            run_dir = root / ".specify" / "workflows" / "runs" / "run1"
+            # A context freshly rewritten by a second preflight: it agrees with
+            # the artifacts on disk, so the run-level drift check sees nothing.
+            (run_dir / "planning-context.json").write_text(
+                json.dumps(
+                    {"feature_dir": str(feature_dir), "artifacts_digest": digest}
+                ),
+                encoding="utf-8",
+            )
+            target = self.module.summarize(root=root, run_id="run1")
+            summary = json.loads(target.read_text(encoding="utf-8"))
+
+        self.assertEqual(summary["status"], "escalated")
+        self.assertEqual(
+            sorted(summary["stale_reviews"]), sorted(self.module.STANDARD_ROLES)
+        )
+        self.assertTrue(summary["artifacts_changed_since_preflight"])
+
+    def test_a_cross_provider_panel_is_not_single_provider(self) -> None:
+        oracles = {
+            role: {
+                "integration": self.module.ROLE_CONFIGS[role]["integration"],
+                "model": self.module.ROLE_CONFIGS[role]["model"],
+                "degraded": False,
+            }
+            for role in self.module.STANDARD_ROLES
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.build_run(tmp, oracles)
+            target = self.module.summarize(root=root, run_id="run1")
+            summary = json.loads(target.read_text(encoding="utf-8"))
+
+        self.assertFalse(summary["single_provider_panel"])
+        self.assertEqual(sorted(summary["panel_providers"]), ["claude", "codex"])
+        self.assertNotIn("one provider", summary["architect_action"])
 
 
 class DeterministicPreflightTests(unittest.TestCase):
