@@ -28,7 +28,7 @@ export function Overlay({
   onClose?: () => void;
   scrimTestId?: string;
   size?: "wide" | "narrow";
-}): JSX.Element {
+}): React.JSX.Element {
   const panelRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -128,7 +128,7 @@ export function OverlayHeader({
   status?: ReactNode;
   closeLabel?: string;
   onClose?: () => void;
-}): JSX.Element {
+}): React.JSX.Element {
   return (
     <header className="flex shrink-0 items-start gap-3 border-b border-slate-100 px-5 pt-[max(16px,env(safe-area-inset-top))] pb-3 sm:px-6 sm:pt-5">
       <div className="min-w-0 flex-1">
