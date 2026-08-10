@@ -69,19 +69,34 @@ The split is deliberate, not incidental. Three lenses used to share one model,
 which is one opinion counted three times rather than three independent
 opinions; ADR-0012 moved `architecture-consistency` off codex so that no model
 covers a majority of the panel. Tests assert that property rather than leaving
-it to convention.
+it to convention — but they assert it of the panel **as configured**. The panel
+that actually runs can differ, which is what the next section is about.
 
-**The `codex` CLI is not installed everywhere.** The driver fails closed via
-`shutil.which`, so on a Claude-only machine the two codex lenses cannot run.
+**The `codex` CLI is not installed everywhere.** `resolve_oracle` routes around
+an absent runtime instead of failing closed on it: the two codex lenses fall
+back to `claude`/`sonnet`, and the campaign can reach `approved` on a
+single-runtime machine (ADR-0014). Before that fallback existed those lenses
+wrote no review, the aggregator counted missing mandatory evidence, and every
+campaign returned `escalated` regardless of the artifacts.
+
+The substitution is recorded, never assumed. Each review carries an `oracle`
+block stamped by the harness — not by the reviewer, which cannot author its own
+provenance — and the summary reports `degraded_lenses`, `panel_correlated` and
+`panel_oracles`. Read them: with both fallbacks active, `sonnet` holds a
+majority of a five-lens panel, so the lenses agreeing with each other is weaker
+corroboration than the panel's size suggests.
+
+Two things the fallback deliberately does not do. A reviewer that is installed
+and **fails** still raises rather than retrying elsewhere — absence is a gap, a
+non-zero exit is a defect in evidence that was produced. And a lens that
+produces no review at all is still missing mandatory evidence and still returns
+**`escalated`**, not a pass — a partial campaign is never reported as a clean
+one.
+
 The three Claude lenses run as in-session subagents
 (`.claude/agents/architecture-consistency-reviewer.md`,
-`security-privacy-reviewer.md`, `ux-a11y-reviewer.md`), so a majority of the
-panel — including both mandatory constitutional lenses — survives a
-single-runtime machine. When codex is absent: run the three Claude lenses via
-the Agent tool, write their JSON to
-`.specify/workflows/runs/<run-id>/reviews/<role>.json`, and let the aggregator
-record the missing two. It returns **`escalated`**, not a pass — a partial
-campaign is never reported as a clean one.
+`security-privacy-reviewer.md`, `ux-a11y-reviewer.md`). Write every reviewer's
+JSON to `.specify/workflows/runs/<run-id>/reviews/<role>.json`.
 
 Each reviewer returns JSON valid against
 `.specify/workflows/speckit/review.schema.json`. The agent files are the
