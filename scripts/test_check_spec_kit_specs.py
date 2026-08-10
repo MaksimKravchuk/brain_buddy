@@ -37,7 +37,7 @@ def _valid_handoff() -> dict[str, Any]:
         },
         "planning_review": {
             "run_id": "run123",
-            "risk": "standard",
+            "risk": "medium",
             "status": "approved",
             "reviewers": [
                 "requirements-consistency",
@@ -285,6 +285,15 @@ class CheckSpecKitSpecsTests(unittest.TestCase):
     def test_high_risk_handoff_requires_adversarial_reviewer(self) -> None:
         handoff = _valid_handoff()
         handoff["planning_review"]["risk"] = "high"
+        # A valid sign-off, so this test reaches the assertion it is about.
+        # Without it the newer high-risk sign-off requirement fires first.
+        handoff["planning_review"]["human_signoff"] = {
+            "approved_by": "maksim.v.kravchuk@gmail.com",
+            "approved_on": "2026-08-10",
+            "run_id": "run123",
+            "artifacts_digest": "a" * 64,
+            "rationale": "Reviewed the high-risk surface and accept the residual risk.",
+        }
         self._write_feature_with_handoff(json.dumps(handoff))
 
         result, _stdout, stderr = self._run_check()
@@ -293,6 +302,18 @@ class CheckSpecKitSpecsTests(unittest.TestCase):
         self.assertIn(
             "high-risk handoff requires adversarial-high-risk reviewer", stderr
         )
+
+    def test_high_risk_handoff_without_signoff_fails_the_spec_gate(self) -> None:
+        """The bypass Codex found: approved high-risk with no approval record."""
+        handoff = _valid_handoff()
+        handoff["planning_review"]["risk"] = "high"
+        handoff["planning_review"]["reviewers"].append("adversarial-high-risk")
+        self._write_feature_with_handoff(json.dumps(handoff))
+
+        result, _stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 1)
+        self.assertIn("requires a human_signoff record", stderr)
 
     def test_lane_dependency_cycle_fails(self) -> None:
         handoff = _valid_handoff()
