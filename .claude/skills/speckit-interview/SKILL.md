@@ -63,10 +63,11 @@ Before asking the human anything:
    whole pipeline. For a small, obviously-wanted change, proceed and note in
    `intake.md` that assessment was skipped and why.
 
-The assess skills are Claude-only; there are no `.agents/skills/` twins. That
-is why `assess` is not registered as a hook in `.specify/extensions.yml` — a
-hooked command with no Codex twin breaks Codex runs. This gate is enforced
-here in prose instead.
+`assess` is not registered as a hook in `.specify/extensions.yml`, so this gate
+is enforced here in prose rather than by auto-execution. That is deliberate:
+stage 0 is optional, and a mandatory hook would charge every small change for a
+five-stage assessment. It also means the refusal above is the only thing
+standing between a `kill` verdict and a spec — do not soften it.
 
 ## Before you start
 

@@ -488,6 +488,115 @@ describe("smartAdd", () => {
     ).toEqual({ text: "Plan #calls]", caret: "Plan #calls".length });
   });
 
+  it("accepts every name-char class in a bare unquoted name", () => {
+    // contracts/smart-add.md: name-char = Unicode Letter | Number | Mark | "_",
+    // with "-" and "." allowed between two name-chars.
+    expect(parseSmartAdd("Ping #q3_a-b.c now", { projects, tags })).toMatchObject({
+      cleanTitle: "Ping now",
+      tags: [{ name: "q3_a-b.c" }]
+    });
+    // A combining mark continues the name, and NFKC then composes the display
+    // spelling: "cafe" + U+0301 is stored as "café".
+    expect(parseSmartAdd("Ping #café now", { projects, tags })).toMatchObject({
+      cleanTitle: "Ping now",
+      tags: [{ name: "café" }]
+    });
+  });
+
+  it("folds case downwards, so a name only equal when upper-cased stays distinct", () => {
+    // "ß".toLocaleUpperCase() is "SS". Canonicalising upwards would silently
+    // resolve #ß onto an existing "ss" tag; lower-casing keeps them apart.
+    const sharp: TagResponse[] = [
+      { id: "tag-ss", name: "ss", state: "active", revision: 1, open_task_count: 0 }
+    ];
+
+    expect(parseSmartAdd("Plan #ß", { projects, tags: sharp })).toMatchObject({
+      tags: [{ name: "ß" }]
+    });
+  });
+
+  it("escapes only a sigil, leaving a boundary backslash before anything else", () => {
+    expect(parseSmartAdd("Copy \\ drive", { projects, tags })).toMatchObject({
+      cleanTitle: "Copy \\ drive",
+      hasCompletedTokens: false
+    });
+  });
+
+  it("keeps the contextual project when no inline project token supersedes it", () => {
+    expect(parseSmartAdd("Plan #work", { projects, tags, contextProjectId: "project-launch" })).toMatchObject({
+      cleanTitle: "Plan",
+      tags: [{ id: "tag-work" }],
+      project: { id: "project-launch" }
+    });
+  });
+
+  it("activates a token that opens the input, where start-of-input is the boundary", () => {
+    expect(smartAddSuggestions("#wo", 3, { projects, tags }).map((item) => item.label)).toEqual([
+      "work",
+      "deep work",
+      "Create #wo"
+    ]);
+  });
+
+  it("stops at a completed quoted token even when punctuation runs into it", () => {
+    // The quoted body closes before the caret, so the token is committed rather
+    // than active and the popup stays shut.
+    const input = 'Plan #"work",';
+
+    expect(smartAddSuggestions(input, input.length, { projects, tags })).toEqual([]);
+  });
+
+  it("closes the popup once whitespace separates the caret from an unclosed quote", () => {
+    // The active-token scan stops at the nearest whitespace, so a quoted query
+    // that has grown past a space is no longer caret-local. The contract permits
+    // this: unclosed quoted bodies *may* be active, they are not required to be.
+    const input = 'Plan #"deep wo';
+
+    expect(smartAddSuggestions(input, input.length, { projects, tags })).toEqual([]);
+  });
+
+  it("caps the ranked entities at eight before appending the create option", () => {
+    // contracts/smart-add.md: "Show at most eight entities", and separately
+    // "append one" Create option when the query has no exact match -- so the
+    // cap bounds the entities, and nine rows is the intended shape, not eight.
+    // 003-FR-004 words the same rule as "capped at eight visible results".
+    const many: TagResponse[] = "abcdefghijk".split("").map((suffix) => ({
+      id: `tag-${suffix}`,
+      name: `work${suffix}`,
+      state: "active" as const,
+      revision: 1,
+      open_task_count: 0
+    }));
+
+    const suggestions = smartAddSuggestions("Plan #work", 10, { projects, tags: many });
+
+    expect(suggestions.filter((item) => !item.create)).toHaveLength(8);
+    expect(suggestions.map((item) => item.label)).toEqual([
+      "worka",
+      "workb",
+      "workc",
+      "workd",
+      "worke",
+      "workf",
+      "workg",
+      "workh",
+      "Create #work"
+    ]);
+  });
+
+  it("keeps a name bare when a combining mark follows an internal separator", () => {
+    // "-" is internal punctuation when a name-char follows, and a Mark is a
+    // name-char, so this label serializes unquoted.
+    expect(
+      applySmartAddSuggestion("Plan #a", 7, {
+        kind: "tag",
+        label: "a-́b",
+        ref: { name: "a-́b" },
+        create: true
+      })?.text
+    ).toBe("Plan #a-́b ");
+  });
+
   it("retains an existing separator after accepting a suggestion and ignores plain text", () => {
     expect(applySmartAddSuggestion("Plan #ca tomorrow", 8, {
       kind: "tag",
