@@ -20,7 +20,8 @@ description: "Task list template for feature implementation"
 **Delivery gates** (non-negotiable, regardless of who executes these tasks):
 isolated worktree and feature branch; failing test written and observed failing
 before the implementation that satisfies it; Allure taxonomy on every product
-test with the covering `FR-###`/`SC-###` in the test name or story; acceptance
+test with the covering feature-qualified id (`NNN-FR-###`/`NNN-SC-###`) in
+the test name or story; acceptance
 graded by an agent that did not write the code; landing class decided by
 `scripts/classify_path_risk.py`, with ASK-class changes landing only through a
 reviewed PR.

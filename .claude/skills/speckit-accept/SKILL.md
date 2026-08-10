@@ -82,6 +82,8 @@ Then close the traceability loop mechanically:
 python3 scripts/check_requirement_coverage.py specs/NNN-<slug>
 ```
 
+Matching is feature-qualified (`006-FR-001`). A bare `FR-001` does not count.
+
 ## Rejecting
 
 Reject without hedging when the evidence does not hold. Specifically reject

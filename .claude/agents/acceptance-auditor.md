@@ -58,8 +58,11 @@ Every one of these must hold. Any single failure means `reject`:
 Run these deliberately. Their whole purpose is that a green suite can still be
 hollow:
 
-- Grep each requirement id across the test tree. An id that appears in zero
-  test names, ids, or Allure labels is unmapped no matter how many tests pass.
+- Grep each **feature-qualified** requirement id (`006-FR-001`, or
+  `006_FR_001` in a Python function name) across the test tree. An id that
+  appears in zero test names or Allure labels is unmapped no matter how many
+  tests pass. A bare `FR-001` does not count: every feature restarts numbering,
+  so bare ids let another feature's tests satisfy this gate.
 - Compare result timestamps against the implementation commit. Stale results
   from before the change prove nothing.
 - Spot-check three tests you would most expect to be hollow. Read them. If a

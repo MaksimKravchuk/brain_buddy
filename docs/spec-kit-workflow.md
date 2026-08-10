@@ -191,17 +191,36 @@ skills, so the invocation names use hyphens:
 /speckit-analyze
 ```
 
-Codex exposes the same planning skills with `$` skill invocations:
+Codex exposes the same skills with `$` skill invocations, including the five
+BrainBuddy stages:
 
 ```text
 $speckit-constitution
+$speckit-interview
 $speckit-specify
 $speckit-clarify
+$speckit-design
 $speckit-plan
+$speckit-review
 $speckit-checklist
 $speckit-tasks
 $speckit-analyze
+$speckit-implement
+$speckit-accept
+$speckit-report
 ```
+
+`.specify/extensions.yml` is shared by both agent trees, so **every hooked
+command must exist in both**. A mandatory hook whose skill lives only under
+`.claude/skills/` makes a Codex run emit `EXECUTE_COMMAND` for a command that
+tree cannot invoke, stopping the pipeline at that stage.
+`scripts/test_check_speckit_manifests.py` enforces the parity.
+
+The Codex twins are thin adapters: Codex has no subagent runtime, so where the
+Claude skill delegates to an agent under `.claude/agents/`, the twin applies
+that agent file's contract inline. Those agent files are plain markdown and
+remain the single source of truth for rubrics and procedures — do not fork them
+per runtime.
 
 The generated artifacts do not prescribe a specific agent runtime. Standalone
 Claude Code, Codex, other agents, or a developer may implement them while
