@@ -1,5 +1,6 @@
 .PHONY: install-backend install-frontend dev-backend dev-frontend lint-backend lint-frontend test-backend ci-backend test-frontend test-e2e build-frontend ci-frontend validate-ci check-specs install-mobile typecheck-mobile test-mobile integration-mobile build-mobile ci-mobile \
-	verify-all verify-backend verify-frontend verify-mobile typecheck-frontend lint-mobile format-backend format-check-backend mutation-backend
+	verify-all verify-backend verify-frontend verify-mobile typecheck-frontend lint-mobile format-backend format-check-backend mutation-backend \
+	mutation-gate-backend
 
 install-backend:
 	cd backend && python -m pip install -e .[dev]
@@ -64,6 +65,32 @@ mutation-backend:
 	cd backend && rm -rf mutants mutation-artifacts
 	cd backend && mutmut run || true
 	cd backend && mutmut results
+
+# The ENFORCED-tier measurement (ADR-0011). mutation-backend above measures the
+# OBSERVED tier, which deliberately includes modules still under calibration, so
+# its score must not be checked against ADR-0004's bar. This target narrows the
+# scope to backend/mutation-enforced-scope.txt and asserts the bar with the
+# gate's own validator, which is the only way to reproduce the recorded number
+# without a hand-edited pyproject.toml.
+#
+# mutmut takes its scope from the config file rather than the command line, so
+# backend/pyproject.toml is rewritten for the duration and restored on exit --
+# including on failure or interrupt, hence the trap. mutmut has to run from
+# backend/, and that `cd` stays inside a subshell: the trap's paths are relative
+# to the repository root, so moving the trapped shell's own directory would make
+# the restore silently fail and leave the narrowed scope behind.
+mutation-gate-backend:
+	@cp backend/pyproject.toml backend/pyproject.toml.mutation-bak
+	@trap 'mv backend/pyproject.toml.mutation-bak backend/pyproject.toml; \
+	       rm -f backend/.mutation-enforced-changed.txt' EXIT; \
+	  sed 's/#.*//' backend/mutation-enforced-scope.txt \
+	    | sed '/^[[:space:]]*$$/d' > backend/.mutation-enforced-changed.txt; \
+	  python3 scripts/mutation_gate.py scope \
+	    --enforced backend/mutation-enforced-scope.txt \
+	    --changed backend/.mutation-enforced-changed.txt \
+	    --apply-to backend/pyproject.toml; \
+	  ( cd backend && rm -rf mutants && { mutmut run || true; } && mutmut export-cicd-stats )
+	python3 scripts/mutation_gate.py check --stats backend/mutants/mutmut-cicd-stats.json
 
 validate-ci:
 	python3 -m unittest scripts/test_check_requirement_coverage.py -v

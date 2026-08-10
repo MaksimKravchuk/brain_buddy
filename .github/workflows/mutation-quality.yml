@@ -49,7 +49,11 @@ jobs:
           mutmut run
           mutation_exit=$?
           set -e
-          mutmut export-cicd-stats > mutation-artifacts/mutation-stats.json || true
+          # export-cicd-stats writes mutants/mutmut-cicd-stats.json and prints
+          # only a "Saved ..." line, so redirecting its stdout captured that
+          # sentence instead of the statistics. Copy the file it wrote.
+          mutmut export-cicd-stats || true
+          cp mutants/mutmut-cicd-stats.json mutation-artifacts/mutation-stats.json || true
           mutmut results > mutation-artifacts/mutation-summary.txt || true
           mutmut results --all true > mutation-artifacts/mutation-survivors.txt || true
           {

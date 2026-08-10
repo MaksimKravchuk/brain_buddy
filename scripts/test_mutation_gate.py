@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from mutation_gate import (
+from scripts.mutation_gate import (
     load_enforced_scope,
     mutation_score,
     rewrite_only_mutate,

@@ -129,6 +129,17 @@ mutmut show <mutant-name>      # the diff that survived
 mutmut browse                  # interactive triage
 ```
 
+`mutmut run` measures the OBSERVED tier, which includes modules still under
+calibration, so its score is not the one ADR-0004's 95% bar applies to. To
+reproduce the ENFORCED-tier number, run `make mutation-gate-backend` from the
+repository root: it narrows the scope to
+`backend/mutation-enforced-scope.txt` for the duration of the run and then
+asserts the bar with `scripts/mutation_gate.py check`.
+
+Note that `mutmut export-cicd-stats` writes `mutants/mutmut-cicd-stats.json`
+and prints only a "Saved ..." line — redirecting its stdout captures that
+sentence, not the statistics.
+
 The scope tiers, per ADR-0011:
 
 - **Observed** — `only_mutate` in `backend/pyproject.toml`: the ADR-0004 Reality

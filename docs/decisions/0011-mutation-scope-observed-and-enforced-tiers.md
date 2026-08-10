@@ -60,25 +60,35 @@ Mutation scope is split into two tiers with different obligations.
 
 - the ADR-0004 Reality Tree modules only, for now.
 
-The gate is **built but not connected**, and its precondition is **not met**.
-`scripts/mutation_gate.py` implements ADR-0004's requirements; nothing in CI
-calls it.
+The gate is **built but not connected**. `scripts/mutation_gate.py` implements
+ADR-0004's requirements; nothing in CI calls it.
 
 ADR-0004 asks for two things before promotion: two consecutive successful
-scheduled runs, and a recorded score of at least 95% for the unchanged
-allow-list. The first is comfortably satisfied — twelve consecutive nightlies.
-The second was asserted here in an earlier revision on the strength of the
-first, which does not follow: a green nightly means the campaign completed, not
-that it scored well, and the campaign is report-only precisely so a low score
-cannot fail it.
+scheduled runs with complete retained artifacts, and a recorded score of at
+least 95% for the unchanged allow-list. An earlier revision of this ADR
+asserted the second on the strength of the first, which does not follow: a
+green nightly means the campaign completed, not that it scored well, and the
+campaign is report-only precisely so a low score cannot fail it. Measured
+directly on 2026-08-10 over this exact list: **1279 killed, 70 survived, 1
+timeout of 1350 mutants — 94.81%**. Below the bar.
 
-Measured directly on 2026-08-10 over this exact list: **1280 killed, 70
-survived of 1350 mutants — 94.81%**. Below the bar. Three more killed mutants
-would clear it (1283/1350 = 95.04%).
+Those 70 survivors have since been worked down. Re-measured over the same
+unchanged list with `make mutation-gate-backend`: **1319 killed, 28 survived of
+1347 mutants — 97.92%**, which clears the bar. They resolved as 39 killed by
+focused regression tests in `backend/tests/test_mutation_survivor_exact.py`, 3
+that stopped existing when the unreachable `or [...]` fallback in
+`TreeService.generate_ai_feedback` was deleted, and 28 classified as
+non-behavioral. The classification is itemised per mutant in
+`backend/mutation-enforced-scope.txt`; every entry is a mutation whose
+observable output is identical to the original — redundant explicit defaults,
+falsy sentinels the callee tests for truthiness, a deep copy over fields that
+are all strings — and not a widened exclusion, which ADR-0004 forbids.
 
-So the enforced tier currently defines what is *eligible* to gate, not what
-does. Connecting the gate is gated on killing those survivors, not on writing
-more code.
+What is still missing is the other half of the precondition, and it is an
+observation rather than a code change: two consecutive scheduled runs against
+this unchanged list, with their run URLs and retained artifacts recorded here.
+Until that is written down, the enforced tier defines what is *eligible* to
+gate rather than what does.
 
 A module enters the observed scope as soon as it has mutation-compatible tests
 worth measuring. It moves to the enforced scope only once it independently
@@ -138,8 +148,12 @@ mutation records that breaking it would be noticed.
 `python3 scripts/validate_ci_artifacts.py mutation-workflow` continues to
 check the nightly workflow's scheduling, report-only event policy, explicit
 scope and retained evidence. The observed-scope score is read from
-`mutmut results --all` on a scheduled run; the enforced scope is exercised by
-the pull-request gate. `backend/tests/test_task_owner_isolation.py` is the
+`mutmut results --all` on a scheduled run. The enforced-scope score is
+reproduced by `make mutation-gate-backend`, which narrows `only_mutate` to this
+list for the duration of one run and then asserts the 95% bar with
+`scripts/mutation_gate.py check`; it is the same validator the pull-request
+gate will call once that gate is connected.
+`backend/tests/test_task_owner_isolation.py` is the
 regression suite that makes the task module's owner predicates mutable in the
 first place, and its own kill-power was confirmed by hand-mutating both `_get`
 and `delete_all_for_owner`.
