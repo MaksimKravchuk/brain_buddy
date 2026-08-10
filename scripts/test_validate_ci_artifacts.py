@@ -461,7 +461,39 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  changes:
+    name: Changed stacks
+    outputs:
+      backend: ${{ steps.decide.outputs.backend }}
+      frontend: ${{ steps.decide.outputs.frontend }}
+      mobile: ${{ steps.decide.outputs.mobile }}
+    steps:
+      - uses: dorny/paths-filter@v3
+      - id: decide
+        run: echo decide
+  backend:
+    env:
+      RUN: ${{ needs.changes.outputs.backend }}
+    steps:
+      - name: Ruff lint
+        if: env.RUN == 'true'
+        run: ruff check app tests
+  mobile:
+    env:
+      RUN: ${{ needs.changes.outputs.mobile }}
+    steps:
+      - name: Type check
+        if: env.RUN == 'true'
+        run: npm run typecheck
+  full-ci:
+    needs:
+      - changes
+      - backend
+    steps:
+      - run: echo "${{ contains(needs.*.result, 'skipped') }}"
   frontend:
+    env:
+      RUN: ${{ needs.changes.outputs.frontend }}
     steps:
       - run: npm run lint
       - run: npm run test:coverage
