@@ -20,6 +20,7 @@ test-backend:
 lint-backend:
 	cd backend && ruff check app tests
 	cd backend && mypy app
+	cd backend && lint-imports
 
 ci-backend: lint-backend test-backend
 

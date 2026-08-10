@@ -107,6 +107,11 @@ jobs:
       - name: Type check
         run: mypy app
 
+      # Architectural fitness functions: the layering documented in CLAUDE.md is
+      # enforced here rather than left to review.
+      - name: Import contracts
+        run: lint-imports
+
       - name: Run pytest with coverage and Allure
         run: |
           pytest --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results
