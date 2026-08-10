@@ -379,6 +379,35 @@ not the Makefile, not CI, not another script. Three instances of "a test
 nothing runs" in one change is a class, not a coincidence, so a structural test
 now asserts that every `scripts/test_*.py` is named by some make target.
 
+### The same correction, missed one field over
+
+Found not during authoring but by the repository's automated reviewer on the
+open pull request, which makes it the tenth defect in this change and the
+sixth round of review to find one.
+
+`single_provider_panel` was `len(provider_counts) == 1 and known_oracles > 1`.
+The `known_oracles > 1` guard is right — one lens carrying provenance is not
+evidence a panel collapsed onto one vendor — but routing that insufficiency
+into `False` put it in the same bucket as a panel measured and found diverse.
+Two distinct states reached it: one lens with provenance, and no lens with
+any, the latter being the ordinary shape of a hand-written campaign. The
+report then rendered `False` as "more than one provider is represented", so a
+panel nobody measured read as a panel measured and found independent, with a
+histogram directly beneath it listing one provider or none.
+
+The correction is the one already made to `panel_correlated` fifteen lines
+away, and the comment there states the principle in general terms — "an
+unmeasured panel and a measured-and-diverse one must not share a value" —
+while being applied to a single field. `single_provider_panel` is now
+`bool | None`, `None` below two known oracles, and the renderer prints the
+third state rather than falling silent on it. Silence would have been the
+subtler version of the same defect: an absent line invites the same inference
+as a false one.
+
+That the fix for a "false reads as verified" defect itself shipped a "false
+reads as verified" defect, in the adjacent field, is the strongest evidence in
+this record for the review posture it argues for.
+
 ## Consequences
 
 **Positive.** The conveyor can run to completion, including to `approved`, on a

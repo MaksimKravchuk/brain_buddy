@@ -545,8 +545,64 @@ class PanelProvenanceTests(RendersSectionFive, unittest.TestCase):
         rendered = "\n".join(lines)
         self.assertIn("**Lenses with unknown provenance**", rendered)
         self.assertIn("**Panel correlated**: not recorded.", rendered)
+        self.assertIn("**Single-provider panel**: not recorded", rendered)
         self.assertNotIn("**Panel oracles**", rendered)
         self.assertNotIn("**Panel providers**", rendered)
+
+    def test_one_known_provider_is_never_rendered_as_several(self) -> None:
+        """The regression: `false` meant both "diverse" and "cannot tell".
+
+        `single_provider_panel` was `len(providers) == 1 and known > 1`, so a
+        panel with one lens carrying provenance and four carrying none came
+        out `false` — the same value a genuinely cross-provider panel gets —
+        and this renderer turned that into "more than one provider is
+        represented" while the histogram below it held exactly one.
+        """
+        caveat, lines = self.module.panel_provenance(
+            {
+                "reviewers": [],
+                "degraded_lenses": [],
+                "oracle_unknown_lenses": [
+                    "architecture-consistency",
+                    "security-privacy",
+                    "ux-accessibility-mobile",
+                    "delivery-feasibility",
+                ],
+                "panel_correlated": None,
+                "panel_oracles": {"claude/opus": 1},
+                "panel_providers": {"claude": 1},
+                "single_provider_panel": None,
+                "stale_reviews": [],
+            }
+        )
+
+        rendered = "\n".join(lines)
+        self.assertIn("unknown provenance", caveat)
+        self.assertIn("**Single-provider panel**: not recorded", rendered)
+        self.assertIn("never measured", rendered)
+        self.assertNotIn("more than one provider is represented", rendered)
+        # The honest count stays visible beside the refusal to answer.
+        self.assertIn("**Panel providers**: `claude` x1", rendered)
+
+    def test_a_genuinely_diverse_panel_still_says_so(self) -> None:
+        """The fix must not silence the true negative it was hiding behind."""
+        caveat, lines = self.module.panel_provenance(
+            {
+                "reviewers": [],
+                "degraded_lenses": ["requirements-consistency"],
+                "oracle_unknown_lenses": [],
+                "panel_correlated": False,
+                "panel_oracles": {"claude/opus": 3, "codex/gpt-5.6-sol": 2},
+                "panel_providers": {"claude": 3, "codex": 2},
+                "single_provider_panel": False,
+                "stale_reviews": [],
+            }
+        )
+
+        rendered = "\n".join(lines)
+        self.assertIn("degraded panel", caveat)
+        self.assertIn("more than one provider is represented", rendered)
+        self.assertNotIn("**Single-provider panel**: not recorded", rendered)
 
 
 if __name__ == "__main__":

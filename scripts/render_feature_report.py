@@ -270,6 +270,16 @@ def panel_provenance(summary: dict[str, Any]) -> tuple[str, list[str]]:
             "**Single-provider panel**: no — more than one provider is "
             "represented among the lenses whose provenance is known.\n"
         )
+    else:
+        # Never silent. `None` reaches here whenever fewer than two lenses
+        # carry provenance, which is the ordinary shape of a hand-written
+        # panel, and the reader must not be left to infer a diverse panel
+        # from an absent line.
+        lines.append(
+            "**Single-provider panel**: not recorded — fewer than two lenses "
+            "carry provenance, so whether the panel spanned providers was "
+            "never measured. Not a panel found to span them.\n"
+        )
 
     # The histograms are printed with the correlation claim rather than instead
     # of it, so a reader can check the majority rather than trust it.

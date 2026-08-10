@@ -1152,8 +1152,60 @@ class DegradationVisibilityTests(unittest.TestCase):
         # one must not share a value, or the field answers a question it never
         # asked.
         self.assertIsNone(summary["panel_correlated"])
+        # The same rule, and it was not applied to this field: with no lens
+        # carrying provenance `provider_counts` is empty, so the old
+        # `len(...) == 1 and known > 1` returned `false` and the report
+        # rendered "more than one provider is represented" for a panel where
+        # nothing at all was measured.
+        self.assertIsNone(summary["single_provider_panel"])
         self.assertIn("Provenance note", summary["architect_action"])
         self.assertIn("unmeasured, not verified", summary["architect_action"])
+
+    def test_one_lens_with_provenance_cannot_answer_the_provider_question(
+        self,
+    ) -> None:
+        """One known oracle is not a measurement of panel diversity.
+
+        The boundary the old expression got wrong: `known_oracles > 1` is the
+        right guard against claiming collapse from a single data point, but
+        routing that insufficiency into `false` put it in the same bucket as a
+        verified cross-provider panel.
+        """
+        role = self.module.STANDARD_ROLES[0]
+        oracles = {role: {"integration": "claude", "model": "opus", "degraded": False}}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.build_run(tmp, oracles)
+            target = self.module.summarize(root=root, run_id="run1")
+            summary = json.loads(target.read_text(encoding="utf-8"))
+
+        self.assertEqual(summary["panel_providers"], {"claude": 1})
+        self.assertIsNone(summary["single_provider_panel"])
+        self.assertEqual(
+            sorted(summary["oracle_unknown_lenses"]),
+            sorted(set(self.module.STANDARD_ROLES) - {role}),
+        )
+        # Not claimed as collapsed either — unknown is unknown in both
+        # directions, so the action must not assert one vendor.
+        self.assertNotIn("one vendor", summary["architect_action"])
+
+    def test_two_providers_are_still_reported_as_not_collapsed(self) -> None:
+        """The true negative the tri-state must preserve."""
+        oracles = {
+            role: {
+                "integration": self.module.ROLE_CONFIGS[role]["integration"],
+                "model": self.module.ROLE_CONFIGS[role]["model"],
+                "degraded": False,
+            }
+            for role in self.module.STANDARD_ROLES
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.build_run(tmp, oracles)
+            target = self.module.summarize(root=root, run_id="run1")
+            summary = json.loads(target.read_text(encoding="utf-8"))
+
+        self.assertGreater(len(summary["panel_providers"]), 1)
+        self.assertIs(summary["single_provider_panel"], False)
+        self.assertEqual(summary["oracle_unknown_lenses"], [])
 
     def test_a_fully_degraded_high_risk_panel_reports_single_provider(self) -> None:
         """The 3-of-6 case where a model-majority test reads `false`.

@@ -590,7 +590,7 @@ def aggregate_reviews(
     artifacts_changed: bool = False,
     degraded_roles: tuple[str, ...] = (),
     unknown_oracle_roles: tuple[str, ...] = (),
-    single_provider_panel: bool = False,
+    single_provider_panel: bool | None = None,
 ) -> dict[str, Any]:
     technical_findings: list[dict[str, Any]] = []
     product_decisions: list[dict[str, Any]] = []
@@ -1053,7 +1053,17 @@ def summarize(*, root: Path, run_id: str) -> Path:
     # The fact the model histogram keeps missing, and it has no arithmetic
     # edge: a fallback only ever moves lenses onto one provider, so this is
     # true for every fully degraded campaign at every risk class.
-    single_provider_panel = len(provider_counts) == 1 and known_oracles > 1
+    #
+    # Tri-state for exactly the reason `panel_correlated` is, six lines down.
+    # `len(provider_counts) == 1 and known_oracles > 1` folded two different
+    # insufficiencies into `False` — one lens carrying provenance, and no lens
+    # carrying any — and the report renders `False` as "more than one provider
+    # is represented". A panel nobody measured read as a panel measured and
+    # found diverse, which is this ADR's own failure mode one field over.
+    # Below two known oracles there is nothing to answer the question with.
+    single_provider_panel: bool | None = (
+        None if known_oracles < 2 else len(provider_counts) == 1
+    )
     # Unmeasured is not measured-and-clean. With any provenance missing the
     # majority is computed over a subset, so the honest answer is "unknown"
     # rather than a confident `false` that reads identically to a verified

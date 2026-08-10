@@ -283,6 +283,27 @@ INVARIANTS: tuple[Invariant, ...] = (
         "to the human whose reading is the whole justification for letting a "
         "degraded campaign pass.",
     ),
+    # Found by review on this PR's own second commit, and the same shape as
+    # the `panel_correlated` correction one field over: an insufficiency
+    # rendered as a finding. With fewer than two lenses carrying provenance
+    # there is nothing to answer "did the panel span providers" with, and the
+    # answer must not be the one a verified cross-provider panel gets.
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "the single-provider flag is tri-state, not two-valued",
+        r"None if known_oracles < 2",
+        "`len(providers) == 1 and known > 1` reports both a diverse panel and "
+        "an unmeasured one as `false`, and the report renders `false` as "
+        "'more than one provider is represented'.",
+    ),
+    MustMatch(
+        "scripts/render_feature_report.py",
+        "an unmeasurable provider question is rendered, not skipped",
+        r"\*\*Single-provider panel\*\*: not recorded",
+        "Silence on the third state leaves the reader to infer a diverse "
+        "panel from an absent line, which is the false claim this branch "
+        "exists to replace.",
+    ),
     MustMatch(
         "scripts/spec_kit_planning_review.py",
         "high-risk handoffs must state panel provenance",
