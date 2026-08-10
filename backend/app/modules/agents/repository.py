@@ -148,8 +148,7 @@ class AgentRepository(BaseRepository):
 
     def _initialize_database(self) -> None:
         with self._owned_connection() as conn:
-            conn.executescript(
-                """
+            conn.executescript("""
                 CREATE TABLE IF NOT EXISTS agent_connections (
                     owner_id TEXT NOT NULL,
                     id TEXT NOT NULL,
@@ -228,8 +227,7 @@ class AgentRepository(BaseRepository):
                 );
                 CREATE INDEX IF NOT EXISTS idx_agent_idempotency_created
                     ON agent_idempotency(created_at);
-                """
-            )
+                """)
 
     @staticmethod
     def _payload(model: BaseModel) -> str:
