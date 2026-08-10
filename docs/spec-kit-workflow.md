@@ -55,11 +55,62 @@ specify integration upgrade codex --force
 # specify extension update <extension-id>
 ```
 
-Do not run an unscoped `specify extension update`: community extensions have
-independent versions and require their own source review. No third-party
-extensions are installed in BrainBuddy. In particular, do not install the Git
-extension: automatic feature branches, hooks, and commits conflict with
-repository worktree ownership and delivery gates.
+Do not run an unscoped `specify extension update`: extensions have independent
+versions and require their own source review. Update each pinned extension
+explicitly by id.
+
+### Extension policy
+
+`specify extension search` returns ~150 entries, but the shape of that catalog
+matters more than its size:
+
+| catalog | count | installable |
+|---|---|---|
+| `default` (all `spec-kit-core`) | 4 | yes |
+| `community` | ~146 | **no — discovery only** |
+
+The community catalog cannot be installed from. Adopting one of its entries
+means adding a custom catalog (`.specify/extension-catalogs.yml`) or installing
+from a third-party repository, each requiring its own source review and version
+pin. None is BrainBuddy-aware: our review lenses cite the constitution,
+ADR-0006 vocabulary, the Allure taxonomy and `classify_path_risk.py`, and a
+generic extension knows none of that.
+
+Decisions on the four installable extensions:
+
+- **`assess` — INSTALLED.** Stage 0 of the pipeline: intake → research →
+  define → shape → decide, writing
+  `.specify/assessments/<slug>/decision.md` with a
+  `go / needs-clarification / kill` verdict. It supplies the one capability the
+  hand-built pipeline lacked — closing an idea *before* requirements are
+  elicited. `/speckit-interview` reads that verdict and refuses to proceed on a
+  `kill`, which is what makes the gate load-bearing.
+  It ships Claude skills only (`.claude/skills/speckit-assess-*`), so it is
+  **not** registered under `hooks` in `.specify/extensions.yml`: a hooked
+  command with no `.agents/skills/` twin breaks Codex runs.
+
+- **`git` — NOT INSTALLED**, and the reason is specific rather than blanket.
+  It provides five commands; the extension installs all or none:
+  `speckit.git.commit` auto-commits after each Spec Kit command, which breaks
+  ADR-0008 — `scripts/submit_to_trunk.sh` requires exactly one non-merge commit
+  whose parent equals current `origin/main`. `speckit.git.feature` duplicates
+  `.specify/scripts/bash/create-new-feature.sh` and fights worktree ownership.
+  `speckit.git.initialize` is irrelevant here. The two read-only commands
+  (`speckit.git.validate`, `speckit.git.remote`) are harmless but add nothing:
+  branch naming is already a repository convention and remote detection is
+  already done by `speckit-taskstoissues`.
+
+- **`agent-context` — NOT INSTALLED.** It manages `CLAUDE.md` with generated
+  plan references and markers. `CLAUDE.md` here is hand-maintained and
+  authoritative; a generator editing it would fight every manual change.
+
+- **`bug` — not installed, but not rejected.** Bug triage under
+  `.specify/bugs/<slug>/` is outside the feature-delivery pipeline. Worth
+  revisiting on its own merits.
+
+**`specify extension add` rewrites `.specify/extensions.yml` and strips its
+comments.** After any install, restore the header from git history — it
+documents the hook contract and the Codex-parity requirement.
 
 `.specify/extensions.yml` is **not** a third-party extension install. It is
 first-party repository configuration that the ten v0.15.0 skills already read:

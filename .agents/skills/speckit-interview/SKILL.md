@@ -32,6 +32,32 @@ its `AskUserQuestion` tool for this; Codex simply asks.
 mandatory hook would make specify call interview call specify without end.
 Never change that hook to `optional: false`.
 
+## Stage 0 gate — check the assessment first
+
+The `assess` extension (`spec-kit-core`) runs upstream of this skill and writes
+`.specify/assessments/<slug>/decision.md` with a **go / needs-clarification /
+kill** verdict. It answers a question this skill does not: *should this be
+built at all?*
+
+Before asking the human anything, look for that file and obey its verdict:
+
+- **kill** — stop. Do not interview, do not create a feature directory. Quote
+  the decisive reason and ask whether the human is deliberately reopening it.
+  Only an explicit override restarts the pipeline.
+- **needs-clarification** — say so and point at the stage needing rework. Do
+  not launder it into a go by interviewing past it.
+- **go** — proceed from the handoff summary; do not re-ask what the assessment
+  settled.
+
+If no assessment exists, offer one for anything substantial or speculative;
+for a small obviously-wanted change, proceed and record in `intake.md` that
+assessment was skipped and why.
+
+**The assess extension installs Claude skills only** — there are no
+`$speckit-assess-*` commands in this tree. In a Codex session, read the
+decision file directly (it is plain markdown) and apply the verdict; run the
+assessment itself from a Claude session.
+
 ## Before you start
 
 Read `.specify/memory/constitution.md`, `AGENTS.md`, `CLAUDE.md` and the
