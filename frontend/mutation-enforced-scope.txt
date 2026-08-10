@@ -19,10 +19,17 @@
 #   542 of 551 mutants killed -- 98.37%.
 #
 # Observed but deliberately NOT enforced yet, with the same measurement:
-#   src/features/tasks/smartAdd.ts                  92.96% (528/568)
+#   src/features/tasks/smartAdd.ts                  96.23% (536/557)
 #   src/api/taskHooks.ts                            93.51% (72/77)
 #   src/api/account.ts                              93.33% (28/30)
 #   src/features/brain-dump/brainDumpNavigation.ts  91.67% (11/12)
+#
+# smartAdd.ts now clears ADR-0004's 95% on its own and is the first candidate
+# for promotion -- but it is NOT promoted here. Clearing the score satisfies one
+# half of the precondition; the other half is two consecutive successful
+# scheduled runs, and the nightly had not yet produced one when this was
+# measured. Promote it once two nightlies have recorded >= 95% against this
+# unchanged list, and record their run URLs here when you do.
 src/api/auth.ts
 src/api/client.ts
 src/stores/authStore.ts

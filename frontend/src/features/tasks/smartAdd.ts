@@ -68,7 +68,9 @@ function isNameChar(char: string | undefined): boolean {
 }
 
 function hasLeftBoundary(input: string, index: number): boolean {
-  return index === 0 || leftBoundaryPattern.test(input[index - 1] ?? "");
+  // `index === 0` short-circuits the only out-of-range read, so the lookbehind
+  // is always a real character.
+  return index === 0 || leftBoundaryPattern.test(input[index - 1]);
 }
 
 function parseQuoted(input: string, bodyStart: number): { name: string; end: number } | null {
@@ -155,7 +157,12 @@ function expandedRemovalSpans(input: string, tokens: TokenSpan[]): Array<{ start
     // between the bracket and the token is whitespace by construction: a
     // matching pair here always wraps the token alone, and re-checking the gap
     // for content would be a condition that cannot be false.
-    const close = wrapperPairs.get(input[left] ?? "");
+    //
+    // `left` may be -1 and `right` may be `input.length`; an out-of-range read
+    // is `undefined`, which is neither a wrapper key nor equal to `close`, so
+    // both loop bounds above and this lookup fall out the same way without a
+    // separate guard.
+    const close = wrapperPairs.get(input[left]);
     if (close && input[right] === close) {
       return { start: left, end: right + 1 };
     }
@@ -187,11 +194,13 @@ function projectKeyForName(name: string): string {
   return normalize(stripLegacyProjectSigil(name));
 }
 
-function refKey(ref: SmartAddRef, kind: SmartAddKind): string {
+// Only tags are deduplicated -- projects are last-token-wins, so they never need
+// an identity key. Taking a `kind` here would be a branch nothing can select.
+function tagRefKey(ref: SmartAddRef): string {
   if ("id" in ref) {
     return `id:${ref.id}`;
   }
-  return `name:${kind === "tag" ? tagKeyForName(ref.name) : projectKeyForName(ref.name)}`;
+  return `name:${tagKeyForName(ref.name)}`;
 }
 
 function resolveTag(name: string, tags: TagResponse[]): SmartAddRef {
@@ -211,7 +220,7 @@ export function parseSmartAdd(input: string, options: SmartAddParseOptions): Sma
   const tags: SmartAddRef[] = [];
   const seenTags = new Set<string>();
   const appendTag = (ref: SmartAddRef) => {
-    const key = refKey(ref, "tag");
+    const key = tagRefKey(ref);
     if (!seenTags.has(key)) {
       seenTags.add(key);
       tags.push(ref);
@@ -291,6 +300,11 @@ function findActiveToken(input: string, caret: number): ActiveToken | null {
 function scoreEntity(query: string, name: string): number | null {
   const normalizedQuery = normalize(query);
   const normalizedName = normalize(name);
+  // Equivalent-mutant note: emptying or inverting this guard cannot be caught.
+  // Every name is prefixed by "", so with the guard gone all entities tie at
+  // rank 1 instead of rank 4 and fall through to the same name/id tie-break --
+  // the deterministic name order the contract asks for either way. The rank is
+  // kept because it states the intent, not because a test can see it.
   if (!normalizedQuery) {
     return 4;
   }
@@ -348,6 +362,8 @@ export function applySmartAddSuggestion(input: string, caret: number, suggestion
   const needsSpace = !input[active.end] || (!whitespacePattern.test(input[active.end]) && !/[,.;:!?\])}]/u.test(input[active.end]));
   const replacement = `${token}${needsSpace ? " " : ""}`;
   const text = `${input.slice(0, active.start)}${replacement}${input.slice(active.end)}`;
-  const caretOffset = replacement.length + (!needsSpace && whitespacePattern.test(input[active.end] ?? "") ? 1 : 0);
+  // `needsSpace` is false only when `input[active.end]` exists and is whitespace
+  // or a terminator, so the read below is never out of range.
+  const caretOffset = replacement.length + (!needsSpace && whitespacePattern.test(input[active.end]) ? 1 : 0);
   return { text, caret: active.start + caretOffset };
 }
