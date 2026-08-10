@@ -14,6 +14,7 @@ import sqlite3
 from collections import OrderedDict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Event, Thread
 from typing import Any
 
 import pytest
@@ -79,6 +80,19 @@ class FakeConnector:
         return self.command_outcome
 
 
+class BlockingTestConnector(FakeConnector):
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = Event()
+        self.release = Event()
+
+    def test(self, target: ConnectorTarget) -> ConnectorTestOutcome:
+        self.tests.append(target)
+        self.entered.set()
+        assert self.release.wait(timeout=5)
+        return self.test_outcome
+
+
 class Clock:
     """A controllable clock so retention and silence are testable."""
 
@@ -128,7 +142,11 @@ def fake_resolver(host: str, port: int) -> list[str]:
 
 
 def build_service(
-    repo: AgentRepository, connector: FakeConnector, clock: Clock, *, key: bytes = b"\x07" * 32
+    repo: AgentRepository,
+    connector: FakeConnector,
+    clock: Clock,
+    *,
+    key: bytes = b"\x07" * 32,
 ) -> AgentRelayService:
     return AgentRelayService(
         repo,
@@ -448,6 +466,80 @@ class TestConnectAnAgent:
             )
 
 
+class TestConnectionTestConcurrency:
+    def test_a_slow_test_cannot_restore_a_concurrently_disconnected_connection(
+        self, tmp_path: Path, clock: Clock
+    ) -> None:
+        connector = BlockingTestConnector()
+        service = build_service(AgentRepository(tmp_path), connector, clock)
+        connection_id = connect(service)
+        tested: list[Any] = []
+        worker = Thread(
+            target=lambda: tested.append(
+                service.test_connection(connection_id, owner_id=OWNER)
+            )
+        )
+        worker.start()
+        assert connector.entered.wait(timeout=5)
+
+        current = service.get_connection(connection_id, owner_id=OWNER)
+        service.disconnect_connection(
+            connection_id,
+            AgentConnectionDisconnectRequest(
+                current_password="correct-horse-battery-staple",
+                expected_revision=current.revision,
+            ),
+            owner_id=OWNER,
+            idempotency_key="idem-disconnect-race",
+            reauthenticated=True,
+        )
+        connector.release.set()
+        worker.join(timeout=5)
+
+        persisted = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
+        assert persisted.status == "disconnected"
+        assert persisted.credential is None
+        assert persisted.inbound_secret is None
+        assert persisted.disconnected_at is not None
+        assert tested and tested[0].status == "disconnected"
+
+    def test_a_slow_test_cannot_restore_a_concurrently_rotated_credential(
+        self, tmp_path: Path, clock: Clock
+    ) -> None:
+        connector = BlockingTestConnector()
+        service = build_service(AgentRepository(tmp_path), connector, clock)
+        connection_id = connect(service)
+        tested: list[Any] = []
+        worker = Thread(
+            target=lambda: tested.append(
+                service.test_connection(connection_id, owner_id=OWNER)
+            )
+        )
+        worker.start()
+        assert connector.entered.wait(timeout=5)
+
+        current = service.get_connection(connection_id, owner_id=OWNER)
+        service.rotate_credential(
+            connection_id,
+            AgentConnectionRotateRequest(
+                credential="Bearer rotated-token",
+                current_password="correct-horse-battery-staple",
+                expected_revision=current.revision,
+            ),
+            owner_id=OWNER,
+            idempotency_key="idem-rotate-race",
+            reauthenticated=True,
+        )
+        connector.release.set()
+        worker.join(timeout=5)
+
+        persisted = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
+        assert persisted.status == "untested"
+        assert service._target(persisted).credential == "Bearer rotated-token"
+        assert persisted.last_tested_at is None
+        assert tested and tested[0].status == "untested"
+
+
 # --- User Story 2: review and hand one task to the agent ---------------------
 
 
@@ -581,7 +673,22 @@ class TestHandOffReview:
         assert envelope["task_id"] == "task_1"
         assert envelope["idempotency_key"]
         assert envelope["title"] == "Draft the migration plan"
-        assert envelope["reporting"]["callback_url"] == CALLBACK
+        reporting = envelope["reporting"]
+        assert reporting == {
+            "callback_url": CALLBACK,
+            "connection_id": connection_id,
+            "connection_header": "X-BrainBuddy-Connection",
+            "timestamp_header": "X-BrainBuddy-Timestamp",
+            "signature_header": "X-BrainBuddy-Signature",
+            "timestamp_format": "ascii-base-10-unix-seconds-no-sign-space-or-leading-zero",
+            "signature_algorithm": "hmac-sha256",
+            "signing_bytes": "timestamp_bytes + b'.' + raw_body",
+            "signature_format": "v1=<lowercase hex>",
+            "body_envelope_version": PROTOCOL_VERSION,
+            "instructions": reporting["instructions"],
+            "instructions_version": "v2",
+        }
+        assert "super-secret-token" not in json.dumps(reporting)
 
     @pytest.mark.parametrize("replays", [1, 2, 3])
     def test_replaying_the_dispatch_returns_the_same_run_without_restarting(
@@ -809,7 +916,9 @@ class Relay:
             signature=sign(secret or self.secret, timestamp, body),
         )
 
-    def event(self, event_id: str, event_type: str, version: int, **extra: Any) -> dict[str, Any]:
+    def event(
+        self, event_id: str, event_type: str, version: int, **extra: Any
+    ) -> dict[str, Any]:
         """A realistic, fully-formed envelope for this connection's run.
 
         Every field the strict contract requires is present, including the
@@ -864,7 +973,13 @@ class TestMonitorRun:
         relay.emit(relay.event("evt_1", "running", 1, progress="Halfway-ish"))
 
         fields = set(relay.projection().model_dump())
-        assert not fields & {"percent", "percent_complete", "eta", "eta_seconds", "stage"}
+        assert not fields & {
+            "percent",
+            "percent_complete",
+            "eta",
+            "eta_seconds",
+            "stage",
+        }
 
     def test_a_completed_event_is_labelled_as_the_agents_claim(
         self, relay: Relay
@@ -942,9 +1057,7 @@ class TestMonitorRun:
         assert run.primary_state_label == "Agent reported complete"
         assert [event.type for event in run.events] == ["running", "completed"]
 
-    def test_a_terminal_run_never_leaves_its_terminal_state(
-        self, relay: Relay
-    ) -> None:
+    def test_a_terminal_run_never_leaves_its_terminal_state(self, relay: Relay) -> None:
         """FR-008: after a terminal state, later state changes are rejected."""
 
         relay.emit(relay.event("evt_1", "completed", 1, result="Done"))
@@ -983,6 +1096,22 @@ class TestEventAuthentication:
             relay.emit(relay.event("evt_1", "running", 1), secret="not-the-secret")
 
         assert relay.projection().reported_state is None
+
+    @pytest.mark.parametrize("timestamp", ["+1", "01", " 1", "1 ", "-1"])
+    def test_noncanonical_timestamp_text_is_refused(
+        self, relay: Relay, timestamp: str
+    ) -> None:
+        body = json.dumps(relay.event("evt_1", "running", 1)).encode("utf-8")
+
+        with pytest.raises(EventRejected) as rejected:
+            relay.service.ingest_event(
+                raw_body=body,
+                connection_id=relay.connection_id,
+                timestamp=timestamp,
+                signature="v1=" + "0" * 64,
+            )
+
+        assert rejected.value.code == "timestamp_invalid"
 
     def test_a_tampered_body_changes_nothing(self, relay: Relay, clock: Clock) -> None:
         """The signature covers the whole request, so edits are detected."""
@@ -1186,9 +1315,7 @@ class TestStrictEventEnvelope:
 
         assert relay.projection().reported_state is None
 
-    def test_completed_is_satisfied_by_a_result_link_alone(
-        self, relay: Relay
-    ) -> None:
+    def test_completed_is_satisfied_by_a_result_link_alone(self, relay: Relay) -> None:
         """A result the agent hosts elsewhere is still a reported result."""
 
         relay.emit(
@@ -1359,9 +1486,7 @@ class TestReplyAndCancel:
         assert run.needs_user is False
         assert run.primary_state_label == label
 
-    def test_clearing_the_question_keeps_it_in_the_timeline(
-        self, relay: Relay
-    ) -> None:
+    def test_clearing_the_question_keeps_it_in_the_timeline(self, relay: Relay) -> None:
         """History is preserved: only the live state-owned field is cleared."""
 
         relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
@@ -1387,9 +1512,7 @@ class TestReplyAndCancel:
         assert run.question_text == "Which branch?"
         assert run.needs_user is True
 
-    def test_a_blocked_event_without_a_question_is_refused(
-        self, relay: Relay
-    ) -> None:
+    def test_a_blocked_event_without_a_question_is_refused(self, relay: Relay) -> None:
         """`blocked` means "I need an answer", so the question is mandatory.
 
         Accepting a questionless block would leave the user a needs-you badge
@@ -1430,7 +1553,9 @@ class TestReplyAndCancel:
 
         run = service.reply_to_run(
             relay.run.id,
-            AgentReplyRequest(message="Use staging."),
+            AgentReplyRequest(
+                message="Use staging.", expected_revision=relay.projection().revision
+            ),
             owner_id=OWNER,
             idempotency_key="idem-reply",
         )
@@ -1439,16 +1564,39 @@ class TestReplyAndCancel:
         assert [command.kind for command in run.commands if command.kind == "reply"]
         assert len(relay.service.connector.commands) == 1  # type: ignore[attr-defined]
 
+    def test_a_stale_reply_revision_is_refused_before_connector_delivery(
+        self, relay: Relay, service: AgentRelayService, connector: FakeConnector
+    ) -> None:
+        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
+        stale_revision = relay.projection().revision
+        relay.emit(relay.event("evt_2", "blocked", 2, question="Which region?"))
+
+        with pytest.raises(ConflictError):
+            service.reply_to_run(
+                relay.run.id,
+                AgentReplyRequest(
+                    message="Use staging.", expected_revision=stale_revision
+                ),
+                owner_id=OWNER,
+                idempotency_key="idem-stale-reply",
+            )
+
+        assert connector.commands == []
+        assert [c for c in relay.projection().commands if c.kind == "reply"] == []
+
     def test_replaying_a_reply_causes_at_most_one_connector_action(
         self, relay: Relay, service: AgentRelayService, connector: FakeConnector
     ) -> None:
         """FR-007: a duplicate submission returns the same command."""
 
         relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
+        payload = AgentReplyRequest(
+            message="Use staging.", expected_revision=relay.projection().revision
+        )
         for _ in range(3):
             service.reply_to_run(
                 relay.run.id,
-                AgentReplyRequest(message="Use staging."),
+                payload,
                 owner_id=OWNER,
                 idempotency_key="idem-reply",
             )
@@ -1465,7 +1613,9 @@ class TestReplyAndCancel:
 
         run = service.reply_to_run(
             relay.run.id,
-            AgentReplyRequest(message="Use staging."),
+            AgentReplyRequest(
+                message="Use staging.", expected_revision=relay.projection().revision
+            ),
             owner_id=OWNER,
             idempotency_key="idem-reply",
         )
@@ -1491,7 +1641,10 @@ class TestReplyAndCancel:
         with pytest.raises(ValidationFailure):
             service.reply_to_run(
                 relay.run.id,
-                AgentReplyRequest(message="Use staging."),
+                AgentReplyRequest(
+                    message="Use staging.",
+                    expected_revision=relay.projection().revision,
+                ),
                 owner_id=OWNER,
                 idempotency_key="idem-reply",
             )
@@ -1524,6 +1677,34 @@ class TestReplyAndCancel:
         run = relay.projection()
         assert run.reported_state == "cancelled"
         assert run.primary_state_label == "Cancelled"
+        assert run.cancel_requested is False
+
+    @pytest.mark.parametrize(
+        ("terminal_type", "content"),
+        [
+            ("completed", {"result": "Done."}),
+            ("failed", {"reason": "Broken."}),
+            ("cancelled", {}),
+        ],
+    )
+    def test_every_terminal_event_clears_the_pending_cancellation_condition(
+        self,
+        relay: Relay,
+        service: AgentRelayService,
+        terminal_type: str,
+        content: dict[str, str],
+    ) -> None:
+        relay.emit(relay.event("evt_1", "running", 1))
+        service.cancel_run(relay.run.id, owner_id=OWNER, idempotency_key="idem-cancel")
+
+        relay.emit(relay.event("evt_2", terminal_type, 2, **content))
+
+        run = relay.projection()
+        assert run.reported_state == terminal_type
+        assert run.cancel_requested is False
+        assert [
+            command.kind for command in run.commands if command.kind == "cancel"
+        ] == ["cancel"]
 
     def test_cancelling_through_a_connector_without_cancel_support_is_refused(
         self, service: AgentRelayService, connector: FakeConnector, clock: Clock
@@ -1550,7 +1731,7 @@ class TestReplyAndCancel:
         with pytest.raises(NotFoundError):
             service.reply_to_run(
                 relay.run.id,
-                AgentReplyRequest(message="Nope."),
+                AgentReplyRequest(message="Nope.", expected_revision=1),
                 owner_id=OTHER_OWNER,
                 idempotency_key="idem-reply",
             )
@@ -1579,10 +1760,16 @@ class TestCommandReplayAfterTheWorldMoved:
         *,
         key: str = "idem-reply",
         message: str = "Use staging.",
+        expected_revision: int | None = None,
     ) -> Any:
+        revisions = getattr(self, "_reply_revisions", {})
+        revision = expected_revision
+        if revision is None:
+            revision = revisions.setdefault(key, relay.projection().revision)
+        self._reply_revisions = revisions
         return service.reply_to_run(
             relay.run.id,
-            AgentReplyRequest(message=message),
+            AgentReplyRequest(message=message, expected_revision=revision),
             owner_id=OWNER,
             idempotency_key=key,
         )
@@ -1618,6 +1805,31 @@ class TestCommandReplayAfterTheWorldMoved:
         assert replay.reported_state == "completed"
         assert len(connector.commands) == 1
 
+    def test_a_completed_reply_replay_precedes_the_live_revision_check(
+        self, relay: Relay, service: AgentRelayService, connector: FakeConnector
+    ) -> None:
+        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
+        revision = relay.projection().revision
+        payload = AgentReplyRequest(message="Use staging.", expected_revision=revision)
+        service.reply_to_run(
+            relay.run.id,
+            payload,
+            owner_id=OWNER,
+            idempotency_key="idem-reply-revision-replay",
+        )
+        relay.emit(relay.event("evt_2", "completed", 2, result="Shipped."))
+
+        replay = service.reply_to_run(
+            relay.run.id,
+            payload,
+            owner_id=OWNER,
+            idempotency_key="idem-reply-revision-replay",
+        )
+
+        assert replay.reported_state == "completed"
+        assert replay.revision > revision
+        assert len(connector.commands) == 1
+
     def test_a_reply_replayed_after_a_disconnect_returns_its_outcome(
         self, relay: Relay, service: AgentRelayService, connector: FakeConnector
     ) -> None:
@@ -1648,7 +1860,7 @@ class TestCommandReplayAfterTheWorldMoved:
             relay.run.id, owner_id=OWNER, idempotency_key="idem-cancel"
         )
 
-        assert replay.cancel_requested is True
+        assert replay.cancel_requested is False
         assert replay.reported_state == "cancelled"
         assert [c.kind for c in replay.commands if c.kind == "cancel"] == ["cancel"]
         assert len(connector.commands) == 1
@@ -1681,7 +1893,10 @@ class TestCommandReplayAfterTheWorldMoved:
         with pytest.raises(NotFoundError):
             service.reply_to_run(
                 relay.run.id,
-                AgentReplyRequest(message="Use staging."),
+                AgentReplyRequest(
+                    message="Use staging.",
+                    expected_revision=relay.projection().revision,
+                ),
                 owner_id=OTHER_OWNER,
                 idempotency_key="idem-reply",
             )
@@ -1827,7 +2042,10 @@ class TestDisconnectAndRetention:
         with pytest.raises(ValidationFailure):
             service.reply_to_run(
                 relay.run.id,
-                AgentReplyRequest(message="Use staging."),
+                AgentReplyRequest(
+                    message="Use staging.",
+                    expected_revision=relay.projection().revision,
+                ),
                 owner_id=OWNER,
                 idempotency_key="idem-reply",
             )
@@ -1848,6 +2066,102 @@ class TestDisconnectAndRetention:
         assert run.manifest is None
         assert run.primary_state_label == "Agent reported complete"
         assert run.events and run.events[0].summary is None
+
+    def test_a_fresh_reply_to_an_expired_run_is_refused_without_content_write(
+        self,
+        relay: Relay,
+        clock: Clock,
+        service: AgentRelayService,
+        connector: FakeConnector,
+    ) -> None:
+        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
+        clock.advance(service.content_retention + timedelta(seconds=1))
+        assert service.run_retention_sweep() == 1
+        revision = relay.projection().revision
+
+        with pytest.raises(ValidationFailure) as refused:
+            service.reply_to_run(
+                relay.run.id,
+                AgentReplyRequest(message="New secret", expected_revision=revision),
+                owner_id=OWNER,
+                idempotency_key="idem-after-expiry",
+            )
+
+        assert refused.value.detail == {"reason": "run_content_expired"}
+        assert connector.commands == []
+        assert all(command.body is None for command in relay.projection().commands)
+
+    def test_a_completed_same_key_reply_replays_after_content_expiry(
+        self,
+        relay: Relay,
+        clock: Clock,
+        service: AgentRelayService,
+        connector: FakeConnector,
+    ) -> None:
+        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
+        payload = AgentReplyRequest(
+            message="Use staging.", expected_revision=relay.projection().revision
+        )
+        first = service.reply_to_run(
+            relay.run.id,
+            payload,
+            owner_id=OWNER,
+            idempotency_key="idem-reply-before-expiry",
+        )
+        persisted = service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
+        service.agent_repo.save_run(
+            persisted.model_copy(update={"content_expires_at": clock.now})
+        )
+        clock.advance(timedelta(seconds=1))
+        assert service.run_retention_sweep() == 1
+
+        replay = service.reply_to_run(
+            relay.run.id,
+            payload,
+            owner_id=OWNER,
+            idempotency_key="idem-reply-before-expiry",
+        )
+
+        assert replay.id == first.id
+        assert replay.content_expired is True
+        assert len(connector.commands) == 1
+        assert all(command.body is None for command in replay.commands)
+
+    @pytest.mark.parametrize(
+        ("event_type", "content"),
+        [
+            ("running", {"progress": "Secret progress"}),
+            ("blocked", {"question": "Secret question?"}),
+            ("completed", {"result": "Secret result"}),
+            ("failed", {"reason": "Secret failure"}),
+        ],
+    )
+    def test_late_events_advance_expired_runs_without_repopulating_content(
+        self,
+        relay: Relay,
+        clock: Clock,
+        service: AgentRelayService,
+        event_type: str,
+        content: dict[str, str],
+    ) -> None:
+        clock.advance(service.content_retention + timedelta(seconds=1))
+        assert service.run_retention_sweep() == 1
+
+        relay.emit(relay.event("evt_late", event_type, 1, **content))
+
+        run = relay.projection()
+        assert run.content_expired is True
+        assert run.reported_state == event_type
+        assert run.run_version == 1
+        assert run.last_contact_at == clock.now
+        assert run.progress_text is None
+        assert run.question_text is None
+        assert run.result_text is None
+        assert run.result_link is None
+        assert run.failure_reason is None
+        assert run.events[-1].summary is None
+        assert service.run_retention_sweep() == 0
+        assert all(event.summary is None for event in relay.projection().events)
 
     def test_expiry_leaves_no_manifest_fingerprint_in_run_storage(
         self, relay: Relay, clock: Clock, service: AgentRelayService, tmp_path: Path
@@ -1878,7 +2192,9 @@ class TestDisconnectAndRetention:
         assert stored["manifest"] is None
         assert token not in rows[0][1]
         assert not [
-            key for key, value in stored.items() if isinstance(value, str) and value == token
+            key
+            for key, value in stored.items()
+            if isinstance(value, str) and value == token
         ]
 
     def test_content_within_retention_is_untouched(
@@ -1937,17 +2253,183 @@ class TestAudit:
         assert "Cloning the repo" not in serialized
         assert relay.secret not in serialized
 
-    def test_a_rejected_event_is_audited_as_rejected(
+    def test_pre_authentication_rejections_do_not_create_durable_audit_rows(
         self, relay: Relay, service: AgentRelayService
     ) -> None:
-        """Rejections are observable without revealing why to the caller."""
+        before = len(service.list_audit(owner_id=OWNER))
 
         with pytest.raises(EventRejected):
             relay.emit(relay.event("evt_1", "running", 1), secret="wrong")
 
-        assert any(
-            entry.action == "event_rejected" for entry in service.list_audit(owner_id=OWNER)
+        assert len(service.list_audit(owner_id=OWNER)) == before
+
+    def test_pre_authentication_rejection_floods_are_bounded_and_valid_events_continue(
+        self, relay: Relay, service: AgentRelayService, clock: Clock
+    ) -> None:
+        before = len(service.list_audit(owner_id=OWNER))
+        body = json.dumps(relay.event("evt_stale", "running", 1)).encode("utf-8")
+        stale = int((clock.now - timedelta(hours=2)).timestamp())
+
+        for index in range(20):
+            with pytest.raises(EventRejected):
+                relay.emit(
+                    relay.event(f"evt_bad_{index}", "running", 1), secret="wrong"
+                )
+            with pytest.raises(EventRejected):
+                service.ingest_event(
+                    raw_body=body,
+                    connection_id=relay.connection_id,
+                    timestamp=str(stale),
+                    signature=sign(relay.secret, stale, body),
+                )
+
+        assert len(service.list_audit(owner_id=OWNER)) == before
+        accepted = relay.emit(relay.event("evt_valid", "running", 1))
+        assert accepted.accepted is True
+
+        current = service.get_connection(relay.connection_id, owner_id=OWNER)
+        service.disconnect_connection(
+            relay.connection_id,
+            AgentConnectionDisconnectRequest(
+                current_password="correct-horse-battery-staple",
+                expected_revision=current.revision,
+            ),
+            owner_id=OWNER,
+            idempotency_key="idem-disconnect-audit-flood",
+            reauthenticated=True,
         )
+        after_disconnect = len(service.list_audit(owner_id=OWNER))
+        for index in range(20):
+            with pytest.raises(EventRejected):
+                relay.emit(relay.event(f"evt_disconnected_{index}", "running", 2))
+
+        assert len(service.list_audit(owner_id=OWNER)) == after_disconnect
+
+        replacement = service.create_connection(
+            create_request(name="Replacement"),
+            owner_id=OWNER,
+            idempotency_key="idem-create-after-flood",
+            reauthenticated=True,
+        )
+        make_ready(service, replacement.id)
+        replacement_run = dispatch(
+            service,
+            replacement.id,
+            task_id="task_2",
+            key="idem-dispatch-after-flood",
+        )
+        body = json.dumps(
+            {
+                "protocol_version": PROTOCOL_VERSION,
+                "connection_id": replacement.id,
+                "event_id": "evt_after_flood",
+                "run_id": replacement_run.id,
+                "type": "running",
+                "run_version": 1,
+            }
+        ).encode("utf-8")
+        timestamp = int(clock.now.timestamp())
+        accepted = service.ingest_event(
+            raw_body=body,
+            connection_id=replacement.id,
+            timestamp=str(timestamp),
+            signature=sign(
+                replacement.inbound_signing_secret,
+                timestamp,
+                body,
+            ),
+        )
+        assert accepted.accepted is True
+
+    def test_authenticated_semantic_rejection_audit_is_fixed_cardinality(
+        self, relay: Relay, service: AgentRelayService, clock: Clock
+    ) -> None:
+        before = len(service.list_audit(owner_id=OWNER))
+        timestamp = int(clock.now.timestamp())
+
+        for index in range(20):
+            body = json.dumps(
+                {
+                    "protocol_version": PROTOCOL_VERSION,
+                    "connection_id": relay.connection_id,
+                    "event_id": f"evt_invalid_{index}",
+                }
+            ).encode("utf-8")
+            with pytest.raises(EventRejected) as rejected:
+                service.ingest_event(
+                    raw_body=body,
+                    connection_id=relay.connection_id,
+                    timestamp=str(timestamp),
+                    signature=sign(relay.secret, timestamp, body),
+                )
+            assert rejected.value.code == "envelope_invalid"
+
+        entries = service.list_audit(owner_id=OWNER)
+        assert len(entries) == before + 1
+        rejection = next(entry for entry in entries if entry.action == "event_rejected")
+        assert rejection.outcome == "envelope_invalid"
+        assert rejection.connection_id == relay.connection_id
+        assert rejection.run_id is None
+        assert rejection.correlation_id is None
+        serialized = json.dumps(rejection.model_dump(mode="json"))
+        assert "evt_invalid_" not in serialized
+
+        mismatch_body = json.dumps(
+            {
+                "protocol_version": PROTOCOL_VERSION,
+                "connection_id": "agentconn_other",
+                "event_id": "evt_attacker_controlled",
+                "run_id": "agentrun_attacker_controlled",
+                "type": "running",
+                "run_version": 1,
+            }
+        ).encode("utf-8")
+        with pytest.raises(EventRejected) as rejected:
+            service.ingest_event(
+                raw_body=mismatch_body,
+                connection_id=relay.connection_id,
+                timestamp=str(timestamp),
+                signature=sign(relay.secret, timestamp, mismatch_body),
+            )
+        assert rejected.value.code == "connection_mismatch"
+
+        entries = service.list_audit(owner_id=OWNER)
+        assert len(entries) == before + 2
+        assert {
+            entry.outcome for entry in entries if entry.action == "event_rejected"
+        } == {
+            "connection_mismatch",
+            "envelope_invalid",
+        }
+        serialized = json.dumps(
+            [
+                entry.model_dump(mode="json")
+                for entry in entries
+                if entry.action == "event_rejected"
+            ]
+        )
+        assert "evt_attacker_controlled" not in serialized
+        assert "agentrun_attacker_controlled" not in serialized
+
+        accepted = relay.emit(relay.event("evt_valid_after_auth_flood", "running", 1))
+        assert accepted.accepted is True
+
+        for index in range(5):
+            with pytest.raises(EventRejected) as rejected:
+                relay.emit(relay.event(f"evt_stale_{index}", "running", 1))
+            assert rejected.value.code == "run_version_not_newer"
+
+        rejection_entries = [
+            entry
+            for entry in service.list_audit(owner_id=OWNER)
+            if entry.action == "event_rejected"
+        ]
+        assert len(rejection_entries) == 3
+        assert {entry.outcome for entry in rejection_entries} == {
+            "connection_mismatch",
+            "envelope_invalid",
+            "run_version_not_newer",
+        }
 
 
 class TestSecretHandling:
@@ -1959,10 +2441,23 @@ class TestSecretHandling:
         relay.emit(relay.event("evt_1", "completed", 1, result="Done"))
 
         payloads = [
-            json.dumps(service.get_connection(relay.connection_id, owner_id=OWNER).model_dump(mode="json")),
-            json.dumps([c.model_dump(mode="json") for c in service.list_connections(owner_id=OWNER)]),
-            json.dumps(service.get_run(relay.run.id, owner_id=OWNER).model_dump(mode="json")),
-            json.dumps([e.model_dump(mode="json") for e in service.list_audit(owner_id=OWNER)]),
+            json.dumps(
+                service.get_connection(relay.connection_id, owner_id=OWNER).model_dump(
+                    mode="json"
+                )
+            ),
+            json.dumps(
+                [
+                    c.model_dump(mode="json")
+                    for c in service.list_connections(owner_id=OWNER)
+                ]
+            ),
+            json.dumps(
+                service.get_run(relay.run.id, owner_id=OWNER).model_dump(mode="json")
+            ),
+            json.dumps(
+                [e.model_dump(mode="json") for e in service.list_audit(owner_id=OWNER)]
+            ),
         ]
 
         for payload in payloads:
@@ -2166,7 +2661,9 @@ class TestSigningSecretRotation:
         """
 
         revision = service.get_connection(relay.connection_id, owner_id=OWNER).revision
-        first = self.rotate(service, relay.connection_id, key="idem-a", revision=revision)
+        first = self.rotate(
+            service, relay.connection_id, key="idem-a", revision=revision
+        )
         second = self.rotate(service, relay.connection_id, key="idem-b")
 
         with pytest.raises(ConflictError) as refused:
@@ -2190,10 +2687,14 @@ class TestSigningSecretRotation:
         """
 
         revision = service.get_connection(relay.connection_id, owner_id=OWNER).revision
-        first = self.rotate(service, relay.connection_id, key="idem-a", revision=revision)
+        first = self.rotate(
+            service, relay.connection_id, key="idem-a", revision=revision
+        )
         service.test_connection(relay.connection_id, owner_id=OWNER)
 
-        replay = self.rotate(service, relay.connection_id, key="idem-a", revision=revision)
+        replay = self.rotate(
+            service, relay.connection_id, key="idem-a", revision=revision
+        )
 
         assert replay.inbound_signing_secret == first.inbound_signing_secret
         relay.emit(
@@ -2264,15 +2765,22 @@ class TestSigningSecretRotation:
 
         reads = [
             json.dumps(
-                service.get_connection(
-                    relay.connection_id, owner_id=OWNER
-                ).model_dump(mode="json")
+                service.get_connection(relay.connection_id, owner_id=OWNER).model_dump(
+                    mode="json"
+                )
             ),
             json.dumps(
-                [c.model_dump(mode="json") for c in service.list_connections(owner_id=OWNER)]
+                [
+                    c.model_dump(mode="json")
+                    for c in service.list_connections(owner_id=OWNER)
+                ]
             ),
-            json.dumps(service.get_run(relay.run.id, owner_id=OWNER).model_dump(mode="json")),
-            json.dumps([e.model_dump(mode="json") for e in service.list_audit(owner_id=OWNER)]),
+            json.dumps(
+                service.get_run(relay.run.id, owner_id=OWNER).model_dump(mode="json")
+            ),
+            json.dumps(
+                [e.model_dump(mode="json") for e in service.list_audit(owner_id=OWNER)]
+            ),
         ]
 
         for payload in reads:

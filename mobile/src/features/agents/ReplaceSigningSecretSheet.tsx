@@ -67,7 +67,7 @@ export function ReplaceSigningSecretSheet({
       );
       settleIntentKey();
       setPassword("");
-      await queryClient.invalidateQueries({ queryKey: agentKeys.connections });
+      await queryClient.invalidateQueries({ queryKey: agentKeys.root });
       onReplaced(replaced);
     } catch (caught) {
       // The failure can be ambiguous. Keep the same intent key for an explicit retry.

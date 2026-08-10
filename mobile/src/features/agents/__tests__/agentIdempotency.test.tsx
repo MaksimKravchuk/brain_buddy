@@ -10,6 +10,8 @@
 
 import { useState } from "react";
 import { Pressable, Text } from "react-native";
+import { act } from "react-test-renderer";
+import { QueryClientProvider } from "@tanstack/react-query";
 
 import { useConfirmAgentHandoff } from "@/api/hooks";
 import type { AgentHandoffConfirmRequest } from "@/api/types";
@@ -32,13 +34,21 @@ jest.mock("expo-crypto", () => ({
   },
 }));
 
-jest.mock("@/auth/SessionProvider", () => ({
-  useApi: () => ({
+jest.mock("@/auth/SessionProvider", () => {
+  const api = {
     replyToAgentRun: (...args: unknown[]) => mockReply(...args),
     cancelAgentRun: (...args: unknown[]) => mockCancel(...args),
     confirmAgentHandoff: (...args: unknown[]) => mockConfirmHandoff(...args),
-  }),
-}));
+  };
+  return {
+    useApi: () => api,
+    useSession: () => ({
+      api,
+      serverUrl: "https://brain.example.test/api",
+      me: { id: "user-test" },
+    }),
+  };
+});
 
 function props(overrides: Record<string, unknown> = {}) {
   return {
@@ -85,7 +95,10 @@ describe("relay command idempotency", () => {
 
     expect(mockReply).toHaveBeenCalledTimes(2);
     expect(mockReply.mock.calls[1][2]).not.toBe(mockReply.mock.calls[0][2]);
-    expect(mockReply.mock.calls[1][1]).toEqual({ message: "The other repo" });
+    expect(mockReply.mock.calls[1][1]).toEqual({
+      message: "The other repo",
+      expected_revision: 2,
+    });
 
     await unmount();
   });
@@ -110,7 +123,83 @@ describe("relay command idempotency", () => {
 
     expect(mockReply).toHaveBeenCalledTimes(2);
     expect(mockReply.mock.calls[1][2]).toBe(mockReply.mock.calls[0][2]);
-    expect(mockReply.mock.calls[1][1]).toEqual({ message: "The brain_buddy repo" });
+    expect(mockReply.mock.calls[1][1]).toEqual({
+      message: "The brain_buddy repo",
+      expected_revision: 2,
+    });
+
+    await unmount();
+  });
+
+  it("reuses the frozen key and revision when the same question refreshes", async () => {
+    mockReply
+      .mockRejectedValueOnce(new Error("Connection lost"))
+      .mockResolvedValue(makeRun({ reply_pending: true, revision: 4 }));
+    const firstRun = blockedRun();
+    const { renderer, client, unmount } = await renderWithProviders(
+      <AgentRunSection {...props({ runs: [firstRun] })} />,
+    );
+
+    await typeInto(getByLabel(renderer, "Your answer"), "Use staging");
+    await pressText(renderer, "Send answer");
+    await settle();
+
+    await act(async () => {
+      renderer.update(
+        <QueryClientProvider client={client}>
+          <AgentRunSection
+            {...props({ runs: [{ ...firstRun, revision: firstRun.revision + 1 }] })}
+          />
+        </QueryClientProvider>,
+      );
+    });
+    await pressText(renderer, "Send answer");
+    await settle();
+
+    expect(mockReply).toHaveBeenCalledTimes(2);
+    expect(mockReply.mock.calls[1][2]).toBe(mockReply.mock.calls[0][2]);
+    expect(mockReply.mock.calls[1][1]).toEqual({
+      message: "Use staging",
+      expected_revision: firstRun.revision,
+    });
+
+    await unmount();
+  });
+
+  it("mints a new reply key when the displayed question materially changes", async () => {
+    mockReply
+      .mockRejectedValueOnce(new Error("Connection lost"))
+      .mockResolvedValue(makeRun({ reply_pending: true, revision: 4 }));
+    const firstRun = blockedRun();
+    const { renderer, client, unmount } = await renderWithProviders(
+      <AgentRunSection {...props({ runs: [firstRun] })} />,
+    );
+
+    await typeInto(getByLabel(renderer, "Your answer"), "Use staging");
+    await pressText(renderer, "Send answer");
+    await settle();
+
+    const changedRun = {
+      ...firstRun,
+      revision: firstRun.revision + 1,
+      question_text: "Which deployment target?",
+    };
+    await act(async () => {
+      renderer.update(
+        <QueryClientProvider client={client}>
+          <AgentRunSection {...props({ runs: [changedRun] })} />
+        </QueryClientProvider>,
+      );
+    });
+    await pressText(renderer, "Send answer");
+    await settle();
+
+    expect(mockReply).toHaveBeenCalledTimes(2);
+    expect(mockReply.mock.calls[1][2]).not.toBe(mockReply.mock.calls[0][2]);
+    expect(mockReply.mock.calls[1][1]).toEqual({
+      message: "Use staging",
+      expected_revision: changedRun.revision,
+    });
 
     await unmount();
   });

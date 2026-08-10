@@ -449,6 +449,19 @@ export interface AgentHandoffConfirmRequest extends AgentHandoffPreviewRequest {
   current_password?: string | null;
 }
 
+export interface AgentReportingContract {
+  callback_url: string;
+  connection_id: string;
+  connection_header: "X-BrainBuddy-Connection";
+  timestamp_header: "X-BrainBuddy-Timestamp";
+  signature_header: "X-BrainBuddy-Signature";
+  timestamp_format: "ascii-base-10-unix-seconds-no-sign-space-or-leading-zero";
+  signature_algorithm: "hmac-sha256";
+  signing_bytes: "timestamp_bytes + b'.' + raw_body";
+  signature_format: "v1=<lowercase hex>";
+  body_envelope_version: string;
+}
+
 /** Exactly what will leave Brain Buddy, itemised for review. */
 export interface AgentManifestResponse {
   token: string;
@@ -459,6 +472,7 @@ export interface AgentManifestResponse {
   title: string;
   details: string | null;
   context_items: AgentContextItem[];
+  reporting: AgentReportingContract;
   reporting_instructions: string;
   instructions_version: string;
   protocol_version: string;
@@ -469,6 +483,7 @@ export interface AgentManifestResponse {
 
 export interface AgentReplyRequest {
   message: string;
+  expected_revision: number;
 }
 
 export interface AgentRunEvent {

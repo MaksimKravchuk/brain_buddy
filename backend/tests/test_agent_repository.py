@@ -217,9 +217,7 @@ class TestRuns:
 
         repo.create_connection(make_connection())
         repo.create_run(
-            make_run(
-                dispatched_at=None, content_expires_at=NOW - timedelta(days=1)
-            )
+            make_run(dispatched_at=None, content_expires_at=NOW - timedelta(days=1))
         )
 
         assert repo.expire_due_content(now=NOW) == 0
@@ -229,7 +227,7 @@ class TestRuns:
     ) -> None:
         """Confirmation resolves the exact reservation the review produced."""
 
-        from app.modules.agents.domain import AgentRunManifest
+        from app.modules.agents.domain import AgentReportingContract, AgentRunManifest
 
         manifest = AgentRunManifest(
             token="a" * 64,
@@ -238,6 +236,10 @@ class TestRuns:
             connection_id="agentconn_1",
             agent_name="Hermes",
             title="Draft the plan",
+            reporting=AgentReportingContract(
+                callback_url="https://brainbuddy.example/api/agent-events",
+                connection_id="agentconn_1",
+            ),
             reporting_instructions="Report to the callback URL.",
         )
         repo.create_connection(make_connection())

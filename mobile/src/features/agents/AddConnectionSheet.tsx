@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { StyleSheet, TextInput, View } from "react-native";
 
+import { ApiError } from "@/api/client";
 import type { AgentConnectionCreatedResponse } from "@/api/types";
 import { useCreateAgentConnection } from "@/api/hooks";
 import { BBText } from "@/components/BBText";
@@ -8,6 +9,7 @@ import { Button } from "@/components/Button";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { Sheet } from "@/components/Sheet";
 import { colors, fonts, radii, space, type as typeScale } from "@/theme/tokens";
+import { useIntentKey } from "@/utils/ids";
 
 interface AddConnectionSheetProps {
   visible: boolean;
@@ -30,6 +32,7 @@ export function AddConnectionSheet({ visible, onClose, onCreated }: AddConnectio
   const [authHeader, setAuthHeader] = useState(DEFAULT_AUTH_HEADER);
   const [credential, setCredential] = useState("");
   const [password, setPassword] = useState("");
+  const createKey = useIntentKey();
 
   useEffect(() => {
     if (visible) {
@@ -51,19 +54,38 @@ export function AddConnectionSheet({ visible, onClose, onCreated }: AddConnectio
     password.length > 0;
 
   const submit = () => {
+    const trimmedName = name.trim();
+    const trimmedEndpoint = endpoint.trim();
+    const trimmedAuthHeader = authHeader.trim();
+    const intent = JSON.stringify([
+      trimmedName,
+      trimmedEndpoint,
+      trimmedAuthHeader,
+      credential,
+      password,
+    ]);
     create.mutate(
       {
-        name: name.trim(),
-        endpoint_url: endpoint.trim(),
-        auth_header_name: authHeader.trim(),
-        credential,
-        current_password: password,
+        payload: {
+          name: trimmedName,
+          endpoint_url: trimmedEndpoint,
+          auth_header_name: trimmedAuthHeader,
+          credential,
+          current_password: password,
+        },
+        idempotencyKey: createKey.current(intent),
       },
       {
         onSuccess: (connection) => {
+          createKey.settle();
           setCredential("");
           setPassword("");
           onCreated(connection);
+        },
+        onError: (error) => {
+          if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
+            createKey.settle();
+          }
         },
       },
     );

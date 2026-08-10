@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Linking, Pressable, StyleSheet, TextInput, View } from "react-native";
 
+import { ApiError } from "@/api/client";
 import { useCancelAgentRun, useReplyToAgentRun } from "@/api/hooks";
 import type { AgentRunResponse } from "@/api/types";
 import {
@@ -29,6 +30,24 @@ interface AgentRunSectionProps {
   /** Hand a run a command just returned straight back to the feed. */
   onRunUpdated: (run: AgentRunResponse) => void;
   onRetry?: () => void;
+}
+
+interface ReplyIntentSnapshot {
+  idempotencyKey: string;
+  message: string;
+  questionIdentity: string;
+  expectedRevision: number;
+}
+
+function questionIdentity(run: AgentRunResponse): string {
+  const blockedEvent = [...run.events].reverse().find((event) => event.type === "blocked");
+  return JSON.stringify([
+    run.id,
+    run.task_id,
+    run.connection_id,
+    blockedEvent?.id ?? run.run_version,
+    run.question_text,
+  ]);
 }
 
 /**
@@ -116,25 +135,58 @@ function RunCard({
   // ambiguity into a second command.
   const replyKey = useIntentKey();
   const cancelKey = useIntentKey();
+  const replyIntent = useRef<ReplyIntentSnapshot | null>(null);
 
   const showQuestion = awaitsAnswer(run);
+  const displayedQuestionIdentity = questionIdentity(run);
   const replyGuard = canReply(run, run.capabilities, { online });
   const cancelGuard = canCancel(run, run.capabilities, { online });
   const linkGuard = run.result_link ? canOpenResultLink(run) : null;
   const events = sortedEvents(run);
+
+  useEffect(() => {
+    const held = replyIntent.current;
+    if (held && (!showQuestion || held.questionIdentity !== displayedQuestionIdentity)) {
+      replyKey.settle();
+      replyIntent.current = null;
+    }
+  }, [displayedQuestionIdentity, replyKey, showQuestion]);
 
   const sendAnswer = () => {
     const trimmed = answer.trim();
     if (!trimmed || !replyGuard.ok) {
       return;
     }
+    const held = replyIntent.current;
+    const intent =
+      held?.message === trimmed && held.questionIdentity === displayedQuestionIdentity
+        ? held
+        : {
+            message: trimmed,
+            questionIdentity: displayedQuestionIdentity,
+            expectedRevision: run.revision,
+            idempotencyKey: replyKey.current(`${displayedQuestionIdentity}:${trimmed}`),
+          };
+    replyIntent.current = intent;
     reply.mutate(
-      { runId: run.id, message: trimmed, idempotencyKey: replyKey.current(trimmed) },
+      {
+        runId: run.id,
+        message: intent.message,
+        expectedRevision: intent.expectedRevision,
+        idempotencyKey: intent.idempotencyKey,
+      },
       {
         onSuccess: (updated) => {
           replyKey.settle();
+          replyIntent.current = null;
           setAnswer("");
           onRunUpdated(updated);
+        },
+        onError: (error) => {
+          if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
+            replyKey.settle();
+            replyIntent.current = null;
+          }
         },
       },
     );

@@ -14,8 +14,9 @@ import {
 } from "@tanstack/react-query";
 
 import { ApiError } from "@/api/client";
+import { PRIVATE_AGENT_ROOT } from "@/api/privateAgentCache";
 
-import { useApi } from "@/auth/SessionProvider";
+import { useApi, useSession } from "@/auth/SessionProvider";
 import type {
   AgentConnectionCreateRequest,
   AgentConnectionDisconnectRequest,
@@ -40,13 +41,23 @@ export const taskKeys = {
 };
 
 export const agentKeys = {
-  root: ["agents"] as const,
-  connections: ["agents", "connections"] as const,
-  connection: (connectionId: string) => ["agents", "connections", connectionId] as const,
-  taskRuns: (taskId: string) => ["agents", "runs", "task", taskId] as const,
-  run: (runId: string) => ["agents", "runs", runId] as const,
-  summaries: (taskIds: string[]) => ["agents", "summaries", taskIds] as const,
+  root: PRIVATE_AGENT_ROOT,
+  owner: (owner: string) => [...agentKeys.root, owner] as const,
+  connections: (owner: string) => [...agentKeys.owner(owner), "connections"] as const,
+  connection: (owner: string, connectionId: string) =>
+    [...agentKeys.connections(owner), connectionId] as const,
+  taskRuns: (owner: string, taskId: string) =>
+    [...agentKeys.owner(owner), "runs", "task", taskId] as const,
+  run: (owner: string, runId: string) => [...agentKeys.owner(owner), "runs", runId] as const,
+  summaries: (owner: string, taskIds: string[]) =>
+    [...agentKeys.owner(owner), "summaries", taskIds] as const,
+  mutation: (owner: string, action: string) =>
+    [...agentKeys.owner(owner), "mutation", action] as const,
 };
+
+export function agentOwnerIdentity(serverUrl: string, userId: string | null | undefined): string {
+  return `${serverUrl.replace(/\/+$/, "")}|${userId ?? "signed-out"}`;
+}
 
 const PAGE_SIZE = 50;
 
@@ -202,24 +213,29 @@ export function useCreateComment(taskId: string) {
 // silently invalidates task lists (and vice versa). Runs are attached to a
 // task but are not part of it: a connector report never mutates the Task.
 
-function useInvalidateAgents() {
+function useAgentContext() {
+  const { api, serverUrl, me } = useSession();
+  return { api, owner: agentOwnerIdentity(serverUrl, me?.id) };
+}
+
+function useInvalidateAgents(owner: string) {
   const queryClient = useQueryClient();
-  return () => queryClient.invalidateQueries({ queryKey: agentKeys.root });
+  return () => queryClient.invalidateQueries({ queryKey: agentKeys.owner(owner) });
 }
 
 export function useAgentConnections(enabled = true) {
-  const api = useApi();
+  const { api, owner } = useAgentContext();
   return useQuery({
-    queryKey: agentKeys.connections,
+    queryKey: agentKeys.connections(owner),
     queryFn: ({ signal }) => api.listAgentConnections(signal),
     enabled,
   });
 }
 
 export function useAgentConnection(connectionId: string, enabled = true) {
-  const api = useApi();
+  const { api, owner } = useAgentContext();
   return useQuery({
-    queryKey: agentKeys.connection(connectionId),
+    queryKey: agentKeys.connection(owner, connectionId),
     queryFn: ({ signal }) => api.getAgentConnection(connectionId, signal),
     enabled,
   });
@@ -231,28 +247,33 @@ export function useAgentConnection(connectionId: string, enabled = true) {
  * query cache.
  */
 export function useCreateAgentConnection() {
-  const api = useApi();
-  const invalidate = useInvalidateAgents();
+  const { api, owner } = useAgentContext();
+  const invalidate = useInvalidateAgents(owner);
   return useMutation({
-    mutationFn: (payload: AgentConnectionCreateRequest) =>
-      api.createAgentConnection(payload, newIdempotencyKey()),
+    mutationKey: agentKeys.mutation(owner, "create-connection"),
+    mutationFn: (input: {
+      payload: AgentConnectionCreateRequest;
+      idempotencyKey: string;
+    }) => api.createAgentConnection(input.payload, input.idempotencyKey),
     onSuccess: invalidate,
   });
 }
 
 export function useTestAgentConnection() {
-  const api = useApi();
-  const invalidate = useInvalidateAgents();
+  const { api, owner } = useAgentContext();
+  const invalidate = useInvalidateAgents(owner);
   return useMutation({
+    mutationKey: agentKeys.mutation(owner, "test-connection"),
     mutationFn: (connectionId: string) => api.testAgentConnection(connectionId),
     onSuccess: invalidate,
   });
 }
 
 export function useRotateAgentCredential() {
-  const api = useApi();
-  const invalidate = useInvalidateAgents();
+  const { api, owner } = useAgentContext();
+  const invalidate = useInvalidateAgents(owner);
   return useMutation({
+    mutationKey: agentKeys.mutation(owner, "rotate-credential"),
     mutationFn: (input: { connectionId: string; payload: AgentConnectionRotateRequest }) =>
       api.rotateAgentCredential(input.connectionId, input.payload, newIdempotencyKey()),
     onSuccess: invalidate,
@@ -265,9 +286,10 @@ export function useRotateAgentCredential() {
 }
 
 export function useDisconnectAgentConnection() {
-  const api = useApi();
-  const invalidate = useInvalidateAgents();
+  const { api, owner } = useAgentContext();
+  const invalidate = useInvalidateAgents(owner);
   return useMutation({
+    mutationKey: agentKeys.mutation(owner, "disconnect-connection"),
     mutationFn: (input: { connectionId: string; payload: AgentConnectionDisconnectRequest }) =>
       api.disconnectAgentConnection(input.connectionId, input.payload, newIdempotencyKey()),
     onSuccess: invalidate,
@@ -280,9 +302,9 @@ export function useDisconnectAgentConnection() {
 }
 
 export function useAgentRuns(taskId: string, enabled = true) {
-  const api = useApi();
+  const { api, owner } = useAgentContext();
   return useQuery({
-    queryKey: agentKeys.taskRuns(taskId),
+    queryKey: agentKeys.taskRuns(owner, taskId),
     queryFn: ({ signal }) => api.listAgentRuns(taskId, signal),
     enabled,
   });
@@ -298,9 +320,9 @@ export function useAgentRuns(taskId: string, enabled = true) {
  * is simply absent, so its row stays exactly as it was.
  */
 export function useAgentRunSummaries(taskIds: string[], enabled: boolean) {
-  const api = useApi();
+  const { api, owner } = useAgentContext();
   return useQuery({
-    queryKey: agentKeys.summaries(taskIds),
+    queryKey: agentKeys.summaries(owner, taskIds),
     queryFn: ({ signal }) => api.listAgentRunSummaries(taskIds, signal),
     enabled: enabled && taskIds.length > 0,
   });
@@ -308,8 +330,9 @@ export function useAgentRunSummaries(taskIds: string[], enabled: boolean) {
 
 /** Reserves a run id and returns the manifest to review. Nothing is sent. */
 export function usePreviewAgentHandoff(taskId: string) {
-  const api = useApi();
+  const { api, owner } = useAgentContext();
   return useMutation({
+    mutationKey: agentKeys.mutation(owner, "preview-handoff"),
     mutationFn: (payload: AgentHandoffPreviewRequest) => api.previewAgentHandoff(taskId, payload),
   });
 }
@@ -322,9 +345,10 @@ export function usePreviewAgentHandoff(taskId: string) {
  * new token, which is exactly when a new key is wanted.
  */
 export function useConfirmAgentHandoff(taskId: string) {
-  const api = useApi();
-  const invalidate = useInvalidateAgents();
+  const { api, owner } = useAgentContext();
+  const invalidate = useInvalidateAgents(owner);
   return useMutation({
+    mutationKey: agentKeys.mutation(owner, "confirm-handoff"),
     mutationFn: (payload: AgentHandoffConfirmRequest) =>
       api.confirmAgentHandoff(taskId, payload, `agent-handoff-${payload.manifest_token}`),
     onSuccess: invalidate,
@@ -336,19 +360,30 @@ export function useConfirmAgentHandoff(taskId: string) {
  * already have reached the server, so the retry must carry the same key.
  */
 export function useReplyToAgentRun() {
-  const api = useApi();
-  const invalidate = useInvalidateAgents();
+  const { api, owner } = useAgentContext();
+  const invalidate = useInvalidateAgents(owner);
   return useMutation({
-    mutationFn: (input: { runId: string; message: string; idempotencyKey: string }) =>
-      api.replyToAgentRun(input.runId, { message: input.message }, input.idempotencyKey),
+    mutationKey: agentKeys.mutation(owner, "reply-run"),
+    mutationFn: (input: {
+      runId: string;
+      message: string;
+      expectedRevision: number;
+      idempotencyKey: string;
+    }) =>
+      api.replyToAgentRun(
+        input.runId,
+        { message: input.message, expected_revision: input.expectedRevision },
+        input.idempotencyKey,
+      ),
     onSuccess: invalidate,
   });
 }
 
 export function useCancelAgentRun() {
-  const api = useApi();
-  const invalidate = useInvalidateAgents();
+  const { api, owner } = useAgentContext();
+  const invalidate = useInvalidateAgents(owner);
   return useMutation({
+    mutationKey: agentKeys.mutation(owner, "cancel-run"),
     mutationFn: (input: { runId: string; idempotencyKey: string }) =>
       api.cancelAgentRun(input.runId, input.idempotencyKey),
     onSuccess: invalidate,
