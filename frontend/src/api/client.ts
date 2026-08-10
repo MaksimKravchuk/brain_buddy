@@ -63,7 +63,9 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, options: JsonRequestOptions = {}): Promise<T> {
+// Every endpoint below passes its own options object, so there is no default:
+// the request shape is always stated at the call site.
+async function request<T>(path: string, options: JsonRequestOptions): Promise<T> {
   const { body, ...rest } = options;
   const headers = new Headers(rest.headers);
   const method = options.method ?? "GET";

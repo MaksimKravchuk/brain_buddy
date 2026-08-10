@@ -7,12 +7,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from mutation_gate import (
+from scripts.mutation_gate import (
     load_enforced_scope,
+    main,
     mutation_score,
     rewrite_only_mutate,
     scope_for_changes,
+    stryker_score,
     validate_stats,
+    validate_stryker,
 )
 
 ENFORCED = [
@@ -158,6 +161,141 @@ class StatsFileRoundTripTests(unittest.TestCase):
             path.write_text(json.dumps(payload), encoding="utf-8")
             stats = json.loads(path.read_text(encoding="utf-8"))
             validate_stats(stats)
+
+
+def stryker_report(files: dict[str, list[str]]) -> dict[str, object]:
+    """A minimal Stryker report: file path -> the status of each of its mutants."""
+
+    return {
+        "schemaVersion": "1.0",
+        "files": {
+            path: {
+                "language": "typescript",
+                "source": "",
+                "mutants": [
+                    {"id": f"{path}-{index}", "mutatorName": "ConditionalExpression", "status": status}
+                    for index, status in enumerate(statuses)
+                ],
+            }
+            for path, statuses in files.items()
+        },
+    }
+
+
+class StrykerScoreTests(unittest.TestCase):
+    def test_counts_only_mutants_with_a_verdict_about_the_tests(self) -> None:
+        report = stryker_report(
+            {
+                "src/utils/error.ts": [
+                    "Killed",
+                    "Timeout",
+                    "Survived",
+                    "CompileError",
+                    "Ignored",
+                    "RuntimeError",
+                ]
+            }
+        )
+
+        self.assertEqual(stryker_score(report), (2, 3, 2 / 3))
+
+    def test_an_unreached_mutant_counts_against_the_score(self) -> None:
+        report = stryker_report({"src/utils/error.ts": ["Killed", "NoCoverage"]})
+
+        self.assertEqual(stryker_score(report), (1, 2, 0.5))
+
+    def test_scope_restricts_the_count_to_the_enforced_files(self) -> None:
+        report = stryker_report(
+            {
+                "src/utils/error.ts": ["Killed", "Killed"],
+                "src/api/client.ts": ["Survived", "Survived"],
+            }
+        )
+
+        self.assertEqual(stryker_score(report, ["src/utils/error.ts"]), (2, 2, 1.0))
+
+    def test_an_enforced_file_absent_from_the_report_is_an_error(self) -> None:
+        report = stryker_report({"src/utils/error.ts": ["Killed"]})
+
+        with self.assertRaises(ValueError) as caught:
+            stryker_score(report, ["src/api/client.ts"])
+        self.assertIn("src/api/client.ts", str(caught.exception))
+
+    def test_a_report_without_files_is_an_error(self) -> None:
+        with self.assertRaises(ValueError):
+            stryker_score({"schemaVersion": "1.0"})
+
+
+class ValidateStrykerTests(unittest.TestCase):
+    def test_a_report_at_the_threshold_passes(self) -> None:
+        report = stryker_report({"src/utils/error.ts": ["Killed"] * 19 + ["Survived"]})
+
+        validate_stryker(report, threshold=0.95)
+
+    def test_a_report_below_the_threshold_is_rejected_with_its_score(self) -> None:
+        report = stryker_report({"src/utils/error.ts": ["Killed"] * 18 + ["Survived"] * 2})
+
+        with self.assertRaises(ValueError) as caught:
+            validate_stryker(report, threshold=0.95)
+        self.assertIn("90.00%", str(caught.exception))
+
+    def test_a_report_that_checked_nothing_is_rejected(self) -> None:
+        report = stryker_report({"src/utils/error.ts": ["CompileError"]})
+
+        with self.assertRaises(ValueError) as caught:
+            validate_stryker(report)
+        self.assertIn("checked no mutants", str(caught.exception))
+
+
+class CheckStrykerCommandTests(unittest.TestCase):
+    def write(self, root: Path, statuses: dict[str, list[str]]) -> Path:
+        report = root / "mutation-report.json"
+        report.write_text(json.dumps(stryker_report(statuses)), encoding="utf-8")
+        return report
+
+    def test_passes_over_the_enforced_scope_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report = self.write(
+                root,
+                {
+                    "src/utils/error.ts": ["Killed"] * 20,
+                    "src/features/tasks/smartAdd.ts": ["Survived"] * 20,
+                },
+            )
+            scope = root / "enforced.txt"
+            scope.write_text("src/utils/error.ts\n", encoding="utf-8")
+
+            self.assertEqual(
+                main(
+                    [
+                        "check-stryker",
+                        "--report",
+                        str(report),
+                        "--enforced",
+                        str(scope),
+                    ]
+                ),
+                0,
+            )
+
+    def test_fails_when_the_enforced_scope_misses_the_bar(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report = self.write(root, {"src/utils/error.ts": ["Killed"] * 9 + ["Survived"]})
+            scope = root / "enforced.txt"
+            scope.write_text("src/utils/error.ts\n", encoding="utf-8")
+
+            self.assertEqual(
+                main(["check-stryker", "--report", str(report), "--enforced", str(scope)]),
+                1,
+            )
+
+    def test_a_missing_report_fails_rather_than_passing_vacuously(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(
+                main(["check-stryker", "--report", str(Path(tmp) / "absent.json")]), 1
+            )
 
 
 if __name__ == "__main__":

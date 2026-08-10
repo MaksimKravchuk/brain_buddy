@@ -6,7 +6,7 @@
     ".specify/workflows/speckit/handoff.schema.json": "bc7b1882dfd6045a2224f68bea769749a171e28e1eedae38ec42ca7b2be16a2e",
     ".specify/workflows/speckit/review.schema.json": "59ddb9c1a8b3bdf2c0a572c12131426a7beea5fd68673d5d12a91251ee24b3c0",
     ".specify/workflows/speckit/workflow.yml": "36bc2cd22856cc254b55848133303e66cba2989589eea20bd835e8b89e50be74",
-    "Makefile": "3a07451acc5f6512b3303e4c38d3c1361ece57f3831114ba539bb73d50b478ee",
+    "Makefile": "2c98523beec1b957ac62b098d4f2efa642dd76859464b26887784114d621cb36",
     "scripts/check_gate_integrity.py": "7e734de647cedd1477981ce95bd6267be6892189f457d6b930ffde44c2565ef0",
     "scripts/check_requirement_coverage.py": "d3bbfac84046d293e97e8ec5b5ffdcc430be23739c458167c5e0a0281c997268",
     "scripts/check_spec_kit_specs.py": "1b5d2bc387d2224ddccf13bed88a04da175d48827784612045d75b427ec697ad",
