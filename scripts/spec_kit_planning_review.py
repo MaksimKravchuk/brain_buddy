@@ -353,11 +353,19 @@ def resolve_oracle(role: str) -> tuple[dict[str, Any], dict[str, Any]]:
         raise ReviewError(f"Unknown review role: {role}") from exc
 
     primary_cli = INTEGRATION_CLI[config["integration"]]
-    if shutil.which(primary_cli) is not None:
+    primary_path = shutil.which(primary_cli)
+    if primary_path is not None:
         return config, {
             "integration": config["integration"],
             "model": config["model"],
             "degraded": False,
+            # Resolved path, not just the name. Provenance here is only as
+            # strong as PATH: an actor that controls PATH can hide a runtime to
+            # force a fallback, or shim one to fake a primary. Recording what
+            # was actually executed does not close that, but it makes the two
+            # cases distinguishable after the fact instead of asserted from
+            # config alone.
+            "executable": primary_path,
         }
 
     fallback = config.get("fallback")
@@ -365,7 +373,8 @@ def resolve_oracle(role: str) -> tuple[dict[str, Any], dict[str, Any]]:
         raise ReviewError(f"Required reviewer CLI is not installed: {primary_cli}")
 
     fallback_cli = INTEGRATION_CLI[fallback["integration"]]
-    if shutil.which(fallback_cli) is None:
+    fallback_path = shutil.which(fallback_cli)
+    if fallback_path is None:
         raise ReviewError(
             f"Neither the {primary_cli} CLI nor its {fallback_cli} fallback is "
             f"installed for {role}"
@@ -378,24 +387,25 @@ def resolve_oracle(role: str) -> tuple[dict[str, Any], dict[str, Any]]:
         "reason": f"the {primary_cli} CLI is not installed",
         "configured_integration": config["integration"],
         "configured_model": config["model"],
+        "executable": fallback_path,
     }
 
 
+# `config` is required rather than defaulted to `ROLE_CONFIGS[role]`. The CLI
+# presence check lives in `resolve_oracle`, so a caller that builds a command
+# without going through it would get a `codex exec` argv with no availability
+# check and no provenance — the pre-fallback behaviour with the guard removed.
+# Requiring the resolved config makes that bypass unwritable rather than merely
+# unused.
 def build_review_command(
-    *, role: str, prompt: str, schema_path: Path, config: dict[str, Any] | None = None
+    *, prompt: str, schema_path: Path, config: dict[str, Any]
 ) -> tuple[list[str], dict[str, str]]:
-    if config is None:
-        try:
-            config = ROLE_CONFIGS[role]
-        except KeyError as exc:
-            raise ReviewError(f"Unknown review role: {role}") from exc
-
     env = os.environ.copy()
     integration = config["integration"]
     if integration == "codex":
         return (
             [
-                "codex",
+                INTEGRATION_CLI["codex"],
                 "exec",
                 "--model",
                 config["model"],
@@ -416,7 +426,7 @@ def build_review_command(
     schema = schema_path.read_text(encoding="utf-8")
     return (
         [
-            "claude",
+            INTEGRATION_CLI["claude"],
             "-p",
             "--model",
             config["model"],
@@ -535,7 +545,7 @@ def run_review(*, root: Path, run_id: str, role: str) -> Path:
     prompt = build_prompt(role=role, feature_dir=feature_dir, root=root)
     effective_config, oracle = resolve_oracle(role)
     command, env = build_review_command(
-        role=role, prompt=prompt, schema_path=schema_path, config=effective_config
+        prompt=prompt, schema_path=schema_path, config=effective_config
     )
 
     result = subprocess.run(
@@ -558,6 +568,13 @@ def run_review(*, root: Path, run_id: str, role: str) -> Path:
     # `validate_review` rebuilds the payload from known keys and discards
     # anything else, so a model cannot author its own `oracle` block and claim
     # it ran as configured when it did not.
+    # Stamp the artifacts this verdict actually describes. The run-level drift
+    # check compares one recorded digest against the current one, which a
+    # second `preflight` on the same run id silently resets — leaving reviews
+    # of the old spec sitting in `reviews/` and the campaign reporting no
+    # drift. A per-review digest survives that, and also catches a panel of
+    # mixed vintage when a single lens is rerun.
+    oracle["artifacts_digest"] = str(context.get("artifacts_digest", ""))
     review["oracle"] = oracle
     target = run_dir / "reviews" / f"{role}.json"
     write_json_atomic(target, review)
@@ -572,6 +589,8 @@ def aggregate_reviews(
     human_signoff: bool = False,
     artifacts_changed: bool = False,
     degraded_roles: tuple[str, ...] = (),
+    unknown_oracle_roles: tuple[str, ...] = (),
+    single_provider_panel: bool = False,
 ) -> dict[str, Any]:
     technical_findings: list[dict[str, Any]] = []
     product_decisions: list[dict[str, Any]] = []
@@ -649,6 +668,21 @@ def aggregate_reviews(
             "less independent than configured; treat their agreement with the "
             "other Claude lenses as weaker corroboration than it looks."
         )
+    if single_provider_panel:
+        action += (
+            " Every lens that produced evidence ran on one provider, so this "
+            "panel's agreement is one vendor's opinion counted several times."
+        )
+    # Unknown provenance needs a note as loud as degradation's. A campaign
+    # whose reviews were hand-written carries no oracle at all, and without
+    # this it reads exactly like a clean configured panel: no degraded lenses,
+    # no correlation, nothing to look at.
+    if unknown_oracle_roles:
+        action += (
+            f" Provenance note: {', '.join(unknown_oracle_roles)} carry no "
+            "record of which runtime produced them. Their independence is "
+            "unmeasured, not verified."
+        )
 
     return {
         "status": status,
@@ -656,7 +690,7 @@ def aggregate_reviews(
         "reviewers": reviewers,
         "technical_findings": technical_findings,
         "product_decisions": product_decisions,
-        "degraded_reviewers": list(degraded_roles),
+        "degraded_lenses": list(degraded_roles),
         "architect_action": action,
     }
 
@@ -970,29 +1004,62 @@ def summarize(*, root: Path, run_id: str) -> Path:
 
     degraded: list[str] = []
     unknown_oracle: list[str] = []
+    stale_reviews: list[str] = []
     oracle_counts: dict[str, int] = {}
+    provider_counts: dict[str, int] = {}
     for review in reviews:
+        role_name = str(review["role"])
         oracle = review.get("oracle")
         # An absent oracle is unknown provenance, not proof the lens ran as
         # configured. Reporting it as clean would repeat the defect ADR-0012
         # removed from risk derivation: treating silence as evidence of safety.
         if not isinstance(oracle, dict):
-            unknown_oracle.append(str(review["role"]))
+            unknown_oracle.append(role_name)
             continue
         if oracle.get("degraded") is True:
-            degraded.append(str(review["role"]))
+            degraded.append(role_name)
+        stamped = str(oracle.get("artifacts_digest", ""))
+        if stamped and current_digest and stamped != current_digest:
+            stale_reviews.append(role_name)
         key = f"{oracle.get('integration')}/{oracle.get('model')}"
         oracle_counts[key] = oracle_counts.get(key, 0) + 1
+        provider = str(oracle.get("integration"))
+        provider_counts[provider] = provider_counts.get(provider, 0) + 1
+
+    # A review naming a different digest than the artifacts on disk is evidence
+    # about superseded content, whatever the run context claims. Re-running
+    # preflight on an existing run id rewrites that context and clears the
+    # run-level drift flag while leaving the old reviews in `reviews/`; a
+    # per-review stamp survives that, and also catches a panel of mixed vintage
+    # when one lens is rerun on its own.
+    artifacts_changed = artifacts_changed or bool(stale_reviews)
 
     # Correlation is a property of the lenses that actually produced evidence.
-    # A strict majority on one oracle means the panel's agreement is worth less
-    # than its size suggests: three lenses on one model are one opinion counted
-    # three times, which is the defect ADR-0012 set out to remove and which a
-    # fallback can silently reintroduce.
+    # A majority on one oracle means the panel's agreement is worth less than
+    # its size suggests: three lenses on one model are one opinion counted three
+    # times, the defect ADR-0012 set out to remove and one a fallback can
+    # reintroduce.
+    #
+    # Rounded up deliberately. `> known // 2` called a 3-of-6 split
+    # uncorrelated, and 3-of-6 is exactly the shape of a fully degraded
+    # high-risk panel (sonnet x3, opus x2, fable x1) — so the only
+    # machine-readable independence signal read "independent" for a
+    # single-provider panel at the one class where independence is what the
+    # human sign-off is an increment on top of.
     known_oracles = sum(oracle_counts.values())
-    panel_correlated = bool(oracle_counts) and (
-        max(oracle_counts.values()) > known_oracles // 2
+    panel_correlated: bool | None = bool(oracle_counts) and (
+        max(oracle_counts.values()) >= (known_oracles + 1) // 2
     )
+    # The fact the model histogram keeps missing, and it has no arithmetic
+    # edge: a fallback only ever moves lenses onto one provider, so this is
+    # true for every fully degraded campaign at every risk class.
+    single_provider_panel = len(provider_counts) == 1 and known_oracles > 1
+    # Unmeasured is not measured-and-clean. With any provenance missing the
+    # majority is computed over a subset, so the honest answer is "unknown"
+    # rather than a confident `false` that reads identically to a verified
+    # diverse panel.
+    if unknown_oracle:
+        panel_correlated = None
 
     summary = aggregate_reviews(
         reviews,
@@ -1001,6 +1068,8 @@ def summarize(*, root: Path, run_id: str) -> Path:
         human_signoff=human_signoff,
         artifacts_changed=artifacts_changed,
         degraded_roles=tuple(degraded),
+        unknown_oracle_roles=tuple(unknown_oracle),
+        single_provider_panel=single_provider_panel,
     )
     summary["run_id"] = run_id
     summary["declared_risk"] = declared_risk
@@ -1010,9 +1079,12 @@ def summarize(*, root: Path, run_id: str) -> Path:
     summary["oracle_unknown_lenses"] = unknown_oracle
     summary["panel_correlated"] = panel_correlated
     summary["panel_oracles"] = oracle_counts
+    summary["panel_providers"] = provider_counts
+    summary["single_provider_panel"] = single_provider_panel
     summary["human_signoff"] = signoff_record
     summary["artifacts_digest"] = current_digest
     summary["artifacts_changed_since_preflight"] = artifacts_changed
+    summary["stale_reviews"] = stale_reviews
     target = run_dir / "planning-review-summary.json"
     write_json_atomic(target, summary)
     print(target)
@@ -1199,6 +1271,59 @@ def validate_handoff(payload: object, *, today: date | None = None) -> dict[str,
     if risk == "high" and "adversarial-high-risk" not in reviewers:
         raise ValueError("high-risk handoff requires adversarial-high-risk reviewer")
 
+    # Panel provenance. ADR-0013 lets a degraded campaign reach `approved` on
+    # purpose — blocking on degradation gives back, on a machine without the
+    # codex CLI, the permanently `escalated` gate that record exists to escape.
+    # What a degraded campaign may not do is arrive here unsaid.
+    #
+    # Demanded at `high` and only there. ADR-0012 admits an automated panel at
+    # that class only while it is *uncorrelated*, which is why a clean panel
+    # with no human sign-off escalates — and a degraded panel is a correlated
+    # one, every lens on a single provider. So at `high` the panel's provenance
+    # decides whether the class's evidence bar was cleared at all, and an
+    # absent field would be read as a panel that ran as configured. That is the
+    # "silence is evidence of safety" defect ADR-0012 removed from risk
+    # derivation. Below `high` the panel is accepted as sufficient on its own,
+    # so stating this is welcome rather than owed.
+    #
+    # This blocks on the omission, never on the fact.
+    provenance_fields = ("degraded_lenses", "oracle_unknown_lenses")
+    raw_single_provider = raw_review.get("single_provider_panel")
+    panel_provenance: dict[str, Any] = {}
+    for field in provenance_fields:
+        raw_value = raw_review.get(field)
+        if raw_value is None:
+            if risk == HUMAN_SIGNOFF_REQUIRED_AT:
+                raise ValueError(
+                    f"a high-risk planning_review must state planning_review.{field}; "
+                    "an absent field is unknown provenance, not a panel that ran as "
+                    "configured (record a clean panel as [])"
+                )
+            continue
+        values = _string_list(raw_value, f"planning_review.{field}", minimum=0)
+        # A lens named here that never reviewed is provenance recorded under a
+        # name nobody reads. Checked against this handoff's own reviewers
+        # rather than a role enum, so adding a lens does not add one more place
+        # that must be updated in lockstep (ADR-0011).
+        off_panel = sorted(set(values) - set(reviewers))
+        if off_panel:
+            raise ValueError(
+                f"planning_review.{field} names {off_panel}, which is not in "
+                "planning_review.reviewers: a lens that did not review cannot "
+                "have been degraded or unmeasured"
+            )
+        panel_provenance[field] = values
+    if raw_single_provider is None:
+        if risk == HUMAN_SIGNOFF_REQUIRED_AT:
+            raise ValueError(
+                "a high-risk planning_review must state planning_review."
+                "single_provider_panel; at this class an automated panel is "
+                "sufficient evidence only while it is uncorrelated, so whether "
+                "every lens ran on one provider cannot be left unsaid"
+            )
+    elif not isinstance(raw_single_provider, bool):
+        raise ValueError("planning_review.single_provider_panel must be a boolean")
+
     raw_decisions = payload.get("product_decisions")
     if not isinstance(raw_decisions, list):
         raise ValueError("product_decisions must be a list")
@@ -1303,6 +1428,13 @@ def validate_handoff(payload: object, *, today: date | None = None) -> dict[str,
         "status": str(status),
         "reviewers": reviewers,
     }
+    # Carried for the same reason the two human records are: a validated
+    # handoff that dropped these would recreate the defect one layer down, with
+    # the gate measuring degradation and the artifact it authorizes unable to
+    # repeat it.
+    planning_review.update(panel_provenance)
+    if isinstance(raw_single_provider, bool):
+        planning_review["single_provider_panel"] = raw_single_provider
     if founder_acceptance is not None:
         planning_review["founder_acceptance"] = founder_acceptance
     if isinstance(signoff, dict):

@@ -12,6 +12,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,6 +50,23 @@ class GateIntegrityTests(unittest.TestCase):
     def test_manifest_covers_exactly_the_guarded_files(self) -> None:
         manifest = self.module.load_manifest()
         self.assertEqual(set(manifest), set(self.module.GUARDED_FILES))
+
+    def test_no_script_test_file_is_orphaned(self) -> None:
+        """A test nothing runs is documentation that looks like enforcement.
+
+        This class of defect showed up three times in one change: the
+        gate-integrity guard was absent from CI, the report renderer's tests
+        were written and never wired up, and `test_validate_backend_coverage`
+        was referenced by nothing at all. Each looked enforced from the inside.
+        Guarding the class is cheaper than finding the next instance.
+        """
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        orphans = [
+            path.name
+            for path in sorted((ROOT / "scripts").glob("test_*.py"))
+            if path.name not in makefile
+        ]
+        self.assertEqual(orphans, [], f"script tests no make target runs: {orphans}")
 
 
 class InvariantEnforcementTests(unittest.TestCase):
@@ -276,6 +294,142 @@ class InvariantEnforcementTests(unittest.TestCase):
                 lambda text: text.replace('        "privacy-consent-security",\n', ""),
             )
             self.assertIn("mandatory lenses", report)
+
+
+class BehaviouralMutationTests(unittest.TestCase):
+    """Regexes guard text. These guard the property.
+
+    Some mutations are beyond any pattern. Flip the fallback's `degraded` to
+    `False` and plant the literal `{"degraded": True}` in a comment below it,
+    and every invariant is satisfied while nothing is ever marked degraded.
+    Swap the two return branches and degradation is recorded for exactly the
+    wrong runtime, with all three literals still present. Both are dataflow
+    properties, and the only guard that survives them is running the mutant.
+
+    The harness runs a whole campaign on a simulated claude-only machine and
+    asks the summary what it recorded, which is the fact the gate reports.
+    """
+
+    SOURCE = ROOT / "scripts" / "spec_kit_planning_review.py"
+    EXPECTED = ["requirements-consistency", "testability-evidence"]
+
+    def setUp(self) -> None:
+        self.module = load_module()
+
+    def _load_mutant(self, tmp: Path, mutate):
+        path = tmp / "mutant.py"
+        path.write_text(
+            mutate(self.SOURCE.read_text(encoding="utf-8")), encoding="utf-8"
+        )
+        spec = importlib.util.spec_from_file_location("mutant", path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError("Unable to load the mutant module")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def _degraded_lenses(self, tmp: Path, mutate) -> list[str]:
+        """Run a campaign where only `claude` is on PATH; report what it saw."""
+        module = self._load_mutant(tmp, mutate)
+        root = tmp / "repo"
+        run_dir = root / ".specify" / "workflows" / "runs" / "run1"
+        (run_dir / "reviews").mkdir(parents=True)
+        (run_dir / "inputs.json").write_text(
+            json.dumps({"inputs": {"risk": "medium"}}), encoding="utf-8"
+        )
+        with mock.patch.object(
+            module.shutil,
+            "which",
+            lambda name: "/usr/bin/claude" if name == "claude" else None,
+        ):
+            for role in module.STANDARD_ROLES:
+                _config, oracle = module.resolve_oracle(role)
+                review = {
+                    "role": role,
+                    "verdict": "pass",
+                    "summary": "No concerns.",
+                    "reviewed_files": ["specs/006-example/spec.md"],
+                    "findings": [],
+                    "product_decisions": [],
+                    "oracle": oracle,
+                }
+                (run_dir / "reviews" / f"{role}.json").write_text(
+                    json.dumps(review), encoding="utf-8"
+                )
+            target = module.summarize(root=root, run_id="run1")
+        summary = json.loads(target.read_text(encoding="utf-8"))
+        return sorted(summary["degraded_lenses"])
+
+    def _mutant_source(self, tmp: Path, mutate) -> Path:
+        """The mutant laid out where `check_invariants` can read it."""
+        fake = tmp / "textcheck"
+        target = fake / "scripts" / "spec_kit_planning_review.py"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            mutate(self.SOURCE.read_text(encoding="utf-8")), encoding="utf-8"
+        )
+        return target
+
+    def _invariants_on(self, tmp: Path, mutate) -> list[str]:
+        source = self._mutant_source(tmp, mutate)
+        return [
+            invariant.name
+            for invariant in self.module.INVARIANTS
+            if invariant.path == "scripts/spec_kit_planning_review.py"
+            and not invariant.check(source.read_text(encoding="utf-8"))
+        ]
+
+    def test_clean_source_records_both_fallbacks(self) -> None:
+        """The harness must pass on an unmutated tree, or it proves nothing."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(self._degraded_lenses(Path(tmp), lambda t: t), self.EXPECTED)
+
+    def test_a_planted_literal_cannot_fake_the_degraded_marker(self) -> None:
+        """The mutation no pattern can catch, caught by execution."""
+
+        def mutate(text: str) -> str:
+            return text.replace(
+                '"degraded": True,', '"degraded": False,  # {"degraded": True}'
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # Stated as an assertion rather than a comment: the text layer is
+            # genuinely blind here, which is the whole argument for this class.
+            self.assertEqual(self._invariants_on(Path(tmp), mutate), [])
+            self.assertNotEqual(self._degraded_lenses(Path(tmp), mutate), self.EXPECTED)
+
+    def test_swapping_the_resolver_branches_is_caught(self) -> None:
+        """Degradation recorded for the runtime that ran as configured."""
+
+        def mutate(text: str) -> str:
+            return text.replace('"degraded": False,', '"degraded": SWAP,').replace(
+                '"degraded": True,', '"degraded": False,'
+            ).replace('"degraded": SWAP,', '"degraded": True,')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertNotEqual(self._degraded_lenses(Path(tmp), mutate), self.EXPECTED)
+
+    def test_dropping_the_oracle_carry_across_is_caught(self) -> None:
+        """ADR-0013 names this as the easy-to-get-wrong step. Nothing textual
+        guards it: the write to disk stays, only the read back is lost."""
+
+        def mutate(text: str) -> str:
+            return text.replace('            review["oracle"] = payload["oracle"]', "            pass")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(self._invariants_on(Path(tmp), mutate), [])
+            self.assertNotEqual(self._degraded_lenses(Path(tmp), mutate), self.EXPECTED)
+
+    def test_never_collecting_the_degraded_role_is_caught(self) -> None:
+        def mutate(text: str) -> str:
+            return text.replace(
+                "        if oracle.get(\"degraded\") is True:\n"
+                "            degraded.append(role_name)",
+                "        if False:\n            degraded.append(role_name)",
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertNotEqual(self._degraded_lenses(Path(tmp), mutate), self.EXPECTED)
 
 
 class HashLayerTests(unittest.TestCase):

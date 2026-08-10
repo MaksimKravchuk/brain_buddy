@@ -209,12 +209,25 @@ INVARIANTS: tuple[Invariant, ...] = (
     # is only acceptable while the substitution stays visible: a fallback that
     # stops recording degradation is a panel silently running on one oracle
     # while reporting the diversity it was configured with.
+    # Every pattern below is right-bounded to the enclosing function with
+    # `(?:(?!\ndef ).)*?`. An unbounded DOTALL `.*?` runs to the end of the
+    # file and happily terminates on an identical token in an unrelated
+    # function — the exact hazard flagged for the Makefile invariants above,
+    # and one these reintroduced on their first draft: deleting run_review's
+    # own `raise` still matched `preflight`'s three hundred lines later.
     MustMatch(
         "scripts/spec_kit_planning_review.py",
         "a fallback oracle is recorded as degraded",
-        r'def resolve_oracle\(.*?"degraded":\s*True',
+        r'def resolve_oracle\((?:(?!\ndef ).)*?"degraded":\s*True',
         "Substituting a reviewer runtime without marking it degraded hides a "
         "correlated panel behind a configuration that no longer describes it.",
+    ),
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "both codex lenses keep a fallback",
+        r'"fallback":\s*CODEX_FALLBACK(?:(?!\ndef ).)*?"fallback":\s*CODEX_FALLBACK',
+        "Removing a fallback returns that lens to writing no review when its "
+        "CLI is absent, which is the permanent `escalated` ADR-0013 removed.",
     ),
     MustMatch(
         "scripts/spec_kit_planning_review.py",
@@ -223,23 +236,42 @@ INVARIANTS: tuple[Invariant, ...] = (
         "Provenance must be written by the harness. Dropping the stamp leaves "
         "no record of which runtime produced a verdict.",
     ),
+    # Guards the call site, not the resolver. `resolve_oracle` can be left
+    # perfectly correct and its verdict overwritten one line later.
+    MustNotMatch(
+        "scripts/spec_kit_planning_review.py",
+        "resolved provenance is not rewritten after the fact",
+        r"oracle\s*=\s*\{\*\*oracle",
+        "Rebuilding the oracle after resolution can flip `degraded` without "
+        "touching the resolver any invariant is watching.",
+    ),
     MustMatch(
         "scripts/spec_kit_planning_review.py",
         "degradation reaches the summary",
-        r'summary\["degraded_lenses"\]\s*=',
+        r'summary\["degraded_lenses"\]\s*=\s*degraded',
         "A degradation recorded on the review but absent from the summary is "
-        "invisible to every consumer of the gate.",
+        "invisible to every consumer of the gate. Bound to the collected list "
+        "so assigning a constant empty list does not satisfy it.",
     ),
-    # Anchored inside run_review on purpose. An unanchored returncode check
-    # also matches the identical guard in resolve_feature_dir, so removing the
-    # reviewer's own failure path would leave the invariant satisfied by an
-    # unrelated function — a guard that passes while guarding nothing.
+    # Anchored inside run_review on purpose, and bounded on both sides. The
+    # first draft bounded only the left edge, so deleting run_review's raise
+    # let the match run on to preflight's — seeing the hazard and fixing half
+    # of it.
     MustMatch(
         "scripts/spec_kit_planning_review.py",
         "a failing reviewer is not routed to a fallback",
-        r"def run_review\(.*?if result\.returncode != 0:.*?raise ReviewError",
+        r"def run_review\((?:(?!\ndef ).)*?if result\.returncode != 0:"
+        r"(?:(?!\ndef ).)*?raise ReviewError",
         "Only an absent runtime may be substituted. Retrying a failed "
         "reviewer on another oracle launders a defect into a clean verdict.",
+    ),
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "high-risk handoffs must state panel provenance",
+        r"a high-risk planning_review must state planning_review\.\{field\}",
+        "The gate measures degradation and unknown provenance; a handoff that "
+        "may omit them lets an authorized high-risk change be indistinguishable "
+        "from one reviewed by a panel that ran as configured.",
     ),
     # The Makefile invariants above assert that `check-specs` runs the guards.
     # They said nothing about whether anything runs `check-specs`, and the CI

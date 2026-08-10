@@ -73,6 +73,34 @@ def _valid_handoff() -> dict[str, Any]:
     }
 
 
+def _high_risk_handoff() -> dict[str, Any]:
+    """A high-risk handoff carrying everything the class demands.
+
+    Every gate `high` adds is satisfied here — the adversarial lens, the
+    sign-off record, and the panel provenance — so each test below can remove
+    exactly one and fail on the property it is about instead of on whichever
+    requirement the validator happens to reach first.
+    """
+    handoff = _valid_handoff()
+    review = handoff["planning_review"]
+    review["risk"] = "high"
+    review["reviewers"].append("adversarial-high-risk")
+    # A clean panel states that it was clean. `[]` and `false` are the record;
+    # an absent field is unknown provenance, which at this class is not the
+    # same claim.
+    review["degraded_lenses"] = []
+    review["oracle_unknown_lenses"] = []
+    review["single_provider_panel"] = False
+    review["human_signoff"] = {
+        "approved_by": "maksim.v.kravchuk@gmail.com",
+        "approved_on": "2026-08-10",
+        "run_id": "run123",
+        "artifacts_digest": "a" * 64,
+        "rationale": "Reviewed the high-risk surface and accept the residual risk.",
+    }
+    return handoff
+
+
 class CheckSpecKitSpecsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -314,6 +342,98 @@ class CheckSpecKitSpecsTests(unittest.TestCase):
 
         self.assertEqual(result, 1)
         self.assertIn("requires a human_signoff record", stderr)
+
+    def test_high_risk_degraded_handoff_carries_the_degradation(self) -> None:
+        """ADR-0013: a degraded panel may pass the gate. It may not pass unsaid."""
+        handoff = _high_risk_handoff()
+        handoff["planning_review"]["degraded_lenses"] = [
+            "requirements-consistency",
+            "testability-evidence",
+        ]
+        handoff["planning_review"]["single_provider_panel"] = True
+        self._write_feature_with_handoff(json.dumps(handoff))
+
+        result, stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 0, stderr)
+        self.assertIn("Spec Kit artifact check passed.", stdout)
+
+    def test_high_risk_handoff_omitting_degraded_lenses_fails(self) -> None:
+        """ADR-0012 correction D in mirror image: the gate measured degradation
+        and the authorizing artifact could not carry it."""
+        handoff = _high_risk_handoff()
+        del handoff["planning_review"]["degraded_lenses"]
+        self._write_feature_with_handoff(json.dumps(handoff))
+
+        result, _stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 1)
+        self.assertIn("must state planning_review.degraded_lenses", stderr)
+
+    def test_high_risk_handoff_omitting_unknown_provenance_fails(self) -> None:
+        """The hole the other two fields leave open on their own.
+
+        A panel of hand-written reviews carries no `oracle` at all, so
+        `summarize` reports no degraded lenses and — with an empty histogram —
+        `single_provider_panel: false`. Both fields are then honestly `[]` and
+        `false` while nothing about the panel was ever measured. Only naming
+        the unmeasured lenses separates that from a verified clean panel.
+        """
+        handoff = _high_risk_handoff()
+        del handoff["planning_review"]["oracle_unknown_lenses"]
+        self._write_feature_with_handoff(json.dumps(handoff))
+
+        result, _stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 1)
+        self.assertIn("must state planning_review.oracle_unknown_lenses", stderr)
+
+    def test_high_risk_handoff_omitting_single_provider_panel_fails(self) -> None:
+        handoff = _high_risk_handoff()
+        del handoff["planning_review"]["single_provider_panel"]
+        self._write_feature_with_handoff(json.dumps(handoff))
+
+        result, _stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 1)
+        self.assertIn("must state planning_review.single_provider_panel", stderr)
+
+    def test_high_risk_clean_panel_must_say_so_explicitly(self) -> None:
+        """The cost of requiring the fields: `[]` and `false` get written out.
+
+        A configured, uncorrelated high-risk campaign is the case that pays for
+        this rule, so it is asserted rather than assumed.
+        """
+        self._write_feature_with_handoff(json.dumps(_high_risk_handoff()))
+
+        result, stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 0, stderr)
+        self.assertIn("Spec Kit artifact check passed.", stdout)
+
+    def test_degraded_lens_missing_from_the_panel_fails(self) -> None:
+        """A misspelled role is degradation recorded under a name nobody reads."""
+        handoff = _valid_handoff()
+        handoff["planning_review"]["degraded_lenses"] = ["testability_evidence"]
+        self._write_feature_with_handoff(json.dumps(handoff))
+
+        result, _stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 1)
+        self.assertIn("is not in planning_review.reviewers", stderr)
+
+    def test_medium_risk_may_state_provenance_without_being_required_to(self) -> None:
+        """Below high the panel is sufficient evidence on its own, so provenance
+        is welcome but not owed — and must not be rejected as an unknown key."""
+        handoff = _valid_handoff()
+        handoff["planning_review"]["degraded_lenses"] = ["testability-evidence"]
+        handoff["planning_review"]["single_provider_panel"] = True
+        self._write_feature_with_handoff(json.dumps(handoff))
+
+        result, stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 0, stderr)
+        self.assertIn("Spec Kit artifact check passed.", stdout)
 
     def test_lane_dependency_cycle_fails(self) -> None:
         handoff = _valid_handoff()

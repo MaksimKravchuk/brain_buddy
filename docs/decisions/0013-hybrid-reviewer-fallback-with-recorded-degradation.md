@@ -241,6 +241,135 @@ lost.
 A campaign that genuinely requires independent oracles needs the `codex` CLI
 present. The difference now is that the summary tells you whether it was.
 
+## Corrections made during review of this record
+
+Every one is a defect in this record's own first implementation, found by an
+independent adversarial review before it landed. They are listed rather than
+quietly folded in, because ADR-0012 established that pattern and because each
+is another instance of the failure mode both records are about: a mechanism
+that looks stricter while being weaker.
+
+### The correlation signal inverted at the one class that depends on it
+
+`panel_correlated` used a strict majority, `max(counts) > known // 2`. A
+fully degraded high-risk panel is six lenses — sonnet ×3, opus ×2, fable ×1 —
+and `3 > 3` is false. So a panel that had collapsed to a single provider
+reported "not correlated", *the same value a genuinely cross-provider panel
+gets*, at precisely the risk class where ADR-0012 scopes the human sign-off as
+the increment on top of an uncorrelated mechanism. It fired only at `medium`,
+where nothing turns on it.
+
+The majority is now rounded up. More importantly, model-majority was the wrong
+question: a fallback only ever moves lenses onto **one provider**, so
+`single_provider_panel` and a `panel_providers` histogram were added. They have
+no arithmetic edge — true for every fully degraded campaign at every risk
+class — and `single_provider_panel` appears in `architect_action` alongside the
+degradation note.
+
+### Unknown provenance was silent, and the repository told you to create it
+
+`oracle_unknown_lenses` was written to the summary and nowhere else: no note in
+`architect_action`, no effect on anything. Meanwhile `speckit-review/SKILL.md`
+still instructed the operator to hand-write review JSON when codex was absent,
+and `docs/spec-kit-workflow.md` still described the pre-fallback behaviour.
+Following the repository's own documented procedure produced five hand-written
+reviews, no provenance, and a summary reporting a clean uncorrelated panel.
+
+Both documents were corrected, `unknown_oracle_roles` now produces a note as
+loud as degradation's, and `panel_correlated` becomes `null` — not `false` —
+whenever any provenance is missing. Unmeasured and measured-and-diverse must
+not share a value.
+
+### The report would have become *less* honest than before the change
+
+`render_feature_report.py` derived "lenses that did not run" from the roles
+present in the summary. Before the fallback, a codex-less campaign rendered a
+warning naming two lenses. After it, all five produce reviews, so the same
+machine rendered "All five standard lenses ran." and nothing else.
+
+Worse, this section originally argued that not blocking is acceptable because
+"`architect_action` is the sentence a human actually reads" — and nothing read
+`architect_action`. The justification rested on a consumer that did not exist.
+The renderer now surfaces degradation, provenance, the histograms, stale
+reviews and the architect's next action, with tests asserting the rendered
+text; a clean panel still renders exactly as before.
+
+### Four of the five new invariants were satisfiable by code that does not work
+
+The anchored patterns used an unbounded DOTALL `.*?`, which runs to the end of
+the file and terminates on an identical token anywhere later. Deleting
+`run_review`'s own `raise ReviewError` left the invariant matching
+`preflight`'s, three hundred lines on. That is the exact hazard flagged in a
+comment twenty lines above these invariants, reintroduced while writing them.
+
+All patterns are now right-bounded to the enclosing function. A `MustNotMatch`
+guards the call site, since a correct resolver can have its verdict overwritten
+one line later, and a `MustMatch` asserts both codex lenses keep a fallback at
+all.
+
+Regexes still cannot catch a dataflow defect: flip the fallback's marker to
+`False` and plant the literal `{"degraded": True}` in a comment below it, and
+every pattern is satisfied while nothing is ever degraded. So the text layer is
+no longer carrying that weight alone — `BehaviouralMutationTests` writes the
+mutant to disk, imports it, simulates a claude-only PATH, runs a whole campaign
+and asks the summary what it recorded. The planted-comment test asserts *both*
+that the invariants pass and that the behaviour is wrong, which is the argument
+for the class stated as an assertion.
+
+### Re-running preflight laundered stale reviews past the drift escalation
+
+ADR-0012 correction #3 made "editing the spec invalidates the approval" true by
+recomputing the digest. But `preflight` rewrites `planning-context.json`
+including that digest and never clears `reviews/`. Editing the spec, re-running
+preflight on the same run id, and summarizing therefore reported no drift over
+five verdicts describing the original content — the escalation turned off by
+re-running the step that produces its baseline.
+
+Each review's `oracle` now stamps the digest it was produced against, and any
+review disagreeing with the recomputed digest is named in `stale_reviews` and
+escalates. That is strictly stronger than the run-level check and also catches
+a panel of mixed vintage when a single lens is rerun. Pre-existing, but this
+record makes the run directory something you return to, so it became
+load-bearing here.
+
+### `build_review_command` was a second entry point with no presence check
+
+Moving the `shutil.which` guard into `resolve_oracle` left
+`build_review_command(config=None)` defaulting to `ROLE_CONFIGS[role]` — a
+caller could get a `codex exec` argv with no availability check and no
+provenance, which is the pre-fallback behaviour with the guard removed. It
+existed only to keep two tests on the old signature. `config` is now required
+and the tests pass it.
+
+### Provenance is only as strong as PATH
+
+The record claims a reviewer cannot author its own provenance, and that holds.
+It does not follow that provenance is trustworthy. `resolve_oracle` decides
+from `shutil.which`, and any actor that can run a shell controls PATH: narrow
+it and a lens degrades on demand; shim `codex` to exec `claude` and the oracle
+reports `degraded: false` with no configured/actual pair to contradict it.
+
+The oracle now records the resolved absolute path, which makes the two cases
+distinguishable after the fact rather than asserted from configuration. It does
+not close the hole. Nothing at this layer can — it is the same absence of
+cryptographic identity ADR-0012 recorded for the sign-off — and combined with
+degradation having no effect on status, an actor that prefers its own model
+family can arrange to be reviewed by it. The mitigation is that the arrangement
+is now visible in the summary, the report and the handoff.
+
+### Two keys for one fact, and three tests nothing ran
+
+`aggregate_reviews` returned `degraded_reviewers` while `summarize` wrote
+`degraded_lenses`, same content, and the invariant guarded one while the tests
+asserted the other. One key now.
+
+Separately, wiring the guard into CI turned up two more orphans of the same
+kind: the report renderer's tests were written and never referenced, and
+`scripts/test_validate_backend_coverage.py` was referenced by nothing at all —
+not the Makefile, not CI, not another script. Three instances of "a test
+nothing runs" in one change is a class, not a coincidence, so a structural test
+now asserts that every `scripts/test_*.py` is named by some make target.
+
 ## Consequences
 
 **Positive.** The conveyor can run to completion, including to `approved`, on a

@@ -28,6 +28,26 @@ RUNS_DIR = REPO_ROOT / ".specify" / "workflows" / "runs"
 
 ABSENT = "_not run_"
 
+# Absent, these keys mean the campaign never measured its own provenance. That
+# is reported as unknown, never as a clean panel.
+PROVENANCE_KEYS = (
+    "degraded_lenses",
+    "oracle_unknown_lenses",
+    "panel_correlated",
+    "panel_oracles",
+    "panel_providers",
+    "single_provider_panel",
+)
+
+# `architect_action` is the next action with panel notes appended. This report
+# renders those notes from the structured fields they were built from, so the
+# notes are cut here to keep the same degradation from being printed twice.
+NEXT_ACTION_NOTES = (
+    " Panel note: ",
+    " Provenance note: ",
+    " Every lens that produced evidence ran on one provider",
+)
+
 DEFINITION_RE = re.compile(r"^\s*[-*]\s*\*\*((?:FR|SC)-\d+)\*\*", re.MULTILINE)
 SCREEN_ID_RE = re.compile(r"\b([DM]-\d{2})\b")
 VERDICT_RE = re.compile(r"\*\*VERDICT\*\*:\s*(\w+)|^VERDICT:\s*(\w+)", re.MULTILINE)
@@ -106,6 +126,213 @@ def extract_section(text: str, heading: str) -> str | None:
     return rest[: end if end != -1 else None].strip() or None
 
 
+def _role_list(value: object) -> list[str]:
+    """Role names from a summary key that may be absent, null or malformed."""
+    return [str(item) for item in value] if isinstance(value, list) else []
+
+
+def _histogram(value: object) -> str | None:
+    """`{"claude/sonnet": 3}` as ``claude/sonnet x3``, or nothing to print."""
+    if not isinstance(value, dict) or not value:
+        return None
+    return ", ".join(f"`{key}` x{count}" for key, count in sorted(value.items()))
+
+
+def _oracle_label(integration: object, model: object) -> str:
+    """``integration/model``, without filling in a half that was not recorded."""
+    if integration is None and model is None:
+        return "not recorded"
+    return f"`{integration or '?'}/{model or '?'}`"
+
+
+def _digest(value: object) -> str:
+    """A digest short enough to compare by eye, or the fact there is none."""
+    text = str(value or "")
+    return f"`{text[:12]}`" if text else "not recorded"
+
+
+def panel_provenance(summary: dict[str, Any]) -> tuple[str, list[str]]:
+    """The verdict caveat and the panel-composition block, from provenance only.
+
+    ADR-0013 deliberately lets a degraded campaign reach `approved`, and rests
+    that entire choice on the human seeing the degradation. Printing five
+    verdicts without saying which oracles produced them makes a fully degraded
+    single-provider panel indistinguishable from the configured one, which
+    leaves that justification with nothing behind it — the report would be
+    strictly less honest than when the missing lenses simply failed to run.
+
+    Every key read here postdates summaries that may already be on disk, so an
+    absent key is reported as unknown provenance and never as a clean panel.
+    """
+    stale = _role_list(summary.get("stale_reviews"))
+    degraded = _role_list(summary.get("degraded_lenses"))
+    unknown = _role_list(summary.get("oracle_unknown_lenses"))
+    correlated = summary.get("panel_correlated")
+    single_provider = summary.get("single_provider_panel")
+    recorded = any(key in summary for key in PROVENANCE_KEYS)
+
+    caveats: list[str] = []
+    if stale:
+        caveats.append("stale reviews")
+    if not recorded:
+        caveats.append("panel provenance not recorded")
+    if degraded:
+        caveats.append("degraded panel")
+    if unknown:
+        caveats.append("unknown provenance")
+    if single_provider is True:
+        caveats.append("single-provider panel")
+    if correlated is True:
+        caveats.append("correlated oracles")
+    if not caveats:
+        return "", []
+
+    lines: list[str] = []
+    # Stale reviews lead the block. `escalated` has four causes and the status
+    # names none of them, and this is the cause a reader is least likely to
+    # guess: the run context says the artifacts are unchanged because a second
+    # preflight on the same run id rewrote it.
+    if stale:
+        lines.append(
+            "**Reviews describing superseded artifacts**: "
+            + ", ".join(f"`{role}`" for role in stale)
+            + ". These lenses stamped a different artifacts digest than the "
+            "artifacts now on disk, so their verdicts are about content that "
+            "has since changed. A verdict on superseded content is not "
+            "evidence about the artifacts as they now stand, and this is on "
+            "its own an escalation cause.\n"
+        )
+        for role in stale:
+            oracle = summary_oracle(summary, role) or {}
+            lines.append(
+                f"- `{role}`: reviewed "
+                f"{_digest(oracle.get('artifacts_digest'))}, artifacts now "
+                f"{_digest(summary.get('artifacts_digest'))}"
+            )
+        lines.append("")
+
+    if not recorded:
+        lines.append(
+            "**Panel provenance**: not recorded. This summary predates "
+            "per-lens oracle provenance, so which model reviewed this feature "
+            "is unknown. Unknown is not the same as clean.\n"
+        )
+        return " — " + ", ".join(caveats), lines
+
+    if degraded:
+        lines.append(
+            "**Lenses that ran on a fallback oracle**: "
+            + ", ".join(f"`{role}`" for role in degraded)
+            + ". These lenses produced a review, but not from the oracle they "
+            "are configured for. The same verdict from this panel is a weaker "
+            "result than it would be from a clean one.\n"
+        )
+        for role in degraded:
+            oracle = summary_oracle(summary, role)
+            if oracle is None:
+                lines.append(
+                    f"- `{role}`: listed as degraded, but no oracle was "
+                    "recorded for it — what it ran on is unknown."
+                )
+                continue
+            detail = (
+                f"- `{role}`: configured "
+                + _oracle_label(
+                    oracle.get("configured_integration"), oracle.get("configured_model")
+                )
+                + ", actually ran "
+                + _oracle_label(oracle.get("integration"), oracle.get("model"))
+            )
+            reason = oracle.get("reason")
+            if isinstance(reason, str) and reason.strip():
+                detail += f" — {reason.strip()}"
+            lines.append(detail)
+        lines.append("")
+
+    if unknown:
+        lines.append(
+            "**Lenses with unknown provenance**: "
+            + ", ".join(f"`{role}`" for role in unknown)
+            + ". No oracle was recorded for these reviews, so which model "
+            "produced them is unknown. An absent record is not evidence that a "
+            "lens ran as configured.\n"
+        )
+
+    if single_provider is True:
+        lines.append(
+            "**The panel collapsed to a single provider.** Every lens whose "
+            "provenance is known ran on one vendor, so its agreement is one "
+            "provider's opinion counted several times, not several "
+            "independent ones.\n"
+        )
+    elif single_provider is False:
+        lines.append(
+            "**Single-provider panel**: no — more than one provider is "
+            "represented among the lenses whose provenance is known.\n"
+        )
+
+    # The histograms are printed with the correlation claim rather than instead
+    # of it, so a reader can check the majority rather than trust it.
+    if correlated is True:
+        lines.append(
+            "**Panel correlated**: yes — one oracle holds a strict majority of "
+            "the lenses whose provenance is known.\n"
+        )
+    elif correlated is False:
+        lines.append(
+            "**Panel correlated**: no — no single oracle holds a strict "
+            "majority. This does not cancel anything above it; correlation and "
+            "degradation answer different questions.\n"
+        )
+    else:
+        lines.append("**Panel correlated**: not recorded.\n")
+
+    for label, key in (
+        ("Panel oracles", "panel_oracles"),
+        ("Panel providers", "panel_providers"),
+    ):
+        rendered = _histogram(summary.get(key))
+        if rendered:
+            lines.append(f"**{label}**: {rendered}\n")
+
+    return " — " + ", ".join(caveats), lines
+
+
+def next_action(summary: dict[str, Any]) -> str | None:
+    """What the architect does next, with the appended panel notes cut off.
+
+    Section 5 reported five verdicts and then stopped, so the one field saying
+    what to do about them never reached the human at all. It cannot be printed
+    whole: the notes appended to it restate the degradation this section
+    already spells out from the structured fields, and a reader who meets the
+    same paragraph twice learns to skip the place it is explained.
+
+    Only the leading next action survives the cut. A field that is nothing but
+    notes yields nothing rather than an invented instruction.
+    """
+    action = summary.get("architect_action")
+    if not isinstance(action, str):
+        return None
+    cuts = [action.find(note) for note in NEXT_ACTION_NOTES]
+    found = [index for index in cuts if index != -1]
+    if found:
+        action = action[: min(found)]
+    return action.strip() or None
+
+
+def summary_oracle(summary: dict[str, Any], role: str) -> dict[str, Any] | None:
+    """The `oracle` block a reviewer entry carries, or None if it carries none."""
+    reviewers = summary.get("reviewers")
+    if not isinstance(reviewers, list):
+        return None
+    for reviewer in reviewers:
+        if not isinstance(reviewer, dict) or str(reviewer.get("role")) != role:
+            continue
+        oracle = reviewer.get("oracle")
+        return oracle if isinstance(oracle, dict) else None
+    return None
+
+
 def section_review(feature_dir: Path) -> str:
     found = latest_review_summary(feature_dir)
     if found is None:
@@ -127,9 +354,13 @@ def section_review(feature_dir: Path) -> str:
         key = str(finding.get("severity", "unknown"))
         by_severity[key] = by_severity.get(key, 0) + 1
 
+    # The verdict is the one line every reader takes away, so it does not stand
+    # alone when the panel behind it was degraded or was never measured.
+    caveat, panel_lines = panel_provenance(summary)
+
     lines = [
         "### 5. What review found\n",
-        f"**Verdict**: `{status}`  ",
+        f"**Verdict**: `{status}`{caveat}  ",
         f"**Risk**: `{summary.get('risk', 'unknown')}`  ",
         f"**Summary**: `{path.relative_to(REPO_ROOT)}`\n",
         "| reviewer | verdict | summary |",
@@ -160,6 +391,10 @@ def section_review(feature_dir: Path) -> str:
     else:
         lines.append("All five standard lenses ran.\n")
 
+    # "All five ran" is true of a fully degraded panel too, so what they ran on
+    # follows immediately rather than being buried after the findings.
+    lines.extend(panel_lines)
+
     lines.append(
         "**Findings**: "
         + (
@@ -176,6 +411,12 @@ def section_review(feature_dir: Path) -> str:
                 f"- [{decision.get('category', '?')}] {decision.get('question', '?')}"
             )
         lines.append("")
+
+    # A verdict with no next action leaves the reader to infer what a status
+    # obliges them to do, which is the inference this report exists to remove.
+    action = next_action(summary)
+    if action:
+        lines.append(f"**Next action for the architect**: {action}\n")
 
     if status == "founder-accepted":
         acceptance = summary.get("founder_acceptance")
