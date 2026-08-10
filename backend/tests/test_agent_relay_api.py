@@ -127,21 +127,21 @@ def relay_app(
 
 @pytest.fixture
 def client(
-    relay_app: tuple[TestClient, TestClient, FakeConnector, Container]
+    relay_app: tuple[TestClient, TestClient, FakeConnector, Container],
 ) -> TestClient:
     return relay_app[0]
 
 
 @pytest.fixture
 def other_client(
-    relay_app: tuple[TestClient, TestClient, FakeConnector, Container]
+    relay_app: tuple[TestClient, TestClient, FakeConnector, Container],
 ) -> TestClient:
     return relay_app[1]
 
 
 @pytest.fixture
 def connector(
-    relay_app: tuple[TestClient, TestClient, FakeConnector, Container]
+    relay_app: tuple[TestClient, TestClient, FakeConnector, Container],
 ) -> FakeConnector:
     return relay_app[2]
 
