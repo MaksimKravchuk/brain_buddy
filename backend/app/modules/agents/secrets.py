@@ -31,13 +31,13 @@ _KEY_BYTES = 32
 _NONCE_BYTES = 12
 _EPHEMERAL_KEY_ID = "ephemeral"
 
-AAD_OUTBOUND_CREDENTIAL = "outbound-credential"
+AAD_PURPOSE_OUTBOUND_CREDENTIAL = "outbound-credential"
 """The credential BrainBuddy sends *to* the user's agent."""
 
-AAD_INBOUND_SIGNING_SECRET = "inbound-signing-secret"
+AAD_PURPOSE_INBOUND_SIGNING = "inbound-signing-secret"
 """The secret the user's agent signs its reports *with*."""
 
-AAD_SIGNING_SECRET_RECEIPT = "signing-secret-receipt"
+AAD_PURPOSE_SIGNING_RECEIPT = "signing-secret-receipt"
 """A one-time replacement secret held only for lost-response recovery."""
 
 _AAD_SCHEME = "brain-buddy/agent-relay"
@@ -85,9 +85,7 @@ def parse_secret_keys(raw: str | None) -> OrderedDict[str, bytes]:
     """Parse ``id:base64key`` entries, newest first, or refuse the whole set."""
 
     if raw is None or not raw.strip():
-        raise SecretsUnavailable(
-            "No external-agent relay key material is configured."
-        )
+        raise SecretsUnavailable("No external-agent relay key material is configured.")
 
     keys: OrderedDict[str, bytes] = OrderedDict()
     for entry in raw.split(","):
@@ -119,9 +117,7 @@ def parse_secret_keys(raw: str | None) -> OrderedDict[str, bytes]:
         keys[key_id] = material
 
     if not keys:
-        raise SecretsUnavailable(
-            "No external-agent relay key material is configured."
-        )
+        raise SecretsUnavailable("No external-agent relay key material is configured.")
     return keys
 
 
@@ -204,7 +200,9 @@ class SecretBox:
         try:
             raw = base64.b64decode(sealed.ciphertext, validate=True)
         except (binascii.Error, ValueError) as exc:
-            raise SecretDecryptionFailed("Sealed credential is not valid base64.") from exc
+            raise SecretDecryptionFailed(
+                "Sealed credential is not valid base64."
+            ) from exc
         if len(raw) <= _NONCE_BYTES:
             raise SecretDecryptionFailed("Sealed credential is truncated.")
         try:
@@ -238,9 +236,9 @@ def build_secret_box(raw_keys: str | None, *, environment: AppEnvironment) -> Se
 
 
 __all__ = [
-    "AAD_INBOUND_SIGNING_SECRET",
-    "AAD_OUTBOUND_CREDENTIAL",
-    "AAD_SIGNING_SECRET_RECEIPT",
+    "AAD_PURPOSE_INBOUND_SIGNING",
+    "AAD_PURPOSE_OUTBOUND_CREDENTIAL",
+    "AAD_PURPOSE_SIGNING_RECEIPT",
     "SealedSecret",
     "SecretBox",
     "SecretDecryptionFailed",

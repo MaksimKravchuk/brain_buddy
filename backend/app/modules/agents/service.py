@@ -63,6 +63,7 @@ from .domain import (
     AgentAuditEntryDocument,
     AgentCapabilities,
     AgentConnectionDocument,
+    AgentEventEnvelope,
     AgentIdempotencyRecord,
     AgentManifestContextItem,
     AgentReportingContract,
@@ -79,9 +80,9 @@ from .egress import (
 )
 from .repository import AgentRepository
 from .secrets import (
-    AAD_INBOUND_SIGNING_SECRET,
-    AAD_OUTBOUND_CREDENTIAL,
-    AAD_SIGNING_SECRET_RECEIPT,
+    AAD_PURPOSE_INBOUND_SIGNING,
+    AAD_PURPOSE_OUTBOUND_CREDENTIAL,
+    AAD_PURPOSE_SIGNING_RECEIPT,
     SealedSecret,
     SecretBox,
     SecretDecryptionFailed,
@@ -398,7 +399,7 @@ class AgentRelayService:
             credential = self.secret_box.open(
                 connection.credential,
                 aad=secret_aad(
-                    AAD_OUTBOUND_CREDENTIAL,
+                    AAD_PURPOSE_OUTBOUND_CREDENTIAL,
                     owner_id=connection.owner_id,
                     connection_id=connection.id,
                 ),
@@ -498,7 +499,7 @@ class AgentRelayService:
                 credential=self.secret_box.seal(
                     payload.credential,
                     aad=secret_aad(
-                        AAD_OUTBOUND_CREDENTIAL,
+                        AAD_PURPOSE_OUTBOUND_CREDENTIAL,
                         owner_id=owner_id,
                         connection_id=connection_id,
                     ),
@@ -506,7 +507,7 @@ class AgentRelayService:
                 inbound_secret=self.secret_box.seal(
                     inbound_secret,
                     aad=secret_aad(
-                        AAD_INBOUND_SIGNING_SECRET,
+                        AAD_PURPOSE_INBOUND_SIGNING,
                         owner_id=owner_id,
                         connection_id=connection_id,
                     ),
@@ -639,7 +640,7 @@ class AgentRelayService:
                     "credential": self.secret_box.seal(
                         payload.credential,
                         aad=secret_aad(
-                            AAD_OUTBOUND_CREDENTIAL,
+                            AAD_PURPOSE_OUTBOUND_CREDENTIAL,
                             owner_id=owner_id,
                             connection_id=connection_id,
                         ),
@@ -704,7 +705,7 @@ class AgentRelayService:
         command = "rotate_signing_secret"
         canonical = self._canonical_request(command, payload, target=connection_id)
         receipt_aad = secret_aad(
-            AAD_SIGNING_SECRET_RECEIPT,
+            AAD_PURPOSE_SIGNING_RECEIPT,
             owner_id=owner_id,
             connection_id=connection_id,
         )
@@ -744,7 +745,7 @@ class AgentRelayService:
             installed = self.secret_box.seal(
                 replacement,
                 aad=secret_aad(
-                    AAD_INBOUND_SIGNING_SECRET,
+                    AAD_PURPOSE_INBOUND_SIGNING,
                     owner_id=owner_id,
                     connection_id=connection_id,
                 ),
@@ -1238,29 +1239,31 @@ class AgentRelayService:
 
     def _primary_state_label(self, run: AgentRunDocument) -> str:
         if run.connection_disconnected_at is not None:
-            return "Connection disconnected"
-        if run.reported_state == "completed":
+            label = "Connection disconnected"
+        elif run.reported_state == "completed":
             # Never "Complete": BrainBuddy did not verify the work (FR-011).
-            return "Agent reported complete"
-        if run.reported_state == "failed":
-            return "Failed"
-        if run.reported_state == "cancelled":
-            return "Cancelled"
-        if self._stopped_reporting(run):
-            return "Stopped reporting"
-        if run.reported_state == "blocked":
-            return "Needs you"
-        if run.cancel_requested_at is not None:
-            return "Cancellation requested"
-        if run.reported_state == "running":
-            return "Running"
-        if run.reported_state == "accepted":
-            return "Accepted"
-        if run.dispatch_state == "delivery_unconfirmed":
-            return "Delivery unconfirmed"
-        if run.dispatch_state == "sent":
-            return "Sent"
-        return "Not sent"
+            label = "Agent reported complete"
+        elif run.reported_state == "failed":
+            label = "Failed"
+        elif run.reported_state == "cancelled":
+            label = "Cancelled"
+        elif self._stopped_reporting(run):
+            label = "Stopped reporting"
+        elif run.reported_state == "blocked":
+            label = "Needs you"
+        elif run.cancel_requested_at is not None:
+            label = "Cancellation requested"
+        elif run.reported_state == "running":
+            label = "Running"
+        elif run.reported_state == "accepted":
+            label = "Accepted"
+        elif run.dispatch_state == "delivery_unconfirmed":
+            label = "Delivery unconfirmed"
+        elif run.dispatch_state == "sent":
+            label = "Sent"
+        else:
+            label = "Not sent"
+        return label
 
     def _run_response(self, run: AgentRunDocument) -> AgentRunResponse:
         connection: AgentConnectionDocument | None
@@ -1598,67 +1601,46 @@ class AgentRelayService:
 
     # --- inbound events -----------------------------------------------------
 
-    def ingest_event(
+    def _authenticate_event_request(
         self,
         *,
         raw_body: bytes,
         connection_id: str,
         timestamp: str,
         signature: str,
-    ) -> AgentEventIngestResponse:
-        """Authenticate, validate, then apply one connector report.
-
-        Every check runs before any mutation, and a rejection at any step leaves
-        the projection byte-identical (FR-009).
-        """
+    ) -> AgentConnectionDocument:
+        """Authenticate the exact wire bytes without recording probe evidence."""
 
         connection = self.agent_repo.find_connection_anywhere(connection_id)
         if connection is None:
             raise EventRejected("unknown_connection")
-        owner_id = connection.owner_id
-
-        authenticated = False
-
-        def reject(code: str) -> EventRejected:
-            # Pre-authentication probes never write. Once the complete raw body
-            # has a valid HMAC, preserve only fixed-cardinality coarse evidence.
-            if authenticated:
-                self._audit_authenticated_event_rejection(
-                    owner_id=owner_id,
-                    connection_id=connection.id,
-                    rejection_class=code,
-                )
-            return EventRejected(code)
-
         if len(raw_body) > MAX_EVENT_BYTES:
-            raise reject("event_too_large")
+            raise EventRejected("event_too_large")
         if connection.status == "disconnected" or connection.inbound_secret is None:
-            raise reject("connection_disconnected")
-
+            raise EventRejected("connection_disconnected")
         try:
             secret = self.secret_box.open(
                 connection.inbound_secret,
                 aad=secret_aad(
-                    AAD_INBOUND_SIGNING_SECRET,
-                    owner_id=owner_id,
+                    AAD_PURPOSE_INBOUND_SIGNING,
+                    owner_id=connection.owner_id,
                     connection_id=connection.id,
                 ),
             )
         except SecretDecryptionFailed as exc:
-            raise reject("signing_secret_unreadable") from exc
-
+            raise EventRejected("signing_secret_unreadable") from exc
         if not (
             timestamp.isascii()
             and timestamp.isdecimal()
             and (timestamp == "0" or not timestamp.startswith("0"))
         ):
-            raise reject("timestamp_invalid")
+            raise EventRejected("timestamp_invalid")
         try:
             sent_at = datetime.fromtimestamp(int(timestamp), tz=UTC)
         except (TypeError, ValueError, OverflowError) as exc:
-            raise reject("timestamp_invalid") from exc
+            raise EventRejected("timestamp_invalid") from exc
         if abs(self._now() - sent_at) > EVENT_FRESHNESS_WINDOW:
-            raise reject("timestamp_stale")
+            raise EventRejected("timestamp_stale")
 
         expected = hmac.new(
             secret.encode("utf-8"),
@@ -1673,127 +1655,186 @@ class AgentRelayService:
         if not valid_signature_format or not hmac.compare_digest(
             expected, signature[3:]
         ):
-            raise reject("signature_invalid")
-        authenticated = True
+            raise EventRejected("signature_invalid")
+        return connection
 
+    def _authenticated_event_rejection(
+        self, connection: AgentConnectionDocument, code: str
+    ) -> EventRejected:
+        """Retain only bounded coarse evidence after the complete body authenticates."""
+
+        self._audit_authenticated_event_rejection(
+            owner_id=connection.owner_id,
+            connection_id=connection.id,
+            rejection_class=code,
+        )
+        return EventRejected(code)
+
+    def _validate_authenticated_event(
+        self,
+        *,
+        raw_body: bytes,
+        connection: AgentConnectionDocument,
+    ) -> AgentEventEnvelope:
         try:
             payload = json.loads(raw_body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise reject("body_invalid") from exc
+            raise self._authenticated_event_rejection(
+                connection, "body_invalid"
+            ) from exc
         if not isinstance(payload, dict):
-            raise reject("body_invalid")
+            raise self._authenticated_event_rejection(connection, "body_invalid")
 
-        # The strict envelope is what turns an authentic body into a *valid*
-        # one: unknown fields, coerced types, and payloads that do not belong to
-        # the reported type are all refused here, before anything is consumed.
+        # Strict validation turns an authentic body into a valid protocol event.
         try:
             event = AGENT_EVENT_ENVELOPE_ADAPTER.validate_python(payload)
         except PydanticValidationError as exc:
-            raise reject("envelope_invalid") from exc
+            raise self._authenticated_event_rejection(
+                connection, "envelope_invalid"
+            ) from exc
         if event.protocol_version != PROTOCOL_VERSION:
-            raise reject("protocol_version_unsupported")
-        # The body has to name the connection the signature already proved, so a
-        # report cannot be lifted verbatim onto another connection's route.
-        if event.connection_id != connection_id:
-            raise reject("connection_mismatch")
+            raise self._authenticated_event_rejection(
+                connection, "protocol_version_unsupported"
+            )
+        if event.connection_id != connection.id:
+            raise self._authenticated_event_rejection(connection, "connection_mismatch")
+        return event
 
-        event_id = event.event_id
-        run_id = event.run_id
-        event_type = event.type
-        run_version = event.run_version
+    def _event_run(
+        self, connection: AgentConnectionDocument, event: AgentEventEnvelope
+    ) -> AgentRunDocument:
+        try:
+            run = self.agent_repo.get_run(event.run_id, owner_id=connection.owner_id)
+        except NotFoundError as exc:
+            raise self._authenticated_event_rejection(
+                connection, "unknown_run"
+            ) from exc
+        if run.dispatched_at is None or run.connection_id != connection.id:
+            raise self._authenticated_event_rejection(
+                connection, "run_not_for_connection"
+            )
+        if run.connection_disconnected_at is not None:
+            raise self._authenticated_event_rejection(
+                connection, "connection_disconnected"
+            )
+        if event.run_version <= run.run_version:
+            raise self._authenticated_event_rejection(
+                connection, "run_version_not_newer"
+            )
+        if run.reported_state in TERMINAL_REPORTED_STATES:
+            raise self._authenticated_event_rejection(connection, "run_terminal")
+        return run
 
+    @staticmethod
+    def _event_updates(
+        run: AgentRunDocument, event: AgentEventEnvelope, *, now: datetime
+    ) -> dict[str, Any]:
+        progress = getattr(event, "progress", None)
+        updates: dict[str, Any] = {
+            "reported_state": event.type,
+            "run_version": event.run_version,
+            "last_contact_at": now,
+            "updated_at": now,
+            "revision": run.revision + 1,
+        }
+        if run.content_expired:
+            # Retention is irreversible: higher versions advance state/contact,
+            # but a late event can never recreate expired content.
+            updates.update(
+                progress_text=None,
+                question_text=None,
+                result_text=None,
+                result_link=None,
+                failure_reason=None,
+            )
+        else:
+            if progress is not None:
+                updates["progress_text"] = progress
+            updates["question_text"] = (
+                getattr(event, "question", None) if event.type == "blocked" else None
+            )
+            if event.type == "completed":
+                updates["result_text"] = getattr(event, "result", None)
+                updates["result_link"] = getattr(event, "result_link", None)
+            if event.type == "failed":
+                updates["failure_reason"] = getattr(event, "reason", None)
+        if event.type in TERMINAL_REPORTED_STATES:
+            updates["cancel_requested_at"] = None
+        return updates
+
+    @staticmethod
+    def _event_summary(run: AgentRunDocument, event: AgentEventEnvelope) -> str | None:
+        if run.content_expired:
+            return None
+        return (
+            getattr(event, "progress", None)
+            or getattr(event, "question", None)
+            or getattr(event, "result", None)
+            or getattr(event, "reason", None)
+        )
+
+    def _apply_authenticated_event(
+        self, connection: AgentConnectionDocument, event: AgentEventEnvelope
+    ) -> None:
+        owner_id = connection.owner_id
         with self.agent_repo.command_lock(owner_id):
-            try:
-                run = self.agent_repo.get_run(run_id, owner_id=owner_id)
-            except NotFoundError as exc:
-                raise reject("unknown_run") from exc
-            if run.dispatched_at is None or run.connection_id != connection_id:
-                raise reject("run_not_for_connection")
-            if run.connection_disconnected_at is not None:
-                raise reject("connection_disconnected")
-            if run_version <= run.run_version:
-                raise reject("run_version_not_newer")
-            if run.reported_state in TERMINAL_REPORTED_STATES:
-                raise reject("run_terminal")
-
-            progress = getattr(event, "progress", None)
-            question = getattr(event, "question", None)
-            result = getattr(event, "result", None)
-            reason = getattr(event, "reason", None)
-            result_link = getattr(event, "result_link", None)
-
-            # Replay identifiers are consumed atomically and only once every
-            # other check has passed, so a rejected event cannot burn an ID.
+            run = self._event_run(connection, event)
+            # Consume only after every projection check, so rejection cannot burn
+            # an identifier. The repository claim remains the atomic replay gate.
             if not self.agent_repo.consume_event_id(
                 owner_id=owner_id,
-                connection_id=connection_id,
-                event_id=event_id,
+                connection_id=connection.id,
+                event_id=event.event_id,
                 now=self._now(),
             ):
-                raise reject("event_replayed")
+                raise self._authenticated_event_rejection(connection, "event_replayed")
 
             now = self._now()
-            updates: dict[str, Any] = {
-                "reported_state": event_type,
-                "run_version": run_version,
-                "last_contact_at": now,
-                "updated_at": now,
-                "revision": run.revision + 1,
-            }
-            if run.content_expired:
-                # Retention is irreversible. Authenticated higher versions still
-                # advance state/contact, but no late payload may recreate content.
-                updates.update(
-                    progress_text=None,
-                    question_text=None,
-                    result_text=None,
-                    result_link=None,
-                    failure_reason=None,
-                )
-            else:
-                if progress is not None:
-                    updates["progress_text"] = progress
-                if event_type == "blocked":
-                    updates["question_text"] = question
-                else:
-                    # The question belongs to the `blocked` state. Once the agent
-                    # reports anything else, the run is no longer waiting on an
-                    # answer, so the stale question must not survive into a state
-                    # that would show a dead reply control (FR-008). The timeline
-                    # event that carried it is untouched.
-                    updates["question_text"] = None
-                if event_type == "completed":
-                    updates["result_text"] = result
-                    updates["result_link"] = result_link
-                if event_type == "failed":
-                    updates["failure_reason"] = reason
-            if event_type in TERMINAL_REPORTED_STATES:
-                updates["cancel_requested_at"] = None
-            self.agent_repo.save_run(run.model_copy(update=updates))
+            self.agent_repo.save_run(
+                run.model_copy(update=self._event_updates(run, event, now=now))
+            )
             self.agent_repo.append_event(
                 AgentRunEventDocument(
-                    id=event_id,
+                    id=event.event_id,
                     owner_id=owner_id,
                     run_id=run.id,
-                    connection_id=connection_id,
-                    type=event_type,
-                    run_version=run_version,
+                    connection_id=connection.id,
+                    type=event.type,
+                    run_version=event.run_version,
                     received_at=now,
-                    summary=(
-                        None
-                        if run.content_expired
-                        else progress or question or result or reason
-                    ),
+                    summary=self._event_summary(run, event),
                 )
             )
             self._audit(
                 owner_id=owner_id,
                 action="event_accepted",
-                outcome=event_type,
-                connection_id=connection_id,
+                outcome=event.type,
+                connection_id=connection.id,
                 run_id=run.id,
             )
-        return AgentEventIngestResponse(accepted=True, run_version=run_version)
+
+    def ingest_event(
+        self,
+        *,
+        raw_body: bytes,
+        connection_id: str,
+        timestamp: str,
+        signature: str,
+    ) -> AgentEventIngestResponse:
+        """Authenticate, validate, then apply one connector report."""
+
+        connection = self._authenticate_event_request(
+            raw_body=raw_body,
+            connection_id=connection_id,
+            timestamp=timestamp,
+            signature=signature,
+        )
+        event = self._validate_authenticated_event(
+            raw_body=raw_body,
+            connection=connection,
+        )
+        self._apply_authenticated_event(connection, event)
+        return AgentEventIngestResponse(accepted=True, run_version=event.run_version)
 
     # --- maintenance --------------------------------------------------------
 

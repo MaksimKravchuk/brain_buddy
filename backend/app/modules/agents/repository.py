@@ -247,7 +247,10 @@ class AgentRepository(BaseRepository):
     # --- connections --------------------------------------------------------
 
     def create_connection(self, connection: AgentConnectionDocument) -> None:
-        with self._connection() as conn, _sqlite_guard("Agent connection", connection.id):
+        with (
+            self._connection() as conn,
+            _sqlite_guard("Agent connection", connection.id),
+        ):
             existing = conn.execute(
                 "SELECT 1 FROM agent_connections WHERE owner_id = ? AND id = ?",
                 (connection.owner_id, connection.id),
@@ -257,7 +260,10 @@ class AgentRepository(BaseRepository):
             self._upsert_connection(conn, connection)
 
     def save_connection(self, connection: AgentConnectionDocument) -> None:
-        with self._connection() as conn, _sqlite_guard("Agent connection", connection.id):
+        with (
+            self._connection() as conn,
+            _sqlite_guard("Agent connection", connection.id),
+        ):
             self._upsert_connection(conn, connection)
 
     def _upsert_connection(
@@ -402,7 +408,9 @@ class AgentRepository(BaseRepository):
             raise NotFoundError("Agent run", run_id)
         return self._model(row, AgentRunDocument)
 
-    def list_runs_for_task(self, task_id: str, *, owner_id: str) -> list[AgentRunDocument]:
+    def list_runs_for_task(
+        self, task_id: str, *, owner_id: str
+    ) -> list[AgentRunDocument]:
         with self._connection() as conn:
             rows = conn.execute(
                 """
@@ -434,20 +442,20 @@ class AgentRepository(BaseRepository):
         if not unique:
             return {}
         latest: dict[str, AgentRunDocument] = {}
-        placeholders = ",".join("?" for _ in unique)
         with self._connection() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT task_id, payload FROM agent_runs
-                WHERE owner_id = ? AND dispatched_at IS NOT NULL
-                    AND task_id IN ({placeholders})
-                ORDER BY created_at ASC, id ASC
-                """,
-                (owner_id, *unique),
-            ).fetchall()
-        for row in rows:
-            # Ascending order means the last write per task wins.
-            latest[row["task_id"]] = self._model(row, AgentRunDocument)
+            for task_id in unique:
+                row = conn.execute(
+                    """
+                    SELECT task_id, payload FROM agent_runs
+                    WHERE owner_id = ? AND dispatched_at IS NOT NULL
+                        AND task_id = ?
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (owner_id, task_id),
+                ).fetchone()
+                if row is not None:
+                    latest[row["task_id"]] = self._model(row, AgentRunDocument)
         return latest
 
     # --- events -------------------------------------------------------------
@@ -682,39 +690,38 @@ class AgentRepository(BaseRepository):
         candidates = list(key_hashes)
         if not candidates:
             return None
-        placeholders = ",".join("?" for _ in candidates)
         with self._connection() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT key_hash, command, request_hash, resource_id, command_id,
-                       completed, response_body, created_at
-                FROM agent_idempotency
-                WHERE owner_id = ? AND key_hash IN ({placeholders})
-                """,
-                (owner_id, *candidates),
-            ).fetchall()
-        by_hash = {row["key_hash"]: row for row in rows}
-        for candidate in candidates:
-            row = by_hash.get(candidate)
-            if row is None:
-                continue
-            return AgentIdempotencyRecord(
-                key_hash=row["key_hash"],
-                command=row["command"],
-                request_hash=row["request_hash"],
-                resource_id=row["resource_id"],
-                command_id=row["command_id"],
-                completed=bool(row["completed"]),
-                response_body=json.loads(row["response_body"]),
-                created_at=row["created_at"],
-            )
+            for candidate in candidates:
+                row = conn.execute(
+                    """
+                    SELECT key_hash, command, request_hash, resource_id, command_id,
+                           completed, response_body, created_at
+                    FROM agent_idempotency
+                    WHERE owner_id = ? AND key_hash = ?
+                    """,
+                    (owner_id, candidate),
+                ).fetchone()
+                if row is not None:
+                    return AgentIdempotencyRecord(
+                        key_hash=row["key_hash"],
+                        command=row["command"],
+                        request_hash=row["request_hash"],
+                        resource_id=row["resource_id"],
+                        command_id=row["command_id"],
+                        completed=bool(row["completed"]),
+                        response_body=json.loads(row["response_body"]),
+                        created_at=row["created_at"],
+                    )
         return None
 
-    def save_idempotency(self, *, owner_id: str, record: AgentIdempotencyRecord) -> None:
+    def save_idempotency(
+        self, *, owner_id: str, record: AgentIdempotencyRecord
+    ) -> None:
         # The guard's identifier is deliberately the resource, not the key or
         # its hash: it can end up in an error message and a log line.
-        with self._connection() as conn, _sqlite_guard(
-            "Idempotency-Key", record.resource_id
+        with (
+            self._connection() as conn,
+            _sqlite_guard("Idempotency-Key", record.resource_id),
         ):
             conn.execute(
                 """
@@ -766,16 +773,19 @@ class AgentRepository(BaseRepository):
         """Erase every relay record belonging to one owner. Idempotent."""
 
         with self.command_lock(owner_id), self._connection() as conn:
-            for table in (
-                "agent_run_events",
-                "agent_run_commands",
-                "agent_runs",
-                "agent_event_ids",
-                "agent_connections",
-                "agent_audit",
-                "agent_idempotency",
-            ):
-                conn.execute(f"DELETE FROM {table} WHERE owner_id = ?", (owner_id,))
+            conn.execute("DELETE FROM agent_run_events WHERE owner_id = ?", (owner_id,))
+            conn.execute(
+                "DELETE FROM agent_run_commands WHERE owner_id = ?", (owner_id,)
+            )
+            conn.execute("DELETE FROM agent_runs WHERE owner_id = ?", (owner_id,))
+            conn.execute("DELETE FROM agent_event_ids WHERE owner_id = ?", (owner_id,))
+            conn.execute(
+                "DELETE FROM agent_connections WHERE owner_id = ?", (owner_id,)
+            )
+            conn.execute("DELETE FROM agent_audit WHERE owner_id = ?", (owner_id,))
+            conn.execute(
+                "DELETE FROM agent_idempotency WHERE owner_id = ?", (owner_id,)
+            )
 
 
 __all__ = [

@@ -301,15 +301,11 @@ def _canonical_public_base_url(raw: str, *, environment: AppEnvironment) -> str:
         raise ValueError(reject + "could not parse the public base URL.") from exc
 
     if parts.scheme not in {"http", "https"} or not host:
-        raise ValueError(
-            reject + "needs an http(s) public base URL with a host."
-        )
+        raise ValueError(reject + "needs an http(s) public base URL with a host.")
     if parts.username or parts.password:
         raise ValueError(reject + "forbids credentials in the public base URL.")
     if parts.query or parts.fragment:
-        raise ValueError(
-            reject + "forbids a query or fragment in the public base URL."
-        )
+        raise ValueError(reject + "forbids a query or fragment in the public base URL.")
     if parts.path not in {"", "/"}:
         raise ValueError(
             reject + "needs a bare origin as the public base URL, with no path."

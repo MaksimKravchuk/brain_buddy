@@ -2810,6 +2810,390 @@ class TestSigningSecretRotation:
         assert rotated.inbound_signing_secret not in serialized
 
 
+class TestRelayFailureRecoveryEdges:
+    """Release-risk failures stay recoverable and fail closed without leakage."""
+
+    def test_retry_after_a_post_send_save_failure_reuses_the_reserved_command_id(
+        self,
+        relay: Relay,
+        service: AgentRelayService,
+        connector: FakeConnector,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
+        payload = AgentReplyRequest(
+            message="Use staging.", expected_revision=relay.projection().revision
+        )
+        save_command = service.agent_repo.save_command
+        failed_once = False
+
+        def fail_after_delivery(command: Any) -> None:
+            nonlocal failed_once
+            if not failed_once:
+                failed_once = True
+                raise RuntimeError("simulated post-delivery storage outage")
+            save_command(command)
+
+        monkeypatch.setattr(service.agent_repo, "save_command", fail_after_delivery)
+        with pytest.raises(RuntimeError, match="post-delivery"):
+            service.reply_to_run(
+                relay.run.id,
+                payload,
+                owner_id=OWNER,
+                idempotency_key="idem-crash-reply",
+            )
+
+        recovered = service.reply_to_run(
+            relay.run.id,
+            payload,
+            owner_id=OWNER,
+            idempotency_key="idem-crash-reply",
+        )
+
+        assert [call["command_id"] for call in connector.commands] == [
+            connector.commands[0]["command_id"],
+            connector.commands[0]["command_id"],
+        ]
+        assert [
+            command.body for command in recovered.commands if command.kind == "reply"
+        ] == ["Use staging."]
+
+    def test_missing_stored_credential_refuses_network_use(
+        self, service: AgentRelayService, connector: FakeConnector
+    ) -> None:
+        connection_id = connect(service)
+        connection = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
+        service.agent_repo.save_connection(
+            connection.model_copy(update={"credential": None})
+        )
+
+        with pytest.raises(ValidationFailure) as refused:
+            service.test_connection(connection_id, owner_id=OWNER)
+
+        assert refused.value.detail == {"reason": "credential_missing"}
+        assert connector.tests == []
+
+    def test_disconnected_connection_cannot_be_tested(
+        self, service: AgentRelayService, connector: FakeConnector
+    ) -> None:
+        connection_id = connect(service)
+        current = service.get_connection(connection_id, owner_id=OWNER)
+        service.disconnect_connection(
+            connection_id,
+            AgentConnectionDisconnectRequest(
+                current_password="correct-horse-battery-staple",
+                expected_revision=current.revision,
+            ),
+            owner_id=OWNER,
+            idempotency_key="idem-disconnect-before-test",
+            reauthenticated=True,
+        )
+
+        with pytest.raises(ValidationFailure) as refused:
+            service.test_connection(connection_id, owner_id=OWNER)
+
+        assert refused.value.detail == {"reason": "connection_disconnected"}
+        assert connector.tests == []
+
+    def test_credential_rotation_guards_and_replay_are_stable(
+        self, service: AgentRelayService
+    ) -> None:
+        connection_id = connect(service)
+        original = service.get_connection(connection_id, owner_id=OWNER)
+        payload = AgentConnectionRotateRequest(
+            credential="Bearer replacement",
+            current_password="correct-horse-battery-staple",
+            expected_revision=original.revision,
+        )
+
+        with pytest.raises(ValidationFailure) as refused:
+            service.rotate_credential(
+                connection_id,
+                payload,
+                owner_id=OWNER,
+                idempotency_key="idem-rotate-no-reauth",
+                reauthenticated=False,
+            )
+        assert refused.value.detail == {"reason": "reauthentication_required"}
+
+        rotated = service.rotate_credential(
+            connection_id,
+            payload,
+            owner_id=OWNER,
+            idempotency_key="idem-rotate-replay",
+            reauthenticated=True,
+        )
+        replayed = service.rotate_credential(
+            connection_id,
+            payload,
+            owner_id=OWNER,
+            idempotency_key="idem-rotate-replay",
+            reauthenticated=True,
+        )
+        assert replayed == rotated
+
+        disconnected_payload = AgentConnectionDisconnectRequest(
+            current_password="correct-horse-battery-staple",
+            expected_revision=rotated.revision,
+        )
+        service.disconnect_connection(
+            connection_id,
+            disconnected_payload,
+            owner_id=OWNER,
+            idempotency_key="idem-disconnect-after-rotate",
+            reauthenticated=True,
+        )
+        with pytest.raises(ValidationFailure) as disconnected:
+            service.rotate_credential(
+                connection_id,
+                AgentConnectionRotateRequest(
+                    credential="Bearer impossible",
+                    current_password="correct-horse-battery-staple",
+                    expected_revision=rotated.revision + 1,
+                ),
+                owner_id=OWNER,
+                idempotency_key="idem-rotate-disconnected",
+                reauthenticated=True,
+            )
+        assert disconnected.value.detail == {"reason": "connection_disconnected"}
+
+    def test_disconnect_replay_returns_the_same_projection(self, relay: Relay) -> None:
+        current = relay.service.get_connection(relay.connection_id, owner_id=OWNER)
+        payload = AgentConnectionDisconnectRequest(
+            current_password="correct-horse-battery-staple",
+            expected_revision=current.revision,
+        )
+        first = relay.service.disconnect_connection(
+            relay.connection_id,
+            payload,
+            owner_id=OWNER,
+            idempotency_key="idem-disconnect-replay",
+            reauthenticated=True,
+        )
+        second = relay.service.disconnect_connection(
+            relay.connection_id,
+            payload,
+            owner_id=OWNER,
+            idempotency_key="idem-disconnect-replay",
+            reauthenticated=True,
+        )
+
+        assert second == first
+        assert second.status == "disconnected"
+
+    def test_disconnect_marks_only_dispatched_nonterminal_runs(
+        self, relay: Relay, service: AgentRelayService
+    ) -> None:
+        terminal = dispatch(
+            service, relay.connection_id, task_id="task_2", key="idem-task-2"
+        )
+        relay.emit(
+            relay.event("evt_done", "completed", 1, result="Done", run_id=terminal.id)
+        )
+        preview = service.preview_handoff(
+            "task_1",
+            AgentHandoffPreviewRequest(connection_id=relay.connection_id),
+            owner_id=OWNER,
+        )
+        current = service.get_connection(relay.connection_id, owner_id=OWNER)
+
+        service.disconnect_connection(
+            relay.connection_id,
+            AgentConnectionDisconnectRequest(
+                current_password="correct-horse-battery-staple",
+                expected_revision=current.revision,
+            ),
+            owner_id=OWNER,
+            idempotency_key="idem-selective-disconnect",
+            reauthenticated=True,
+        )
+
+        active = service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
+        completed = service.agent_repo.get_run(terminal.id, owner_id=OWNER)
+        reserved = service.agent_repo.get_run(preview.run_id, owner_id=OWNER)
+        assert active.connection_disconnected_at is not None
+        assert completed.connection_disconnected_at is None
+        assert reserved.connection_disconnected_at is None
+
+    def test_unverified_scope_requires_reauthentication(
+        self, service: AgentRelayService
+    ) -> None:
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        connection = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
+        service.agent_repo.save_connection(
+            connection.model_copy(update={"scope_verified_at": None})
+        )
+
+        preview = service.preview_handoff(
+            "task_1",
+            AgentHandoffPreviewRequest(connection_id=connection_id),
+            owner_id=OWNER,
+        )
+
+        assert preview.reauthentication_required is True
+
+    def test_oversized_context_is_refused_before_reservation(
+        self, service: AgentRelayService
+    ) -> None:
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        context = [
+            AgentContextItemRequest(label=f"Item {index}", body="bounded")
+            for index in range(21)
+        ]
+
+        with pytest.raises(ValidationFailure) as refused:
+            service.preview_handoff(
+                "task_1",
+                AgentHandoffPreviewRequest(
+                    connection_id=connection_id, context_items=context
+                ),
+                owner_id=OWNER,
+            )
+
+        assert refused.value.detail == {"reason": "too_many_context_items"}
+        assert service.list_runs_for_task("task_1", owner_id=OWNER) == []
+
+    def test_unreserved_manifest_and_preview_run_are_not_actionable(
+        self, service: AgentRelayService, connector: FakeConnector
+    ) -> None:
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        preview = service.preview_handoff(
+            "task_1",
+            AgentHandoffPreviewRequest(connection_id=connection_id),
+            owner_id=OWNER,
+        )
+
+        with pytest.raises(NotFoundError):
+            service.get_run(preview.run_id, owner_id=OWNER)
+        with pytest.raises(NotFoundError):
+            service.reply_to_run(
+                preview.run_id,
+                AgentReplyRequest(message="Do not send", expected_revision=1),
+                owner_id=OWNER,
+                idempotency_key="idem-preview-reply",
+            )
+        with pytest.raises(ValidationFailure) as refused:
+            service.dispatch_run(
+                "task_1",
+                AgentHandoffConfirmRequest(
+                    connection_id=connection_id, manifest_token="f" * 64
+                ),
+                owner_id=OWNER,
+                idempotency_key="idem-unreserved-manifest",
+            )
+
+        assert refused.value.detail == {"reason": "manifest_not_reserved"}
+        assert connector.starts == []
+
+    @pytest.mark.parametrize(
+        "receipt",
+        [
+            {},
+            {"sealed_signing_secret": {"key_id": "v1", "ciphertext": "%%%"}},
+        ],
+    )
+    def test_corrupt_signing_secret_receipt_fails_closed(
+        self,
+        relay: Relay,
+        service: AgentRelayService,
+        receipt: dict[str, Any],
+    ) -> None:
+        current = service.get_connection(relay.connection_id, owner_id=OWNER).revision
+        service.rotate_signing_secret(
+            relay.connection_id,
+            AgentConnectionRotateSigningSecretRequest(
+                current_password="correct-horse-battery-staple",
+                expected_revision=current,
+            ),
+            owner_id=OWNER,
+            idempotency_key="idem-corrupt-receipt",
+            reauthenticated=True,
+        )
+        with sqlite3.connect(service.agent_repo.db_path) as database:
+            stored = database.execute(
+                "SELECT response_body FROM agent_idempotency "
+                "WHERE owner_id = ? AND command = 'rotate_signing_secret'",
+                (OWNER,),
+            ).fetchone()
+            assert stored is not None
+            original = json.loads(stored[0])
+            receipt["installed_secret_fingerprint"] = original[
+                "installed_secret_fingerprint"
+            ]
+            database.execute(
+                "UPDATE agent_idempotency SET response_body = ? "
+                "WHERE owner_id = ? AND command = 'rotate_signing_secret'",
+                (json.dumps(receipt), OWNER),
+            )
+
+        with pytest.raises(ValidationFailure) as refused:
+            service.rotate_signing_secret(
+                relay.connection_id,
+                AgentConnectionRotateSigningSecretRequest(
+                    current_password="correct-horse-battery-staple",
+                    expected_revision=current,
+                ),
+                owner_id=OWNER,
+                idempotency_key="idem-corrupt-receipt",
+                reauthenticated=True,
+            )
+
+        assert refused.value.detail == {"reason": "signing_secret_unrecoverable"}
+
+    def test_overflowing_timestamp_is_rejected_without_mutation(
+        self, relay: Relay
+    ) -> None:
+        body = json.dumps(relay.event("evt_overflow", "running", 1)).encode("utf-8")
+
+        with pytest.raises(EventRejected) as refused:
+            relay.service.ingest_event(
+                raw_body=body,
+                connection_id=relay.connection_id,
+                timestamp="9" * 400,
+                signature="v1=" + "0" * 64,
+            )
+
+        assert refused.value.code == "timestamp_invalid"
+        assert relay.projection().reported_state is None
+
+    @pytest.mark.parametrize("body", [b"\xff", b"[]"])
+    def test_authenticated_non_object_body_is_rejected_and_audited(
+        self, relay: Relay, body: bytes
+    ) -> None:
+        timestamp = int(relay.clock.now.timestamp())
+
+        with pytest.raises(EventRejected) as refused:
+            relay.service.ingest_event(
+                raw_body=body,
+                connection_id=relay.connection_id,
+                timestamp=str(timestamp),
+                signature=sign(relay.secret, timestamp, body),
+            )
+
+        assert refused.value.code == "body_invalid"
+        assert any(
+            entry.action == "event_rejected" and entry.outcome == "body_invalid"
+            for entry in relay.service.list_audit(owner_id=OWNER)
+        )
+
+    def test_run_marked_disconnected_rejects_a_late_authenticated_event(
+        self, relay: Relay
+    ) -> None:
+        persisted = relay.service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
+        relay.service.agent_repo.save_run(
+            persisted.model_copy(update={"connection_disconnected_at": relay.clock.now})
+        )
+
+        with pytest.raises(EventRejected) as refused:
+            relay.emit(relay.event("evt_late", "running", 1))
+
+        assert refused.value.code == "connection_disconnected"
+        assert relay.projection().reported_state is None
+
+
 class TestDispatchScopeReauthentication:
     def test_a_fresh_scope_does_not_re_prompt_for_the_password(
         self, service: AgentRelayService

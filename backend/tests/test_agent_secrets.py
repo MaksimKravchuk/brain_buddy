@@ -15,8 +15,8 @@ import pytest
 
 from app.core.config import AppEnvironment
 from app.modules.agents.secrets import (
-    AAD_INBOUND_SIGNING_SECRET,
-    AAD_OUTBOUND_CREDENTIAL,
+    AAD_PURPOSE_INBOUND_SIGNING,
+    AAD_PURPOSE_OUTBOUND_CREDENTIAL,
     SealedSecret,
     SecretBox,
     SecretDecryptionFailed,
@@ -83,7 +83,7 @@ class TestOwnerBoundAssociatedData:
 
     def _sealed(self, box: SecretBox) -> tuple[str, str]:
         aad = secret_aad(
-            AAD_OUTBOUND_CREDENTIAL, owner_id="user_a", connection_id="conn_1"
+            AAD_PURPOSE_OUTBOUND_CREDENTIAL, owner_id="user_a", connection_id="conn_1"
         )
         return aad, box.seal("hermes-token-value", aad=aad).ciphertext
 
@@ -91,10 +91,10 @@ class TestOwnerBoundAssociatedData:
         """Each component is present, so none of them can be swapped silently."""
 
         aad = secret_aad(
-            AAD_OUTBOUND_CREDENTIAL, owner_id="user_a", connection_id="conn_1"
+            AAD_PURPOSE_OUTBOUND_CREDENTIAL, owner_id="user_a", connection_id="conn_1"
         )
 
-        assert AAD_OUTBOUND_CREDENTIAL in aad
+        assert AAD_PURPOSE_OUTBOUND_CREDENTIAL in aad
         assert "user_a" in aad
         assert "conn_1" in aad
 
@@ -106,7 +106,9 @@ class TestOwnerBoundAssociatedData:
         sealed = box.seal(
             "hermes-token-value",
             aad=secret_aad(
-                AAD_OUTBOUND_CREDENTIAL, owner_id="user_a", connection_id="conn_1"
+                AAD_PURPOSE_OUTBOUND_CREDENTIAL,
+                owner_id="user_a",
+                connection_id="conn_1",
             ),
         )
 
@@ -114,7 +116,9 @@ class TestOwnerBoundAssociatedData:
             box.open(
                 sealed,
                 aad=secret_aad(
-                    AAD_OUTBOUND_CREDENTIAL, owner_id="user_b", connection_id="conn_1"
+                    AAD_PURPOSE_OUTBOUND_CREDENTIAL,
+                    owner_id="user_b",
+                    connection_id="conn_1",
                 ),
             )
 
@@ -126,7 +130,9 @@ class TestOwnerBoundAssociatedData:
         sealed = box.seal(
             "hermes-token-value",
             aad=secret_aad(
-                AAD_OUTBOUND_CREDENTIAL, owner_id="user_a", connection_id="conn_1"
+                AAD_PURPOSE_OUTBOUND_CREDENTIAL,
+                owner_id="user_a",
+                connection_id="conn_1",
             ),
         )
 
@@ -134,7 +140,9 @@ class TestOwnerBoundAssociatedData:
             box.open(
                 sealed,
                 aad=secret_aad(
-                    AAD_OUTBOUND_CREDENTIAL, owner_id="user_a", connection_id="conn_2"
+                    AAD_PURPOSE_OUTBOUND_CREDENTIAL,
+                    owner_id="user_a",
+                    connection_id="conn_2",
                 ),
             )
 
@@ -144,7 +152,9 @@ class TestOwnerBoundAssociatedData:
         sealed = box.seal(
             "hermes-token-value",
             aad=secret_aad(
-                AAD_OUTBOUND_CREDENTIAL, owner_id="user_a", connection_id="conn_1"
+                AAD_PURPOSE_OUTBOUND_CREDENTIAL,
+                owner_id="user_a",
+                connection_id="conn_1",
             ),
         )
 
@@ -152,7 +162,7 @@ class TestOwnerBoundAssociatedData:
             box.open(
                 sealed,
                 aad=secret_aad(
-                    AAD_INBOUND_SIGNING_SECRET,
+                    AAD_PURPOSE_INBOUND_SIGNING,
                     owner_id="user_a",
                     connection_id="conn_1",
                 ),
@@ -169,7 +179,9 @@ class TestOwnerBoundAssociatedData:
             box.open(
                 legacy,
                 aad=secret_aad(
-                    AAD_OUTBOUND_CREDENTIAL, owner_id="user_a", connection_id="conn_1"
+                    AAD_PURPOSE_OUTBOUND_CREDENTIAL,
+                    owner_id="user_a",
+                    connection_id="conn_1",
                 ),
             )
 
@@ -279,6 +291,15 @@ def test_truncated_sealed_secret_is_refused(box: SecretBox) -> None:
 
     with pytest.raises(SecretDecryptionFailed, match="truncated"):
         box.open(truncated, aad="conn_1")
+
+
+def test_non_base64_sealed_secret_is_refused(box: SecretBox) -> None:
+    """Malformed persisted ciphertext fails closed before decryption."""
+
+    malformed = SealedSecret(key_id=box.active_key_id, ciphertext="%%%")
+
+    with pytest.raises(SecretDecryptionFailed, match="valid base64"):
+        box.open(malformed, aad="conn_1")
 
 
 def test_production_without_configured_keys_fails_closed() -> None:

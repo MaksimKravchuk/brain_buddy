@@ -156,6 +156,17 @@ class TestRuns:
             repo.get_run("agentrun_1", owner_id="user_b")
         assert repo.list_runs_for_task("task_1", owner_id="user_b") == []
 
+    def test_creating_the_same_run_id_twice_conflicts(
+        self, repo: AgentRepository
+    ) -> None:
+        """A duplicate run reservation cannot silently replace reviewed content."""
+
+        repo.create_connection(make_connection())
+        repo.create_run(make_run())
+
+        with pytest.raises(ConflictError):
+            repo.create_run(make_run())
+
     def test_listing_runs_for_an_owner_spans_every_task(
         self, repo: AgentRepository
     ) -> None:
@@ -268,7 +279,15 @@ class TestEventReplayConsumption:
 
         repo.create_connection(make_connection())
 
-        assert repo.consume_event_id(owner_id="user_a", connection_id="agentconn_1", event_id="evt_1", now=NOW) is True
+        assert (
+            repo.consume_event_id(
+                owner_id="user_a",
+                connection_id="agentconn_1",
+                event_id="evt_1",
+                now=NOW,
+            )
+            is True
+        )
 
     def test_a_replayed_event_id_is_refused(self, repo: AgentRepository) -> None:
         """A duplicate delivery is rejected atomically, before any mutation."""
@@ -278,7 +297,15 @@ class TestEventReplayConsumption:
             owner_id="user_a", connection_id="agentconn_1", event_id="evt_1", now=NOW
         )
 
-        assert repo.consume_event_id(owner_id="user_a", connection_id="agentconn_1", event_id="evt_1", now=NOW) is False
+        assert (
+            repo.consume_event_id(
+                owner_id="user_a",
+                connection_id="agentconn_1",
+                event_id="evt_1",
+                now=NOW,
+            )
+            is False
+        )
 
     def test_the_same_event_id_on_a_different_connection_is_independent(
         self, repo: AgentRepository
@@ -291,7 +318,15 @@ class TestEventReplayConsumption:
             owner_id="user_a", connection_id="agentconn_1", event_id="evt_1", now=NOW
         )
 
-        assert repo.consume_event_id(owner_id="user_a", connection_id="agentconn_2", event_id="evt_1", now=NOW) is True
+        assert (
+            repo.consume_event_id(
+                owner_id="user_a",
+                connection_id="agentconn_2",
+                event_id="evt_1",
+                now=NOW,
+            )
+            is True
+        )
 
     def test_appended_events_come_back_in_chronological_order(
         self, repo: AgentRepository
@@ -338,6 +373,8 @@ class TestCommandsAndAudit:
 
         commands = repo.list_commands("agentrun_1", owner_id="user_a")
         assert [command.id for command in commands] == ["agentcmd_1"]
+        assert repo.get_command("agentcmd_1", owner_id="user_a") == commands[0]
+        assert repo.get_command("agentcmd_missing", owner_id="user_a") is None
         assert repo.list_commands("agentrun_1", owner_id="user_b") == []
 
     def test_audit_entries_are_listed_newest_first(self, repo: AgentRepository) -> None:
@@ -396,7 +433,9 @@ class TestRetentionAndPurge:
         repo.create_run(make_run(result_text="Still fresh"))
 
         assert repo.expire_due_content(now=NOW) == 0
-        assert repo.get_run("agentrun_1", owner_id="user_a").result_text == "Still fresh"
+        assert (
+            repo.get_run("agentrun_1", owner_id="user_a").result_text == "Still fresh"
+        )
 
     def test_expiring_content_is_idempotent(self, repo: AgentRepository) -> None:
         """A second sweep does not re-report already-expired runs."""
@@ -433,6 +472,28 @@ class TestRetentionAndPurge:
 
         assert repo.list_events("agentrun_1", owner_id="user_a")[0].summary is None
 
+    def test_expiry_leaves_already_content_free_events_unchanged(
+        self, repo: AgentRepository
+    ) -> None:
+        """Retention handles status-only events without manufacturing content."""
+
+        repo.create_connection(make_connection())
+        repo.create_run(make_run(content_expires_at=NOW - timedelta(days=1)))
+        event = AgentRunEventDocument(
+            id="evt_status_only",
+            owner_id="user_a",
+            run_id="agentrun_1",
+            connection_id="agentconn_1",
+            type="accepted",
+            run_version=1,
+            received_at=NOW,
+            summary=None,
+        )
+        repo.append_event(event)
+
+        assert repo.expire_due_content(now=NOW) == 1
+        assert repo.list_events("agentrun_1", owner_id="user_a") == [event]
+
     def test_audit_entries_are_purged_after_ninety_days(
         self, repo: AgentRepository
     ) -> None:
@@ -462,9 +523,7 @@ class TestRetentionAndPurge:
             "agentaudit_new"
         ]
 
-    def test_purging_an_owner_removes_every_record(
-        self, repo: AgentRepository
-    ) -> None:
+    def test_purging_an_owner_removes_every_record(self, repo: AgentRepository) -> None:
         """The account-purge contract leaves nothing behind (AC-021)."""
 
         repo.create_connection(make_connection())
@@ -580,9 +639,7 @@ class TestIdempotency:
             is None
         )
 
-    def test_storage_has_nowhere_to_put_a_raw_key(
-        self, repo: AgentRepository
-    ) -> None:
+    def test_storage_has_nowhere_to_put_a_raw_key(self, repo: AgentRepository) -> None:
         """The record cannot carry the key itself, so no writer can leak it."""
 
         assert "key" not in AgentIdempotencyRecord.model_fields

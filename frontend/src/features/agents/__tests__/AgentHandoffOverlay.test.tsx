@@ -320,6 +320,30 @@ describe("AgentHandoffOverlay", () => {
     expect(screen.queryByRole("button", { name: "Send to agent" })).not.toBeInTheDocument();
   });
 
+  it("reports a failed connection lookup instead of claiming the account has no agents", async () => {
+    vi.mocked(apiClient.listAgentConnections).mockRejectedValue(
+      new ApiError("Server Error", 500, { message: "Connection registry unavailable." }, "corr-connections-1")
+    );
+    renderOverlay();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /connection registry unavailable.*corr-connections-1/i
+    );
+    expect(screen.queryByText(/no agents connected yet/i)).not.toBeInTheDocument();
+  });
+
+  it("does not re-preview when an incomplete context item is submitted", async () => {
+    const user = userEvent.setup();
+    renderOverlay();
+    await selectReadyAgent(user);
+
+    await user.type(screen.getByLabelText("Context label"), "Runbook");
+    await user.click(screen.getByRole("button", { name: "Add context" }));
+
+    expect(apiClient.previewAgentHandoff).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText("Context label")).toHaveValue("Runbook");
+  });
+
   it("reports a failed preview instead of showing a partial payload", async () => {
     vi.mocked(apiClient.previewAgentHandoff).mockImplementation(async () => {
       throw new ApiError("Bad Request", 400, { message: "This connection is stale." }, "corr-preview-1");

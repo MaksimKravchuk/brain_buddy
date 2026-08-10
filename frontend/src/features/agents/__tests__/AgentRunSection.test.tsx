@@ -5,7 +5,7 @@ import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentRunResponse } from "../../../api/agentTypes";
-import { apiClient } from "../../../api/client";
+import { ApiError, apiClient } from "../../../api/client";
 import { AgentRunSection } from "../AgentRunSection";
 
 function makeRun(overrides: Partial<AgentRunResponse> = {}): AgentRunResponse {
@@ -454,6 +454,24 @@ describe("AgentRunSection idempotency across retries", () => {
     const [firstKey, secondKey] = reply.mock.calls.map((call) => call[2]);
     expect(secondKey).not.toBe(firstKey);
     expect(reply.mock.calls[1][1]).toEqual({ message: "Use production.", expected_revision: 1 });
+  });
+
+  it("retires a reply key after a definitive client rejection", async () => {
+    const user = userEvent.setup();
+    distinctKeys();
+    const reply = vi
+      .spyOn(apiClient, "replyToAgentRun")
+      .mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "The question changed." }))
+      .mockResolvedValue(makeRun());
+    renderSection([blocked()]);
+
+    await user.type(screen.getByLabelText("Your answer"), "Use staging.");
+    await user.click(screen.getByRole("button", { name: "Send answer" }));
+    await screen.findByRole("alert");
+    await user.click(screen.getByRole("button", { name: "Send answer" }));
+
+    expect(reply).toHaveBeenCalledTimes(2);
+    expect(reply.mock.calls[1][2]).not.toBe(reply.mock.calls[0][2]);
   });
 
   it("retries a rejected cancellation under the key the first attempt used", async () => {

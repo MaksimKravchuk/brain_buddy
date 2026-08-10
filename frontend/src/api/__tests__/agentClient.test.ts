@@ -221,6 +221,25 @@ describe("apiClient external agent relay contract", () => {
     expect(inits[3].body).toBeUndefined();
   });
 
+  it("batches compact run summaries for every requested task without losing task identity", async () => {
+    fetchMock.mockResolvedValue(
+      response({
+        "task-1": { task_id: "task-1", latest_run_id: "run-1" },
+        "task-2": { task_id: "task-2", latest_run_id: "run-2" }
+      })
+    );
+
+    const summaries = await apiClient.listAgentRunSummaries(["task-1", "task-2"]);
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/agent-run-summaries?task_id=task-1&task_id=task-2"
+    );
+    expect(summaries).toMatchObject({
+      "task-1": { latest_run_id: "run-1" },
+      "task-2": { latest_run_id: "run-2" }
+    });
+  });
+
   it("preserves the correlation ID when a hand-off confirmation is rejected", async () => {
     fetchMock.mockResolvedValue(
       response(
