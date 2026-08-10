@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import re
 import tempfile
 import unittest
@@ -29,10 +30,16 @@ class PreservedOverrideTests(unittest.TestCase):
     def test_repository_overrides_are_all_intact(self) -> None:
         self.assertEqual(self.module.check(ROOT), [])
 
-    def test_both_implement_copies_are_protected(self) -> None:
+    def test_the_implement_policy_is_protected(self) -> None:
+        """One tree now. The Codex twin was removed with `.agents/`.
+
+        The override still matters for the same reason it always did: it is
+        the implement-directly policy, and `specify integration upgrade
+        claude --force` would silently restore upstream's refuse-and-route.
+        """
         protected = set(self.module.PRESERVED_OVERRIDES)
         self.assertIn(".claude/skills/speckit-implement/SKILL.md", protected)
-        self.assertIn(".agents/skills/speckit-implement/SKILL.md", protected)
+        self.assertNotIn(".agents/skills/speckit-implement/SKILL.md", protected)
 
     def test_all_four_customized_templates_are_protected(self) -> None:
         protected = set(self.module.PRESERVED_OVERRIDES)
@@ -60,12 +67,19 @@ class PreservedOverrideTests(unittest.TestCase):
             failures = self.module.check(fake_root)
             self.assertTrue(all("MISSING" in item for item in failures))
 
-    def test_every_hooked_command_exists_in_both_agent_trees(self) -> None:
-        """`.specify/extensions.yml` is shared by both agent trees.
+    def test_every_hooked_command_resolves_to_an_installed_skill(self) -> None:
+        """A hook naming a skill that does not exist stops the pipeline.
 
-        Regression: registering a mandatory hook whose skill exists only under
-        `.claude/skills/` made a Codex run emit EXECUTE_COMMAND for a command
-        that tree cannot invoke, stopping the pipeline dead at that stage.
+        This was a two-tree parity check while `.agents/` existed. Removing
+        that tree narrows the check but does not retire it: the failure mode
+        was never specific to Codex. A mandatory hook whose SKILL.md is absent
+        makes the running agent emit EXECUTE_COMMAND for a command it cannot
+        invoke, and the stage dies there.
+
+        Note for anyone reading this while considering a new hook: this guard
+        now says nothing about `assess`. It ships Claude skills, so hooking it
+        would pass here. The reason it stays unhooked is in the extensions.yml
+        comment and is about stage 0 being optional, not about tree parity.
         """
         extensions = ROOT / ".specify" / "extensions.yml"
         self.assertTrue(extensions.is_file(), "extensions.yml is missing")
@@ -77,14 +91,39 @@ class PreservedOverrideTests(unittest.TestCase):
         )
         self.assertTrue(commands, "extensions.yml registers no hook commands")
 
-        missing: list[str] = []
-        for command in commands:
-            skill = command.replace(".", "-")
-            for tree in (".claude/skills", ".agents/skills"):
-                if not (ROOT / tree / skill / "SKILL.md").is_file():
-                    missing.append(f"{tree}/{skill}/SKILL.md (hook `{command}`)")
+        missing = [
+            f".claude/skills/{command.replace('.', '-')}/SKILL.md (hook `{command}`)"
+            for command in commands
+            if not (
+                ROOT / ".claude/skills" / command.replace(".", "-") / "SKILL.md"
+            ).is_file()
+        ]
 
-        self.assertEqual(missing, [], f"hooked skills missing from a tree: {missing}")
+        self.assertEqual(missing, [], f"hooked skills with no SKILL.md: {missing}")
+
+    def test_the_codex_tree_is_gone_and_nothing_resolves_into_it(self) -> None:
+        """No *functional* reference to `.agents/` survives.
+
+        Deliberately not a blanket text ban. The first version of this test
+        was one, and it failed on the extensions.yml comment explaining why
+        the tree was removed and what that costs — prose the removal was
+        required to add. A guard that forbids documenting a change is worse
+        than no guard: the cheapest way to satisfy it is to delete the
+        explanation.
+        """
+        self.assertFalse((ROOT / ".agents").exists(), "`.agents/` is back")
+        self.assertFalse(
+            any(key.startswith(".agents/") for key in self.module.PRESERVED_OVERRIDES),
+            "a preserved override still points into the removed tree",
+        )
+        integration = json.loads(
+            (ROOT / ".specify" / "integration.json").read_text(encoding="utf-8")
+        )
+        self.assertNotIn("codex", integration["installed_integrations"])
+        self.assertNotIn("codex", integration["integration_settings"])
+        self.assertFalse(
+            (ROOT / ".specify" / "integrations" / "codex.manifest.json").exists()
+        )
 
     def test_implement_skill_is_not_disabled(self) -> None:
         """Regression: the implement skill used to refuse to run at all.
@@ -93,14 +132,11 @@ class PreservedOverrideTests(unittest.TestCase):
         the artifacts may be implemented directly, so a disabled skill left an
         agent that reads skills first with no legal way to proceed.
         """
-        for relative in (
-            ".claude/skills/speckit-implement/SKILL.md",
-            ".agents/skills/speckit-implement/SKILL.md",
-        ):
-            text = (ROOT / relative).read_text(encoding="utf-8")
-            self.assertNotIn("user-invocable: false", text, relative)
-            self.assertNotIn("disable-model-invocation: true", text, relative)
-            self.assertNotIn("DISABLED in BrainBuddy", text, relative)
+        relative = ".claude/skills/speckit-implement/SKILL.md"
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        self.assertNotIn("user-invocable: false", text, relative)
+        self.assertNotIn("disable-model-invocation: true", text, relative)
+        self.assertNotIn("DISABLED in BrainBuddy", text, relative)
 
 
 if __name__ == "__main__":

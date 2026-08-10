@@ -4,7 +4,7 @@ workflow:
   name: "BrainBuddy Portable Spec Review"
   version: "3.0.0"
   author: "BrainBuddy"
-  description: "Portable spec review gate (ADR-0011): five read-only reviewer lenses fan out over the feature planning artifacts and fan in to one schema-validated verdict. Runs for every feature, in Claude Code or Codex, with or without a managed outcome."
+  description: "Portable spec review gate (ADR-0011): five read-only reviewer lenses fan out over the feature planning artifacts and fan in to one schema-validated verdict. Runs for every feature, with or without a managed outcome. Portable means not tied to a managed runtime — the campaign is a plain script any agent or developer can invoke; the skill wrapper is Claude-only since `.agents/` was removed."
 
 requires:
   speckit_version: ">=0.14.2"

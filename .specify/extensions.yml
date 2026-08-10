@@ -20,12 +20,17 @@
 #
 # Command ids use dots; the skills translate `speckit.review` -> `/speckit-review`.
 #
-# WARNING: this file is shared by BOTH agent trees. Every hooked command must
-# resolve to a SKILL.md under `.claude/skills/` AND `.agents/skills/`, or a
-# Codex run emits EXECUTE_COMMAND for a command it cannot invoke and the
-# pipeline stops at that stage. `scripts/test_check_speckit_manifests.py`
-# enforces the parity — that is also why the `assess` extension below is not
-# registered as a hook: it installs Claude skills only.
+# WARNING: every hooked command must resolve to a SKILL.md under
+# `.claude/skills/`, or the agent emits EXECUTE_COMMAND for a command it cannot
+# invoke and the pipeline stops at that stage.
+# `scripts/test_check_speckit_manifests.py` enforces that.
+#
+# This warning used to cover two trees; `.agents/` was removed because nobody
+# authored specs in Codex. Note what that costs: the guard used to be the
+# reason `assess` below is not hooked, and it no longer is — assess ships
+# Claude skills, so hooking it would now pass every mechanical check. The
+# reason it stays unhooked is written out at the `installed:` section and is
+# about what assess IS, not about which trees exist.
 #
 # WARNING 2: `specify extension add` REWRITES this file and strips comments.
 # After any install, restore this header from git history.
@@ -101,8 +106,20 @@ hooks:
 # proceed on a `kill`, which is what makes the gate load-bearing rather than
 # advisory.
 #
-# It is deliberately NOT registered under `hooks` above: it ships Claude skills
-# only, and a hooked command with no Codex twin breaks Codex runs.
+# It is deliberately NOT registered under `hooks` above. The reason recorded
+# here until `.agents/` was removed — no Codex twin — was true but incidental,
+# and it is now void; the real reasons outlast it:
+#
+#   1. Stage 0 is optional by design. Its value is being skippable: a small,
+#      obviously-wanted change should not pay for a five-stage assessment.
+#      A hook with `optional: false` makes it mandatory for every feature,
+#      which is the opposite of what CLAUDE.md and the pipeline promise.
+#   2. The kill verdict is already load-bearing without a hook.
+#      /speckit-interview reads decision.md and refuses to proceed past a
+#      `kill`, so enforcement does not depend on auto-execution.
+#   3. `assess` is five commands (intake -> research -> define -> shape ->
+#      decide), not one. There is no single command a `before_specify` hook
+#      could name that would mean "run the assessment".
 installed:
   - assess
 
