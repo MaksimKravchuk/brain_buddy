@@ -22,8 +22,9 @@ $ARGUMENTS
 > from upstream `github/spec-kit` v0.15.0 and is listed in the preserved-overrides
 > table in `docs/spec-kit-workflow.md`. `scripts/check_speckit_manifests.py`
 > guards it, and `specify integration upgrade claude --force` must not be
-> allowed to silently revert it. The same applies to its
-> `.agents/skills/speckit-implement/SKILL.md` twin.
+> allowed to silently revert it. It had a `.agents/skills/` twin under the same
+> guard until that tree was removed; this is now the only copy, so a reversion
+> here loses the policy outright.
 
 Implementation runs **directly** from the validated Spec Kit artifacts. This
 matches `CLAUDE.md`, `.specify/memory/constitution.md` and

@@ -24,8 +24,14 @@ preflight, the fan-out, the aggregation and the campaign cap always happen
 together.
 
 ADR-0011 governs this stage. It is a **portable** gate: it runs for every
-feature, in Claude Code or Codex, with or without a managed outcome. The old
-"never run the legacy workflow.yml campaign" rule was superseded.
+feature, with or without a managed outcome. The old "never run the legacy
+workflow.yml campaign" rule was superseded.
+
+ADR-0011 words that portability as "in Claude Code or Codex", which was true
+when it was accepted and is not now — `.agents/` was removed. The ADR stands as
+written; portability was always the claim that this gate needs no managed
+runtime, and the campaign is a plain script any agent or a developer can run.
+What is Claude-only today is this skill wrapper, not the gate.
 
 ## Preconditions
 
