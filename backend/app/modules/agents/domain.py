@@ -49,7 +49,7 @@ TERMINAL_REPORTED_STATES: frozenset[str] = frozenset(
 PROTOCOL_VERSION = "2026-08-09"
 """Version of the connector wire contract this build speaks."""
 
-REPORTING_INSTRUCTIONS_VERSION = "v1"
+REPORTING_INSTRUCTIONS_VERSION = "v2"
 
 MAX_PROGRESS_CHARS = 2_000
 MAX_QUESTION_CHARS = 4_000
@@ -211,6 +211,25 @@ class AgentManifestContextItem(StorageBaseModel):
     body: str = Field(min_length=1, max_length=MAX_CONTEXT_ITEM_CHARS)
 
 
+class AgentReportingContract(StorageBaseModel):
+    """Resolved HTTP callback contract emitted to every connector."""
+
+    callback_url: str
+    connection_id: str
+    connection_header: Literal["X-BrainBuddy-Connection"] = "X-BrainBuddy-Connection"
+    timestamp_header: Literal["X-BrainBuddy-Timestamp"] = "X-BrainBuddy-Timestamp"
+    signature_header: Literal["X-BrainBuddy-Signature"] = "X-BrainBuddy-Signature"
+    timestamp_format: Literal[
+        "ascii-base-10-unix-seconds-no-sign-space-or-leading-zero"
+    ] = "ascii-base-10-unix-seconds-no-sign-space-or-leading-zero"
+    signature_algorithm: Literal["hmac-sha256"] = "hmac-sha256"
+    signing_bytes: Literal["timestamp_bytes + b'.' + raw_body"] = (
+        "timestamp_bytes + b'.' + raw_body"
+    )
+    signature_format: Literal["v1=<lowercase hex>"] = "v1=<lowercase hex>"
+    body_envelope_version: str = PROTOCOL_VERSION
+
+
 class AgentRunManifest(StorageBaseModel):
     """The exact, frozen set of content-bearing values a hand-off sends.
 
@@ -228,6 +247,7 @@ class AgentRunManifest(StorageBaseModel):
     title: str
     details: str | None = None
     context_items: list[AgentManifestContextItem] = Field(default_factory=list)
+    reporting: AgentReportingContract
     reporting_instructions: str
     instructions_version: str = REPORTING_INSTRUCTIONS_VERSION
     protocol_version: str = PROTOCOL_VERSION
@@ -368,6 +388,7 @@ __all__ = [
     "AgentIdempotencyRecord",
     "AgentManifestContextItem",
     "AgentReportedState",
+    "AgentReportingContract",
     "AgentRunningEvent",
     "AgentRunCommandDocument",
     "AgentRunDocument",

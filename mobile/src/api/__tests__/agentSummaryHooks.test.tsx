@@ -19,6 +19,13 @@ jest.mock("@/auth/SessionProvider", () => ({
   useApi: () => ({
     listAgentRunSummaries: (...args: unknown[]) => mockListSummaries(...args),
   }),
+  useSession: () => ({
+    serverUrl: "https://brain-a.example.test/api",
+    me: { id: "user-a" },
+    api: {
+      listAgentRunSummaries: (...args: unknown[]) => mockListSummaries(...args),
+    },
+  }),
 }));
 
 function Probe({ taskIds, enabled }: { taskIds: string[]; enabled: boolean }) {
@@ -66,13 +73,22 @@ describe("useAgentRunSummaries", () => {
       },
     });
 
-    const { renderer, unmount } = await renderWithProviders(
+    const { renderer, client, unmount } = await renderWithProviders(
       <Probe taskIds={["task_1", "task_2"]} enabled />,
     );
     await settle();
 
     expect(mockListSummaries).toHaveBeenCalledTimes(1);
     expect(mockListSummaries.mock.calls[0][0]).toEqual(["task_1", "task_2"]);
+    expect(
+      client.getQueryData([
+        "agents",
+        "private",
+        "https://brain-a.example.test/api|user-a",
+        "summaries",
+        ["task_1", "task_2"],
+      ]),
+    ).toBeDefined();
     // Tasks without a hand-off are simply absent rather than present-and-empty.
     expect(visibleText(renderer)).toBe("task_2");
 

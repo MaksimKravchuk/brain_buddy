@@ -3,6 +3,8 @@
 **Branch**: `brain-buddy/t_f6b6162c-outcome-lean-v1-external-agent-relay-and`  
 **Date**: 2026-08-09  
 **Spec**: `specs/006-external-agent-relay/spec.md`
+**Intake**: `specs/006-external-agent-relay/intake.md`
+**Design**: `specs/006-external-agent-relay/design.md`
 
 > This lean delivery plan replaces the archived non-converging requirements attempt. It records only the architecture and release gates required for the production slice; optional work is in `backlog.md`.
 

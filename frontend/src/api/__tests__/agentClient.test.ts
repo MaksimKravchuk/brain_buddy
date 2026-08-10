@@ -1,6 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { AgentManifestResponse } from "../agentTypes";
 import { apiClient } from "../client";
+
+const reportingContract = {
+  callback_url: "https://brain.example.test/api/agent-runs/run-1/reports",
+  connection_id: "conn-1",
+  connection_header: "X-BrainBuddy-Connection",
+  timestamp_header: "X-BrainBuddy-Timestamp",
+  signature_header: "X-BrainBuddy-Signature",
+  timestamp_format: "ascii-base-10-unix-seconds-no-sign-space-or-leading-zero",
+  signature_algorithm: "hmac-sha256",
+  signing_bytes: "timestamp_bytes + b'.' + raw_body",
+  signature_format: "v1=<lowercase hex>",
+  body_envelope_version: "1"
+} satisfies AgentManifestResponse["reporting"];
 
 function response(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(body === undefined ? null : JSON.stringify(body), {
@@ -146,9 +160,11 @@ describe("apiClient external agent relay contract", () => {
   });
 
   it("previews a hand-off without an idempotency key and confirms it with one", async () => {
-    fetchMock.mockImplementation(() => Promise.resolve(response({ token: "manifest-token" })));
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(response({ token: "manifest-token", reporting: reportingContract }))
+    );
 
-    await apiClient.previewAgentHandoff("task-1", {
+    const preview = await apiClient.previewAgentHandoff("task-1", {
       connection_id: "conn-1",
       include_details: false,
       context_items: [{ label: "Spec", body: "Read the spec" }]
@@ -165,6 +181,7 @@ describe("apiClient external agent relay contract", () => {
       "handoff-key"
     );
 
+    expect(preview.reporting).toEqual(reportingContract);
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       "/api/tasks/task-1/agent-runs/preview",
       "/api/tasks/task-1/agent-runs"
@@ -180,7 +197,11 @@ describe("apiClient external agent relay contract", () => {
 
     await apiClient.listAgentRuns("task-1");
     await apiClient.getAgentRun("run-1");
-    await apiClient.replyToAgentRun("run-1", { message: "Use the staging key" }, "reply-key");
+    await apiClient.replyToAgentRun(
+      "run-1",
+      { message: "Use the staging key", expected_revision: 7 },
+      "reply-key"
+    );
     await apiClient.cancelAgentRun("run-1", "cancel-key");
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
@@ -193,7 +214,10 @@ describe("apiClient external agent relay contract", () => {
     expect(inits.map((init) => init.method)).toEqual(["GET", "GET", "POST", "POST"]);
     expect(new Headers(inits[2].headers).get("Idempotency-Key")).toBe("reply-key");
     expect(new Headers(inits[3].headers).get("Idempotency-Key")).toBe("cancel-key");
-    expect(JSON.parse(String(inits[2].body))).toEqual({ message: "Use the staging key" });
+    expect(JSON.parse(String(inits[2].body))).toEqual({
+      message: "Use the staging key",
+      expected_revision: 7
+    });
     expect(inits[3].body).toBeUndefined();
   });
 

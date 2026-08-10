@@ -45,6 +45,11 @@ jest.mock("react-native-safe-area-context", () => ({
 
 jest.mock("@/auth/SessionProvider", () => ({
   useApi: () => mockApi,
+  useSession: () => ({
+    api: mockApi,
+    serverUrl: "https://brain.example.test/api",
+    me: { id: "user-test" },
+  }),
 }));
 
 function props(overrides: Partial<Parameters<typeof TaskAgentSection>[0]> = {}) {

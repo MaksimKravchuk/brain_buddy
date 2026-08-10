@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Bot, ExternalLink } from "lucide-react";
 
 import { agentKeys } from "../../api/agentHooks";
 import type { AgentRunEvent, AgentRunResponse } from "../../api/agentTypes";
-import { apiClient } from "../../api/client";
+import { ApiError, apiClient } from "../../api/client";
 import { Button } from "../../components/ui/Button";
 import { getErrorMessage } from "../../utils/error";
 import { useIntentKey } from "../../utils/idempotency";
@@ -36,6 +36,24 @@ function eventLabel(type: AgentRunEvent["type"]): string {
   }
 }
 
+interface ReplyIntentSnapshot {
+  idempotencyKey: string;
+  message: string;
+  questionIdentity: string;
+  expectedRevision: number;
+}
+
+function questionIdentity(run: AgentRunResponse): string {
+  const blockedEvent = [...run.events].reverse().find((event) => event.type === "blocked");
+  return JSON.stringify([
+    run.id,
+    run.task_id,
+    run.connection_id,
+    blockedEvent?.id ?? run.run_version,
+    run.question_text
+  ]);
+}
+
 /**
  * One external run attached to a task.
  *
@@ -61,16 +79,29 @@ function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): JS
   // turn that ambiguity into a second command.
   const replyKey = useIntentKey(`agent-reply-${run.id}`);
   const cancelKey = useIntentKey(`agent-cancel-${run.id}`);
+  const replyIntent = useRef<ReplyIntentSnapshot | null>(null);
+  const displayedQuestionIdentity = questionIdentity(run);
 
   const replyMutation = useMutation({
-    mutationFn: (input: { message: string; idempotencyKey: string }) =>
-      apiClient.replyToAgentRun(run.id, { message: input.message }, input.idempotencyKey),
+    mutationFn: (input: ReplyIntentSnapshot) =>
+      apiClient.replyToAgentRun(
+        run.id,
+        { message: input.message, expected_revision: input.expectedRevision },
+        input.idempotencyKey
+      ),
     onSuccess: (updated) => {
       replyKey.settle();
+      replyIntent.current = null;
       setAnswer("");
       invalidate(updated);
     },
-    onError: (caught: unknown) => setError(getErrorMessage(caught))
+    onError: (caught: unknown) => {
+      if (caught instanceof ApiError && caught.status >= 400 && caught.status < 500) {
+        replyKey.settle();
+        replyIntent.current = null;
+      }
+      setError(getErrorMessage(caught));
+    }
   });
 
   const cancelMutation = useMutation({
@@ -89,6 +120,14 @@ function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): JS
   const showQuestion = awaitsAnswer(run);
   const canReply = canReplyToRun(run);
   const canCancel = canCancelRun(run);
+
+  useEffect(() => {
+    const held = replyIntent.current;
+    if (held && (!showQuestion || held.questionIdentity !== displayedQuestionIdentity)) {
+      replyKey.settle();
+      replyIntent.current = null;
+    }
+  }, [displayedQuestionIdentity, replyKey, showQuestion]);
 
   return (
     <article className="rounded-[12px] border border-ai-border bg-ai-bg px-3 py-2.5">
@@ -121,7 +160,18 @@ function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): JS
                     event.preventDefault();
                     const message = answer.trim();
                     if (message) {
-                      replyMutation.mutate({ message, idempotencyKey: replyKey.current(message) });
+                      const held = replyIntent.current;
+                      const intent =
+                        held?.message === message && held.questionIdentity === displayedQuestionIdentity
+                          ? held
+                          : {
+                              message,
+                              questionIdentity: displayedQuestionIdentity,
+                              expectedRevision: run.revision,
+                              idempotencyKey: replyKey.current(`${displayedQuestionIdentity}:${message}`)
+                            };
+                      replyIntent.current = intent;
+                      replyMutation.mutate(intent);
                     }
                   }}
                 >

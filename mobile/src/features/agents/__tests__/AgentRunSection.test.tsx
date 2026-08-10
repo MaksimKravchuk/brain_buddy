@@ -23,12 +23,20 @@ const mockCancel = jest.fn();
 // command must still carry an `Idempotency-Key`.
 jest.mock("expo-crypto", () => ({ randomUUID: () => "idem_key_test" }));
 
-jest.mock("@/auth/SessionProvider", () => ({
-  useApi: () => ({
+jest.mock("@/auth/SessionProvider", () => {
+  const api = {
     replyToAgentRun: (...args: unknown[]) => mockReply(...args),
     cancelAgentRun: (...args: unknown[]) => mockCancel(...args),
-  }),
-}));
+  };
+  return {
+    useApi: () => api,
+    useSession: () => ({
+      api,
+      serverUrl: "https://brain.example.test/api",
+      me: { id: "user-test" },
+    }),
+  };
+});
 
 function props(overrides: Partial<Parameters<typeof AgentRunSection>[0]> = {}) {
   return {
@@ -74,6 +82,7 @@ describe("AgentRunSection", () => {
       needs_user: true,
       primary_state_label: "Needs you",
       question_text: "Which repository should I open?",
+      revision: 7,
     });
     const answered = makeRun({
       reported_state: "blocked",
@@ -96,7 +105,7 @@ describe("AgentRunSection", () => {
 
     expect(mockReply).toHaveBeenCalledWith(
       "run_1",
-      { message: "The brain_buddy repo" },
+      { message: "The brain_buddy repo", expected_revision: 7 },
       "idem_key_test",
     );
     expect(onRunUpdated).toHaveBeenCalledWith(answered);

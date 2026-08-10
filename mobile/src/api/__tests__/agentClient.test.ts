@@ -6,7 +6,21 @@
  * "it called something".
  */
 
+import type { AgentManifestResponse } from "../types";
 import { createApiClient } from "../client";
+
+const reportingContract = {
+  callback_url: "https://brain.example.test/api/agent-runs/run1/reports",
+  connection_id: "conn1",
+  connection_header: "X-BrainBuddy-Connection",
+  timestamp_header: "X-BrainBuddy-Timestamp",
+  signature_header: "X-BrainBuddy-Signature",
+  timestamp_format: "ascii-base-10-unix-seconds-no-sign-space-or-leading-zero",
+  signature_algorithm: "hmac-sha256",
+  signing_bytes: "timestamp_bytes + b'.' + raw_body",
+  signature_format: "v1=<lowercase hex>",
+  body_envelope_version: "1",
+} satisfies AgentManifestResponse["reporting"];
 
 type FetchArgs = { url: string; init: RequestInit };
 
@@ -142,12 +156,15 @@ describe("agent connections", () => {
 
 describe("agent hand-off", () => {
   it("previews a hand-off without an Idempotency-Key (nothing is created yet)", async () => {
-    const { client, calls } = makeClient([jsonResponse({ token: "a".repeat(64) })]);
-    await client.previewAgentHandoff("task1", {
+    const { client, calls } = makeClient([
+      jsonResponse({ token: "a".repeat(64), reporting: reportingContract }),
+    ]);
+    const preview = await client.previewAgentHandoff("task1", {
       connection_id: "conn1",
       include_details: false,
       context_items: [{ label: "Subtasks", body: "- book venue" }],
     });
+    expect(preview.reporting).toEqual(reportingContract);
     expect(calls[0].url).toBe("https://example.test/api/tasks/task1/agent-runs/preview");
     expect(calls[0].init.method).toBe("POST");
     expect(headersOf(calls[0])["Idempotency-Key"]).toBeUndefined();
@@ -199,13 +216,20 @@ describe("agent runs", () => {
     expect(calls[0].init.method).toBe("GET");
   });
 
-  it("replies with only the message body", async () => {
+  it("replies with the message and displayed revision", async () => {
     const { client, calls } = makeClient([jsonResponse({ id: "run1" })]);
-    await client.replyToAgentRun("run1", { message: "Use the second quote." }, "key-reply");
+    await client.replyToAgentRun(
+      "run1",
+      { message: "Use the second quote.", expected_revision: 7 },
+      "key-reply",
+    );
     expect(calls[0].url).toBe("https://example.test/api/agent-runs/run1/reply");
     expect(calls[0].init.method).toBe("POST");
     expect(headersOf(calls[0])["Idempotency-Key"]).toBe("key-reply");
-    expect(bodyOf(calls[0])).toEqual({ message: "Use the second quote." });
+    expect(bodyOf(calls[0])).toEqual({
+      message: "Use the second quote.",
+      expected_revision: 7,
+    });
   });
 
   it("requests cancellation with an Idempotency-Key and no body", async () => {

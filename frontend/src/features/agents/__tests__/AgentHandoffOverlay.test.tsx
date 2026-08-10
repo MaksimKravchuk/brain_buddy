@@ -47,6 +47,18 @@ const manifest: AgentManifestResponse = {
   title: "Fix onboarding drop-off",
   details: "Look at the funnel between step two and three.",
   context_items: [{ label: "Funnel notes", body: "Drop-off spikes on mobile." }],
+  reporting: {
+    callback_url: "https://brain.example.test/api/agent-runs/run-77/reports",
+    connection_id: "conn-ready",
+    connection_header: "X-BrainBuddy-Connection",
+    timestamp_header: "X-BrainBuddy-Timestamp",
+    signature_header: "X-BrainBuddy-Signature",
+    timestamp_format: "ascii-base-10-unix-seconds-no-sign-space-or-leading-zero",
+    signature_algorithm: "hmac-sha256",
+    signing_bytes: "timestamp_bytes + b'.' + raw_body",
+    signature_format: "v1=<lowercase hex>",
+    body_envelope_version: "1"
+  },
   reporting_instructions: "Report accepted, running, blocked, completed, failed.",
   instructions_version: "2026-08-01",
   protocol_version: "1",

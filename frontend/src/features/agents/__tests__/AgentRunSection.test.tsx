@@ -46,11 +46,14 @@ function makeRun(overrides: Partial<AgentRunResponse> = {}): AgentRunResponse {
 
 function renderSection(runs: AgentRunResponse[], node?: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={client}>
-      {node ?? <AgentRunSection taskId="task_1" runs={runs} isLoading={false} error={null} />}
-    </QueryClientProvider>
-  );
+  return {
+    ...render(
+      <QueryClientProvider client={client}>
+        {node ?? <AgentRunSection taskId="task_1" runs={runs} isLoading={false} error={null} />}
+      </QueryClientProvider>
+    ),
+    client
+  };
 }
 
 afterEach(() => {
@@ -83,7 +86,8 @@ describe("AgentRunSection", () => {
         reported_state: "blocked",
         primary_state_label: "Needs you",
         needs_user: true,
-        question_text: "Which environment?"
+        question_text: "Which environment?",
+        revision: 7
       })
     ]);
 
@@ -91,7 +95,11 @@ describe("AgentRunSection", () => {
     await user.type(screen.getByLabelText("Your answer"), "Use staging.");
     await user.click(screen.getByRole("button", { name: "Send answer" }));
 
-    expect(reply).toHaveBeenCalledWith("agentrun_1", { message: "Use staging." }, expect.any(String));
+    expect(reply).toHaveBeenCalledWith(
+      "agentrun_1",
+      { message: "Use staging.", expected_revision: 7 },
+      expect.any(String)
+    );
   });
 
   it("states that replies are unsupported instead of showing a dead control", () => {
@@ -340,6 +348,71 @@ describe("AgentRunSection idempotency across retries", () => {
     });
   }
 
+  it("reuses the frozen key and revision after the same question refreshes", async () => {
+    const user = userEvent.setup();
+    distinctKeys();
+    const reply = vi
+      .spyOn(apiClient, "replyToAgentRun")
+      .mockRejectedValueOnce(new Error("network unreachable"))
+      .mockResolvedValue(makeRun());
+    const firstRun = blocked();
+    const { rerender, client } = renderSection([firstRun]);
+
+    await user.type(screen.getByLabelText("Your answer"), "Use staging.");
+    await user.click(screen.getByRole("button", { name: "Send answer" }));
+    await screen.findByRole("alert");
+
+    rerender(
+      <QueryClientProvider client={client}>
+        <AgentRunSection
+          taskId="task_1"
+          runs={[{ ...firstRun, revision: firstRun.revision + 1 }]}
+          isLoading={false}
+          error={null}
+        />
+      </QueryClientProvider>
+    );
+    await user.click(screen.getByRole("button", { name: "Send answer" }));
+
+    expect(reply).toHaveBeenCalledTimes(2);
+    expect(reply.mock.calls[1][2]).toBe(reply.mock.calls[0][2]);
+    expect(reply.mock.calls[1][1]).toEqual({ message: "Use staging.", expected_revision: firstRun.revision });
+  });
+
+  it("mints a new key and uses the current revision when the question changes", async () => {
+    const user = userEvent.setup();
+    distinctKeys();
+    const reply = vi
+      .spyOn(apiClient, "replyToAgentRun")
+      .mockRejectedValueOnce(new Error("network unreachable"))
+      .mockResolvedValue(makeRun());
+    const firstRun = blocked();
+    const { rerender, client } = renderSection([firstRun]);
+
+    await user.type(screen.getByLabelText("Your answer"), "Use staging.");
+    await user.click(screen.getByRole("button", { name: "Send answer" }));
+    await screen.findByRole("alert");
+
+    const changedRun = {
+      ...firstRun,
+      revision: firstRun.revision + 1,
+      question_text: "Which deployment target?"
+    };
+    rerender(
+      <QueryClientProvider client={client}>
+        <AgentRunSection taskId="task_1" runs={[changedRun]} isLoading={false} error={null} />
+      </QueryClientProvider>
+    );
+    await user.click(screen.getByRole("button", { name: "Send answer" }));
+
+    expect(reply).toHaveBeenCalledTimes(2);
+    expect(reply.mock.calls[1][2]).not.toBe(reply.mock.calls[0][2]);
+    expect(reply.mock.calls[1][1]).toEqual({
+      message: "Use staging.",
+      expected_revision: changedRun.revision
+    });
+  });
+
   it("retries a rejected reply under the key the first attempt used", async () => {
     const user = userEvent.setup();
     distinctKeys();
@@ -359,7 +432,7 @@ describe("AgentRunSection idempotency across retries", () => {
     expect(reply).toHaveBeenCalledTimes(2);
     const [firstKey, secondKey] = reply.mock.calls.map((call) => call[2]);
     expect(secondKey).toBe(firstKey);
-    expect(reply.mock.calls[1][1]).toEqual({ message: "Use staging." });
+    expect(reply.mock.calls[1][1]).toEqual({ message: "Use staging.", expected_revision: 1 });
   });
 
   it("mints a new key once the previous reply definitively succeeded", async () => {
@@ -380,7 +453,7 @@ describe("AgentRunSection idempotency across retries", () => {
     await waitFor(() => expect(reply).toHaveBeenCalledTimes(2));
     const [firstKey, secondKey] = reply.mock.calls.map((call) => call[2]);
     expect(secondKey).not.toBe(firstKey);
-    expect(reply.mock.calls[1][1]).toEqual({ message: "Use production." });
+    expect(reply.mock.calls[1][1]).toEqual({ message: "Use production.", expected_revision: 1 });
   });
 
   it("retries a rejected cancellation under the key the first attempt used", async () => {

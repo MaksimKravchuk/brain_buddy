@@ -24,6 +24,7 @@ from app.api.agents import MAX_EVENT_BODY_BYTES, _bounded_event_body
 from app.container import Container
 from app.core import get_config
 from app.main import create_app
+from app.modules.agents import service as agent_service_module
 from app.modules.agents.connector import (
     ConnectorCommandOutcome,
     ConnectorStartOutcome,
@@ -49,6 +50,7 @@ class FakeConnector:
         self.start_outcome = ConnectorStartOutcome("sent")
         self.command_outcome = ConnectorCommandOutcome("confirmed")
         self.starts: list[dict[str, Any]] = []
+        self.commands: list[dict[str, Any]] = []
 
     def test(self, target: ConnectorTarget) -> ConnectorTestOutcome:
         return self.test_outcome
@@ -62,6 +64,7 @@ class FakeConnector:
     def command(
         self, target: ConnectorTarget, *, envelope: dict[str, Any]
     ) -> ConnectorCommandOutcome:
+        self.commands.append(envelope)
         return self.command_outcome
 
 
@@ -123,7 +126,9 @@ def relay_app(
 
 
 @pytest.fixture
-def client(relay_app: tuple[TestClient, TestClient, FakeConnector, Container]) -> TestClient:
+def client(
+    relay_app: tuple[TestClient, TestClient, FakeConnector, Container]
+) -> TestClient:
     return relay_app[0]
 
 
@@ -431,9 +436,7 @@ class TestSigningSecretRotationRoute:
         run = hand_off(client, created["id"], task_id)
         current = client.get(f"/api/agent-connections/{created['id']}").json()
 
-        response = self.rotate(
-            client, created["id"], revision=current["revision"]
-        )
+        response = self.rotate(client, created["id"], revision=current["revision"])
 
         assert response.status_code == 200, response.text
         replacement = response.json()["inbound_signing_secret"]
@@ -567,9 +570,9 @@ class TestSigningSecretRotationRoute:
 
         created = create_connection(client)
         current = client.get(f"/api/agent-connections/{created['id']}").json()
-        secret = self.rotate(client, created["id"], revision=current["revision"]).json()[
-            "inbound_signing_secret"
-        ]
+        secret = self.rotate(
+            client, created["id"], revision=current["revision"]
+        ).json()["inbound_signing_secret"]
 
         detail = client.get(f"/api/agent-connections/{created['id']}").json()
         listed = client.get("/api/agent-connections").json()
@@ -686,8 +689,10 @@ class TestEventIngestRoutes:
             **payload,
         }
         body = json.dumps(envelope).encode("utf-8")
-        stamp = timestamp if timestamp is not None else int(
-            datetime.now(tz=UTC).timestamp()
+        stamp = (
+            timestamp
+            if timestamp is not None
+            else int(datetime.now(tz=UTC).timestamp())
         )
         signature = hmac.new(
             secret.encode("utf-8"), f"{stamp}.".encode() + body, hashlib.sha256
@@ -702,6 +707,119 @@ class TestEventIngestRoutes:
                 "X-BrainBuddy-Signature": f"v1={signature}",
             },
         )
+
+    def test_emitted_reporting_contract_produces_an_accepted_callback(
+        self, client: TestClient, connector: FakeConnector
+    ) -> None:
+        created = create_connection(client)
+        client.post(f"/api/agent-connections/{created['id']}/test")
+        task_id = create_task(client)
+        run = hand_off(client, created["id"], task_id)
+        reporting = connector.starts[-1]["reporting"]
+        assert reporting["signature_algorithm"] == "hmac-sha256"
+        assert reporting["signing_bytes"] == "timestamp_bytes + b'.' + raw_body"
+        assert reporting["signature_format"] == "v1=<lowercase hex>"
+
+        body = json.dumps(
+            {
+                "protocol_version": reporting["body_envelope_version"],
+                "connection_id": reporting["connection_id"],
+                "event_id": "evt_contract_vector",
+                "run_id": run["id"],
+                "type": "running",
+                "run_version": 1,
+                "progress": "Using emitted contract",
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+        timestamp_bytes = str(int(datetime.now(tz=UTC).timestamp())).encode("ascii")
+        digest = hmac.new(
+            created["inbound_signing_secret"].encode("utf-8"),
+            timestamp_bytes + b"." + body,
+            hashlib.sha256,
+        ).hexdigest()
+
+        response = client.post(
+            reporting["callback_url"],
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                reporting["connection_header"]: reporting["connection_id"],
+                reporting["timestamp_header"]: timestamp_bytes.decode("ascii"),
+                reporting["signature_header"]: f"v1={digest}",
+            },
+        )
+
+        assert response.status_code == 202, response.text
+        assert response.json() == {"accepted": True, "run_version": 1}
+
+    def test_reporting_v2_accepts_a_fixed_external_golden_vector(
+        self,
+        relay_app: tuple[TestClient, TestClient, FakeConnector, Container],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Freeze every signed byte so producer and verifier cannot drift together."""
+
+        client, _, connector, container = relay_app
+        fixed_secret = "golden-vector-signing-secret-v2"
+        fixed_timestamp = b"1786320000"
+        fixed_now = datetime(2026, 8, 10, tzinfo=UTC)
+        fixed_body = (
+            b'{"protocol_version":"2026-08-09","connection_id":"agentconn_golden_vector",'
+            b'"event_id":"evt_golden_vector","run_id":"agentrun_golden_vector",'
+            b'"type":"running","run_version":1,"progress":"Fixed golden vector"}'
+        )
+        # Generated independently with OpenSSL over
+        # b"1786320000." + fixed_body using the fixed secret above.
+        expected_digest = (
+            "8464ec9e75dd88ff92f85bad0d5bbe4" "68ae2aa09826d9894cd06feb9064c7700"
+        )
+        original_generate_id = agent_service_module.generate_id
+
+        def fixed_relay_id(prefix: str) -> str:
+            if prefix == "agentconn":
+                return "agentconn_golden_vector"
+            if prefix == "agentrun":
+                return "agentrun_golden_vector"
+            return original_generate_id(prefix)
+
+        monkeypatch.setattr(agent_service_module, "generate_id", fixed_relay_id)
+        monkeypatch.setattr(
+            agent_service_module.secrets,
+            "token_urlsafe",
+            lambda _bytes: fixed_secret,
+        )
+        container.agent_relay_service._now = lambda: fixed_now
+
+        created = create_connection(client, key="golden-create")
+        assert created["id"] == "agentconn_golden_vector"
+        assert created["inbound_signing_secret"] == fixed_secret
+        client.post(f"/api/agent-connections/{created['id']}/test")
+        task_id = create_task(client)
+        run = hand_off(client, created["id"], task_id, key="golden-handoff")
+        assert run["id"] == "agentrun_golden_vector"
+
+        reporting = connector.starts[-1]["reporting"]
+        assert reporting["instructions_version"] == "v2"
+        assert reporting["body_envelope_version"] == "2026-08-09"
+        assert reporting["signature_algorithm"] == "hmac-sha256"
+        assert reporting["signing_bytes"] == "timestamp_bytes + b'.' + raw_body"
+        assert reporting["signature_format"] == "v1=<lowercase hex>"
+        assert reporting["connection_id"] == "agentconn_golden_vector"
+
+        response = client.post(
+            reporting["callback_url"],
+            content=fixed_body,
+            headers={
+                "Content-Type": "application/json",
+                reporting["connection_header"]: "agentconn_golden_vector",
+                reporting["timestamp_header"]: fixed_timestamp.decode("ascii"),
+                reporting["signature_header"]: f"v1={expected_digest}",
+            },
+        )
+
+        assert response.status_code == 202, response.text
+        assert response.json() == {"accepted": True, "run_version": 1}
 
     def test_a_signed_event_updates_the_run(self, client: TestClient) -> None:
         """AC-011 over HTTP, from an unauthenticated connector."""
@@ -755,7 +873,9 @@ class TestEventIngestRoutes:
         )
 
         assert response.status_code in (400, 401, 403)
-        assert client.get(f"/api/agent-runs/{run['id']}").json()["reported_state"] is None
+        assert (
+            client.get(f"/api/agent-runs/{run['id']}").json()["reported_state"] is None
+        )
 
     def test_a_wrongly_signed_event_is_refused(self, client: TestClient) -> None:
         """A forged signature never moves the projection."""
@@ -779,7 +899,9 @@ class TestEventIngestRoutes:
         )
 
         assert response.status_code == 403
-        assert client.get(f"/api/agent-runs/{run['id']}").json()["reported_state"] is None
+        assert (
+            client.get(f"/api/agent-runs/{run['id']}").json()["reported_state"] is None
+        )
 
     def test_the_rejection_body_never_explains_which_check_failed(
         self, client: TestClient
@@ -823,10 +945,14 @@ class TestEventIngestRoutes:
             },
         )
 
+        current = client.get(f"/api/agent-runs/{run['id']}").json()
         response = client.post(
             f"/api/agent-runs/{run['id']}/reply",
             headers={"Idempotency-Key": "k-reply"},
-            json={"message": "Use staging."},
+            json={
+                "message": "Use staging.",
+                "expected_revision": current["revision"],
+            },
         )
 
         assert response.status_code == 200, response.text
@@ -834,6 +960,46 @@ class TestEventIngestRoutes:
         assert body["needs_user"] is True
         assert body["question_text"] == "Which environment?"
         assert any(command["kind"] == "reply" for command in body["commands"])
+
+    def test_a_stale_question_revision_returns_409_before_reply_delivery(
+        self, client: TestClient, connector: FakeConnector
+    ) -> None:
+        created = create_connection(client)
+        client.post(f"/api/agent-connections/{created['id']}/test")
+        task_id = create_task(client)
+        run = hand_off(client, created["id"], task_id)
+        base = {
+            "run_id": run["id"],
+            "type": "blocked",
+            "question": "Which environment?",
+        }
+        self._emit(
+            client,
+            connection_id=created["id"],
+            secret=created["inbound_signing_secret"],
+            payload={**base, "event_id": "evt_1", "run_version": 1},
+        )
+        stale_revision = client.get(f"/api/agent-runs/{run['id']}").json()["revision"]
+        self._emit(
+            client,
+            connection_id=created["id"],
+            secret=created["inbound_signing_secret"],
+            payload={
+                **base,
+                "event_id": "evt_2",
+                "run_version": 2,
+                "question": "Which region?",
+            },
+        )
+
+        response = client.post(
+            f"/api/agent-runs/{run['id']}/reply",
+            headers={"Idempotency-Key": "k-stale-reply"},
+            json={"message": "Use staging.", "expected_revision": stale_revision},
+        )
+
+        assert response.status_code == 409, response.text
+        assert connector.commands == []
 
     # --- bounded ingestion on an unauthenticated route ----------------------
 
@@ -971,7 +1137,9 @@ class TestEventIngestRoutes:
 
         assert response.status_code == 413, response.text
         assert response.headers["X-Correlation-ID"]
-        assert client.get(f"/api/agent-runs/{run['id']}").json()["reported_state"] is None
+        assert (
+            client.get(f"/api/agent-runs/{run['id']}").json()["reported_state"] is None
+        )
 
     def test_another_owner_cannot_read_or_command_the_run(
         self, client: TestClient, other_client: TestClient

@@ -104,6 +104,25 @@ The user can disconnect an agent without exposing its secret or erasing the hone
 - Mobile interruption or app closure does not cancel a run; reopening fetches the owner-scoped server projection. Offline clients show cached state as potentially stale and do not claim a reply or cancel was sent until the server confirms receipt.
 - A connector may support authenticated polling instead of inbound events. The user-visible state and honesty rules are identical.
 
+## Post-ratification implementation clarifications (2026-08-10)
+
+The release-blocker review after ratification exposed two security details that the
+requirements stated only at outcome level. This amendment narrows implementation
+choices without changing the approved product intent:
+
+- The FR-005/FR-009 reporting manifest resolves the callback URL and connection ID,
+  names `X-BrainBuddy-Connection`, `X-BrainBuddy-Timestamp`, and
+  `X-BrainBuddy-Signature`, and specifies canonical unsigned ASCII base-10 Unix
+  seconds with no whitespace or leading zeroes. Signatures are
+  `v1=<lowercase hex>` HMAC-SHA256 over
+  `timestamp_bytes + b'.' + raw_body`; the emitted contract also names the body
+  envelope/protocol version.
+- FR-015 permits durable semantic-rejection audit after authentication, but
+  pre-authentication invalid-signature, stale-timestamp, unreadable-secret, and
+  disconnected probes MUST NOT create one 90-day row per request. Their durable
+  cardinality must be fixed/bounded independently of attacker request volume;
+  dropping per-attempt durable rows is conforming.
+
 ## Requirements
 
 ### Functional Requirements

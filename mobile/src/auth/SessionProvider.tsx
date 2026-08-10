@@ -8,8 +8,10 @@ import {
   useState,
   type PropsWithChildren,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { ApiError, createApiClient, type ApiClient } from "@/api/client";
+import { resetPrivateAgentState } from "@/api/privateAgentCache";
 import type { MeResponse } from "@/api/types";
 import { DEFAULT_SERVER_URL, loadServerUrl, saveServerUrl } from "@/config/serverUrl";
 
@@ -34,38 +36,44 @@ interface SessionContextValue {
 const SessionContext = createContext<SessionContextValue | null>(null);
 
 export function SessionProvider({ children }: PropsWithChildren) {
+  const queryClient = useQueryClient();
   const [status, setStatus] = useState<SessionStatus>("loading");
   const [me, setMe] = useState<MeResponse | null>(null);
   const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
   const serverUrlRef = useRef(serverUrl);
   serverUrlRef.current = serverUrl;
 
+  const exposeSignedOut = useCallback(async () => {
+    await resetPrivateAgentState(queryClient);
+    setMe(null);
+    setStatus("signed-out");
+  }, [queryClient]);
+
   const api = useMemo(
     () =>
       createApiClient({
         getBaseUrl: () => serverUrlRef.current,
         onUnauthorized: () => {
-          setMe(null);
-          setStatus("signed-out");
+          void exposeSignedOut();
         },
       }),
-    [],
+    [exposeSignedOut],
   );
 
   const probe = useCallback(async () => {
     try {
       const profile = await api.me();
+      await resetPrivateAgentState(queryClient);
       setMe(profile);
       setStatus("signed-in");
     } catch (error) {
-      setMe(null);
-      setStatus("signed-out");
+      await exposeSignedOut();
       if (!(error instanceof ApiError)) {
         // Network failure (offline / cold start): still land on sign-in,
         // which shows the reachable-server state honestly.
       }
     }
-  }, [api]);
+  }, [api, exposeSignedOut, queryClient]);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,10 +94,11 @@ export function SessionProvider({ children }: PropsWithChildren) {
   const signIn = useCallback(
     async (email: string, password: string) => {
       const profile = await api.login({ email: email.trim(), password });
+      await resetPrivateAgentState(queryClient);
       setMe(profile);
       setStatus("signed-in");
     },
-    [api],
+    [api, queryClient],
   );
 
   const signUp = useCallback(
@@ -99,10 +108,11 @@ export function SessionProvider({ children }: PropsWithChildren) {
         password,
         invite_code: inviteCode.trim(),
       });
+      await resetPrivateAgentState(queryClient);
       setMe(profile);
       setStatus("signed-in");
     },
-    [api],
+    [api, queryClient],
   );
 
   const signOut = useCallback(async () => {
@@ -111,15 +121,20 @@ export function SessionProvider({ children }: PropsWithChildren) {
     } catch {
       // Signing out locally is fine even if the network call fails.
     }
-    setMe(null);
-    setStatus("signed-out");
-  }, [api]);
+    await exposeSignedOut();
+  }, [api, exposeSignedOut]);
 
-  const updateServerUrl = useCallback(async (url: string) => {
-    const normalized = await saveServerUrl(url);
-    serverUrlRef.current = normalized;
-    setServerUrl(normalized);
-  }, []);
+  const updateServerUrl = useCallback(
+    async (url: string) => {
+      const normalized = await saveServerUrl(url);
+      await resetPrivateAgentState(queryClient);
+      serverUrlRef.current = normalized;
+      setServerUrl(normalized);
+      setMe(null);
+      setStatus("signed-out");
+    },
+    [queryClient],
+  );
 
   const value = useMemo<SessionContextValue>(
     () => ({

@@ -116,6 +116,21 @@ class AgentContextItemResponse(StrictBaseModel):
     body: str
 
 
+class AgentReportingContractResponse(StrictBaseModel):
+    callback_url: str
+    connection_id: str
+    connection_header: Literal["X-BrainBuddy-Connection"]
+    timestamp_header: Literal["X-BrainBuddy-Timestamp"]
+    signature_header: Literal["X-BrainBuddy-Signature"]
+    timestamp_format: Literal[
+        "ascii-base-10-unix-seconds-no-sign-space-or-leading-zero"
+    ]
+    signature_algorithm: Literal["hmac-sha256"]
+    signing_bytes: Literal["timestamp_bytes + b'.' + raw_body"]
+    signature_format: Literal["v1=<lowercase hex>"]
+    body_envelope_version: str
+
+
 class AgentHandoffPreviewRequest(StrictBaseModel):
     connection_id: str = Field(min_length=1, max_length=200)
     include_details: bool = True
@@ -140,6 +155,7 @@ class AgentManifestResponse(StrictBaseModel):
     title: str
     details: str | None = None
     context_items: list[AgentContextItemResponse] = Field(default_factory=list)
+    reporting: AgentReportingContractResponse
     reporting_instructions: str
     instructions_version: str
     protocol_version: str
@@ -150,6 +166,7 @@ class AgentManifestResponse(StrictBaseModel):
 
 class AgentReplyRequest(StrictBaseModel):
     message: str = Field(min_length=1, max_length=4_000)
+    expected_revision: int = Field(ge=1)
 
 
 class AgentRunEventResponse(StrictBaseModel):
@@ -254,6 +271,7 @@ __all__ = [
     "AgentManifestResponse",
     "AgentReplyRequest",
     "AgentReportedState",
+    "AgentReportingContractResponse",
     "AgentRunCommandResponse",
     "AgentRunEventResponse",
     "AgentRunResponse",
