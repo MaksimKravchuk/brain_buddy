@@ -19,6 +19,7 @@ test-backend:
 
 lint-backend:
 	cd backend && ruff check app tests
+	cd backend && black --check app tests
 	cd backend && mypy app
 	cd backend && lint-imports
 

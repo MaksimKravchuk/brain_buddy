@@ -236,7 +236,9 @@ def test_project_and_tag_updates_archive_delete_and_replay_are_idempotent(
 
     tag = _make_tag(service, name="calls", key="update-tag-source")
     first_tag_replay = service.create_tag(
-        TagCreateRequest(name="calls"), owner_id=OWNER, idempotency_key="update-tag-source"
+        TagCreateRequest(name="calls"),
+        owner_id=OWNER,
+        idempotency_key="update-tag-source",
     )
     assert first_tag_replay == tag
 
@@ -598,7 +600,9 @@ def test_brain_dump_append_retry_after_idempotency_crash_does_not_advance_revisi
             raise RuntimeError("simulated crash after brain dump write")
         original_store_idempotency(**kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(voice_service, "_store_idempotency", fail_once_after_operation_write)
+    monkeypatch.setattr(
+        voice_service, "_store_idempotency", fail_once_after_operation_write
+    )
     payload = BrainDumpTranscriptAppendRequest.model_validate(
         {"segments": [{"sequence": 1, "text": "Pay VAT.", "stability": "stable"}]}
     )
@@ -694,7 +698,11 @@ def test_brain_dump_append_replay_state_and_duplicate_segment_branches(
         voice_service.append_brain_dump_transcript(
             operation.id,
             BrainDumpTranscriptAppendRequest.model_validate(
-                {"segments": [{"sequence": 1, "text": "Pay taxes.", "stability": "stable"}]}
+                {
+                    "segments": [
+                        {"sequence": 1, "text": "Pay taxes.", "stability": "stable"}
+                    ]
+                }
             ),
             owner_id=OWNER,
             idempotency_key="brain-dump-append-duplicate-conflict",
@@ -711,7 +719,11 @@ def test_brain_dump_append_replay_state_and_duplicate_segment_branches(
         voice_service.append_brain_dump_transcript(
             cancelled.id,
             BrainDumpTranscriptAppendRequest.model_validate(
-                {"segments": [{"sequence": 2, "text": "Call bank.", "stability": "stable"}]}
+                {
+                    "segments": [
+                        {"sequence": 2, "text": "Call bank.", "stability": "stable"}
+                    ]
+                }
             ),
             owner_id=OWNER,
             idempotency_key="brain-dump-append-cancelled",
@@ -731,13 +743,19 @@ def test_brain_dump_proposal_update_replay_not_found_and_invalid_state(
     operation = voice_service.append_brain_dump_transcript(
         operation.id,
         BrainDumpTranscriptAppendRequest.model_validate(
-            {"segments": [{"sequence": 1, "text": "Email broker.", "stability": "stable"}]}
+            {
+                "segments": [
+                    {"sequence": 1, "text": "Email broker.", "stability": "stable"}
+                ]
+            }
         ),
         owner_id=OWNER,
         idempotency_key="brain-dump-proposal-segment",
     )
     proposal_id = operation.proposals[0].id
-    payload = BrainDumpProposalUpdateRequest(title="Email mortgage broker", expected_revision=operation.revision)
+    payload = BrainDumpProposalUpdateRequest(
+        title="Email mortgage broker", expected_revision=operation.revision
+    )
 
     updated = voice_service.update_brain_dump_proposal(
         operation.id,
@@ -759,7 +777,9 @@ def test_brain_dump_proposal_update_replay_not_found_and_invalid_state(
         voice_service.update_brain_dump_proposal(
             operation.id,
             "missing-proposal",
-            BrainDumpProposalUpdateRequest(deleted=True, expected_revision=updated.revision),
+            BrainDumpProposalUpdateRequest(
+                deleted=True, expected_revision=updated.revision
+            ),
             owner_id=OWNER,
             idempotency_key="brain-dump-proposal-missing",
         )
@@ -775,7 +795,9 @@ def test_brain_dump_proposal_update_replay_not_found_and_invalid_state(
         voice_service.update_brain_dump_proposal(
             cancelled.id,
             proposal_id,
-            BrainDumpProposalUpdateRequest(title="Ignored", expected_revision=cancelled.revision),
+            BrainDumpProposalUpdateRequest(
+                title="Ignored", expected_revision=cancelled.revision
+            ),
             owner_id=OWNER,
             idempotency_key="brain-dump-proposal-cancelled-edit",
         )
@@ -889,7 +911,15 @@ def test_brain_dump_commit_replay_invalid_state_and_deleted_proposals(
     operation = voice_service.append_brain_dump_transcript(
         operation.id,
         BrainDumpTranscriptAppendRequest.model_validate(
-            {"segments": [{"sequence": 1, "text": "Book dentist. Call bank.", "stability": "stable"}]}
+            {
+                "segments": [
+                    {
+                        "sequence": 1,
+                        "text": "Book dentist. Call bank.",
+                        "stability": "stable",
+                    }
+                ]
+            }
         ),
         owner_id=OWNER,
         idempotency_key="brain-dump-commit-segments",
@@ -897,7 +927,9 @@ def test_brain_dump_commit_replay_invalid_state_and_deleted_proposals(
     deleted = voice_service.update_brain_dump_proposal(
         operation.id,
         operation.proposals[0].id,
-        BrainDumpProposalUpdateRequest(deleted=True, expected_revision=operation.revision),
+        BrainDumpProposalUpdateRequest(
+            deleted=True, expected_revision=operation.revision
+        ),
         owner_id=OWNER,
         idempotency_key="brain-dump-delete-first-proposal",
     )
@@ -964,46 +996,58 @@ def test_idempotent_result_replay_repairs_stale_canonical_records(
     service: TaskService,
 ) -> None:
     project = _make_project(service, name="Replay Project", key="replay-project-old")
-    newer_project = project.model_copy(update={"name": "Replay Project v2", "revision": 2})
-    assert service._project_result(
-        IdempotencyRecord(
-            key="project-replay-newer",
-            command="update_project",
-            request_hash="hash",
-            resource_id=project.id,
-            response_body=newer_project.model_dump(mode="json"),
-            created_at=utcnow(),
-        ),
-        owner_id=OWNER,
-    ).revision == 2
+    newer_project = project.model_copy(
+        update={"name": "Replay Project v2", "revision": 2}
+    )
+    assert (
+        service._project_result(
+            IdempotencyRecord(
+                key="project-replay-newer",
+                command="update_project",
+                request_hash="hash",
+                resource_id=project.id,
+                response_body=newer_project.model_dump(mode="json"),
+                created_at=utcnow(),
+            ),
+            owner_id=OWNER,
+        ).revision
+        == 2
+    )
 
     tag = _make_tag(service, name="replay-tag", key="replay-tag-old")
     newer_tag = tag.model_copy(update={"name": "replay-tag-v2", "revision": 2})
-    assert service._tag_result(
-        IdempotencyRecord(
-            key="tag-replay-newer",
-            command="update_tag",
-            request_hash="hash",
-            resource_id=tag.id,
-            response_body=newer_tag.model_dump(mode="json"),
-            created_at=utcnow(),
-        ),
-        owner_id=OWNER,
-    ).revision == 2
+    assert (
+        service._tag_result(
+            IdempotencyRecord(
+                key="tag-replay-newer",
+                command="update_tag",
+                request_hash="hash",
+                resource_id=tag.id,
+                response_body=newer_tag.model_dump(mode="json"),
+                created_at=utcnow(),
+            ),
+            owner_id=OWNER,
+        ).revision
+        == 2
+    )
 
     task = _make_task(service, title="Replay task", key="replay-task-old")
     newer_task = task.model_copy(update={"title": "Replay task v2", "revision": 2})
-    assert service._task_result(
-        IdempotencyRecord(
-            key="task-replay-newer",
-            command="update_task",
-            request_hash="hash",
-            resource_id=task.id,
-            response_body=newer_task.model_dump(mode="json"),
-            created_at=utcnow(),
-        ),
-        owner_id=OWNER,
-    ).revision == 2
+    assert (
+        service._task_result(
+            IdempotencyRecord(
+                key="task-replay-newer",
+                command="update_task",
+                request_hash="hash",
+                resource_id=task.id,
+                response_body=newer_task.model_dump(mode="json"),
+                created_at=utcnow(),
+            ),
+            owner_id=OWNER,
+        ).revision
+        == 2
+    )
+
 
 def test_brain_dump_title_extraction_ignores_blank_and_duplicate_items() -> None:
     assert VoiceBrainDumpService._extract_task_titles("   \n  ") == []
@@ -1588,7 +1632,9 @@ def test_explicit_empty_allowlist_fails_closed_even_for_openai(
     )
     assert voice_service.allowed_external_provider_categories == frozenset()
 
-    with pytest.raises(ValidationFailure, match="AUDIO_UPLOAD_PROVIDER_CONSENT_REQUIRED"):
+    with pytest.raises(
+        ValidationFailure, match="AUDIO_UPLOAD_PROVIDER_CONSENT_REQUIRED"
+    ):
         _start_and_upload(voice_service, key_prefix="empty-allowlist")
 
 

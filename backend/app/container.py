@@ -248,7 +248,9 @@ def build_container(config: AppConfig) -> Container:
             config.voice.max_cumulative_cost_usd_per_operation
         ),
         provider_run_lease_seconds=_provider_run_lease_seconds(config),
-        allowed_external_provider_categories=_allowed_external_provider_categories(config),
+        allowed_external_provider_categories=_allowed_external_provider_categories(
+            config
+        ),
         audio_limits=config.voice.audio_limits,
         task_port=InProcessTaskPort(task_service.create_native_inbox_task),
         voice_enabled_for_owner=_voice_enabled_for_owner,

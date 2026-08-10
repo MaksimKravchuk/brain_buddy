@@ -441,7 +441,9 @@ def test_tree_response_preserves_metadata_owner_and_directional_relation_counts(
     node_a, _ = node_service.create_node(
         tree.id,
         NodeCreateRequest(
-            label="A", type="parent", position=Position(x=1, y=2),
+            label="A",
+            type="parent",
+            position=Position(x=1, y=2),
             highlight_state="cause_candidate",
         ),
     )

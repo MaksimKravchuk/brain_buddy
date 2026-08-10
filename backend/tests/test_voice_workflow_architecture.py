@@ -34,6 +34,7 @@ def test_optional_reconciler_provenance_does_not_widen_the_public_port() -> None
     assert "model" not in TextReconcilerPort.__dict__
     assert "template_version" not in TextReconcilerPort.__dict__
 
+
 # Method names that uniquely identify the ADR-0002 provider-role port
 # contracts (``FastSttPort.transcribe_window``,
 # ``AccurateSttPort.transcribe_sealed_audio``,
@@ -42,7 +43,9 @@ def test_optional_reconciler_provenance_does_not_widen_the_public_port() -> None
 # also carries the role attribute every reconciler adapter in
 # ``providers.py`` defines (``requires_external_processing``); the other two
 # method names are specific enough to stand alone.
-_STANDALONE_PORT_METHOD_NAMES = frozenset({"transcribe_window", "transcribe_sealed_audio"})
+_STANDALONE_PORT_METHOD_NAMES = frozenset(
+    {"transcribe_window", "transcribe_sealed_audio"}
+)
 _RECONCILER_METHOD_NAME = "reconcile"
 _RECONCILER_ROLE_ATTRIBUTE = "requires_external_processing"
 
@@ -170,7 +173,9 @@ def test_voice_brain_dump_workflow_never_imports_task_repository_or_service() ->
     violations: dict[str, set[str]] = {}
     for path in _iter_python_files(VOICE_BRAIN_DUMP_ROOT):
         offending = {
-            name for name in _imported_module_names(path) if _is_task_module_import(name)
+            name
+            for name in _imported_module_names(path)
+            if _is_task_module_import(name)
         }
         if offending:
             violations[str(path.relative_to(APP_ROOT.parent))] = offending

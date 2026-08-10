@@ -168,9 +168,7 @@ def _two_case_corpus(tmp_path: Path) -> Path:
 def test_real_audio_harness_calls_provider_with_audio_not_expected_transcript(
     tmp_path: Path,
 ) -> None:
-    provider = RecordingProvider(
-        "Надо починить BrainBuddy и сделать production smoke"
-    )
+    provider = RecordingProvider("Надо починить BrainBuddy и сделать production smoke")
 
     report = evaluate_real_audio_corpus(
         _corpus(tmp_path),
@@ -276,8 +274,14 @@ def test_real_audio_harness_reports_stt_and_extraction_failures_separately(
     ("failure", "expected_code"),
     [
         (ValidationFailure("sensitive model output"), "RECONCILER_VALIDATION_FAILURE"),
-        (ProviderRetryableError("sensitive provider payload"), "PROVIDER_RETRYABLE_ERROR"),
-        (ProviderTerminalError("sensitive provider payload"), "PROVIDER_TERMINAL_ERROR"),
+        (
+            ProviderRetryableError("sensitive provider payload"),
+            "PROVIDER_RETRYABLE_ERROR",
+        ),
+        (
+            ProviderTerminalError("sensitive provider payload"),
+            "PROVIDER_TERMINAL_ERROR",
+        ),
         ([{"title": 123}], "INVALID_STRUCTURED_OUTPUT"),
     ],
 )
@@ -323,9 +327,18 @@ def test_real_audio_harness_records_redacted_extraction_failures_and_continues(
 @pytest.mark.parametrize(
     ("failure", "expected_code"),
     [
-        (ValidationFailure("sensitive schema response"), "RECONCILER_VALIDATION_FAILURE"),
-        (ProviderRetryableError("sensitive retry response"), "PROVIDER_RETRYABLE_ERROR"),
-        (ProviderTerminalError("sensitive terminal response"), "PROVIDER_TERMINAL_ERROR"),
+        (
+            ValidationFailure("sensitive schema response"),
+            "RECONCILER_VALIDATION_FAILURE",
+        ),
+        (
+            ProviderRetryableError("sensitive retry response"),
+            "PROVIDER_RETRYABLE_ERROR",
+        ),
+        (
+            ProviderTerminalError("sensitive terminal response"),
+            "PROVIDER_TERMINAL_ERROR",
+        ),
     ],
 )
 def test_real_audio_harness_records_redacted_stt_failures_and_continues(
@@ -513,9 +526,7 @@ def test_same_count_invented_tasks_do_not_match_labelled_boundaries(
     assert report.extraction.task_identity_accuracy == 0
     assert report.extraction.invented_task_count == 2
     assert report.extraction.confidence_calibration_error == pytest.approx(0.9)
-    assert any(
-        failure.code == "INVENTED_TASK_IDENTITY" for failure in report.failures
-    )
+    assert any(failure.code == "INVENTED_TASK_IDENTITY" for failure in report.failures)
 
 
 def test_rich_labels_score_split_merge_confidence_and_grouped_p95_latency(
