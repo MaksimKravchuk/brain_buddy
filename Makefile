@@ -71,6 +71,7 @@ validate-ci:
 	python3 -m unittest scripts/test_validate_ci_artifacts.py -v
 	python3 -m unittest scripts/test_validate_allure_taxonomy.py -v
 	python3 -m unittest scripts/test_validate_coverage_floor.py -v
+	python3 -m unittest scripts/test_mutation_gate.py -v
 	python3 -m unittest scripts/test_validate_trunk_delivery.py -v
 	python3 -m unittest scripts/test_submit_to_trunk.py -v
 	python3 -m unittest scripts/test_production_smoke.py -v
