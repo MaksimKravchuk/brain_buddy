@@ -90,7 +90,7 @@ function conflict(field: string, currentValue: string, suggestedValue: string) {
   };
 }
 
-function TaskListProbe(): JSX.Element {
+function TaskListProbe(): React.JSX.Element {
   const routeParams = useParams();
   return <div>{`Task list route: ${routeParams.state ?? "unknown"}`}</div>;
 }
@@ -135,7 +135,7 @@ function renderBrainDump(
   return rendered;
 }
 
-function LocationProbe(): JSX.Element {
+function LocationProbe(): React.JSX.Element {
   const location = useLocation();
   return <output aria-label="current route">{location.pathname}</output>;
 }

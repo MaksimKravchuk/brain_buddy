@@ -12,7 +12,7 @@ export function SmartAddSuggestions({
   activeIndex,
   listboxId,
   onSelect
-}: SmartAddSuggestionsProps): JSX.Element | null {
+}: SmartAddSuggestionsProps): React.JSX.Element | null {
   if (!suggestions.length) {
     return null;
   }
