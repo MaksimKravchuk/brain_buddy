@@ -43,8 +43,29 @@ FRONTEND_CI_REQUIREMENTS = (
     ("frontend build step", "npm run build"),
     ("Playwright e2e test step", "npm run test:e2e"),
 )
-FRONTEND_COVERAGE_THRESHOLD = 95
+FRONTEND_COVERAGE_THRESHOLD = 97
 FRONTEND_COVERAGE_METRICS = ("statements", "branches", "functions", "lines")
+
+# Blanket coverage suppressions do not lower a coverage number -- they delete
+# the file from the measurement entirely, which reads as "covered" in every
+# report. Four frontend modules once carried one, hiding 2,385 lines from the
+# floor; the floor was met while a third of the source was unmeasured. These
+# patterns are rejected outright, in the same spirit as ADR-0004's rule that a
+# broad mutation exclusion is not an acceptable remedy for a survivor.
+BLANKET_COVERAGE_SUPPRESSIONS = (
+    ("istanbul ignore file", re.compile(r"istanbul\s+ignore\s+file")),
+    ("istanbul ignore start", re.compile(r"istanbul\s+ignore\s+start")),
+    ("c8 ignore start", re.compile(r"c8\s+ignore\s+start")),
+    ("v8 ignore file", re.compile(r"v8\s+ignore\s+file")),
+    ("v8 ignore start", re.compile(r"v8\s+ignore\s+start")),
+    ("node:coverage disable", re.compile(r"node:coverage\s+disable")),
+)
+# A narrow suppression is allowed only where it says what it is suppressing,
+# so review sees a claim it can check rather than a bare pragma.
+NARROW_COVERAGE_SUPPRESSION = re.compile(
+    r"(?:istanbul|c8|v8)\s+ignore\s+(?:next|else|if)\b(?P<justification>.*)"
+)
+SOURCE_SUFFIXES = (".ts", ".tsx", ".js", ".jsx")
 EXECUTED_ALLURE_STATUSES = {"passed", "failed", "broken"}
 E2E_CI_REQUIREMENTS = (
     ("e2e CI job", "  e2e:"),
@@ -566,6 +587,52 @@ def validate_preview_workflow(workflow: Path) -> int:
     return 0
 
 
+def _coverage_suppression_errors(path: Path) -> list[str]:
+    """Report blanket coverage suppressions and unjustified narrow ones."""
+
+    errors: list[str] = []
+    for source in sorted(path.rglob("*")):
+        if source.suffix not in SOURCE_SUFFIXES or not source.is_file():
+            continue
+        for number, line in enumerate(
+            source.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            for label, pattern in BLANKET_COVERAGE_SUPPRESSIONS:
+                if pattern.search(line):
+                    errors.append(
+                        f"{source}:{number}: blanket coverage suppression "
+                        f"({label}); cover the code or delete it -- a whole file "
+                        "excluded from the report reads as covered."
+                    )
+            narrow = NARROW_COVERAGE_SUPPRESSION.search(line)
+            if narrow and "--" not in narrow.group("justification"):
+                errors.append(
+                    f"{source}:{number}: coverage suppression without a "
+                    "justification; write `ignore next -- why this cannot be "
+                    "exercised`."
+                )
+    return errors
+
+
+def validate_coverage_suppressions(paths: list[Path]) -> int:
+    """Fail when source hides itself from the coverage report."""
+
+    errors: list[str] = []
+    for path in paths:
+        if not path.is_dir():
+            return _fail(f"coverage-suppressions: source directory does not exist: {path}")
+        errors.extend(_coverage_suppression_errors(path))
+
+    if errors:
+        for error in errors:
+            print(f"error: {error}", file=sys.stderr)
+        return 1
+
+    scanned = ", ".join(str(path) for path in paths)
+    print(f"coverage-suppressions: no blanket coverage exclusions in {scanned}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -611,6 +678,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     preview_workflow.add_argument("--workflow", type=Path, required=True)
 
+    coverage_suppressions = subparsers.add_parser(
+        "coverage-suppressions",
+        help="reject source that excludes itself from the coverage report",
+    )
+    coverage_suppressions.add_argument(
+        "--path",
+        type=Path,
+        action="append",
+        required=True,
+        help="source directory to scan (repeatable)",
+    )
+
     return parser
 
 
@@ -626,6 +705,8 @@ def main(argv: list[str] | None = None) -> int:
         return validate_native_product_e2e_results(args.path)
     if args.command == "preview-workflow":
         return validate_preview_workflow(args.workflow)
+    if args.command == "coverage-suppressions":
+        return validate_coverage_suppressions(args.path)
     raise AssertionError(f"unknown command: {args.command}")
 
 

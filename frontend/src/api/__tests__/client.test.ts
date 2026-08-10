@@ -179,4 +179,80 @@ describe("apiClient", () => {
 
     await expect(apiClient.getTask("task-1")).rejects.toThrow("Network down");
   });
+
+  it("rethrows a non-Error network failure without wrapping it either", async () => {
+    fetchMock.mockRejectedValue("socket hang up");
+
+    await expect(apiClient.getTask("task-1")).rejects.toBe("socket hang up");
+  });
+
+  it("serializes every date, priority, sort and cancelled filter of the task query", async () => {
+    fetchMock.mockResolvedValue(response({ items: [], counts_by_state: {} }));
+
+    await apiClient.listTasks({
+      includeCancelled: true,
+      priority: ["high", "medium"],
+      dueBefore: "2026-08-01",
+      dueOn: "2026-08-02",
+      dueAfter: "2026-08-03",
+      sort: "due"
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/tasks?include_cancelled=true&priority=high&priority=medium&due_before=2026-08-01&due_on=2026-08-02&due_after=2026-08-03&sort=due"
+    );
+  });
+
+  it("leaves manual order, blank searches and absent filters out of the task query", async () => {
+    fetchMock.mockResolvedValue(response({ items: [], counts_by_state: {} }));
+
+    await apiClient.listTasks({ sort: "manual", q: "   ", includeCompleted: false, unassignedProject: false });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/tasks");
+  });
+
+  it("sends subtask and comment edits with their own idempotency keys", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(response({ id: "subtask-1", revision: 2 })));
+
+    await apiClient.createSubtask("task-1", { title: "Draft" }, "subtask-create-key");
+    await apiClient.updateSubtask("task-1", "subtask-1", { title: "Draft again", expected_revision: 1 }, "subtask-update-key");
+    await apiClient.transitionSubtask("task-1", "subtask-1", { action: "complete", expected_revision: 2 }, "subtask-move-key");
+    await apiClient.createComment("task-1", { body: "Noted" }, "comment-create-key");
+    await apiClient.updateComment("task-1", "comment-1", { body: "Noted again", expected_revision: 1 }, "comment-update-key");
+
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, (init as RequestInit).method])).toEqual([
+      ["/api/tasks/task-1/subtasks", "POST"],
+      ["/api/tasks/task-1/subtasks/subtask-1", "PATCH"],
+      ["/api/tasks/task-1/subtasks/subtask-1/transitions", "POST"],
+      ["/api/tasks/task-1/comments", "POST"],
+      ["/api/tasks/task-1/comments/comment-1", "PATCH"]
+    ]);
+    expect(
+      fetchMock.mock.calls.map(([, init]) => new Headers((init as RequestInit).headers).get("Idempotency-Key"))
+    ).toEqual([
+      "subtask-create-key",
+      "subtask-update-key",
+      "subtask-move-key",
+      "comment-create-key",
+      "comment-update-key"
+    ]);
+  });
+
+  it("leaves an unhandled 401 alone when no session handler is registered", async () => {
+    fetchMock.mockResolvedValue(response({ detail: "expired" }, 401));
+
+    await expect(apiClient.listTags()).rejects.toMatchObject({ status: 401, correlationId: undefined });
+  });
+
+  it("falls back to a generic message when the failed response has no status text", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ detail: "boom" }), {
+        status: 500,
+        statusText: "",
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+
+    await expect(apiClient.listTags()).rejects.toThrow("Request failed");
+  });
 });

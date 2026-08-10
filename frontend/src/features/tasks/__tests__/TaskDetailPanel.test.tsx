@@ -1,0 +1,487 @@
+import { createRef } from "react";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+
+import type {
+  ProjectResponse,
+  TagResponse,
+  TaskCommentResponse,
+  TaskResponse,
+  TaskState,
+  TaskSubtaskResponse
+} from "../../../api/taskTypes";
+import { ShellToastContext } from "../../../components/shell/shellToast";
+import { TaskDetailEmptyPanel, TaskDetailPanel } from "../TaskDetailPanel";
+
+const projects: ProjectResponse[] = [
+  { id: "project-launch", name: "Launch v2", color: "#0ea5e9", state: "active", revision: 1, open_task_count: 2 },
+  { id: "project-onboarding", name: "Onboarding drop-off", color: null, state: "active", revision: 1, open_task_count: 1 }
+];
+
+const tags: TagResponse[] = [
+  { id: "tag-calls", name: "@calls", state: "active", revision: 1, open_task_count: 2 },
+  { id: "tag-deep-work", name: "#deep-work", state: "active", revision: 1, open_task_count: 1 }
+];
+
+function taskFixture(overrides: Partial<TaskResponse> = {}): TaskResponse {
+  return {
+    id: "task-1",
+    title: "Fix onboarding drop-off",
+    details: null,
+    state: "next",
+    project_id: "project-launch",
+    tag_ids: ["tag-deep-work"],
+    due_date: null,
+    priority: "none",
+    waiting_for: null,
+    waiting_since: null,
+    order_key: 1,
+    source_capture_ids: [],
+    created_at: "2026-07-15T10:00:00Z",
+    updated_at: "2026-07-15T10:00:00Z",
+    completed_at: null,
+    cancelled_at: null,
+    revision: 4,
+    subtasks: [],
+    comments: [],
+    ...overrides
+  };
+}
+
+function subtaskFixture(overrides: Partial<TaskSubtaskResponse> = {}): TaskSubtaskResponse {
+  return { id: "subtask-1", title: "Draft the copy", state: "open", order_key: 1, revision: 2, ...overrides };
+}
+
+function commentFixture(overrides: Partial<TaskCommentResponse> = {}): TaskCommentResponse {
+  return {
+    id: "comment-1",
+    body: "Waiting on the analytics export.",
+    actor_id: "usr_9fa",
+    created_at: "2026-07-16T09:30:00Z",
+    edited_at: null,
+    revision: 1,
+    ...overrides
+  };
+}
+
+type PanelProps = Parameters<typeof TaskDetailPanel>[0];
+
+function renderPanel(overrides: Partial<PanelProps> = {}) {
+  const handlers = {
+    onClose: vi.fn(),
+    onSave: vi.fn(),
+    onTransition: vi.fn(),
+    onCreateSubtask: vi.fn(),
+    onTransitionSubtask: vi.fn(),
+    onCreateComment: vi.fn()
+  };
+  const notify = vi.fn();
+  const headingRef = createRef<HTMLHeadingElement>();
+  const view = render(
+    <ShellToastContext.Provider value={notify}>
+      <TaskDetailPanel
+        task={taskFixture()}
+        projects={projects}
+        tags={tags}
+        isLoading={false}
+        error={null}
+        headingRef={headingRef}
+        {...handlers}
+        {...overrides}
+      />
+    </ShellToastContext.Provider>
+  );
+  return { ...view, ...handlers, notify, headingRef };
+}
+
+describe("TaskDetailEmptyPanel", () => {
+  it("invites the reader to pick a task instead of showing an empty form", () => {
+    render(<TaskDetailEmptyPanel />);
+
+    const panel = screen.getByRole("complementary", { name: "Task detail" });
+    expect(within(panel).getByText("Nothing selected")).toBeInTheDocument();
+    expect(within(panel).getByText("Pick a task to see its details.")).toBeInTheDocument();
+  });
+});
+
+describe("TaskDetailPanel chrome", () => {
+  it("closes on the chevron and routes the placeholder canvas through the shell toast", async () => {
+    const user = userEvent.setup();
+    const { onClose, notify } = renderPanel();
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "Thinking canvas" }));
+    expect(notify).toHaveBeenCalledWith("Thinking canvas isn't built yet — placeholder");
+
+    await user.click(screen.getByRole("button", { name: "Think" }));
+    expect(notify).toHaveBeenCalledTimes(2);
+  });
+
+  it("opens the overflow menu, cancels the task from it, and closes it again on a second click", async () => {
+    const user = userEvent.setup();
+    const task = taskFixture();
+    const { onTransition } = renderPanel({ task });
+
+    const menuButton = screen.getByRole("button", { name: "Task menu" });
+    expect(menuButton).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(menuButton);
+    expect(menuButton).toHaveAttribute("aria-expanded", "true");
+    await user.click(menuButton);
+    expect(screen.queryByRole("button", { name: "Cancel task" })).not.toBeInTheDocument();
+
+    await user.click(menuButton);
+    await user.click(screen.getByRole("button", { name: "Cancel task" }));
+    expect(onTransition).toHaveBeenCalledWith(task, "cancel");
+    expect(screen.queryByRole("button", { name: "Cancel task" })).not.toBeInTheDocument();
+  });
+
+  it("hides the destructive menu once the task is terminal", () => {
+    renderPanel({ task: taskFixture({ state: "completed", completed_at: "2026-07-17T08:00:00Z" }) });
+
+    expect(screen.queryByRole("button", { name: "Task menu" })).not.toBeInTheDocument();
+  });
+
+  it("shows nothing but chrome while there is no task yet, and surfaces loading and error copy", () => {
+    const { rerender, headingRef } = renderPanel({ task: undefined, isLoading: true });
+
+    expect(screen.getByText("Loading task detail…")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Title")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Task menu" })).not.toBeInTheDocument();
+    expect(headingRef.current).toBe(screen.getByRole("heading", { name: "Task detail" }));
+
+    rerender(
+      <ShellToastContext.Provider value={vi.fn()}>
+        <TaskDetailPanel
+          task={undefined}
+          projects={projects}
+          tags={tags}
+          isLoading={false}
+          error={new Error("Task detail is unavailable.")}
+          headingRef={headingRef}
+          onClose={vi.fn()}
+          onSave={vi.fn()}
+          onTransition={vi.fn()}
+          onCreateSubtask={vi.fn()}
+          onTransitionSubtask={vi.fn()}
+          onCreateComment={vi.fn()}
+        />
+      </ShellToastContext.Provider>
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Task detail is unavailable.");
+    expect(screen.queryByText("Loading task detail…")).not.toBeInTheDocument();
+  });
+
+  it("closes an open menu when the panel switches to another task", async () => {
+    const user = userEvent.setup();
+    const headingRef = createRef<HTMLHeadingElement>();
+    const props = {
+      projects,
+      tags,
+      isLoading: false,
+      error: null,
+      headingRef,
+      onClose: vi.fn(),
+      onSave: vi.fn(),
+      onTransition: vi.fn(),
+      onCreateSubtask: vi.fn(),
+      onTransitionSubtask: vi.fn(),
+      onCreateComment: vi.fn()
+    };
+    const { rerender } = render(<TaskDetailPanel task={taskFixture()} {...props} />);
+
+    await user.click(screen.getByRole("button", { name: "Task menu" }));
+    expect(screen.getByRole("button", { name: "Cancel task" })).toBeInTheDocument();
+
+    rerender(<TaskDetailPanel task={taskFixture({ id: "task-2", title: "Second task" })} {...props} />);
+
+    expect(screen.queryByRole("button", { name: "Cancel task" })).not.toBeInTheDocument();
+  });
+});
+
+describe("TaskDetailPanel editing", () => {
+  it("saves a changed title on blur and commits with Enter rather than inserting a newline", async () => {
+    const user = userEvent.setup();
+    const task = taskFixture();
+    const { onSave } = renderPanel({ task });
+
+    const title = screen.getByLabelText("Title");
+    await user.clear(title);
+    await user.type(title, "Fix onboarding drop-off properly{Enter}");
+
+    expect(title).not.toHaveFocus();
+    expect(onSave).toHaveBeenCalledWith(task, {
+      title: "Fix onboarding drop-off properly",
+      expected_revision: 4
+    });
+  });
+
+  it("leaves the title alone when it is unchanged or blanked", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderPanel();
+
+    const title = screen.getByLabelText("Title");
+    await user.click(title);
+    await user.tab();
+    expect(onSave).not.toHaveBeenCalled();
+
+    await user.clear(title);
+    await user.tab();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("keeps a shift-Enter newline inside the title instead of committing", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderPanel();
+
+    const title = screen.getByLabelText("Title");
+    await user.clear(title);
+    await user.type(title, "First line{Shift>}{Enter}{/Shift}second line");
+
+    expect(title).toHaveFocus();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("saves the due date, the project, the priority and tag toggles with the current revision", async () => {
+    const user = userEvent.setup();
+    const task = taskFixture({ due_date: "2026-07-20" });
+    const { onSave } = renderPanel({ task });
+
+    const dueDate = screen.getByLabelText("Due date");
+    expect(dueDate).toHaveValue("2026-07-20");
+    await user.clear(dueDate);
+    expect(onSave).toHaveBeenLastCalledWith(task, { due_date: null, expected_revision: 4 });
+
+    await user.type(dueDate, "2026-08-01");
+    expect(onSave).toHaveBeenLastCalledWith(task, { due_date: "2026-08-01", expected_revision: 4 });
+
+    await user.selectOptions(screen.getByLabelText("Project"), "project-onboarding");
+    expect(onSave).toHaveBeenLastCalledWith(task, { project_id: "project-onboarding", expected_revision: 4 });
+
+    await user.selectOptions(screen.getByLabelText("Project"), "");
+    expect(onSave).toHaveBeenLastCalledWith(task, { project_id: null, expected_revision: 4 });
+
+    await user.selectOptions(screen.getByLabelText("Priority"), "high");
+    expect(onSave).toHaveBeenLastCalledWith(task, { priority: "high", expected_revision: 4 });
+
+    await user.click(screen.getByRole("checkbox", { name: "#calls" }));
+    expect(onSave).toHaveBeenLastCalledWith(task, {
+      tag_ids: ["tag-deep-work", "tag-calls"],
+      expected_revision: 4
+    });
+
+    await user.click(screen.getByRole("checkbox", { name: "#deep-work" }));
+    expect(onSave).toHaveBeenLastCalledWith(task, { tag_ids: [], expected_revision: 4 });
+  });
+
+  it("saves details only when the text actually changed", async () => {
+    const user = userEvent.setup();
+    const task = taskFixture({ details: "Existing notes" });
+    const { onSave } = renderPanel({ task });
+
+    const details = screen.getByLabelText("Details");
+    await user.click(details);
+    await user.tab();
+    expect(onSave).not.toHaveBeenCalled();
+
+    await user.clear(details);
+    await user.tab();
+    expect(onSave).toHaveBeenLastCalledWith(task, { details: null, expected_revision: 4 });
+
+    await user.type(details, "Analytics export first");
+    await user.tab();
+    expect(onSave).toHaveBeenLastCalledWith(task, { details: "Analytics export first", expected_revision: 4 });
+  });
+
+  it("saves waiting-for only for a waiting task, and only when it changed", async () => {
+    const user = userEvent.setup();
+    const nextTask = taskFixture();
+    const { onSave, unmount } = renderPanel({ task: nextTask });
+
+    await user.type(screen.getByLabelText("Waiting for"), "Design review");
+    await user.tab();
+    expect(onSave).not.toHaveBeenCalled();
+    unmount();
+
+    const waitingTask = taskFixture({ state: "waiting", waiting_for: "Design review" });
+    const second = renderPanel({ task: waitingTask });
+    const field = screen.getByLabelText("Waiting for");
+    expect(field).toHaveValue("Design review");
+
+    await user.click(field);
+    await user.tab();
+    expect(second.onSave).not.toHaveBeenCalled();
+
+    await user.clear(field);
+    await user.type(field, "Finance sign-off");
+    await user.tab();
+    expect(second.onSave).toHaveBeenLastCalledWith(waitingTask, {
+      waiting_for: "Finance sign-off",
+      expected_revision: 4
+    });
+  });
+});
+
+describe("TaskDetailPanel transitions", () => {
+  it("completes an open task and reopens a terminal one from the same control", async () => {
+    const user = userEvent.setup();
+    const openTask = taskFixture();
+    const first = renderPanel({ task: openTask });
+
+    await user.click(screen.getByRole("button", { name: "Complete task" }));
+    expect(first.onTransition).toHaveBeenCalledWith(openTask, "complete", undefined);
+    first.unmount();
+
+    const cancelled = taskFixture({ state: "cancelled", cancelled_at: "2026-07-18T08:00:00Z" });
+    const second = renderPanel({ task: cancelled });
+
+    await user.click(screen.getByRole("button", { name: "Reopen task" }));
+    expect(second.onTransition).toHaveBeenCalledWith(cancelled, "reopen", "inbox");
+  });
+
+  it("moves an open task between lists and carries the live waiting-for value into a waiting move", async () => {
+    const user = userEvent.setup();
+    const task = taskFixture();
+    const { onTransition } = renderPanel({ task });
+
+    await user.selectOptions(screen.getByLabelText("List"), "someday");
+    expect(onTransition).toHaveBeenLastCalledWith(task, "move", "someday", undefined);
+
+    await user.type(screen.getByLabelText("Waiting for"), "Finance");
+    await user.selectOptions(screen.getByLabelText("List"), "waiting");
+    expect(onTransition).toHaveBeenLastCalledWith(task, "move", "waiting", "Finance");
+  });
+
+  it("offers a terminal task the reopen-to targets and ignores the inert placeholder option", async () => {
+    const user = userEvent.setup();
+    const task = taskFixture({ state: "completed", completed_at: "2026-07-17T08:00:00Z" });
+    const { onTransition } = renderPanel({ task });
+
+    const list = screen.getByLabelText("List");
+    expect(list).toHaveValue("");
+    expect(within(list).getByRole("option", { name: "Completed" })).toBeInTheDocument();
+    expect(within(list).getByRole("option", { name: "Reopen to Next actions" })).toBeInTheDocument();
+
+    await user.selectOptions(list, "next");
+    expect(onTransition).toHaveBeenCalledWith(task, "reopen", "next", undefined);
+
+    await user.selectOptions(list, "");
+    expect(onTransition).toHaveBeenCalledTimes(1);
+  });
+
+  it("labels a cancelled task's inert list option as Cancelled", () => {
+    renderPanel({ task: taskFixture({ state: "cancelled", cancelled_at: "2026-07-18T08:00:00Z" }) });
+
+    expect(within(screen.getByLabelText("List")).getByRole("option", { name: "Cancelled" })).toBeInTheDocument();
+  });
+});
+
+describe("TaskDetailPanel subtasks and comments", () => {
+  it("reports subtask progress and toggles a subtask both ways", async () => {
+    const user = userEvent.setup();
+    const task = taskFixture({
+      subtasks: [
+        subtaskFixture(),
+        subtaskFixture({ id: "subtask-2", title: "Ship the fix", state: "completed", revision: 3 })
+      ]
+    });
+    const { onTransitionSubtask } = renderPanel({ task });
+
+    expect(screen.getByRole("heading", { name: "Subtasks · 1 / 2" })).toBeInTheDocument();
+    expect(screen.getByText("50%")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Complete Draft the copy" }));
+    expect(onTransitionSubtask).toHaveBeenLastCalledWith(task, task.subtasks?.[0], "complete");
+
+    await user.click(screen.getByRole("button", { name: "Reopen Ship the fix" }));
+    expect(onTransitionSubtask).toHaveBeenLastCalledWith(task, task.subtasks?.[1], "reopen");
+  });
+
+  it("renders a projectless task with the neutral swatch and no comment list", async () => {
+    const user = userEvent.setup();
+    const task = taskFixture({
+      project_id: null,
+      state: "waiting",
+      waiting_for: null,
+      comments: undefined
+    });
+    const { onSave } = renderPanel({ task });
+
+    expect(screen.getByLabelText("Project")).toHaveValue("");
+    expect(screen.getByLabelText("Waiting for")).toHaveValue("");
+    expect(screen.queryByText(/·/)).not.toBeInTheDocument();
+
+    // A waiting task with no recorded blocker still saves the first value typed.
+    await user.type(screen.getByLabelText("Waiting for"), "Finance");
+    await user.tab();
+    expect(onSave).toHaveBeenCalledWith(task, { waiting_for: "Finance", expected_revision: 4 });
+  });
+
+  it("drops the progress meter when a task has no subtasks", () => {
+    renderPanel({ task: taskFixture({ subtasks: undefined }) });
+
+    expect(screen.getByRole("heading", { name: "Subtasks" })).toBeInTheDocument();
+    expect(screen.queryByText("%", { exact: false })).not.toBeInTheDocument();
+  });
+
+  it("creates a subtask on submit, resets the field, and ignores a blank one", async () => {
+    const user = userEvent.setup();
+    const task = taskFixture();
+    const { onCreateSubtask } = renderPanel({ task });
+
+    const field = screen.getByLabelText("New subtask title");
+    await user.type(field, "   {Enter}");
+    expect(onCreateSubtask).not.toHaveBeenCalled();
+
+    await user.clear(field);
+    await user.type(field, "Draft the copy{Enter}");
+    expect(onCreateSubtask).toHaveBeenCalledWith(task, "Draft the copy");
+    expect(field).toHaveValue("");
+  });
+
+  it("creates a comment on submit, resets the field, and ignores a blank one", async () => {
+    const user = userEvent.setup();
+    const task = taskFixture();
+    const { onCreateComment } = renderPanel({ task });
+
+    const field = screen.getByLabelText("New comment");
+    await user.type(field, "  {Enter}");
+    expect(onCreateComment).not.toHaveBeenCalled();
+
+    await user.type(field, "Blocked on analytics{Enter}");
+    expect(onCreateComment).toHaveBeenCalledWith(task, "Blocked on analytics");
+    expect(field).toHaveValue("");
+  });
+
+  it("renders each comment with an actor initialism and a readable date, falling back to the raw value", () => {
+    renderPanel({
+      task: taskFixture({
+        comments: [commentFixture(), commentFixture({ id: "comment-2", body: "Second note", created_at: "not-a-date" })]
+      })
+    });
+
+    const formatted = new Date("2026-07-16T09:30:00Z").toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric"
+    });
+    expect(screen.getByText("Waiting on the analytics export.")).toBeInTheDocument();
+    expect(screen.getByText(`US · ${formatted}`)).toBeInTheDocument();
+    expect(screen.getByText("US · not-a-date")).toBeInTheDocument();
+  });
+});
+
+describe("TaskDetailPanel terminal presentation", () => {
+  it.each<[TaskState, string]>([
+    ["completed", "Completed"],
+    ["cancelled", "Cancelled"]
+  ])("strikes a %s title through and keeps its list option inert", (state, label) => {
+    renderPanel({ task: taskFixture({ state }) });
+
+    expect(screen.getByLabelText("Title")).toHaveClass("line-through");
+    expect(within(screen.getByLabelText("List")).getByRole("option", { name: label })).toBeInTheDocument();
+  });
+});

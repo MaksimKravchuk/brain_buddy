@@ -46,11 +46,14 @@ export default defineConfig({
       reporter: ["text", "lcov", "json-summary"],
       include: ["src/**/*.{ts,tsx}"],
       exclude: ["src/main.tsx", "src/test/allureTaxonomy.ts"],
+      // Kept just under frontend/coverage-floor.json, which is the gate CI
+      // enforces: a local `npm run test:coverage` should fail on the same
+      // regression rather than passing and leaving CI to find it.
       thresholds: {
-        statements: 95,
-        branches: 95,
-        functions: 95,
-        lines: 95
+        statements: 98,
+        branches: 97,
+        functions: 98,
+        lines: 98
       }
     }
   }

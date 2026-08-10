@@ -49,6 +49,14 @@ jobs:
           python3 scripts/validate_ci_artifacts.py preview-workflow \
             --workflow .github/workflows/fly-review-frontend.yml
 
+      # A file excluded from the coverage report reads as covered, so the floor
+      # can be met while a third of the source is unmeasured. It happened here.
+      - name: Reject blanket coverage suppressions
+        run: |
+          python3 scripts/validate_ci_artifacts.py coverage-suppressions \
+            --path frontend/src \
+            --path mobile/src
+
       - name: Validate verified-trunk delivery contract
         run: |
           python3 -m unittest scripts/test_validate_trunk_delivery.py -v

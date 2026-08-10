@@ -1,4 +1,3 @@
-/* istanbul ignore file -- route glue is exercised by AppRoutes tests and Playwright shell snapshots. */
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import { ProtectedRoute } from "../components/auth/ProtectedRoute";

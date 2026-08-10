@@ -45,4 +45,20 @@ describe("getErrorMessage", () => {
   it("keeps a string payload with only whitespace from falling back", () => {
     expect(getErrorMessage(new ApiError("Empty", 400, "   "))).toBe("400: Empty");
   });
+
+  it("shows a plain string payload as the message", () => {
+    expect(getErrorMessage(new ApiError("Ignored", 502, "Upstream is down"))).toBe("Upstream is down");
+  });
+
+  it("ignores empty and blank fields rather than showing them as the message", () => {
+    expect(getErrorMessage(new ApiError("Conflict", 409, []))).toBe("409: Conflict");
+    expect(getErrorMessage(new ApiError("Conflict", 409, { message: "  ", detail: "  " }))).toBe("409: Conflict");
+    expect(getErrorMessage(new ApiError("Conflict", 409, { detail: [] }))).toBe("409: Conflict");
+    expect(getErrorMessage(new ApiError("Conflict", 409, { detail: [{ code: 1 }] }))).toBe("409: Conflict");
+  });
+
+  it("ignores a blank reference id instead of appending an empty one", () => {
+    expect(getErrorMessage(new ApiError("Ignored", 500, { message: "Broke", reference_id: "   " }))).toBe("Broke");
+    expect(getErrorMessage(new ApiError("Ignored", 500, { message: "Broke", reference_id: 42 }))).toBe("Broke");
+  });
 });
