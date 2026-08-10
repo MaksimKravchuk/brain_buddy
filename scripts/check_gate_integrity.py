@@ -108,9 +108,34 @@ INVARIANTS: tuple[Invariant, ...] = (
     ),
     MustMatch(
         "scripts/spec_kit_planning_review.py",
+        "risk derivation can only raise the class",
+        r'DERIVABLE_RISKS:\s*tuple\[str, \.\.\.\]\s*=\s*\("high",\)',
+        "Derivation reads which paths the artifacts mention, and a mention is "
+        "not a change. Letting it infer `low` produced a false low on an auth "
+        "change that merely cited docs/auth.md. Lowering a class is an "
+        "accountable human declaration, never a regex over prose.",
+    ),
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
         "missing mandatory evidence escalates",
         r"if missing_roles:\s*\n\s*status\s*=\s*\"escalated\"",
         "Missing review evidence must escalate, never resolve to a pass.",
+    ),
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "human sign-off is a run-bound record, not a caller flag",
+        r"signoff_record\s*=\s*load_human_signoff\(",
+        "A caller-controlled boolean lets the same automated actor that runs "
+        "the campaign self-certify the human gate on exactly the ASK-class "
+        "surfaces the gate protects. The sign-off must be a separate record "
+        "bound to the run id and a digest of the reviewed artifacts.",
+    ),
+    MustNotMatch(
+        ".specify/workflows/speckit/workflow.yml",
+        "no caller-supplied human_signoff input",
+        r"^\s{2}human_signoff:",
+        "Re-introducing this input would let the campaign caller assert its own "
+        "human approval.",
     ),
     MustMatch(
         "scripts/spec_kit_planning_review.py",

@@ -433,6 +433,108 @@ class PlanningReviewAggregationTests(unittest.TestCase):
             self.assertEqual(list(target.parent.glob("*.tmp")), [])
 
 
+class HumanSignoffTests(unittest.TestCase):
+    """High-risk sign-off must be evidence, not a flag the caller sets.
+
+    Regression: `human_signoff` was a workflow input coerced with `bool(...)`,
+    so the same automated actor that ran the campaign could self-certify the
+    human gate on exactly the ASK-class surfaces the gate exists to protect.
+    """
+
+    def setUp(self) -> None:
+        self.module = load_module()
+
+    def build(self, tmp: str) -> tuple[Path, Path, str]:
+        root = Path(tmp)
+        feature_dir = root / "specs" / "006-example"
+        (feature_dir / "checklists").mkdir(parents=True)
+        (feature_dir / "spec.md").write_text("# Spec\n", encoding="utf-8")
+        (feature_dir / "plan.md").write_text("# Plan\n", encoding="utf-8")
+        run_dir = root / "runs" / "run1"
+        run_dir.mkdir(parents=True)
+        digest = self.module.review_artifacts_digest(feature_dir)
+        return feature_dir, run_dir, digest
+
+    def record(self, **overrides) -> dict:
+        base = {
+            "approved_by": "maksim.v.kravchuk@gmail.com",
+            "approved_on": "2026-08-10",
+            "run_id": "run1",
+            "artifacts_digest": "",
+            "rationale": "Reviewed the session-rotation surface personally and accept the residual risk.",
+        }
+        base.update(overrides)
+        return base
+
+    def write(self, run_dir: Path, record: dict) -> None:
+        (run_dir / "human-signoff.json").write_text(json.dumps(record), encoding="utf-8")
+
+    def load(self, run_dir: Path, digest: str):
+        return self.module.load_human_signoff(
+            run_dir, run_id="run1", artifacts_digest=digest
+        )
+
+    def test_absent_record_is_no_signoff(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _feature, run_dir, digest = self.build(tmp)
+            self.assertIsNone(self.load(run_dir, digest))
+
+    def test_valid_record_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _feature, run_dir, digest = self.build(tmp)
+            self.write(run_dir, self.record(artifacts_digest=digest))
+            loaded = self.load(run_dir, digest)
+            self.assertIsNotNone(loaded)
+            assert loaded is not None
+            self.assertEqual(loaded["approved_by"], "maksim.v.kravchuk@gmail.com")
+
+    def test_signoff_from_another_run_is_rejected(self) -> None:
+        """An approval must not be replayed across campaigns."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _feature, run_dir, digest = self.build(tmp)
+            self.write(run_dir, self.record(run_id="run-other", artifacts_digest=digest))
+            self.assertIsNone(self.load(run_dir, digest))
+
+    def test_signoff_goes_stale_when_the_artifacts_change(self) -> None:
+        """Approving one spec must not silently approve its rewrite."""
+        with tempfile.TemporaryDirectory() as tmp:
+            feature_dir, run_dir, digest = self.build(tmp)
+            self.write(run_dir, self.record(artifacts_digest=digest))
+            self.assertIsNotNone(self.load(run_dir, digest))
+
+            (feature_dir / "spec.md").write_text("# Spec, rewritten\n", encoding="utf-8")
+            new_digest = self.module.review_artifacts_digest(feature_dir)
+            self.assertNotEqual(new_digest, digest)
+            self.assertIsNone(self.load(run_dir, new_digest))
+
+    def test_anonymous_or_unreasoned_signoff_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _feature, run_dir, digest = self.build(tmp)
+            for bad in (
+                self.record(approved_by="", artifacts_digest=digest),
+                self.record(rationale="ok", artifacts_digest=digest),
+                self.record(approved_on="", artifacts_digest=digest),
+            ):
+                self.write(run_dir, bad)
+                self.assertIsNone(self.load(run_dir, digest))
+
+    def test_malformed_record_is_not_an_approval(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _feature, run_dir, digest = self.build(tmp)
+            (run_dir / "human-signoff.json").write_text("{not json", encoding="utf-8")
+            self.assertIsNone(self.load(run_dir, digest))
+
+    def test_digest_covers_every_reviewed_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            feature_dir, _run_dir, digest = self.build(tmp)
+            (feature_dir / "design.md").write_text("# Design\n", encoding="utf-8")
+            self.assertNotEqual(
+                self.module.review_artifacts_digest(feature_dir),
+                digest,
+                "adding a reviewed artifact must change the digest",
+            )
+
+
 class FounderAcceptanceBoundsTests(unittest.TestCase):
     """A risk acceptance must be bounded in time and carry mitigations.
 
@@ -652,37 +754,48 @@ class DeterministicPreflightTests(unittest.TestCase):
             feature_dir = self.write_feature(tmp, spec=spec)
             self.assertEqual(self.module.derive_risk(feature_dir), "high")
 
-    def test_ship_class_code_surface_is_medium(self) -> None:
-        spec = self.clean_spec() + "Touches frontend/src/components/Canvas.tsx only.\n"
-        with tempfile.TemporaryDirectory() as tmp:
-            feature_dir = self.write_feature(tmp, spec=spec)
-            self.assertEqual(self.module.derive_risk(feature_dir), "medium")
-
-    def test_unclassifiable_change_defaults_to_medium_not_low(self) -> None:
-        """An unclassifiable change takes the middle class.
+    def test_unclassifiable_change_has_no_derived_opinion(self) -> None:
+        """Derivation stays silent; the campaign then runs at the default.
 
         Treating silence as safety would let exactly the work nobody could
-        classify take the cheapest path through the gate.
+        classify take the cheapest path through the gate, so the default is
+        medium and derivation never argues it down.
         """
         with tempfile.TemporaryDirectory() as tmp:
             feature_dir = self.write_feature(tmp, spec=self.clean_spec())
-            self.assertEqual(self.module.derive_risk(feature_dir), "medium")
+            self.assertIsNone(self.module.derive_risk(feature_dir))
             self.assertEqual(self.module.DEFAULT_RISK, "medium")
 
-    def test_entirely_inert_change_may_fall_to_low(self) -> None:
-        spec = self.clean_spec() + "Touches docs/auth.md and specs/006-x/plan.md.\n"
-        with tempfile.TemporaryDirectory() as tmp:
-            feature_dir = self.write_feature(tmp, spec=spec)
-            self.assertEqual(self.module.derive_risk(feature_dir), "low")
+    def test_derivation_never_lowers_the_class(self) -> None:
+        """Regression: a real false low on the worst possible surface.
 
-    def test_one_code_path_prevents_the_low_class(self) -> None:
+        An earlier version returned `low` when every mentioned path was inert.
+        A spec rotating session tokens while merely *citing* docs/auth.md as
+        background therefore derived `low` — a mention is not a change, and at
+        spec-review time there is no diff to tell them apart.
+        """
         spec = (
             self.clean_spec()
-            + "Touches docs/auth.md and backend/app/services/tree_service.py.\n"
+            + "Rotates session tokens. See docs/auth.md and docs/data-retention.md.\n"
         )
         with tempfile.TemporaryDirectory() as tmp:
             feature_dir = self.write_feature(tmp, spec=spec)
-            self.assertEqual(self.module.derive_risk(feature_dir), "medium")
+            self.assertIsNone(self.module.derive_risk(feature_dir))
+        self.assertEqual(self.module.DERIVABLE_RISKS, ("high",))
+
+    def test_only_high_is_derivable(self) -> None:
+        for risk in self.module.DERIVABLE_RISKS:
+            self.assertEqual(
+                risk,
+                self.module.stricter_risk(risk, self.module.DEFAULT_RISK),
+                "a derivable class must be at least as strict as the default",
+            )
+
+    def test_plain_code_path_alone_does_not_raise_the_class(self) -> None:
+        spec = self.clean_spec() + "Touches frontend/src/components/Canvas.tsx only.\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            feature_dir = self.write_feature(tmp, spec=spec)
+            self.assertIsNone(self.module.derive_risk(feature_dir))
 
     def test_risk_escalates_and_never_de_escalates(self) -> None:
         self.assertEqual(self.module.stricter_risk("low", "high"), "high")

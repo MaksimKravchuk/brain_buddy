@@ -10,6 +10,7 @@ that after reading the generated review summary.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -39,16 +40,17 @@ SEVERITIES = {"blocking", "important", "advisory"}
 # Risk classes, ordered least to most strict.
 #
 # `medium` is the default for a reason: an unclassifiable change gets the
-# middle class, never the lowest. Lowering to `low` requires the objective
-# rules in derive_risk() to actually fire; silence is not evidence of safety.
+# middle class, never the lowest, because silence is not evidence of safety.
+# `low` exists in the vocabulary but can only be **declared** by an operator,
+# never inferred — see derive_risk() for why prose cannot lower a class.
 RISK_CLASSES: tuple[str, ...] = ("low", "medium", "high")
 DEFAULT_RISK = "medium"
 # `high` additionally requires a recorded human sign-off: at that class an
 # uncorrelated automated mechanism alone is not sufficient evidence.
 HUMAN_SIGNOFF_REQUIRED_AT = "high"
-# Paths that cannot change runtime or CI behavior. Only a change confined
-# entirely to these may fall to `low`.
-INERT_PATH_RE = re.compile(r"^(docs/|specs/|requirements/)|\.md$")
+# Derivation may only raise the class. Lowering below DEFAULT_RISK is an
+# accountable human declaration, never inferred from prose — see derive_risk().
+DERIVABLE_RISKS: tuple[str, ...] = ("high",)
 STANDARD_ROLES = (
     "requirements-consistency",
     "architecture-consistency",
@@ -629,26 +631,28 @@ def deterministic_defects(feature_dir: Path) -> list[str]:
     return defects
 
 
-def derive_risk(feature_dir: Path) -> str:
-    """Derive the campaign risk class from the surfaces the artifacts name.
+def derive_risk(feature_dir: Path) -> str | None:
+    """Detect an ASK-class surface in the planning artifacts.
 
-    Three outcomes, and the default matters more than the extremes:
+    Returns `"high"` when one is named, and **`None` — no opinion —** otherwise.
+    Derivation can raise the class. It can never lower it.
 
-    - `high`   — any ASK-class surface (auth, migrations, CI, deploy, secrets).
-    - `low`    — every named path is inert (docs, specs, markdown) AND at least
-                 one path was actually found. This is the only branch that may
-                 lower the class, and it fires only on positive evidence.
-    - `medium` — everything else, including "no paths could be extracted".
+    That asymmetry is the whole design. At spec-review time there is no diff,
+    so all this can see is which paths the artifacts *mention*, and a mention
+    is not a change: a spec that cites `docs/auth.md` as background reading
+    while rotating session tokens looks identical to a documentation edit. An
+    earlier version of this function returned `low` when every mentioned path
+    was inert, and derived `low` for exactly that auth change — a false low on
+    the one class of work that must never get one.
 
-    An unclassifiable change is `medium`, never `low`. Treating silence as
-    safety is exactly the inversion that lets a risky change take the cheapest
-    path, so the absence of evidence must cost strictness rather than save it.
+    Lowering below the default is therefore an accountable human act (declare
+    `risk: low` on the campaign), not something a regex over prose may infer.
     """
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     try:
         from classify_path_risk import ASK, classify_path
     except ImportError:  # pragma: no cover - classifier is repo-local
-        return DEFAULT_RISK
+        return None
 
     path_like = re.compile(r"\b[\w./-]+\.(?:py|ts|tsx|js|jsx|yml|yaml|toml|sql|md)\b")
     candidates: set[str] = set()
@@ -657,22 +661,93 @@ def derive_risk(feature_dir: Path) -> str:
         if path.is_file():
             candidates.update(path_like.findall(path.read_text(encoding="utf-8")))
 
-    classifiable = [candidate for candidate in candidates if "\\" not in candidate]
-    if not classifiable:
-        return DEFAULT_RISK
-
-    for candidate in classifiable:
+    for candidate in candidates:
+        if "\\" in candidate:
+            continue
         if classify_path(candidate)[0] == ASK:
             return "high"
-
-    if all(INERT_PATH_RE.search(candidate) for candidate in classifiable):
-        return "low"
-    return DEFAULT_RISK
+    return None
 
 
 def stricter_risk(left: str, right: str) -> str:
     """The stricter of two risk classes. Risk escalates and never de-escalates."""
     return max(left, right, key=RISK_CLASSES.index)
+
+
+def review_artifacts_digest(feature_dir: Path) -> str:
+    """A digest over the artifact set a reviewer actually saw.
+
+    Binds a human sign-off to the exact artifacts it was given. Editing the
+    spec after approval changes this digest, which invalidates the sign-off —
+    otherwise "a human approved it" would silently carry across a rewrite.
+    """
+    hasher = hashlib.sha256()
+    for name in review_artifacts(feature_dir):
+        hasher.update(name.encode("utf-8"))
+        hasher.update(b"\0")
+        hasher.update((feature_dir / name).read_bytes())
+        hasher.update(b"\0")
+    return hasher.hexdigest()
+
+
+def load_human_signoff(
+    run_dir: Path, *, run_id: str, artifacts_digest: str
+) -> dict[str, Any] | None:
+    """Read and validate the human sign-off record for this campaign.
+
+    A caller-supplied boolean is not evidence of human approval: the same
+    automated actor that runs the campaign can set it, which lets an agent
+    self-certify the human gate on exactly the ASK-class surfaces the gate
+    exists for. The sign-off is therefore a separate, named, run-bound record:
+
+        .specify/workflows/runs/<run-id>/human-signoff.json
+
+    Returns the validated record, or None when there is no usable sign-off.
+    Any defect — wrong run, stale digest, missing approver — yields None, so
+    the gate escalates rather than passing on a malformed approval.
+
+    Honest limit: nothing here is unforgeable. An actor with write access to
+    the run directory can write this file, as it can write any file in the
+    repository. What this buys is that the approval becomes a named, dated,
+    auditable artifact bound to specific content, instead of an invisible
+    boolean in a workflow input — and that it goes stale automatically the
+    moment the reviewed artifacts change.
+    """
+    path = run_dir / "human-signoff.json"
+    if not path.is_file():
+        return None
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(record, dict):
+        return None
+
+    try:
+        approved_by = _required_string(record.get("approved_by"), "approved_by")
+        approved_on = _required_string(record.get("approved_on"), "approved_on")
+        rationale = _required_string(record.get("rationale"), "rationale")
+        recorded_run = _required_string(record.get("run_id"), "run_id")
+        recorded_digest = _required_string(
+            record.get("artifacts_digest"), "artifacts_digest"
+        )
+    except ValueError:
+        return None
+
+    if recorded_run != run_id:
+        return None
+    if recorded_digest != artifacts_digest:
+        return None
+    if len(rationale) < 40:
+        return None
+
+    return {
+        "approved_by": approved_by,
+        "approved_on": approved_on,
+        "rationale": rationale,
+        "run_id": recorded_run,
+        "artifacts_digest": recorded_digest,
+    }
 
 
 def preflight(*, root: Path, run_id: str) -> Path:
@@ -689,8 +764,12 @@ def preflight(*, root: Path, run_id: str) -> Path:
         {
             "feature_dir": str(feature_dir),
             "project_root": str(root),
+            # None when nothing raises the class; the campaign then runs at
+            # whatever was declared, defaulting to medium.
             "derived_risk": derive_risk(feature_dir),
             "review_artifacts": review_artifacts(feature_dir),
+            # Binds any human sign-off to the artifacts as they stood here.
+            "artifacts_digest": review_artifacts_digest(feature_dir),
         },
     )
     return target
@@ -720,13 +799,24 @@ def summarize(*, root: Path, run_id: str) -> Path:
     # artifacts.
     context_path = run_dir / "planning-context.json"
     declared_risk = risk
-    human_signoff = bool(inputs.get("human_signoff", False))
+    artifacts_digest = ""
     if context_path.is_file():
         context = json.loads(context_path.read_text(encoding="utf-8"))
         derived = context.get("derived_risk")
-        if isinstance(derived, str) and derived in RISK_CLASSES:
+        # Only a derivable (raising) class is honoured. A stored value outside
+        # DERIVABLE_RISKS cannot pull the campaign below what was declared.
+        if isinstance(derived, str) and derived in DERIVABLE_RISKS:
             risk = stricter_risk(risk, derived)
+        artifacts_digest = str(context.get("artifacts_digest", ""))
     escalated = risk != declared_risk
+
+    # Deliberately NOT read from `inputs`: a caller-controlled flag lets the
+    # same automated actor that runs the campaign self-certify the human gate
+    # on precisely the ASK-class surfaces the gate exists to protect.
+    signoff_record = load_human_signoff(
+        run_dir, run_id=run_id, artifacts_digest=artifacts_digest
+    )
+    human_signoff = signoff_record is not None
 
     roles: list[str] = list(STANDARD_ROLES)
     if risk == "high":
@@ -759,7 +849,7 @@ def summarize(*, root: Path, run_id: str) -> Path:
     summary["declared_risk"] = declared_risk
     summary["risk_escalated_by_classifier"] = escalated
     summary["missing_reviewers"] = missing
-    summary["human_signoff"] = human_signoff
+    summary["human_signoff"] = signoff_record
     target = run_dir / "planning-review-summary.json"
     write_json_atomic(target, summary)
     print(target)
