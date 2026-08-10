@@ -201,6 +201,7 @@ HTTP request
 - **Docker Compose** (local full stack): `docker compose up --build` → backend `:8000`, frontend `:8080`. Smoke via `./scripts/smoke_test.sh`.
 - **Fly.io** — two apps via `fly.backend.toml` and `fly.frontend.toml`. The **backend app is private (Flycast-only)**; the frontend proxies to it via `BACKEND_ORIGIN`. Runbooks: `docs/fly-deployment.md`, `docs/fly-review-apps.md`.
 - **CI** — `.github/workflows/ci.yml` runs backend lint/type/test + coverage, frontend unit tests + build, and Docker image builds on every push/PR to `main`. Wait for CI green before deploying.
+- **Mutation gate** — the `mutation-gate` job blocks a change that touches any module in `backend/mutation-enforced-scope.txt` (the ADR-0011 *enforced* tier: the tree/version/relation services and their repositories). It measures only the entries you touched and fails below 95%, on zero checked mutants, or on any regression against the base revision. Touch none of them and it costs nothing. Reproduce locally with `make mutation-gate-backend`. The nightly `mutation-quality.yml` stays report-only over the wider *observed* tier.
 - **Deeper docs** — architecture, API, troubleshooting, performance, and infra runbooks live under `docs/`. Feature specs (e.g. `001-relation-linking-refactor`) live under `specs/`.
 
 ### Environment variables

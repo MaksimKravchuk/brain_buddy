@@ -60,8 +60,10 @@ Mutation scope is split into two tiers with different obligations.
 
 - the ADR-0004 Reality Tree modules only, for now.
 
-The gate is **built but not connected**. `scripts/mutation_gate.py` implements
-ADR-0004's requirements; nothing in CI calls it.
+The gate is **built and connected**. `scripts/mutation_gate.py` implements
+ADR-0004's requirements and the `mutation-gate` job in
+`.github/workflows/ci.yml` calls it on every pull request and every push to the
+landing path.
 
 ADR-0004 asks for two things before promotion: two consecutive successful
 scheduled runs with complete retained artifacts, and a recorded score of at
@@ -84,11 +86,27 @@ observable output is identical to the original — redundant explicit defaults,
 falsy sentinels the callee tests for truthiness, a deep copy over fields that
 are all strings — and not a widened exclusion, which ADR-0004 forbids.
 
-What is still missing is the other half of the precondition, and it is an
-observation rather than a code change: two consecutive scheduled runs against
-this unchanged list, with their run URLs and retained artifacts recorded here.
-Until that is written down, the enforced tier defines what is *eligible* to
-gate rather than what does.
+The other half of the precondition — two consecutive successful scheduled runs
+retaining complete artifacts — is satisfied by the nightly's run history; the
+score that revision history could not establish is the one measured above. On
+that evidence the gate was promoted, and the enforced tier now defines what
+*does* gate rather than what is merely eligible to.
+
+Two shapes of that promotion are worth recording, because both were choices
+rather than defaults.
+
+**The landing path measures the whole list, not a diff.** SHIP/SHOW changes
+land by pushing `trunk-candidate/**` with no pull request at all (ADR-0008), so
+that push is the only gate those changes ever meet. Scoping it to a diff would
+leave the majority of delivery ungated. Pull requests keep the narrow scope
+ADR-0004 asked for.
+
+**The base revision is measured in its own CI job.** `pip install -e` points at
+exactly one checkout, so measuring both revisions from a single job risks
+running the base's tests against the head's code and reporting a comparison
+that is silently meaningless — the worst failure available to a gate, because
+it still shows green. Two jobs cost runner minutes and no wall-clock, since
+they measure concurrently.
 
 A module enters the observed scope as soon as it has mutation-compatible tests
 worth measuring. It moves to the enforced scope only once it independently

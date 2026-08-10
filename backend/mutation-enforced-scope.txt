@@ -7,7 +7,13 @@
 # unchanged allow-list. Adding one without that evidence defeats the point of
 # having two tiers.
 #
-# NOT YET ENFORCING. Nothing reads this list in CI yet.
+# ENFORCING. The `mutation-gate` job in .github/workflows/ci.yml reads this
+# file. On a pull request it measures only the entries the change actually
+# touches and fails below 95%, on zero checked mutants, or on any regression
+# against the base revision measured over the same scope. On the landing path
+# (push to main or trunk-candidate/**) it measures the whole list, because
+# SHIP/SHOW changes land without a pull request and that push is their only
+# gate. Editing this file changes what may block delivery.
 #
 # Score, measured over exactly this list with `make mutation-gate-backend`:
 #
@@ -49,10 +55,10 @@
 #   case-insensitive codec name (1) — export_tree 66 turns "utf-8" into
 #     "UTF-8"; codec lookup normalises case.
 #
-# Connecting the gate needs the other half of ADR-0004's precondition, which is
-# an observation rather than a code change: two consecutive scheduled runs
-# against this unchanged list, with their run URLs and retained artifacts
-# recorded in ADR-0011.
+# The nightly campaign in .github/workflows/mutation-quality.yml stays
+# report-only over the wider OBSERVED scope. It is not redundant with the gate:
+# it measures the modules still under calibration, which are not allowed to
+# block anything yet.
 app/services/tree_service.py
 app/services/version_service.py
 app/services/relation_service.py

@@ -9,10 +9,13 @@ It runs only over the intersection of the enforced scope and the files a pull
 request actually changed, so a change that touches none of them costs nothing,
 and one that touches a single module does not pay for the whole campaign.
 
-Two failure modes are treated as equally disqualifying: a score below the
-threshold, and a run that checked no mutants at all. The second matters more
-than it looks -- a campaign that silently mutates nothing reports a perfect
-score, which is exactly how a gate comes to mean nothing.
+Three failure modes are treated as equally disqualifying: a score below the
+threshold, a score below the base revision's for the same scope, and a run that
+checked no mutants at all. The last matters more than it looks -- a campaign
+that silently mutates nothing reports a perfect score, which is exactly how a
+gate comes to mean nothing. The base comparison matters for the opposite
+reason: an absolute floor alone lets a module sitting at 99% shed four points
+of assertion strength without anyone noticing.
 """
 
 from __future__ import annotations
@@ -64,9 +67,18 @@ def mutation_score(stats: dict[str, object]) -> tuple[int, int, float]:
 
 
 def validate_stats(
-    stats: dict[str, object], *, threshold: float = DEFAULT_THRESHOLD
+    stats: dict[str, object],
+    *,
+    threshold: float = DEFAULT_THRESHOLD,
+    base_stats: dict[str, object] | None = None,
 ) -> None:
-    """Raise when the campaign checked nothing or scored below ``threshold``."""
+    """Raise when the campaign checked nothing, scored below ``threshold``, or
+    scored below the base revision measured over the same scope.
+
+    ``base_stats`` that checked no mutants means the base revision had nothing
+    comparable to measure -- a scoped file it does not contain, most obviously
+    -- so the comparison is skipped rather than treated as a score of zero.
+    """
 
     killed, checked, score = mutation_score(stats)
     if checked == 0:
@@ -79,6 +91,15 @@ def validate_stats(
             f"mutation score {score:.2%} ({killed}/{checked} killed) is below "
             f"the required {threshold:.2%}."
         )
+    if base_stats is not None:
+        base_killed, base_checked, base_score = mutation_score(base_stats)
+        if base_checked and score < base_score:
+            raise ValueError(
+                f"mutation score {score:.2%} ({killed}/{checked} killed) is below "
+                f"the base revision's {base_score:.2%} "
+                f"({base_killed}/{base_checked} killed) over the same scope; "
+                "the enforced scope may not regress."
+            )
 
 
 def rewrite_only_mutate(pyproject: Path, scope: list[str]) -> None:
@@ -124,6 +145,18 @@ def main(argv: list[str] | None = None) -> int:
     check = sub.add_parser("check", help="validate a mutmut CI/CD stats file")
     check.add_argument("--stats", type=Path, required=True)
     check.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
+    check.add_argument(
+        "--base-stats",
+        type=Path,
+        help=(
+            "stats from the base revision measured over the same scope; the "
+            "score may not fall below it. A file recording zero checked mutants "
+            "means the base had nothing comparable and the comparison is "
+            "skipped. Passing a path that does not exist is an error, so a "
+            "missing base measurement fails the gate instead of silently "
+            "downgrading it to a threshold-only check."
+        ),
+    )
 
     args = parser.parse_args(argv)
 
@@ -140,14 +173,33 @@ def main(argv: list[str] | None = None) -> int:
     if not args.stats.is_file():
         print(f"error: stats file does not exist: {args.stats}", file=sys.stderr)
         return 1
+    base_stats = None
+    if args.base_stats is not None:
+        if not args.base_stats.is_file():
+            print(
+                f"error: base stats file does not exist: {args.base_stats}",
+                file=sys.stderr,
+            )
+            return 1
+        base_stats = json.loads(args.base_stats.read_text(encoding="utf-8"))
     stats = json.loads(args.stats.read_text(encoding="utf-8"))
     try:
-        validate_stats(stats, threshold=args.threshold)
+        validate_stats(stats, threshold=args.threshold, base_stats=base_stats)
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     killed, checked, score = mutation_score(stats)
-    print(f"mutation gate passed: {score:.2%} ({killed}/{checked} mutants killed)")
+    message = f"mutation gate passed: {score:.2%} ({killed}/{checked} mutants killed)"
+    if base_stats is not None:
+        base_killed, base_checked, base_score = mutation_score(base_stats)
+        if base_checked:
+            message += (
+                f"; base revision {base_score:.2%} "
+                f"({base_killed}/{base_checked} killed)"
+            )
+        else:
+            message += "; base revision had no comparable mutants"
+    print(message)
     return 0
 
 

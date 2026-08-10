@@ -37,6 +37,26 @@ MUTATION_EVIDENCE = (
     "retention-days: 30",
 )
 
+# ADR-0004's blocking gate, once promoted, is only worth as much as its
+# presence in CI. These keep the five requirements it was promoted under from
+# being quietly unpicked: it must be wired, it must compute its own narrow
+# scope rather than inherit the stack filter, it must compare against the base
+# revision, it must keep its evidence even when it fails, and Full CI must
+# depend on both of its jobs so neither can be dropped or left skipped.
+MUTATION_GATE_REQUIREMENTS = (
+    ("mutation gate job", "  mutation-gate:"),
+    ("mutation base measurement job", "  mutation-base:"),
+    ("mutation gate job name", "name: Backend mutation gate"),
+    ("enforced-scope allow-list", "backend/mutation-enforced-scope.txt"),
+    ("scope computed from the changed files", "mutation_gate.py scope"),
+    ("verdict step", "mutation_gate.py check"),
+    ("base-revision comparison", "--base-stats"),
+    ("base revision checked out by sha", "ref: ${{ github.event.pull_request.base.sha }}"),
+    ("blocking-gate Allure evidence", "--mode blocking-gate"),
+    ("full-CI gate covers the mutation gate", "      - mutation-gate\n"),
+    ("full-CI gate covers the base measurement", "      - mutation-base\n"),
+)
+
 FRONTEND_CI_REQUIREMENTS = (
     ("frontend lint step", "npm run lint"),
     ("frontend coverage test step", "npm run test:coverage"),
@@ -386,12 +406,20 @@ def _status_context_errors(workflow_text: str) -> list[str]:
     return errors
 
 
+def _mutation_gate_errors(workflow_text: str) -> list[str]:
+    errors: list[str] = []
+    for label, snippet in MUTATION_GATE_REQUIREMENTS:
+        if snippet not in workflow_text:
+            errors.append(f"missing {label}: {snippet!r}")
+    return errors
+
+
 def _path_filter_errors(workflow_text: str) -> list[str]:
     errors: list[str] = []
     for label, snippet in PATH_FILTER_REQUIREMENTS:
         if snippet not in workflow_text:
             errors.append(f"missing {label}: {snippet!r}")
-    for job in ("backend", "frontend", "mobile", "docker"):
+    for job in ("backend", "frontend", "mobile", "docker", "mutation-base", "mutation-gate"):
         block = _job_block(workflow_text, job)
         if block is None:
             errors.append(f"missing {job} job")
@@ -435,6 +463,7 @@ def validate_workflow(
         errors.extend(_missing_frontend_ci_errors(workflow_text))
         errors.extend(_missing_e2e_ci_errors(workflow_text))
         errors.extend(_path_filter_errors(workflow_text))
+        errors.extend(_mutation_gate_errors(workflow_text))
         errors.extend(_concurrency_errors(workflow_text))
         errors.extend(_retention_errors(workflow_text))
         errors.extend(_status_context_errors(workflow_text))
@@ -474,7 +503,11 @@ def validate_mutation_workflow(workflow: Path) -> int:
     if "workflow_dispatch:" not in workflow_text:
         errors.append("mutation workflow must support workflow_dispatch")
     if "pull_request:" in workflow_text or "push:" in workflow_text:
-        errors.append("mutation workflow must remain report-only until a blocking gate is approved")
+        # The blocking gate lives in ci.yml over the narrower ENFORCED tier
+        # (ADR-0011). This nightly measures the OBSERVED tier, which still
+        # contains modules under calibration, so it must stay report-only
+        # permanently rather than "for now".
+        errors.append("mutation workflow measures the observed tier and must stay report-only")
     if "mutmut run" not in workflow_text or "mutmut results" not in workflow_text:
         errors.append("mutation workflow must run mutmut and save its results")
     for path in MUTATION_SCOPE:

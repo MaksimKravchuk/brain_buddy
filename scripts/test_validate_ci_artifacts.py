@@ -484,10 +484,48 @@ jobs:
       - name: Type check
         if: env.RUN == 'true'
         run: npm run typecheck
+  mutation-base:
+    name: Backend mutation base measurement
+    env:
+      RUN: ${{ needs.changes.outputs.mutation }}
+    steps:
+      - uses: actions/checkout@v4
+        if: env.RUN == 'true'
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+      - name: Measure the base revision
+        if: env.RUN == 'true'
+        run: |
+          python3 scripts/mutation_gate.py scope \
+            --enforced backend/mutation-enforced-scope.txt \
+            --changed /tmp/base-scope.txt --apply-to base/backend/pyproject.toml
+  mutation-gate:
+    name: Backend mutation gate
+    env:
+      RUN: ${{ needs.changes.outputs.mutation }}
+    steps:
+      - name: Measure the enforced scope at this revision
+        if: env.RUN == 'true'
+        run: |
+          python3 scripts/mutation_gate.py scope \
+            --enforced backend/mutation-enforced-scope.txt \
+            --changed /tmp/head-scope.txt --apply-to backend/pyproject.toml
+      - name: Create blocking-gate Allure evidence
+        if: always() && env.RUN == 'true'
+        run: |
+          python3 scripts/create_mutation_allure_evidence.py --mode blocking-gate \
+            --summary s.txt --survivors v.txt --output r.json
+      - name: Enforce the mutation gate
+        if: env.RUN == 'true'
+        run: |
+          python3 scripts/mutation_gate.py check --stats stats.json --base-stats base.json
   full-ci:
     needs:
       - changes
       - backend
+      - mutation-base
+      - mutation-gate
     steps:
       - run: echo "${{ contains(needs.*.result, 'skipped') }}"
   frontend:
@@ -891,6 +929,102 @@ jobs:
         self.assertIn("not a product test", evidence)
         self.assertIn("mutation-summary.txt", evidence)
         self.assertIn("mutation-survivors.txt", evidence)
+
+    def test_blocking_gate_evidence_is_not_labelled_report_only(self) -> None:
+        # The nightly cannot fail anything and the pull-request gate can. Both
+        # write Allure evidence, and a reader has to be able to tell which
+        # campaign produced the number in front of them.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            summary = root / "mutation-summary.txt"
+            survivors = root / "mutation-survivors.txt"
+            output = root / "mutation-gate-result.json"
+            summary.write_text("Mutation score: 97.9%\n", encoding="utf-8")
+            survivors.write_text("28 non-behavioral survivors\n", encoding="utf-8")
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(MUTATION_EVIDENCE_SCRIPT),
+                    "--mode",
+                    "blocking-gate",
+                    "--summary",
+                    str(summary),
+                    "--survivors",
+                    str(survivors),
+                    "--output",
+                    str(output),
+                ],
+                cwd=REPO_ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            evidence = json.loads(output.read_text(encoding="utf-8"))
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("Mutation gate evidence", evidence["name"])
+        self.assertIn("blocking", evidence["name"])
+        tags = {
+            label["value"] for label in evidence["labels"] if label["name"] == "tag"
+        }
+        self.assertIn("blocking-gate", tags)
+        self.assertNotIn("report-only", tags)
+
+    def test_workflow_rejects_a_ci_file_that_dropped_the_mutation_gate(self) -> None:
+        # The gate is only worth its presence in the workflow. A CI file that is
+        # otherwise conformant but has no gate must not validate.
+        conformant = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        without_gate = conformant.replace("  mutation-gate:", "  mutation-gate-x:", 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "ci.yml"
+            workflow.write_text(without_gate, encoding="utf-8")
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("mutation gate job", completed.stderr)
+
+    def test_workflow_rejects_a_gate_without_the_base_revision_comparison(self) -> None:
+        conformant = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        without_base = conformant.replace("--base-stats", "--stats-only")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "ci.yml"
+            workflow.write_text(without_base, encoding="utf-8")
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("base-revision comparison", completed.stderr)
+
+    def test_workflow_rejects_a_mutation_gate_hidden_behind_a_job_level_if(self) -> None:
+        # A job-level `if` makes the gate report 'skipped', which is exactly the
+        # result ADR-0008 requires Full CI to treat as a failure.
+        conformant = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        skippable = conformant.replace(
+            "  mutation-gate:\n    name: Backend mutation gate\n",
+            "  mutation-gate:\n    name: Backend mutation gate\n"
+            "    if: needs.changes.outputs.mutation == 'true'\n",
+            1,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "ci.yml"
+            workflow.write_text(skippable, encoding="utf-8")
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("mutation-gate job uses a job-level 'if'", completed.stderr)
 
 
 if __name__ == "__main__":

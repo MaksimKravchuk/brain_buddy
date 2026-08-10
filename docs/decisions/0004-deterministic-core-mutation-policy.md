@@ -61,6 +61,14 @@ Do not add the blocking gate until two consecutive scheduled runs complete succe
 both retain complete artifacts. Before promotion, record their run URLs, the non-zero mutant
 count, and a mutation score of at least 95% for this unchanged allow-list.
 
+**Promoted on 2026-08-10.** The score half of the precondition had been asserted twice
+without being measured; measured directly it was 94.81% (1279 killed, 70 survived, 1 timeout
+of 1350 mutants) — below the bar. After the survivors were worked down the same unchanged
+allow-list scored **97.92% (1319 killed, 28 survived of 1347 mutants)**, reproducible with
+`make mutation-gate-backend`. ADR-0011 records the measurement and the disposition of every
+survivor. The gate is the `mutation-gate` and `mutation-base` jobs in
+`.github/workflows/ci.yml`.
+
 The subsequent gate must:
 
 1. run only when a pull request changes a file in the allow-list;
@@ -69,6 +77,16 @@ The subsequent gate must:
 4. upload the same raw state, statistics, summary, survivors, and clearly-labelled Allure
    evidence even on failure;
 5. keep this allow-list unchanged unless an ADR gives a behavioral reason for a boundary change.
+
+Requirement 1 is met for pull requests, and deliberately exceeded on the landing path: a push
+to `main` or `trunk-candidate/**` measures the whole allow-list, because SHIP/SHOW changes
+land without a pull request (ADR-0008) and scoping that push to a diff would leave most of
+delivery ungated. Requirement 2 is met by measuring the base revision in its own job, which
+is what keeps `pip install -e` pointed at one checkout per measurement; a single job doing
+both can run the base's tests against the head's code and report a green comparison that
+means nothing. `scripts/check_gate_integrity.py` now guards `scripts/mutation_gate.py`, with
+non-waivable invariants on the 95% constant, the zero-mutants rule, and the base comparison,
+so requirement 3 cannot be softened in silence.
 
 ## Consequences
 

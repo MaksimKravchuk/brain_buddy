@@ -45,6 +45,11 @@ GUARDED_FILES: tuple[str, ...] = (
     "scripts/check_requirement_coverage.py",
     "scripts/classify_path_risk.py",
     "scripts/check_gate_integrity.py",
+    # Guarded from the moment they stopped being advisory: since ADR-0004's
+    # promotion this script can fail a pull request, and this list decides which
+    # modules it can fail one over. Editing either changes what "passing" means.
+    "scripts/mutation_gate.py",
+    "backend/mutation-enforced-scope.txt",
     ".claude/settings.json",
     ".specify/workflows/speckit/workflow.yml",
     ".specify/workflows/speckit/review.schema.json",
@@ -197,6 +202,41 @@ INVARIANTS: tuple[Invariant, ...] = (
         "check-specs runs this integrity guard",
         r"^check-specs:(?:\n\t[^\n]*)*?\n\tpython3 scripts/check_gate_integrity\.py",
         "The guard must run in CI, or it guards nothing.",
+    ),
+    MustMatch(
+        "scripts/mutation_gate.py",
+        "the mutation bar stays at 95%",
+        r"DEFAULT_THRESHOLD\s*=\s*0\.95",
+        "ADR-0004 set 95% and the enforced tier was calibrated against it. "
+        "Lowering the constant is the cheapest way to make a failing gate "
+        "pass, and it must not be possible to do it quietly.",
+    ),
+    MustMatch(
+        "scripts/mutation_gate.py",
+        "a campaign that checked nothing fails",
+        r"if checked == 0:",
+        "A campaign that mutates nothing reports a perfect score. Without "
+        "this the gate passes hardest exactly when it ran least.",
+    ),
+    MustMatch(
+        "scripts/mutation_gate.py",
+        "the base revision comparison survives",
+        r"base_checked and score < base_score",
+        "ADR-0004 requirement 2. The absolute floor alone lets a module at "
+        "99% shed four points one pull request at a time.",
+    ),
+    MustMatch(
+        "backend/mutation-enforced-scope.txt",
+        "the enforced tier keeps all six calibrated modules",
+        r"(?m)^app/services/tree_service\.py$.*"
+        r"^app/services/version_service\.py$.*"
+        r"^app/services/relation_service\.py$.*"
+        r"^app/repositories/tree\.py$.*"
+        r"^app/repositories/version\.py$.*"
+        r"^app/repositories/index\.py$",
+        "ADR-0004 requirement 5: the allow-list changes only for a behavioural "
+        "reason an ADR gives. Dropping a module is the other cheap way to make "
+        "a failing gate pass, and it looks like housekeeping in a diff.",
     ),
     MustMatch(
         ".specify/workflows/speckit/review.schema.json",

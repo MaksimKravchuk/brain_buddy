@@ -147,9 +147,14 @@ The scope tiers, per ADR-0011:
   `app/services/auth_service.py`. The nightly `.github/workflows/mutation-quality.yml`
   runs this report-only; it is deliberately not triggered by `push` or
   `pull_request`.
-- **Enforced** — the ADR-0004 Reality Tree modules only. A module graduates from
-  observed to enforced only after clearing 95% on its own across two consecutive
-  successful scheduled runs.
+- **Enforced** — the ADR-0004 Reality Tree modules only, listed in
+  `backend/mutation-enforced-scope.txt`. **This tier blocks.** The
+  `mutation-gate` job in `.github/workflows/ci.yml` measures the entries your
+  pull request touches and fails below 95%, on zero checked mutants, or on any
+  regression against the base revision over the same scope. Touch none of them
+  and it costs nothing. On a push to `main` or `trunk-candidate/**` it measures
+  the whole list. A module graduates from observed to enforced only after
+  clearing 95% on its own across two consecutive successful scheduled runs.
 
 Kill a survivor with a focused test, or document it as non-behavioural. Widening
 an exclusion to raise the score is not an available remedy (ADR-0004). The four
