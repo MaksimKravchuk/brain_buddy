@@ -117,7 +117,9 @@ def brain_dump_operation_is_committable(
 
     if operation.status != "awaiting_confirmation":
         return False
-    if any(not proposal.deleted and proposal.conflicts for proposal in operation.proposals):
+    if any(
+        not proposal.deleted and proposal.conflicts for proposal in operation.proposals
+    ):
         return False
     if operation.legacy_import == "legacy_preview_only" or operation.manual_review:
         return True
@@ -131,8 +133,7 @@ def brain_dump_operation_is_committable(
         operation.reconciliation_quality == "accurate"
         and has_frozen_reconciled_batch
         and all(
-            proposal.deleted
-            or proposal.status in {"reconciled", "user_edited"}
+            proposal.deleted or proposal.status in {"reconciled", "user_edited"}
             for proposal in operation.proposals
         )
     )
@@ -285,7 +286,9 @@ class VoiceBrainDumpService:
     # be purged out from under it, no matter how old it looks: purging an
     # in-progress or recoverable operation would destroy data a resume/retry
     # still needs, not merely "abandoned" work.
-    _TERMINAL_PURGE_ELIGIBLE_STATUSES = frozenset({"completed", "cancelled", "terminal_error"})
+    _TERMINAL_PURGE_ELIGIBLE_STATUSES = frozenset(
+        {"completed", "cancelled", "terminal_error"}
+    )
 
     # Raw audio's retention clock starts at successful reconciliation, not
     # only at operation completion/cancellation/failure, so an operation
@@ -518,9 +521,7 @@ class VoiceBrainDumpService:
                     # audit records (ADR-0002 migration rule 1): never
                     # rewrite them via a retention sweep.
                     continue
-                is_terminal = (
-                    operation.status in self._TERMINAL_PURGE_ELIGIBLE_STATUSES
-                )
+                is_terminal = operation.status in self._TERMINAL_PURGE_ELIGIBLE_STATUSES
                 withdrawn = operation.consent_withdrawn_at is not None
                 expires_at = (
                     operation.working_artifacts_expires_at
@@ -879,9 +880,11 @@ class VoiceBrainDumpService:
                 chunk.chunk_number: chunk for chunk in operation.audio_chunks
             }.get(chunk_number)
             if existing is not None:
-                if existing.sha256 != actual_sha256 or existing.size_bytes != len(
-                    content
-                ) or existing.mime_type != normalized_content_type:
+                if (
+                    existing.sha256 != actual_sha256
+                    or existing.size_bytes != len(content)
+                    or existing.mime_type != normalized_content_type
+                ):
                     raise ConflictError(
                         "Brain dump audio chunk",
                         str(chunk_number),
@@ -983,7 +986,9 @@ class VoiceBrainDumpService:
         command = f"brain_dump_seal:{operation_id}"
         request_hash = self._request_hash(command, payload)
         with self.operation_repo.command_lock(owner_id):
-            self.operation_repo.purge_expired_idempotency(owner_id=owner_id, now=utcnow())
+            self.operation_repo.purge_expired_idempotency(
+                owner_id=owner_id, now=utcnow()
+            )
             self._reconcile_idempotent_result(owner_id=owner_id, key=idempotency_key)
             record = self._idempotency_record(
                 owner_id=owner_id,
@@ -1003,9 +1008,7 @@ class VoiceBrainDumpService:
             if operation.status not in {"recording", "paused"}:
                 raise ValidationFailure("Only an active brain dump can be sealed.")
             expected_numbers = set(range(payload.expected_chunks))
-            uploaded_numbers = {
-                chunk.chunk_number for chunk in operation.audio_chunks
-            }
+            uploaded_numbers = {chunk.chunk_number for chunk in operation.audio_chunks}
             missing = sorted(expected_numbers - uploaded_numbers)
             unexpected = sorted(uploaded_numbers - expected_numbers)
             if missing or unexpected:
@@ -1078,9 +1081,7 @@ class VoiceBrainDumpService:
                     "the configured maximum recording duration."
                 )
             now = utcnow()
-            reservation = getattr(
-                self.accurate_stt, "max_cost_usd_per_operation", 0.0
-            )
+            reservation = getattr(self.accurate_stt, "max_cost_usd_per_operation", 0.0)
             claimed = operation.model_copy(
                 update={
                     "status": "accurate_transcribing",
@@ -1509,11 +1510,7 @@ class VoiceBrainDumpService:
             # (``_operation_cost_budget_exceeded``); otherwise a stuck or
             # unknown-outcome run's reserved spend would be silently
             # dropped from the reconciler's own admission check.
-            + (
-                run.reserved_cost_usd
-                if run.status in {"pending", "running"}
-                else 0.0
-            )
+            + (run.reserved_cost_usd if run.status in {"pending", "running"} else 0.0)
             for run in checkpoint_runs
         )
         worst_case_next = getattr(
@@ -1631,7 +1628,9 @@ class VoiceBrainDumpService:
                     error=redacted_code,
                     error_code=redacted_code,
                     now=now,
-                    retryable=isinstance(exc, ProviderRetryableError | ValidationFailure),
+                    retryable=isinstance(
+                        exc, ProviderRetryableError | ValidationFailure
+                    ),
                     attempt=attempt,
                     recovery_count=recovery_count,
                     estimated_cost_usd=exc.estimated_cost_usd,
@@ -1688,8 +1687,7 @@ class VoiceBrainDumpService:
                 # Stamped once, at the first successful reconciliation, and
                 # never recomputed afterward — see ``purge_expired_raw_audio``.
                 "raw_audio_expires_at": (
-                    operation.raw_audio_expires_at
-                    or now + self.raw_audio_retention
+                    operation.raw_audio_expires_at or now + self.raw_audio_retention
                 ),
                 "updated_at": now,
                 "revision": operation.revision + 1,
@@ -1709,7 +1707,9 @@ class VoiceBrainDumpService:
         command = f"brain_dump_retry:{operation_id}"
         request_hash = self._request_hash(command, payload)
         with self.operation_repo.command_lock(owner_id):
-            self.operation_repo.purge_expired_idempotency(owner_id=owner_id, now=utcnow())
+            self.operation_repo.purge_expired_idempotency(
+                owner_id=owner_id, now=utcnow()
+            )
             self._reconcile_idempotent_result(owner_id=owner_id, key=idempotency_key)
             record = self._idempotency_record(
                 owner_id=owner_id,
@@ -1743,17 +1743,20 @@ class VoiceBrainDumpService:
                 and latest_provider_run.role == "reconciler"
                 and latest_provider_run.checkpoint == "accurate_transcribed"
                 and (
-                    latest_provider_run.status == "retryable_error"
-                    or recoverable_claim
+                    latest_provider_run.status == "retryable_error" or recoverable_claim
                 )
             )
-            last_run = latest_provider_run if resume_reconciliation else next(
-                (
-                    run
-                    for run in reversed(operation.provider_runs)
-                    if run.role == "accurate_stt"
-                ),
-                None,
+            last_run = (
+                latest_provider_run
+                if resume_reconciliation
+                else next(
+                    (
+                        run
+                        for run in reversed(operation.provider_runs)
+                        if run.role == "accurate_stt"
+                    ),
+                    None,
+                )
             )
             if last_run is None or operation.sealed_manifest_hash is None:
                 raise ValidationFailure(
@@ -1852,9 +1855,11 @@ class VoiceBrainDumpService:
                             attempt=attempt,
                             recovery_count=recovery_count,
                             reserved_cost_usd=getattr(
-                                self.text_reconciler
-                                if resume_reconciliation
-                                else self.accurate_stt,
+                                (
+                                    self.text_reconciler
+                                    if resume_reconciliation
+                                    else self.accurate_stt
+                                ),
                                 "max_cost_usd_per_operation",
                                 0.0,
                             ),
@@ -2084,9 +2089,7 @@ class VoiceBrainDumpService:
                     if conflict.field == "title"
                 ]
                 if not title_conflicts:
-                    raise ValidationFailure(
-                        "Proposal has no conflict to resolve."
-                    )
+                    raise ValidationFailure("Proposal has no conflict to resolve.")
                 conflict = title_conflicts[-1]
                 resolved_title = proposal.title
                 if payload.conflict_resolution == "accept":
@@ -2105,9 +2108,7 @@ class VoiceBrainDumpService:
                             if resolved_title != proposal.title
                             else proposal.title_revision
                         ),
-                        "locked_fields": sorted(
-                            {*proposal.locked_fields, "title"}
-                        ),
+                        "locked_fields": sorted({*proposal.locked_fields, "title"}),
                         "conflicts": [],
                     }
                 )
@@ -2115,9 +2116,7 @@ class VoiceBrainDumpService:
                     ProposalPatch.update(
                         proposal_id=proposal.id,
                         title=(
-                            resolved_title
-                            if resolved_title != proposal.title
-                            else None
+                            resolved_title if resolved_title != proposal.title else None
                         ),
                         producer="user",
                         locked_fields=["title"],
@@ -2362,8 +2361,7 @@ class VoiceBrainDumpService:
             owner_id=owner_id,
             operation_id=operation.id,
             chunks=[
-                (chunk.chunk_number, chunk.sha256)
-                for chunk in operation.audio_chunks
+                (chunk.chunk_number, chunk.sha256) for chunk in operation.audio_chunks
             ],
         )
         updated = operation.model_copy(
@@ -2439,8 +2437,7 @@ class VoiceBrainDumpService:
             owner_id=owner_id,
             operation_id=operation.id,
             chunks=[
-                (chunk.chunk_number, chunk.sha256)
-                for chunk in operation.audio_chunks
+                (chunk.chunk_number, chunk.sha256) for chunk in operation.audio_chunks
             ],
         )
         updated = operation.model_copy(
@@ -2493,11 +2490,7 @@ class VoiceBrainDumpService:
 
         cumulative_spent = sum(
             max(run.estimated_cost_usd, run.consumed_cost_usd)
-            + (
-                run.reserved_cost_usd
-                if run.status in {"pending", "running"}
-                else 0.0
-            )
+            + (run.reserved_cost_usd if run.status in {"pending", "running"} else 0.0)
             for run in prior_runs
         )
         cap = self.max_cumulative_cost_usd_per_operation
@@ -2610,7 +2603,9 @@ class VoiceBrainDumpService:
         """
 
         with self.operation_repo.command_lock(owner_id):
-            self.operation_repo.purge_expired_idempotency(owner_id=owner_id, now=utcnow())
+            self.operation_repo.purge_expired_idempotency(
+                owner_id=owner_id, now=utcnow()
+            )
             self._reconcile_idempotent_result(owner_id=owner_id, key=idempotency_key)
             record = self._idempotency_record(
                 owner_id=owner_id,
@@ -2860,9 +2855,11 @@ class VoiceBrainDumpService:
             return operation
         now = utcnow()
         actions = [
-            action.model_copy(update={"status": "succeeded", "task_id": task_id})
-            if action.proposal_id == proposal_id and action.status != "succeeded"
-            else action
+            (
+                action.model_copy(update={"status": "succeeded", "task_id": task_id})
+                if action.proposal_id == proposal_id and action.status != "succeeded"
+                else action
+            )
             for action in batch.actions
         ]
         receipts = list(operation.action_receipts)
@@ -2970,7 +2967,10 @@ class VoiceBrainDumpService:
                     "commit with an unresolved action."
                 )
             committed_task_ids.append(action.task_id)
-            if f"receipt:{operation.id}:{action.proposal_id}" not in existing_receipt_ids:
+            if (
+                f"receipt:{operation.id}:{action.proposal_id}"
+                not in existing_receipt_ids
+            ):
                 backfilled_receipts.append(
                     self._action_receipt(
                         operation,
@@ -3450,8 +3450,7 @@ class VoiceBrainDumpService:
         now: datetime,
     ) -> list[BrainDumpProposalDocument]:
         base = [
-            self._proposal_document_to_reconciled(proposal)
-            for proposal in existing
+            self._proposal_document_to_reconciled(proposal) for proposal in existing
         ]
         projection = apply_proposal_patches(base, patches)
         by_existing_id = {proposal.id: proposal for proposal in existing}

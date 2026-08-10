@@ -260,7 +260,9 @@ class TaskRepository(BaseRepository):
                             "name": display_tag_name(tag.name),
                             "normalized_name": tag.normalized_name
                             or normalize_task_name(tag.name, strip_tag_prefix=True),
-                            "state": "deleted" if tag.state == "archived" else tag.state,
+                            "state": (
+                                "deleted" if tag.state == "archived" else tag.state
+                            ),
                         }
                     )
                     self._upsert_tag(conn, tag)
@@ -305,13 +307,17 @@ class TaskRepository(BaseRepository):
 
     @staticmethod
     def _payload(model: BaseModel) -> str:
-        return json.dumps(model.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+        return json.dumps(
+            model.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+        )
 
     @staticmethod
     def _model(row: sqlite3.Row, model_cls: type[ModelT]) -> ModelT:
         return model_cls.model_validate(json.loads(row["payload"]))
 
-    def _upsert_project(self, conn: sqlite3.Connection, project: ProjectDocument) -> None:
+    def _upsert_project(
+        self, conn: sqlite3.Connection, project: ProjectDocument
+    ) -> None:
         conn.execute(
             """
             INSERT INTO projects (owner_id, id, normalized_name, state, payload)
@@ -329,7 +335,9 @@ class TaskRepository(BaseRepository):
                 self._payload(project),
             ),
         )
-        BaseRepository.dump_model(self.project_path(project.owner_id, project.id), project)
+        BaseRepository.dump_model(
+            self.project_path(project.owner_id, project.id), project
+        )
 
     def _upsert_tag(self, conn: sqlite3.Connection, tag: TagDocument) -> None:
         conn.execute(
@@ -401,7 +409,9 @@ class TaskRepository(BaseRepository):
     def get_project_for_owner(
         self, project_id: str, *, owner_id: str
     ) -> ProjectDocument:
-        return self._get("projects", ProjectDocument, "Project", project_id, owner_id=owner_id)
+        return self._get(
+            "projects", ProjectDocument, "Project", project_id, owner_id=owner_id
+        )
 
     def get_tag_for_owner(self, tag_id: str, *, owner_id: str) -> TagDocument:
         return self._get("tags", TagDocument, "Tag", tag_id, owner_id=owner_id)
@@ -459,7 +469,10 @@ class TaskRepository(BaseRepository):
                 "SELECT payload FROM subtasks WHERE owner_id = ? AND task_id = ?",
                 (owner_id, task_id),
             ).fetchall()
-        return [TaskSubtaskDocument.model_validate(json.loads(row["payload"])) for row in rows]
+        return [
+            TaskSubtaskDocument.model_validate(json.loads(row["payload"]))
+            for row in rows
+        ]
 
     def get_subtask_for_owner(
         self, subtask_id: str, *, owner_id: str, task_id: str
@@ -507,7 +520,10 @@ class TaskRepository(BaseRepository):
                 "SELECT payload FROM comments WHERE owner_id = ? AND task_id = ?",
                 (owner_id, task_id),
             ).fetchall()
-        return [TaskCommentDocument.model_validate(json.loads(row["payload"])) for row in rows]
+        return [
+            TaskCommentDocument.model_validate(json.loads(row["payload"]))
+            for row in rows
+        ]
 
     def get_comment_for_owner(
         self, comment_id: str, *, owner_id: str, task_id: str

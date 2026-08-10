@@ -208,8 +208,12 @@ class VoiceProviderSettings(BaseModel):
     ) -> tuple[float, ...]:
         if not values or len(values) > 5:
             raise ValueError("retry backoff must contain between one and five delays")
-        if any(not math.isfinite(value) or value < 0 or value > 300 for value in values):
-            raise ValueError("retry backoff delays must be finite values from 0 to 300 seconds")
+        if any(
+            not math.isfinite(value) or value < 0 or value > 300 for value in values
+        ):
+            raise ValueError(
+                "retry backoff delays must be finite values from 0 to 300 seconds"
+            )
         return values
 
 
@@ -310,9 +314,7 @@ def _build_feature_flags() -> FeatureFlagSettings:
     states = _parse_feature_flag_states(os.getenv("BRAIN_BUDDY_FEATURE_FLAGS", ""))
     internal_users = frozenset(
         value.strip()
-        for value in os.getenv(
-            "BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS", ""
-        ).split(",")
+        for value in os.getenv("BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS", "").split(",")
         if value.strip()
     )
     return FeatureFlagSettings(states=states, internal_users=internal_users)
@@ -360,14 +362,13 @@ def _build_config() -> AppConfig:
         accurate_provider = (
             "deterministic"
             if environment is AppEnvironment.TEST
-            else "openai"
-            if os.getenv("OPENAI_API_KEY")
-            else "disabled"
+            else "openai" if os.getenv("OPENAI_API_KEY") else "disabled"
         )
-    if environment is AppEnvironment.PRODUCTION and accurate_provider == "deterministic":
-        raise ValueError(
-            "Production cannot use deterministic accurate STT."
-        )
+    if (
+        environment is AppEnvironment.PRODUCTION
+        and accurate_provider == "deterministic"
+    ):
+        raise ValueError("Production cannot use deterministic accurate STT.")
 
     retry_backoff = tuple(
         float(value.strip())
@@ -396,9 +397,7 @@ def _build_config() -> AppConfig:
         timeout_seconds=float(
             os.getenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_TIMEOUT_SECONDS", "180")
         ),
-        max_retries=int(
-            os.getenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_MAX_RETRIES", "2")
-        ),
+        max_retries=int(os.getenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_MAX_RETRIES", "2")),
         retry_backoff_seconds=retry_backoff,
         max_cost_usd_per_operation=float(
             os.getenv("BRAIN_BUDDY_VOICE_ACCURATE_STT_MAX_COST_USD", "0.50")
@@ -432,9 +431,7 @@ def _build_config() -> AppConfig:
             timeout_seconds=float(
                 os.getenv("BRAIN_BUDDY_VOICE_RECONCILER_TIMEOUT_SECONDS", "30")
             ),
-            max_retries=int(
-                os.getenv("BRAIN_BUDDY_VOICE_RECONCILER_MAX_RETRIES", "2")
-            ),
+            max_retries=int(os.getenv("BRAIN_BUDDY_VOICE_RECONCILER_MAX_RETRIES", "2")),
             retry_backoff_seconds=reconciler_retry_backoff,
             max_cost_usd_per_operation=float(
                 os.getenv("BRAIN_BUDDY_VOICE_RECONCILER_MAX_COST_USD", "0.50")
@@ -483,9 +480,7 @@ def _build_config() -> AppConfig:
                 os.getenv("BRAIN_BUDDY_VOICE_AUDIO_MAX_DURATION_SECONDS", "1800")
             ),
             assumed_chunk_duration_seconds=float(
-                os.getenv(
-                    "BRAIN_BUDDY_VOICE_AUDIO_ASSUMED_CHUNK_DURATION_SECONDS", "5"
-                )
+                os.getenv("BRAIN_BUDDY_VOICE_AUDIO_ASSUMED_CHUNK_DURATION_SECONDS", "5")
             ),
         ),
         max_operation_recoveries=int(
