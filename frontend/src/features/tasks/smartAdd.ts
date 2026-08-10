@@ -151,13 +151,13 @@ function expandedRemovalSpans(input: string, tokens: TokenSpan[]): Array<{ start
     while (right < input.length && whitespacePattern.test(input[right])) {
       right += 1;
     }
+    // Both scans stopped at the first non-whitespace character, so everything
+    // between the bracket and the token is whitespace by construction: a
+    // matching pair here always wraps the token alone, and re-checking the gap
+    // for content would be a condition that cannot be false.
     const close = wrapperPairs.get(input[left] ?? "");
     if (close && input[right] === close) {
-      const before = input.slice(left + 1, token.start);
-      const after = input.slice(token.end, right);
-      if (!before.trim() && !after.trim()) {
-        return { start: left, end: right + 1 };
-      }
+      return { start: left, end: right + 1 };
     }
     return { start: token.start, end: token.end };
   });

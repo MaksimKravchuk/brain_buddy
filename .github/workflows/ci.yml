@@ -57,6 +57,12 @@ jobs:
             --path frontend/src \
             --path mobile/src
 
+      - name: Validate the frontend mutation tiers
+        run: |
+          python3 scripts/validate_ci_artifacts.py mutation-scope \
+            --config frontend/stryker.config.json \
+            --enforced frontend/mutation-enforced-scope.txt
+
       - name: Validate verified-trunk delivery contract
         run: |
           python3 -m unittest scripts/test_validate_trunk_delivery.py -v

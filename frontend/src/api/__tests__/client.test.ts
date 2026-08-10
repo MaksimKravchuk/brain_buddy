@@ -244,6 +244,150 @@ describe("apiClient", () => {
     await expect(apiClient.listTags()).rejects.toMatchObject({ status: 401, correlationId: undefined });
   });
 
+  it("names its own error type, so a caller can tell an ApiError from any other throw", async () => {
+    fetchMock.mockResolvedValue(response({ detail: "nope" }, 409));
+
+    const failure = await apiClient.listTags().catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).name).toBe("ApiError");
+  });
+
+  it("sends no body and no JSON content type on reads", async () => {
+    fetchMock.mockResolvedValue(response({ items: [], counts_by_state: {} }));
+
+    await apiClient.listTasks();
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.body).toBeUndefined();
+    expect(new Headers(init.headers).get("Content-Type")).toBeNull();
+    expect(init.credentials).toBe("include");
+  });
+
+  // Every read takes an AbortSignal so React Query can cancel it when the
+  // component unmounts; a request that ignores it keeps running after the view
+  // is gone and resolves into nothing.
+  it.each([
+    ["listTasks", (signal: AbortSignal) => apiClient.listTasks({}, signal)],
+    ["getTask", (signal: AbortSignal) => apiClient.getTask("task-1", signal)],
+    ["listProjects", (signal: AbortSignal) => apiClient.listProjects(signal)],
+    ["listTags", (signal: AbortSignal) => apiClient.listTags(signal)],
+    ["getAccount", (signal: AbortSignal) => apiClient.getAccount(signal)],
+    ["getBrainDumpProviders", (signal: AbortSignal) => apiClient.getBrainDumpProviders(signal)],
+    ["getBrainDump", (signal: AbortSignal) => apiClient.getBrainDump("op-1", signal)]
+  ])("forwards the caller's abort signal on %s", async (_name, call) => {
+    fetchMock.mockResolvedValue(response({ items: [], counts_by_state: {} }));
+    const controller = new AbortController();
+
+    await call(controller.signal);
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.signal).toBe(controller.signal);
+  });
+
+  // The backend deduplicates a retried write by its Idempotency-Key. A write
+  // that drops the header turns a retry into a second task, project or tag.
+  it.each([
+    ["createProject", () => apiClient.createProject({ name: "Launch" }, "key-1"), "POST", "/api/projects"],
+    [
+      "updateProject",
+      () => apiClient.updateProject("project-1", { name: "Launch", expected_revision: 2 }, "key-2"),
+      "PATCH",
+      "/api/projects/project-1"
+    ],
+    [
+      "archiveProject",
+      () => apiClient.archiveProject("project-1", 3, "key-3"),
+      "POST",
+      "/api/projects/project-1/archive"
+    ],
+    ["createTag", () => apiClient.createTag({ name: "calls" }, "key-4"), "POST", "/api/tags"],
+    [
+      "updateTag",
+      () => apiClient.updateTag("tag-1", { name: "calls", expected_revision: 1 }, "key-5"),
+      "PATCH",
+      "/api/tags/tag-1"
+    ],
+    [
+      "deleteTag",
+      () => apiClient.deleteTag("tag-1", 4, "key-6"),
+      "DELETE",
+      "/api/tags/tag-1?expected_revision=4"
+    ],
+    [
+      "startBrainDump",
+      () => apiClient.startBrainDump({ mode: "voice" } as never, "key-7"),
+      "POST",
+      "/api/brain-dump-operations"
+    ],
+    [
+      "appendBrainDumpTranscript",
+      () => apiClient.appendBrainDumpTranscript("op-1", { text: "hi" } as never, "key-8"),
+      "POST",
+      "/api/brain-dump-operations/op-1/transcript"
+    ],
+    [
+      "sealBrainDump",
+      () =>
+        apiClient.sealBrainDump(
+          "op-1",
+          { expected_revision: 1, expected_chunks: 2, manifest_hash: "hash" },
+          "key-9"
+        ),
+      "POST",
+      "/api/brain-dump-operations/op-1/seal"
+    ],
+    [
+      "updateBrainDumpProposal",
+      () => apiClient.updateBrainDumpProposal("op-1", "proposal-1", { expected_revision: 1 }, "key-10"),
+      "PATCH",
+      "/api/brain-dump-operations/op-1/proposals/proposal-1"
+    ],
+    [
+      "commandBrainDump",
+      () => apiClient.commandBrainDump("op-1", "commit", 2, "key-11"),
+      "POST",
+      "/api/brain-dump-operations/op-1/commit"
+    ]
+  ])("sends %s with its method, path and idempotency key", async (_name, call, method, url) => {
+    fetchMock.mockResolvedValue(response({ id: "created" }));
+
+    await call();
+
+    const [requestUrl, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(requestUrl).toBe(url);
+    expect(init.method).toBe(method);
+    expect(new Headers(init.headers).get("Idempotency-Key")).toMatch(/^key-\d+$/);
+  });
+
+  it("carries the expected revision of the write it is guarding", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(response({ id: "project-1" })));
+
+    await apiClient.archiveProject("project-1", 7, "key-archive");
+    expect(JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body))).toEqual({
+      expected_revision: 7
+    });
+
+    fetchMock.mockClear();
+    await apiClient.commandBrainDump("op-1", "cancel", 9, "key-cancel");
+    expect(JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body))).toEqual({
+      expected_revision: 9
+    });
+  });
+
+  it("uploads an audio chunk as raw bytes rather than JSON", async () => {
+    fetchMock.mockResolvedValue(response({ id: "op-1" }));
+    const audio = new Uint8Array([4, 5, 6]).buffer;
+
+    await apiClient.uploadBrainDumpAudio("op-1", 3, audio, "sha", "audio/webm");
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/brain-dump-operations/op-1/audio/3");
+    expect(init.method).toBe("PUT");
+    expect(init.body).toBe(audio);
+    expect(new Headers(init.headers).get("Content-Type")).toBe("audio/webm");
+  });
+
   it("falls back to a generic message when the failed response has no status text", async () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ detail: "boom" }), {
