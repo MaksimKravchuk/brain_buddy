@@ -9,10 +9,25 @@ before writing expo-audio / expo-file-system code — do not trust memory.
 
 ```bash
 npm run typecheck     # tsc --noEmit — must stay clean
+npm run lint          # eslint — every eslint-config-expo rule is on; do not turn any off
 npm test              # jest unit tests
+npm test -- --coverage  # also what the coverage floor is measured from
 npm run integration   # real client vs disposable local backend (needs backend pip deps)
+npm run mutation      # report-only Stryker campaign (ADR-0013 scope)
 npx expo export --platform ios   # Metro bundle integrity check
 ```
+
+## Testing
+
+Unit tests run against a fake backend installed over `global.fetch`
+(`src/test/fakeBackend.ts`) and the real `SessionProvider`, React Query client
+and screens — no product module is ever mocked. Only device boundaries are:
+the recorder, the file system, crypto, navigation and safe-area insets, each
+stubbed in `jest.setup.js` with a stand-in under `src/test/` that records what
+the product code asked it to do.
+
+`mobile/coverage-floor.json` may only ratchet upward; CI checks a branch that
+edits it against the base branch's copy.
 
 ## Non-negotiable contracts
 

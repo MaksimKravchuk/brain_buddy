@@ -104,6 +104,73 @@ jobs:
           echo "mutmut could not finish; raw evidence was uploaded for diagnosis." >&2
           exit 1
 
+  mobile-deterministic-core-mutation:
+    name: Mobile deterministic core mutation evidence
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: mobile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          # Expo SDK 57 requires Node.js 22.13.x or newer.
+          node-version: "22.13.1"
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Scope is the mobile deterministic core configured in
+      # mobile/stryker.config.json, per ADR-0013:
+      # src/braindump/machine.ts, src/braindump/manifest.ts,
+      # src/braindump/uploader.ts, src/braindump/waveform.ts,
+      # src/lifecycle/guards.ts, and src/config/serverUrl.ts.
+      # React components, screens, and the device boundaries they drive are
+      # not part of this campaign.
+      - name: Run mobile deterministic-core mutation campaign
+        id: mutation
+        continue-on-error: true
+        run: |
+          rm -rf mutation-artifacts .stryker-tmp
+          npx stryker run
+
+      - name: Summarize the mobile campaign
+        if: always()
+        run: |
+          mkdir -p mutation-artifacts
+          python3 ../scripts/summarize_stryker_report.py \
+            --report mutation-artifacts/mutation-report.json \
+            --summary mutation-artifacts/mobile-mutation-summary.txt \
+            --survivors mutation-artifacts/mobile-mutation-survivors.txt \
+            || echo "stryker produced no report" > mutation-artifacts/mobile-mutation-summary.txt
+          {
+            echo "### Mobile deterministic-core mutation campaign (report-only)"
+            echo '```'
+            cat mutation-artifacts/mobile-mutation-summary.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload mobile mutation summary and survivors
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mobile-mutation-summary-and-survivors
+          path: mobile/mutation-artifacts
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Fail on mutation runner infrastructure errors
+        if: steps.mutation.outcome == 'failure'
+        run: |
+          echo "stryker could not finish; evidence was uploaded for diagnosis." >&2
+          exit 1
+
   mutation-allure-report:
     name: Mutation Allure evidence report
     runs-on: ubuntu-latest

@@ -45,9 +45,16 @@ make integration-mobile   # boots a disposable test backend (deterministic AI pr
                           #   auth → tasks/transitions/409 → projects/tags →
                           #   brain-dump seal protocol (text fixture + multi-chunk WAV)
 make build-mobile         # expo export --platform ios (Metro bundle integrity)
+make lint-mobile          # eslint, with every eslint-config-expo rule enforced
+make mutation-mobile      # report-only Stryker campaign over the deterministic core
 ```
 
 `integration-mobile` needs the backend Python deps (`make install-backend`).
+
+`test-mobile` also enforces `mobile/coverage-floor.json`, which may only ratchet
+upward. `mutation-mobile` is report-only and scoped by ADR-0013 — see
+`docs/decisions/0013-mobile-deterministic-core-mutation-scope.md` for what is
+mutated, what is not, and what promoting it to a blocking gate would require.
 
 ## Architecture
 

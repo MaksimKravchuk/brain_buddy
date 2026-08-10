@@ -1,5 +1,5 @@
 .PHONY: install-backend install-frontend dev-backend dev-frontend lint-backend lint-frontend test-backend ci-backend test-frontend test-e2e build-frontend ci-frontend validate-ci check-specs install-mobile typecheck-mobile test-mobile integration-mobile build-mobile ci-mobile \
-	verify-all verify-backend verify-frontend verify-mobile typecheck-frontend lint-mobile format-backend format-check-backend mutation-backend
+	verify-all verify-backend verify-frontend verify-mobile typecheck-frontend lint-mobile format-backend format-check-backend mutation-backend mutation-mobile
 
 install-backend:
 	cd backend && python -m pip install -e .[dev]
@@ -72,6 +72,7 @@ validate-ci:
 	python3 -m unittest scripts/test_validate_allure_taxonomy.py -v
 	python3 -m unittest scripts/test_validate_coverage_floor.py -v
 	python3 -m unittest scripts/test_mutation_gate.py -v
+	python3 -m unittest scripts/test_summarize_stryker_report.py -v
 	python3 -m unittest scripts/test_validate_trunk_delivery.py -v
 	python3 -m unittest scripts/test_submit_to_trunk.py -v
 	python3 -m unittest scripts/test_production_smoke.py -v
@@ -107,6 +108,16 @@ test-mobile:
 	cd mobile && npx jest --coverage
 	python3 scripts/validate_coverage_floor.py --stack mobile --format istanbul-summary \
 		--report mobile/coverage/coverage-summary.json --floor mobile/coverage-floor.json
+
+# Report-only, like mutation-backend: the deterministic-core scope lives in
+# mobile/stryker.config.json and is fixed by ADR-0013.
+mutation-mobile:
+	cd mobile && rm -rf mutation-artifacts .stryker-tmp
+	cd mobile && npx stryker run
+	python3 scripts/summarize_stryker_report.py \
+		--report mobile/mutation-artifacts/mutation-report.json \
+		--summary mobile/mutation-artifacts/mobile-mutation-summary.txt \
+		--survivors mobile/mutation-artifacts/mobile-mutation-survivors.txt
 
 # Boots its own disposable backend (requires backend deps: make install-backend)
 integration-mobile:

@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from mutation_gate import (
+# `scripts/` is not a package and not on sys.path when this runs from the
+# repository root, which is how the Makefile and the docs invoke it.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from mutation_gate import (  # noqa: E402
     load_enforced_scope,
     mutation_score,
     rewrite_only_mutate,

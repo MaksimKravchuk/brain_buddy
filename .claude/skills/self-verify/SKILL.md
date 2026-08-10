@@ -72,12 +72,24 @@ Watch mode while iterating: `cd frontend && npm run test:watch`
 
 ```bash
 make typecheck-mobile     # tsc --noEmit
-make lint-mobile          # expo lint
-make test-mobile          # jest
+make lint-mobile          # eslint, every eslint-config-expo rule enforced
+make test-mobile          # jest + the coverage floor
 make integration-mobile   # real api client vs a disposable local backend
 make build-mobile         # expo export --platform ios
 make ci-mobile            # all of the above
+make mutation-mobile      # report-only, NOT part of ci-mobile (~5 min)
 ```
+
+Floors, in `mobile/coverage-floor.json` and enforced by
+`scripts/validate_coverage_floor.py`: **statements ≥ 94%, branches ≥ 88%,
+functions ≥ 95%, lines ≥ 94%**. The floor may only ratchet upward, and CI
+checks a branch that edits it against the base branch's copy.
+
+`make mutation-mobile` runs the ADR-0013 deterministic-core campaign
+(`src/braindump/{machine,manifest,uploader,waveform}.ts`,
+`src/lifecycle/guards.ts`, `src/config/serverUrl.ts`). It is report-only and
+does not gate merge; the last recorded score is 99.35% with two documented
+non-behavioral survivors.
 
 `make ci-mobile` includes `integration-mobile`. It did not always — a
 locally-green agent could still fail CI — so do not substitute an older

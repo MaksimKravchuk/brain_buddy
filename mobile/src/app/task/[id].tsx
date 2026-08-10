@@ -1,6 +1,6 @@
 import { useLocalSearchParams } from "expo-router";
 import { Calendar, Check, Flag } from "lucide-react-native";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -34,6 +34,7 @@ import { StatePicker } from "@/features/tasks/StatePicker";
 import { useClassificationNames } from "@/features/tasks/useClassificationNames";
 import { availableTransitions, buildTransition } from "@/lifecycle/guards";
 import { colors, fonts, radii, space, type as typeScale } from "@/theme/tokens";
+import { useServerDraft } from "@/utils/useServerDraft";
 
 const STATE_LABELS: Record<string, string> = {
   inbox: "Inbox",
@@ -109,11 +110,15 @@ export default function TaskDetailScreen() {
 
   const task = query.data;
 
-  const [title, setTitle] = useState("");
-  const [details, setDetails] = useState("");
+  // Drafts follow the server copy until the user types, and follow it again on
+  // every fresh revision — including after a 409 refetch.
+  const revision = task ? `${task.id}:${task.revision}` : "";
+  const [title, setTitle] = useServerDraft(task?.title ?? "", revision);
+  const [details, setDetails] = useServerDraft(task?.details ?? "", revision);
+  const [dueDraft, setDueDraft] = useServerDraft(task?.due_date ?? "", revision);
+  const [waitingDraft, setWaitingDraft] = useServerDraft(task?.waiting_for ?? "", revision);
+
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [dueDraft, setDueDraft] = useState("");
-  const [waitingDraft, setWaitingDraft] = useState("");
   const [subtaskDraft, setSubtaskDraft] = useState("");
   const [commentDraft, setCommentDraft] = useState("");
   const [dueVisible, setDueVisible] = useState(false);
@@ -123,19 +128,6 @@ export default function TaskDetailScreen() {
   const [moveWaitingFor, setMoveWaitingFor] = useState("");
   const [moveGuardError, setMoveGuardError] = useState<string | null>(null);
   const [reopenVisible, setReopenVisible] = useState(false);
-
-  // Sync drafts from the server copy whenever a fresh revision arrives —
-  // including after a 409 refetch (edits in progress are the user's to redo
-  // deliberately; we never silently overwrite the server).
-  useEffect(() => {
-    if (task) {
-      setTitle(task.title);
-      setDetails(task.details ?? "");
-      setDueDraft(task.due_date ?? "");
-      setWaitingDraft(task.waiting_for ?? "");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task?.id, task?.revision]);
 
   const transitions = useMemo(() => (task ? availableTransitions(task) : null), [task]);
 

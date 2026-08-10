@@ -29,8 +29,9 @@ export function chunkSha256Hex(bytes: Uint8Array): string {
  */
 export function manifestHash(chunks: BrainDumpAudioChunkMeta[], expectedChunks: number): string {
   const ordered = chunks
+    // `filter` already returns a fresh array, so sorting in place here cannot
+    // reach the caller's.
     .filter((chunk) => chunk.chunk_number < expectedChunks)
-    .slice()
     .sort((a, b) => a.chunk_number - b.chunk_number)
     .map((chunk) => ({
       chunk_number: chunk.chunk_number,

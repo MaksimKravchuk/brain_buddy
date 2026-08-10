@@ -37,6 +37,23 @@ MUTATION_EVIDENCE = (
     "retention-days: 30",
 )
 
+# ADR-0013. Named here as well as in mobile/stryker.config.json so a narrowed
+# allow-list has to change two files, one of which CI reads back.
+MOBILE_MUTATION_SCOPE = (
+    "src/braindump/machine.ts",
+    "src/braindump/manifest.ts",
+    "src/braindump/uploader.ts",
+    "src/braindump/waveform.ts",
+    "src/lifecycle/guards.ts",
+    "src/config/serverUrl.ts",
+)
+
+MOBILE_MUTATION_EVIDENCE = (
+    "mobile-mutation-summary.txt",
+    "mobile-mutation-survivors.txt",
+    "name: mobile-mutation-summary-and-survivors",
+)
+
 FRONTEND_CI_REQUIREMENTS = (
     ("frontend lint step", "npm run lint"),
     ("frontend coverage test step", "npm run test:coverage"),
@@ -477,10 +494,15 @@ def validate_mutation_workflow(workflow: Path) -> int:
         errors.append("mutation workflow must remain report-only until a blocking gate is approved")
     if "mutmut run" not in workflow_text or "mutmut results" not in workflow_text:
         errors.append("mutation workflow must run mutmut and save its results")
+    if "stryker run" not in workflow_text:
+        errors.append("mutation workflow must run the mobile stryker campaign")
     for path in MUTATION_SCOPE:
         if path not in workflow_text:
             errors.append(f"mutation workflow is missing deterministic-core scope: {path}")
-    for evidence in MUTATION_EVIDENCE:
+    for path in MOBILE_MUTATION_SCOPE:
+        if path not in workflow_text:
+            errors.append(f"mutation workflow is missing mobile scope: {path}")
+    for evidence in MUTATION_EVIDENCE + MOBILE_MUTATION_EVIDENCE:
         if evidence not in workflow_text:
             errors.append(f"mutation workflow is missing evidence artifact: {evidence}")
 

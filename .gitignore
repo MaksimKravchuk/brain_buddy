@@ -32,6 +32,9 @@ coverage/
 /backend/mutation-allure-results/
 /backend/mutation-allure-results.previous.*/
 /frontend/allure-results/
+/mobile/mutation-artifacts/
+/mobile/.stryker-tmp/
+/mobile/reports/
 /allure-report/
 *.log
 

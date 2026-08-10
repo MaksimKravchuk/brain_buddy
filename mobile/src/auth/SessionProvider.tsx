@@ -4,14 +4,18 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type PropsWithChildren,
 } from "react";
 
-import { ApiError, createApiClient, type ApiClient } from "@/api/client";
+import { createApiClient, type ApiClient } from "@/api/client";
 import type { MeResponse } from "@/api/types";
-import { DEFAULT_SERVER_URL, loadServerUrl, saveServerUrl } from "@/config/serverUrl";
+import {
+  currentServerUrl,
+  DEFAULT_SERVER_URL,
+  loadServerUrl,
+  saveServerUrl,
+} from "@/config/serverUrl";
 
 export type SessionStatus = "loading" | "signed-out" | "signed-in";
 
@@ -34,14 +38,15 @@ const SessionContext = createContext<SessionContextValue | null>(null);
 export function SessionProvider({ children }: PropsWithChildren) {
   const [status, setStatus] = useState<SessionStatus>("loading");
   const [me, setMe] = useState<MeResponse | null>(null);
+  // Mirrors the device setting for rendering. The api client does not read it
+  // from here — it asks `config/serverUrl`, which owns the live value — so the
+  // client can be built once without a ref synced during render.
   const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
-  const serverUrlRef = useRef(serverUrl);
-  serverUrlRef.current = serverUrl;
 
   const api = useMemo(
     () =>
       createApiClient({
-        getBaseUrl: () => serverUrlRef.current,
+        getBaseUrl: currentServerUrl,
         onUnauthorized: () => {
           setMe(null);
           setStatus("signed-out");
@@ -55,13 +60,11 @@ export function SessionProvider({ children }: PropsWithChildren) {
       const profile = await api.me();
       setMe(profile);
       setStatus("signed-in");
-    } catch (error) {
+    } catch {
+      // Both an unauthenticated response and a network failure (offline / cold
+      // start) land on sign-in, which shows the reachable-server state honestly.
       setMe(null);
       setStatus("signed-out");
-      if (!(error instanceof ApiError)) {
-        // Network failure (offline / cold start): still land on sign-in,
-        // which shows the reachable-server state honestly.
-      }
     }
   }, [api]);
 
@@ -73,7 +76,6 @@ export function SessionProvider({ children }: PropsWithChildren) {
         return;
       }
       setServerUrl(stored);
-      serverUrlRef.current = stored;
       await probe();
     })();
     return () => {
@@ -115,7 +117,6 @@ export function SessionProvider({ children }: PropsWithChildren) {
 
   const updateServerUrl = useCallback(async (url: string) => {
     const normalized = await saveServerUrl(url);
-    serverUrlRef.current = normalized;
     setServerUrl(normalized);
   }, []);
 

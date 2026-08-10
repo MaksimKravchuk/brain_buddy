@@ -858,6 +858,51 @@ jobs:
         self.assertIn("report-only", completed.stderr)
         self.assertIn("mutation-summary", completed.stderr)
 
+    def test_mutation_workflow_requires_the_mobile_campaign_and_its_scope(self) -> None:
+        real = (REPO_ROOT / ".github" / "workflows" / "mutation-quality.yml").read_text(
+            encoding="utf-8"
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "mutation.yml"
+            # Drop the mobile campaign but keep the backend one intact.
+            workflow.write_text(
+                real.replace("npx stryker run", "echo skipped").replace(
+                    "src/lifecycle/guards.ts", "src/lifecycle/nothing.ts"
+                ),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("mutation-workflow", "--workflow", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("stryker", completed.stderr)
+        self.assertIn("src/lifecycle/guards.ts", completed.stderr)
+
+    def test_mutation_workflow_requires_the_mobile_evidence_artifacts(self) -> None:
+        real = (REPO_ROOT / ".github" / "workflows" / "mutation-quality.yml").read_text(
+            encoding="utf-8"
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "mutation.yml"
+            workflow.write_text(
+                real.replace("mobile-mutation-survivors.txt", "nowhere.txt"),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("mutation-workflow", "--workflow", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("mobile-mutation-survivors.txt", completed.stderr)
+
+    def test_the_real_mutation_workflow_passes_validation(self) -> None:
+        workflow = REPO_ROOT / ".github" / "workflows" / "mutation-quality.yml"
+
+        completed = self.run_validator("mutation-workflow", "--workflow", str(workflow))
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
     def test_mutation_evidence_is_explicitly_informational_not_a_product_test(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

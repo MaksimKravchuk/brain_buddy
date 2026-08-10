@@ -58,11 +58,18 @@ docker compose down --volumes
 ```bash
 make install-mobile        # npm install in mobile/
 make typecheck-mobile      # tsc --noEmit
-make test-mobile           # jest unit tests
+make lint-mobile           # eslint (every eslint-config-expo rule is enforced)
+make test-mobile           # jest unit tests + the mobile coverage floor
 make integration-mobile    # real api client vs disposable local backend (needs install-backend)
 make build-mobile          # expo export --platform ios (Metro bundle check)
+make mutation-mobile       # report-only Stryker campaign (ADR-0013 scope, ~5 min)
 cd mobile && npx expo start   # run on an iPhone via Expo Go
 ```
+
+Mobile unit tests run the real screens, hooks and api client against a fake
+backend installed over `global.fetch` (`mobile/src/test/fakeBackend.ts`); only
+device boundaries are stubbed, in `mobile/jest.setup.js`. `mutation-mobile` is
+not part of `ci-mobile`.
 
 See `mobile/README.md` for the device runbook and `mobile/AGENTS.md` for the
 wire-protocol contracts the client must keep (chunk hashing, manifest hash,
