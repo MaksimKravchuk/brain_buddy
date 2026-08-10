@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Pressable,
   ScrollView,
@@ -10,6 +10,7 @@ import {
 
 import { useAgentConnections, useConfirmAgentHandoff, usePreviewAgentHandoff } from "@/api/hooks";
 import type {
+  AgentConnectionResponse,
   AgentContextItem,
   AgentManifestResponse,
   AgentRunResponse,
@@ -32,6 +33,53 @@ interface HandoffSheetProps {
   onDispatched: (run: AgentRunResponse) => void;
 }
 
+interface PreviewMaterial {
+  visible: boolean;
+  openSession: number;
+  task: Pick<TaskResponse, "id" | "revision" | "title" | "details">;
+  projectName: string | null;
+  tagNames: string[];
+  sourceItems: AgentContextItem[];
+  connectionId: string | null;
+  connection: AgentConnectionResponse | null;
+  includeDetails: boolean;
+  items: AgentContextItem[];
+}
+
+/** Canonical, secret-free projection of every value that can affect review or dispatch safety. */
+function previewInputSnapshot(material: PreviewMaterial): string {
+  const connection = material.connection;
+  return JSON.stringify([
+    [material.visible, material.openSession],
+    [material.task.id, material.task.revision, material.task.title, material.task.details],
+    [material.projectName, material.tagNames, material.sourceItems],
+    connection
+      ? [
+          connection.id,
+          connection.name,
+          connection.endpoint_url,
+          connection.auth_header_name,
+          connection.status,
+          connection.stale,
+          connection.ready_for_handoff,
+          [
+            connection.capabilities.progress,
+            connection.capabilities.reply,
+            connection.capabilities.cancel,
+          ],
+          connection.last_test_error_code,
+          connection.last_contact_at,
+          connection.last_tested_at,
+          connection.stale_after_seconds,
+          connection.revision,
+        ]
+      : material.connectionId
+        ? [material.connectionId, "missing"]
+        : null,
+    [material.connectionId, material.includeDetails, material.items],
+  ]);
+}
+
 /**
  * Review-then-confirm hand-off. The manifest the server returns is the single
  * source of truth for what leaves Brain Buddy: every value shown below comes
@@ -51,76 +99,162 @@ export function HandoffSheet({
   const preview = usePreviewAgentHandoff(task.id);
   const confirm = useConfirmAgentHandoff(task.id);
 
+  const initialContextItems = buildContextCandidates(task, { projectName, tagNames });
+  const contextSourceSnapshot = JSON.stringify([task.id, projectName, tagNames, initialContextItems]);
   const [connectionId, setConnectionId] = useState<string | null>(null);
-  const [includeDetails, setIncludeDetails] = useState(true);
-  const [contextItems, setContextItems] = useState<AgentContextItem[]>([]);
+  const [includeDetails, setIncludeDetails] = useState(() => Boolean(task.details?.trim()));
+  const [contextSelection, setContextSelection] = useState(() => ({
+    sourceSnapshot: contextSourceSnapshot,
+    items: initialContextItems,
+  }));
   const [manifest, setManifest] = useState<AgentManifestResponse | null>(null);
+  const [manifestSnapshot, setManifestSnapshot] = useState<string | null>(null);
+  const [previewPending, setPreviewPending] = useState(false);
+  const [previewError, setPreviewError] = useState<unknown>(null);
   const [password, setPassword] = useState("");
   const [rereviewNotice, setRereviewNotice] = useState<string | null>(null);
+  const [previewRequestNonce, setPreviewRequestNonce] = useState(0);
+  const previewGeneration = useRef(0);
+  const visibility = useRef({ visible, openSession: visible ? 1 : 0 });
+  if (visibility.current.visible !== visible) {
+    visibility.current = {
+      visible,
+      openSession: visibility.current.openSession + 1,
+    };
+  }
+
+  const items = connections.data ?? [];
+  const selectedConnection =
+    items.find((connection) => connection.id === connectionId) ?? null;
+  const selectedConnectionGuard = selectedConnection ? canHandOff(selectedConnection) : null;
+  const contextItems =
+    contextSelection.sourceSnapshot === contextSourceSnapshot
+      ? contextSelection.items
+      : initialContextItems;
+  const hasDetails = Boolean(task.details?.trim());
+  const effectiveIncludeDetails = hasDetails && includeDetails;
+  const currentInputSnapshot = previewInputSnapshot({
+    visible,
+    openSession: visibility.current.openSession,
+    task,
+    projectName,
+    tagNames,
+    sourceItems: initialContextItems,
+    connectionId,
+    connection: selectedConnection,
+    includeDetails: effectiveIncludeDetails,
+    items: contextItems,
+  });
+  const currentInputSnapshotRef = useRef(currentInputSnapshot);
+  currentInputSnapshotRef.current = currentInputSnapshot;
+
+  useEffect(() => {
+    if (contextSelection.sourceSnapshot !== contextSourceSnapshot) {
+      setContextSelection({ sourceSnapshot: contextSourceSnapshot, items: initialContextItems });
+    }
+    if (!hasDetails && includeDetails) {
+      setIncludeDetails(false);
+    }
+  }, [
+    contextSourceSnapshot,
+    contextSelection.sourceSnapshot,
+    hasDetails,
+    includeDetails,
+    initialContextItems,
+  ]);
+
+  useEffect(() => {
+    const generation = ++previewGeneration.current;
+    const snapshot = currentInputSnapshot;
+    setManifest(null);
+    setManifestSnapshot(null);
+    setPreviewError(null);
+    setPreviewPending(false);
+
+    if (
+      !visible ||
+      !connectionId ||
+      !selectedConnection ||
+      !selectedConnectionGuard?.ok
+    ) {
+      return;
+    }
+
+    setPreviewPending(true);
+    void preview
+      .mutateAsync({
+        connection_id: connectionId,
+        include_details: effectiveIncludeDetails,
+        context_items: contextItems,
+      })
+      .then((fresh) => {
+        if (
+          generation === previewGeneration.current &&
+          currentInputSnapshotRef.current === snapshot
+        ) {
+          setManifest(fresh);
+          setManifestSnapshot(snapshot);
+          setPreviewPending(false);
+        }
+      })
+      .catch((caught: unknown) => {
+        if (
+          generation === previewGeneration.current &&
+          currentInputSnapshotRef.current === snapshot
+        ) {
+          setManifest(null);
+          setManifestSnapshot(null);
+          setPreviewError(caught);
+          setPreviewPending(false);
+        }
+      });
+    // The canonical snapshot, not object identity, owns preview replacement.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentInputSnapshot, previewRequestNonce]);
 
   useEffect(() => {
     if (visible) {
       preview.reset();
       confirm.reset();
-      setConnectionId(null);
-      setIncludeDetails(Boolean(task.details?.trim()));
-      setContextItems(
-        buildContextCandidates(task, { projectName, tagNames }),
-      );
-      setManifest(null);
       setPassword("");
       setRereviewNotice(null);
     }
+    // Reset only at an open-session boundary; material changes preserve the
+    // user's selected agent while forcing a new exact review above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, task.id, task.revision]);
-
-  const runPreview = useCallback(
-    async (next: { connectionId: string; includeDetails: boolean; items: AgentContextItem[] }) => {
-      try {
-        const fresh = await preview.mutateAsync({
-          connection_id: next.connectionId,
-          include_details: next.includeDetails,
-          context_items: next.items,
-        });
-        setManifest(fresh);
-      } catch {
-        // Surfaced by the preview mutation's own error state below.
-        setManifest(null);
-      }
-    },
-    [preview],
-  );
+  }, [visibility.current.openSession]);
 
   const choose = (id: string) => {
     setConnectionId(id);
     setRereviewNotice(null);
-    void runPreview({ connectionId: id, includeDetails, items: contextItems });
   };
 
   const toggleDetails = () => {
-    const next = !includeDetails;
-    setIncludeDetails(next);
-    if (connectionId) {
-      void runPreview({ connectionId, includeDetails: next, items: contextItems });
-    }
+    setIncludeDetails((current) => !current);
   };
 
   const removeContext = (index: number) => {
-    const next = contextItems.filter((_, position) => position !== index);
-    setContextItems(next);
-    if (connectionId) {
-      void runPreview({ connectionId, includeDetails, items: next });
-    }
+    setContextSelection({
+      sourceSnapshot: contextSourceSnapshot,
+      items: contextItems.filter((_, position) => position !== index),
+    });
   };
 
   const send = () => {
-    if (!connectionId || !manifest) {
+    if (
+      !visible ||
+      !connectionId ||
+      !selectedConnectionGuard?.ok ||
+      !manifest ||
+      previewPending ||
+      manifestSnapshot !== currentInputSnapshot
+    ) {
       return;
     }
     confirm.mutate(
       {
         connection_id: connectionId,
-        include_details: includeDetails,
+        include_details: effectiveIncludeDetails,
         context_items: contextItems,
         manifest_token: manifest.token,
         ...(manifest.reauthentication_required ? { current_password: password } : {}),
@@ -138,17 +272,22 @@ export function HandoffSheet({
               "What would be sent changed since you reviewed it. The review below has been refreshed — read it again before sending.",
             );
             setManifest(null);
-            void runPreview({ connectionId, includeDetails, items: contextItems });
+            setManifestSnapshot(null);
+            setPreviewRequestNonce((nonce) => nonce + 1);
           }
         },
       },
     );
   };
 
-  const items = connections.data ?? [];
-  const hasDetails = Boolean(task.details?.trim());
   const needsPassword = manifest?.reauthentication_required === true;
-  const canSend = Boolean(manifest) && (!needsPassword || password.length > 0);
+  const canSend =
+    visible &&
+    selectedConnectionGuard?.ok === true &&
+    Boolean(manifest) &&
+    !previewPending &&
+    manifestSnapshot === currentInputSnapshot &&
+    (!needsPassword || password.length > 0);
 
   return (
     <Sheet visible={visible} onClose={onClose} title="Hand to agent">
@@ -198,12 +337,12 @@ export function HandoffSheet({
             </View>
           ) : null}
 
-          {preview.isError ? <ErrorBanner error={preview.error} /> : null}
+          {previewError ? <ErrorBanner error={previewError} /> : null}
           {confirm.isError && !manifestRejectionReason(confirm.error) ? (
             <ErrorBanner error={confirm.error} />
           ) : null}
 
-          {connectionId && !manifest && preview.isPending ? (
+          {connectionId && !manifest && previewPending ? (
             <BBText variant="caption" color={colors.fg5}>
               Building the review…
             </BBText>
