@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from mutation_gate import (
+# `python3 -m unittest scripts/test_mutation_gate.py` — the form `validate-ci`
+# uses — puts the repository root on sys.path, not `scripts/`, so the sibling
+# import below raised ModuleNotFoundError. The suite passed under pytest, which
+# prepends the test file's own directory, and no CI job ran it, so the breakage
+# was invisible from both sides.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from mutation_gate import (  # noqa: E402
     load_enforced_scope,
     mutation_score,
     rewrite_only_mutate,
