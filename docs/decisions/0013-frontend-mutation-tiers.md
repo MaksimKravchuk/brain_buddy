@@ -59,7 +59,7 @@ an unchanged allow-list. The frontend campaign has run locally, not nightly, so
 the first half of that precondition cannot be satisfied yet by construction.
 
 Measured locally on 2026-08-10, over the scopes exactly as configured above.
-The campaign instruments 1,238 mutants and takes about 15 minutes:
+The campaign instruments 1,227 mutants and takes about 15 minutes:
 
 | module | score | killed / checked | tier |
 |---|---|---|---|
@@ -68,12 +68,12 @@ The campaign instruments 1,238 mutants and takes about 15 minutes:
 | `src/utils/error.ts` | 97.69% | 127 / 130 | enforced |
 | `src/api/auth.ts` | 96.83% | 61 / 63 | enforced |
 | `src/utils/telemetry.ts` | 96.30% | 26 / 27 | enforced |
+| `src/features/tasks/smartAdd.ts` | 96.23% | 536 / 557 | observed |
 | `src/api/taskHooks.ts` | 93.51% | 72 / 77 | observed |
 | `src/api/account.ts` | 93.33% | 28 / 30 | observed |
-| `src/features/tasks/smartAdd.ts` | 92.96% | 528 / 568 | observed |
 | `src/features/brain-dump/brainDumpNavigation.ts` | 91.67% | 11 / 12 | observed |
 | **enforced tier** | **98.37%** | **542 / 551** | |
-| **observed tier** | **95.40%** | **1181 / 1238** | |
+| **observed tier** | **96.90%** | **1189 / 1227** | |
 
 The starting point for the same scopes, before this work, was 84.82% enforced
 and 85.27% observed. What moved it was not more coverage — every one of these
@@ -83,12 +83,54 @@ duration is a subtraction, which idempotency key and HTTP verb each write
 carries, whether an abort signal is forwarded, whether the auth store's logout
 also ends the server session, and how Smart Add ranks a suggestion.
 
-`smartAdd.ts` is the one module that did not clear the bar. It went from 82.90%
-to 92.96%, and its 40 remaining survivors are concentrated in the Unicode
-character-class regexes and in guards that no reachable input can falsify. It
-stays observed, as ADR-0011 kept the task module observed at 68.3%: a tier that
-starts blocking before it is calibrated creates pressure to weaken the scope
-rather than to write assertions.
+`smartAdd.ts` was the one module that did not clear the bar, at 92.96% with 40
+survivors. Working that backlog took it to **96.23%**, and the three remedies
+below split it cleanly: 11 survivors were killable by assertion, 8 lived in code
+no reachable input could construct, and 21 are equivalent.
+
+The 11 assertions were not obscure. The suggestion cap of eight is written into
+003-FR-004 and into the grammar contract, and deleting `.slice(0, 8)` was
+invisible to every test. `name-char` is defined as Unicode Letter, Number, Mark
+or `_`, and the suite only ever used ASCII letters. Nothing anywhere asserted
+that canonical matching folds case *downwards* -- `"ß".toLocaleUpperCase()` is
+`"SS"`, so folding upwards would silently resolve `#ß` onto an existing `ss`
+tag, and every other comparison normalises both sides, so no test could see it.
+
+`smartAdd.ts` **stays observed** even so. It now satisfies the score half of
+ADR-0004's precondition and nothing else: the promotion rule asks for two
+consecutive successful *scheduled* runs, and the nightly campaign that produces
+them had not yet run when this was measured. The five modules already on the
+enforced list were placed there when the tier was created and no nightly existed
+at all; that bootstrap is spent, and repeating it for a sixth module one day
+before real evidence arrives would be an exception, not a precedent.
+
+### The 21 equivalent survivors in `smartAdd.ts`
+
+Recorded so the next reader does not re-derive them. Each was checked by hand,
+and they fall into five families:
+
+| n | family | why no test can kill it |
+|---|---|---|
+| 4 | `^...$` anchors on `nameCharPattern` and `leftBoundaryPattern` | both regexes only ever test a single character, so the anchors cannot change a verdict |
+| 7 | loop bounds in the four scanners | an out-of-range index reads `undefined`, which fails the character test that follows, so the bound never decides anything |
+| 4 | injected values nothing reads back | a sparse `new Array()` indexes identically, and a mutated `kind` is only ever compared against `"tag"` |
+| 2 | exact-match rank 0 versus prefix rank 1 | an exact match is always alphabetically first among prefix matches, so collapsing the ranks cannot reorder a list |
+| 2 | `+` quantifiers on already-collapsed runs | whitespace is collapsed to single spaces before the second `replace`, so one-or-more and exactly-one match the same input |
+
+The first family is the one worth naming, because it is a live temptation. The
+anchors are provably redundant and deleting them would score four more kills for
+nothing. They stay: weakening an assertion to move a number is the failure
+ADR-0011 recorded, and a score bought that way measures nothing. The same logic
+retired one deletion made while working this backlog -- `scoreEntity`'s
+empty-query rank was reachable and covered, not unconstructible, so removing it
+to claim two mutants was moving the number, and it was restored.
+
+The third remedy applies to code that *cannot be constructed*, which is a
+narrower claim than *cannot be observed*. Eight survivors here met it: three
+dead `?? ""` fallbacks guarding reads that cannot be out of range -- two of which
+Stryker reported as `NoCoverage`, which is the tool proving no test reaches the
+fallback at all -- and a `refKey` parameter only ever passed `"tag"`, whose
+project branch nothing could select.
 
 **React component trees are in neither tier.** A mutant inside a component is as
 likely to be caught by a DOM snapshot as by an assertion about behaviour, so the
@@ -115,7 +157,7 @@ wrong:
 
 - The frontend's deterministic logic becomes measurable on the same terms as the
   backend's, and survivors become an itemised backlog instead of an unknown.
-- The nightly campaign gets longer. The observed scope is 1,238 mutants and
+- The nightly campaign gets longer. The observed scope is 1,227 mutants and
   takes about 15 minutes on four cores; it runs on the existing nightly schedule
   alongside the backend campaign and blocks nothing.
 - Coverage can no longer be quietly narrowed:
