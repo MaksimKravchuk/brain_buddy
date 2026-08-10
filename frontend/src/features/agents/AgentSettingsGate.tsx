@@ -15,7 +15,7 @@ const emptyCounts: TaskCounts = { inbox: 0, next: 0, waiting: 0, someday: 0 };
  * read as "not turned on", never as a broken page. Fails closed — a missing flag
  * is OFF (see `hasFeatureFlag`).
  */
-export function AgentSettingsGate(): JSX.Element {
+export function AgentSettingsGate(): React.JSX.Element {
   const user = useAuthStore((state) => state.user);
 
   if (hasFeatureFlag(user, "external_agent_relay")) {
@@ -25,7 +25,7 @@ export function AgentSettingsGate(): JSX.Element {
   return <AgentRelayOffPage />;
 }
 
-function AgentRelayOffPage(): JSX.Element {
+function AgentRelayOffPage(): React.JSX.Element {
   const countsQuery = useTaskList({ state: "next", limit: 1 });
   const projectsQuery = useProjects();
   const tagsQuery = useTags();

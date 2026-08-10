@@ -17,7 +17,7 @@ export function SectionCard({
   description: string;
   children: ReactNode;
   tone?: "default" | "danger";
-}): JSX.Element {
+}): React.JSX.Element {
   const border = tone === "danger" ? "border-rose-200" : "border-slate-200";
   return (
     <section className={`rounded-2xl border ${border} bg-white p-5 shadow-soft`}>
@@ -47,7 +47,7 @@ export function Field({
   placeholder?: string;
   /** Rendered under the input and wired to it, for policy the server enforces. */
   hint?: string;
-}): JSX.Element {
+}): React.JSX.Element {
   const hintId = hint ? `${name}-hint` : undefined;
   // The hint sits outside the <label> deliberately: inside, it would join the
   // field's accessible name and every `getByLabelText`/`getByLabel` lookup — in
@@ -82,7 +82,7 @@ export function Feedback({
 }: {
   error: string | null;
   success: string | null;
-}): JSX.Element | null {
+}): React.JSX.Element | null {
   if (error) {
     return (
       <p role="alert" className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">

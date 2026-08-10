@@ -63,7 +63,7 @@ function questionIdentity(run: AgentRunResponse): string {
  * disclosed capabilities: an unsupported reply or cancel is stated as
  * unsupported rather than rendered as a button that would fail.
  */
-function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): JSX.Element {
+function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): React.JSX.Element {
   const queryClient = useQueryClient();
   const [answer, setAnswer] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -308,7 +308,7 @@ export function AgentRunSection({
   runs: AgentRunResponse[];
   isLoading: boolean;
   error: unknown;
-}): JSX.Element | null {
+}): React.JSX.Element | null {
   if (error && runs.length === 0) {
     return (
       <div className="flex flex-col gap-2 border-t border-slate-200 px-4 py-3">

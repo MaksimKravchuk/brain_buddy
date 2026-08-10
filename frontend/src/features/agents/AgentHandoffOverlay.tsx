@@ -46,7 +46,7 @@ export function AgentHandoffOverlay({
   taskTitle: string;
   onClose: () => void;
   onDispatched: (run: AgentRunResponse) => void;
-}): JSX.Element {
+}): React.JSX.Element {
   const titleId = useId();
   const reviewId = useId();
   const queryClient = useQueryClient();
@@ -344,7 +344,7 @@ export function AgentHandoffOverlay({
   );
 }
 
-function ReviewRow({ label, children }: { label: string; children: React.ReactNode }): JSX.Element {
+function ReviewRow({ label, children }: { label: string; children: React.ReactNode }): React.JSX.Element {
   return (
     <div className="flex flex-col gap-1">
       <p className="text-xs font-medium text-slate-600">{label}</p>
