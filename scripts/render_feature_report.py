@@ -37,19 +37,35 @@ def read(path: Path) -> str | None:
     return path.read_text(encoding="utf-8") if path.is_file() else None
 
 
-def latest_review_summary() -> tuple[Path, dict[str, Any]] | None:
-    """The most recent campaign summary, by mtime."""
+def latest_review_summary(feature_dir: Path) -> tuple[Path, dict[str, Any]] | None:
+    """The most recent campaign summary **for this feature**.
+
+    Runs live in one flat directory shared by every feature, so picking the
+    globally newest summary would splice another feature's verdict, findings
+    and product decisions into this report — the precise misreport this module
+    exists to prevent. `preflight` records `feature_dir` in
+    `planning-context.json`; a run whose context is missing or names a
+    different feature is not this feature's evidence and is skipped.
+    """
     if not RUNS_DIR.is_dir():
         return None
+
+    wanted = feature_dir.resolve()
     candidates = sorted(
         RUNS_DIR.glob("*/planning-review-summary.json"),
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )
     for candidate in candidates:
+        context_path = candidate.parent / "planning-context.json"
+        if not context_path.is_file():
+            continue
         try:
+            context = json.loads(context_path.read_text(encoding="utf-8"))
+            if Path(str(context.get("feature_dir", ""))).resolve() != wanted:
+                continue
             return candidate, json.loads(candidate.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError, ValueError):
             continue
     return None
 
@@ -90,13 +106,14 @@ def extract_section(text: str, heading: str) -> str | None:
     return rest[: end if end != -1 else None].strip() or None
 
 
-def section_review() -> str:
-    found = latest_review_summary()
+def section_review(feature_dir: Path) -> str:
+    found = latest_review_summary(feature_dir)
     if found is None:
         return (
             "### 5. What review found\n\n"
             f"{ABSENT} — no `planning-review-summary.json` under "
-            "`.specify/workflows/runs/`. The spec was not put through the "
+            "`.specify/workflows/runs/` whose `planning-context.json` names "
+            f"`{feature_dir.name}`. This feature was not put through the "
             "five-lens review gate.\n"
         )
     path, summary = found
@@ -228,7 +245,7 @@ def render(feature_dir: Path) -> str:
             "Planning did not complete.",
         ),
         "",
-        section_review(),
+        section_review(feature_dir),
         "",
         section_simple(
             "6. Task decomposition", feature_dir, "tasks.md", "No task breakdown exists."

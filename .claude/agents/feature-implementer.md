@@ -69,8 +69,12 @@ helpers — `backend/tests/allure_taxonomy.py`,
 `frontend/src/test/allureTaxonomy.ts`, `frontend/tests/allure.fixtures.ts` —
 and override only for narrower labels.
 
-Name tests so the acceptance auditor can find them: include the `FR-###` or
-`SC-###` the test covers in the test name or its Allure story.
+Name tests so the acceptance auditor can find them: include the
+**feature-qualified** requirement id — `006-FR-001`, or `006_FR_001` inside a
+Python function name — in the test name or its Allure story. The `NNN-` prefix
+is required: every feature restarts at `FR-001`, so
+`scripts/check_requirement_coverage.py` rejects a bare id to stop one feature's
+tests from satisfying another's gate.
 
 ## Conventions
 
@@ -100,7 +104,7 @@ commits:  <sha list>
 TASKS: <n> done / <n> total
   incomplete: <ids + one-line why>
 
-TESTS ADDED: <n>  (<file::name> → covers FR-###)
+TESTS ADDED: <n>  (<file::name> → covers NNN-FR-###)
 
 SELF-VERIFY
   backend  <pass|fail>   frontend <pass|fail>   mobile <pass|fail>

@@ -52,27 +52,61 @@ class RequirementCoverageTests(unittest.TestCase):
                 ["FR-001", "FR-002", "SC-001"],
             )
 
-    def test_id_named_in_a_test_counts_as_covered(self) -> None:
+    def test_feature_qualified_id_counts_as_covered(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root, feature_dir = self.build(
                 tmp,
                 backend_test=(
-                    "def test_sign_in_FR_001():\n    pass\n"
-                    "def test_covers_FR-001_and_FR-002():\n    pass\n"
+                    "def test_006_FR_001_signs_in():\n    pass\n"
+                    'allure.story("006-FR-002 signs out")\n'
                 ),
             )
             result = self.module.coverage(root, feature_dir)
             self.assertTrue(result["FR-001"])
             self.assertTrue(result["FR-002"])
 
+    def test_bare_id_does_not_count_as_covered(self) -> None:
+        """Regression: bare ids let another feature's tests satisfy this gate.
+
+        Every feature restarts numbering at FR-001, so an unqualified match
+        against the whole test tree would score a feature green off unrelated
+        tests while its own requirements went untested.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root, feature_dir = self.build(
+                tmp,
+                backend_test=(
+                    "def test_sign_in_FR_001():\n    pass\n"
+                    'allure.story("FR-002 signs out")\n'
+                ),
+            )
+            result = self.module.coverage(root, feature_dir)
+            self.assertEqual(result["FR-001"], [])
+            self.assertEqual(result["FR-002"], [])
+
+    def test_another_features_qualified_id_does_not_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root, feature_dir = self.build(
+                tmp, backend_test="def test_003_FR_001_other_feature():\n    pass\n"
+            )
+            result = self.module.coverage(root, feature_dir)
+            self.assertEqual(result["FR-001"], [])
+
     def test_unnamed_requirement_is_uncovered(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root, feature_dir = self.build(
-                tmp, backend_test="def test_covers_FR-001():\n    pass\n"
+                tmp, backend_test="def test_covers_006_FR_001():\n    pass\n"
             )
             result = self.module.coverage(root, feature_dir)
             self.assertEqual(result["SC-001"], [])
             self.assertEqual(result["FR-002"], [])
+
+    def test_malformed_feature_directory_name_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "not-numbered"
+            bad.mkdir()
+            with self.assertRaises(SystemExit):
+                self.module.feature_number(bad)
 
     def test_non_test_files_are_not_scanned(self) -> None:
         """A requirement id in product code is not coverage."""
@@ -80,7 +114,9 @@ class RequirementCoverageTests(unittest.TestCase):
             root, feature_dir = self.build(tmp, backend_test="")
             source = root / "backend" / "app"
             source.mkdir(parents=True)
-            (source / "auth.py").write_text("# implements FR-001\n", encoding="utf-8")
+            (source / "auth.py").write_text(
+                "# implements 006-FR-001\n", encoding="utf-8"
+            )
             result = self.module.coverage(root, feature_dir)
             self.assertEqual(result["FR-001"], [])
 

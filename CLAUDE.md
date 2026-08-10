@@ -114,6 +114,10 @@ read — no upstream skill is forked. Front door for an abstract ask:
 /speckit-report      the end-to-end report for the human                 [human]
 ```
 
+Tests carry the feature-qualified requirement id (`006-FR-001`, or
+`006_FR_001` in a Python name) so `scripts/check_requirement_coverage.py` can
+trace them; a bare `FR-001` is rejected because every feature restarts at 001.
+
 Subagents live in `.claude/agents/`: `design-architect`,
 `security-privacy-reviewer`, `ux-a11y-reviewer`, `feature-implementer`,
 `delivery-verifier`, `acceptance-auditor`. The two reviewer agent files are the

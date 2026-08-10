@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -58,6 +59,32 @@ class PreservedOverrideTests(unittest.TestCase):
             (fake_root / ".specify").mkdir()
             failures = self.module.check(fake_root)
             self.assertTrue(all("MISSING" in item for item in failures))
+
+    def test_every_hooked_command_exists_in_both_agent_trees(self) -> None:
+        """`.specify/extensions.yml` is shared by both agent trees.
+
+        Regression: registering a mandatory hook whose skill exists only under
+        `.claude/skills/` made a Codex run emit EXECUTE_COMMAND for a command
+        that tree cannot invoke, stopping the pipeline dead at that stage.
+        """
+        extensions = ROOT / ".specify" / "extensions.yml"
+        self.assertTrue(extensions.is_file(), "extensions.yml is missing")
+
+        commands = re.findall(
+            r"^\s*command:\s*([\w.]+)\s*$",
+            extensions.read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        self.assertTrue(commands, "extensions.yml registers no hook commands")
+
+        missing: list[str] = []
+        for command in commands:
+            skill = command.replace(".", "-")
+            for tree in (".claude/skills", ".agents/skills"):
+                if not (ROOT / tree / skill / "SKILL.md").is_file():
+                    missing.append(f"{tree}/{skill}/SKILL.md (hook `{command}`)")
+
+        self.assertEqual(missing, [], f"hooked skills missing from a tree: {missing}")
 
     def test_implement_skill_is_not_disabled(self) -> None:
         """Regression: the implement skill used to refuse to run at all.

@@ -118,9 +118,21 @@ step. Use the central helpers and override only for narrower labels:
 - `frontend/src/test/allureTaxonomy.ts`
 - `frontend/tests/allure.fixtures.ts`
 
-Name tests so acceptance can trace them: include the `FR-###` or `SC-###` a
-test covers in its name or Allure story. `scripts/check_requirement_coverage.py`
-fails when a requirement has no test emitting its id.
+Name tests so acceptance can trace them: include the **feature-qualified**
+requirement id in the test name or Allure story — `006-FR-001`, or
+`006_FR_001` inside a Python function name:
+
+```python
+def test_006_FR_001_signs_the_user_in(): ...
+```
+```ts
+allure.story("006-SC-002 sign-in completes under two seconds");
+```
+
+The `NNN-` prefix is load-bearing. Every feature restarts numbering at
+`FR-001`, so a bare id would let another feature's tests satisfy this feature's
+gate. `scripts/check_requirement_coverage.py` accepts only the qualified form
+and fails when a requirement has no test naming it.
 
 ## Ports and isolation for parallel agents
 
