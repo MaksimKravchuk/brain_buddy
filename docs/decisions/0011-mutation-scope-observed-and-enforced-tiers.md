@@ -60,14 +60,25 @@ Mutation scope is split into two tiers with different obligations.
 
 - the ADR-0004 Reality Tree modules only, for now.
 
-The gate itself is **not yet implemented**. ADR-0004 specifies its five
-requirements and records that its calibration precondition is met — the nightly
-has now completed successfully on twelve consecutive scheduled runs against an
-unchanged allow-list — so building it is the next step, not an open question.
-Until it exists, the enforced tier defines what is *eligible* to gate rather
-than what does. This ADR is about which modules belong in which tier; conflating
-that with whether the gate has been built is what this paragraph exists to
-prevent.
+The gate is **built but not connected**, and its precondition is **not met**.
+`scripts/mutation_gate.py` implements ADR-0004's requirements; nothing in CI
+calls it.
+
+ADR-0004 asks for two things before promotion: two consecutive successful
+scheduled runs, and a recorded score of at least 95% for the unchanged
+allow-list. The first is comfortably satisfied — twelve consecutive nightlies.
+The second was asserted here in an earlier revision on the strength of the
+first, which does not follow: a green nightly means the campaign completed, not
+that it scored well, and the campaign is report-only precisely so a low score
+cannot fail it.
+
+Measured directly on 2026-08-10 over this exact list: **1280 killed, 70
+survived of 1350 mutants — 94.81%**. Below the bar. Three more killed mutants
+would clear it (1283/1350 = 95.04%).
+
+So the enforced tier currently defines what is *eligible* to gate, not what
+does. Connecting the gate is gated on killing those survivors, not on writing
+more code.
 
 A module enters the observed scope as soon as it has mutation-compatible tests
 worth measuring. It moves to the enforced scope only once it independently
