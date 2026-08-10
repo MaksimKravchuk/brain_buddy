@@ -8,9 +8,9 @@ description: How BrainBuddy tests are written and judged — Allure taxonomy, th
 ## Running them
 
 ```bash
-make test-backend        # pytest + 95% branch coverage + taxonomy validation
-make test-frontend       # vitest --coverage + taxonomy validation
-make test-mobile         # cd mobile && npx jest
+make test-backend        # pytest + coverage floor + taxonomy validation
+make test-frontend       # vitest --coverage + coverage floor + taxonomy validation
+make test-mobile         # jest --coverage + coverage floor
 ```
 
 While iterating on the backend, skip the coverage and Allure plugins — the
@@ -20,10 +20,10 @@ default `addopts` in `backend/pyproject.toml` make a single-file run slow:
 cd backend && python3 -m pytest -c mutmut_pytest.ini -q tests/test_task_owner_isolation.py
 ```
 
-`mutmut_pytest.ini` is just `addopts = -ra`, and it is also what the mutation
-campaign uses (`pytest_add_cli_args` in `[tool.mutmut]`). Run the full
-`make test-backend` before you call the work done — the 95% branch gate and the
-taxonomy gate only exist there.
+`mutmut_pytest.ini` sets `addopts = -ra` and `testpaths = tests`, and it is also
+what the mutation campaign uses (`pytest_add_cli_args` in `[tool.mutmut]`). Run
+the full `make test-backend` before you call the work done — the coverage-floor
+gate and the taxonomy gate only exist there.
 
 ## Allure taxonomy: edit the module map, not the tests
 
@@ -218,8 +218,9 @@ decorative.
 ## Frontend Vitest
 
 Specs live in `frontend/src/**/__tests__/*.test.ts(x)`; `frontend/vite.config.ts`
-sets `environment: "jsdom"`, `globals: true`, and 95% statement/branch/function/
-line coverage thresholds (istanbul).
+sets `environment: "jsdom"`, `globals: true`, and istanbul coverage. The number
+that gates is the measured floor in `frontend/coverage-floor.json`, which may
+only ratchet upward; `make test-frontend` checks it.
 
 ```bash
 cd frontend && npm test            # vitest run

@@ -56,9 +56,18 @@ Mutation scope is split into two tiers with different obligations.
 - `app/modules/tasks/repository.py`;
 - `app/services/auth_service.py`.
 
-**Enforced scope** — additionally gates pull requests:
+**Enforced scope** — the tier that is allowed to gate pull requests:
 
 - the ADR-0004 Reality Tree modules only, for now.
+
+The gate itself is **not yet implemented**. ADR-0004 specifies its five
+requirements and records that its calibration precondition is met — the nightly
+has now completed successfully on twelve consecutive scheduled runs against an
+unchanged allow-list — so building it is the next step, not an open question.
+Until it exists, the enforced tier defines what is *eligible* to gate rather
+than what does. This ADR is about which modules belong in which tier; conflating
+that with whether the gate has been built is what this paragraph exists to
+prevent.
 
 A module enters the observed scope as soon as it has mutation-compatible tests
 worth measuring. It moves to the enforced scope only once it independently
