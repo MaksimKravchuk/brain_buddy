@@ -265,6 +265,24 @@ INVARIANTS: tuple[Invariant, ...] = (
         "Only an absent runtime may be substituted. Retrying a failed "
         "reviewer on another oracle launders a defect into a clean verdict.",
     ),
+    # ADR-0013 trades blocking for visibility: a degraded campaign may reach
+    # `approved` because the human will see the degradation. After that trade
+    # the seeing happens here, so the renderer became load-bearing for the
+    # decision not to block. Four invariants assert `summarize` *writes* the
+    # facts; none asserted anything *reads* them, and the cheapest future edit
+    # — keep the write, drop the render — restores the exact defect in a diff
+    # nobody would flag.
+    #
+    # An invariant rather than a hashed file, for the same reason as ci.yml:
+    # this file changes for ordinary reporting reasons.
+    MustMatch(
+        "scripts/render_feature_report.py",
+        "the report renders panel provenance",
+        r'"degraded_lenses"(?:.*?)"oracle_unknown_lenses"(?:.*?)"stale_reviews"',
+        "A degradation written to the summary and never rendered is invisible "
+        "to the human whose reading is the whole justification for letting a "
+        "degraded campaign pass.",
+    ),
     MustMatch(
         "scripts/spec_kit_planning_review.py",
         "high-risk handoffs must state panel provenance",

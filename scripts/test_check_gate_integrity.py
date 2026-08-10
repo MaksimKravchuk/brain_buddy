@@ -263,6 +263,16 @@ class InvariantEnforcementTests(unittest.TestCase):
             )
             self.assertIn("not routed to a fallback", report)
 
+    def test_dropping_provenance_from_the_report_is_caught(self) -> None:
+        """Keep the write, drop the render: the trade ADR-0013 made, undone."""
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._assert_invariant_fires(
+                tmp,
+                "scripts/render_feature_report.py",
+                lambda text: text.replace('"stale_reviews"', '"unused_key"'),
+            )
+            self.assertIn("renders panel provenance", report)
+
     def test_dropping_the_integrity_guard_from_ci_is_caught(self) -> None:
         """The Makefile target is only enforcement if CI invokes it."""
         with tempfile.TemporaryDirectory() as tmp:

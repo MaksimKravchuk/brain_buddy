@@ -294,6 +294,15 @@ The renderer now surfaces degradation, provenance, the histograms, stale
 reviews and the architect's next action, with tests asserting the rendered
 text; a clean panel still renders exactly as before.
 
+That fix created its own gap, caught in the same review. Four invariants
+assert `summarize()` *writes* these facts and none asserted anything *reads*
+them — but once the gate trades blocking for visibility, the renderer is
+load-bearing for the trade, and the cheapest edit that undoes this decision is
+to keep the write and drop the render. An invariant now requires
+`section_review()` to read all three provenance keys, with a mutation test.
+Like the CI ones it is an invariant without a hash entry: the file changes for
+ordinary reporting reasons.
+
 ### Four of the five new invariants were satisfiable by code that does not work
 
 The anchored patterns used an unbounded DOTALL `.*?`, which runs to the end of
