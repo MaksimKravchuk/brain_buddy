@@ -65,7 +65,10 @@ class SessionRepository(BaseRepository):
                 continue
             try:
                 session = self.load_model(path, Session)
-            except Exception:  # noqa: BLE001 - corrupt entry must not block revocation
+            # S112: continuing without logging is deliberate here -- a corrupt
+            # entry must not block revocation, and the path is on the auth hot
+            # path where a log line per bad file would be noise.
+            except Exception:  # noqa: BLE001, S112 - corrupt entry must not block revocation
                 continue
             if session.user_id != user_id:
                 continue

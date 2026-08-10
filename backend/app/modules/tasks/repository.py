@@ -644,7 +644,14 @@ class TaskRepository(BaseRepository):
                 "projects",
                 "idempotency_records",
             ):
-                conn.execute(f"DELETE FROM {table} WHERE owner_id = ?", (owner_id,))
+                # noqa justification: `table` is bound by the literal tuple
+                # directly above, never by caller input. The owner filter is
+                # parameterised. If `table` ever becomes caller-controlled,
+                # this suppression must go.
+                conn.execute(
+                    f"DELETE FROM {table} WHERE owner_id = ?",  # noqa: S608
+                    (owner_id,),
+                )
         for dirname in (
             "tasks",
             "projects",
@@ -663,12 +670,18 @@ class TaskRepository(BaseRepository):
             ).fetchone()[0]
         return (value if value is not None else -1) + 1
 
+    # The three helpers below interpolate `table` into SQL. Every caller passes
+    # a string literal naming one of this module's own tables -- SQLite cannot
+    # parameterise a table name -- and the owner and id filters are always
+    # bound. The suppressions are valid only while `table` stays internal; if a
+    # caller ever forwards request data into it, they must be removed rather
+    # than carried forward.
     def _exists(
         self, conn: sqlite3.Connection, table: str, owner_id: str, record_id: str
     ) -> bool:
         return (
             conn.execute(
-                f"SELECT 1 FROM {table} WHERE owner_id = ? AND id = ?",
+                f"SELECT 1 FROM {table} WHERE owner_id = ? AND id = ?",  # noqa: S608
                 (owner_id, record_id),
             ).fetchone()
             is not None
@@ -685,7 +698,7 @@ class TaskRepository(BaseRepository):
     ) -> ModelT:
         with self._connection() as conn, _sqlite_guard(resource, record_id):
             row = conn.execute(
-                f"SELECT payload FROM {table} WHERE owner_id = ? AND id = ?",
+                f"SELECT payload FROM {table} WHERE owner_id = ? AND id = ?",  # noqa: S608
                 (owner_id, record_id),
             ).fetchone()
         if row is None:
@@ -700,6 +713,7 @@ class TaskRepository(BaseRepository):
     ) -> list[ModelT]:
         with self._connection() as conn, _sqlite_guard(table, owner_id):
             rows = conn.execute(
-                f"SELECT payload FROM {table} WHERE owner_id = ?", (owner_id,)
+                f"SELECT payload FROM {table} WHERE owner_id = ?",  # noqa: S608
+                (owner_id,),
             ).fetchall()
         return [model_cls.model_validate(json.loads(row["payload"])) for row in rows]
