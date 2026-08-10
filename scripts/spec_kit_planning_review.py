@@ -80,10 +80,23 @@ REQUIREMENT_DEFINITION_RE = re.compile(
     r"^\s*[-*]\s*\*\*(FR|SC)-(\d+)\*\*", re.MULTILINE
 )
 UNCHECKED_ITEM_RE = re.compile(r"^\s*[-*]\s*\[ \]", re.MULTILINE)
-ROLE_CONFIGS: dict[str, dict[str, str]] = {
+# Which executable each integration needs on PATH. Resolved before a lens
+# runs, so an absent runtime is a routing decision rather than a crash.
+INTEGRATION_CLI: dict[str, str] = {"codex": "codex", "claude": "claude"}
+
+# The fallback for both codex lenses. Deliberately `sonnet` rather than
+# `opus`: the opus seats belong to lenses carrying their own rubric files, and
+# a fallback should not dilute the lenses that are still running as
+# configured. With only two review-grade Claude tiers any all-Claude panel of
+# five has a majority — the honest response is to report that in
+# `panel_correlated`, not to pick a model that games the metric.
+CODEX_FALLBACK: dict[str, str] = {"integration": "claude", "model": "sonnet"}
+
+ROLE_CONFIGS: dict[str, dict[str, Any]] = {
     "requirements-consistency": {
         "integration": "codex",
         "model": "gpt-5.6-sol",
+        "fallback": CODEX_FALLBACK,
         "focus": (
             "Find contradictions, missing acceptance behavior, unsupported scope, "
             "and mismatches between spec.md and plan.md."
@@ -106,6 +119,7 @@ ROLE_CONFIGS: dict[str, dict[str, str]] = {
     "testability-evidence": {
         "integration": "codex",
         "model": "gpt-5.6-sol",
+        "fallback": CODEX_FALLBACK,
         "focus": (
             "Check that every acceptance outcome has proportionate automated or "
             "operational evidence and that tasks can be grouped into independent lanes."
@@ -315,13 +329,66 @@ def parse_review_output(raw: str) -> dict[str, Any]:
     return parsed
 
 
-def build_review_command(
-    *, role: str, prompt: str, schema_path: Path
-) -> tuple[list[str], dict[str, str]]:
+def resolve_oracle(role: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Choose the runtime that will actually review, and record which one it was.
+
+    Before this, a lens whose CLI was not installed produced no evidence at
+    all: `run_review` raised, no review file was written, and `summarize`
+    counted missing mandatory evidence. Two of five lenses shell out to
+    `codex`, so on a single-runtime machine every campaign returned
+    `escalated` and the gate could never be passed rather than merely being
+    hard to pass.
+
+    The substitution is never silent. What actually ran is stamped onto the
+    review by the harness, and `summarize` reports both which lenses were
+    degraded and whether the effective panel ended up correlated.
+
+    An absent CLI is routed around. A CLI that is present and *fails* is not
+    handled here and still raises — absence is a gap a fallback can fill,
+    failure is a defect in evidence that was produced.
+    """
     try:
         config = ROLE_CONFIGS[role]
     except KeyError as exc:
         raise ReviewError(f"Unknown review role: {role}") from exc
+
+    primary_cli = INTEGRATION_CLI[config["integration"]]
+    if shutil.which(primary_cli) is not None:
+        return config, {
+            "integration": config["integration"],
+            "model": config["model"],
+            "degraded": False,
+        }
+
+    fallback = config.get("fallback")
+    if not isinstance(fallback, dict):
+        raise ReviewError(f"Required reviewer CLI is not installed: {primary_cli}")
+
+    fallback_cli = INTEGRATION_CLI[fallback["integration"]]
+    if shutil.which(fallback_cli) is None:
+        raise ReviewError(
+            f"Neither the {primary_cli} CLI nor its {fallback_cli} fallback is "
+            f"installed for {role}"
+        )
+
+    return {**config, **fallback}, {
+        "integration": fallback["integration"],
+        "model": fallback["model"],
+        "degraded": True,
+        "reason": f"the {primary_cli} CLI is not installed",
+        "configured_integration": config["integration"],
+        "configured_model": config["model"],
+    }
+
+
+def build_review_command(
+    *, role: str, prompt: str, schema_path: Path, config: dict[str, Any] | None = None
+) -> tuple[list[str], dict[str, str]]:
+    if config is None:
+        try:
+            config = ROLE_CONFIGS[role]
+        except KeyError as exc:
+            raise ReviewError(f"Unknown review role: {role}") from exc
 
     env = os.environ.copy()
     integration = config["integration"]
@@ -466,9 +533,10 @@ def run_review(*, root: Path, run_id: str, role: str) -> Path:
 
     schema_path = root / ".specify" / "workflows" / "speckit" / "review.schema.json"
     prompt = build_prompt(role=role, feature_dir=feature_dir, root=root)
-    command, env = build_review_command(role=role, prompt=prompt, schema_path=schema_path)
-    if shutil.which(command[0]) is None:
-        raise ReviewError(f"Required reviewer CLI is not installed: {command[0]}")
+    effective_config, oracle = resolve_oracle(role)
+    command, env = build_review_command(
+        role=role, prompt=prompt, schema_path=schema_path, config=effective_config
+    )
 
     result = subprocess.run(
         command,
@@ -479,9 +547,18 @@ def run_review(*, root: Path, run_id: str, role: str) -> Path:
         timeout=900,
     )
     if result.returncode != 0:
+        # Deliberately not routed to the fallback. A reviewer that ran and
+        # failed produced a defect in evidence, and retrying it on a different
+        # oracle would launder that into a clean verdict from a lens nobody
+        # chose. Only an absent runtime is substituted, and only visibly.
         detail = result.stderr.strip() or result.stdout.strip() or "no diagnostic output"
         raise ReviewError(f"{role} reviewer failed: {detail[-2000:]}")
     review = validate_review(parse_review_output(result.stdout), expected_role=role)
+    # Provenance is stamped by the harness, never by the reviewer.
+    # `validate_review` rebuilds the payload from known keys and discards
+    # anything else, so a model cannot author its own `oracle` block and claim
+    # it ran as configured when it did not.
+    review["oracle"] = oracle
     target = run_dir / "reviews" / f"{role}.json"
     write_json_atomic(target, review)
     return target
@@ -494,15 +571,22 @@ def aggregate_reviews(
     missing_roles: tuple[str, ...] = (),
     human_signoff: bool = False,
     artifacts_changed: bool = False,
+    degraded_roles: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     technical_findings: list[dict[str, Any]] = []
     product_decisions: list[dict[str, Any]] = []
-    reviewers: list[dict[str, str]] = []
+    reviewers: list[dict[str, Any]] = []
     for review in reviews:
         role = str(review["role"])
-        reviewers.append(
-            {"role": role, "verdict": str(review["verdict"]), "summary": str(review["summary"])}
-        )
+        entry: dict[str, Any] = {
+            "role": role,
+            "verdict": str(review["verdict"]),
+            "summary": str(review["summary"]),
+        }
+        oracle = review.get("oracle")
+        if isinstance(oracle, dict):
+            entry["oracle"] = oracle
+        reviewers.append(entry)
         for finding in review.get("findings", []):
             technical_findings.append({"reviewer": role, **finding})
         for decision in review.get("product_decisions", []):
@@ -553,12 +637,26 @@ def aggregate_reviews(
         status = "approved"
         action = "Architect may finalize tasks.md, analyze, and the compact Kanban handoff."
 
+    # Degradation deliberately does not change the status. Blocking on it
+    # would be indistinguishable from the permanent `escalated` the fallback
+    # exists to escape, and a gate nobody can pass is a gate nobody reads. It
+    # must not be invisible either, so it is named in the field a human
+    # actually reads rather than only in machine output.
+    if degraded_roles:
+        action += (
+            f" Panel note: {', '.join(degraded_roles)} ran on a fallback oracle "
+            "because the configured runtime was unavailable. Those lenses are "
+            "less independent than configured; treat their agreement with the "
+            "other Claude lenses as weaker corroboration than it looks."
+        )
+
     return {
         "status": status,
         "risk": risk,
         "reviewers": reviewers,
         "technical_findings": technical_findings,
         "product_decisions": product_decisions,
+        "degraded_reviewers": list(degraded_roles),
         "architect_action": action,
     }
 
@@ -859,9 +957,42 @@ def summarize(*, root: Path, run_id: str) -> Path:
         if not path.is_file():
             missing.append(role)
             continue
-        reviews.append(
-            validate_review(json.loads(path.read_text(encoding="utf-8")), expected_role=role)
-        )
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        review = validate_review(payload, expected_role=role)
+        # `validate_review` rebuilds the payload from known keys, so the
+        # harness-stamped provenance has to be carried across deliberately.
+        # Without this the oracle survives to disk and is then dropped on the
+        # way back in, which would make degradation invisible in exactly the
+        # artifact that exists to report it.
+        if isinstance(payload, dict) and isinstance(payload.get("oracle"), dict):
+            review["oracle"] = payload["oracle"]
+        reviews.append(review)
+
+    degraded: list[str] = []
+    unknown_oracle: list[str] = []
+    oracle_counts: dict[str, int] = {}
+    for review in reviews:
+        oracle = review.get("oracle")
+        # An absent oracle is unknown provenance, not proof the lens ran as
+        # configured. Reporting it as clean would repeat the defect ADR-0012
+        # removed from risk derivation: treating silence as evidence of safety.
+        if not isinstance(oracle, dict):
+            unknown_oracle.append(str(review["role"]))
+            continue
+        if oracle.get("degraded") is True:
+            degraded.append(str(review["role"]))
+        key = f"{oracle.get('integration')}/{oracle.get('model')}"
+        oracle_counts[key] = oracle_counts.get(key, 0) + 1
+
+    # Correlation is a property of the lenses that actually produced evidence.
+    # A strict majority on one oracle means the panel's agreement is worth less
+    # than its size suggests: three lenses on one model are one opinion counted
+    # three times, which is the defect ADR-0012 set out to remove and which a
+    # fallback can silently reintroduce.
+    known_oracles = sum(oracle_counts.values())
+    panel_correlated = bool(oracle_counts) and (
+        max(oracle_counts.values()) > known_oracles // 2
+    )
 
     summary = aggregate_reviews(
         reviews,
@@ -869,11 +1000,16 @@ def summarize(*, root: Path, run_id: str) -> Path:
         missing_roles=tuple(missing),
         human_signoff=human_signoff,
         artifacts_changed=artifacts_changed,
+        degraded_roles=tuple(degraded),
     )
     summary["run_id"] = run_id
     summary["declared_risk"] = declared_risk
     summary["risk_escalated_by_classifier"] = escalated
     summary["missing_reviewers"] = missing
+    summary["degraded_lenses"] = degraded
+    summary["oracle_unknown_lenses"] = unknown_oracle
+    summary["panel_correlated"] = panel_correlated
+    summary["panel_oracles"] = oracle_counts
     summary["human_signoff"] = signoff_record
     summary["artifacts_digest"] = current_digest
     summary["artifacts_changed_since_preflight"] = artifacts_changed

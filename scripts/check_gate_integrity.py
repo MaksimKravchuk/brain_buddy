@@ -205,6 +205,66 @@ INVARIANTS: tuple[Invariant, ...] = (
         "The privacy and UX lenses cover constitution principles I and V. "
         "Removing either leaves a principle with no reviewer.",
     ),
+    # The fallback exists so an absent runtime cannot lock the gate shut. That
+    # is only acceptable while the substitution stays visible: a fallback that
+    # stops recording degradation is a panel silently running on one oracle
+    # while reporting the diversity it was configured with.
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "a fallback oracle is recorded as degraded",
+        r'def resolve_oracle\(.*?"degraded":\s*True',
+        "Substituting a reviewer runtime without marking it degraded hides a "
+        "correlated panel behind a configuration that no longer describes it.",
+    ),
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "the harness stamps reviewer provenance",
+        r'review\["oracle"\]\s*=\s*oracle',
+        "Provenance must be written by the harness. Dropping the stamp leaves "
+        "no record of which runtime produced a verdict.",
+    ),
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "degradation reaches the summary",
+        r'summary\["degraded_lenses"\]\s*=',
+        "A degradation recorded on the review but absent from the summary is "
+        "invisible to every consumer of the gate.",
+    ),
+    # Anchored inside run_review on purpose. An unanchored returncode check
+    # also matches the identical guard in resolve_feature_dir, so removing the
+    # reviewer's own failure path would leave the invariant satisfied by an
+    # unrelated function — a guard that passes while guarding nothing.
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "a failing reviewer is not routed to a fallback",
+        r"def run_review\(.*?if result\.returncode != 0:.*?raise ReviewError",
+        "Only an absent runtime may be substituted. Retrying a failed "
+        "reviewer on another oracle launders a defect into a clean verdict.",
+    ),
+    # The Makefile invariants above assert that `check-specs` runs the guards.
+    # They said nothing about whether anything runs `check-specs`, and the CI
+    # spec-kit job ran only the feature-spec validator — so this guard, its
+    # invariants and the preserved-override check were absent from every build.
+    # An actor could weaken its own gate and watch CI go green. Guarding the
+    # Makefile without guarding the caller is a guard with no reader.
+    #
+    # Deliberately an invariant and not a hashed file: ci.yml changes for
+    # unrelated reasons constantly, and a hash here would spend the manifest's
+    # friction budget on noise instead of on the gate.
+    MustMatch(
+        ".github/workflows/ci.yml",
+        "CI runs the gate-integrity guard",
+        r"python3 scripts/check_gate_integrity\.py",
+        "A guard that never executes in CI protects nothing. The Makefile "
+        "target is only enforcement if something actually invokes it.",
+    ),
+    MustMatch(
+        ".github/workflows/ci.yml",
+        "CI runs the preserved-override guard",
+        r"python3 scripts/check_speckit_manifests\.py",
+        "Preserved Spec Kit overrides can otherwise be reverted by an "
+        "integration upgrade with no build failure.",
+    ),
 )
 
 

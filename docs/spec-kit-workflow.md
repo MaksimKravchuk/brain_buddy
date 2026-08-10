@@ -249,8 +249,17 @@ is fixed. Carry campaign 1's findings forward into campaign 2. After campaign
 founder acceptance with the full record (see below).
 
 **Degraded runs.** Two of the five lenses shell out to the `codex` CLI. Where
-it is absent they cannot run and the campaign returns `escalated`, naming the
-missing lenses. A partial campaign is never reported as a clean one.
+it is absent they fall back to `claude`/`sonnet` rather than failing, because a
+gate that can never be reached is a gate people route around (ADR-0013). The
+substitution is never silent: each review records which oracle actually ran,
+and the summary carries `degraded_lenses`, `panel_correlated` and
+`panel_oracles`. A degraded campaign may reach `approved`, but it cannot look
+undegraded.
+
+A reviewer that is *installed and fails* still raises — absence is a gap a
+fallback can fill, failure is a defect in evidence that was produced. A lens
+that produces no review at all is still missing mandatory evidence and still
+returns `escalated`. A partial campaign is never reported as a clean one.
 
 For Claude Code and Hermes Agent in this repository, Spec Kit is installed as
 skills, so the invocation names use hyphens:

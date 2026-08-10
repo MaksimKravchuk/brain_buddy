@@ -58,14 +58,28 @@ class InvariantEnforcementTests(unittest.TestCase):
         self.module = load_module()
 
     def _fake_root(self, tmp: str) -> Path:
-        """A copy of the repo's guarded files, editable in isolation."""
+        """A copy of every file an invariant reads, editable in isolation.
+
+        Deliberately the union of the guarded files and the invariant paths.
+        Copying only `GUARDED_FILES` would leave any invariant on an unhashed
+        file — the CI ones, for instance — reporting MISSING in every mutation
+        test, so `_assert_invariant_fires` would see a non-empty failure list
+        no matter what the mutation did and stop proving anything.
+        """
         fake = Path(tmp)
-        for relative in self.module.GUARDED_FILES:
+        wanted = set(self.module.GUARDED_FILES)
+        wanted.update(invariant.path for invariant in self.module.INVARIANTS)
+        for relative in sorted(wanted):
             source = ROOT / relative
             target = fake / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(source.read_bytes())
         return fake
+
+    def test_the_fake_root_starts_clean(self) -> None:
+        """The mutation harness must prove the mutation caused the failure."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(self.module.check_invariants(self._fake_root(tmp)), [])
 
     def _assert_invariant_fires(self, tmp: str, relative: str, mutate) -> str:
         fake = self._fake_root(tmp)
@@ -180,6 +194,79 @@ class InvariantEnforcementTests(unittest.TestCase):
                 ),
             )
             self.assertIn("check-specs runs the spec and manifest guards", report)
+
+    def test_dropping_the_degraded_marker_from_the_fallback_is_caught(self) -> None:
+        """A silent substitution is a correlated panel wearing its config."""
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._assert_invariant_fires(
+                tmp,
+                "scripts/spec_kit_planning_review.py",
+                lambda text: text.replace('"degraded": True', '"degraded": False'),
+            )
+            self.assertIn("recorded as degraded", report)
+
+    def test_dropping_the_provenance_stamp_is_caught(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._assert_invariant_fires(
+                tmp,
+                "scripts/spec_kit_planning_review.py",
+                lambda text: text.replace('review["oracle"] = oracle', "pass"),
+            )
+            self.assertIn("stamps reviewer provenance", report)
+
+    def test_dropping_degradation_from_the_summary_is_caught(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._assert_invariant_fires(
+                tmp,
+                "scripts/spec_kit_planning_review.py",
+                lambda text: text.replace(
+                    'summary["degraded_lenses"] = degraded', "pass"
+                ),
+            )
+            self.assertIn("degradation reaches the summary", report)
+
+    def test_routing_a_failed_reviewer_to_a_fallback_is_caught(self) -> None:
+        """Absence may be substituted. Failure may not.
+
+        The mutation removes only run_review's own failure path. An unanchored
+        invariant would still match the identical guard in resolve_feature_dir
+        and pass, which is why the pattern is anchored inside run_review.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._assert_invariant_fires(
+                tmp,
+                "scripts/spec_kit_planning_review.py",
+                lambda text: text.replace(
+                    "    if result.returncode != 0:\n"
+                    "        # Deliberately not routed to the fallback.",
+                    "    if False:\n"
+                    "        # Deliberately not routed to the fallback.",
+                ),
+            )
+            self.assertIn("not routed to a fallback", report)
+
+    def test_dropping_the_integrity_guard_from_ci_is_caught(self) -> None:
+        """The Makefile target is only enforcement if CI invokes it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._assert_invariant_fires(
+                tmp,
+                ".github/workflows/ci.yml",
+                lambda text: text.replace(
+                    "          python3 scripts/check_gate_integrity.py\n", ""
+                ),
+            )
+            self.assertIn("CI runs the gate-integrity guard", report)
+
+    def test_dropping_the_manifest_guard_from_ci_is_caught(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._assert_invariant_fires(
+                tmp,
+                ".github/workflows/ci.yml",
+                lambda text: text.replace(
+                    "          python3 scripts/check_speckit_manifests.py\n", ""
+                ),
+            )
+            self.assertIn("CI runs the preserved-override guard", report)
 
     def test_removing_a_mandatory_lens_is_caught(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
