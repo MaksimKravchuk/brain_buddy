@@ -1211,13 +1211,13 @@ describe("BrainDumpRoute", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Stop & review" }));
 
     const review = await screen.findByRole("main", { name: "Review brain dump proposals" });
-    const titleInput = within(review).getByDisplayValue("Renew car insurance");
+    const titleInput = await within(review).findByDisplayValue("Renew car insurance");
     await userEvent.clear(titleInput);
     await userEvent.type(titleInput, "Renew car insurance before Friday");
     await userEvent.tab();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/proposals/proposal_1"), expect.anything()));
 
-    await userEvent.click(within(review).getByRole("button", { name: "Delete Reply to Anna" }));
+    await userEvent.click(await within(review).findByRole("button", { name: "Delete Reply to Anna" }));
     expect(within(review).queryByText("Reply to Anna")).not.toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/tasks"), expect.anything());
 
@@ -2289,7 +2289,7 @@ describe("BrainDumpRoute", () => {
     renderBrainDump("/brain-dump/brain_dump_no_citation/review");
 
     const review = await screen.findByRole("main", { name: "Review brain dump proposals" });
-    expect(within(review).getByDisplayValue("Book the dentist")).toBeInTheDocument();
+    expect(await within(review).findByDisplayValue("Book the dentist")).toBeInTheDocument();
     expect(within(review).queryByText("Cited from what you said")).not.toBeInTheDocument();
   });
 
