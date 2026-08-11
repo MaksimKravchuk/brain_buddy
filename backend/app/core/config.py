@@ -45,7 +45,18 @@ class AppEnvironment(str, Enum):
 # the backend brain-dump commands and provider discovery, plus the frontend
 # route (which reads the effective flag from ``/api/auth/me``). It ships
 # default OFF and rolls out OFF → INTERNAL → ON like every other flag.
-KNOWN_FEATURE_FLAGS: tuple[str, ...] = ("delivery_canary", "voice_brain_dump")
+#
+# ``mobile_task_classification`` (spec 006, FR-015) gates assigning a project
+# and Tags from the mobile task detail screen. It is purely client-side
+# exposure: no route, service or stored shape changes with it, and the mobile
+# client reads the effective value from ``/api/auth/me`` exactly as the
+# frontend reads ``voice_brain_dump``. Default OFF means the task screen keeps
+# today's presentation until the flag is deliberately turned on.
+KNOWN_FEATURE_FLAGS: tuple[str, ...] = (
+    "delivery_canary",
+    "voice_brain_dump",
+    "mobile_task_classification",
+)
 
 
 class FeatureFlagState(str, Enum):
