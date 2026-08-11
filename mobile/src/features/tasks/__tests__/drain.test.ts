@@ -1,7 +1,7 @@
 /**
  * 006-FR-021 / 006-FR-017 / 006-FR-008 / 006-FR-018 — the drain orchestration.
  *
- * `mobile/` cannot render a component in a test, so a rule that lives inside a
+ * `is now covered by render tests (main added a fake-backend harness after this was written) a component in a test, so a rule that lives inside a
  * `useEffect` has no evidence at all. Everything the drain decides is therefore
  * a pure function over the queue, and this file tests those functions rather
  * than the hook that calls them. The hook's own evidence is typecheck, bundle

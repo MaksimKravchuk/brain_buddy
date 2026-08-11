@@ -1,7 +1,7 @@
 /**
  * Every row of design.md's M-02 and M-03 state tables, asserted as data.
  *
- * `mobile/` has no component-render test library, so `ProjectPicker.tsx` and
+ * `mobile/` is now covered by render tests (main added a fake-backend harness after this was written), so `ProjectPicker.tsx` and
  * `TagPicker.tsx` are evidenced only by typecheck, the Metro bundle and the
  * quickstart's manual steps. Everything they *decide* lives in `pickerState.ts`
  * and is asserted here — which is the only reason those two screens have any

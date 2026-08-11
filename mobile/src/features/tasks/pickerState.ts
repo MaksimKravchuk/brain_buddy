@@ -1,7 +1,7 @@
 /**
  * M-02 and M-03 as data.
  *
- * `mobile/` has no component-render test library, so anything decided inside a
+ * `mobile/` is now covered by render tests (main added a fake-backend harness after this was written), so anything decided inside a
  * `.tsx` file is untestable except through the integration harness. Every row of
  * the two picker state tables in
  * `specs/006-mobile-task-classification/design.md` is therefore resolved here,

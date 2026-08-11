@@ -52,7 +52,7 @@ export interface ConflictSheetProps {
  *
  * Every state this sheet can be in is decided by `buildConflictView`, so the
  * rows of design.md's M-04 table are asserted in `__tests__/sheetState.test.ts`
- * rather than left to a screen no test in `mobile/` can render. What is left
+ * rather than left to a screen is now covered by render tests (main added a fake-backend harness after this was written). What is left
  * here is rendering, and it should stay that way: a decision added below is a
  * decision that leaves the test suite.
  *

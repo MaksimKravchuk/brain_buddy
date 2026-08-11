@@ -57,6 +57,20 @@ export interface TagPickerProps {
  * asserted in `__tests__/pickerState.test.ts`; this file renders and nothing
  * more.
  */
+/** The snapshot plus anything newly attached, first occurrence wins. */
+function mergeRowSource(
+  snapshot: readonly AttachedEntity[],
+  live: readonly AttachedEntity[],
+): AttachedEntity[] {
+  const merged = [...snapshot];
+  for (const entity of live) {
+    if (!merged.some((existing) => existing.id === entity.id)) {
+      merged.push(entity);
+    }
+  }
+  return merged;
+}
+
 export function TagPicker({
   visible,
   onClose,
@@ -83,10 +97,21 @@ export function TagPicker({
 
   // Reset the grace clock when the sheet opens, during render — React's
   // documented pattern for deriving from a prop change.
+  //
+  // `rowSource` is snapshotted at the same moment and is what the rows are
+  // built from, because `attached` is recomputed by the screen from the
+  // *optimistic* value: detach the only Tag on a first-ever offline visit and
+  // the live prop empties, taking the row with it and leaving nothing to tap
+  // to undo. design.md's M-03 promises that detach is undoable without a
+  // connection, and reading the live prop quietly broke that promise. The
+  // pure-module test passed only because it holds `attached` fixed while
+  // `selected` empties — a pairing the wiring never produces.
   const [wasVisible, setWasVisible] = useState(visible);
+  const [rowSource, setRowSource] = useState<readonly AttachedEntity[]>(attached);
   if (wasVisible !== visible) {
     setWasVisible(visible);
     setElapsedMs(0);
+    setRowSource(attached);
   }
 
   useEffect(() => {
@@ -124,7 +149,8 @@ export function TagPicker({
     online,
     query: draft.query,
     elapsedMs,
-    attached,
+    // Union so a Tag attached while the sheet is open still gets a row.
+    attached: mergeRowSource(rowSource, attached),
     selected: draft.selection,
   });
   const busy = draft.create.status === "creating";
