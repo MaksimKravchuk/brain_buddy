@@ -888,10 +888,23 @@ jobs:
   # because E2E already waits on them; restating a transitive edge is exactly
   # what the graph rule rejects. It still does not wait on mobile, which ships
   # in neither image.
+  #
+  # The condition is what makes the diagnostic above actually hold. With a bare
+  # `needs: e2e`, GitHub skips this job the moment E2E fails -- so the separate
+  # required check went missing in precisely the case it exists to explain, and
+  # `full-ci` saw a skipped result on top of the real failure. Spelled out:
+  #   E2E failed   -> run, so `Docker Images` still reports whether the images
+  #                   built when the Playwright journeys are what went red
+  #   E2E skipped  -> skip, because its own gate already decided the services
+  #                   are too broken to be worth building images from
+  #   cancelled    -> skip
+  # This is not path filtering and never hides a check behind the diff, which
+  # is what the job-level `if` ban exists to prevent.
   docker:
     name: Docker Images
     runs-on: ubuntu-latest
     needs: e2e
+    if: ${{ !cancelled() && needs.e2e.result != 'skipped' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -1079,21 +1092,33 @@ jobs:
   # evidence -- without it the aggregate could be generated before mobile
   # finished writing its results, and Playwright's results arrive with `e2e`.
   #
-  # `docker` is here for a different reason: this report is the run's closing
-  # artifact, and the pull request comment points at it. Generated while another
-  # job can still fail, that link can be published before the run is decided.
-  # Listing docker makes "last" a property of the graph rather than a
-  # coincidence of how long two parallel jobs happen to take. It costs the tail
-  # roughly 20 seconds, docker now being a cache hit rather than a full build.
+  # Everything else is here for a different reason: this report is the run's
+  # closing artifact and the pull request comment points at it, so it must not
+  # be generated while any job can still change the verdict.
+  #
+  # That is why the list is EVERY job but `full-ci` rather than only the four
+  # that produce results. Naming just the evidence producers, or only those plus
+  # `docker`, left "last" true by coincidence: `mutation-head` carries
+  # timeout-minutes: 90, so on a change that touches the enforced backend scope
+  # mutmut runs far longer than E2E and Docker together, and the report would
+  # publish its link while `mutation-gate` was still deciding. The rule is
+  # checked by `scripts/validate_ci_artifacts.py workflow`, so a new job cannot
+  # quietly start finishing after the report that claims to summarise it.
   allure-report:
     name: Allure Report
     runs-on: ubuntu-latest
     needs:
+      - workflow-lint
+      - changes
+      - spec-kit
       - backend
       - frontend
       - mobile
-      - e2e
+      - mutation-base
+      - mutation-head
+      - mutation-gate
       - docker
+      - e2e
     if: always()
     permissions:
       contents: read

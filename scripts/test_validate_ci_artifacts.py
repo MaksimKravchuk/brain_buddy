@@ -727,6 +727,16 @@ jobs:
     steps:
       - run: echo build
   allure-report:
+    needs:
+      - changes
+      - backend
+      - mobile
+      - frontend
+      - e2e
+      - docker
+      - mutation-base
+      - mutation-head
+      - mutation-gate
     steps:
       - run: python3 scripts/validate_allure_taxonomy.py
       - run: npx allure generate ../allure-results -o ../allure-report
@@ -1415,8 +1425,11 @@ jobs:
         self.assertIn("summarize-mutmut", completed.stderr)
 
     def test_workflow_rejects_a_mutation_gate_hidden_behind_a_job_level_if(self) -> None:
-        # A job-level `if` makes the gate report 'skipped', which is exactly the
-        # result ADR-0008 requires Full CI to treat as a failure.
+        # Gating a job on the changed-stack filter makes it report 'skipped',
+        # which is exactly the result ADR-0008 requires Full CI to treat as a
+        # failure. A condition that only propagates another job's outcome (as
+        # `docker` uses, so it still reports when E2E fails) is a different
+        # thing and stays allowed.
         conformant = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
         )
@@ -1434,7 +1447,55 @@ jobs:
             completed = self.run_validator("workflow", "--ci", str(workflow))
 
         self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("mutation-gate job uses a job-level 'if'", completed.stderr)
+        self.assertIn(
+            "mutation-gate job gates itself on the changed-stack filter", completed.stderr
+        )
+
+    def test_workflow_accepts_an_outcome_propagating_job_level_if(self) -> None:
+        # docker carries one so the required check still reports when E2E fails
+        # instead of vanishing in the case it exists to explain.
+        conformant = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("!cancelled() && needs.e2e.result != 'skipped'", conformant)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "ci.yml"
+            workflow.write_text(conformant, encoding="utf-8")
+
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_workflow_rejects_a_report_that_can_outrun_a_job(self) -> None:
+        # The report publishes the run's closing link. mutation-head runs up to
+        # 90 minutes, so dropping it here would let the link be posted while the
+        # mutation gate is still deciding.
+        conformant = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        racing = conformant.replace(
+            "      - mutation-gate\n      - docker\n      - e2e\n    if: always()",
+            "      - docker\n      - e2e\n    if: always()",
+            1,
+        )
+        self.assertNotEqual(racing, conformant, "fixture edit did not apply")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "ci.yml"
+            workflow.write_text(racing, encoding="utf-8")
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("allure-report does not wait for every other job", completed.stderr)
+        self.assertIn("mutation-gate", completed.stderr)
 
 
 class CoverageSuppressionTests(unittest.TestCase):

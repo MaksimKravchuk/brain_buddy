@@ -526,10 +526,26 @@ def _path_filter_errors(workflow_text: str) -> list[str]:
         block = _job_block(workflow_text, job)
         if block is None:
             errors.append(f"missing {job} job")
-        elif re.search(r"^    if:", block, flags=re.MULTILINE):
+            continue
+        job_if = re.search(r"^    if:(?P<expr>.*)$", block, flags=re.MULTILINE)
+        if not job_if:
+            continue
+        # The hazard this guards is a job that silently does not run because the
+        # DIFF said so. That reports 'skipped', which ADR-0008 requires Full CI
+        # to treat as a failure, so a candidate must never be able to land on a
+        # check that quietly did not execute.
+        #
+        # A condition that only propagates another job's outcome is not that.
+        # `docker` needs one: with a bare `needs: e2e` it was skipped the moment
+        # E2E failed, so the required check went missing in exactly the case it
+        # exists to explain. Banning every job-level `if` cost that check its
+        # purpose; what stays banned is reading the path filter here.
+        expression = job_if.group("expr")
+        if "needs.changes.outputs" in expression or "env.RUN" in expression:
             errors.append(
-                f"{job} job uses a job-level 'if'; path filtering must gate "
-                "steps so the job still reports success rather than skipped"
+                f"{job} job gates itself on the changed-stack filter with a "
+                "job-level 'if'; path filtering must gate steps so the job "
+                "still reports success rather than skipped"
             )
     return errors
 
@@ -625,6 +641,7 @@ LANE_DEPENDENCY_LIMITS = {
     "mutation-gate": {"changes", "mutation-base", "mutation-head"},
 }
 FULL_CI_JOB = "full-ci"
+ALLURE_REPORT_JOB = "allure-report"
 
 
 def _job_graph_errors(workflow_text: str) -> list[str]:
@@ -653,13 +670,34 @@ def _job_graph_errors(workflow_text: str) -> list[str]:
         errors.append(f"missing {FULL_CI_JOB} job")
         return errors
 
-    expected = {job for job in _job_names(workflow_text) if job != FULL_CI_JOB}
+    all_jobs = set(_job_names(workflow_text))
+    expected = all_jobs - {FULL_CI_JOB}
     missing = sorted(expected - full_ci_needs)
     if missing:
         errors.append(
             f"{FULL_CI_JOB} does not require every job: {missing}. With a flat job "
             "graph this gate is the only thing that makes a job required, so a job "
             "missing here is not checked at all."
+        )
+
+    # The aggregate report is the run's closing artifact and the pull request
+    # comment points at it, so it must not be generated while any job can still
+    # change the verdict. Naming only the jobs that produce results left that
+    # true by coincidence: mutation-head runs up to 90 minutes, so on a change
+    # touching the enforced backend scope the report would publish its link long
+    # before mutation-gate decided.
+    report_needs = _job_needs(workflow_text, ALLURE_REPORT_JOB)
+    if report_needs is None:
+        errors.append(f"missing {ALLURE_REPORT_JOB} job")
+        return errors
+    report_expected = all_jobs - {FULL_CI_JOB, ALLURE_REPORT_JOB}
+    report_missing = sorted(report_expected - report_needs)
+    if report_missing:
+        errors.append(
+            f"{ALLURE_REPORT_JOB} does not wait for every other job: {report_missing}. "
+            "It publishes the run's closing report and its pull request link, so a job "
+            "that can still be running when it starts makes that report describe a run "
+            "nobody has finished."
         )
     return errors
 
