@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>M-01b Task detail — queued change</title><style>
+:root{
+  --bb-brand-primary:#0ea5e9; --bb-brand-primary-soft:rgba(14,165,233,.1);
+  --bb-surface-base:#f8fafc; --bb-surface-sunken:#f1f5f9; --bb-surface-raised:#fff;
+  --bb-fg-1:#0f172a; --bb-fg-4:#475569; --bb-fg-5:#64748b; --bb-fg-6:#94a3b8;
+  --bb-border:#e2e8f0; --bb-border-hover:#cbd5e1;
+  --bb-warning:#d97706; --bb-warning-bg:#fffbeb; --bb-warning-border:#fde68a; --bb-warning-fg:#92400e;
+  --bb-danger:#e11d48; --bb-danger-bg:#fff1f2; --bb-danger-border:#fecdd3; --bb-danger-fg:#9f1239;
+  --bb-tag-bg:#f1f5f9; --bb-tag-fg:#475569;
+  --bb-radius-sm:6px; --bb-radius-md:8px; --bb-radius-lg:16px; --bb-radius-xl:20px; --bb-radius-full:999px;
+  --bb-shadow-raised:0 1px 2px rgba(15,23,42,.05),0 8px 24px -12px rgba(15,23,42,.12);
+  --bb-font-sans:"Inter",ui-sans-serif,system-ui,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--bb-font-sans);background:#e2e8f0;padding:24px;color:var(--bb-fg-1);
+  display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start}
+.phone{width:390px;height:851px;background:var(--bb-surface-base);border-radius:32px;
+  overflow:hidden;position:relative;box-shadow:var(--bb-shadow-raised);display:flex;flex-direction:column}
+.caption{width:390px;font-size:12px;color:#334155;margin-bottom:-14px;font-weight:600}
+.status{height:44px;display:flex;align-items:center;justify-content:space-between;
+  padding:0 20px;font-size:12px;font-weight:600;color:var(--bb-fg-4)}
+.nav{height:52px;display:flex;align-items:center;gap:12px;padding:0 12px;
+  border-bottom:1px solid var(--bb-border);background:var(--bb-surface-raised)}
+.nav button{min-width:44px;min-height:44px;border:0;background:none;font-size:15px;
+  color:var(--bb-brand-primary);cursor:pointer}
+.nav h1{font-size:16px;font-weight:600;flex:1;text-align:center}
+.body{flex:1;overflow-y:auto;padding:16px}
+.title{font-size:20px;font-weight:600;line-height:1.3;margin-bottom:4px}
+.row{background:var(--bb-surface-raised);border:1px solid var(--bb-border);
+  border-radius:var(--bb-radius-md);padding:12px 14px;margin-bottom:10px;
+  display:flex;align-items:center;gap:10px;min-height:52px}
+.row .label{font-size:11px;text-transform:uppercase;letter-spacing:.04em;
+  color:var(--bb-fg-5);font-weight:600;width:64px;flex-shrink:0}
+.row .value{flex:1;font-size:15px}
+.row .chev{color:var(--bb-fg-6);font-size:18px}
+.placeholder{color:var(--bb-fg-6)}
+.pill{display:inline-block;background:var(--bb-tag-bg);color:var(--bb-tag-fg);
+  border-radius:var(--bb-radius-full);padding:4px 10px;font-size:13px;margin:2px 4px 2px 0}
+.pill.project{background:var(--bb-brand-primary-soft);color:#0369a1}
+.pending{display:inline-flex;align-items:center;gap:5px;background:var(--bb-warning-bg);
+  color:var(--bb-warning-fg);border:1px solid var(--bb-warning-border);
+  border-radius:var(--bb-radius-full);padding:2px 9px;font-size:11px;font-weight:600}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--bb-warning)}
+.banner{border-radius:var(--bb-radius-md);padding:10px 12px;font-size:13px;
+  line-height:1.45;margin-bottom:12px;border:1px solid}
+.banner.warn{background:var(--bb-warning-bg);border-color:var(--bb-warning-border);color:var(--bb-warning-fg)}
+.banner.info{background:#f1f5f9;border-color:var(--bb-border);color:var(--bb-fg-4)}
+.search{width:100%;min-height:44px;border:1px solid var(--bb-border);
+  border-radius:var(--bb-radius-md);padding:10px 12px;font-size:15px;
+  font-family:inherit;margin-bottom:12px;background:var(--bb-surface-raised)}
+.opt{background:var(--bb-surface-raised);border:1px solid var(--bb-border);
+  border-radius:var(--bb-radius-md);padding:0 14px;min-height:48px;display:flex;
+  align-items:center;gap:10px;margin-bottom:8px;font-size:15px}
+.opt .check{margin-left:auto;color:var(--bb-brand-primary);font-weight:700}
+.opt.create{border-style:dashed;color:var(--bb-brand-primary);font-weight:600}
+.opt.disabled{opacity:.55;border-style:dashed}
+.opt.disabled .why{font-size:11px;color:var(--bb-fg-5);font-weight:400;margin-left:auto;
+  text-align:right;max-width:150px;line-height:1.3}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--bb-surface-raised);
+  border-radius:var(--bb-radius-xl) var(--bb-radius-xl) 0 0;padding:20px;
+  box-shadow:0 -8px 32px rgba(15,23,42,.18)}
+.scrim{position:absolute;inset:0;background:rgba(15,23,42,.45)}
+.sheet h2{font-size:17px;font-weight:600;margin-bottom:8px}
+.sheet p{font-size:14px;color:var(--bb-fg-4);line-height:1.5;margin-bottom:14px}
+.diff{background:var(--bb-surface-sunken);border-radius:var(--bb-radius-md);
+  padding:12px;margin-bottom:14px;font-size:13px;line-height:1.7}
+.diff .k{color:var(--bb-fg-5);display:inline-block;width:86px}
+.btn{width:100%;min-height:48px;border-radius:var(--bb-radius-md);font-size:15px;
+  font-weight:600;font-family:inherit;border:1px solid transparent;margin-bottom:8px;cursor:pointer}
+.btn.primary{background:var(--bb-brand-primary);color:#fff}
+.btn.ghost{background:var(--bb-surface-raised);border-color:var(--bb-border);color:var(--bb-fg-1)}
+.btn.danger{background:var(--bb-danger);color:#fff}
+.corr{font-size:11px;color:var(--bb-fg-5);font-family:ui-monospace,Menlo,monospace;margin-top:6px}
+.skel{background:var(--bb-surface-sunken);border-radius:var(--bb-radius-sm);height:14px;
+  margin-bottom:9px;animation:p 1.4s ease-in-out infinite}
+@keyframes p{0%,100%{opacity:1}50%{opacity:.5}}
+.foot{border-top:1px solid var(--bb-border);background:var(--bb-surface-raised);
+  padding:10px 16px;font-size:12px;color:var(--bb-fg-5);text-align:center}
+</style></head>
+<body><div class="caption">M-01b — a change accepted offline, not yet sent</div><div class="phone">
+<div class="status"><span>9:41</span><span>Brain&nbsp;Buddy</span></div><div class="nav"><button>&#8249; Back</button><h1>Task</h1><button>&nbsp;</button></div>
+<div class="body">
+  <div class="banner warn"><strong>No connection.</strong> Your changes are saved on this
+    phone and will be sent when you are back online.</div>
+  <div class="title">Draft the experiment write-up</div>
+  <div style="font-size:13px;color:var(--bb-fg-5);margin-bottom:16px">Next &middot; due Fri</div>
+  <div class="row"><span class="label">Project</span>
+    <span class="value"><span class="pill project">Q3 planning</span>
+      <span class="pending"><span class="dot"></span>Not sent</span></span>
+    <span class="chev">&#8250;</span></div>
+  <div class="row"><span class="label">Tags</span>
+    <span class="value"><span class="pill">deep-work</span><span class="pill">writing</span></span>
+    <span class="chev">&#8250;</span></div>
+  <div class="row"><span class="label">Due</span><span class="value">Fri, 14 Aug</span><span class="chev">&#8250;</span></div>
+</div>
+<div class="foot">1 change waiting to be sent</div>
+</div></body></html>
