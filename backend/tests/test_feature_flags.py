@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Generator
 from pathlib import Path
 
+import allure
 import pytest
 from fastapi.testclient import TestClient
 
@@ -22,6 +23,9 @@ from app.utils.time import utcnow
 INTERNAL_EMAIL = "cohort-member@example.com"
 OUTSIDER_EMAIL = "outsider@example.com"
 PASSWORD = "correct-horse-battery-staple"
+
+# Feature 006 (mobile task classification) gates its exposure on this flag.
+MOBILE_CLASSIFICATION_FLAG = "mobile_task_classification"
 
 
 @pytest.fixture(autouse=True)
@@ -371,3 +375,59 @@ def test_unauthenticated_me_stays_401_without_flag_payload(
     resp = client.get("/api/auth/me")
     assert resp.status_code == 401
     assert "feature_flags" not in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Feature 006 — mobile task classification rollout flag
+# ---------------------------------------------------------------------------
+
+
+@allure.story("006-FR-015 mobile task classification rollout flag")
+def test_006_FR_015_mobile_classification_flag_defaults_off_in_me_response(
+    api_client: TestClient,
+) -> None:
+    """006-FR-015: the mobile classification flag ships OFF and reaches /auth/me.
+
+    Default OFF is what makes the mobile task screen render exactly today's
+    presentation until the flag is deliberately turned on. Asserted at both
+    ends: the typed settings model, and the only channel the mobile client can
+    read the flag through.
+    """
+
+    assert MOBILE_CLASSIFICATION_FLAG in KNOWN_FEATURE_FLAGS
+    assert (
+        FeatureFlagSettings().states[MOBILE_CLASSIFICATION_FLAG] is FeatureFlagState.OFF
+    )
+
+    with allure.step("GET /api/auth/me delivers the flag, resolved off"):
+        body = api_client.get("/api/auth/me").json()
+        flags = body["feature_flags"]
+        # Delivered, not merely absent-and-therefore-falsy on the client: a
+        # missing key and an explicit ``false`` are indistinguishable to a
+        # client that reads ``=== true``, and only one of them proves the
+        # rollout channel works.
+        assert set(flags) == set(KNOWN_FEATURE_FLAGS)
+        assert flags[MOBILE_CLASSIFICATION_FLAG] is False
+
+
+@allure.story("006-FR-015 mobile task classification rollout flag")
+def test_006_FR_015_mobile_classification_flag_is_exposed_once_rolled_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """006-FR-015: turning the flag on exposes it to the authenticated user.
+
+    Without this the default-off assertion above would also pass for a name
+    that is merely allow-listed and wired to nothing.
+    """
+
+    client = _signed_up_client(
+        tmp_path,
+        monkeypatch,
+        email=OUTSIDER_EMAIL,
+        flags=f"{MOBILE_CLASSIFICATION_FLAG}=on",
+    )
+    with allure.step("GET /api/auth/me after the flag is rolled out"):
+        flags = client.get("/api/auth/me").json()["feature_flags"]
+        assert flags[MOBILE_CLASSIFICATION_FLAG] is True
+        # Exposure only: other flags are untouched by this one's rollout.
+        assert flags["delivery_canary"] is False
