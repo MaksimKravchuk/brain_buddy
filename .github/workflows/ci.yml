@@ -133,8 +133,14 @@ jobs:
               # Shared surfaces exercise everything: a change to CI, the
               # delivery scripts, the Makefile or the Compose stack can alter
               # any stack's result.
+              #
+              # `compose.yaml` is this repository's Compose file. The pattern
+              # used to name only `docker-compose`, which has never matched
+              # anything here, so edits to the real file silently exercised no
+              # stack at all. Both spellings are listed now: the legacy one
+              # costs nothing and survives a rename back.
               if printf '%s\n' "${changed}" | grep -Eq \
-                   '^(\.github/|scripts/|Makefile$|docker-compose)'; then
+                   '^(\.github/|scripts/|Makefile$|compose\.yaml$|docker-compose)'; then
                 echo "shared surface touched; exercising every stack"
               else
                 printf '%s\n' "${changed}" | grep -q '^backend/'  || backend=false
