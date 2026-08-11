@@ -219,10 +219,12 @@ class TreeService:
                 "Consider linking more causes to effects to expose gaps."
             )
 
+        # No `or [...]` fallback: the branch above always appends, so
+        # `recommendations` is never empty and the fallback was unreachable.
         return AiFeedbackResponse(
             status="success",
             summary=summary,
-            recommendations=recommendations or ["No recommendations available."],
+            recommendations=recommendations,
             request_id=payload.request_id,
         )
 

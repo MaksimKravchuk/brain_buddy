@@ -31,6 +31,10 @@ coverage/
 /backend/mutation-artifacts.previous.*/
 /backend/mutation-allure-results/
 /backend/mutation-allure-results.previous.*/
+# Transient state of `make mutation-gate-backend`; its trap removes both, but a
+# hard kill can leave them behind and neither is ever meant to be committed.
+/backend/pyproject.toml.mutation-bak
+/backend/.mutation-enforced-changed.txt
 /frontend/allure-results/
 /frontend/.stryker-tmp/
 /frontend/mutation-artifacts/
