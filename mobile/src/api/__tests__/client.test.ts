@@ -149,3 +149,70 @@ describe("createApiClient", () => {
     expect(JSON.parse(String(calls[0].init.body))).toEqual({ expected_revision: 12 });
   });
 });
+
+/**
+ * 006-FR-019 — a session may end only on an authentication rejection. The
+ * client is where the two failures first become distinguishable: a 401 is a
+ * response, a dead connection is a rejected promise.
+ */
+describe("createApiClient session outcomes", () => {
+  function failingClient(error: unknown, onUnauthorized?: () => void) {
+    const fetchImpl = jest.fn(async () => {
+      throw error;
+    }) as unknown as typeof fetch;
+    return createApiClient({
+      getBaseUrl: () => "https://example.test/api",
+      onUnauthorized,
+      fetchImpl,
+    });
+  }
+
+  it("006-FR-019 fires onUnauthorized on a 401 — the one failure that ends a session", async () => {
+    const onUnauthorized = jest.fn();
+    const { client } = makeClient(
+      [jsonResponse({ message: "Authentication required." }, 401)],
+      onUnauthorized,
+    );
+
+    await expect(client.me()).rejects.toBeInstanceOf(ApiError);
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it("006-FR-019 does not fire onUnauthorized when the request never reaches the server", async () => {
+    const onUnauthorized = jest.fn();
+    const client = failingClient(new TypeError("Network request failed"), onUnauthorized);
+
+    await expect(client.me()).rejects.toBeInstanceOf(TypeError);
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it("006-FR-019 does not fire onUnauthorized when the request times out", async () => {
+    const timeout = new Error("The operation timed out");
+    timeout.name = "TimeoutError";
+    const onUnauthorized = jest.fn();
+    const client = failingClient(timeout, onUnauthorized);
+
+    await expect(client.me()).rejects.toThrow("The operation timed out");
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it("006-FR-019 does not fire onUnauthorized on a server-side failure", async () => {
+    const onUnauthorized = jest.fn();
+    const { client } = makeClient(
+      [jsonResponse({ message: "Internal server error." }, 503)],
+      onUnauthorized,
+    );
+
+    await expect(client.me()).rejects.toBeInstanceOf(ApiError);
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it("006-FR-019 surfaces a transport failure unwrapped, so the caller can still classify it", async () => {
+    // `classifySessionFailure` reads a bare TypeError as unreachable. If the
+    // client wrapped it in an ApiError it would arrive with no status and be
+    // indistinguishable from a rejection.
+    const client = failingClient(new TypeError("Network request failed"));
+
+    await expect(client.me()).rejects.not.toBeInstanceOf(ApiError);
+  });
+});

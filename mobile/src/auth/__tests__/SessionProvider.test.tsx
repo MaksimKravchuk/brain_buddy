@@ -186,8 +186,14 @@ describe("SessionProvider actions", () => {
       expect(screen.getByTestId("server")).toHaveTextContent("http://10.0.0.5:8000/api"),
     );
 
-    await fireEvent.press(screen.getByLabelText("refresh"));
+    // Changing the server is now a real identity transition (spec 006,
+    // FR-011): it clears the session and re-probes, so the save itself costs a
+    // /auth/me. Before that, this screen told the person it signed them out
+    // while the code only rewrote a string. The refresh below is the third.
     await waitFor(() => expect(backend.callsTo("GET", "/auth/me")).toHaveLength(2));
+
+    await fireEvent.press(screen.getByLabelText("refresh"));
+    await waitFor(() => expect(backend.callsTo("GET", "/auth/me")).toHaveLength(3));
   });
 
   it("reads the voice flag from the profile and fails closed without it", async () => {
