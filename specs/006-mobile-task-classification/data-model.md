@@ -125,6 +125,17 @@ the exact path the feature exists for.
    - `expired` retains the payload until the person dismisses the notice, so a
      clock error is recoverable rather than terminal.
 
+8a. **The 30-day bound is enforced in two places and they must not overlap.**
+   At *entry* level (`expireQueue`) it moves an entry to `expired` and **retains
+   the payload** until the person dismisses the notice. At *key* level (the
+   sweep, 8b) it **deletes** — but only foreign keys and the active identity's
+   aged *cache*, never the active identity's queue entries.
+
+   Letting the deleting rule reach the active identity's entries silently
+   destroys FR-018's "retains the payload until dismissed", and the person is
+   then told a count for work they can no longer recover. The two rules are
+   complementary, not alternatives, and the wiring must keep them apart.
+
 8b. **The sweep runs across every key, not only the active one.** On app start
    and on every identity change, enumerate `AsyncStorage.getAllKeys()` for the
    `bb.pendingClassification.*` and `bb.classificationCache.*` prefixes; apply
