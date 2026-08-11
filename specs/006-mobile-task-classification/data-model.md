@@ -252,7 +252,7 @@ added to fix. Persist the opaque `id` only, never the email.
           rejected otherwise ──────────┼──▶ queued, error surfaced with correlation id
           timeout / connection lost ───┴──▶ queued, same idempotencyKey on the next try
 
-   conflicted ── person keeps theirs ──▶ queued, current revision, key unchanged
+   conflicted ── person keeps theirs ──▶ queued, current revision, NEW key
    conflicted ── person abandons ──────▶ removed
    conflicted ── app backgrounded ─────▶ stays conflicted; the sheet returns
 

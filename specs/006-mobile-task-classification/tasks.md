@@ -105,15 +105,15 @@ the task screen, and it reaches the server.
 **Independent test**: `quickstart.md` "Manual end-to-end check" passes — set a
 project and two Tags on the phone, refresh the web client, see both.
 
-- [ ] T042 [P] [US1] Write the failing integration assertion `006-FR-001` in mobile/integration/run.ts: set a project on a real task against the disposable backend, then read it back
-- [ ] T043 [P] [US1] Write the failing integration assertion `006-FR-002` in mobile/integration/run.ts for attaching and detaching a Tag
-- [ ] T044 [P] [US1] Write the failing integration assertion `006-FR-003` in mobile/integration/run.ts for clearing a project with an explicit `null`
-- [ ] T045 [P] [US1] Write the failing integration assertion `006-SC-002` in mobile/integration/run.ts proving the server holds exactly what the phone sent (pairs with the manual web-client refresh)
+- [x] T042 [P] [US1] Write the failing integration assertion `006-FR-001` in mobile/integration/run.ts: set a project on a real task against the disposable backend, then read it back
+- [x] T043 [P] [US1] Write the failing integration assertion `006-FR-002` in mobile/integration/run.ts for attaching and detaching a Tag
+- [x] T044 [P] [US1] Write the failing integration assertion `006-FR-003` in mobile/integration/run.ts for clearing a project with an explicit `null`
+- [x] T045 [P] [US1] Write the failing integration assertion `006-SC-002` in mobile/integration/run.ts proving the server holds exactly what the phone sent (pairs with the manual web-client refresh)
 - [ ] T046 [US1] Relayout the task-detail metadata area in mobile/src/app/task/[id].tsx from the current chip row into labelled Project/Tags/Due/Priority rows with chevrons, keeping muted placeholders when unset rather than hiding the row. Evidence: typecheck + bundle + quickstart step 2 — this is a component, so there is no unit path
 - [ ] T047 [US1] Render the existing chip presentation when the flag is OFF in mobile/src/app/task/[id].tsx (M-01c). The screen carries both presentations behind the flag read
 - [ ] T048 [P] [US1] Build the project picker in mobile/src/features/tasks/ProjectPicker.tsx — M-02 default, loading, empty-first-run, offline-never-fetched (with "None" still available), error
 - [ ] T049 [P] [US1] Build the Tag picker in mobile/src/features/tasks/TagPicker.tsx — M-03 states, including that in offline-never-fetched the task's own attached Tags stay listed and detachable, sourced from the task rather than the uncached list
-- [ ] T050 [US1] Wire the rows to the pickers and the queue in mobile/src/features/tasks/useClassificationQueue.ts, with drain on foreground and after a successful request
+- [x] T050 [US1] Wire the rows to the pickers and the queue in mobile/src/features/tasks/useClassificationQueue.ts, with drain on foreground and after a successful request. **The hook and every decision it takes are delivered and tested** (`__tests__/drain.test.ts`, 48 cases): cold-read `sending` reset before any drain, single flight, the payload shape, the two 409s, the >24h re-read, the expiry notice payload and the last-synced advance. It takes `identity` and a narrow API port as arguments rather than reading the session, so nothing in it is unreachable from a test. Its call sites are the pickers and rows of T046–T049, which land separately
 - [ ] T051 [US1] Add the last-synced footer to mobile/src/app/task/[id].tsx as a live region announcing only on material change (SC-004, FR-007 — no per-change markers anywhere)
 - [ ] T052 [US1] Run quickstart "Manual end-to-end check" steps 1–5 and record the SC-006 interaction count against the ceiling in `design.md`'s affordance map
 
@@ -147,8 +147,8 @@ asking, and never crosses identities.
 **Independent test**: `quickstart.md` offline, expiry, conflict and identity
 checks all pass.
 
-- [ ] T058 [P] [US3] Write the failing integration assertion `006-FR-017` in mobile/integration/run.ts, classification-specific: after two PATCHes with the same key, the task's `revision` advanced exactly once and `project_id` equals the intended value
-- [ ] T059 [P] [US3] Write the failing integration assertion `006-FR-008` in mobile/integration/run.ts for a stale `expected_revision` → 409 on a classification change
+- [x] T058 [P] [US3] Write the failing integration assertion `006-FR-017` in mobile/integration/run.ts, classification-specific: after two PATCHes with the same key, the task's `revision` advanced exactly once and `project_id` equals the intended value
+- [x] T059 [P] [US3] Write the failing integration assertion `006-FR-008` in mobile/integration/run.ts for a stale `expected_revision` → 409 on a classification change
 - [ ] T060 [US3] Build the conflict sheet in mobile/src/features/tasks/ConflictSheet.tsx per M-04: three labelled rows, the first sourced as what the device last showed **with its age**, the "changed more than once" line when `serverRevision - observedRevision > 1`, the non-chosen button disabled while sending, correlation id
 - [ ] T061 [US3] Handle the Tags and combined-field conflict layout in mobile/src/features/tasks/ConflictSheet.tsx — one heading per changed field, each with its own three-row diff, stacked vertically; three tag sets side by side do not fit 390px
 - [ ] T062 [US3] Build the discard-unsent sheet in mobile/src/features/tasks/DiscardUnsentSheet.tsx per M-05: count only, never a list; live-decrementing; discard blocked while any entry is `sending`, since the client cannot abort an in-flight send
@@ -157,7 +157,7 @@ checks all pass.
 - [ ] T065 [US3] Add the expired-unsent-work notice to mobile/src/app/task/[id].tsx naming the field and what it reverted to, with a labelled "Dismiss" button in tab order after the affected row (FR-018, SC-003)
 - [ ] T066 [US3] Add the account-level dismiss-once expiry notice with the total, on whichever task screen or list opens next after a sweep — triage happens from lists, so a per-task banner alone leaves FR-018's MUST unmet
 - [x] T067 [US3] Persist the last server `Date` header seen and require the expiry test to pass against it too, in mobile/src/features/tasks/classificationQueue.storage.ts
-- [ ] T068 [US3] Implement the >24h drain rule in mobile/src/features/tasks/useClassificationQueue.ts: past `firstSentAt + 24h` the drain re-reads the task first, then drops the entry if the server already holds the intended value or re-presents it against the current revision with a new key and refreshed `originalValue`
+- [x] T068 [US3] Implement the >24h drain rule in mobile/src/features/tasks/useClassificationQueue.ts: past `firstSentAt + 24h` the drain re-reads the task first, then drops the entry if the server already holds the intended value or re-presents it against the current revision with a new key and refreshed `originalValue`
 - [ ] T069 [US3] Run the quickstart offline, expiry, conflict and identity checks and record the results
 
 **Checkpoint**: all three stories demonstrable.

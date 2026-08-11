@@ -120,6 +120,41 @@ class RequirementCoverageTests(unittest.TestCase):
             result = self.module.coverage(root, feature_dir)
             self.assertEqual(result["FR-001"], [])
 
+    def test_dedicated_test_tree_is_scanned_regardless_of_filename(self):
+        """A tree that holds nothing but tests must not be re-filtered by name.
+
+        `mobile/integration/run.ts` was listed as a test tree and then discarded
+        by the filename hints, so every integration assertion in the repository
+        was invisible to this gate: a feature could name an id only from an
+        integration test and still be reported as untraced.
+        """
+        module = load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "mobile" / "integration").mkdir(parents=True)
+            (root / "mobile" / "integration" / "run.ts").write_text(
+                'assert(ok, "006-FR-004 create-then-attach lands both");',
+                encoding="utf-8",
+            )
+
+            found = {p.name for p in module.iter_test_files(root)}
+
+        self.assertIn("run.ts", found)
+
+    def test_mixed_tree_still_requires_a_filename_hint(self):
+        """The hint filter must survive for trees that also hold product code."""
+        module = load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "mobile" / "src" / "features").mkdir(parents=True)
+            (root / "mobile" / "src" / "features" / "widget.ts").write_text(
+                "export const x = 1;", encoding="utf-8"
+            )
+
+            found = {p.name for p in module.iter_test_files(root)}
+
+        self.assertNotIn("widget.ts", found)
+
 
 if __name__ == "__main__":
     unittest.main()
