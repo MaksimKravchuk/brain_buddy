@@ -44,6 +44,32 @@ added to the spec. The interview skill calls non-goals the highest-value
 answers of the whole stage; losing them at the handoff to spec would have
 wasted them.
 
+### What the clarify session changed
+
+Three items, two of them found by the repository's automated reviewer on the
+pull request before the five-lens review had run at all.
+
+**The spec was unimplementable as written.** AGENTS.md requires new production
+behavior behind a server-owned flag defaulting to OFF; the spec forbade every
+backend change. Nothing could satisfy both. `KNOWN_FEATURE_FLAGS` lives in
+`backend/app/core/config.py`, which is *not* an ASK-classified path, so the
+minimal flag wiring costs nothing against the path constraint — the conflict
+was with a boundary the interview drew before that rule was checked. FR-015
+added, FR-014 and the out-of-scope bullet narrowed to match.
+
+**"Single-user deployment" was false.** The spec reasoned it from invite-gated
+signup. `docs/auth.md` describes reusable invites, ordinary accounts and
+per-owner isolation, and the mobile client persists a switchable server URL.
+The consequence is not cosmetic: FR-011 had bounded the device queue by
+sign-out alone, so pending content could survive an account or server change
+and be displayed or replayed under the wrong identity. FR-011 now binds every
+entry to its account and server, with SC-007 and two acceptance scenarios.
+
+**Offline creation was an open assumption and is now a confirmed limit.**
+FR-016 states it: creating a project or tag requires connectivity, and the
+affordance is unavailable offline rather than failing after the person types a
+name.
+
 ### Two judgements a reader should check rather than trust
 
 **No numeric success criterion is claimed.** SC-001 through SC-006 are

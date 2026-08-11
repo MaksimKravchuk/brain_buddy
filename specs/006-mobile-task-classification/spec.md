@@ -10,6 +10,32 @@
 the founder on 2026-08-10. The scope boundary and non-goals in §4 of that
 document were read back as nine numbered items and confirmed explicitly.
 
+## Clarifications
+
+### Session 2026-08-11
+
+The `/speckit-clarify` stage was interrupted and its questions were put to the
+human directly. Two of the five came from the repository's automated reviewer
+on the pull request rather than from the spec's own open questions, and both
+were verified against the codebase before being asked.
+
+- Q: AGENTS.md requires new production behavior behind a server-owned flag,
+  default OFF, while this spec forbade every backend change. Which wins?
+  → A: Permit the minimal flag wiring. The prohibition on new task routes
+  stands. (`backend/app/core/config.py` holds `KNOWN_FEATURE_FLAGS` and is not
+  one of the ASK-classified paths, so this does not touch the path constraint.)
+- Q: Creating a project or tag needs the server to assign identity, so it
+  cannot be queued. Accept that offline classification is limited to entities
+  that already exist? → A: Accept the narrowing.
+- Q: The mobile client can change servers and the queue survives restarts.
+  What happens to pending entries on an account or server change?
+  → A: Bind every entry to its account and server, and clear on any identity
+  transition with the same warning as sign-out.
+
+Still open, carried forward rather than answered: the KPI baseline (see
+Assumptions), the ordering rule when several queued changes touch one task,
+and what "connectivity returned" means concretely.
+
 ## User Scenarios & Testing *(mandatory)*
 
 Three journeys, ordered by importance. The first is a viable slice on its own:
@@ -117,6 +143,13 @@ change arrives and the marker clears.
    are warned that unsent work will be lost before it is discarded.
 7. **Given** the person cancels that sign-out, **When** they return, **Then** the
    queued changes are still pending and still marked.
+8. **Given** unsent changes and a switch to a different server or account,
+   **When** the switch is confirmed, **Then** the person is warned first and the
+   entries are discarded — they are never shown to, or sent under, the new
+   identity.
+9. **Given** the app is closed and reopened with the same account and server,
+   **When** it starts, **Then** the queued changes are still pending and still
+   marked.
 
 ---
 
@@ -130,10 +163,13 @@ change arrives and the marker clears.
   failing opaquely.
 - **Two queued changes for the same task.** The later one supersedes the
   earlier; the queue does not send two changes that fight each other.
-- **Creating a project or tag while offline.** Creation needs the server to
-  assign identity, so it cannot be queued the way an assignment can. This is a
-  real boundary of the offline story and is called out in Assumptions rather
-  than papered over.
+- **Creating a project or tag while offline.** Not possible; FR-016. The
+  affordance is unavailable offline and says why, rather than failing after the
+  person has typed a name.
+- **A queued change belonging to another account or server.** Bound by FR-011
+  and never displayed or sent under the wrong identity. The mobile client can
+  change servers (`bb.serverUrl` is persisted), so this is reachable without
+  signing out at all.
 - **The app is closed with changes still queued.** Principle V requires local
   drafts and operation checkpoints to avoid data loss, so the queue survives.
 - **A tag added and removed before the queue drains.** The net effect is sent,
@@ -168,16 +204,28 @@ change arrives and the marker clears.
 - **FR-009**: Queued changes MUST survive the app being closed and reopened.
 - **FR-010**: When several queued changes target the same task, the system MUST
   send the net effect rather than replaying each in turn.
-- **FR-011**: Signing out with unsent changes MUST warn before discarding them,
-  and MUST discard them on confirmation so no account content is left on the
-  device.
+- **FR-011**: Every queued change MUST record the account and the server it was
+  made against, and MUST NOT be displayed or sent under any other. On sign-out,
+  an account change or a server change, unsent changes MUST be warned about and
+  then discarded, so no account's content is left on the device under another
+  identity.
+- **FR-015**: Production exposure of this behavior MUST be controlled by a
+  server-owned feature flag defaulting to OFF, per AGENTS.md. The flag governs
+  exposure only and is never authorization.
+- **FR-016**: Creating a project or tag MUST require connectivity, and the
+  affordance MUST be unavailable rather than failing late when offline, saying
+  why. Identity for a new project or tag is assigned by the server, so a
+  created-offline entity would have nothing stable for a queued change to
+  reference.
 - **FR-012**: Every failure a person sees MUST be actionable and MUST carry the
   correlation ID of the failed request, matching the behaviour the rest of the
   product already has.
 - **FR-013**: The system MUST use the term **Tag** throughout, per ADR-0006.
   Never Context, never @context.
 - **FR-014**: The feature MUST NOT add a task route to the backend, and MUST NOT
-  require any change to the web client.
+  require any change to the web client. Backend change is limited to the flag
+  wiring in FR-015; `backend/app/api/tasks.py` and the other ASK-classified
+  path modules stay untouched.
 
 ### Out of scope
 
@@ -193,8 +241,11 @@ against.
 - **Smart-add `#tag` / `@project` token syntax on mobile.** That is a capture
   feature with its own ADR-0007 and its own delivered spec (003). Putting a
   parser on this screen would restate those rules on a second client.
-- **Any change to the web client or the backend** (FR-014). The web client
-  already has this capability.
+- **Task routes, and web client changes** (FR-014). The web client already has
+  this capability. Backend change is confined to registering and reading the
+  feature flag of FR-015 — the interview's "no backend change" boundary was
+  written before AGENTS.md's flag rule was checked against it, and the flag
+  wiring is the narrowest thing that satisfies both.
 
 ### Key Entities
 
@@ -203,9 +254,10 @@ against.
 - **Project**: already exists. A task points at one or none.
 - **Tag**: already exists. A task points at zero or more.
 - **Pending classification change**: new, and device-local. What the person
-  chose, which task it applies to, and the task revision they were looking at
-  when they chose it. It exists only until the server accepts it, the person
-  abandons it at a conflict, or sign-out clears it.
+  chose, which task it applies to, the task revision they were looking at when
+  they chose it, and the account and server it was made against. It exists only
+  until the server accepts it, the person abandons it at a conflict, or an
+  identity transition clears it.
 
 ## Success Criteria *(mandatory)*
 
@@ -222,6 +274,8 @@ against.
   what they are looking at has reached the server.
 - **SC-005**: No conflict is resolved without the person choosing. Zero
   classifications are overwritten or discarded silently.
+- **SC-007**: No pending change is ever shown to, or sent under, an account or
+  server other than the one it was made against.
 - **SC-006**: Triage of a task requires no more interactions on the phone than
   the same triage on the web client, so moving to mobile costs nothing in effort.
 
@@ -238,17 +292,20 @@ against.
   derived from Principle V, which requires local drafts and operation
   checkpoints to avoid data loss. Recorded as an assumption rather than silently
   treated as a decision — flagged for `/speckit-clarify`.
-- **Creating a project or tag requires connectivity.** Identity is assigned by
-  the server, so a created-offline entity would have no stable identity to
-  attach. Offline classification is therefore limited to projects and tags that
-  already exist. This is a genuine narrowing of User Story 3 against User Story
-  2 and should be confirmed with the human rather than assumed away.
+- **Creating a project or tag requires connectivity — confirmed, not assumed.**
+  Raised in clarify and accepted by the human, so offline classification is
+  limited to projects and tags that already exist. User Story 3 is deliberately
+  narrower than User Story 2, and FR-016 states it.
 - **"Connectivity returned" means the next time the app is in use and a request
   succeeds.** No background sync while the app is closed is assumed. Flagged for
   `/speckit-clarify`.
-- **Single-user deployment.** Private and invite-gated, so there is no
-  multi-user permission question about who may create a project or tag. Read
-  from `docs/auth.md`, not asked.
+- **Not a single-user system, corrected.** An earlier draft of this spec
+  assumed one, reasoning from invite-gated signup. That was wrong: `docs/auth.md`
+  describes reusable invites, ordinary accounts and per-owner isolation, and the
+  mobile client persists a switchable server URL. The correction matters
+  because it is what makes FR-011 more than a sign-out rule — a durable device
+  queue outlives both the account and the server it was made against. Found by
+  the repository's automated reviewer, not by this spec's own author.
 - **No new consent surface.** No new personal data is collected and no AI
   provider sees this content, so the existing consent model is untouched. The
   device-local queue is the only new place account content rests, and FR-011
