@@ -4,7 +4,6 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type PropsWithChildren,
 } from "react";
@@ -40,6 +39,9 @@ import { classifySessionFailure, resolveFailedProbe } from "./sessionOutcome";
  * queue — so the missing state is what would destroy unsent work on the one
  * journey this feature exists for (SC-008, SC-009).
  */
+/** Monotonic across the process; see the note where it is used. */
+let identityEpoch = 0;
+
 export type SessionStatus = "loading" | "signed-out" | "signed-in" | "signed-in-offline";
 
 interface SessionContextValue {
@@ -90,11 +92,18 @@ export function SessionProvider({ children }: PropsWithChildren) {
    * flight by a server change must never sign out the session a later
    * sign-in established.
    */
-  const epochRef = useRef(0);
+  // Deliberately NOT a `useRef`. This counter answers "which identity
+  // transition is current" for the whole process, never for one render, and
+  // nothing here is read while rendering — every read is inside an async
+  // handler that a 401, a probe or a sign-in already scheduled. Holding it in
+  // a ref made `react-hooks/refs` flag the api-client memo, correctly by its
+  // own lights: it cannot tell a render-time read from a call-time one. There
+  // is exactly one SessionProvider in the app, so a module-scope counter says
+  // what this actually is instead of dressing it as component state.
 
   /** A 401 anywhere in the app: the session ended without anyone choosing it. */
   const handleUnauthorized = useCallback(async () => {
-    const epoch = ++epochRef.current;
+    const epoch = ++identityEpoch;
     const url = currentServerUrl();
     // Reading first gives a sign-in that raced this 401 a chance to win: if
     // the epoch moved, the newer session owns the identity and nothing here
@@ -102,14 +111,14 @@ export function SessionProvider({ children }: PropsWithChildren) {
     // offline launch that the next successful `/auth/me` rewrites — the
     // fail-closed direction.
     const current = await loadPersistedIdentity(url);
-    if (epochRef.current !== epoch) {
+    if (identityEpoch !== epoch) {
       return;
     }
     // The identity itself is kept — FR-011 keeps unsent work through an
     // involuntary end, and the queue is offered back on the next sign-in to
     // the same account. Only the marker changes.
     const marked = current ? await markSessionRejected(url) : null;
-    if (epochRef.current !== epoch) {
+    if (identityEpoch !== epoch) {
       return;
     }
     setMe(null);
@@ -147,12 +156,12 @@ export function SessionProvider({ children }: PropsWithChildren) {
    * cold start (FR-009, FR-020).
    */
   const adoptProfile = useCallback(async (profile: MeResponse) => {
-    const epoch = ++epochRef.current;
+    const epoch = ++identityEpoch;
     setMe(profile);
     setFlags(profile.feature_flags ?? null);
     setStatus("signed-in");
     const record = await persistIdentity(currentServerUrl(), profile);
-    if (epochRef.current !== epoch) {
+    if (identityEpoch !== epoch) {
       return;
     }
     setIdentity(record);
@@ -160,23 +169,23 @@ export function SessionProvider({ children }: PropsWithChildren) {
 
   const probe = useCallback(
     async (signal?: AbortSignal) => {
-      const epoch = epochRef.current;
+      const epoch = identityEpoch;
       const url = currentServerUrl();
       try {
         const profile = await api.me(signal);
-        if (epochRef.current !== epoch) {
+        if (identityEpoch !== epoch) {
           return;
         }
         await adoptProfile(profile);
       } catch (error) {
-        if (epochRef.current !== epoch) {
+        if (identityEpoch !== epoch) {
           // A 401 was already handled by `onUnauthorized`, or a newer
           // transition owns the session now.
           return;
         }
         const failure = classifySessionFailure(error);
         const known = await loadPersistedIdentity(url);
-        if (epochRef.current !== epoch) {
+        if (identityEpoch !== epoch) {
           return;
         }
         setMe(null);
@@ -186,7 +195,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
           // identity and the device queue all resolve from what the device
           // already holds.
           const persisted = await loadPersistedFlags(url, known.accountId);
-          if (epochRef.current !== epoch) {
+          if (identityEpoch !== epoch) {
             return;
           }
           setFlags(persisted);
@@ -242,14 +251,14 @@ export function SessionProvider({ children }: PropsWithChildren) {
    * unnameable.
    */
   const signOut = useCallback(async () => {
-    const epoch = ++epochRef.current;
+    const epoch = ++identityEpoch;
     try {
       await api.logout();
     } catch {
       // Signing out locally is fine even if the network call fails.
     }
     await clearPersistedIdentity(currentServerUrl());
-    if (epochRef.current !== epoch) {
+    if (identityEpoch !== epoch) {
       return;
     }
     setMe(null);
@@ -274,7 +283,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
         // as one would sign the person out for nothing.
         return;
       }
-      const epoch = ++epochRef.current;
+      const epoch = ++identityEpoch;
       await clearPersistedIdentity(previous);
       // `saveServerUrl` above already moved the live value; `config/serverUrl`
       // owns it since main #149, so there is no ref to keep in step — only the
@@ -284,7 +293,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
       setIdentity(null);
       setFlags(null);
       setStatus("signed-out");
-      if (epochRef.current !== epoch) {
+      if (identityEpoch !== epoch) {
         return;
       }
       await probe(AbortSignal.timeout(SERVER_CHANGE_PROBE_TIMEOUT_MS));
