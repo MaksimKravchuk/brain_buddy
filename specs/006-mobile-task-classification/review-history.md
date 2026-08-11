@@ -104,9 +104,20 @@ store it bounded; and the acceptance expires rather than persisting silently.
 ## Implementation outcome
 
 Built 2026-08-11 by six parallel agents on disjoint file sets, plus an
-integration pass. **660 mobile tests, 1069 backend tests, 30/30 requirements
-traced.** Typecheck, lint, Metro bundle and the mobile integration suite (26
-checks against a disposable backend) all green.
+integration pass and a later round of render tests. **1146 mobile tests, 1069
+backend tests, 30/30 requirements traced.** Typecheck, lint, Metro bundle and
+the mobile integration suite all green; mobile coverage 96.68 statements /
+92.27 branches / 97.59 functions / 96.62 lines against a 94/88/95/94 floor.
+
+**A premise this record asserted, and how it stopped being true.** Every lane
+was briefed that `mobile/` cannot render a component in a test, so component
+evidence was typecheck and a bundle and nothing else. That was true of the
+base this work started from. While it was in flight, main gained a fake-backend
+harness that mounts real screens, a 94% coverage floor and every eslint rule.
+The gap this file once described as an unavoidable limit was, by the time the
+work landed, simply unfinished — and closing it found three more defects that
+the pure-module tests could not see, including a green test asserting the exact
+behaviour that was broken.
 
 ### Every defect found during implementation was at a seam
 
