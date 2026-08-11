@@ -513,9 +513,7 @@ jobs:
     steps:
       - run: make test-e2e
   docker:
-    needs:
-      - backend
-      - frontend
+    needs: e2e
     steps:
       - run: docker buildx build .
 """.strip(),
@@ -527,6 +525,34 @@ jobs:
         # The fixture is a fragment, so other checks still fail it; what matters
         # is that the job-graph rule raised no complaint about these two.
         self.assertNotIn("declares needs it does not consume", completed.stderr)
+
+    def test_workflow_rejects_docker_restating_the_edges_e2e_already_carries(self) -> None:
+        # docker waits on e2e for cache locality. Naming backend/frontend as well
+        # restates edges e2e already holds, which is the noise the rule exists to
+        # keep out -- and it would let the pair drift back into running in
+        # parallel and paying the identical image build twice.
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "ci.yml"
+            workflow.write_text(
+                """
+jobs:
+  docker:
+    name: Docker Images
+    needs:
+      - e2e
+      - backend
+      - frontend
+    steps:
+      - run: docker buildx build .
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("docker job declares needs it does not consume", completed.stderr)
+        self.assertIn("backend", completed.stderr)
 
     def test_workflow_rejects_a_job_absent_from_the_full_ci_gate(self) -> None:
         # A flat graph makes full-ci the only thing that makes a job required,

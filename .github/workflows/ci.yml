@@ -872,17 +872,26 @@ jobs:
   # check on main (docs/autonomous-delivery-runbook.md), so the job name is
   # load-bearing and must not be renamed.
   #
-  # Gated on the two services whose code ships inside the images. Not because it
-  # consumes anything they produce -- it does not -- but because building an
-  # image out of code whose own linter or unit tests just failed cannot tell us
-  # anything we want to know, and runner minutes spent proving it are wasted. It
-  # deliberately does NOT wait on mobile, which ships in neither image.
+  # Gated on `e2e`, and this is the one edge in the graph that exists for
+  # neither of the usual two reasons -- it is there for cache locality.
+  #
+  # This job and the E2E lane build byte-identical images: same Dockerfiles,
+  # same build args, same `stack-*` cache scopes. Running them in parallel meant
+  # paying that build twice whenever the cache was cold, which on a `main` push
+  # is every time. Ordering this one after E2E makes its build a guaranteed hit
+  # on the cache E2E just wrote: measured, roughly 1:01 down to ~20s.
+  #
+  # It costs no wall clock -- E2E is not the last job, so this still lands
+  # before allure-report -- and it keeps the diagnostic value of a separate
+  # check: when E2E goes red, `Docker Images` says at a glance whether the
+  # images built or the journeys failed. `backend`/`frontend` are not listed
+  # because E2E already waits on them; restating a transitive edge is exactly
+  # what the graph rule rejects. It still does not wait on mobile, which ships
+  # in neither image.
   docker:
     name: Docker Images
     runs-on: ubuntu-latest
-    needs:
-      - backend
-      - frontend
+    needs: e2e
     steps:
       - name: Checkout
         uses: actions/checkout@v7

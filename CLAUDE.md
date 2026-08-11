@@ -225,11 +225,14 @@ HTTP request
   `full-ci`: one per service (`backend`, `frontend`, `mobile` — each its own
   lint/type/unit/integration, path filtered by the `changes` job), plus
   `workflow-lint`, `spec-kit`, the mutation gate, `docker` and `e2e`. An edge
-  earns its place only by consuming the other job's output, or by being a cheap
-  check that should fail the run before an expensive one spends runner minutes —
-  `docker`, `e2e` and the mutation jobs wait on the service lanes for that second
-  reason, and on nothing else. `scripts/validate_ci_artifacts.py workflow`
-  rejects any other edge, and rejects a job missing from `full-ci`'s `needs`
+  earns its place for one of three reasons only: the job consumes the other's
+  output; the other is a cheap check that should fail the run before an
+  expensive one spends runner minutes (`e2e` and the mutation jobs wait on the
+  service lanes for this); or the two build byte-identical artifacts and
+  ordering them lets the second reuse the first's cache (`docker` waits on
+  `e2e` for this, turning a duplicated cold build into a ~20s cache hit).
+  `scripts/validate_ci_artifacts.py workflow` rejects any other edge — including
+  a transitive one restated — and rejects a job missing from `full-ci`'s `needs`
   (with a flat graph that gate is the only thing making a job required). `e2e` is
   never path filtered. It rebuilds only what changed: `main`'s Docker layers are
   reused via the shared `stack-*` buildx cache, so an untouched service starts

@@ -584,13 +584,14 @@ def _job_needs(workflow_text: str, job: str) -> set[str] | None:
 # The job graph is deliberately flat: independent work runs as independent
 # lanes, and `full-ci` is the single join. Two things then need guarding.
 #
-# First, a lane must not grow an edge that buys nothing. There are exactly two
-# reasons an edge earns its place -- the job consumes the other's output, or the
+# First, a lane must not grow an edge that buys nothing. There are exactly three
+# reasons an edge earns its place -- the job consumes the other's output; the
 # other is a cheap check that should fail the run before this expensive one
-# spends runner minutes. Chaining the stack jobs behind the documentation and
-# workflow-lint gates satisfies neither: it once put roughly 35 seconds of
-# markdown validation in front of every test in the run without changing a
-# single result.
+# spends runner minutes; or the two build byte-identical artifacts and ordering
+# them lets the second reuse the first's cache instead of paying twice.
+# Chaining the stack jobs behind the documentation and workflow-lint gates
+# satisfies none of them: it once put roughly 35 seconds of markdown validation
+# in front of every test in the run without changing a single result.
 #
 # Second, and more dangerous: with a flat graph `full-ci` is the ONLY thing
 # making a job required. A new job that nobody adds to its `needs` is not a
@@ -603,14 +604,17 @@ LANE_DEPENDENCY_LIMITS = {
     "backend": {"changes"},
     "frontend": {"changes"},
     "mobile": {"changes"},
-    # The two expensive whole-stack jobs. They consume nothing the service lanes
-    # produce, but they may wait for them so a failing linter or unit test stops
-    # the run before anything pays to build or boot the stack. They may wait for
-    # NOTHING ELSE: not mobile (which ships in neither image), not the
-    # documentation or workflow gates, and not each other -- the edge between
-    # them existed only to share an image build, which the layer cache replaces.
+    # The whole-stack lane. It consumes nothing the service lanes produce, but
+    # it may wait for them so a failing linter or unit test stops the run before
+    # anything pays to boot the stack. It may wait for NOTHING ELSE: not mobile
+    # (which ships in neither image), and not docker.
     "e2e": {"backend", "frontend"},
-    "docker": {"backend", "frontend"},
+    # The image build, ordered after E2E for cache locality: the two build
+    # byte-identical images, so running them in parallel paid the same build
+    # twice on every cold cache. `backend`/`frontend` are deliberately absent --
+    # e2e already waits on them, and restating a transitive edge is the noise
+    # this rule exists to keep out.
+    "docker": {"e2e"},
     # The mutation measurements consume the enforced-scope decision from
     # `changes`, and wait on `backend` for cost: mutmut re-runs the backend suite
     # hundreds of times, so it is the most expensive thing in the workflow to
