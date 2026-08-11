@@ -37,8 +37,10 @@ own. Their per-state rows live under M-01.
 | empty (first run) | task has no project and no Tags | Rows present with muted placeholders, not hidden | "Add a project", "Add Tags" | FR-001, FR-002 |
 | empty (filtered to nothing) | n/a on this screen | — | — | — |
 | error | save rejected for any reason other than revision | Row reverts to the server value, inline error, retry | "Could not save. Tap to try again." + correlation id | FR-012 |
-| partial failure | **unreachable as specified** — `PATCH /tasks/{id}` is atomic, so no event sequence produces a half-saved task. Open decision 4 | The succeeded half shows as saved, the failed half reverts and is named | "Project saved. Tags could not be saved." | FR-012 |
+| ~~partial failure~~ | **removed.** `PATCH /tasks/{id}` applies project and Tags in one atomic request, so no event sequence produces a half-saved task. Keeping the state would have meant two calls per change — double the queue and a new desynchronised state — for a screen nobody can reach | — | — | — |
 | offline / interrupted | no connection at the moment of the change | Change applied locally and shown as made. No marker, no banner, no per-row decoration. The footer's last-synced time is the only signal | "Last synced 14 minutes ago" | FR-006, FR-007, SC-004 |
+| expired unsent work | opening the app with queued changes older than 30 days | The rows show the server's values again, and a dismissible line says how many changes were dropped and why. FR-007 removed per-change markers, so without this the values would simply appear to revert on their own | "3 changes older than 30 days were not sent and have been discarded" | FR-018 |
+| session ended by itself | expired token, or a launch with no connection | The queue is untouched and nothing is discarded. A launch with no connection is not treated as a sign-out at all | — | FR-011, FR-019 |
 | flag OFF | server-owned flag defaults OFF | Exactly today's screen: values shown, no controls, no disabled affordances | — | FR-015 |
 
 ### M-02 — Project picker
@@ -63,7 +65,7 @@ own. Their per-state rows live under M-01.
 | empty (first run) | no Tags exist | Create row only | "No Tags yet" | FR-004 |
 | empty (filtered to nothing) | search matches nothing | Create row carrying the typed name | "Create \"<typed>\"" | FR-004, FR-005 |
 | error | list fetch failed | Inline retry; already-attached Tags still shown | + correlation id | FR-012 |
-| partial failure | **unreachable as specified** — `tag_ids` is sent as one intended set, applied whole or not at all. Open decision 4 | Named per Tag, not as one blanket failure | — | FR-012 |
+| ~~partial failure~~ | **removed.** `tag_ids` is sent as one intended set, applied whole or not at all — per-Tag failure cannot occur | — | — | — |
 | offline / interrupted | no connection | Existing Tags selectable from the list last stored on the device; create row disabled with the reason visible before it is tapped | "Needs a connection — new Tags are named by the server" | FR-016 |
 | offline, never fetched | offline and this device has never loaded the list | Stated plainly rather than shown as "no Tags yet" | "Can't load your Tags without a connection" | FR-016 |
 
@@ -71,7 +73,7 @@ own. Their per-state rows live under M-01.
 
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
-| default | queued change rejected on revision | Sheet naming what was changed and when, both values side by side, two explicit choices. Naming the change is load-bearing: nothing on the task screen ever said it was in flight | "You changed the project 14 minutes ago. This task changed somewhere else since." | FR-008, SC-005 |
+| default | queued change rejected on revision | Sheet naming what was changed and when, and **all three** values: what it was when they started, what they set, what the server holds now. Two explicit choices. Naming the change is load-bearing: nothing on the task screen ever said it was in flight | "You changed the project 14 minutes ago — Inbox → Q3 Launch. It is now Archive here." | FR-008, FR-010, SC-005 |
 | loading | resolution being sent | Chosen button shows progress; both stay visible | — | — |
 | empty | n/a | — | — | — |
 | error | the resolution itself fails | Sheet stays open, nothing discarded, retry offered | + correlation id | FR-012, SC-003 |
@@ -107,6 +109,8 @@ own. Their per-state rows live under M-01.
 | M-04 | "Keep mine, replace theirs" | Re-sends against the current revision | FR-008 |
 | M-04 | "Discard mine, keep the server's" | Drops the queued entry | FR-008 |
 | M-04 | Correlation id | Makes the rejection reportable | FR-012 |
+| M-04 | The value the person started from | Without it the sheet can only name one side of the disagreement | FR-010 |
+| M-01 | Expired-change notice | FR-018 discards at 30 days; a person finding work silently gone is the failure this avoids | FR-018 |
 | M-05 | "Stay and let them send" | Cancels the identity transition | FR-011 |
 | M-05 | "Discard N changes and continue" | Proceeds, discarding. The count is the whole of what the person is told | FR-011, SC-007 |
 

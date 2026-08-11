@@ -44,7 +44,10 @@ device-local queue and the pure logic around it.
 
 **Consent & Safety.** No new consent surface: no new personal data is collected and no AI provider is involved. One new place account content rests — the device queue — and FR-011 bounds its lifetime to a single account-and-server pairing, clearing on any identity transition. No real data, secrets, transcripts, paths or fingerprints are committed or logged; the queue holds task ids and classification ids the device already had.
 
-**Tests.** Failing first, then passing: the queue reducer's coalescing and identity-binding tests (`006-FR-010`, `006-FR-011`), the conflict-decision table (`006-FR-008`), the offline create-guard (`006-FR-016`), the single-flight and stable-key rules (`006-FR-017`), and an integration test driving `PATCH /tasks/{id}` with a stale `expected_revision` to prove the rejection path is the ordinary one (`006-FR-008`). A second integration test sends one entry's key twice and asserts one applied change, which is the only honest proof of `006-FR-017` — a unit test would assert that the mock was written. Edge cases from the spec — a queued change for a deleted task, a Tag added then removed before the drain, a mid-send sign-out — are table cases in the reducer suite.
+**Tests.** Failing first, then passing: the queue reducer's coalescing and identity-binding tests (`006-FR-010`, `006-FR-011`), the conflict-decision table (`006-FR-008`), the offline create-guard (`006-FR-016`), the single-flight and stable-key rules (`006-FR-017`), the 30-day expiry
+evaluated on read (`006-FR-018`), the 401-versus-unreachable split in
+`SessionProvider` (`006-FR-019`), the retained original value surviving
+coalescing (`006-FR-010`), and an integration test driving `PATCH /tasks/{id}` with a stale `expected_revision` to prove the rejection path is the ordinary one (`006-FR-008`). A second integration test sends one entry's key twice and asserts one applied change, which is the only honest proof of `006-FR-017` — a unit test would assert that the mock was written. Edge cases from the spec — a queued change for a deleted task, a Tag added then removed before the drain, a mid-send sign-out — are table cases in the reducer suite.
 
 **Contracts.** **No contract changes.** `TaskUpdateRequest` already carries `project_id`, `tag_ids` and the required `expected_revision`; `POST /projects` and `POST /tags` already exist and are already called from `mobile/src/api/client.ts` with idempotency keys. The only backend edit is adding one name to `KNOWN_FEATURE_FLAGS` in `backend/app/core/config.py`, which widens an allow-list and breaks nothing. `/auth/me` already returns `feature_flags`, so the flag needs no new endpoint either. FR-017 needs no contract change
 either, and this was checked rather than assumed: `backend/app/api/tasks.py`
@@ -98,7 +101,8 @@ backend/
 
 mobile/src/
 ├── auth/SessionProvider.tsx                # +1 flag read, fail closed, beside voiceEnabled
-│                                           # + persist accountId, + distinguish 401 from offline
+│                                           # + persist accountId, + FR-019 401-vs-offline split
+│                                           # involuntary end keeps the queue (FR-011)
 ├── features/tasks/classificationCache.ts   # NEW: project/Tag lists survive a cold start offline
 ├── api/client.ts                           # unchanged — updateTask/createProject/createTag exist
 ├── features/tasks/

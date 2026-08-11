@@ -47,38 +47,47 @@ were verified against the codebase before being asked.
 Still open, carried forward rather than answered: the KPI baseline (see
 Assumptions) and what "connectivity returned" means concretely.
 
-### Open product decisions
+### Session 2026-08-11 (b) — four decisions taken on instruction
 
-Raised by the review campaign of 2026-08-11 (run
-`006-mobile-task-classification-c1`), put to the human, and **not yet
-answered**. They are recorded here rather than resolved because the review gate
-classifies them as product decisions: they trade user-visible behaviour against
-cost, and no reviewer or agent has standing to settle them. Implementation is
-blocked on all four. Each names what happens under the current text, so the
-cost of leaving one unanswered is visible rather than implied.
+The review campaign (`006-mobile-task-classification-c1`) returned four
+product decisions. They were put to the human twice, as options with a
+recommendation and a stated cost for each. The answer both times was to stop
+surfacing problems and settle them: *«Надо уже дожимать… Я готов принимать
+решения, но опции на тебе.»*
 
-1. **How long may an unsent change rest on the device?** No bound is stated
-   anywhere, so an entry lives until it sends or the person discards it. The
-   device queue is the only place in the product where account content has no
-   retention limit — `docs/data-retention.md` bounds everything else — and the
-   backend's idempotency replay window is 24 hours, so a retry older than that
-   is no longer protected against double-applying by FR-017's mechanism.
-2. **What happens to unsent work when the session ends involuntarily?** See
-   FR-011. `SessionProvider` treats a network failure at cold start the same as
-   a 401, so an offline launch is indistinguishable from a sign-out, and the
-   session token expires by itself after 30 days. Under the current text both
-   destroy the queue with no warning and no action to attach one to.
-3. **Is the coalescing rule settled, and does anything remember the original
-   value?** FR-010 states the net effect as a MUST while this section listed the
-   same question as open, so the two disagree about whether it was ever asked.
-   `data-model.md` implements a net-effect reducer that keeps the first
-   `observedRevision` — which means the value the person started from is not
-   retained, and M-04 cannot say "it was A, you set C" without it.
-4. **Does the partial-failure behaviour stay?** M-01 and M-03 both specify it
-   ("Project saved. Tags could not be saved."), and `PATCH /tasks/{id}` is
-   atomic, so no sequence of events can produce that state. Either the design
-   states an outcome that cannot occur, or the feature needs two calls per
-   change — which is a materially larger queue with a new desynchronised state.
+So these are **agent-proposed defaults adopted under an explicit instruction to
+proceed**, not human answers, and they are labelled that way so a later reader
+does not mistake them for elicited requirements. Each is one line to reverse,
+and each names what it costs.
+
+1. **Retention: 30 days, tied to the session.** A queued change is discarded 30
+   days after it was made. Rationale: the queue cannot usefully outlive the
+   session that would send it, and the session token already dies at 30 days —
+   any longer bound would be fiction. This also keeps the device queue inside
+   `docs/data-retention.md` rather than becoming the one unbounded store.
+   → FR-018.
+2. **Involuntary session loss preserves the queue, and the detection gets
+   fixed.** Only a real 401 signs the person out; a network failure means
+   offline. Unsent work survives an expired token and is offered on the next
+   sign-in to the same account, discarded on a different one. Rationale: this is
+   the same offline-first reasoning that removed the not-sent marker — sync
+   bookkeeping is the app's problem. Any other option loses work on a path
+   nobody chose. → FR-011, FR-019.
+3. **Coalescing stays net-effect, and the original server value is retained.**
+   One field added to the queue entry. Rationale: FR-010 already mandated the
+   net effect; the contradiction was that Clarifications still listed it as
+   open, which is now resolved in FR-010's favour. Without the original value
+   M-04 cannot say "it was A, you set C", which is usually the sentence that
+   tells a person who is right. → FR-010, and `originalValue` in the data model.
+4. **Partial failure is removed as unreachable.** `PATCH /tasks/{id}` applies
+   project and Tags in one atomic request, so no event sequence produces a
+   half-saved task. Rationale: the alternative is two calls per change, which
+   doubles the queue and invents a desynchronised state, in exchange for a
+   screen nobody can reach. The two design states and their copy are deleted.
+   → M-01, M-03.
+
+**To reverse any of these, change the named requirement — nothing else depends
+on them implicitly.**
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -256,16 +265,27 @@ time advances.
   abandoned, and MUST NOT decide for them.
 - **FR-009**: Queued changes MUST survive the app being closed and reopened.
 - **FR-010**: When several queued changes target the same task, the system MUST
-  send the net effect rather than replaying each in turn.
+  send the net effect rather than replaying each in turn, and MUST retain the
+  value the server held when the first of them was made. The conflict prompt of
+  FR-008 MUST be able to name both what the person started from and what the
+  server holds now; without the retained value it can only name one side.
 - **FR-011**: Every queued change MUST record the account and the server it was
   made against, and MUST NOT be displayed or sent under any other. On a
   **deliberate** sign-out, account change or server change, unsent changes MUST
   be warned about and then discarded, so no account's content is left on the
-  device under another identity. What happens when the session ends without
-  anyone choosing it — an expired token, or a network failure the client cannot
-  currently tell apart from a rejection — is open decision 2 and MUST be settled
-  before implementation; the warning this requirement relies on cannot be shown
-  on a path where there was no action to warn about.
+  device under another identity. A session ending **without** anyone choosing it
+  MUST NOT discard unsent work: the entries survive, and are offered on the next
+  sign-in to the same account and discarded on a different one. The warning this
+  requirement relies on cannot be shown where there was no action to warn about,
+  so on that path the work is kept rather than silently destroyed.
+- **FR-018**: A queued change MUST be discarded 30 days after it was made, and
+  the person MUST be told when this happens rather than finding the entry gone.
+  The device queue is account content and MUST NOT be the one store in the
+  product without a retention bound (`docs/data-retention.md`).
+- **FR-019**: The client MUST distinguish an authentication rejection from a
+  failure to reach the server, and MUST end the session only on the former.
+  Treating them alike makes an offline launch indistinguishable from a
+  sign-out, which is what would destroy the queue on the feature's main path.
 - **FR-017**: A queued change MUST reach the server at most once. Each entry
   MUST carry an idempotency key generated when the entry is created and reused
   unchanged on every retry, and the system MUST NOT have two sends of one entry
@@ -329,9 +349,15 @@ against.
   and tags both set — entirely on the phone, without opening the web client.
 - **SC-002**: A classification made on the phone is visible in the web client on
   the next refresh, with the same project and the same tags.
-- **SC-003**: A classification made with no connectivity is never lost: it is
-  either delivered once connectivity returns, or abandoned by an explicit choice
-  the person made.
+- **SC-003**: A classification made with no connectivity is never lost
+  *silently*. Exactly one of three things happens to it, and the person can tell
+  which: it is delivered once connectivity returns; it is abandoned by an
+  explicit choice they made; or it passes the 30-day bound of FR-018 and is
+  discarded **with that fact shown on the task screen**. An unsent change that
+  simply disappears is a defect under this criterion.
+- **SC-008**: A session ending on its own — an expired token, or an app launch
+  with no connection — destroys no unsent work. Only a deliberate sign-out,
+  account change or server change does, and only after the FR-011 warning.
 - **SC-004**: A person can tell, without leaving the task screen, how current
   what they are looking at is — by the last-synchronised time, not by per-change
   bookkeeping they have to read and reconcile.
