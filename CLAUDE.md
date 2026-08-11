@@ -77,6 +77,11 @@ which edges are allowed, the backend mutation-gate thresholds, and the Fly.io
 topology are in the **`deploy-and-ci`** skill. Architecture, API, troubleshooting,
 performance and infra runbooks live under `docs/`.
 
+The `allure-report` job does not just publish the aggregate report, it **grades**
+it: `allure quality-gate` fails the run on any failed or broken result
+(`maxFailures: 0` in `allurerc.mjs`, which is **ASK class**). The answer to a gate
+failure is never to raise that number. See `docs/allure-quality-gate.md`.
+
 ## Conventions
 
 - **Commits:** conventional prefix style — `feat:`, `fix:`, `docs:`, `refactor:`, etc.
