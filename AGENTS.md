@@ -46,7 +46,8 @@
 
 ## Mandatory Spec Kit Workflow
 - GitHub Spec Kit is the canonical authoring workflow for every new or materially changed BrainBuddy feature spec; use the repo-pinned official CLI version documented in `docs/spec-kit-workflow.md`.
-- The portable artifact sequence is constitution → `/speckit-specify` (what/why) → `/speckit-clarify` → `/speckit-plan` (how/architecture) → `/speckit-checklist` → `/speckit-tasks` → `/speckit-analyze`. Amend the spec first whenever implementation intent changes.
+- The portable artifact sequence is constitution → `/speckit-specify` (what/why) → `/speckit-clarify` → `/speckit-design` (user-visible surfaces) → `/speckit-plan` (how/architecture) → `/speckit-review` → `/speckit-checklist` → `/speckit-tasks` → `/speckit-analyze`. Amend the spec first whenever implementation intent changes.
+- `/speckit-design` and `/speckit-review` are part of that sequence, not extras: `plan.md` must cite `design.md` for any user-visible surface, and the ADR-0011 five-lens review gate runs for every feature, managed or not. `docs/spec-kit-workflow.md` carries the full path including the optional stage 0 assessment, acceptance and the delivery report.
 - Spec Kit owns versioned planning artifacts under `specs/` plus `.specify/`. Generated `tasks.md` is planning input, not permission to bypass isolated worktrees, TDD, independent review, CI, landing, or release gates.
 - Execution tooling is selected by the work context. Standalone agents may implement from the validated artifacts; opt-in Hermes-managed outcomes additionally follow `.hermes.md`, ADR-0010, and `docs/spec-driven-kanban.md`.
 - Before adding or changing a feature spec, run `python3 scripts/check_spec_kit_specs.py` (or `make check-specs`) and preserve documented grandfathering for historical specs.

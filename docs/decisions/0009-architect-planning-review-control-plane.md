@@ -1,9 +1,27 @@
 # ADR-0009: Architect-owned planning review control plane
 
 Date: 2026-07-25
-Status: Accepted; superseded by ADR-0010 only for explicitly managed outcomes
+Status: Superseded in part. Read ADR-0011 (portable spec review stage) first.
+Superseded by:
+- [ADR-0011](0011-portable-spec-review-stage.md) — **repository-wide**, for the
+  review campaign itself. The campaign is now a portable stage that runs for
+  every feature; the five-lens panel, the aggregation semantics and the
+  `founder-accepted` record below are all restated there. Where this record and
+  ADR-0011 disagree about the review, ADR-0011 wins.
+- [ADR-0010](0010-adopt-spec-driven-kanban-control-plane.md) — **only inside an
+  explicitly activated managed outcome**, for the delivery control plane.
+  Outside one, ADR-0010 leaves this record applicable within its original scope.
+
+What that leaves standing here: the control-plane *reasoning* — why review is
+read-only, why product-decision categories are enumerated, why run state is
+persisted — as the record of why the gate has its shape. What is no longer
+current: the framing of the Hermes Architect as the sole planning writer and of
+Hermes Kanban as the sole writable implementation scheduler. ADR-0010 made that
+opt-in, and `/speckit-implement` implements directly outside a managed outcome.
+The body below is preserved as written rather than retroactively edited.
+
 Decision owner: BrainBuddy
-Related: ADR-0005, `.specify/workflows/speckit/`, `docs/spec-kit-workflow.md`, `scripts/spec_kit_planning_review.py`
+Related: ADR-0005, ADR-0010, ADR-0011, `.specify/workflows/speckit/`, `docs/spec-kit-workflow.md`, `scripts/spec_kit_planning_review.py`
 
 ## Context
 

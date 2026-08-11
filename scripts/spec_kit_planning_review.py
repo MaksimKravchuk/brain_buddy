@@ -523,7 +523,7 @@ Also inspect relevant accepted/proposed ADRs and current code only where needed 
 
 Hard boundaries:
 - Do not edit files, run implementation, commit, push, create cards, or propose a second scheduler.
-- Spec Kit tasks are planning input; Hermes Kanban remains the sole execution runtime.
+- Spec Kit tasks are planning input, not a runtime graph. Do not assume, require, or review against any particular execution runtime: outside an explicitly activated managed outcome (ADR-0010), a developer or a standalone agent implements directly from these artifacts.
 - Technical decisions belong to Architect. Do not escalate database, framework, API shape, module boundary, testing strategy, migration mechanics, or implementation choices to the product owner.
 - Product decisions are allowed only for: {allowed_categories}.
 - Cite concrete file paths/symbols/sections in every finding's evidence.

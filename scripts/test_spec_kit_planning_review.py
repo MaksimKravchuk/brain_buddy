@@ -925,6 +925,54 @@ class ReviewerIndependenceTests(unittest.TestCase):
             self.assertTrue(path.is_file(), f"{role} points at missing {path}")
 
 
+class ReviewerPromptTests(unittest.TestCase):
+    """The hard boundaries are law for five lenses on every feature.
+
+    `build_prompt` is not documentation — its text is the only instruction the
+    reviewers get, so a superseded rule in it is enforced rather than merely
+    stale. It carried "Hermes Kanban remains the sole execution runtime" from
+    ADR-0009, which ADR-0010 demoted to an opt-in overlay and which the
+    implement-directly policy contradicts outright. A reviewer holding that
+    line would raise a finding against a plan that is correct.
+
+    Asserted as a negative invariant only. An earlier version of this class
+    also pinned the replacement wording ("second scheduler", "planning input");
+    that pinned prose rather than behaviour and would have failed on any honest
+    rewording, so it is gone. What must not come back is the mandate.
+    """
+
+    def setUp(self) -> None:
+        self.module = load_module()
+
+    def write_feature(self, tmp: str) -> Path:
+        """A throwaway feature, so the test never depends on specs/ contents.
+
+        `build_prompt` lists `review_artifacts(feature_dir)`, so pointing at a
+        real feature made this assert against whatever that directory happens
+        to hold today — and it would break outright when that feature is
+        renamed or archived.
+        """
+        feature_dir = Path(tmp) / "specs" / "123-example"
+        (feature_dir / "checklists").mkdir(parents=True)
+        (feature_dir / "spec.md").write_text("# Spec\n", encoding="utf-8")
+        (feature_dir / "plan.md").write_text("# Plan\n", encoding="utf-8")
+        (feature_dir / "checklists" / "requirements.md").write_text(
+            "- [x] done", encoding="utf-8"
+        )
+        return feature_dir
+
+    def test_no_lens_is_told_an_execution_runtime_is_mandatory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            feature_dir = self.write_feature(tmp)
+            for role in self.module.ROLE_CONFIGS:
+                prompt = self.module.build_prompt(
+                    role=role, feature_dir=feature_dir, root=Path(tmp)
+                )
+                self.assertNotIn("sole execution runtime", prompt, role)
+                self.assertNotIn("Hermes", prompt, role)
+                self.assertNotIn("Kanban", prompt, role)
+
+
 class OracleFallbackTests(unittest.TestCase):
     """An absent runtime is routed around; the substitution is never silent.
 
