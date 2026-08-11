@@ -19,15 +19,17 @@
 - **No module reads the clock except through an argument.** `expireQueue` and
   `formatLastSynced` take `now`. There is no fake-timer precedent in `mobile/`,
   so an internal `Date.now()` makes the 30-day boundary untestable.
-- **Allure taxonomy** on every test: non-empty `epic`, `feature`, `story`, a
-  human-readable title, at least one named step.
+- **Allure taxonomy on backend tests only.** `CLAUDE.md` scopes the rule to
+  pytest, Vitest and Playwright. `mobile/` runs plain Jest with no taxonomy
+  helper, so the backend test carries full `epic`/`feature`/`story` and a named
+  step, and the Jest suites carry none. See T003.
 
 ---
 
 ## Phase 1: Setup
 
 - [x] T001 Develop on the designated feature branch. **The worktree is deliberately skipped**: the session's branch policy requires this branch, a second worktree fights that for no benefit, and the parallel agents are already isolated by disjoint file ownership rather than by directory
-- [ ] T002 [P] Add the `mobile/src/features/tasks/` directory with an `index.ts` barrel in mobile/src/features/tasks/index.ts
+- [x] T002 **Dropped.** The directory already existed, and a barrel nothing imports is dead code that the coverage floor then counts. Every module here is imported by path, matching the rest of `mobile/src`
 - [x] T003 **Dropped, and the original task was wrong.** `CLAUDE.md` scopes the Allure taxonomy rule to pytest, Vitest and Playwright; `mobile/` runs plain Jest and has no `src/test/allureTaxonomy.ts` to extend. Inventing one to satisfy a rule that does not apply would add a fixture nothing reads. The backend test in T039 still carries full Allure, because backend tests genuinely are in scope
 - [ ] T004 Confirm `make typecheck-mobile`, `make test-mobile` and `make build-mobile` are green on the untouched branch, so every later failure is attributable
 - [x] T004a Write the shared type contract in mobile/src/features/tasks/classificationTypes.ts before fanning out, so the reducer, storage adapter and drain hook can be built in parallel without racing on a shared file
@@ -41,55 +43,55 @@ can be demonstrated until they exist.**
 
 ### The session substrate — FR-019, FR-020, FR-011
 
-- [ ] T005 [P] Write failing `006-FR-019` table test in mobile/src/auth/__tests__/sessionOutcome.test.ts: `ApiError(401)` → `unauthenticated`, `ApiError(503)` → `other`, bare `TypeError` (what fetch throws offline) → `unreachable`
-- [ ] T006 Implement `classifySessionFailure(error: unknown)` in mobile/src/auth/sessionOutcome.ts to make T005 pass
-- [ ] T007 Add the fourth `SessionStatus` value `"signed-in-offline"` in mobile/src/auth/SessionProvider.tsx — FR-019 requires a representable "authenticated, offline, no live profile" state and the union has nowhere to put it today
-- [ ] T008 Rewrite `probe()` in mobile/src/auth/SessionProvider.tsx to dispatch on `classifySessionFailure` — only `unauthenticated` signs the person out; `unreachable` resolves from persisted state. This is the line that made an offline launch indistinguishable from a sign-out
-- [ ] T009 [P] Write failing `006-FR-019` test in mobile/src/api/__tests__/client.test.ts asserting `onUnauthorized` fires on a 401 and does NOT fire when the injected `fetchImpl` rejects
-- [ ] T010 Persist identity and the resolved rollout flag on **every** response yielding a `MeResponse` — `/auth/me`, `/auth/login`, `/auth/signup` — in mobile/src/auth/SessionProvider.tsx. `signIn`/`signUp` never call the probe, so persisting only on `/auth/me` leaves a fresh sign-in with no stored identity (FR-009, FR-020)
-- [ ] T011 [P] Write failing `006-FR-020` test in mobile/src/auth/__tests__/flagResolution.test.ts: the flag resolves `true` from persisted state with a null `me`, and `false` when it was never known for this identity
-- [ ] T012 Implement the persisted-flag read beside `voiceEnabled` in mobile/src/auth/SessionProvider.tsx to make T011 pass — fail-closed means closed when never known, not closed whenever the network is down
-- [ ] T013 Make `updateServerUrl` a real identity transition in mobile/src/auth/SessionProvider.tsx (clear `me`, set signed-out, re-probe). Today it only persists the URL, so FR-011's server-change binding has nothing to hang on while settings.tsx already tells the user it signs them out
+- [x] T005 [P] Write failing `006-FR-019` table test in mobile/src/auth/__tests__/sessionOutcome.test.ts: `ApiError(401)` → `unauthenticated`, `ApiError(503)` → `other`, bare `TypeError` (what fetch throws offline) → `unreachable`
+- [x] T006 Implement `classifySessionFailure(error: unknown)` in mobile/src/auth/sessionOutcome.ts to make T005 pass
+- [x] T007 Add the fourth `SessionStatus` value `"signed-in-offline"` in mobile/src/auth/SessionProvider.tsx — FR-019 requires a representable "authenticated, offline, no live profile" state and the union has nowhere to put it today
+- [x] T008 Rewrite `probe()` in mobile/src/auth/SessionProvider.tsx to dispatch on `classifySessionFailure` — only `unauthenticated` signs the person out; `unreachable` resolves from persisted state. This is the line that made an offline launch indistinguishable from a sign-out
+- [x] T009 [P] Write failing `006-FR-019` test in mobile/src/api/__tests__/client.test.ts asserting `onUnauthorized` fires on a 401 and does NOT fire when the injected `fetchImpl` rejects
+- [x] T010 Persist identity and the resolved rollout flag on **every** response yielding a `MeResponse` — `/auth/me`, `/auth/login`, `/auth/signup` — in mobile/src/auth/SessionProvider.tsx. `signIn`/`signUp` never call the probe, so persisting only on `/auth/me` leaves a fresh sign-in with no stored identity (FR-009, FR-020)
+- [x] T011 [P] Write failing `006-FR-020` test in mobile/src/auth/__tests__/flagResolution.test.ts: the flag resolves `true` from persisted state with a null `me`, and `false` when it was never known for this identity
+- [x] T012 Implement the persisted-flag read beside `voiceEnabled` in mobile/src/auth/SessionProvider.tsx to make T011 pass — fail-closed means closed when never known, not closed whenever the network is down
+- [x] T013 Make `updateServerUrl` a real identity transition in mobile/src/auth/SessionProvider.tsx (clear `me`, set signed-out, re-probe). Today it only persists the URL, so FR-011's server-change binding has nothing to hang on while settings.tsx already tells the user it signs them out
 
 ### Storage keys and the device stores — FR-011, FR-018, SC-007
 
-- [ ] T014 [P] Write failing `006-SC-007` test in mobile/src/features/tasks/__tests__/storageKey.test.ts: components are escaped separately, and two distinct (serverUrl, accountId) pairings can never render to one key
-- [ ] T015 Implement `queueKey()` and `cacheKey()` in mobile/src/features/tasks/storageKeys.ts using `encodeURIComponent` per component
-- [ ] T016 [P] Write failing `006-FR-018` boundary table in mobile/src/features/tasks/__tests__/expireQueue.test.ts: 29d23h kept, 30d1m expired, payload retained on expiry, dropped count returned not swallowed, a future timestamp clamped rather than becoming immortal
-- [ ] T017 Implement `expireQueue(entries, now)` in mobile/src/features/tasks/classificationQueue.ts — pure, clock injected
-- [ ] T018 [P] Write failing `006-FR-018` test for the cross-identity sweep in mobile/src/features/tasks/__tests__/sweep.test.ts: the age rule applies to every stored key, and a non-active key is deleted outright once a different identity signs in
-- [ ] T019 Implement `sweepAllIdentities()` in mobile/src/features/tasks/classificationQueue.storage.ts over `AsyncStorage.getAllKeys()` — identity-in-the-key closes disclosure but cannot delete, and a key nobody reads never expires
-- [ ] T020 [P] Write failing `006-FR-011` / `006-SC-008` table in mobile/src/features/tasks/__tests__/identityEvent.test.ts for `resolveQueueOnIdentityEvent`: involuntary+same → keep, involuntary+different → discard, deliberate+same → warn-then-discard, deliberate+different → warn-then-discard
-- [ ] T021 Implement `resolveQueueOnIdentityEvent()` in mobile/src/features/tasks/classificationQueue.ts
-- [ ] T022 Implement the AsyncStorage adapter in mobile/src/features/tasks/classificationQueue.storage.ts, including the defence-in-depth read check that verifies each entry's own `accountId`/`serverUrl` against the active identity and discards a mismatch before display or send
+- [x] T014 [P] Write failing `006-SC-007` test in mobile/src/features/tasks/__tests__/storageKey.test.ts: components are escaped separately, and two distinct (serverUrl, accountId) pairings can never render to one key
+- [x] T015 Implement `queueKey()` and `cacheKey()` in mobile/src/features/tasks/storageKeys.ts using `encodeURIComponent` per component
+- [x] T016 [P] Write failing `006-FR-018` boundary table in mobile/src/features/tasks/__tests__/expireQueue.test.ts: 29d23h kept, 30d1m expired, payload retained on expiry, dropped count returned not swallowed, a future timestamp clamped rather than becoming immortal
+- [x] T017 Implement `expireQueue(entries, now)` in mobile/src/features/tasks/classificationQueue.ts — pure, clock injected
+- [x] T018 [P] Write failing `006-FR-018` test for the cross-identity sweep in mobile/src/features/tasks/__tests__/sweep.test.ts: the age rule applies to every stored key, and a non-active key is deleted outright once a different identity signs in
+- [x] T019 Implement `sweepAllIdentities()` in mobile/src/features/tasks/classificationQueue.storage.ts over `AsyncStorage.getAllKeys()` — identity-in-the-key closes disclosure but cannot delete, and a key nobody reads never expires
+- [x] T020 [P] Write failing `006-FR-011` / `006-SC-008` table in mobile/src/features/tasks/__tests__/identityEvent.test.ts for `resolveQueueOnIdentityEvent`: involuntary+same → keep, involuntary+different → discard, deliberate+same → warn-then-discard, deliberate+different → warn-then-discard
+- [x] T021 Implement `resolveQueueOnIdentityEvent()` in mobile/src/features/tasks/classificationQueue.ts
+- [x] T022 Implement the AsyncStorage adapter in mobile/src/features/tasks/classificationQueue.storage.ts, including the defence-in-depth read check that verifies each entry's own `accountId`/`serverUrl` against the active identity and discards a mismatch before display or send
 
 ### The queue reducer — FR-010, FR-017, FR-021
 
-- [ ] T023 [P] Write failing `006-FR-010` reducer tests in mobile/src/features/tasks/__tests__/classificationQueue.test.ts: net-effect coalescing; a tag added then removed leaves no trace; an entry whose net set equals the server's is dropped rather than sent as a no-op
-- [ ] T024 [P] Write failing `006-FR-010` test that after N coalesces including a `null` clear, `originalValue` is unchanged from first capture, and `firstQueuedAt` is immutable while `lastEditedAt` moves
-- [ ] T025 [P] Write failing `006-FR-017` tests: `idempotencyKey` is byte-identical across an unchanged retry, and **changes** when coalescing alters `projectId` or `tagIds`
-- [ ] T026 [P] Write failing `006-FR-017` single-flight test: an entry in `sending` is not returned by a second `selectDrainable`, and two concurrent drain triggers produce exactly one call to an injected sender
-- [ ] T027 [P] Write failing `006-FR-021` test that loads a queue fixture containing a `sending` entry and asserts it is reset to `queued` and drained
-- [ ] T028 [P] Write failing `006-FR-010`/`006-FR-017` test for an edit arriving while an entry is `sending`: it creates a successor entry with its own key, and the in-flight acceptance does not remove the successor's work
-- [ ] T029 Implement the reducer in mobile/src/features/tasks/classificationQueue.ts — coalescing, key lifecycle, `selectDrainable`, the successor rule, and the cold-read `sending` → `queued` reset — to make T023–T028 pass
+- [x] T023 [P] Write failing `006-FR-010` reducer tests in mobile/src/features/tasks/__tests__/classificationQueue.test.ts: net-effect coalescing; a tag added then removed leaves no trace; an entry whose net set equals the server's is dropped rather than sent as a no-op
+- [x] T024 [P] Write failing `006-FR-010` test that after N coalesces including a `null` clear, `originalValue` is unchanged from first capture, and `firstQueuedAt` is immutable while `lastEditedAt` moves
+- [x] T025 [P] Write failing `006-FR-017` tests: `idempotencyKey` is byte-identical across an unchanged retry, and **changes** when coalescing alters `projectId` or `tagIds`
+- [x] T026 [P] Write failing `006-FR-017` single-flight test: an entry in `sending` is not returned by a second `selectDrainable`, and two concurrent drain triggers produce exactly one call to an injected sender
+- [x] T027 [P] Write failing `006-FR-021` test that loads a queue fixture containing a `sending` entry and asserts it is reset to `queued` and drained
+- [x] T028 [P] Write failing `006-FR-010`/`006-FR-017` test for an edit arriving while an entry is `sending`: it creates a successor entry with its own key, and the in-flight acceptance does not remove the successor's work
+- [x] T029 Implement the reducer in mobile/src/features/tasks/classificationQueue.ts — coalescing, key lifecycle, `selectDrainable`, the successor rule, and the cold-read `sending` → `queued` reset — to make T023–T028 pass
 
 ### The remaining pure modules
 
-- [ ] T030 [P] Write failing `006-FR-005` table in mobile/src/features/tasks/__tests__/matchExisting.test.ts: exact match, case difference, leading/trailing whitespace all match; a substring must NOT
-- [ ] T031 Implement `matchExisting(typedName, candidates)` in mobile/src/features/tasks/matchExisting.ts
-- [ ] T032 [P] Write failing `006-SC-004` table in mobile/src/features/tasks/__tests__/syncStatus.test.ts over `now - lastSyncedAt`
-- [ ] T033 Implement `formatLastSynced(lastSyncedAt, now)` in mobile/src/features/tasks/syncStatus.ts
-- [ ] T034 [P] Write failing `006-FR-008` table in mobile/src/features/tasks/__tests__/conflictDecision.test.ts, including the branch on `detail.resource`: `"Task"` opens the conflict sheet, `"Idempotency-Key"` is a client bug that must never be retried with the same key
-- [ ] T035 Implement `conflictDecision.ts` in mobile/src/features/tasks/conflictDecision.ts, including the "server already holds what the entry intended" resolution that drops the entry and advances last-synced without prompting
-- [ ] T036 [P] Write failing `006-FR-006` test for the list cache in mobile/src/features/tasks/__tests__/classificationCache.test.ts, including that it is cleared on a deliberate identity transition **even when the queue is empty**
-- [ ] T037 Implement mobile/src/features/tasks/classificationCache.ts
+- [x] T030 [P] Write failing `006-FR-005` table in mobile/src/features/tasks/__tests__/matchExisting.test.ts: exact match, case difference, leading/trailing whitespace all match; a substring must NOT
+- [x] T031 Implement `matchExisting(typedName, candidates)` in mobile/src/features/tasks/matchExisting.ts
+- [x] T032 [P] Write failing `006-SC-004` table in mobile/src/features/tasks/__tests__/syncStatus.test.ts over `now - lastSyncedAt`
+- [x] T033 Implement `formatLastSynced(lastSyncedAt, now)` in mobile/src/features/tasks/syncStatus.ts
+- [x] T034 [P] Write failing `006-FR-008` table in mobile/src/features/tasks/__tests__/conflictDecision.test.ts, including the branch on `detail.resource`: `"Task"` opens the conflict sheet, `"Idempotency-Key"` is a client bug that must never be retried with the same key
+- [x] T035 Implement `conflictDecision.ts` in mobile/src/features/tasks/conflictDecision.ts, including the "server already holds what the entry intended" resolution that drops the entry and advances last-synced without prompting
+- [x] T036 [P] Write failing `006-FR-006` test for the list cache in mobile/src/features/tasks/__tests__/classificationCache.test.ts, including that it is cleared on a deliberate identity transition **even when the queue is empty**
+- [x] T037 Implement mobile/src/features/tasks/classificationCache.ts
 
 ### Backend and API surface
 
-- [ ] T038 Add the rollout flag to the per-user feature flags in backend/app/core/config.py, defaulting OFF (FR-015). This is the one backend line; FR-014 forbids any other backend change
-- [ ] T039 [P] Add a backend test naming `006-FR-015` in backend/tests/test_feature_flags.py asserting the flag defaults off and is delivered in `MeResponse`
-- [ ] T040 Change `useUpdateTask` in mobile/src/api/hooks.ts to accept the entry's idempotency key instead of minting its own — FR-017 requires the entry to own its key, and the hook is the call path the task screen actually uses
-- [ ] T041 Add cache write-through to `useProjects`/`useTags` in mobile/src/api/hooks.ts, and read-back on fetch failure
+- [x] T038 Add the rollout flag to the per-user feature flags in backend/app/core/config.py, defaulting OFF (FR-015). This is the one backend line; FR-014 forbids any other backend change
+- [x] T039 [P] Add a backend test naming `006-FR-015` in backend/tests/test_feature_flags.py asserting the flag defaults off and is delivered in `MeResponse`
+- [x] T040 Change `useUpdateTask` in mobile/src/api/hooks.ts to accept the entry's idempotency key instead of minting its own — FR-017 requires the entry to own its key, and the hook is the call path the task screen actually uses
+- [x] T041 Add cache write-through to `useProjects`/`useTags` in mobile/src/api/hooks.ts, and read-back on fetch failure
 
 **Checkpoint**: pure modules green, session substrate in place. User stories can now proceed.
 
@@ -154,7 +156,7 @@ checks all pass.
 - [ ] T064 [US3] Gate the remaining `signOut` call site in mobile/src/app/sign-in.tsx
 - [ ] T065 [US3] Add the expired-unsent-work notice to mobile/src/app/task/[id].tsx naming the field and what it reverted to, with a labelled "Dismiss" button in tab order after the affected row (FR-018, SC-003)
 - [ ] T066 [US3] Add the account-level dismiss-once expiry notice with the total, on whichever task screen or list opens next after a sweep — triage happens from lists, so a per-task banner alone leaves FR-018's MUST unmet
-- [ ] T067 [US3] Persist the last server `Date` header seen and require the expiry test to pass against it too, in mobile/src/features/tasks/classificationQueue.storage.ts
+- [x] T067 [US3] Persist the last server `Date` header seen and require the expiry test to pass against it too, in mobile/src/features/tasks/classificationQueue.storage.ts
 - [ ] T068 [US3] Implement the >24h drain rule in mobile/src/features/tasks/useClassificationQueue.ts: past `firstSentAt + 24h` the drain re-reads the task first, then drops the entry if the server already holds the intended value or re-presents it against the current revision with a new key and refreshed `originalValue`
 - [ ] T069 [US3] Run the quickstart offline, expiry, conflict and identity checks and record the results
 
