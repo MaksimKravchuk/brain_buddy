@@ -60,3 +60,8 @@ jest.mock("lucide-react-native", () => {
     },
   );
 });
+
+// Allure taxonomy defaults. Registered last so its afterEach runs after the
+// device stubs are in place; it fills the epic/feature/story and step evidence
+// that `scripts/validate_allure_taxonomy.py` requires of every result.
+require("./src/test/allureTaxonomy").registerAllureTaxonomy();

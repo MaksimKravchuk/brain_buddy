@@ -221,7 +221,24 @@ HTTP request
 
 - **Docker Compose** (local full stack): `docker compose up --build` → backend `:8000`, frontend `:8080`. Smoke via `./scripts/smoke_test.sh`.
 - **Fly.io** — two apps via `fly.backend.toml` and `fly.frontend.toml`. The **backend app is private (Flycast-only)**; the frontend proxies to it via `BACKEND_ORIGIN`. Runbooks: `docs/fly-deployment.md`, `docs/fly-review-apps.md`.
-- **CI** — `.github/workflows/ci.yml` runs backend lint/type/test + coverage, frontend unit tests + build, and Docker image builds on every push/PR to `main`. Wait for CI green before deploying.
+- **CI** — `.github/workflows/ci.yml` runs as parallel lanes joined only by
+  `full-ci`: one per service (`backend`, `frontend`, `mobile` — each its own
+  lint/type/unit/integration, path filtered by the `changes` job), plus
+  `workflow-lint`, `spec-kit`, the mutation gate, `docker` and `e2e`. An edge
+  earns its place for one of three reasons only: the job consumes the other's
+  output; the other is a cheap check that should fail the run before an
+  expensive one spends runner minutes (`e2e` and the mutation jobs wait on the
+  service lanes for this); or the two build byte-identical artifacts and
+  ordering them lets the second reuse the first's cache (`docker` waits on
+  `e2e` for this, turning a duplicated cold build into a ~20s cache hit).
+  `scripts/validate_ci_artifacts.py workflow` rejects any other edge — including
+  a transitive one restated — and rejects a job missing from `full-ci`'s `needs`
+  (with a flat graph that gate is the only thing making a job required). `e2e` is
+  never path filtered. It rebuilds only what changed: `main`'s Docker layers are
+  reused via the shared `stack-*` buildx cache, so an untouched service starts
+  from main's image. `allure-report` closes the run — it is the last job before
+  `full-ci`, so the aggregate report and the link posted to the pull request
+  always describe a finished run. Wait for CI green before deploying.
 - **Mutation gate** — the `mutation-gate` job blocks a change that touches any module in `backend/mutation-enforced-scope.txt` (the ADR-0011 *enforced* tier: the tree/version/relation services and their repositories). It measures only the entries you touched and fails below 95%, on zero checked mutants, or on any regression against the base revision. Touch none of them and it costs nothing. Reproduce locally with `make mutation-gate-backend`. The nightly `mutation-quality.yml` stays report-only over the wider *observed* tier.
 - **Deeper docs** — architecture, API, troubleshooting, performance, and infra runbooks live under `docs/`. Feature specs (e.g. `001-relation-linking-refactor`) live under `specs/`.
 
@@ -243,4 +260,5 @@ HTTP request
 - **TypeScript:** strict mode; PascalCase component filenames; no `any` except at explicit boundaries.
 - **Backend tests:** mirror module name (`test_tree_service.py`); use the `api_client` / service fixtures from `conftest.py`; clear the LRU cache between tests.
 - **Frontend tests:** Vitest + Testing Library in `src/**/__tests__/`; Playwright e2e in `frontend/tests/`.
-- **Allure taxonomy:** every pytest, Vitest, and Playwright product test must emit non-empty `epic`, `feature`, `story`, a human-readable title, and at least one named step. Central defaults live in `backend/tests/allure_taxonomy.py`, `frontend/src/test/allureTaxonomy.ts`, and `frontend/tests/allure.fixtures.ts`; use explicit Allure decorators/helpers only for narrower overrides. See `docs/test-allure-taxonomy.md`.
+- **Allure taxonomy:** every pytest, Vitest, Jest and Playwright product test must emit non-empty `epic`, `feature`, `story`, a human-readable title, and at least one named step. Central defaults live in `backend/tests/allure_taxonomy.py`, `frontend/src/test/allureTaxonomy.ts`, `mobile/src/test/allureTaxonomy.ts`, and `frontend/tests/allure.fixtures.ts`; use explicit Allure decorators/helpers only for narrower overrides. See `docs/test-allure-taxonomy.md`.
+  Mobile is the one runner whose steps cannot come from a hook: in `allure-jest` a step follows the executing scope, and during `beforeEach`/`afterEach` that scope is the fixture, not the test. Labels bind from a hook, the step does not — so `mobile/src/test/allureTaxonomy.ts` sets the labels in `beforeEach` and wraps each test body in a step instead.

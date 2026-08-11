@@ -16,6 +16,10 @@ from pathlib import Path
 REQUIRED_ARTIFACTS = {
     "backend-allure-results": "backend/allure-results",
     "frontend-allure-results": "frontend/allure-results",
+    # Mobile was the one lane whose tests produced no Allure evidence, so the
+    # aggregate report spoke for two stacks out of three while reading as if it
+    # covered the product.
+    "mobile-allure-results": "mobile/allure-results",
     "playwright-allure-results": "frontend/allure-results/playwright",
     "allure-report-html": "allure-report",
 }
@@ -522,10 +526,26 @@ def _path_filter_errors(workflow_text: str) -> list[str]:
         block = _job_block(workflow_text, job)
         if block is None:
             errors.append(f"missing {job} job")
-        elif re.search(r"^    if:", block, flags=re.MULTILINE):
+            continue
+        job_if = re.search(r"^    if:(?P<expr>.*)$", block, flags=re.MULTILINE)
+        if not job_if:
+            continue
+        # The hazard this guards is a job that silently does not run because the
+        # DIFF said so. That reports 'skipped', which ADR-0008 requires Full CI
+        # to treat as a failure, so a candidate must never be able to land on a
+        # check that quietly did not execute.
+        #
+        # A condition that only propagates another job's outcome is not that.
+        # `docker` needs one: with a bare `needs: e2e` it was skipped the moment
+        # E2E failed, so the required check went missing in exactly the case it
+        # exists to explain. Banning every job-level `if` cost that check its
+        # purpose; what stays banned is reading the path filter here.
+        expression = job_if.group("expr")
+        if "needs.changes.outputs" in expression or "env.RUN" in expression:
             errors.append(
-                f"{job} job uses a job-level 'if'; path filtering must gate "
-                "steps so the job still reports success rather than skipped"
+                f"{job} job gates itself on the changed-stack filter with a "
+                "job-level 'if'; path filtering must gate steps so the job "
+                "still reports success rather than skipped"
             )
     return errors
 
@@ -539,6 +559,147 @@ def _job_block(workflow_text: str, job: str) -> str | None:
         flags=re.MULTILINE | re.DOTALL,
     )
     return match.group("body") if match else None
+
+
+def _job_names(workflow_text: str) -> list[str]:
+    """Every top-level job key, in file order."""
+
+    jobs_block = re.search(
+        r"^jobs:$(?P<body>.*)\Z", workflow_text, flags=re.MULTILINE | re.DOTALL
+    )
+    if not jobs_block:
+        return []
+    return re.findall(r"^  ([a-z0-9-]+):$", jobs_block.group("body"), flags=re.MULTILINE)
+
+
+def _job_needs(workflow_text: str, job: str) -> set[str] | None:
+    """Return one job's declared ``needs``, or None when the job is absent."""
+
+    block = _job_block(workflow_text, job)
+    if block is None:
+        return None
+
+    inline = re.search(r"^    needs:[ \t]*([A-Za-z0-9_-]+)[ \t]*$", block, flags=re.MULTILINE)
+    if inline:
+        return {inline.group(1)}
+
+    flow = re.search(r"^    needs:[ \t]*\[(?P<items>[^\]]*)\]", block, flags=re.MULTILINE)
+    if flow:
+        return {item.strip() for item in flow.group("items").split(",") if item.strip()}
+
+    listed = re.search(r"^    needs:[ \t]*\n(?P<items>(?:^      - .+\n)+)", block, flags=re.MULTILINE)
+    if listed:
+        return {
+            line.strip().removeprefix("- ").strip()
+            for line in listed.group("items").splitlines()
+            if line.strip()
+        }
+    return set()
+
+
+# The job graph is deliberately flat: independent work runs as independent
+# lanes, and `full-ci` is the single join. Two things then need guarding.
+#
+# First, a lane must not grow an edge that buys nothing. There are exactly three
+# reasons an edge earns its place -- the job consumes the other's output; the
+# other is a cheap check that should fail the run before this expensive one
+# spends runner minutes; or the two build byte-identical artifacts and ordering
+# them lets the second reuse the first's cache instead of paying twice.
+# Chaining the stack jobs behind the documentation and workflow-lint gates
+# satisfies none of them: it once put roughly 35 seconds of markdown validation
+# in front of every test in the run without changing a single result.
+#
+# Second, and more dangerous: with a flat graph `full-ci` is the ONLY thing
+# making a job required. A new job that nobody adds to its `needs` is not a
+# lenient check, it is an absent one, and the run stays green without it. The
+# completeness check below is what makes flattening safe.
+LANE_DEPENDENCY_LIMITS = {
+    # The service lanes consume exactly one thing: the changed-stack decision
+    # that drives their RUN gate. Nothing else may precede them -- they are the
+    # cheap checks everything else is allowed to wait for.
+    "backend": {"changes"},
+    "frontend": {"changes"},
+    "mobile": {"changes"},
+    # The whole-stack lane. It consumes nothing the service lanes produce, but
+    # it may wait for them so a failing linter or unit test stops the run before
+    # anything pays to boot the stack. It may wait for NOTHING ELSE: not mobile
+    # (which ships in neither image), and not docker.
+    "e2e": {"backend", "frontend"},
+    # The image build, ordered after E2E for cache locality: the two build
+    # byte-identical images, so running them in parallel paid the same build
+    # twice on every cold cache. `backend`/`frontend` are deliberately absent --
+    # e2e already waits on them, and restating a transitive edge is the noise
+    # this rule exists to keep out.
+    "docker": {"e2e"},
+    # The mutation measurements consume the enforced-scope decision from
+    # `changes`, and wait on `backend` for cost: mutmut re-runs the backend suite
+    # hundreds of times, so it is the most expensive thing in the workflow to
+    # point at code whose own tests are already failing.
+    "mutation-base": {"changes", "backend"},
+    "mutation-head": {"changes", "backend"},
+    # The gate genuinely consumes both measurements -- it compares them.
+    "mutation-gate": {"changes", "mutation-base", "mutation-head"},
+}
+FULL_CI_JOB = "full-ci"
+ALLURE_REPORT_JOB = "allure-report"
+
+
+def _job_graph_errors(workflow_text: str) -> list[str]:
+    errors: list[str] = []
+    for job, allowed in LANE_DEPENDENCY_LIMITS.items():
+        needs = _job_needs(workflow_text, job)
+        if needs is None:
+            errors.append(f"missing {job} job")
+            continue
+        surplus = sorted(needs - allowed)
+        if surplus:
+            permitted = ", ".join(sorted(allowed))
+            limit = (
+                f"it may depend on {permitted} and nothing else"
+                if permitted
+                else "it must run as an independent lane"
+            )
+            errors.append(
+                f"{job} job declares needs it does not consume: {surplus}; {limit}. "
+                "A lane queued behind unrelated work delays the whole run without "
+                "changing any result."
+            )
+
+    full_ci_needs = _job_needs(workflow_text, FULL_CI_JOB)
+    if full_ci_needs is None:
+        errors.append(f"missing {FULL_CI_JOB} job")
+        return errors
+
+    all_jobs = set(_job_names(workflow_text))
+    expected = all_jobs - {FULL_CI_JOB}
+    missing = sorted(expected - full_ci_needs)
+    if missing:
+        errors.append(
+            f"{FULL_CI_JOB} does not require every job: {missing}. With a flat job "
+            "graph this gate is the only thing that makes a job required, so a job "
+            "missing here is not checked at all."
+        )
+
+    # The aggregate report is the run's closing artifact and the pull request
+    # comment points at it, so it must not be generated while any job can still
+    # change the verdict. Naming only the jobs that produce results left that
+    # true by coincidence: mutation-head runs up to 90 minutes, so on a change
+    # touching the enforced backend scope the report would publish its link long
+    # before mutation-gate decided.
+    report_needs = _job_needs(workflow_text, ALLURE_REPORT_JOB)
+    if report_needs is None:
+        errors.append(f"missing {ALLURE_REPORT_JOB} job")
+        return errors
+    report_expected = all_jobs - {FULL_CI_JOB, ALLURE_REPORT_JOB}
+    report_missing = sorted(report_expected - report_needs)
+    if report_missing:
+        errors.append(
+            f"{ALLURE_REPORT_JOB} does not wait for every other job: {report_missing}. "
+            "It publishes the run's closing report and its pull request link, so a job "
+            "that can still be running when it starts makes that report describe a run "
+            "nobody has finished."
+        )
+    return errors
 
 
 def _missing_e2e_ci_errors(workflow_text: str) -> list[str]:
@@ -562,6 +723,7 @@ def validate_workflow(
         errors.extend(_missing_frontend_ci_errors(workflow_text))
         errors.extend(_missing_e2e_ci_errors(workflow_text))
         errors.extend(_path_filter_errors(workflow_text))
+        errors.extend(_job_graph_errors(workflow_text))
         errors.extend(_mutation_gate_errors(workflow_text))
         errors.extend(_concurrency_errors(workflow_text))
         errors.extend(_retention_errors(workflow_text))
