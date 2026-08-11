@@ -63,30 +63,31 @@ export function DiscardUnsentSheet({
   });
   const nothingToWarnAbout = view.kind === "no-prompt";
 
+  // Adjusting state during render rather than in an effect: React's documented
+  // pattern for "derive from a prop change", and the one
+  // `react-hooks/set-state-in-effect` exists to push you towards. Doing it in
+  // an effect cost a cascading render on every queue tick.
+  const [wasVisible, setWasVisible] = useState(visible);
+  if (wasVisible !== visible) {
+    setWasVisible(visible);
+    setSawWork(visible ? !nothingToWarnAbout : false);
+  } else if (visible && !nothingToWarnAbout && !sawWork) {
+    setSawWork(true);
+  }
+
   useEffect(() => {
     if (!visible) {
       proceeded.current = false;
-      setSawWork(false);
       return;
     }
-    if (!nothingToWarnAbout) {
-      setSawWork(true);
-    }
-    if (!nothingToWarnAbout || proceeded.current) {
+    if (!nothingToWarnAbout || proceeded.current || sawWork) {
       return;
     }
     // design.md M-05, "empty": the sheet never appears and the action proceeds.
     // That rule is about the sheet OPENING with nothing to warn about, not
-    // about it emptying while someone reads it. If the queue drains to zero
-    // mid-read, auto-continuing signs the person out of a screen they are
-    // still looking at, with no tap of theirs in between — startling, and the
-    // one moment they were promised a choice. So it only fires when the queue
-    // was already empty when the sheet appeared; a live drain to zero falls
-    // through to the "all sent" view, which costs one tap.
-    if (sawWork) {
-      return;
-    }
-    // Guarded by a ref so a re-render cannot fire the transition twice.
+    // about it emptying while someone reads it — draining to zero mid-read
+    // falls through to the "all sent" view, which costs one tap instead of
+    // signing the person out from under them.
     proceeded.current = true;
     onContinue();
   }, [visible, nothingToWarnAbout, onContinue, sawWork]);

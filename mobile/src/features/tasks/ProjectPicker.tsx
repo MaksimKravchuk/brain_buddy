@@ -75,13 +75,23 @@ export function ProjectPicker({
   const selectedId = value?.id ?? null;
   const selectedName = value?.name;
 
+  // Reset the grace clock when the sheet opens, during render — React's
+  // documented pattern for deriving from a prop change.
+  const [wasVisible, setWasVisible] = useState(visible);
+  if (wasVisible !== visible) {
+    setWasVisible(visible);
+    setElapsedMs(0);
+  }
+
   useEffect(() => {
     if (!visible) {
       return;
     }
     // The skeleton grace: nothing is shown for the first 300 ms, so a list that
-    // arrives quickly never flashes a placeholder.
-    setElapsedMs(0);
+    // arrives quickly never flashes a placeholder. The reset happens during
+    // render below, not here — setting state synchronously in an effect costs
+    // a cascading render, which is what `react-hooks/set-state-in-effect` is
+    // for. Only the timer belongs in an effect.
     const timer = setTimeout(() => setElapsedMs(SKELETON_DELAY_MS), SKELETON_DELAY_MS);
     return () => clearTimeout(timer);
   }, [visible]);

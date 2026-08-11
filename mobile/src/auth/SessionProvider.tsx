@@ -118,6 +118,13 @@ export function SessionProvider({ children }: PropsWithChildren) {
     setStatus("signed-out");
   }, []);
 
+  // NOTE: `react-hooks/refs` flags this memo — `handleUnauthorized` reads
+  // `epochRef`, and the rule traces that read into the memo body. The read
+  // happens when a 401 arrives, never during render, but the rule cannot say
+  // so. It is NOT suppressed: mobile/AGENTS.md forbids turning a rule off, and
+  // the honest fix is to move the epoch guard onto functional state updates,
+  // which see the latest value without a ref. That is a real refactor of six
+  // call sites in this file and is deliberately not bundled into the lint pass.
   const api = useMemo(
     () =>
       createApiClient({

@@ -744,10 +744,16 @@ export function useClassificationQueue(
 
   const queueRef = useRef<PendingClassificationChange[]>(EMPTY);
   const identityRef = useRef<ClassificationIdentity | null>(null);
+  // Written in an effect, not during render: mutating a ref while rendering is
+  // not safe under concurrent rendering, which is what `react-hooks/refs`
+  // guards. These exist only to keep the drain from closing over a stale api
+  // or callback, and the drain never runs during render.
   const apiRef = useRef(api);
-  apiRef.current = api;
   const onSyncedRef = useRef(onSynced);
-  onSyncedRef.current = onSynced;
+  useEffect(() => {
+    apiRef.current = api;
+    onSyncedRef.current = onSynced;
+  });
   /** One pass at a time. The queue's own `sending` marker is what makes a
    *  concurrent send impossible; this only stops two passes interleaving their
    *  writes to the same key. */
@@ -800,12 +806,23 @@ export function useClassificationQueue(
   // The cold read, and the drain trigger that follows it. Runs again on every
   // identity change: the key changes with it, and nothing of one identity's is
   // ever read under another (FR-011, SC-007).
+  // Clearing the queue when the feature is off or the identity is unknown is a
+  // derivation from props, so it happens during render. In an effect it would
+  // cascade a render on every tick of a disabled hook.
+  const inactive = !enabled || !serverUrl || !accountId;
+  const [wasInactive, setWasInactive] = useState(inactive);
+  if (wasInactive !== inactive) {
+    setWasInactive(inactive);
+    if (inactive) {
+      setQueue(EMPTY);
+      setReady(false);
+    }
+  }
+
   useEffect(() => {
     if (!enabled || !serverUrl || !accountId) {
       identityRef.current = null;
       queueRef.current = EMPTY;
-      setQueue(EMPTY);
-      setReady(false);
       return;
     }
     const active: ClassificationIdentity = { serverUrl, accountId };

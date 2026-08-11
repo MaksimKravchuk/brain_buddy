@@ -78,20 +78,38 @@ export function ConflictSheet({
   const headingRef = useRef<View>(null);
   const entryKey = conflict?.entry.idempotencyKey;
 
-  useEffect(() => {
-    // Read here rather than during render: React's purity rule forbids the
-    // latter, and `buildConflictView` takes `now` as an argument precisely so
-    // this stays a screen concern. Until it runs the sheet states the change
-    // without its age, which is the honest thing to show for one frame.
-    setClock(visible ? Date.now() : null);
-  }, [visible, entryKey]);
+  // Clearing the clock when the sheet closes is a prop-change derivation, so
+  // it happens during render alongside the resolution reset below.
+  const [clockFor, setClockFor] = useState(`${entryKey}:${visible}`);
+  if (clockFor !== `${entryKey}:${visible}`) {
+    setClockFor(`${entryKey}:${visible}`);
+    setClock(null);
+  }
 
   useEffect(() => {
-    // A different conflict, or a reopen, is a fresh question: a failure carried
-    // over from the previous one would show its correlation id against a task
-    // it has nothing to do with.
+    if (!visible) {
+      return;
+    }
+    // The clock cannot be read during render — React's purity rule — and
+    // cannot be set synchronously here either, because that cascades a render
+    // (`react-hooks/set-state-in-effect`). Reading it from a scheduled task
+    // satisfies both, and costs nothing the design did not already accept:
+    // `buildConflictView` takes `now` as an argument precisely so the age is
+    // omitted until a real instant exists, which is the honest thing to show
+    // rather than dating a three-week-old change as "just now".
+    const scheduled = setTimeout(() => setClock(Date.now()), 0);
+    return () => clearTimeout(scheduled);
+  }, [visible, entryKey]);
+
+  // A different conflict, or a reopen, is a fresh question: a failure carried
+  // over from the previous one would show its correlation id against a task it
+  // has nothing to do with. Reset during render rather than in an effect —
+  // setting state synchronously in an effect cascades a render.
+  const [lastQuestion, setLastQuestion] = useState(`${entryKey}:${visible}`);
+  if (lastQuestion !== `${entryKey}:${visible}`) {
+    setLastQuestion(`${entryKey}:${visible}`);
     setResolution({ status: "idle" });
-  }, [entryKey, visible]);
+  }
 
   useEffect(() => {
     if (!visible) {

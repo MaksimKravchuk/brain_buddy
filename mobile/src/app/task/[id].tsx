@@ -232,11 +232,15 @@ export default function TaskDetailScreen() {
     announcedFooter.current = footer;
   }, [footer]);
 
+  // Reading the per-run dismissal latch is a derivation from the identity key,
+  // so it happens during render. In an effect it cascaded a render on every
+  // pass, which is what `react-hooks/set-state-in-effect` is there to stop.
   const noticeKey = accountNoticeKey(surface.identity);
-  useEffect(() => {
+  const [noticeKeyRead, setNoticeKeyRead] = useState(noticeKey);
+  if (noticeKeyRead !== noticeKey) {
+    setNoticeKeyRead(noticeKey);
     setAccountNoticeDismissed(hasDismissedAccountNotice(noticeKey));
-  }, [noticeKey]);
-
+  }
   const dismissAccountNotice = useCallback(() => {
     rememberAccountNoticeDismissed(noticeKey);
     setAccountNoticeDismissed(true);
