@@ -70,6 +70,7 @@ import {
 } from "@/features/tasks/useClassificationQueue";
 import { availableTransitions, buildTransition } from "@/lifecycle/guards";
 import { colors, fonts, minHitTarget, radii, space, type as typeScale } from "@/theme/tokens";
+import { useServerDraft } from "@/utils/useServerDraft";
 import { newIdempotencyKey } from "@/utils/ids";
 
 const STATE_LABELS: Record<string, string> = {
@@ -142,11 +143,16 @@ export default function TaskDetailScreen() {
 
   const task = query.data;
 
-  const [title, setTitle] = useState("");
-  const [details, setDetails] = useState("");
+  // Drafts follow the server copy until the user types, and follow it again on
+  // every fresh revision — including after a 409 refetch. `useServerDraft`
+  // landed on main while this feature was in flight; it replaces the effect
+  // that used to do this by hand, and the eslint-disable that came with it.
+  const revision = task ? `${task.id}:${task.revision}` : "";
+  const [title, setTitle] = useServerDraft(task?.title ?? "", revision);
+  const [details, setDetails] = useServerDraft(task?.details ?? "", revision);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [dueDraft, setDueDraft] = useState("");
-  const [waitingDraft, setWaitingDraft] = useState("");
+  const [dueDraft, setDueDraft] = useServerDraft(task?.due_date ?? "", revision);
+  const [waitingDraft, setWaitingDraft] = useServerDraft(task?.waiting_for ?? "", revision);
   const [subtaskDraft, setSubtaskDraft] = useState("");
   const [commentDraft, setCommentDraft] = useState("");
   const [dueVisible, setDueVisible] = useState(false);
@@ -162,19 +168,6 @@ export default function TaskDetailScreen() {
   // SC-004's footer is the only thing on this screen that ages, so the clock is
   // read here and passed down; nothing in `taskScreenState` reads it itself.
   const [now, setNow] = useState(() => Date.now());
-
-  // Sync drafts from the server copy whenever a fresh revision arrives —
-  // including after a 409 refetch (edits in progress are the user's to redo
-  // deliberately; we never silently overwrite the server).
-  useEffect(() => {
-    if (task) {
-      setTitle(task.title);
-      setDetails(task.details ?? "");
-      setDueDraft(task.due_date ?? "");
-      setWaitingDraft(task.waiting_for ?? "");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task?.id, task?.revision]);
 
   const transitions = useMemo(() => (task ? availableTransitions(task) : null), [task]);
   const taskOpen = (transitions?.moveTargets.length ?? 0) > 0;

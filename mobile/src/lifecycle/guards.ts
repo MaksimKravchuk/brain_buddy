@@ -59,6 +59,11 @@ export interface TransitionInput {
   expectedRevision: number;
 }
 
+const PAST_PARTICIPLE: Record<"complete" | "cancel", string> = {
+  complete: "completed",
+  cancel: "cancelled",
+};
+
 /**
  * Validate a transition against the current task state and build the exact
  * request payload (no extra keys — the backend forbids them).
@@ -69,7 +74,9 @@ export function buildTransition(task: { state: TaskState }, input: TransitionInp
 
   if (action === "complete" || action === "cancel") {
     if (!open) {
-      return { ok: false, reason: `Only open tasks can be ${action}d.` };
+      // Spelled out rather than built from the action name, which produced
+      // "canceld".
+      return { ok: false, reason: `Only open tasks can be ${PAST_PARTICIPLE[action]}.` };
     }
     return { ok: true, payload: { action, expected_revision: expectedRevision } };
   }

@@ -1,8 +1,9 @@
 import { Mic } from "lucide-react-native";
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { Animated, Easing, StyleSheet, View } from "react-native";
 
 import { colors, radii } from "@/theme/tokens";
+import { useAnimatedValue } from "@/utils/useAnimatedValue";
 
 interface PulsingMicProps {
   active: boolean;
@@ -15,7 +16,7 @@ interface PulsingMicProps {
  * lives in the brain dump.
  */
 export function PulsingMic({ active, size = 72 }: PulsingMicProps) {
-  const pulse = useRef(new Animated.Value(0)).current;
+  const pulse = useAnimatedValue(0);
 
   useEffect(() => {
     if (!active) {

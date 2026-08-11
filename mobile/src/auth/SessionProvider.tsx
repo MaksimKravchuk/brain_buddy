@@ -11,7 +11,12 @@ import {
 
 import { createApiClient, type ApiClient } from "@/api/client";
 import type { MeResponse } from "@/api/types";
-import { DEFAULT_SERVER_URL, loadServerUrl, saveServerUrl } from "@/config/serverUrl";
+import {
+  currentServerUrl,
+  DEFAULT_SERVER_URL,
+  loadServerUrl,
+  saveServerUrl,
+} from "@/config/serverUrl";
 
 import {
   TASK_CLASSIFICATION_FLAG,
@@ -78,8 +83,6 @@ export function SessionProvider({ children }: PropsWithChildren) {
   const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
   const [identity, setIdentity] = useState<PersistedIdentity | null>(null);
   const [flags, setFlags] = useState<FeatureFlagRecord | null>(null);
-  const serverUrlRef = useRef(serverUrl);
-  serverUrlRef.current = serverUrl;
 
   /**
    * Every identity transition bumps this. Anything that started under an
@@ -92,7 +95,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
   /** A 401 anywhere in the app: the session ended without anyone choosing it. */
   const handleUnauthorized = useCallback(async () => {
     const epoch = ++epochRef.current;
-    const url = serverUrlRef.current;
+    const url = currentServerUrl();
     // Reading first gives a sign-in that raced this 401 a chance to win: if
     // the epoch moved, the newer session owns the identity and nothing here
     // is written. Should one still slip through, the cost is a signed-out
@@ -118,7 +121,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
   const api = useMemo(
     () =>
       createApiClient({
-        getBaseUrl: () => serverUrlRef.current,
+        getBaseUrl: currentServerUrl,
         onUnauthorized: () => {
           void handleUnauthorized();
         },
@@ -141,7 +144,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
     setMe(profile);
     setFlags(profile.feature_flags ?? null);
     setStatus("signed-in");
-    const record = await persistIdentity(serverUrlRef.current, profile);
+    const record = await persistIdentity(currentServerUrl(), profile);
     if (epochRef.current !== epoch) {
       return;
     }
@@ -151,7 +154,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
   const probe = useCallback(
     async (signal?: AbortSignal) => {
       const epoch = epochRef.current;
-      const url = serverUrlRef.current;
+      const url = currentServerUrl();
       try {
         const profile = await api.me(signal);
         if (epochRef.current !== epoch) {
@@ -198,7 +201,6 @@ export function SessionProvider({ children }: PropsWithChildren) {
         return;
       }
       setServerUrl(stored);
-      serverUrlRef.current = stored;
       await probe();
     })();
     return () => {
@@ -239,7 +241,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
     } catch {
       // Signing out locally is fine even if the network call fails.
     }
-    await clearPersistedIdentity(serverUrlRef.current);
+    await clearPersistedIdentity(currentServerUrl());
     if (epochRef.current !== epoch) {
       return;
     }
@@ -258,7 +260,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
    */
   const updateServerUrl = useCallback(
     async (url: string) => {
-      const previous = serverUrlRef.current;
+      const previous = currentServerUrl();
       const normalized = await saveServerUrl(url);
       if (normalized === previous) {
         // Saving the URL it already had is not a transition, and treating it
@@ -267,7 +269,9 @@ export function SessionProvider({ children }: PropsWithChildren) {
       }
       const epoch = ++epochRef.current;
       await clearPersistedIdentity(previous);
-      serverUrlRef.current = normalized;
+      // `saveServerUrl` above already moved the live value; `config/serverUrl`
+      // owns it since main #149, so there is no ref to keep in step — only the
+      // rendering mirror below.
       setServerUrl(normalized);
       setMe(null);
       setIdentity(null);

@@ -16,6 +16,10 @@ from pathlib import Path
 REQUIRED_ARTIFACTS = {
     "backend-allure-results": "backend/allure-results",
     "frontend-allure-results": "frontend/allure-results",
+    # Mobile was the one lane whose tests produced no Allure evidence, so the
+    # aggregate report spoke for two stacks out of three while reading as if it
+    # covered the product.
+    "mobile-allure-results": "mobile/allure-results",
     "playwright-allure-results": "frontend/allure-results/playwright",
     "allure-report-html": "allure-report",
 }
@@ -35,7 +39,42 @@ MUTATION_EVIDENCE = (
     "mutation-evidence",
     "name: mutation-raw-results",
     "retention-days: 30",
+    # The nightly must report the ENFORCED tier as well as the observed one.
+    # Its own `only_mutate` is the observed scope, which carries modules under
+    # calibration and can never clear 95%, so without this nothing scheduled
+    # measures the tier that actually blocks and ADR-0004's promotion
+    # precondition has no producer at all. It is free: the observed tier is a
+    # superset, so this is a filter over per-mutant verdicts already written.
+    "summarize-mutmut",
+    "backend/mutation-enforced-scope.txt",
 )
+
+# ADR-0004's blocking gate, once promoted, is only worth as much as its
+# presence in CI. These keep the five requirements it was promoted under from
+# being quietly unpicked: it must be wired, it must compute its own narrow
+# scope rather than inherit the stack filter, it must compare against the base
+# revision, it must keep its evidence even when it fails, and Full CI must
+# depend on both of its jobs so neither can be dropped or left skipped.
+MUTATION_GATE_REQUIREMENTS = (
+    ("mutation gate job", "  mutation-gate:"),
+    ("mutation base measurement job", "  mutation-base:"),
+    ("mutation head measurement job", "  mutation-head:"),
+    ("mutation gate job name", "name: Backend mutation gate"),
+    ("enforced-scope allow-list", "backend/mutation-enforced-scope.txt"),
+    ("scope computed from the changed files", "mutation_gate.py scope"),
+    ("verdict step", "mutation_gate.py check"),
+    ("base-revision comparison", "--base-stats"),
+    ("base revision checked out by sha", "ref: ${{ github.event.pull_request.base.sha }}"),
+    ("blocking-gate Allure evidence", "--mode blocking-gate"),
+    ("full-CI gate covers the mutation gate", "      - mutation-gate\n"),
+    ("full-CI gate covers the base measurement", "      - mutation-base\n"),
+    ("full-CI gate covers the head measurement", "      - mutation-head\n"),
+)
+
+# The two measurements must stay independent of one another. Making either wait
+# on the other doubles a pull request's wall-clock for no gain, which is the
+# shape this started as; only the verdict job is allowed to depend on both.
+MUTATION_MEASUREMENT_JOBS = ("mutation-base", "mutation-head")
 
 # The frontend campaign (ADR-0013) is held to the same shape as the backend one:
 # a named observed scope, a report-only run, and evidence retained whether or
@@ -58,6 +97,25 @@ FRONTEND_MUTATION_EVIDENCE = (
     "--scope-label frontend",
     "name: frontend-mutation-report",
     "name: frontend-mutation-evidence-allure-results",
+)
+
+# The mobile campaign (ADR-0015), same shape again. `check_mutate_scope`
+# compares this against the `mutate` array in mobile/stryker.config.json, which
+# is the list the campaign obeys — the workflow's header comment only describes
+# it.
+MOBILE_MUTATION_SCOPE = (
+    "src/braindump/machine.ts",
+    "src/braindump/manifest.ts",
+    "src/braindump/uploader.ts",
+    "src/braindump/waveform.ts",
+    "src/lifecycle/guards.ts",
+    "src/config/serverUrl.ts",
+)
+
+MOBILE_MUTATION_EVIDENCE = (
+    "--scope-label mobile",
+    "name: mobile-mutation-report",
+    "name: mobile-mutation-evidence-allure-results",
 )
 
 FRONTEND_CI_REQUIREMENTS = (
@@ -483,19 +541,64 @@ def _status_context_errors(workflow_text: str) -> list[str]:
     return errors
 
 
+def _mutation_gate_errors(workflow_text: str) -> list[str]:
+    errors: list[str] = []
+    for label, snippet in MUTATION_GATE_REQUIREMENTS:
+        if snippet not in workflow_text:
+            errors.append(f"missing {label}: {snippet!r}")
+
+    for job in MUTATION_MEASUREMENT_JOBS:
+        block = _job_block(workflow_text, job)
+        if block is None:
+            continue
+        others = [other for other in MUTATION_MEASUREMENT_JOBS if other != job]
+        for other in others:
+            if re.search(rf"^\s+- {re.escape(other)}$", block, flags=re.MULTILINE):
+                errors.append(
+                    f"{job} must not depend on {other}: the two measurements run "
+                    "concurrently, and chaining them doubles a pull request's "
+                    "wall-clock. Only the verdict job may need both."
+                )
+    return errors
+
+
 def _path_filter_errors(workflow_text: str) -> list[str]:
     errors: list[str] = []
     for label, snippet in PATH_FILTER_REQUIREMENTS:
         if snippet not in workflow_text:
             errors.append(f"missing {label}: {snippet!r}")
-    for job in ("backend", "frontend", "mobile", "docker"):
+    for job in (
+        "backend",
+        "frontend",
+        "mobile",
+        "docker",
+        "mutation-base",
+        "mutation-head",
+        "mutation-gate",
+    ):
         block = _job_block(workflow_text, job)
         if block is None:
             errors.append(f"missing {job} job")
-        elif re.search(r"^    if:", block, flags=re.MULTILINE):
+            continue
+        job_if = re.search(r"^    if:(?P<expr>.*)$", block, flags=re.MULTILINE)
+        if not job_if:
+            continue
+        # The hazard this guards is a job that silently does not run because the
+        # DIFF said so. That reports 'skipped', which ADR-0008 requires Full CI
+        # to treat as a failure, so a candidate must never be able to land on a
+        # check that quietly did not execute.
+        #
+        # A condition that only propagates another job's outcome is not that.
+        # `docker` needs one: with a bare `needs: e2e` it was skipped the moment
+        # E2E failed, so the required check went missing in exactly the case it
+        # exists to explain. Banning every job-level `if` cost that check its
+        # purpose; what stays banned is reading the path filter here.
+        expression = job_if.group("expr")
+        if "needs.changes.outputs" in expression or "env.RUN" in expression:
             errors.append(
-                f"{job} job uses a job-level 'if'; path filtering must gate "
-                "steps so the job still reports success rather than skipped"
+                f"{job} job gates itself on the changed-stack filter with a "
+                "job-level 'if'; path filtering must gate steps so the job "
+                "still reports success rather than skipped"
             )
     return errors
 
@@ -509,6 +612,147 @@ def _job_block(workflow_text: str, job: str) -> str | None:
         flags=re.MULTILINE | re.DOTALL,
     )
     return match.group("body") if match else None
+
+
+def _job_names(workflow_text: str) -> list[str]:
+    """Every top-level job key, in file order."""
+
+    jobs_block = re.search(
+        r"^jobs:$(?P<body>.*)\Z", workflow_text, flags=re.MULTILINE | re.DOTALL
+    )
+    if not jobs_block:
+        return []
+    return re.findall(r"^  ([a-z0-9-]+):$", jobs_block.group("body"), flags=re.MULTILINE)
+
+
+def _job_needs(workflow_text: str, job: str) -> set[str] | None:
+    """Return one job's declared ``needs``, or None when the job is absent."""
+
+    block = _job_block(workflow_text, job)
+    if block is None:
+        return None
+
+    inline = re.search(r"^    needs:[ \t]*([A-Za-z0-9_-]+)[ \t]*$", block, flags=re.MULTILINE)
+    if inline:
+        return {inline.group(1)}
+
+    flow = re.search(r"^    needs:[ \t]*\[(?P<items>[^\]]*)\]", block, flags=re.MULTILINE)
+    if flow:
+        return {item.strip() for item in flow.group("items").split(",") if item.strip()}
+
+    listed = re.search(r"^    needs:[ \t]*\n(?P<items>(?:^      - .+\n)+)", block, flags=re.MULTILINE)
+    if listed:
+        return {
+            line.strip().removeprefix("- ").strip()
+            for line in listed.group("items").splitlines()
+            if line.strip()
+        }
+    return set()
+
+
+# The job graph is deliberately flat: independent work runs as independent
+# lanes, and `full-ci` is the single join. Two things then need guarding.
+#
+# First, a lane must not grow an edge that buys nothing. There are exactly three
+# reasons an edge earns its place -- the job consumes the other's output; the
+# other is a cheap check that should fail the run before this expensive one
+# spends runner minutes; or the two build byte-identical artifacts and ordering
+# them lets the second reuse the first's cache instead of paying twice.
+# Chaining the stack jobs behind the documentation and workflow-lint gates
+# satisfies none of them: it once put roughly 35 seconds of markdown validation
+# in front of every test in the run without changing a single result.
+#
+# Second, and more dangerous: with a flat graph `full-ci` is the ONLY thing
+# making a job required. A new job that nobody adds to its `needs` is not a
+# lenient check, it is an absent one, and the run stays green without it. The
+# completeness check below is what makes flattening safe.
+LANE_DEPENDENCY_LIMITS = {
+    # The service lanes consume exactly one thing: the changed-stack decision
+    # that drives their RUN gate. Nothing else may precede them -- they are the
+    # cheap checks everything else is allowed to wait for.
+    "backend": {"changes"},
+    "frontend": {"changes"},
+    "mobile": {"changes"},
+    # The whole-stack lane. It consumes nothing the service lanes produce, but
+    # it may wait for them so a failing linter or unit test stops the run before
+    # anything pays to boot the stack. It may wait for NOTHING ELSE: not mobile
+    # (which ships in neither image), and not docker.
+    "e2e": {"backend", "frontend"},
+    # The image build, ordered after E2E for cache locality: the two build
+    # byte-identical images, so running them in parallel paid the same build
+    # twice on every cold cache. `backend`/`frontend` are deliberately absent --
+    # e2e already waits on them, and restating a transitive edge is the noise
+    # this rule exists to keep out.
+    "docker": {"e2e"},
+    # The mutation measurements consume the enforced-scope decision from
+    # `changes`, and wait on `backend` for cost: mutmut re-runs the backend suite
+    # hundreds of times, so it is the most expensive thing in the workflow to
+    # point at code whose own tests are already failing.
+    "mutation-base": {"changes", "backend"},
+    "mutation-head": {"changes", "backend"},
+    # The gate genuinely consumes both measurements -- it compares them.
+    "mutation-gate": {"changes", "mutation-base", "mutation-head"},
+}
+FULL_CI_JOB = "full-ci"
+ALLURE_REPORT_JOB = "allure-report"
+
+
+def _job_graph_errors(workflow_text: str) -> list[str]:
+    errors: list[str] = []
+    for job, allowed in LANE_DEPENDENCY_LIMITS.items():
+        needs = _job_needs(workflow_text, job)
+        if needs is None:
+            errors.append(f"missing {job} job")
+            continue
+        surplus = sorted(needs - allowed)
+        if surplus:
+            permitted = ", ".join(sorted(allowed))
+            limit = (
+                f"it may depend on {permitted} and nothing else"
+                if permitted
+                else "it must run as an independent lane"
+            )
+            errors.append(
+                f"{job} job declares needs it does not consume: {surplus}; {limit}. "
+                "A lane queued behind unrelated work delays the whole run without "
+                "changing any result."
+            )
+
+    full_ci_needs = _job_needs(workflow_text, FULL_CI_JOB)
+    if full_ci_needs is None:
+        errors.append(f"missing {FULL_CI_JOB} job")
+        return errors
+
+    all_jobs = set(_job_names(workflow_text))
+    expected = all_jobs - {FULL_CI_JOB}
+    missing = sorted(expected - full_ci_needs)
+    if missing:
+        errors.append(
+            f"{FULL_CI_JOB} does not require every job: {missing}. With a flat job "
+            "graph this gate is the only thing that makes a job required, so a job "
+            "missing here is not checked at all."
+        )
+
+    # The aggregate report is the run's closing artifact and the pull request
+    # comment points at it, so it must not be generated while any job can still
+    # change the verdict. Naming only the jobs that produce results left that
+    # true by coincidence: mutation-head runs up to 90 minutes, so on a change
+    # touching the enforced backend scope the report would publish its link long
+    # before mutation-gate decided.
+    report_needs = _job_needs(workflow_text, ALLURE_REPORT_JOB)
+    if report_needs is None:
+        errors.append(f"missing {ALLURE_REPORT_JOB} job")
+        return errors
+    report_expected = all_jobs - {FULL_CI_JOB, ALLURE_REPORT_JOB}
+    report_missing = sorted(report_expected - report_needs)
+    if report_missing:
+        errors.append(
+            f"{ALLURE_REPORT_JOB} does not wait for every other job: {report_missing}. "
+            "It publishes the run's closing report and its pull request link, so a job "
+            "that can still be running when it starts makes that report describe a run "
+            "nobody has finished."
+        )
+    return errors
 
 
 def _missing_e2e_ci_errors(workflow_text: str) -> list[str]:
@@ -541,6 +785,8 @@ def validate_workflow(
         errors.extend(_missing_e2e_ci_errors(workflow_text))
         errors.extend(_missing_allure_aggregation_errors(workflow_text))
         errors.extend(_path_filter_errors(workflow_text))
+        errors.extend(_job_graph_errors(workflow_text))
+        errors.extend(_mutation_gate_errors(workflow_text))
         errors.extend(_concurrency_errors(workflow_text))
         errors.extend(_retention_errors(workflow_text))
         errors.extend(_status_context_errors(workflow_text))
@@ -567,7 +813,53 @@ def validate_workflow(
     return 0
 
 
-def validate_mutation_workflow(workflow: Path) -> int:
+def declared_mutate_scope(config: Path) -> list[str] | str:
+    """The `mutate` allow-list a Stryker config declares, or an error string."""
+
+    if not config.is_file():
+        return f"Stryker config does not exist: {config}"
+    try:
+        declared = json.loads(config.read_text(encoding="utf-8")).get("mutate")
+    except json.JSONDecodeError as exc:
+        return f"invalid Stryker config JSON in {config}: {exc}"
+    if not isinstance(declared, list) or not declared:
+        return f"{config} declares no 'mutate' scope"
+    return [str(path) for path in declared]
+
+
+def check_mutate_scope(config: Path, expected: tuple[str, ...], label: str) -> list[str]:
+    """Require a Stryker config's `mutate` list to be exactly ``expected``.
+
+    The workflow checks above read the header comment, which documents the
+    scope but does not drive it. This reads the file the campaign actually
+    obeys, so dropping a module from `mutate` cannot pass by leaving the
+    comment intact — the failure mode a reviewer caught on #149.
+    """
+
+    declared = declared_mutate_scope(config)
+    if isinstance(declared, str):
+        return [f"{label} {declared}"]
+
+    errors: list[str] = []
+    for path in sorted(set(expected) - set(declared)):
+        errors.append(
+            f"{label} scope {path} is missing from {config}; the campaign would "
+            "stop mutating it while the workflow comment still claims it"
+        )
+    for path in sorted(set(declared) - set(expected)):
+        errors.append(
+            f"{config} mutates {path}, which is not in the {label} scope this "
+            "validator knows about; widening the scope needs an ADR and a "
+            "matching update here"
+        )
+    return errors
+
+
+def validate_mutation_workflow(
+    workflow: Path,
+    frontend_stryker_config: Path | None = None,
+    mobile_stryker_config: Path | None = None,
+) -> int:
     """Reject a mutation workflow that can misrepresent its scope or evidence."""
 
     if not workflow.is_file():
@@ -580,7 +872,11 @@ def validate_mutation_workflow(workflow: Path) -> int:
     if "workflow_dispatch:" not in workflow_text:
         errors.append("mutation workflow must support workflow_dispatch")
     if "pull_request:" in workflow_text or "push:" in workflow_text:
-        errors.append("mutation workflow must remain report-only until a blocking gate is approved")
+        # The blocking gate lives in ci.yml over the narrower ENFORCED tier
+        # (ADR-0011). This nightly measures the OBSERVED tier, which still
+        # contains modules under calibration, so it must stay report-only
+        # permanently rather than "for now".
+        errors.append("mutation workflow measures the observed tier and must stay report-only")
     if "mutmut run" not in workflow_text or "mutmut results" not in workflow_text:
         errors.append("mutation workflow must run mutmut and save its results")
     for path in MUTATION_SCOPE:
@@ -600,6 +896,27 @@ def validate_mutation_workflow(workflow: Path) -> int:
             errors.append(
                 f"mutation workflow is missing frontend evidence artifact: {evidence}"
             )
+
+    if "  mobile-observed-mutation:" not in workflow_text:
+        errors.append("mutation workflow is missing the mobile observed-scope job")
+    for path in MOBILE_MUTATION_SCOPE:
+        if path not in workflow_text:
+            errors.append(f"mutation workflow is missing mobile observed scope: {path}")
+    for evidence in MOBILE_MUTATION_EVIDENCE:
+        if evidence not in workflow_text:
+            errors.append(
+                f"mutation workflow is missing mobile evidence artifact: {evidence}"
+            )
+
+    # The configs are the scope; the workflow only describes it.
+    if frontend_stryker_config is not None:
+        errors += check_mutate_scope(
+            frontend_stryker_config, FRONTEND_MUTATION_SCOPE, "frontend observed"
+        )
+    if mobile_stryker_config is not None:
+        errors += check_mutate_scope(
+            mobile_stryker_config, MOBILE_MUTATION_SCOPE, "mobile observed"
+        )
 
     if errors:
         for error in errors:
@@ -815,6 +1132,16 @@ def build_parser() -> argparse.ArgumentParser:
         "mutation-workflow", help="validate report-only mutation workflow requirements"
     )
     mutation_workflow.add_argument("--workflow", type=Path, required=True)
+    mutation_workflow.add_argument(
+        "--frontend-stryker-config",
+        type=Path,
+        help="frontend Stryker config whose 'mutate' list must match the known scope",
+    )
+    mutation_workflow.add_argument(
+        "--mobile-stryker-config",
+        type=Path,
+        help="mobile Stryker config whose 'mutate' list must match the known scope",
+    )
 
     product_e2e_results = subparsers.add_parser(
         "product-e2e-results",
@@ -857,7 +1184,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "workflow":
         return validate_workflow(args.ci, args.disallow_workflow, args.frontend_vite_config)
     if args.command == "mutation-workflow":
-        return validate_mutation_workflow(args.workflow)
+        return validate_mutation_workflow(
+            args.workflow,
+            frontend_stryker_config=args.frontend_stryker_config,
+            mobile_stryker_config=args.mobile_stryker_config,
+        )
     if args.command == "product-e2e-results":
         return validate_native_product_e2e_results(args.path)
     if args.command == "preview-workflow":

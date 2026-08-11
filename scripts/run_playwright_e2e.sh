@@ -18,6 +18,22 @@ with socket.socket() as s:
 PY
 )}"
 
+# Compose starts exactly these tags (see compose.yaml). Defaulting them per
+# project keeps concurrent local runs from racing on a shared tag; CI overrides
+# them with the tags it prebuilt from the cached layers of main.
+export BRAIN_BUDDY_BACKEND_IMAGE="${BRAIN_BUDDY_BACKEND_IMAGE:-brain-buddy-backend:${PROJECT_NAME}}"
+export BRAIN_BUDDY_FRONTEND_IMAGE="${BRAIN_BUDDY_FRONTEND_IMAGE:-brain-buddy-frontend:${PROJECT_NAME}}"
+
+# Building here is the default so a bare run from a clean checkout still works.
+# CI sets 0 because it already built both images with a shared layer cache;
+# --no-build then fails closed when a tag is missing rather than quietly
+# building an unpinned replacement and testing something nobody pinned.
+if [[ "${BRAIN_BUDDY_E2E_BUILD_IMAGES:-1}" == "1" ]]; then
+  COMPOSE_BUILD_MODE="--build"
+else
+  COMPOSE_BUILD_MODE="--no-build"
+fi
+
 BACKEND_URL="http://127.0.0.1:${BACKEND_PORT}"
 FRONTEND_URL="http://127.0.0.1:${FRONTEND_PORT}"
 COMPOSE_LOG_DIR="${ROOT_DIR}/frontend/test-results/compose"
@@ -41,8 +57,9 @@ trap cleanup EXIT
 cd "${ROOT_DIR}"
 
 echo "[e2e] Starting isolated Compose project ${PROJECT_NAME}"
-echo "[e2e] Backend: ${BACKEND_URL}"
-echo "[e2e] Frontend: ${FRONTEND_URL}"
+echo "[e2e] Backend: ${BACKEND_URL} (${BRAIN_BUDDY_BACKEND_IMAGE})"
+echo "[e2e] Frontend: ${FRONTEND_URL} (${BRAIN_BUDDY_FRONTEND_IMAGE})"
+echo "[e2e] Image mode: ${COMPOSE_BUILD_MODE}"
 
 COMPOSE_PROJECT_NAME="${PROJECT_NAME}" \
 BRAIN_BUDDY_ENV=test \
@@ -53,7 +70,7 @@ BRAIN_BUDDY_FEATURE_FLAGS=voice_brain_dump=on \
 BRAIN_BUDDY_PORT="${BACKEND_PORT}" \
 FRONTEND_PORT="${FRONTEND_PORT}" \
 VITE_API_BASE_URL=/api \
-docker compose up -d --build
+docker compose up -d "${COMPOSE_BUILD_MODE}"
 
 for attempt in {1..60}; do
   if curl -fsS "${BACKEND_URL}/health" >/dev/null; then

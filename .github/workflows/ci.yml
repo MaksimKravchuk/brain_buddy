@@ -45,7 +45,9 @@ jobs:
             --frontend-vite-config frontend/vite.config.ts \
             --disallow-workflow frontend/.github/workflows/playwright.yml
           python3 scripts/validate_ci_artifacts.py mutation-workflow \
-            --workflow .github/workflows/mutation-quality.yml
+            --workflow .github/workflows/mutation-quality.yml \
+            --frontend-stryker-config frontend/stryker.config.json \
+            --mobile-stryker-config mobile/stryker.config.json
           python3 scripts/validate_ci_artifacts.py preview-workflow \
             --workflow .github/workflows/fly-review-frontend.yml
 
@@ -85,10 +87,12 @@ jobs:
   #
   # Filtering applies to pull requests only. Pushes to main and to
   # trunk-candidate/** are the landing path, and those are verified in full.
+  # This job holds no `needs`. It is the only real data dependency the stack
+  # lanes have, so nothing may sit in front of it: a lint gate queued ahead of
+  # it would delay every test in the run without changing any of their results.
   changes:
     name: Changed stacks
     runs-on: ubuntu-latest
-    needs: workflow-lint
     outputs:
       backend: ${{ steps.decide.outputs.backend }}
       frontend: ${{ steps.decide.outputs.frontend }}
@@ -96,6 +100,8 @@ jobs:
       floor-backend: ${{ steps.decide.outputs.floor-backend }}
       floor-frontend: ${{ steps.decide.outputs.floor-frontend }}
       floor-mobile: ${{ steps.decide.outputs.floor-mobile }}
+      mutation: ${{ steps.mutation_scope.outputs.mutation }}
+      mutation_scope: ${{ steps.mutation_scope.outputs.scope }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -130,8 +136,14 @@ jobs:
               # Shared surfaces exercise everything: a change to CI, the
               # delivery scripts, the Makefile or the Compose stack can alter
               # any stack's result.
+              #
+              # `compose.yaml` is this repository's Compose file. The pattern
+              # used to name only `docker-compose`, which has never matched
+              # anything here, so edits to the real file silently exercised no
+              # stack at all. Both spellings are listed now: the legacy one
+              # costs nothing and survives a rename back.
               if printf '%s\n' "${changed}" | grep -Eq \
-                   '^(\.github/|scripts/|Makefile$|docker-compose)'; then
+                   '^(\.github/|scripts/|Makefile$|compose\.yaml$|docker-compose)'; then
                 echo "shared surface touched; exercising every stack"
               else
                 printf '%s\n' "${changed}" | grep -q '^backend/'  || backend=false
@@ -172,10 +184,55 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "backend=${backend} frontend=${frontend} mobile=${mobile}"
 
+      # The mutation gate's scope is computed separately and far more narrowly
+      # than the stack filter above: ADR-0004 requirement 1 runs it only over
+      # enforced-tier files a change actually touches, so the shared-surface
+      # widening deliberately does not apply here. Editing CI does not make a
+      # tree_service campaign meaningful.
+      #
+      # The landing path is different, and not for symmetry: SHIP/SHOW changes
+      # land by pushing trunk-candidate/** with no pull request at all
+      # (ADR-0008), so that push is the only gate those changes ever meet. It
+      # measures the whole enforced list.
+      - name: Decide the enforced mutation scope this change touches
+        id: mutation_scope
+        run: |
+          enforced=backend/mutation-enforced-scope.txt
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base='${{ github.event.pull_request.base.sha }}'
+            if git fetch --no-tags --depth=1 origin "${base}" 2>/dev/null &&
+               git diff --name-only "${base}" HEAD > /tmp/mutation-changed.txt 2>/dev/null; then
+              # The allow-list is written relative to backend/, the diff is not.
+              sed -i 's|^backend/||' /tmp/mutation-changed.txt
+            else
+              # Fails safe toward measuring MORE, as the stack filter does.
+              echo "could not read the diff against ${base}; measuring the whole enforced list"
+              sed 's/#.*//' "${enforced}" | sed '/^[[:space:]]*$/d' > /tmp/mutation-changed.txt
+            fi
+          else
+            echo "landing path; measuring the whole enforced list"
+            sed 's/#.*//' "${enforced}" | sed '/^[[:space:]]*$/d' > /tmp/mutation-changed.txt
+          fi
+
+          python3 scripts/mutation_gate.py scope \
+            --enforced "${enforced}" \
+            --changed /tmp/mutation-changed.txt > /tmp/mutation-scope.txt
+          cat /tmp/mutation-scope.txt
+
+          if [ -s /tmp/mutation-scope.txt ]; then mutation=true; else mutation=false; fi
+          {
+            echo "mutation=${mutation}"
+            echo "scope=$(tr '\n' ' ' < /tmp/mutation-scope.txt)"
+          } >> "$GITHUB_OUTPUT"
+          echo "mutation=${mutation}"
+
+  # Validates the markdown under specs/ and the gate scripts themselves. It
+  # shares no input and no artifact with any stack lane, so it is a lane of its
+  # own; `full-ci` is where its result is required, not the stack lanes' `needs`.
   spec-kit:
     name: Spec Kit artifacts
     runs-on: ubuntu-latest
-    needs: workflow-lint
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -202,10 +259,7 @@ jobs:
   backend:
     name: Backend
     runs-on: ubuntu-latest
-    needs:
-      - workflow-lint
-      - spec-kit
-      - changes
+    needs: changes
     # The job always runs; RUN gates its expensive steps. See the `changes` job
     # for why this is not a job-level `if`.
     env:
@@ -323,10 +377,7 @@ jobs:
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
-    needs:
-      - workflow-lint
-      - spec-kit
-      - changes
+    needs: changes
     env:
       RUN: ${{ needs.changes.outputs.frontend }}
     defaults:
@@ -424,10 +475,7 @@ jobs:
   mobile:
     name: Mobile
     runs-on: ubuntu-latest
-    needs:
-      - workflow-lint
-      - spec-kit
-      - changes
+    needs: changes
     env:
       RUN: ${{ needs.changes.outputs.mobile }}
     defaults:
@@ -499,6 +547,24 @@ jobs:
           python3 scripts/validate_coverage_floor.py --stack mobile --format istanbul-summary \
             --report mobile/coverage/coverage-summary.json --floor mobile/coverage-floor.json "${base_args[@]}"
 
+      # Mobile was the one lane whose tests produced no Allure evidence at all,
+      # so the aggregate report covered two stacks out of three. Validated on
+      # the same terms as the others: every result carries epic/feature/story,
+      # a readable title and a meaningful step.
+      - name: Validate mobile Allure results
+        if: always() && env.RUN == 'true'
+        working-directory: .
+        run: python3 scripts/validate_allure_taxonomy.py --path mobile/allure-results --label mobile-jest
+
+      - name: Upload mobile Allure results
+        if: always() && env.RUN == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: mobile-allure-results
+          path: mobile/allure-results
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+
       - name: Set up Python for the integration backend
         if: env.RUN == 'true'
         uses: actions/setup-python@v7
@@ -527,48 +593,390 @@ jobs:
           EXPO_NO_TELEMETRY: "1"
         run: npx expo export --platform ios
 
+  # ADR-0004 requirement 2: the pull request's scoped score is compared against
+  # the base revision measured over the same scope. An absolute floor alone is
+  # not enough -- a module sitting at 99% can shed four points and still clear
+  # 95%, one pull request at a time.
+  #
+  # The base is measured in its OWN job rather than a second directory inside
+  # the gate job, and that is the whole point of splitting them: `pip install
+  # -e` points at exactly one checkout, so measuring both revisions from one
+  # job risks running the base's tests against the head's code and reporting a
+  # comparison that is silently meaningless.
+  #
+  # This job and mutation-head are deliberately independent of each other, so
+  # the two campaigns overlap and a pull request pays one campaign's wall-clock
+  # rather than two. Only mutation-gate waits, and it just reads two artifacts.
+  # A push has no base to measure, so every step below skips in seconds.
+  # mutmut re-runs the backend suite hundreds of times. Measuring the
+  # mutation score of code whose own unit tests are failing burns the most
+  # runner minutes in the workflow to learn nothing, so this waits for the
+  # backend lane. `changes` stays: it carries the enforced-scope decision.
+  mutation-base:
+    name: Backend mutation base measurement
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs:
+      - changes
+      - backend
+    # No job-level `if`: a skipped job fails Full CI (ADR-0008). The steps below
+    # carry the condition instead.
+    env:
+      RUN: ${{ needs.changes.outputs.mutation }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # The base revision is measured with the HEAD revision's allow-list and
+      # gate script. Reading either from the base would let a pull request pick
+      # its own comparison by editing them.
+      - name: Checkout the base revision
+        if: env.RUN == 'true' && github.event_name == 'pull_request'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+
+      - name: Set up Python
+        if: env.RUN == 'true' && github.event_name == 'pull_request'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: base/backend/pyproject.toml
+
+      - name: Install the base revision's dependencies
+        if: env.RUN == 'true' && github.event_name == 'pull_request'
+        working-directory: base/backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Measure the enforced scope at the base revision
+        if: env.RUN == 'true' && github.event_name == 'pull_request'
+        env:
+          MUTATION_SCOPE: ${{ needs.changes.outputs.mutation_scope }}
+        run: |
+          mkdir -p base-stats
+
+          # A scoped file the base revision does not contain cannot be measured
+          # there. Recording zero checked mutants tells the gate there was no
+          # comparable base, which it treats as "skip the comparison" rather
+          # than as a base score of 0%.
+          tr ' ' '\n' <<< "${MUTATION_SCOPE}" | sed '/^[[:space:]]*$/d' > /tmp/scope.txt
+          : > /tmp/base-scope.txt
+          while read -r entry; do
+            if [ -f "base/backend/${entry}" ]; then
+              echo "${entry}" >> /tmp/base-scope.txt
+            else
+              echo "the base revision has no ${entry}; excluded from the comparison"
+            fi
+          done < /tmp/scope.txt
+          if [ ! -s /tmp/base-scope.txt ]; then
+            echo '{"killed": 0, "survived": 0}' > base-stats/base-mutation-stats.json
+            exit 0
+          fi
+
+          python3 scripts/mutation_gate.py scope \
+            --enforced backend/mutation-enforced-scope.txt \
+            --changed /tmp/base-scope.txt \
+            --apply-to base/backend/pyproject.toml
+
+          cd base/backend
+          rm -rf mutants
+          # Surviving mutants make mutmut exit non-zero; that is the gate's
+          # verdict to make, not this step's.
+          set +e
+          mutmut run
+          echo "base mutmut exit status: $?"
+          set -e
+          mutmut export-cicd-stats
+          cp mutants/mutmut-cicd-stats.json \
+            "${GITHUB_WORKSPACE}/base-stats/base-mutation-stats.json"
+          cat "${GITHUB_WORKSPACE}/base-stats/base-mutation-stats.json"
+
+      - name: Upload the base measurement
+        if: always() && env.RUN == 'true' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutation-base-stats
+          path: base-stats
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+
+  # The head-revision half of the measurement. Independent of mutation-base so
+  # the two campaigns overlap: an earlier shape had the gate both measure and
+  # judge, which forced `needs: mutation-base` and serialised them, doubling a
+  # pull request's wall-clock for no reason. Measuring and judging are split so
+  # only the judging waits.
+  # mutmut re-runs the backend suite hundreds of times. Measuring the
+  # mutation score of code whose own unit tests are failing burns the most
+  # runner minutes in the workflow to learn nothing, so this waits for the
+  # backend lane. `changes` stays: it carries the enforced-scope decision.
+  mutation-head:
+    name: Backend mutation head measurement
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs:
+      - changes
+      - backend
+    env:
+      RUN: ${{ needs.changes.outputs.mutation }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        if: env.RUN == 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install dependencies
+        if: env.RUN == 'true'
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Measure the enforced scope at this revision
+        if: env.RUN == 'true'
+        env:
+          MUTATION_SCOPE: ${{ needs.changes.outputs.mutation_scope }}
+        run: |
+          mkdir -p backend/mutation-artifacts
+          tr ' ' '\n' <<< "${MUTATION_SCOPE}" | sed '/^[[:space:]]*$/d' > /tmp/head-scope.txt
+          python3 scripts/mutation_gate.py scope \
+            --enforced backend/mutation-enforced-scope.txt \
+            --changed /tmp/head-scope.txt \
+            --apply-to backend/pyproject.toml
+
+          cd backend
+          rm -rf mutants
+          # Surviving mutants make mutmut exit non-zero; that is the gate's
+          # verdict to make, not this step's.
+          set +e
+          mutmut run
+          echo "mutmut exit status: $?" > mutation-artifacts/mutation-run-status.txt
+          set -e
+          # export-cicd-stats is NOT tolerated: the verdict is computed from the
+          # file it writes, so a campaign that cannot produce one must fail the
+          # job rather than be waved through. The human-readable summaries are
+          # diagnostics and may fail without invalidating the measurement.
+          mutmut export-cicd-stats
+          cp mutants/mutmut-cicd-stats.json mutation-artifacts/mutation-stats.json
+          mutmut results > mutation-artifacts/mutation-summary.txt || true
+          mutmut results --all true > mutation-artifacts/mutation-survivors.txt || true
+          cat mutation-artifacts/mutation-stats.json
+
+      # Written here rather than in the verdict job so a failing gate still
+      # ships its evidence, and tolerant of a campaign that died before writing
+      # any: a run that crashed is exactly when someone needs the artifacts.
+      - name: Create blocking-gate Allure evidence
+        if: always() && env.RUN == 'true'
+        run: |
+          mkdir -p backend/mutation-gate-evidence
+          for evidence in mutation-summary.txt mutation-survivors.txt; do
+            if [ -f "backend/mutation-artifacts/${evidence}" ]; then
+              cp "backend/mutation-artifacts/${evidence}" backend/mutation-gate-evidence/
+            else
+              echo "the campaign did not produce ${evidence}; see the raw mutmut state" \
+                > "backend/mutation-gate-evidence/${evidence}"
+            fi
+          done
+          python3 scripts/create_mutation_allure_evidence.py \
+            --mode blocking-gate \
+            --scope-label backend \
+            --summary backend/mutation-gate-evidence/mutation-summary.txt \
+            --survivors backend/mutation-gate-evidence/mutation-survivors.txt \
+            --output backend/mutation-gate-evidence/mutation-gate-result.json
+
+      - name: Upload raw mutmut state
+        if: always() && env.RUN == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutation-gate-raw-results
+          path: backend/mutants
+          if-no-files-found: warn
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+
+      - name: Upload mutation statistics, summary and survivors
+        if: always() && env.RUN == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutation-gate-artifacts
+          path: backend/mutation-artifacts
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+
+      - name: Upload blocking-gate Allure evidence
+        if: always() && env.RUN == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutation-gate-evidence
+          path: backend/mutation-gate-evidence
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+
+  # ADR-0004's blocking verdict over the ADR-0011 enforced tier. It fails below
+  # 95%, fails when the campaign checked no mutants at all, and on a pull
+  # request also fails on any regression against the base revision.
+  #
+  # This job only judges: both measurements arrive as artifacts, so it costs
+  # seconds and the two campaigns that feed it ran concurrently.
+  mutation-gate:
+    name: Backend mutation gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs:
+      - changes
+      - mutation-base
+      - mutation-head
+    env:
+      RUN: ${{ needs.changes.outputs.mutation }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Download the head measurement
+        if: env.RUN == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: mutation-gate-artifacts
+          path: head-stats
+
+      - name: Download the base measurement
+        if: env.RUN == 'true' && github.event_name == 'pull_request'
+        uses: actions/download-artifact@v8
+        with:
+          name: mutation-base-stats
+          path: base-stats
+
+      - name: Enforce the mutation gate
+        if: env.RUN == 'true'
+        run: |
+          # --base-stats is passed on every pull request, and the gate errors on
+          # a path that does not exist. A base measurement that failed to
+          # produce a file therefore fails the gate instead of quietly
+          # downgrading it to a threshold-only check.
+          base_args=()
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base_args=(--base-stats base-stats/base-mutation-stats.json)
+          fi
+          python3 scripts/mutation_gate.py check \
+            --stats head-stats/mutation-stats.json "${base_args[@]}"
+
+  # Proves the production Dockerfiles still build. This is a required status
+  # check on main (docs/autonomous-delivery-runbook.md), so the job name is
+  # load-bearing and must not be renamed.
+  #
+  # Gated on `e2e`, and this is the one edge in the graph that exists for
+  # neither of the usual two reasons -- it is there for cache locality.
+  #
+  # This job and the E2E lane build byte-identical images: same Dockerfiles,
+  # same build args, same `stack-*` cache scopes. Running them in parallel meant
+  # paying that build twice whenever the cache was cold, which on a `main` push
+  # is every time. Ordering this one after E2E makes its build a guaranteed hit
+  # on the cache E2E just wrote: measured, roughly 1:01 down to ~20s.
+  #
+  # It costs no wall clock -- E2E is not the last job, so this still lands
+  # before allure-report -- and it keeps the diagnostic value of a separate
+  # check: when E2E goes red, `Docker Images` says at a glance whether the
+  # images built or the journeys failed. `backend`/`frontend` are not listed
+  # because E2E already waits on them; restating a transitive edge is exactly
+  # what the graph rule rejects. It still does not wait on mobile, which ships
+  # in neither image.
+  #
+  # The condition is what makes the diagnostic above actually hold. With a bare
+  # `needs: e2e`, GitHub skips this job the moment E2E fails -- so the separate
+  # required check went missing in precisely the case it exists to explain, and
+  # `full-ci` saw a skipped result on top of the real failure. Spelled out:
+  #   E2E failed   -> run, so `Docker Images` still reports whether the images
+  #                   built when the Playwright journeys are what went red
+  #   E2E skipped  -> skip, because its own gate already decided the services
+  #                   are too broken to be worth building images from
+  #   cancelled    -> skip
+  # This is not path filtering and never hides a check behind the diff, which
+  # is what the job-level `if` ban exists to prevent.
   docker:
     name: Docker Images
     runs-on: ubuntu-latest
-    needs:
-      - backend
-      - frontend
-      - changes
-    env:
-      RUN: ${{ (needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true') && 'true' || 'false' }}
+    needs: e2e
+    if: ${{ !cancelled() && needs.e2e.result != 'skipped' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
-        if: env.RUN == 'true'
         uses: docker/setup-buildx-action@v4
 
+      - name: Expose the Actions cache service to buildx
+        uses: actions/github-script@v9
+        with:
+          script: |
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      # Reads the same cache scopes the E2E lane writes, and deliberately does
+      # not write them back: the two jobs build byte-identical layers, so a
+      # second writer would only spend the repository's shared 10 GB cache quota
+      # storing a duplicate -- and evict the npm and pip caches the other lanes
+      # depend on to do it.
+      #
+      # type=cacheonly: this job proves the Dockerfile builds, it never runs the
+      # image, so exporting one would be pure cost.
       - name: Build backend image
-        if: env.RUN == 'true'
         run: |
           for attempt in 1 2 3; do
-            docker build -t brain-buddy-backend-test -f backend/Dockerfile . && exit 0
+            docker buildx build \
+              --file backend/Dockerfile \
+              --cache-from "type=gha,scope=stack-backend" \
+              --output type=cacheonly . && exit 0
             if [ "$attempt" = 3 ]; then exit 1; fi
             sleep "$((attempt * 10))"
           done
 
+      # Same build args as the E2E lane, so both resolve to the same layers and
+      # therefore to the same cache entries.
       - name: Build frontend image
-        if: env.RUN == 'true'
         run: |
           for attempt in 1 2 3; do
-            docker build -t brain-buddy-frontend-test -f frontend/Dockerfile . && exit 0
+            docker buildx build \
+              --file frontend/Dockerfile \
+              --cache-from "type=gha,scope=stack-frontend" \
+              --build-arg VITE_API_BASE_URL=/api \
+              --output type=cacheonly . && exit 0
             if [ "$attempt" = 3 ]; then exit 1; fi
             sleep "$((attempt * 10))"
           done
 
+  # The whole-stack lane, and the most expensive job in the run.
+  #
+  # It is NEVER path filtered: it is the only check that exercises the backend
+  # and the frontend against each other, so "nothing in my stack changed" is not
+  # a reason to skip it -- a change on either side of the wire can break the pair
+  # while both services' own suites stay green.
+  #
+  # It is still gated on those two services, though. Booting a stack built from
+  # code whose own linter or unit tests just failed proves nothing, and this is
+  # the job that would waste the most runner time doing it. Cheap checks first,
+  # then the expensive one. Same reasoning as the docker job, and like it this
+  # lane does not wait on mobile, which is not part of the Compose stack.
+  #
+  # It does NOT need `docker`. That edge existed only because both jobs built
+  # the same images, and the shared layer cache below replaces it.
   e2e:
     name: Compose Playwright E2E
     runs-on: ubuntu-latest
     needs:
       - backend
       - frontend
-      - docker
+    env:
+      # Pinned so the prebuilt images below are exactly what Compose starts.
+      BRAIN_BUDDY_BACKEND_IMAGE: brain-buddy-backend:ci
+      BRAIN_BUDDY_FRONTEND_IMAGE: brain-buddy-frontend:ci
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -588,7 +996,59 @@ jobs:
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # buildx talks to the Actions cache service through these two variables. A
+      # `run:` step does not receive them the way a build action does, and
+      # exporting them here keeps a third-party action out of a
+      # candidate-controlled workflow. If the service is unreachable the cache
+      # simply misses and the image builds from scratch: this fails toward doing
+      # MORE work, never toward starting a stale service.
+      - name: Expose the Actions cache service to buildx
+        uses: actions/github-script@v9
+        with:
+          script: |
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      # This is what "services from main, only the change rebuilt" buys. GitHub
+      # scopes its cache so a branch reads the DEFAULT BRANCH's entries: a
+      # service this branch did not touch restores main's layers and is ready in
+      # seconds, while a service it did touch misses from the first changed
+      # layer on and rebuilds. Nothing here branches on the diff -- the layers
+      # are content addressed, so the cache decides, and it can only ever be
+      # wrong in the direction of rebuilding too much.
+      - name: Build the stack images, reusing main's layers
+        run: |
+          # build <dockerfile> <tag> <cache-scope> [extra buildx args...]
+          build() {
+            local dockerfile="$1" tag="$2" scope="$3"
+            shift 3
+            for attempt in 1 2 3; do
+              docker buildx build \
+                --file "${dockerfile}" \
+                --tag "${tag}" \
+                --cache-from "type=gha,scope=stack-${scope}" \
+                --cache-to "type=gha,mode=max,scope=stack-${scope}" \
+                "$@" --load . && return 0
+              if [ "${attempt}" = 3 ]; then return 1; fi
+              sleep "$((attempt * 10))"
+            done
+          }
+          build backend/Dockerfile "${BRAIN_BUDDY_BACKEND_IMAGE}" backend
+          # Same value run_playwright_e2e.sh gives Compose: the frontend bakes
+          # its API base in at build time, so a prebuilt image must be built
+          # with the one the E2E stack actually serves.
+          build frontend/Dockerfile "${BRAIN_BUDDY_FRONTEND_IMAGE}" frontend \
+            --build-arg VITE_API_BASE_URL=/api
+
       - name: Run Compose smoke and Playwright E2E
+        env:
+          # The images are already built and tagged above, so Compose starts
+          # exactly those. --no-build (see run_playwright_e2e.sh) fails closed if
+          # one is missing rather than quietly building an unpinned replacement.
+          BRAIN_BUDDY_E2E_BUILD_IMAGES: "0"
         run: |
           # make test-e2e invokes npm run test:e2e after the Compose stack is ready.
           make test-e2e
@@ -626,13 +1086,38 @@ jobs:
           if-no-files-found: warn
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
+  # backend, frontend, mobile and e2e are real data dependencies: this job
+  # downloads the Allure results each of them uploads, and they are the only
+  # four that emit any. `mobile` joined when the mobile suite started producing
+  # evidence -- without it the aggregate could be generated before mobile
+  # finished writing its results, and Playwright's results arrive with `e2e`.
+  #
+  # Everything else is here for a different reason: this report is the run's
+  # closing artifact and the pull request comment points at it, so it must not
+  # be generated while any job can still change the verdict.
+  #
+  # That is why the list is EVERY job but `full-ci` rather than only the four
+  # that produce results. Naming just the evidence producers, or only those plus
+  # `docker`, left "last" true by coincidence: `mutation-head` carries
+  # timeout-minutes: 90, so on a change that touches the enforced backend scope
+  # mutmut runs far longer than E2E and Docker together, and the report would
+  # publish its link while `mutation-gate` was still deciding. The rule is
+  # checked by `scripts/validate_ci_artifacts.py workflow`, so a new job cannot
+  # quietly start finishing after the report that claims to summarise it.
   allure-report:
     name: Allure Report
     runs-on: ubuntu-latest
     needs:
+      - workflow-lint
       - changes
+      - spec-kit
       - backend
       - frontend
+      - mobile
+      - mutation-base
+      - mutation-head
+      - mutation-gate
+      - docker
       - e2e
     if: always()
     permissions:
@@ -750,12 +1235,15 @@ jobs:
       - backend
       - frontend
       - mobile
+      - mutation-base
+      - mutation-head
+      - mutation-gate
       - docker
       - e2e
       - allure-report
     if: always()
     steps:
-      - name: Require successful CI, Docker, E2E, and Allure report
+      - name: Require successful CI, mutation gate, Docker, E2E, and Allure report
         run: |
           # A skipped required job must fail too: with `if: always()` here, a
           # skipped dependency would otherwise let Full CI pass vacuously.
