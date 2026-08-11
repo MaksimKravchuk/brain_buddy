@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AccessibilityInfo, StyleSheet, View, findNodeHandle } from "react-native";
 
 import { BBText } from "@/components/BBText";
@@ -51,6 +51,9 @@ export function DiscardUnsentSheet({
 }: DiscardUnsentSheetProps) {
   const headingRef = useRef<View>(null);
   const proceeded = useRef(false);
+  /** True once this sheet has been shown with unsent work on it. Distinguishes
+   *  "opened empty" (proceed silently) from "emptied while being read". */
+  const [sawWork, setSawWork] = useState(false);
 
   const view = buildDiscardUnsentView({
     queue,
@@ -63,16 +66,30 @@ export function DiscardUnsentSheet({
   useEffect(() => {
     if (!visible) {
       proceeded.current = false;
+      setSawWork(false);
       return;
+    }
+    if (!nothingToWarnAbout) {
+      setSawWork(true);
     }
     if (!nothingToWarnAbout || proceeded.current) {
       return;
     }
     // design.md M-05, "empty": the sheet never appears and the action proceeds.
+    // That rule is about the sheet OPENING with nothing to warn about, not
+    // about it emptying while someone reads it. If the queue drains to zero
+    // mid-read, auto-continuing signs the person out of a screen they are
+    // still looking at, with no tap of theirs in between — startling, and the
+    // one moment they were promised a choice. So it only fires when the queue
+    // was already empty when the sheet appeared; a live drain to zero falls
+    // through to the "all sent" view, which costs one tap.
+    if (sawWork) {
+      return;
+    }
     // Guarded by a ref so a re-render cannot fire the transition twice.
     proceeded.current = true;
     onContinue();
-  }, [visible, nothingToWarnAbout, onContinue]);
+  }, [visible, nothingToWarnAbout, onContinue, sawWork]);
 
   useEffect(() => {
     if (!visible || nothingToWarnAbout) {
@@ -86,6 +103,34 @@ export function DiscardUnsentSheet({
   }, [visible, nothingToWarnAbout]);
 
   if (view.kind !== "prompt") {
+    // Drained to zero while the person was reading it. Nothing is at risk any
+    // more, but silently completing a sign-out under someone mid-read is the
+    // one thing this sheet exists to prevent, so it costs one tap.
+    if (sawWork && visible) {
+      return (
+        <Sheet visible={visible} onClose={onStay}>
+          <View
+            ref={headingRef}
+            accessible
+            accessibilityRole="header"
+            accessibilityLabel="All your changes have been sent"
+            style={styles.heading}
+          >
+            <BBText variant="title">All your changes have been sent</BBText>
+          </View>
+
+          <BBText variant="body" color={colors.fg4}>
+            Nothing is waiting on this device any more.
+          </BBText>
+
+          <View style={styles.action}>
+            <Button variant="primary" onPress={onContinue}>
+              Continue
+            </Button>
+          </View>
+        </Sheet>
+      );
+    }
     return null;
   }
 

@@ -8,7 +8,7 @@
     ".specify/workflows/speckit/workflow.yml": "019a936511cde48cee35c3832ec5078a45557da85869b170998da4d1df869832",
     "Makefile": "551615adc905c2c34f2c7f5f446cda55a4d2a8c3c6b149d525bc9ee710b408eb",
     "scripts/check_gate_integrity.py": "d68583451611bb7eabc78f316d94bef20455e37ad6d6354f066bd619cfde27ab",
-    "scripts/check_requirement_coverage.py": "d3bbfac84046d293e97e8ec5b5ffdcc430be23739c458167c5e0a0281c997268",
+    "scripts/check_requirement_coverage.py": "755229af528cd0a1ca678cca0a5403b58669d1383577c1d5e8cf929f51c92b70",
     "scripts/check_spec_kit_specs.py": "1b5d2bc387d2224ddccf13bed88a04da175d48827784612045d75b427ec697ad",
     "scripts/check_speckit_manifests.py": "e5fb29295f3bb0fa9569362fc74cd871ab5715912dca2c25dec531e7eaa92408",
     "scripts/classify_path_risk.py": "a51e4bf3821c60e6e8aa1829475449e388f1c72bcf33327febb9c87bee5cce7a",

@@ -100,3 +100,64 @@ store it bounded; and the acceptance expires rather than persisting silently.
 
 **The expiry is not decoration.** If this has not landed and been accepted by
 2026-11-09, the gate closes and a fresh campaign is required.
+
+## Implementation outcome
+
+Built 2026-08-11 by six parallel agents on disjoint file sets, plus an
+integration pass. **660 mobile tests, 1069 backend tests, 30/30 requirements
+traced.** Typecheck, lint, Metro bundle and the mobile integration suite (26
+checks against a disposable backend) all green.
+
+### Every defect found during implementation was at a seam
+
+Three, and all three lived in a file no single lane owned:
+
+1. **The idempotency 409 loop, rebuilt from two correct halves.**
+   `conflictDecision` distinguished the two things the backend returns 409 for
+   and carried `reuseIdempotencyKey: false`; `applyRejected` had no parameter
+   to honour it. This is the same defect campaign 2 caught in the requirement
+   text — the gate stopped it in prose and it came back in code.
+2. **`AuthGate` did not know about `signed-in-offline`.** The session lane
+   added the status for FR-019 and correctly left a file it did not own alone.
+   One equality check stranded an authenticated offline person on the sign-in
+   screen with a full queue behind it — the exact path SC-009 exists for.
+3. **The conflict sheet could not tell why an entry was parked.** The sheets
+   lane built a discard-only sheet for a target deleted elsewhere; the queue
+   recorded only *that* an entry was `conflicted`. Every 404 would have offered
+   "Keep mine, replace theirs" for a task that no longer exists, and the sheet
+   built for that case was unreachable.
+
+Disjoint file ownership is what makes parallel agents safe from each other and
+is exactly what makes them blind to what lies between them. **The integration
+pass is not cleanup; it is where this bug class exclusively lives.**
+
+### Things the lanes found that the spec had wrong
+
+- **The SC-007 key derivation did not work.** Campaign 2 said "escape
+  components separately"; `encodeURIComponent` does not escape `.`, and `.` was
+  the separator, so `("a.b","c")` and `("a","b.c")` collided. `serverUrl` is a
+  URL and always contains dots. Because the design rejects a filter, that
+  collision *is* cross-account disclosure. Found independently by two lanes.
+- **`observedAt` did not exist**, so M-04 could not honestly date the value it
+  shows. The sheets lane omitted the age rather than back-filling it from
+  `firstQueuedAt`, which would have claimed the phone's knowledge was minutes
+  old when it may be weeks old — the precise falsehood the labelled row exists
+  to prevent.
+- **A repo-wide gate bug**: `mobile/integration` was listed as a test tree and
+  then filtered back out by filename hints, so every integration assertion in
+  the repository was invisible to `check_requirement_coverage.py`.
+- **`target-missing` had no design state**, only a spec edge case.
+- **T064's premise was wrong** — `sign-in.tsx` has no `signOut` call.
+
+### Not done, and why
+
+- **T052, T069 — the manual quickstart runs need a physical iPhone.** Every
+  criterion whose only honest evidence is a person looking at the screen
+  (SC-001, SC-006, and the rendering halves of FR-007 and FR-012) is therefore
+  ungraded. `/speckit-accept` must not be run until they are.
+- **Component-layer evidence is genuinely weaker than the rest.** `mobile/`
+  installs no React renderer, so `.tsx` files have typecheck and a bundle and
+  nothing else. The lanes pushed every decision they could into pure modules —
+  `pickerState`, `sheetState`, `taskScreenState`, `drainStep` — to shrink that
+  gap, and two of them checked the Hermes bundle by byte-search rather than
+  trusting a passing export. The residue is real and is recorded here.
