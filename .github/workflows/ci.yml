@@ -11,7 +11,13 @@ on:
     # this file therefore cannot grant itself the power to land.
     branches: ["main", "trunk-candidate/**"]
   pull_request:
-    branches: ["main"]
+    # `stack/**` so a stacked pull request gets the same full CI as one
+    # targeting main. Without it a stack is unreviewable: only the base PR
+    # runs anything, and every slice above it shows four skipped preview jobs
+    # and no evidence at all. These refs are pull-request runs, which carry no
+    # write permission and cannot promote — landing stays owned by the
+    # default-branch deploy workflow, exactly as for `main`.
+    branches: ["main", "stack/**"]
 
 permissions:
   contents: read
