@@ -500,8 +500,8 @@ jobs:
           python3 scripts/mutation_gate.py scope \
             --enforced backend/mutation-enforced-scope.txt \
             --changed /tmp/base-scope.txt --apply-to base/backend/pyproject.toml
-  mutation-gate:
-    name: Backend mutation gate
+  mutation-head:
+    name: Backend mutation head measurement
     env:
       RUN: ${{ needs.changes.outputs.mutation }}
     steps:
@@ -516,6 +516,11 @@ jobs:
         run: |
           python3 scripts/create_mutation_allure_evidence.py --mode blocking-gate \
             --summary s.txt --survivors v.txt --output r.json
+  mutation-gate:
+    name: Backend mutation gate
+    env:
+      RUN: ${{ needs.changes.outputs.mutation }}
+    steps:
       - name: Enforce the mutation gate
         if: env.RUN == 'true'
         run: |
@@ -525,6 +530,7 @@ jobs:
       - changes
       - backend
       - mutation-base
+      - mutation-head
       - mutation-gate
     steps:
       - run: echo "${{ contains(needs.*.result, 'skipped') }}"
@@ -1074,6 +1080,62 @@ jobs:
 
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("base-revision comparison", completed.stderr)
+
+    def test_workflow_rejects_chaining_the_two_mutation_measurements(self) -> None:
+        # The measurements must overlap. Making one need the other doubles a
+        # pull request's wall-clock, which is the shape this gate started as.
+        conformant = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        serialised = conformant.replace(
+            "  mutation-head:\n"
+            "    name: Backend mutation head measurement\n"
+            "    runs-on: ubuntu-latest\n"
+            "    timeout-minutes: 90\n"
+            "    needs:\n"
+            "      - workflow-lint\n"
+            "      - spec-kit\n"
+            "      - changes\n",
+            "  mutation-head:\n"
+            "    name: Backend mutation head measurement\n"
+            "    runs-on: ubuntu-latest\n"
+            "    timeout-minutes: 90\n"
+            "    needs:\n"
+            "      - workflow-lint\n"
+            "      - spec-kit\n"
+            "      - changes\n"
+            "      - mutation-base\n",
+            1,
+        )
+        self.assertNotEqual(serialised, conformant, "fixture edit did not apply")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "ci.yml"
+            workflow.write_text(serialised, encoding="utf-8")
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("must not depend on mutation-base", completed.stderr)
+
+    def test_mutation_workflow_must_report_the_enforced_tier(self) -> None:
+        # The nightly's own scope is the observed tier and can never clear 95%.
+        # Without this summary nothing scheduled measures the tier that blocks.
+        nightly = (REPO_ROOT / ".github" / "workflows" / "mutation-quality.yml").read_text(
+            encoding="utf-8"
+        )
+        without = nightly.replace("summarize-mutmut", "summarize-nothing")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "mutation.yml"
+            workflow.write_text(without, encoding="utf-8")
+
+            completed = self.run_validator(
+                "mutation-workflow", "--workflow", str(workflow)
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("summarize-mutmut", completed.stderr)
 
     def test_workflow_rejects_a_mutation_gate_hidden_behind_a_job_level_if(self) -> None:
         # A job-level `if` makes the gate report 'skipped', which is exactly the

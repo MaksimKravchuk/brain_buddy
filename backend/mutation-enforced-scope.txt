@@ -58,7 +58,11 @@
 # The nightly campaign in .github/workflows/mutation-quality.yml stays
 # report-only over the wider OBSERVED scope. It is not redundant with the gate:
 # it measures the modules still under calibration, which are not allowed to
-# block anything yet.
+# block anything yet. It also reports THIS list's score from the same run --
+# the observed scope is a superset, so the enforced number is a filter over
+# per-mutant verdicts it already produced, at no extra runtime. That is the
+# only scheduled evidence this tier has, and drift here shows up nightly
+# rather than on whichever pull request happens to trip the gate.
 app/services/tree_service.py
 app/services/version_service.py
 app/services/relation_service.py

@@ -107,15 +107,22 @@ running the base's tests against the head's code and reporting a comparison
 that is silently meaningless — the worst failure available to a gate, because
 it still shows green.
 
-The two jobs run in sequence, not in parallel: `mutation-gate` declares
-`needs: mutation-base` so it can download the base measurement as an artifact,
-and `needs` gates when a job *starts*. A pull request therefore pays for both
-campaigns end to end — the first run of this gate measured 623 mutants twice,
-seven minutes each. Making them concurrent needs a third job that consumes both
-artifacts and renders the verdict; the two-job shape was chosen for correctness
-first and has not been optimised. The landing path is unaffected, because there
-is no base revision to measure on a push and `mutation-base` finishes in
-seconds.
+**Measuring and judging are separate jobs, and that is what makes the
+comparison affordable.** The first shape had the gate both measure the head and
+render the verdict, which forced `needs: mutation-base` on it so it could read
+the base artifact — and since `needs` gates when a job *starts*, the two
+campaigns ran strictly in sequence. A pull request paid two campaigns'
+wall-clock, 623 mutants twice at about seven minutes each.
+
+Splitting the verdict out fixes it: `mutation-base` and `mutation-head` depend
+only on the scope calculation, so they overlap, and `mutation-gate` waits for
+both to read two artifacts and decide, which takes seconds. A pull request now
+pays one campaign's wall-clock. `validate_ci_artifacts.py` rejects a workflow
+that reintroduces a dependency between the two measurements, because the
+serialised shape looks perfectly reasonable in a diff.
+
+The landing path never had this cost: a push has no base revision to measure,
+so `mutation-base` skips every step.
 
 A module enters the observed scope as soon as it has mutation-compatible tests
 worth measuring. It moves to the enforced scope only once it independently
@@ -174,12 +181,21 @@ mutation records that breaking it would be noticed.
 
 `python3 scripts/validate_ci_artifacts.py mutation-workflow` continues to
 check the nightly workflow's scheduling, report-only event policy, explicit
-scope and retained evidence. The observed-scope score is read from
-`mutmut results --all` on a scheduled run. The enforced-scope score is
-reproduced by `make mutation-gate-backend`, which narrows `only_mutate` to this
-list for the duration of one run and then asserts the 95% bar with
-`scripts/mutation_gate.py check`; it is the same validator the pull-request
-gate will call once that gate is connected.
+scope and retained evidence, and now also that it reports the enforced tier.
+
+That last requirement closes a gap this ADR opened. Splitting the tiers left
+the scheduled campaign measuring only the observed scope, so the number
+ADR-0004 wants scheduled evidence for — the enforced one — had no producer at
+all, and its promotion precondition could not have been satisfied by waiting.
+The nightly now derives it with `scripts/mutation_gate.py summarize-mutmut`,
+filtering the per-mutant verdicts it already writes down to the enforced
+modules. The observed scope is a superset, so this costs no extra runtime and
+gives the gating scope ongoing drift detection rather than a one-off number.
+
+The enforced score is also reproducible on demand with
+`make mutation-gate-backend`, which narrows `only_mutate` to this list for one
+run and asserts the 95% bar with `scripts/mutation_gate.py check` — the same
+validator the pull-request gate calls.
 `backend/tests/test_task_owner_isolation.py` is the
 regression suite that makes the task module's owner predicates mutable in the
 first place, and its own kill-power was confirmed by hand-mutating both `_get`

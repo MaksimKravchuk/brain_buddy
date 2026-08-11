@@ -61,10 +61,19 @@ build-frontend:
 
 ci-frontend: lint-frontend typecheck-frontend test-frontend build-frontend
 
+# Report-only over the OBSERVED tier, and it prints the enforced-tier score
+# from the same run: the observed scope is a superset, so the number that gates
+# pull requests is a filter over these verdicts rather than a second campaign.
 mutation-backend:
-	cd backend && rm -rf mutants mutation-artifacts
+	cd backend && rm -rf mutants mutation-artifacts && mkdir -p mutation-artifacts
 	cd backend && mutmut run || true
 	cd backend && mutmut results
+	cd backend && mutmut results --all true > mutation-artifacts/mutation-survivors.txt
+	python3 scripts/mutation_gate.py summarize-mutmut \
+		--results backend/mutation-artifacts/mutation-survivors.txt \
+		--enforced backend/mutation-enforced-scope.txt \
+		--summary-out backend/mutation-artifacts/enforced-summary.txt \
+		--survivors-out backend/mutation-artifacts/enforced-survivors.txt
 
 # Report-only, like mutation-backend: it prints the observed and enforced scores
 # and never fails the build on either. Takes ~35 minutes; scope one module with

@@ -11,8 +11,12 @@ from scripts.mutation_gate import (
     load_enforced_scope,
     main,
     mutation_score,
+    mutmut_results_score,
+    mutmut_summary,
+    mutmut_survivors,
     rewrite_only_mutate,
     scope_for_changes,
+    scope_module_prefixes,
     stryker_score,
     validate_stats,
     validate_stryker,
@@ -259,6 +263,143 @@ class CheckCommandTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             head = self._write(Path(tmp), "head.json", {"killed": 99, "survived": 1})
             self.assertEqual(main(["check", "--stats", str(head)]), 0)
+
+
+#: An observed-tier dump: the enforced modules plus the two ADR-0011 admitted
+#: under calibration, which is exactly the shape the nightly produces.
+OBSERVED_DUMP = "\n".join(
+    [
+        "app.services.tree_service.xǁTreeServiceǁget_tree__mutmut_1: killed",
+        "app.services.tree_service.xǁTreeServiceǁget_tree__mutmut_2: survived",
+        "app.repositories.tree.xǁTreeRepositoryǁload__mutmut_1: killed",
+        "app.modules.tasks.repository.xǁTaskRepositoryǁ_get__mutmut_1: survived",
+        "app.modules.tasks.repository.xǁTaskRepositoryǁ_get__mutmut_2: survived",
+        "app.services.auth_service.xǁAuthServiceǁlogin__mutmut_1: survived",
+        "app.services.tree_service.xǁTreeServiceǁget_tree__mutmut_3: not checked",
+    ]
+)
+
+ENFORCED_TWO = ["app/services/tree_service.py", "app/repositories/tree.py"]
+
+
+class ScopeModulePrefixTests(unittest.TestCase):
+    def test_a_path_becomes_a_dotted_prefix_with_a_trailing_dot(self) -> None:
+        self.assertEqual(
+            scope_module_prefixes(["app/services/tree_service.py"]),
+            ["app.services.tree_service."],
+        )
+
+    def test_the_trailing_dot_stops_a_sibling_module_being_claimed(self) -> None:
+        # Without it `app.repositories.tree` would swallow every mutant of
+        # `app.repositories.tree_service` as well.
+        dump = "app.repositories.tree_service.xǁXǁf__mutmut_1: survived"
+        self.assertEqual(
+            mutmut_results_score(dump, ["app/repositories/tree.py"]), (0, 0, 0.0)
+        )
+
+
+class MutmutResultsScoreTests(unittest.TestCase):
+    """One campaign, two tier scores: the enforced number is a filter over the
+    observed run's per-mutant verdicts, not a second campaign."""
+
+    def test_the_observed_tier_counts_every_module(self) -> None:
+        self.assertEqual(mutmut_results_score(OBSERVED_DUMP)[:2], (2, 6))
+
+    def test_the_enforced_tier_excludes_modules_under_calibration(self) -> None:
+        killed, checked, score = mutmut_results_score(OBSERVED_DUMP, ENFORCED_TWO)
+        self.assertEqual((killed, checked), (2, 3))
+        self.assertAlmostEqual(score, 2 / 3)
+
+    def test_undecided_verdicts_stay_out_of_the_denominator(self) -> None:
+        # `not checked` says nothing about assertion strength, exactly as
+        # skipped and timed-out mutants do not in the aggregate stats.
+        self.assertEqual(mutmut_results_score(OBSERVED_DUMP, ENFORCED_TWO)[1], 3)
+
+    def test_an_empty_intersection_reports_nothing_checked_not_a_pass(self) -> None:
+        self.assertEqual(
+            mutmut_results_score(OBSERVED_DUMP, ["app/repositories/version.py"]),
+            (0, 0, 0.0),
+        )
+
+
+class MutmutSummaryTests(unittest.TestCase):
+    def test_summary_names_the_tier_and_lists_each_enforced_module(self) -> None:
+        summary = mutmut_summary(OBSERVED_DUMP, ENFORCED_TWO)
+        self.assertIn("app/services/tree_service.py: 50.00% (1/2 killed)", summary)
+        self.assertIn("app/repositories/tree.py: 100.00% (1/1 killed)", summary)
+        self.assertIn("TOTAL (enforced scope): 66.67% (2/3 killed)", summary)
+
+    def test_the_observed_summary_says_which_tier_it_is(self) -> None:
+        self.assertIn("TOTAL (observed scope):", mutmut_summary(OBSERVED_DUMP))
+
+    def test_survivors_are_limited_to_the_scope(self) -> None:
+        survivors = mutmut_survivors(OBSERVED_DUMP, ENFORCED_TWO)
+        self.assertIn("tree_service.xǁTreeServiceǁget_tree__mutmut_2", survivors)
+        self.assertNotIn("tasks.repository", survivors)
+        self.assertNotIn("auth_service", survivors)
+
+    def test_no_survivors_says_so_rather_than_writing_an_empty_file(self) -> None:
+        clean = "app.services.tree_service.xǁTreeServiceǁget_tree__mutmut_1: killed"
+        self.assertEqual(
+            mutmut_survivors(clean, ["app/services/tree_service.py"]),
+            "No surviving mutants\n",
+        )
+
+
+class SummarizeMutmutCommandTests(unittest.TestCase):
+    def test_writes_both_files_and_reports_the_enforced_total(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            results = root / "results.txt"
+            results.write_text(OBSERVED_DUMP, encoding="utf-8")
+            enforced = root / "enforced.txt"
+            enforced.write_text("\n".join(ENFORCED_TWO) + "\n", encoding="utf-8")
+            summary_out = root / "out" / "summary.txt"
+            survivors_out = root / "out" / "survivors.txt"
+
+            self.assertEqual(
+                main(
+                    [
+                        "summarize-mutmut",
+                        "--results",
+                        str(results),
+                        "--enforced",
+                        str(enforced),
+                        "--summary-out",
+                        str(summary_out),
+                        "--survivors-out",
+                        str(survivors_out),
+                    ]
+                ),
+                0,
+            )
+            self.assertIn(
+                "TOTAL (enforced scope): 66.67%",
+                summary_out.read_text(encoding="utf-8"),
+            )
+            self.assertNotIn(
+                "tasks.repository", survivors_out.read_text(encoding="utf-8")
+            )
+
+    def test_a_missing_results_file_fails_rather_than_writing_a_clean_report(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.assertEqual(
+                main(
+                    [
+                        "summarize-mutmut",
+                        "--results",
+                        str(root / "absent.txt"),
+                        "--summary-out",
+                        str(root / "s.txt"),
+                        "--survivors-out",
+                        str(root / "v.txt"),
+                    ]
+                ),
+                1,
+            )
 
 
 def stryker_report(files: dict[str, list[str]]) -> dict[str, object]:

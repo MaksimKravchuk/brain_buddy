@@ -583,11 +583,10 @@ jobs:
   # job risks running the base's tests against the head's code and reporting a
   # comparison that is silently meaningless.
   #
-  # These two run in SEQUENCE, not in parallel: mutation-gate needs this job's
-  # artifact, and `needs` gates when a job starts. A pull request pays for both
-  # campaigns end to end. Overlapping them needs a third job that consumes both
-  # artifacts and renders the verdict; correctness came first here. A push is
-  # unaffected -- there is no base to measure, so every step below skips.
+  # This job and mutation-head are deliberately independent of each other, so
+  # the two campaigns overlap and a pull request pays one campaign's wall-clock
+  # rather than two. Only mutation-gate waits, and it just reads two artifacts.
+  # A push has no base to measure, so every step below skips in seconds.
   mutation-base:
     name: Backend mutation base measurement
     runs-on: ubuntu-latest
@@ -681,18 +680,19 @@ jobs:
           if-no-files-found: error
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
-  # ADR-0004's blocking gate over the ADR-0011 enforced tier. It fails below
-  # 95%, fails when the campaign checked no mutants at all, and on a pull
-  # request also fails on any regression against the base revision.
-  mutation-gate:
-    name: Backend mutation gate
+  # The head-revision half of the measurement. Independent of mutation-base so
+  # the two campaigns overlap: an earlier shape had the gate both measure and
+  # judge, which forced `needs: mutation-base` and serialised them, doubling a
+  # pull request's wall-clock for no reason. Measuring and judging are split so
+  # only the judging waits.
+  mutation-head:
+    name: Backend mutation head measurement
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs:
       - workflow-lint
       - spec-kit
       - changes
-      - mutation-base
     env:
       RUN: ${{ needs.changes.outputs.mutation }}
     steps:
@@ -709,10 +709,10 @@ jobs:
 
       - name: Install dependencies
         if: env.RUN == 'true'
+        working-directory: backend
         run: |
           python -m pip install --upgrade pip
           pip install -e .[dev]
-        working-directory: backend
 
       - name: Measure the enforced scope at this revision
         if: env.RUN == 'true'
@@ -728,6 +728,8 @@ jobs:
 
           cd backend
           rm -rf mutants
+          # Surviving mutants make mutmut exit non-zero; that is the gate's
+          # verdict to make, not this step's.
           set +e
           mutmut run
           echo "mutmut exit status: $?" > mutation-artifacts/mutation-run-status.txt
@@ -742,16 +744,9 @@ jobs:
           mutmut results --all true > mutation-artifacts/mutation-survivors.txt || true
           cat mutation-artifacts/mutation-stats.json
 
-      - name: Download the base measurement
-        if: env.RUN == 'true' && github.event_name == 'pull_request'
-        uses: actions/download-artifact@v8
-        with:
-          name: mutation-base-stats
-          path: base-stats
-
-      # Written before the verdict so a failing gate still ships its evidence,
-      # and tolerant of a campaign that died before writing any: a run that
-      # crashed is exactly when someone needs the artifacts.
+      # Written here rather than in the verdict job so a failing gate still
+      # ships its evidence, and tolerant of a campaign that died before writing
+      # any: a run that crashed is exactly when someone needs the artifacts.
       - name: Create blocking-gate Allure evidence
         if: always() && env.RUN == 'true'
         run: |
@@ -766,23 +761,10 @@ jobs:
           done
           python3 scripts/create_mutation_allure_evidence.py \
             --mode blocking-gate \
+            --scope-label backend \
             --summary backend/mutation-gate-evidence/mutation-summary.txt \
             --survivors backend/mutation-gate-evidence/mutation-survivors.txt \
             --output backend/mutation-gate-evidence/mutation-gate-result.json
-
-      - name: Enforce the mutation gate
-        if: env.RUN == 'true'
-        run: |
-          # --base-stats is passed on every pull request, and the gate errors on
-          # a path that does not exist. A base measurement that failed to
-          # produce a file therefore fails the gate instead of quietly
-          # downgrading it to a threshold-only check.
-          base_args=()
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base_args=(--base-stats base-stats/base-mutation-stats.json)
-          fi
-          python3 scripts/mutation_gate.py check \
-            --stats backend/mutation-artifacts/mutation-stats.json "${base_args[@]}"
 
       - name: Upload raw mutmut state
         if: always() && env.RUN == 'true'
@@ -810,6 +792,54 @@ jobs:
           path: backend/mutation-gate-evidence
           if-no-files-found: error
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+
+  # ADR-0004's blocking verdict over the ADR-0011 enforced tier. It fails below
+  # 95%, fails when the campaign checked no mutants at all, and on a pull
+  # request also fails on any regression against the base revision.
+  #
+  # This job only judges: both measurements arrive as artifacts, so it costs
+  # seconds and the two campaigns that feed it ran concurrently.
+  mutation-gate:
+    name: Backend mutation gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs:
+      - changes
+      - mutation-base
+      - mutation-head
+    env:
+      RUN: ${{ needs.changes.outputs.mutation }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Download the head measurement
+        if: env.RUN == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: mutation-gate-artifacts
+          path: head-stats
+
+      - name: Download the base measurement
+        if: env.RUN == 'true' && github.event_name == 'pull_request'
+        uses: actions/download-artifact@v8
+        with:
+          name: mutation-base-stats
+          path: base-stats
+
+      - name: Enforce the mutation gate
+        if: env.RUN == 'true'
+        run: |
+          # --base-stats is passed on every pull request, and the gate errors on
+          # a path that does not exist. A base measurement that failed to
+          # produce a file therefore fails the gate instead of quietly
+          # downgrading it to a threshold-only check.
+          base_args=()
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base_args=(--base-stats base-stats/base-mutation-stats.json)
+          fi
+          python3 scripts/mutation_gate.py check \
+            --stats head-stats/mutation-stats.json "${base_args[@]}"
 
   docker:
     name: Docker Images
@@ -988,6 +1018,7 @@ jobs:
       - frontend
       - mobile
       - mutation-base
+      - mutation-head
       - mutation-gate
       - docker
       - e2e

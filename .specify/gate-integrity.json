@@ -6,14 +6,14 @@
     ".specify/workflows/speckit/handoff.schema.json": "089076b6df81ada79d7ba596b873c686a9d1748b8a921c592cce31f98dc82bf1",
     ".specify/workflows/speckit/review.schema.json": "59ddb9c1a8b3bdf2c0a572c12131426a7beea5fd68673d5d12a91251ee24b3c0",
     ".specify/workflows/speckit/workflow.yml": "019a936511cde48cee35c3832ec5078a45557da85869b170998da4d1df869832",
-    "Makefile": "595544bf5855592f188a1ae9dcb14393e674e0f3f008e2fb441a634a7077ddb7",
-    "backend/mutation-enforced-scope.txt": "6444d5c4f1f5f23de12f8a925f7284d29f86a4e8f04c519d01fe8c3fdbfbd819",
+    "Makefile": "6991c2e4379bb5c60e3ff35dbc76571970e32f05fa057a29822447a7e3592fd4",
+    "backend/mutation-enforced-scope.txt": "8c52d36416607e50f5b1f25541d14f83f5bc67019ef6c12e1906bfeb9c1f0386",
     "scripts/check_gate_integrity.py": "365631462465c5388ed42ae996a19ee5076c106036f6fcdefedb1e7fdeb2ca1d",
     "scripts/check_requirement_coverage.py": "d3bbfac84046d293e97e8ec5b5ffdcc430be23739c458167c5e0a0281c997268",
     "scripts/check_spec_kit_specs.py": "1b5d2bc387d2224ddccf13bed88a04da175d48827784612045d75b427ec697ad",
     "scripts/check_speckit_manifests.py": "e5fb29295f3bb0fa9569362fc74cd871ab5715912dca2c25dec531e7eaa92408",
     "scripts/classify_path_risk.py": "a51e4bf3821c60e6e8aa1829475449e388f1c72bcf33327febb9c87bee5cce7a",
-    "scripts/mutation_gate.py": "b471755ed42b0df22695dc684bf0f4030ded94ccf5a088dc02d1737e052abda8",
+    "scripts/mutation_gate.py": "e43ce786d0ddde93028fa10d0c6e26b8f62c8155a41b23efd8bfc0300d171b68",
     "scripts/spec_kit_planning_review.py": "f81f81eb85f4c823aba21c7852669c557c63058b4f063f1134b9eb249d9402ec"
   }
 }

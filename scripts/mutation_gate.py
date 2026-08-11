@@ -235,6 +235,93 @@ def stryker_survivors(report: dict[str, object], scope: list[str] | None = None)
     return "\n".join(lines) + "\n"
 
 
+#: `mutmut results --all true` prints one `<mutant name>: <verdict>` line per
+#: mutant. Only killed and survived are a verdict about the tests, matching
+#: how ``mutation_score`` reads the aggregate stats.
+MUTMUT_RESULT_LINE = re.compile(r"^\s*(?P<mutant>[\w.]+ǁ?[\w.ǁ]*):\s*(?P<verdict>[a-z ]+)\s*$")
+
+
+def scope_module_prefixes(scope: list[str]) -> list[str]:
+    """Turn `app/services/tree_service.py` into `app.services.tree_service.`.
+
+    The trailing dot matters: without it `app.repositories.tree` would also
+    claim every mutant of a hypothetical `app.repositories.tree_service`.
+    """
+
+    prefixes = []
+    for entry in scope:
+        module = entry.removesuffix(".py").replace("/", ".")
+        prefixes.append(f"{module}.")
+    return prefixes
+
+
+def mutmut_results_score(
+    results_text: str, scope: list[str] | None = None
+) -> tuple[int, int, float]:
+    """Return (killed, checked, score) from `mutmut results --all true` output.
+
+    This is how one campaign yields two tier scores. The observed scope is a
+    superset of the enforced one, so the enforced number is a filter over the
+    same per-mutant verdicts rather than a second campaign -- which is what
+    makes ongoing enforced-tier evidence cost nothing.
+    """
+
+    prefixes = None if scope is None else scope_module_prefixes(scope)
+    killed = 0
+    survived = 0
+    for line in results_text.splitlines():
+        match = MUTMUT_RESULT_LINE.match(line)
+        if match is None:
+            continue
+        mutant = match.group("mutant")
+        if prefixes is not None and not any(mutant.startswith(p) for p in prefixes):
+            continue
+        verdict = match.group("verdict").strip()
+        if verdict == "killed":
+            killed += 1
+        elif verdict == "survived":
+            survived += 1
+
+    checked = killed + survived
+    if checked == 0:
+        return killed, 0, 0.0
+    return killed, checked, killed / checked
+
+
+def mutmut_summary(results_text: str, scope: list[str] | None = None) -> str:
+    """Render the per-module and overall score of a mutmut results dump."""
+
+    lines = []
+    if scope is not None:
+        for entry in scope:
+            killed, checked, score = mutmut_results_score(results_text, [entry])
+            lines.append(f"{entry}: {score:.2%} ({killed}/{checked} killed)")
+
+    killed, checked, score = mutmut_results_score(results_text, scope)
+    tier = "enforced scope" if scope is not None else "observed scope"
+    lines.append(f"TOTAL ({tier}): {score:.2%} ({killed}/{checked} killed)")
+    return "\n".join(lines) + "\n"
+
+
+def mutmut_survivors(results_text: str, scope: list[str] | None = None) -> str:
+    """Render every surviving mutant in ``scope`` as one reviewable line."""
+
+    prefixes = None if scope is None else scope_module_prefixes(scope)
+    lines: list[str] = []
+    for line in results_text.splitlines():
+        match = MUTMUT_RESULT_LINE.match(line)
+        if match is None or match.group("verdict").strip() != "survived":
+            continue
+        mutant = match.group("mutant")
+        if prefixes is not None and not any(mutant.startswith(p) for p in prefixes):
+            continue
+        lines.append(mutant)
+
+    if not lines:
+        return "No surviving mutants\n"
+    return "\n".join(lines) + "\n"
+
+
 def rewrite_only_mutate(pyproject: Path, scope: list[str]) -> None:
     """Narrow ``[tool.mutmut] only_mutate`` to ``scope`` in place.
 
@@ -311,6 +398,20 @@ def main(argv: list[str] | None = None) -> int:
     summarize.add_argument("--summary-out", type=Path, required=True)
     summarize.add_argument("--survivors-out", type=Path, required=True)
 
+    summarize_mutmut = sub.add_parser(
+        "summarize-mutmut",
+        help="write the score summary and survivor list of a mutmut results dump",
+    )
+    summarize_mutmut.add_argument(
+        "--results",
+        type=Path,
+        required=True,
+        help="output of `mutmut results --all true`",
+    )
+    summarize_mutmut.add_argument("--enforced", type=Path)
+    summarize_mutmut.add_argument("--summary-out", type=Path, required=True)
+    summarize_mutmut.add_argument("--survivors-out", type=Path, required=True)
+
     args = parser.parse_args(argv)
 
     if args.command == "summarize-stryker":
@@ -325,6 +426,20 @@ def main(argv: list[str] | None = None) -> int:
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
+        for path, text in ((args.summary_out, summary), (args.survivors_out, survivors)):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        print(summary, end="")
+        return 0
+
+    if args.command == "summarize-mutmut":
+        if not args.results.is_file():
+            print(f"error: results do not exist: {args.results}", file=sys.stderr)
+            return 1
+        results_text = args.results.read_text(encoding="utf-8")
+        scope = load_enforced_scope(args.enforced) if args.enforced else None
+        summary = mutmut_summary(results_text, scope)
+        survivors = mutmut_survivors(results_text, scope)
         for path, text in ((args.summary_out, summary), (args.survivors_out, survivors)):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
