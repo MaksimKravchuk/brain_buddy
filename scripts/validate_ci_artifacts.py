@@ -458,6 +458,108 @@ def _job_block(workflow_text: str, job: str) -> str | None:
     return match.group("body") if match else None
 
 
+def _job_names(workflow_text: str) -> list[str]:
+    """Every top-level job key, in file order."""
+
+    jobs_block = re.search(
+        r"^jobs:$(?P<body>.*)\Z", workflow_text, flags=re.MULTILINE | re.DOTALL
+    )
+    if not jobs_block:
+        return []
+    return re.findall(r"^  ([a-z0-9-]+):$", jobs_block.group("body"), flags=re.MULTILINE)
+
+
+def _job_needs(workflow_text: str, job: str) -> set[str] | None:
+    """Return one job's declared ``needs``, or None when the job is absent."""
+
+    block = _job_block(workflow_text, job)
+    if block is None:
+        return None
+
+    inline = re.search(r"^    needs:[ \t]*([A-Za-z0-9_-]+)[ \t]*$", block, flags=re.MULTILINE)
+    if inline:
+        return {inline.group(1)}
+
+    flow = re.search(r"^    needs:[ \t]*\[(?P<items>[^\]]*)\]", block, flags=re.MULTILINE)
+    if flow:
+        return {item.strip() for item in flow.group("items").split(",") if item.strip()}
+
+    listed = re.search(r"^    needs:[ \t]*\n(?P<items>(?:^      - .+\n)+)", block, flags=re.MULTILINE)
+    if listed:
+        return {
+            line.strip().removeprefix("- ").strip()
+            for line in listed.group("items").splitlines()
+            if line.strip()
+        }
+    return set()
+
+
+# The job graph is deliberately flat: independent work runs as independent
+# lanes, and `full-ci` is the single join. Two things then need guarding.
+#
+# First, a lane must not grow a dependency it does not consume. Chaining the
+# stack jobs behind the documentation and workflow-lint gates once put roughly
+# 35 seconds of markdown validation in front of every test in the run, and put
+# the Docker build -- which reads nothing either test job writes -- behind both
+# of them. None of it changed a single result.
+#
+# Second, and more dangerous: with a flat graph `full-ci` is the ONLY thing
+# making a job required. A new job that nobody adds to its `needs` is not a
+# lenient check, it is an absent one, and the run stays green without it. The
+# completeness check below is what makes flattening safe.
+LANE_DEPENDENCY_LIMITS = {
+    # The stack lanes consume exactly one thing: the changed-stack decision that
+    # drives their RUN gate.
+    "backend": {"changes"},
+    "frontend": {"changes"},
+    "mobile": {"changes"},
+    # E2E is never path filtered and never queued behind a per-service lane. It
+    # is the only check that exercises the services against each other, so
+    # "my own suite is green" must not be a precondition for running it.
+    "e2e": set(),
+    # An image build reads nothing a test lane produces.
+    "docker": set(),
+}
+FULL_CI_JOB = "full-ci"
+
+
+def _job_graph_errors(workflow_text: str) -> list[str]:
+    errors: list[str] = []
+    for job, allowed in LANE_DEPENDENCY_LIMITS.items():
+        needs = _job_needs(workflow_text, job)
+        if needs is None:
+            errors.append(f"missing {job} job")
+            continue
+        surplus = sorted(needs - allowed)
+        if surplus:
+            permitted = ", ".join(sorted(allowed))
+            limit = (
+                f"it may depend on {permitted} and nothing else"
+                if permitted
+                else "it must run as an independent lane"
+            )
+            errors.append(
+                f"{job} job declares needs it does not consume: {surplus}; {limit}. "
+                "A lane queued behind unrelated work delays the whole run without "
+                "changing any result."
+            )
+
+    full_ci_needs = _job_needs(workflow_text, FULL_CI_JOB)
+    if full_ci_needs is None:
+        errors.append(f"missing {FULL_CI_JOB} job")
+        return errors
+
+    expected = {job for job in _job_names(workflow_text) if job != FULL_CI_JOB}
+    missing = sorted(expected - full_ci_needs)
+    if missing:
+        errors.append(
+            f"{FULL_CI_JOB} does not require every job: {missing}. With a flat job "
+            "graph this gate is the only thing that makes a job required, so a job "
+            "missing here is not checked at all."
+        )
+    return errors
+
+
 def _missing_e2e_ci_errors(workflow_text: str) -> list[str]:
     errors: list[str] = []
     for label, snippet in E2E_CI_REQUIREMENTS:
@@ -479,6 +581,7 @@ def validate_workflow(
         errors.extend(_missing_frontend_ci_errors(workflow_text))
         errors.extend(_missing_e2e_ci_errors(workflow_text))
         errors.extend(_path_filter_errors(workflow_text))
+        errors.extend(_job_graph_errors(workflow_text))
         errors.extend(_concurrency_errors(workflow_text))
         errors.extend(_retention_errors(workflow_text))
         errors.extend(_status_context_errors(workflow_text))

@@ -447,6 +447,80 @@ jobs:
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("Docker Images", completed.stderr)
 
+    def test_workflow_rejects_stack_lane_chained_behind_an_unrelated_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "ci.yml"
+            workflow.write_text(
+                """
+jobs:
+  backend:
+    needs:
+      - spec-kit
+      - changes
+    steps:
+      - run: pytest
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("backend job declares needs it does not consume", completed.stderr)
+        self.assertIn("spec-kit", completed.stderr)
+
+    def test_workflow_rejects_e2e_queued_behind_the_per_service_lanes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "ci.yml"
+            workflow.write_text(
+                """
+jobs:
+  e2e:
+    name: Compose Playwright E2E
+    needs:
+      - backend
+      - frontend
+    steps:
+      - run: make test-e2e
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("e2e job declares needs it does not consume", completed.stderr)
+        self.assertIn("independent lane", completed.stderr)
+
+    def test_workflow_rejects_a_job_absent_from_the_full_ci_gate(self) -> None:
+        # A flat graph makes full-ci the only thing that makes a job required,
+        # so a job missing from its needs is unchecked rather than lenient.
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "ci.yml"
+            workflow.write_text(
+                """
+jobs:
+  changes:
+    steps:
+      - run: echo decide
+  security-scan:
+    steps:
+      - run: echo scan
+  full-ci:
+    needs:
+      - changes
+    steps:
+      - run: echo "${{ contains(needs.*.result, 'skipped') }}"
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("full-ci does not require every job", completed.stderr)
+        self.assertIn("security-scan", completed.stderr)
+
     def test_workflow_accepts_pr_scoped_concurrency_and_conditional_retention(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -488,6 +562,11 @@ jobs:
     needs:
       - changes
       - backend
+      - mobile
+      - frontend
+      - e2e
+      - docker
+      - allure-report
     steps:
       - run: echo "${{ contains(needs.*.result, 'skipped') }}"
   frontend:
@@ -524,8 +603,6 @@ jobs:
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
   e2e:
     name: Compose Playwright E2E
-    needs:
-      - frontend
     steps:
       - run: |
           make test-e2e

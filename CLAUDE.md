@@ -214,7 +214,17 @@ HTTP request
 
 - **Docker Compose** (local full stack): `docker compose up --build` → backend `:8000`, frontend `:8080`. Smoke via `./scripts/smoke_test.sh`.
 - **Fly.io** — two apps via `fly.backend.toml` and `fly.frontend.toml`. The **backend app is private (Flycast-only)**; the frontend proxies to it via `BACKEND_ORIGIN`. Runbooks: `docs/fly-deployment.md`, `docs/fly-review-apps.md`.
-- **CI** — `.github/workflows/ci.yml` runs backend lint/type/test + coverage, frontend unit tests + build, and Docker image builds on every push/PR to `main`. Wait for CI green before deploying.
+- **CI** — `.github/workflows/ci.yml` runs as parallel lanes joined only by
+  `full-ci`: one per service (`backend`, `frontend`, `mobile` — each its own
+  lint/type/unit/integration, path filtered by the `changes` job), plus
+  `workflow-lint`, `spec-kit`, `docker` and `e2e`. A lane may declare `needs`
+  only for a job whose output it actually consumes; `scripts/validate_ci_artifacts.py
+  workflow` rejects anything else, and rejects a job missing from `full-ci`'s
+  `needs` (with a flat graph that gate is the only thing making a job required).
+  `e2e` is never path filtered and never queued behind a service lane. It
+  rebuilds only what changed: `main`'s Docker layers are reused via the shared
+  `stack-*` buildx cache, so an untouched service starts from main's image.
+  Wait for CI green before deploying.
 - **Deeper docs** — architecture, API, troubleshooting, performance, and infra runbooks live under `docs/`. Feature specs (e.g. `001-relation-linking-refactor`) live under `specs/`.
 
 ### Environment variables

@@ -85,10 +85,13 @@ jobs:
   #
   # Filtering applies to pull requests only. Pushes to main and to
   # trunk-candidate/** are the landing path, and those are verified in full.
+  #
+  # This job holds no `needs`. It is the only real data dependency the stack
+  # lanes have, so nothing may sit in front of it: a lint gate queued ahead of
+  # it would delay every test in the run without changing any of their results.
   changes:
     name: Changed stacks
     runs-on: ubuntu-latest
-    needs: workflow-lint
     outputs:
       backend: ${{ steps.decide.outputs.backend }}
       frontend: ${{ steps.decide.outputs.frontend }}
@@ -172,10 +175,12 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "backend=${backend} frontend=${frontend} mobile=${mobile}"
 
+  # Validates the markdown under specs/ and the gate scripts themselves. It
+  # shares no input and no artifact with any stack lane, so it is a lane of its
+  # own; `full-ci` is where its result is required, not the stack lanes' `needs`.
   spec-kit:
     name: Spec Kit artifacts
     runs-on: ubuntu-latest
-    needs: workflow-lint
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -199,13 +204,14 @@ jobs:
           python3 scripts/check_speckit_manifests.py
           python3 scripts/check_gate_integrity.py
 
+  # One lane per service (backend, frontend, mobile). Each owns its own lint,
+  # type check, unit tests and integration suite, and depends on nothing but the
+  # change decision: no service's result is an input to another's, so none may
+  # queue behind another. `full-ci` is the single place their results are joined.
   backend:
     name: Backend
     runs-on: ubuntu-latest
-    needs:
-      - workflow-lint
-      - spec-kit
-      - changes
+    needs: changes
     # The job always runs; RUN gates its expensive steps. See the `changes` job
     # for why this is not a job-level `if`.
     env:
@@ -323,10 +329,7 @@ jobs:
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
-    needs:
-      - workflow-lint
-      - spec-kit
-      - changes
+    needs: changes
     env:
       RUN: ${{ needs.changes.outputs.frontend }}
     defaults:
@@ -424,10 +427,7 @@ jobs:
   mobile:
     name: Mobile
     runs-on: ubuntu-latest
-    needs:
-      - workflow-lint
-      - spec-kit
-      - changes
+    needs: changes
     env:
       RUN: ${{ needs.changes.outputs.mobile }}
     defaults:
@@ -527,48 +527,80 @@ jobs:
           EXPO_NO_TELEMETRY: "1"
         run: npx expo export --platform ios
 
+  # Proves the production Dockerfiles still build. This is a required status
+  # check on main (docs/autonomous-delivery-runbook.md), so the job name is
+  # load-bearing and must not be renamed.
+  #
+  # It holds no `needs`: an image build consumes nothing a test lane produces,
+  # and gating it on the test lanes only pushed it -- and everything behind it
+  # -- later into the run. The layer cache below makes it cheap enough to run
+  # unconditionally rather than only when backend/ or frontend/ changed.
   docker:
     name: Docker Images
     runs-on: ubuntu-latest
-    needs:
-      - backend
-      - frontend
-      - changes
-    env:
-      RUN: ${{ (needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true') && 'true' || 'false' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
-        if: env.RUN == 'true'
         uses: docker/setup-buildx-action@v4
 
+      - name: Expose the Actions cache service to buildx
+        uses: actions/github-script@v9
+        with:
+          script: |
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      # Reads the same cache scopes the E2E lane writes, and deliberately does
+      # not write them back: the two jobs build byte-identical layers, so a
+      # second writer would only spend the repository's shared 10 GB cache quota
+      # storing a duplicate -- and evict the npm and pip caches the other lanes
+      # depend on to do it.
+      #
+      # type=cacheonly: this job proves the Dockerfile builds, it never runs the
+      # image, so exporting one would be pure cost.
       - name: Build backend image
-        if: env.RUN == 'true'
         run: |
           for attempt in 1 2 3; do
-            docker build -t brain-buddy-backend-test -f backend/Dockerfile . && exit 0
+            docker buildx build \
+              --file backend/Dockerfile \
+              --cache-from "type=gha,scope=stack-backend" \
+              --output type=cacheonly . && exit 0
             if [ "$attempt" = 3 ]; then exit 1; fi
             sleep "$((attempt * 10))"
           done
 
+      # Same build args as the E2E lane, so both resolve to the same layers and
+      # therefore to the same cache entries.
       - name: Build frontend image
-        if: env.RUN == 'true'
         run: |
           for attempt in 1 2 3; do
-            docker build -t brain-buddy-frontend-test -f frontend/Dockerfile . && exit 0
+            docker buildx build \
+              --file frontend/Dockerfile \
+              --cache-from "type=gha,scope=stack-frontend" \
+              --build-arg VITE_API_BASE_URL=/api \
+              --output type=cacheonly . && exit 0
             if [ "$attempt" = 3 ]; then exit 1; fi
             sleep "$((attempt * 10))"
           done
 
+  # The whole-stack lane. Unlike the per-service lanes this one is NEVER path
+  # filtered and holds no `needs`: it is the only check that exercises the
+  # backend and the frontend against each other, so "nothing in my stack
+  # changed" is not a reason to skip it -- a change on either side of the wire
+  # can break the pair while both services' own suites stay green.
+  #
+  # It starts at the same moment as the unit lanes rather than after them. That
+  # trades a little compute on a run that was going to fail anyway for roughly
+  # half the wall clock on every run that passes.
   e2e:
     name: Compose Playwright E2E
     runs-on: ubuntu-latest
-    needs:
-      - backend
-      - frontend
-      - docker
+    env:
+      # Pinned so the prebuilt images below are exactly what Compose starts.
+      BRAIN_BUDDY_BACKEND_IMAGE: brain-buddy-backend:ci
+      BRAIN_BUDDY_FRONTEND_IMAGE: brain-buddy-frontend:ci
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -588,7 +620,59 @@ jobs:
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # buildx talks to the Actions cache service through these two variables. A
+      # `run:` step does not receive them the way a build action does, and
+      # exporting them here keeps a third-party action out of a
+      # candidate-controlled workflow. If the service is unreachable the cache
+      # simply misses and the image builds from scratch: this fails toward doing
+      # MORE work, never toward starting a stale service.
+      - name: Expose the Actions cache service to buildx
+        uses: actions/github-script@v9
+        with:
+          script: |
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      # This is what "services from main, only the change rebuilt" buys. GitHub
+      # scopes its cache so a branch reads the DEFAULT BRANCH's entries: a
+      # service this branch did not touch restores main's layers and is ready in
+      # seconds, while a service it did touch misses from the first changed
+      # layer on and rebuilds. Nothing here branches on the diff -- the layers
+      # are content addressed, so the cache decides, and it can only ever be
+      # wrong in the direction of rebuilding too much.
+      - name: Build the stack images, reusing main's layers
+        run: |
+          # build <dockerfile> <tag> <cache-scope> [extra buildx args...]
+          build() {
+            local dockerfile="$1" tag="$2" scope="$3"
+            shift 3
+            for attempt in 1 2 3; do
+              docker buildx build \
+                --file "${dockerfile}" \
+                --tag "${tag}" \
+                --cache-from "type=gha,scope=stack-${scope}" \
+                --cache-to "type=gha,mode=max,scope=stack-${scope}" \
+                "$@" --load . && return 0
+              if [ "${attempt}" = 3 ]; then return 1; fi
+              sleep "$((attempt * 10))"
+            done
+          }
+          build backend/Dockerfile "${BRAIN_BUDDY_BACKEND_IMAGE}" backend
+          # Same value run_playwright_e2e.sh gives Compose: the frontend bakes
+          # its API base in at build time, so a prebuilt image must be built
+          # with the one the E2E stack actually serves.
+          build frontend/Dockerfile "${BRAIN_BUDDY_FRONTEND_IMAGE}" frontend \
+            --build-arg VITE_API_BASE_URL=/api
+
       - name: Run Compose smoke and Playwright E2E
+        env:
+          # The images are already built and tagged above, so Compose starts
+          # exactly those. --no-build (see run_playwright_e2e.sh) fails closed if
+          # one is missing rather than quietly building an unpinned replacement.
+          BRAIN_BUDDY_E2E_BUILD_IMAGES: "0"
         run: |
           # make test-e2e invokes npm run test:e2e after the Compose stack is ready.
           make test-e2e
