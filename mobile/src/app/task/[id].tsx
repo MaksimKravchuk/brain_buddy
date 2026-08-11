@@ -66,6 +66,7 @@ import {
 } from "@/features/tasks/taskScreenState";
 import { useClassificationNames } from "@/features/tasks/useClassificationNames";
 import {
+  conflictServerState,
   effectiveClassification,
   useClassificationQueue,
   type ClassificationApiPort,
@@ -332,6 +333,9 @@ export default function TaskDetailScreen() {
   const classification = resolveClassificationAvailability({
     queueEnabled: surface.queueEnabled,
     queueReady: queue.ready,
+    // A read that failed withholds them just the same; only the sentence
+    // changes, because there is no longer a wait to describe.
+    queueReadFailed: queue.readFailed,
   });
   const metadataChips =
     surface.presentation === "chips"
@@ -421,6 +425,15 @@ export default function TaskDetailScreen() {
   // fresh revision, which mints a new key — is asked rather than swallowed.
   const conflictAsked =
     queuedConflict !== undefined && dismissedConflict !== queuedConflict.entry.idempotencyKey;
+  // What M-04 states the server holds now. The re-read that parked the entry is
+  // the only thing on this device that has seen it: a conflicted pass settles
+  // nothing, so nothing refetches the copy this screen loaded. "Now on server"
+  // is the row "Keep mine, replace theirs" replaces, so it is stated from that
+  // read — and from this screen's copy only for an entry parked without one.
+  const loadedServerState = { ...serverClassification, revision: task.revision };
+  const conflictServer = queuedConflict
+    ? conflictServerState(queuedConflict.entry, loadedServerState)
+    : loadedServerState;
 
   const expiredNoticeCard = expiredNotice ? (
     <View style={styles.noticeCard}>
@@ -1072,11 +1085,7 @@ export default function TaskDetailScreen() {
       <ConflictSheet
         visible={conflictAsked}
         conflict={queuedConflict}
-        server={{
-          projectId: task.project_id,
-          tagIds: task.tag_ids,
-          revision: task.revision,
-        }}
+        server={conflictServer}
         // The entry now carries why it was parked, so a 404 on a deleted
         // target gets the discard-only sheet instead of being offered "Keep
         // mine, replace theirs" for something that no longer exists. Falls

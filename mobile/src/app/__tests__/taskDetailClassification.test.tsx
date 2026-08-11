@@ -178,6 +178,23 @@ function stallQueueRead(): () => void {
 }
 
 /**
+ * Make the persisted queue's read fail, the way a device store that cannot be
+ * opened does.
+ *
+ * Swapped rather than `jest.spyOn`-ed for the same reason `stallQueueRead` is,
+ * and undone by the same `afterEach`. Every other key still reads through, so
+ * the session, the flags and both lists resolve exactly as they would.
+ */
+function failQueueRead(): void {
+  AsyncStorage.getItem = (async (key: string) => {
+    if (key === QUEUE_KEY) {
+      throw new Error("device store unavailable");
+    }
+    return realGetItem.call(AsyncStorage, key);
+  }) as typeof AsyncStorage.getItem;
+}
+
+/**
  * The words a screen reader is given, in order.
  *
  * The one device boundary this file stands in for: an announcement has no
@@ -606,6 +623,38 @@ describe("task detail — before the device has read what it has not sent", () =
       release();
     }
   });
+
+  it("006-FR-009 says the device could not be read when it could not, and still withholds the rows", async () => {
+    // A store that will not open is not a wait: nothing is coming. Withholding
+    // is still the only safe direction — an edit made now would be persisted
+    // over unsent work this device has not managed to read — but "Checking for
+    // changes" describes a wait that never ends, so the person is told to keep
+    // waiting for something that already failed.
+    failQueueRead();
+
+    await openTask(makeTask({ id: "t1", project_id: "p1", tag_ids: ["g1"] }));
+
+    const reason = "Can't read the changes this phone hasn't sent yet";
+    expect(await screen.findByText(reason)).toBeOnTheScreen();
+    expect(screen.queryByText("Checking for changes this phone hasn't sent yet")).toBeNull();
+
+    // Heard, not merely seen: the reason is part of each row's own name.
+    const projectRow = screen.getByLabelText(`Project, Wedding. ${reason}`);
+    expect(projectRow).toBeDisabled();
+    expect(screen.getByLabelText(`Tags, errand. ${reason}`)).toBeDisabled();
+
+    // Withheld, not merely explained. Opening the gate on a failed read is the
+    // overwrite the gate exists to prevent, so the picker still does not open.
+    await fireEvent.press(projectRow);
+    expect(screen.queryByText("A task has one project, or none")).toBeNull();
+
+    // The device is what failed, not the server, so there is no id to report.
+    expect(screen.queryByText(/correlation id/i)).toBeNull();
+
+    // Due and Priority never touch the queue, so they are untouched by it.
+    expect(screen.getByLabelText("Due, none set")).not.toBeDisabled();
+    expect(screen.getByLabelText("Priority, none set")).not.toBeDisabled();
+  });
 });
 
 describe("task detail — work the 30-day bound discarded", () => {
@@ -837,6 +886,52 @@ describe("task detail — a queued change the server rejected", () => {
     expect(await AsyncStorage.getItem(QUEUE_KEY)).toBeNull();
     // One rejected attempt, then one aimed at what the re-read actually saw.
     expect(revisionsSent()).toEqual([1, 5]);
+  });
+
+  it("006-FR-010 names the value the conflict's re-read found, not the one this screen loaded", async () => {
+    // "Now on server" is the row the choice actually turns on: "Keep mine,
+    // replace theirs" replaces whatever it names. The screen reads the task
+    // once and a conflicted pass settles nothing, so nothing refetches it —
+    // the drain's 409 re-read is the only thing on this device that has seen
+    // what the server holds. Sourcing the row from the screen's own copy names
+    // a value the server had already stopped holding, which is the false story
+    // invariant 9 and FR-010's retained value exist to prevent.
+    let stored = makeTask({ id: "t1", project_id: null, tag_ids: [], revision: 1 });
+    await openTask(stored, {
+      routes: revisionGuardedRoutes(
+        () => stored,
+        (next) => {
+          stored = next;
+        },
+      ),
+    });
+
+    // Somebody else files it under Wedding, several edits along. This screen is
+    // not told, and nothing refetches it: it holds revision 1 and no project
+    // for the rest of the test.
+    stored = { ...stored, project_id: "p1", revision: 5 };
+    await screen.findByText("revision 1", { exact: false });
+
+    await fireEvent.press(await screen.findByLabelText("Project, none set"));
+    await fireEvent.press(await screen.findByLabelText("Q3 launch"));
+
+    expect(await screen.findByText("Keep mine, replace theirs")).toBeOnTheScreen();
+
+    // Three values, three different truths, each labelled as whose it is.
+    expect(
+      screen.getByLabelText("Your phone last showed: None (the value this phone was showing you)"),
+    ).toBeOnTheScreen();
+    expect(screen.getByLabelText("You changed it to: Q3 launch")).toBeOnTheScreen();
+    expect(screen.getByLabelText("Now on server: Wedding")).toBeOnTheScreen();
+    // The screen's copy still says the task has no project. Naming that as the
+    // server's would put the choice to the person on a value nobody holds.
+    expect(screen.queryByLabelText("Now on server: None")).toBeNull();
+
+    // Same source, same sentence: the phone is four revisions behind, so this
+    // is not the two-party disagreement it would otherwise read as.
+    expect(
+      screen.getByText("This task has changed more than once since your phone last saw it."),
+    ).toBeOnTheScreen();
   });
 
   it("006-SC-005 lets the question be left unanswered, and asks it again next time", async () => {

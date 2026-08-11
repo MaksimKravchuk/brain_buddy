@@ -80,6 +80,19 @@ export const ACCOUNT_EXPIRY_DISMISS_LABEL = "Dismiss";
  */
 export const CLASSIFICATION_NOT_READY_REASON = "Checking for changes this phone hasn't sent yet";
 
+/**
+ * Why they are not available when the device store would not answer at all.
+ *
+ * The rows stay withheld for the same reason — see
+ * `resolveClassificationAvailability` — but the sentence above describes a wait,
+ * and there is no longer anything to wait for. It follows design.md's wording
+ * for a problem that is the *device's* rather than the server's ("Can't load
+ * your projects without a connection"): a plain statement of what could not be
+ * done, and no correlation id, because no request was rejected and there is
+ * nothing for anyone to look up.
+ */
+export const CLASSIFICATION_READ_FAILED_REASON = "Can't read the changes this phone hasn't sent yet";
+
 /** What an unset value is called to assistive technology. */
 const NONE_SET = "none set";
 
@@ -204,15 +217,27 @@ export interface ClassificationAvailability {
  *
  * With the queue disabled the screen carries no rows at all (M-01c), so there
  * is nothing to withhold and nothing to explain.
+ *
+ * A read that *failed* withholds them for exactly the same reason and says so
+ * differently: the device knows no more about what it holds than it did while
+ * reading, so an edit made now would overwrite the same unsent work — but it is
+ * no longer waiting for anything, and a sentence promising an arrival that is
+ * not coming is the one thing here that would be untrue.
  */
 export function resolveClassificationAvailability(input: {
   queueEnabled: boolean;
   queueReady: boolean;
+  queueReadFailed?: boolean;
 }): ClassificationAvailability {
   if (!input.queueEnabled || input.queueReady) {
     return { available: true, reason: null };
   }
-  return { available: false, reason: CLASSIFICATION_NOT_READY_REASON };
+  return {
+    available: false,
+    reason: input.queueReadFailed
+      ? CLASSIFICATION_READ_FAILED_REASON
+      : CLASSIFICATION_NOT_READY_REASON,
+  };
 }
 
 export interface MetadataInput {

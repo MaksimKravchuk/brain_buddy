@@ -325,8 +325,15 @@ export function resolveSendRejection({
         reason: decision.reason,
         correlationId: decision.correlationId,
         // What the re-read saw, kept because it is the only revision the
-        // resolution can be aimed at — see `conflictServerRevision`.
-        ...(serverTask ? { serverRevision: serverTask.revision } : {}),
+        // resolution can be aimed at — see `conflictServerRevision` — and the
+        // only values on the device that are the server's own, which is what
+        // M-04's third row states and what the choice turns on.
+        ...(serverTask
+          ? {
+              serverRevision: serverTask.revision,
+              serverValue: { projectId: serverTask.projectId, tagIds: [...serverTask.tagIds] },
+            }
+          : {}),
       }),
       kind: decision.kind === "prompt" ? "conflicted" : "error",
       advanceLastSynced: false,
@@ -823,6 +830,34 @@ export function resolutionRevision(
   return entry.conflictServerRevision ?? fallback;
 }
 
+/**
+ * What M-04 states the server holds now.
+ *
+ * The same argument as `resolutionRevision`, applied to the values rather than
+ * the revision, because the two are read from one re-read and the sheet must
+ * not describe the server from two different moments. The fallback is the
+ * screen's copy of the task, which nothing refreshes when a pass ends in a
+ * conflict — so preferring it names whatever that copy was loaded with, which
+ * on the path this exists for is a value the server had already stopped
+ * holding. It is used only for an entry parked with no re-read at all,
+ * including one parked before the field existed, where the screen's copy is
+ * the only server value the device has.
+ */
+export function conflictServerState(
+  entry: PendingClassificationChange,
+  fallback: ServerTaskState,
+): ServerTaskState {
+  const value = entry.conflictServerValue;
+  if (value === undefined) {
+    return fallback;
+  }
+  return {
+    revision: entry.conflictServerRevision ?? fallback.revision,
+    projectId: value.projectId,
+    tagIds: [...value.tagIds],
+  };
+}
+
 /** "Discard mine, keep the server's" (M-04). The entry goes, and a successor
  *  edit made while it was in flight starts from the server's revision. */
 export function resolveConflictDiscardMine(
@@ -866,6 +901,11 @@ export interface ClassificationQueue {
   /** False until the cold read has run; the screen must not enqueue before it,
    *  or the first edit would be written over a queue it never read. */
   ready: boolean;
+  /** True when that read failed rather than not having finished. `ready` stays
+   *  false either way — the queue is still unknown, and an edit made now would
+   *  still overwrite it — but a failure is not a wait, and the screen says so
+   *  instead of promising an arrival that is not coming. */
+  readFailed: boolean;
   /** SC-004. Null until this device has seen the server answer. */
   lastSyncedAt: string | null;
   /** M-04, one at a time. */
@@ -891,6 +931,7 @@ export function useClassificationQueue(
   const { identity, api, enabled = true, onSynced } = options;
   const [queue, setQueue] = useState<PendingClassificationChange[]>(EMPTY);
   const [ready, setReady] = useState(false);
+  const [readFailed, setReadFailed] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [droppedThisLaunch, setDroppedThisLaunch] = useState(0);
 
@@ -1032,6 +1073,9 @@ export function useClassificationQueue(
     if (inactive) {
       setQueue(EMPTY);
       setReady(false);
+      // A queue that is not read at all has not failed to be read: M-01c and a
+      // signed-out screen carry no rows, so there is nothing to explain.
+      setReadFailed(false);
     }
   }
 
@@ -1056,36 +1100,50 @@ export function useClassificationQueue(
       if (stale()) {
         return;
       }
-      // Invariant 8b, with 8a's guard: the sweep deletes foreign keys and this
-      // identity's aged *cache*, and must be told which key is active or it
-      // deletes this identity's unsent work too.
-      await sweepAllIdentities({ activeKey: sweepActiveKey(active), now: Date.now() });
-      if (stale()) {
-        return;
+      try {
+        // Invariant 8b, with 8a's guard: the sweep deletes foreign keys and
+        // this identity's aged *cache*, and must be told which key is active or
+        // it deletes this identity's unsent work too.
+        await sweepAllIdentities({ activeKey: sweepActiveKey(active), now: Date.now() });
+        if (stale()) {
+          return;
+        }
+        // Invariant 5c: `sending` is reset on the way in, before any drain.
+        const stored = await loadQueue(active, { resetInterrupted });
+        const serverNow = await loadServerTime();
+        const hydrated = hydrateQueue(stored, Date.now(), serverNow ?? undefined);
+        if (stale()) {
+          return;
+        }
+        // An explicit snapshot: `queueRef` is not this identity's until the
+        // line below, so there is no live queue to read yet. Through the chain
+        // all the same, so a later write cannot overtake the cold read's.
+        await persistLive(active, hydrated.queue);
+        if (stale()) {
+          return;
+        }
+        queueRef.current = hydrated.queue;
+        setQueue(hydrated.queue);
+        setDroppedThisLaunch(hydrated.droppedCount);
+        // The last time this device saw the server answer, from the persisted
+        // server `Date` header. Never the device clock: feeding a device
+        // timestamp into that store would launder it into FR-018's cross-check.
+        setLastSyncedAt(serverNow === null ? null : new Date(serverNow).toISOString());
+        setReadFailed(false);
+        setReady(true);
+        await drain();
+      } catch {
+        // The device store would not answer. `ready` deliberately does NOT
+        // flip: the gate exists because an edit made before the queue is known
+        // is persisted over unsent work, and a read that failed knows less than
+        // one that has not finished — opening it here would be the overwrite
+        // itself, on the one path where the device has already proved it cannot
+        // be trusted to say what it holds. What changes is only what the person
+        // is told: "checking" describes a wait that is now never going to end.
+        if (!stale()) {
+          setReadFailed(true);
+        }
       }
-      // Invariant 5c: `sending` is reset on the way in, before any drain.
-      const stored = await loadQueue(active, { resetInterrupted });
-      const serverNow = await loadServerTime();
-      const hydrated = hydrateQueue(stored, Date.now(), serverNow ?? undefined);
-      if (stale()) {
-        return;
-      }
-      // An explicit snapshot: `queueRef` is not this identity's until the line
-      // below, so there is no live queue to read yet. Through the chain all the
-      // same, so a later write cannot overtake the cold read's.
-      await persistLive(active, hydrated.queue);
-      if (stale()) {
-        return;
-      }
-      queueRef.current = hydrated.queue;
-      setQueue(hydrated.queue);
-      setDroppedThisLaunch(hydrated.droppedCount);
-      // The last time this device saw the server answer, from the persisted
-      // server `Date` header. Never the device clock: feeding a device
-      // timestamp into that store would launder it into FR-018's cross-check.
-      setLastSyncedAt(serverNow === null ? null : new Date(serverNow).toISOString());
-      setReady(true);
-      await drain();
     })();
 
     return () => {
@@ -1191,6 +1249,7 @@ export function useClassificationQueue(
   return {
     queue,
     ready,
+    readFailed,
     lastSyncedAt,
     conflict,
     expiredTotal: countExpired(queue),
