@@ -113,6 +113,14 @@ not assume.**
   boundary, testing strategy and migration mechanics are Architect decisions —
   never escalate them to the product owner.** This lens is the one most tempted
   to; do not.
+- **Precedence, when you have both.** A review carrying any
+  `product_decisions` MUST use the `product-decision-required` verdict, even
+  when it also has `blocking` or `important` findings — those still travel in
+  `findings` and still block. This is not a softening: `aggregate_reviews`
+  already checks product decisions *before* changes-required, so the two
+  agree. Said explicitly because the two bullets above are otherwise
+  unsatisfiable together, and `validate_review` rejects the whole review —
+  every finding in it — when decisions accompany any other verdict.
 
 ## Output contract
 

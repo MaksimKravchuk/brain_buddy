@@ -357,6 +357,74 @@ export default defineConfig({
         self.assertIn("frontend lint", completed.stderr)
         self.assertIn("frontend coverage threshold statements", completed.stderr)
 
+    def test_workflow_rejects_removing_the_allure_aggregation_short_circuit(self) -> None:
+        """Deleting the short circuit makes every specs-only branch unmergeable.
+
+        Nothing uploads Allure results when no stack changed, and
+        `actions/download-artifact` does not create its target directory when
+        the pattern matches nothing, so the aggregate validator failed on a
+        directory that was never going to exist. Stages 1 through 9 of a
+        spec-driven feature produce nothing but documentation commits, so this
+        was not one red build but the whole run.
+
+        Guarded because the regression is a one-line deletion and reads like
+        tidying: the `if:` on those steps looks redundant until you know a
+        specs-only commit exists.
+        """
+        workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+        text = workflow.read_text(encoding="utf-8")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ungated = Path(tmp) / "ci-ungated.yml"
+            ungated.write_text(
+                text.replace("        if: steps.aggregate.outputs.run == 'true'\n", ""),
+                encoding="utf-8",
+            )
+            missing_gate = self.run_validator("workflow", "--ci", str(ungated))
+
+            no_validator = Path(tmp) / "ci-no-validator.yml"
+            no_validator.write_text(
+                text.replace("--path allure-results --label aggregate-allure", "--help"),
+                encoding="utf-8",
+            )
+            dropped_validator = self.run_validator("workflow", "--ci", str(no_validator))
+
+            # The predicate's first version asked whether a stack was *selected*
+            # rather than whether its job actually ran, and shipped red: the
+            # stack jobs need `spec-kit`, so a red spec gate skips them while
+            # `changes` still reports them changed — the normal state of a
+            # spec-driven branch. Guarded so the weaker form cannot come back.
+            selected_only = Path(tmp) / "ci-selected-only.yml"
+            selected_only.write_text(
+                text.replace(
+                    "needs.changes.outputs.backend == 'true' && needs.backend.result == 'success'",
+                    "needs.changes.outputs.backend",
+                ),
+                encoding="utf-8",
+            )
+            weaker_predicate = self.run_validator("workflow", "--ci", str(selected_only))
+
+        self.assertNotEqual(missing_gate.returncode, 0)
+        # Both anchored steps must be named, not just whichever fails first.
+        # The first version of this guard used a bare "if: steps.aggregate..."
+        # substring and stayed green under exactly this mutation, because the
+        # "Post PR Allure report link" step joins the same condition to another
+        # with `&&`. The two-line anchors are what make the deletion visible.
+        self.assertIn("gate on the Allure download step", missing_gate.stderr)
+        self.assertIn("gate on the aggregate Allure validation step", missing_gate.stderr)
+
+        # The other direction: the short circuit must not become an excuse to
+        # drop the taxonomy validation itself. Skipping when there is nothing
+        # to aggregate is the fix; skipping when there is, is the defect.
+        self.assertNotEqual(dropped_validator.returncode, 0)
+        self.assertIn("aggregate Allure taxonomy validation still runs", dropped_validator.stderr)
+
+        self.assertNotEqual(weaker_predicate.returncode, 0)
+        self.assertIn(
+            "conjoins selection with the backend job actually running",
+            weaker_predicate.stderr,
+        )
+
     def test_workflow_rejects_missing_pr_scoped_concurrency(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -713,6 +781,26 @@ jobs:
           name: allure-report-html
           path: allure-report
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+  allure-report:
+    name: Allure Report
+    steps:
+      - name: Decide whether there is anything to aggregate
+        id: aggregate
+        env:
+          BACKEND: ${{ needs.changes.outputs.backend == 'true' && needs.backend.result == 'success' }}
+          FRONTEND: ${{ needs.changes.outputs.frontend == 'true' && needs.frontend.result == 'success' }}
+        run: |
+          if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Download Allure results
+        if: steps.aggregate.outputs.run == 'true'
+        uses: actions/download-artifact@v4
+      - name: Validate aggregate Allure results
+        if: steps.aggregate.outputs.run == 'true'
+        run: python3 scripts/validate_allure_taxonomy.py --path allure-results --label aggregate-allure
   e2e:
     name: Compose Playwright E2E
     steps:
