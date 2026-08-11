@@ -10,9 +10,11 @@ which or invent a blended progress number (FR-008, FR-011).
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import AfterValidator, Field, StringConstraints
+
+from app.modules.agents.headers import validate_auth_header_name
 
 from .common import StrictBaseModel
 
@@ -31,6 +33,15 @@ AgentReportedState = Literal[
 AgentCommandKind = Literal["start", "reply", "cancel"]
 AgentCommandDelivery = Literal["unconfirmed", "confirmed"]
 
+ConnectionName = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
+]
+AuthHeaderName = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=128),
+    AfterValidator(validate_auth_header_name),
+]
+
 
 class AgentCapabilitiesResponse(StrictBaseModel):
     """What the connector disclosed. A false capability hides its control."""
@@ -41,9 +52,9 @@ class AgentCapabilitiesResponse(StrictBaseModel):
 
 
 class AgentConnectionCreateRequest(StrictBaseModel):
-    name: str = Field(min_length=1, max_length=200)
+    name: ConnectionName
     endpoint_url: str = Field(min_length=1, max_length=2_000)
-    auth_header_name: str = Field(default="Authorization", min_length=1, max_length=128)
+    auth_header_name: AuthHeaderName = "X-Agent-Key"
     credential: str = Field(min_length=1, max_length=4_000)
     current_password: str = Field(min_length=1, max_length=512)
 

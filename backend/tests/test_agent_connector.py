@@ -21,7 +21,7 @@ from app.modules.agents.domain import PROTOCOL_VERSION
 
 TARGET = ConnectorTarget(
     endpoint_url="https://agent.example.com/hooks",
-    auth_header_name="Authorization",
+    auth_header_name="X-Hermes-Key",
     credential="Bearer super-secret-token",
 )
 
@@ -322,13 +322,34 @@ class TestConnectionTest:
         outcome = connector.test(
             ConnectorTarget(
                 endpoint_url="https://169.254.169.254/latest",
-                auth_header_name="Authorization",
+                auth_header_name="X-Hermes-Key",
                 credential="Bearer super-secret-token",
             )
         )
 
         assert outcome.status == "unreachable"
         assert outcome.error_code == "destination_network_not_allowed"
+        assert seen == []
+
+    @pytest.mark.parametrize(
+        "auth_header_name", ["Host", "x-brainbuddy-run-id", "X Bad"]
+    )
+    def test_an_unsafe_auth_header_is_refused_before_network_io(
+        self, auth_header_name: str
+    ) -> None:
+        connector, seen = build_connector(
+            json_handler({"capabilities": {}, "idempotent_start": True})
+        )
+
+        with pytest.raises(ValueError):
+            connector.test(
+                ConnectorTarget(
+                    endpoint_url="https://agent.example.com/hooks",
+                    auth_header_name=auth_header_name,
+                    credential="Bearer super-secret-token",
+                )
+            )
+
         assert seen == []
 
 
@@ -401,7 +422,7 @@ class TestStart:
         connector, seen = build_connector(json_handler({"accepted": True}, 202))
         unsafe = ConnectorTarget(
             endpoint_url="https://169.254.169.254/latest",
-            auth_header_name="Authorization",
+            auth_header_name="X-Hermes-Key",
             credential="Bearer super-secret-token",
         )
 
@@ -489,7 +510,7 @@ class TestCommand:
         connector, seen = build_connector(json_handler({"command_id": "agentcmd_1"}))
         unsafe = ConnectorTarget(
             endpoint_url="https://127.0.0.1/hooks",
-            auth_header_name="Authorization",
+            auth_header_name="X-Hermes-Key",
             credential="Bearer super-secret-token",
         )
 

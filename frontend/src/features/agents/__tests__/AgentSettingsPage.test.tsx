@@ -86,6 +86,26 @@ describe("AgentSettingsPage", () => {
     expect(apiClient.listAgentConnections).not.toHaveBeenCalled();
   });
 
+  it("maps a migrated invalid header to recovery guidance without exposing its code", async () => {
+    vi.spyOn(apiClient, "listAgentConnections").mockResolvedValue([
+      connection({
+        id: "conn-migrated",
+        name: "Migrated agent",
+        auth_header_name: "X-Agent-Key",
+        status: "untested",
+        ready_for_handoff: false,
+        last_test_error_code: "legacy_invalid_auth_header_requires_reconfiguration"
+      })
+    ]);
+    renderPage();
+
+    const card = await screen.findByRole("article", { name: "Migrated agent" });
+    expect(card).toHaveTextContent(
+      /enter a replacement credential for X-Agent-Key, then test the connection/i
+    );
+    expect(card).not.toHaveTextContent("legacy_invalid_auth_header_requires_reconfiguration");
+  });
+
   it("adds a connection and shows the inbound signing secret exactly once", async () => {
     const create = vi.spyOn(apiClient, "createAgentConnection").mockResolvedValue({
       ...connection({ id: "conn-new", status: "untested", stale: false, ready_for_handoff: false, revision: 1 }),
@@ -99,6 +119,8 @@ describe("AgentSettingsPage", () => {
       await user.type(within(form).getByLabelText("Agent name"), "Hermes");
       await user.clear(within(form).getByLabelText("Endpoint URL"));
       await user.type(within(form).getByLabelText("Endpoint URL"), "https://agent.example.com/hooks");
+      await user.clear(within(form).getByLabelText("Auth header name"));
+      await user.type(within(form).getByLabelText("Auth header name"), "X-Custom-Agent-Key");
       await user.type(within(form).getByLabelText("Credential"), "token-abc");
       await user.type(within(form).getByLabelText("Current password"), "hunter2hunter2");
       await user.click(within(form).getByRole("button", { name: "Add agent" }));
@@ -109,7 +131,7 @@ describe("AgentSettingsPage", () => {
         {
           name: "Hermes",
           endpoint_url: "https://agent.example.com/hooks",
-          auth_header_name: "Authorization",
+          auth_header_name: "X-Custom-Agent-Key",
           credential: "token-abc",
           current_password: "hunter2hunter2"
         },
@@ -121,6 +143,7 @@ describe("AgentSettingsPage", () => {
     expect(within(panel).getByText("sk-inbound-9f2c")).toBeInTheDocument();
     expect(within(panel).getByText(/never show it again/i)).toBeInTheDocument();
     expect(within(panel).getByText(/sign every report/i)).toBeInTheDocument();
+    expect(within(form).getByLabelText("Auth header name")).toHaveValue("X-Agent-Key");
 
     await act(async () => {
       await user.click(within(panel).getByRole("button", { name: /i've saved it/i }));

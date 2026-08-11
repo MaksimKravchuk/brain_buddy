@@ -102,7 +102,7 @@ function AddConnectionSection(): React.JSX.Element {
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [endpointUrl, setEndpointUrl] = useState("");
-  const [authHeaderName, setAuthHeaderName] = useState("Authorization");
+  const [authHeaderName, setAuthHeaderName] = useState("X-Agent-Key");
   const [credential, setCredential] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -132,7 +132,7 @@ function AddConnectionSection(): React.JSX.Element {
       setCreatedWithoutSecret(returnedSecret ? null : created.name);
       setName("");
       setEndpointUrl("");
-      setAuthHeaderName("Authorization");
+      setAuthHeaderName("X-Agent-Key");
       setCredential("");
       setCurrentPassword("");
       void queryClient.invalidateQueries({ queryKey: agentKeys.connections() });
@@ -308,8 +308,15 @@ function ConnectionCard({
           ? "Ready to receive a hand-off."
           : "Cannot receive a hand-off yet."}
       </p>
-      {connection.last_test_error_code ? (
-        <p className="text-xs text-slate-500">Reported error code: {connection.last_test_error_code}</p>
+      {connection.last_test_error_code ===
+      "legacy_invalid_auth_header_requires_reconfiguration" ? (
+        <p className="text-xs text-needs-you-fg">
+          Enter a replacement credential for {connection.auth_header_name}, then test the connection.
+        </p>
+      ) : connection.last_test_error_code ? (
+        <p className="text-xs text-slate-500">
+          The last connection test failed. Test again after correcting the connection settings.
+        </p>
       ) : null}
 
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-slate-500">

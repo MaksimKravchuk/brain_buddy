@@ -62,6 +62,7 @@ from .domain import (
     TERMINAL_REPORTED_STATES,
     AgentAuditEntryDocument,
     AgentCapabilities,
+    AgentCommandKind,
     AgentConnectionDocument,
     AgentEventEnvelope,
     AgentIdempotencyRecord,
@@ -255,6 +256,7 @@ class AgentRelayService:
         canonical: str,
         resource_id: str,
         command_id: str | None = None,
+        delivery_attempted: bool = False,
         completed: bool = True,
         request_hash: str | None = None,
         created_at: datetime | None = None,
@@ -272,6 +274,7 @@ class AgentRelayService:
                 ),
                 resource_id=resource_id,
                 command_id=command_id,
+                delivery_attempted=delivery_attempted,
                 completed=completed,
                 # Only ever IDs and sealed blobs: this row is ordinary
                 # application data and must stay readable to no one.
@@ -292,6 +295,7 @@ class AgentRelayService:
         resource_id: str,
         record: AgentIdempotencyRecord | None,
         now: datetime,
+        response_body: dict[str, object] | None = None,
     ) -> tuple[str, datetime]:
         """Pin one command ID for this key, durably, before any network I/O.
 
@@ -317,9 +321,105 @@ class AgentRelayService:
             command_id=command_id,
             completed=False,
             created_at=created_at,
+            response_body=response_body,
+        )
+        return command_id, created_at
+
+    def _begin_delivery_attempt(
+        self,
+        *,
+        owner_id: str,
+        key_hash: str,
+        command: str,
+        canonical: str,
+        resource_id: str,
+        command_id: str,
+        created_at: datetime,
+        request_hash: str | None = None,
+        response_body: dict[str, object] | None = None,
+    ) -> None:
+        """Durably distinguish a safe-to-send reservation from ambiguous I/O."""
+
+        self.agent_repo.commit_checkpoint()
+        self._remember(
+            owner_id=owner_id,
+            key_hash=key_hash,
+            command=command,
+            canonical=canonical,
+            resource_id=resource_id,
+            command_id=command_id,
+            delivery_attempted=True,
+            completed=False,
+            request_hash=request_hash,
+            created_at=created_at,
+            response_body=response_body,
         )
         self.agent_repo.commit_checkpoint()
-        return command_id, created_at
+
+    def _reconcile_attempted_command(
+        self,
+        record: AgentIdempotencyRecord | None,
+        *,
+        owner_id: str,
+        canonical: str,
+        kind: AgentCommandKind,
+        body: str | None = None,
+    ) -> AgentRunResponse | None:
+        """Settle an ambiguous durable attempt without repeating connector I/O."""
+
+        if (
+            record is None
+            or record.completed
+            or not record.delivery_attempted
+            or record.command_id is None
+        ):
+            return None
+        current = self.agent_repo.get_run(record.resource_id, owner_id=owner_id)
+        existing = self.agent_repo.get_command(record.command_id, owner_id=owner_id)
+        if existing is None:
+            self.agent_repo.save_command(
+                AgentRunCommandDocument(
+                    id=record.command_id,
+                    owner_id=owner_id,
+                    run_id=current.id,
+                    kind=kind,
+                    body=None if current.content_expired else body,
+                    delivery="unconfirmed",
+                    created_at=record.created_at,
+                )
+            )
+        if kind == "cancel":
+            connection = self.agent_repo.get_connection(
+                current.connection_id, owner_id=owner_id
+            )
+            if (
+                current.reported_state not in TERMINAL_REPORTED_STATES
+                and connection.status != "disconnected"
+                and connection.capabilities.cancel
+                and connection.revision
+                == record.response_body.get("connection_revision")
+            ):
+                merge_time = max(current.updated_at, self._now())
+                current = current.model_copy(
+                    update={
+                        "cancel_requested_at": record.created_at,
+                        "updated_at": merge_time,
+                        "revision": current.revision + 1,
+                    }
+                )
+                self.agent_repo.save_run(current)
+        self._remember(
+            owner_id=owner_id,
+            key_hash=record.key_hash,
+            command=record.command,
+            canonical=canonical,
+            resource_id=current.id,
+            command_id=record.command_id,
+            delivery_attempted=True,
+            created_at=record.created_at,
+            request_hash=record.request_hash,
+        )
+        return self._run_response(current)
 
     def _audit(
         self,
@@ -1109,120 +1209,198 @@ class AgentRelayService:
         # without it a key spent handing off one task would replay as a
         # success for another.
         canonical = self._canonical_request(command, payload, target=task_id)
-        with self.agent_repo.command_lock(owner_id):
-            key_hash, record = self._replayed(
-                owner_id=owner_id,
-                key=idempotency_key,
-                command=command,
-                canonical=canonical,
-            )
-            if record is not None:
-                # A replay returns the original outcome and starts nothing.
-                return self._run_response(
-                    self.agent_repo.get_run(record.resource_id, owner_id=owner_id)
-                )
-
-            connection = self._require_dispatchable(
-                payload.connection_id, owner_id=owner_id
-            )
-            task = self.task_snapshot(task_id, owner_id=owner_id)
-
-            reserved = self.agent_repo.find_run_by_manifest_token(
-                payload.manifest_token, owner_id=owner_id
-            )
-            if reserved is None or reserved.dispatched_at is not None:
-                raise ValidationFailure(
-                    "This hand-off review is no longer valid. Review what will "
-                    "be sent and confirm again.",
-                    detail={"reason": "manifest_not_reserved"},
-                )
-            # Recompute from the confirmation's own values: if anything the user
-            # reviewed changed, the token cannot reproduce (FR-005).
-            recomputed = self._build_manifest(
-                run_id=reserved.id, task=task, connection=connection, payload=payload
-            )
-            if not hmac.compare_digest(recomputed.token, payload.manifest_token):
-                raise ValidationFailure(
-                    "What would be sent has changed since you reviewed it. "
-                    "Review it again before confirming.",
-                    detail={"reason": "manifest_token_mismatch"},
-                )
-            if self.requires_dispatch_reauthentication(connection) and not (
-                reauthenticated
-            ):
-                raise ValidationFailure(
-                    "Confirm your password before sending task content to this "
-                    "agent for the first time.",
-                    detail={"reason": "reauthentication_required"},
-                )
-
-            now = self._now()
-            envelope = {
-                "type": "start",
-                "protocol_version": PROTOCOL_VERSION,
-                "run_id": reserved.id,
-                "task_id": task.id,
-                "idempotency_key": reserved.id,
-                "title": recomputed.title,
-                "details": recomputed.details,
-                "context": [item.model_dump() for item in recomputed.context_items],
-                "reporting": {
-                    **recomputed.reporting.model_dump(mode="json"),
-                    "instructions": recomputed.reporting_instructions,
-                    "instructions_version": recomputed.instructions_version,
-                },
-            }
-            outcome = self.connector.start(self._target(connection), envelope=envelope)
-
-            dispatched = reserved.model_copy(
-                update={
-                    "manifest": recomputed,
-                    "dispatched_at": now,
-                    "dispatch_state": outcome.status,
-                    "dispatch_error_code": outcome.error_code,
-                    "last_contact_at": now if outcome.status == "sent" else None,
-                    "content_expires_at": now + self.content_retention,
-                    "updated_at": now,
-                    "revision": reserved.revision + 1,
-                }
-            )
-            self.agent_repo.save_run(dispatched)
-            self.agent_repo.save_command(
-                AgentRunCommandDocument(
-                    id=generate_id("agentcmd"),
+        operation_fingerprint = self._key_hashes(owner_id, idempotency_key)[0]
+        with self.agent_repo.operation_lock(owner_id, operation_fingerprint):
+            with self.agent_repo.command_lock(owner_id):
+                key_hash, record = self._replayed(
                     owner_id=owner_id,
-                    run_id=dispatched.id,
-                    kind="start",
-                    delivery="confirmed" if outcome.status == "sent" else "unconfirmed",
-                    created_at=now,
-                    confirmed_at=now if outcome.status == "sent" else None,
+                    key=idempotency_key,
+                    command=command,
+                    canonical=canonical,
                 )
-            )
-            if connection.first_dispatch_at is None:
-                self.agent_repo.save_connection(
-                    connection.model_copy(
+                if record is not None and record.completed:
+                    return self._run_response(
+                        self.agent_repo.get_run(record.resource_id, owner_id=owner_id)
+                    )
+                reconciled = self._reconcile_attempted_command(
+                    record, owner_id=owner_id, canonical=canonical, kind="start"
+                )
+                if reconciled is not None:
+                    return reconciled
+
+                connection = self._require_dispatchable(
+                    payload.connection_id, owner_id=owner_id
+                )
+                if record is None:
+                    task = self.task_snapshot(task_id, owner_id=owner_id)
+                    reserved = self.agent_repo.find_run_by_manifest_token(
+                        payload.manifest_token, owner_id=owner_id
+                    )
+                    if reserved is None or reserved.dispatched_at is not None:
+                        raise ValidationFailure(
+                            "This hand-off review is no longer valid. Review what will "
+                            "be sent and confirm again.",
+                            detail={"reason": "manifest_not_reserved"},
+                        )
+                    manifest = self._build_manifest(
+                        run_id=reserved.id,
+                        task=task,
+                        connection=connection,
+                        payload=payload,
+                    )
+                    if not hmac.compare_digest(manifest.token, payload.manifest_token):
+                        raise ValidationFailure(
+                            "What would be sent has changed since you reviewed it. "
+                            "Review it again before confirming.",
+                            detail={"reason": "manifest_token_mismatch"},
+                        )
+                    if self.requires_dispatch_reauthentication(connection) and not (
+                        reauthenticated
+                    ):
+                        raise ValidationFailure(
+                            "Confirm your password before sending task content to this "
+                            "agent for the first time.",
+                            detail={"reason": "reauthentication_required"},
+                        )
+                else:
+                    reserved = self.agent_repo.get_run(
+                        record.resource_id, owner_id=owner_id
+                    )
+                    stored_manifest = reserved.manifest
+                    if stored_manifest is None:
+                        raise ValidationFailure(
+                            "This hand-off's retained content has expired.",
+                            detail={"reason": "run_content_expired"},
+                        )
+                    manifest = stored_manifest
+                if (
+                    manifest.connection_id != connection.id
+                    or manifest.task_id != task_id
+                ):
+                    raise ConflictError("Agent run", reserved.id)
+
+                now = record.created_at if record is not None else self._now()
+                command_id, reserved_at = self._reserve_command(
+                    owner_id=owner_id,
+                    key_hash=key_hash,
+                    command=command,
+                    canonical=canonical,
+                    resource_id=reserved.id,
+                    record=record,
+                    now=now,
+                )
+                if reserved.dispatched_at is None:
+                    reserved = reserved.model_copy(
                         update={
-                            "first_dispatch_at": now,
+                            "manifest": manifest,
+                            "dispatched_at": now,
+                            "dispatch_state": "delivery_unconfirmed",
+                            "dispatch_error_code": None,
+                            "content_expires_at": now + self.content_retention,
                             "updated_at": now,
-                            "revision": connection.revision + 1,
+                            "revision": reserved.revision + 1,
                         }
                     )
+                    self.agent_repo.save_run(reserved)
+                    self.agent_repo.save_command(
+                        AgentRunCommandDocument(
+                            id=command_id,
+                            owner_id=owner_id,
+                            run_id=reserved.id,
+                            kind="start",
+                            created_at=reserved_at,
+                        )
+                    )
+                    if connection.first_dispatch_at is None:
+                        connection = connection.model_copy(
+                            update={
+                                "first_dispatch_at": now,
+                                "updated_at": now,
+                                "revision": connection.revision + 1,
+                            }
+                        )
+                        self.agent_repo.save_connection(connection)
+                target = self._target(connection)
+                envelope = {
+                    "type": "start",
+                    "protocol_version": PROTOCOL_VERSION,
+                    "run_id": reserved.id,
+                    "task_id": manifest.task_id,
+                    "idempotency_key": reserved.id,
+                    "title": manifest.title,
+                    "details": manifest.details,
+                    "context": [item.model_dump() for item in manifest.context_items],
+                    "reporting": {
+                        **manifest.reporting.model_dump(mode="json"),
+                        "instructions": manifest.reporting_instructions,
+                        "instructions_version": manifest.instructions_version,
+                    },
+                }
+                self._begin_delivery_attempt(
+                    owner_id=owner_id,
+                    key_hash=key_hash,
+                    command=command,
+                    canonical=canonical,
+                    resource_id=reserved.id,
+                    command_id=command_id,
+                    created_at=reserved_at,
+                    request_hash=record.request_hash if record is not None else None,
                 )
-            self._remember(
-                owner_id=owner_id,
-                key_hash=key_hash,
-                command=command,
-                canonical=canonical,
-                resource_id=dispatched.id,
-            )
-            self._audit(
-                owner_id=owner_id,
-                action="run_dispatched",
-                outcome=outcome.status,
-                connection_id=connection.id,
-                run_id=dispatched.id,
-            )
-        return self._run_response(dispatched)
+
+            outcome = self.connector.start(target, envelope=envelope)
+
+            with self.agent_repo.command_lock(owner_id):
+                current = self.agent_repo.get_run(reserved.id, owner_id=owner_id)
+                post_io_now = self._now()
+                callback_arrived_during_io = current.run_version > reserved.run_version
+                effective_status = (
+                    "sent" if callback_arrived_during_io else outcome.status
+                )
+                updates: dict[str, Any] = {
+                    "dispatch_state": effective_status,
+                    "dispatch_error_code": (
+                        None if callback_arrived_during_io else outcome.error_code
+                    ),
+                    "updated_at": max(current.updated_at, post_io_now),
+                    "revision": current.revision + 1,
+                }
+                if effective_status == "sent" and current.last_contact_at is None:
+                    updates["last_contact_at"] = post_io_now
+                current = current.model_copy(update=updates)
+                self.agent_repo.save_run(current)
+                self.agent_repo.save_command(
+                    AgentRunCommandDocument(
+                        id=command_id,
+                        owner_id=owner_id,
+                        run_id=current.id,
+                        kind="start",
+                        delivery=(
+                            "confirmed" if effective_status == "sent" else "unconfirmed"
+                        ),
+                        created_at=reserved_at,
+                        confirmed_at=(
+                            post_io_now if effective_status == "sent" else None
+                        ),
+                    )
+                )
+                self._remember(
+                    owner_id=owner_id,
+                    key_hash=key_hash,
+                    command=command,
+                    canonical=canonical,
+                    resource_id=current.id,
+                    command_id=command_id,
+                    delivery_attempted=True,
+                    created_at=reserved_at,
+                )
+                self._audit(
+                    owner_id=owner_id,
+                    action="run_dispatched",
+                    outcome=effective_status,
+                    connection_id=connection.id,
+                    run_id=current.id,
+                )
+            return self._run_response(current)
 
     # --- run projection -----------------------------------------------------
 
@@ -1427,46 +1605,71 @@ class AgentRelayService:
     ) -> AgentRunResponse:
         command_name = "reply_to_run"
         canonical = self._canonical_request(command_name, payload, target=run_id)
-        with self.agent_repo.command_lock(owner_id):
-            key_hash, record = self._replayed(
-                owner_id=owner_id,
-                key=idempotency_key,
-                command=command_name,
-                canonical=canonical,
-            )
-            settled = self._settled_command_response(record, owner_id=owner_id)
-            if settled is not None:
-                return settled
-            run, connection = self._require_commandable(run_id, owner_id=owner_id)
-            if run.content_expired:
-                raise ValidationFailure(
-                    "This run's relayed content has expired, so it can no longer accept replies.",
-                    detail={"reason": "run_content_expired"},
+        operation_fingerprint = self._key_hashes(owner_id, idempotency_key)[0]
+        with self.agent_repo.operation_lock(owner_id, operation_fingerprint):
+            with self.agent_repo.command_lock(owner_id):
+                key_hash, record = self._replayed(
+                    owner_id=owner_id,
+                    key=idempotency_key,
+                    command=command_name,
+                    canonical=canonical,
                 )
-            if run.revision != payload.expected_revision:
-                raise ConflictError(
-                    "Agent run",
-                    run_id,
-                    "This run changed elsewhere; reload and try again.",
+                settled = self._settled_command_response(record, owner_id=owner_id)
+                if settled is not None:
+                    return settled
+                reconciled = self._reconcile_attempted_command(
+                    record,
+                    owner_id=owner_id,
+                    canonical=canonical,
+                    kind="reply",
+                    body=payload.message,
                 )
-            if not connection.capabilities.reply:
-                raise ValidationFailure(
-                    "This agent does not support replies.",
-                    detail={"reason": "capability_unsupported", "capability": "reply"},
+                if reconciled is not None:
+                    return reconciled
+                run, connection = self._require_commandable(run_id, owner_id=owner_id)
+                if run.content_expired:
+                    raise ValidationFailure(
+                        "This run's relayed content has expired, so it can no longer accept replies.",
+                        detail={"reason": "run_content_expired"},
+                    )
+                if run.revision != payload.expected_revision:
+                    raise ConflictError(
+                        "Agent run",
+                        run_id,
+                        "This run changed elsewhere; reload and try again.",
+                    )
+                if not connection.capabilities.reply:
+                    raise ValidationFailure(
+                        "This agent does not support replies.",
+                        detail={
+                            "reason": "capability_unsupported",
+                            "capability": "reply",
+                        },
+                    )
+                now = self._now()
+                command_id, reserved_at = self._reserve_command(
+                    owner_id=owner_id,
+                    key_hash=key_hash,
+                    command=command_name,
+                    canonical=canonical,
+                    resource_id=run.id,
+                    record=record,
+                    now=now,
+                )
+                target = self._target(connection)
+                self._begin_delivery_attempt(
+                    owner_id=owner_id,
+                    key_hash=key_hash,
+                    command=command_name,
+                    canonical=canonical,
+                    resource_id=run.id,
+                    command_id=command_id,
+                    created_at=reserved_at,
+                    request_hash=record.request_hash if record is not None else None,
                 )
 
-            now = self._now()
-            command_id, reserved_at = self._reserve_command(
-                owner_id=owner_id,
-                key_hash=key_hash,
-                command=command_name,
-                canonical=canonical,
-                resource_id=run.id,
-                record=record,
-                now=now,
-            )
             outcome = self.connector.command(
-                self._target(connection),
+                target,
                 envelope={
                     "type": "reply",
                     "protocol_version": PROTOCOL_VERSION,
@@ -1475,82 +1678,128 @@ class AgentRelayService:
                     "message": payload.message,
                 },
             )
-            self.agent_repo.save_command(
-                AgentRunCommandDocument(
-                    id=command_id,
-                    owner_id=owner_id,
-                    run_id=run.id,
-                    kind="reply",
-                    body=payload.message,
-                    delivery=(
-                        "confirmed" if outcome.status == "confirmed" else "unconfirmed"
-                    ),
-                    created_at=now,
-                    confirmed_at=now if outcome.status == "confirmed" else None,
+
+            with self.agent_repo.command_lock(owner_id):
+                current = self.agent_repo.get_run(run.id, owner_id=owner_id)
+                current_connection = self.agent_repo.get_connection(
+                    connection.id, owner_id=owner_id
                 )
-            )
-            # Submitting a reply does not clear ``blocked``; only a later
-            # authenticated event can move the run's reported state (FR-008).
-            updated = run.model_copy(
-                update={
-                    "reply_pending_command_id": command_id,
-                    "updated_at": now,
-                    "revision": run.revision + 1,
-                }
-            )
-            self.agent_repo.save_run(updated)
-            self._remember(
-                owner_id=owner_id,
-                key_hash=key_hash,
-                command=command_name,
-                canonical=canonical,
-                resource_id=run.id,
-                command_id=command_id,
-                created_at=reserved_at,
-            )
-            self._audit(
-                owner_id=owner_id,
-                action="run_replied",
-                outcome=outcome.status,
-                connection_id=connection.id,
-                run_id=run.id,
-            )
-        return self._run_response(updated)
+                self.agent_repo.save_command(
+                    AgentRunCommandDocument(
+                        id=command_id,
+                        owner_id=owner_id,
+                        run_id=run.id,
+                        kind="reply",
+                        body=None if current.content_expired else payload.message,
+                        delivery=(
+                            "confirmed"
+                            if outcome.status == "confirmed"
+                            else "unconfirmed"
+                        ),
+                        created_at=reserved_at,
+                        confirmed_at=now if outcome.status == "confirmed" else None,
+                    )
+                )
+                unchanged_scope = (
+                    current.revision == run.revision
+                    and current_connection.revision == connection.revision
+                    and current_connection.status != "disconnected"
+                    and current.reported_state not in TERMINAL_REPORTED_STATES
+                    and not current.content_expired
+                    and current_connection.capabilities.reply
+                )
+                if unchanged_scope:
+                    current = current.model_copy(
+                        update={
+                            "reply_pending_command_id": command_id,
+                            "updated_at": now,
+                            "revision": current.revision + 1,
+                        }
+                    )
+                    self.agent_repo.save_run(current)
+                self._remember(
+                    owner_id=owner_id,
+                    key_hash=key_hash,
+                    command=command_name,
+                    canonical=canonical,
+                    resource_id=run.id,
+                    command_id=command_id,
+                    delivery_attempted=True,
+                    created_at=reserved_at,
+                )
+                self._audit(
+                    owner_id=owner_id,
+                    action="run_replied",
+                    outcome=outcome.status,
+                    connection_id=connection.id,
+                    run_id=run.id,
+                )
+            return self._run_response(current)
 
     def cancel_run(
         self, run_id: str, *, owner_id: str, idempotency_key: str
     ) -> AgentRunResponse:
         command_name = "cancel_run"
         canonical = self._canonical_request(command_name, {}, target=run_id)
-        with self.agent_repo.command_lock(owner_id):
-            key_hash, record = self._replayed(
-                owner_id=owner_id,
-                key=idempotency_key,
-                command=command_name,
-                canonical=canonical,
-            )
-            settled = self._settled_command_response(record, owner_id=owner_id)
-            if settled is not None:
-                return settled
-            run, connection = self._require_commandable(run_id, owner_id=owner_id)
-            if not connection.capabilities.cancel:
-                raise ValidationFailure(
-                    "This agent does not support cancellation.",
-                    detail={"reason": "capability_unsupported", "capability": "cancel"},
+        operation_fingerprint = self._key_hashes(owner_id, idempotency_key)[0]
+        with self.agent_repo.operation_lock(owner_id, operation_fingerprint):
+            with self.agent_repo.command_lock(owner_id):
+                key_hash, record = self._replayed(
+                    owner_id=owner_id,
+                    key=idempotency_key,
+                    command=command_name,
+                    canonical=canonical,
+                )
+                settled = self._settled_command_response(record, owner_id=owner_id)
+                if settled is not None:
+                    return settled
+                reconciled = self._reconcile_attempted_command(
+                    record,
+                    owner_id=owner_id,
+                    canonical=canonical,
+                    kind="cancel",
+                )
+                if reconciled is not None:
+                    return reconciled
+                run, connection = self._require_commandable(run_id, owner_id=owner_id)
+                if not connection.capabilities.cancel:
+                    raise ValidationFailure(
+                        "This agent does not support cancellation.",
+                        detail={
+                            "reason": "capability_unsupported",
+                            "capability": "cancel",
+                        },
+                    )
+                now = self._now()
+                attempt_receipt: dict[str, object] = {
+                    "id": run.id,
+                    "connection_revision": connection.revision,
+                }
+                command_id, reserved_at = self._reserve_command(
+                    owner_id=owner_id,
+                    key_hash=key_hash,
+                    command=command_name,
+                    canonical=canonical,
+                    resource_id=run.id,
+                    record=record,
+                    now=now,
+                    response_body=attempt_receipt,
+                )
+                target = self._target(connection)
+                self._begin_delivery_attempt(
+                    owner_id=owner_id,
+                    key_hash=key_hash,
+                    command=command_name,
+                    canonical=canonical,
+                    resource_id=run.id,
+                    command_id=command_id,
+                    created_at=reserved_at,
+                    request_hash=record.request_hash if record is not None else None,
+                    response_body=attempt_receipt,
                 )
 
-            now = self._now()
-            command_id, reserved_at = self._reserve_command(
-                owner_id=owner_id,
-                key_hash=key_hash,
-                command=command_name,
-                canonical=canonical,
-                resource_id=run.id,
-                record=record,
-                now=now,
-            )
             outcome = self.connector.command(
-                self._target(connection),
+                target,
                 envelope={
                     "type": "cancel",
                     "protocol_version": PROTOCOL_VERSION,
@@ -1558,46 +1807,63 @@ class AgentRelayService:
                     "command_id": command_id,
                 },
             )
-            self.agent_repo.save_command(
-                AgentRunCommandDocument(
-                    id=command_id,
-                    owner_id=owner_id,
-                    run_id=run.id,
-                    kind="cancel",
-                    delivery=(
-                        "confirmed" if outcome.status == "confirmed" else "unconfirmed"
-                    ),
-                    created_at=now,
-                    confirmed_at=now if outcome.status == "confirmed" else None,
+
+            with self.agent_repo.command_lock(owner_id):
+                current = self.agent_repo.get_run(run.id, owner_id=owner_id)
+                current_connection = self.agent_repo.get_connection(
+                    connection.id, owner_id=owner_id
                 )
-            )
-            # Requested, not cancelled: only the connector's own report can make
-            # this run cancelled (AC-017).
-            updated = run.model_copy(
-                update={
-                    "cancel_requested_at": now,
-                    "updated_at": now,
-                    "revision": run.revision + 1,
-                }
-            )
-            self.agent_repo.save_run(updated)
-            self._remember(
-                owner_id=owner_id,
-                key_hash=key_hash,
-                command=command_name,
-                canonical=canonical,
-                resource_id=run.id,
-                command_id=command_id,
-                created_at=reserved_at,
-            )
-            self._audit(
-                owner_id=owner_id,
-                action="run_cancel_requested",
-                outcome=outcome.status,
-                connection_id=connection.id,
-                run_id=run.id,
-            )
-        return self._run_response(updated)
+                merge_time = max(current.updated_at, self._now())
+                self.agent_repo.save_command(
+                    AgentRunCommandDocument(
+                        id=command_id,
+                        owner_id=owner_id,
+                        run_id=run.id,
+                        kind="cancel",
+                        delivery=(
+                            "confirmed"
+                            if outcome.status == "confirmed"
+                            else "unconfirmed"
+                        ),
+                        created_at=reserved_at,
+                        confirmed_at=(
+                            merge_time if outcome.status == "confirmed" else None
+                        ),
+                    )
+                )
+                unchanged_scope = (
+                    current_connection.revision == connection.revision
+                    and current_connection.status != "disconnected"
+                    and current.reported_state not in TERMINAL_REPORTED_STATES
+                    and current_connection.capabilities.cancel
+                )
+                if unchanged_scope:
+                    current = current.model_copy(
+                        update={
+                            "cancel_requested_at": now,
+                            "updated_at": merge_time,
+                            "revision": current.revision + 1,
+                        }
+                    )
+                    self.agent_repo.save_run(current)
+                self._remember(
+                    owner_id=owner_id,
+                    key_hash=key_hash,
+                    command=command_name,
+                    canonical=canonical,
+                    resource_id=run.id,
+                    command_id=command_id,
+                    delivery_attempted=True,
+                    created_at=reserved_at,
+                )
+                self._audit(
+                    owner_id=owner_id,
+                    action="run_cancel_requested",
+                    outcome=outcome.status,
+                    connection_id=connection.id,
+                    run_id=run.id,
+                )
+            return self._run_response(current)
 
     # --- inbound events -----------------------------------------------------
 

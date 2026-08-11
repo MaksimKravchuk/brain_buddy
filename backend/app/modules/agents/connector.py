@@ -39,6 +39,7 @@ from .egress import (
     pinned_request,
     validate_destination,
 )
+from .headers import validate_auth_header_name
 
 TestStatus = Literal["ready", "invalid_credentials", "unreachable", "unsupported"]
 StartStatus = Literal["sent", "not_sent", "delivery_unconfirmed"]
@@ -119,6 +120,7 @@ class GenericHttpConnector:
     ) -> tuple[int, bytes]:
         """Validate, pin, and POST. Raises for every unsafe or failed attempt."""
 
+        validate_auth_header_name(target.auth_header_name)
         destination = validate_destination(
             target.endpoint_url,
             allow_private_destinations=self._allow_private_destinations,

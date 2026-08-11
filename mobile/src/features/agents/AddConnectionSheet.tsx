@@ -18,7 +18,7 @@ interface AddConnectionSheetProps {
   onCreated: (connection: AgentConnectionCreatedResponse) => void;
 }
 
-const DEFAULT_AUTH_HEADER = "Authorization";
+const DEFAULT_AUTH_HEADER = "X-Agent-Key";
 
 /**
  * Adds an agent the user operates. The credential is entered masked, sent

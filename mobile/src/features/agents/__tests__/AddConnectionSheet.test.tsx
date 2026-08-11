@@ -1,5 +1,7 @@
 /** Caller-owned idempotency for creating an external-agent connection. */
+import { QueryClientProvider } from "@tanstack/react-query";
 import type { ReactTestInstance, ReactTestRenderer } from "react-test-renderer";
+import { act } from "react-test-renderer";
 
 import { ApiError } from "@/api/client";
 import { AddConnectionSheet } from "@/features/agents/AddConnectionSheet";
@@ -54,6 +56,34 @@ beforeEach(() => {
 });
 
 describe("AddConnectionSheet idempotency", () => {
+  it("resets a changed auth header after close and reopen", async () => {
+    const onClose = jest.fn();
+    const { renderer, client, unmount } = await renderWithProviders(
+      <AddConnectionSheet visible onClose={onClose} onCreated={jest.fn()} />,
+    );
+    const authHeader = input(renderer, "X-Agent-Key");
+    await typeInto(authHeader, "X-Temporary-Key");
+    expect(authHeader.props.value).toBe("X-Temporary-Key");
+
+    await act(async () => {
+      renderer.update(
+        <QueryClientProvider client={client}>
+          <AddConnectionSheet visible={false} onClose={onClose} onCreated={jest.fn()} />
+        </QueryClientProvider>,
+      );
+    });
+    await act(async () => {
+      renderer.update(
+        <QueryClientProvider client={client}>
+          <AddConnectionSheet visible onClose={onClose} onCreated={jest.fn()} />
+        </QueryClientProvider>,
+      );
+    });
+
+    expect(input(renderer, "X-Agent-Key").props.value).toBe("X-Agent-Key");
+    await unmount();
+  });
+
   it("retries a lost create response with the original key and recovers the one-time secret", async () => {
     const created = { ...makeConnection(), inbound_signing_secret: "shown-once" };
     mockCreate.mockRejectedValueOnce(new Error("Response lost")).mockResolvedValue(created);
@@ -69,6 +99,7 @@ describe("AddConnectionSheet idempotency", () => {
     await settle();
 
     expect(mockCreate).toHaveBeenCalledTimes(2);
+    expect(mockCreate.mock.calls[0][0].auth_header_name).toBe("X-Agent-Key");
     expect(mockCreate.mock.calls[1][1]).toBe(mockCreate.mock.calls[0][1]);
     expect(onCreated).toHaveBeenCalledWith(created);
 

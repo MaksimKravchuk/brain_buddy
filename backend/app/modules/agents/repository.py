@@ -13,9 +13,10 @@ import sqlite3
 import threading
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import ClassVar, TypeVar
+from typing import Any, ClassVar, TypeVar
+from weakref import WeakValueDictionary
 
 from pydantic import BaseModel
 
@@ -35,6 +36,7 @@ from .domain import (
     AgentRunDocument,
     AgentRunEventDocument,
 )
+from .headers import validate_auth_header_name
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
@@ -75,6 +77,10 @@ class AgentRepository(BaseRepository):
 
     _thread_state: ClassVar[threading.local] = threading.local()
     _process_lock: ClassVar[threading.RLock] = threading.RLock()
+    _operation_locks_guard: ClassVar[threading.Lock] = threading.Lock()
+    _operation_locks: ClassVar[WeakValueDictionary[tuple[str, str, str], Any]] = (
+        WeakValueDictionary()
+    )
 
     def __init__(self, root: Path) -> None:
         super().__init__(root)
@@ -82,6 +88,21 @@ class AgentRepository(BaseRepository):
         self._initialize_database()
 
     # --- connection plumbing ------------------------------------------------
+
+    @contextmanager
+    def operation_lock(
+        self, owner_id: str, operation_fingerprint: str
+    ) -> Iterator[None]:
+        """Serialize one idempotent intent without holding a database writer."""
+
+        coordinate = (str(self.db_path), owner_id, operation_fingerprint)
+        with self._operation_locks_guard:
+            lock = self._operation_locks.get(coordinate)
+            if lock is None:
+                lock = threading.RLock()
+                self._operation_locks[coordinate] = lock
+        with lock:
+            yield
 
     @contextmanager
     def command_lock(self, owner_id: str) -> Iterator[None]:
@@ -228,6 +249,107 @@ class AgentRepository(BaseRepository):
                 CREATE INDEX IF NOT EXISTS idx_agent_idempotency_created
                     ON agent_idempotency(created_at);
                 """)
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS agent_schema_migrations ("
+                "name TEXT PRIMARY KEY)"
+            )
+            migration_name = "delivery_attempted_backfill_v1"
+            migrated = conn.execute(
+                "SELECT 1 FROM agent_schema_migrations WHERE name = ?",
+                (migration_name,),
+            ).fetchone()
+            if migrated is None:
+                # Keep ALTER, conservative legacy backfill, and the durable marker
+                # in one SQLite transaction. If startup stops anywhere in this
+                # block, the entire migration rolls back and the next startup
+                # retries it rather than authorizing an ambiguous redelivery.
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    columns = {
+                        row["name"]
+                        for row in conn.execute("PRAGMA table_info(agent_idempotency)")
+                    }
+                    if "delivery_attempted" not in columns:
+                        conn.execute(
+                            "ALTER TABLE agent_idempotency "
+                            "ADD COLUMN delivery_attempted "
+                            "INTEGER NOT NULL DEFAULT 0"
+                        )
+                        columns.add("delivery_attempted")
+                    if {
+                        "completed",
+                        "command_id",
+                        "delivery_attempted",
+                    }.issubset(columns):
+                        conn.execute(
+                            "UPDATE agent_idempotency "
+                            "SET delivery_attempted = 1 "
+                            "WHERE completed = 0 AND command_id IS NOT NULL "
+                            "AND delivery_attempted = 0"
+                        )
+                    conn.execute(
+                        "INSERT INTO agent_schema_migrations(name) VALUES (?)",
+                        (migration_name,),
+                    )
+                    conn.commit()
+                except BaseException:
+                    conn.rollback()
+                    raise
+            self._migrate_legacy_invalid_header_connections(conn)
+
+    @staticmethod
+    def _migrate_legacy_invalid_header_connections(conn: sqlite3.Connection) -> None:
+        """Quarantine persisted header names rejected by the current transport."""
+
+        rows = conn.execute(
+            "SELECT owner_id, id, payload FROM agent_connections"
+        ).fetchall()
+        for row in rows:
+            try:
+                payload = json.loads(row["payload"])
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            raw_header = payload.get("auth_header_name")
+            if isinstance(raw_header, str):
+                try:
+                    validate_auth_header_name(raw_header)
+                except ValueError:
+                    pass
+                else:
+                    continue
+            raw_revision = payload.get("revision", 1)
+            try:
+                legacy_revision = int(raw_revision)
+            except (TypeError, ValueError, OverflowError):
+                legacy_revision = 1
+            legacy_revision = min(max(legacy_revision, 1), 2_147_483_646)
+            payload.update(
+                auth_header_name="X-Agent-Key",
+                credential=None,
+                capabilities={"progress": False, "reply": False, "cancel": False},
+                status="untested",
+                last_test_error_code=(
+                    "legacy_invalid_auth_header_requires_reconfiguration"
+                ),
+                last_contact_at=None,
+                last_tested_at=None,
+                scope_verified_at=None,
+                first_dispatch_at=None,
+                revision=legacy_revision + 1,
+                updated_at=datetime.now(UTC).isoformat(),
+            )
+            conn.execute(
+                "UPDATE agent_connections SET status = ?, payload = ? "
+                "WHERE owner_id = ? AND id = ?",
+                (
+                    "untested",
+                    json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                    row["owner_id"],
+                    row["id"],
+                ),
+            )
 
     @staticmethod
     def _payload(model: BaseModel) -> str:
@@ -693,7 +815,7 @@ class AgentRepository(BaseRepository):
                 row = conn.execute(
                     """
                     SELECT key_hash, command, request_hash, resource_id, command_id,
-                           completed, response_body, created_at
+                           delivery_attempted, completed, response_body, created_at
                     FROM agent_idempotency
                     WHERE owner_id = ? AND key_hash = ?
                     """,
@@ -706,6 +828,7 @@ class AgentRepository(BaseRepository):
                         request_hash=row["request_hash"],
                         resource_id=row["resource_id"],
                         command_id=row["command_id"],
+                        delivery_attempted=bool(row["delivery_attempted"]),
                         completed=bool(row["completed"]),
                         response_body=json.loads(row["response_body"]),
                         created_at=row["created_at"],
@@ -725,8 +848,8 @@ class AgentRepository(BaseRepository):
                 """
                 INSERT OR REPLACE INTO agent_idempotency
                     (owner_id, key_hash, command, request_hash, resource_id,
-                     command_id, completed, response_body, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     command_id, delivery_attempted, completed, response_body, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_id,
@@ -735,6 +858,7 @@ class AgentRepository(BaseRepository):
                     record.request_hash,
                     record.resource_id,
                     record.command_id,
+                    int(record.delivery_attempted),
                     int(record.completed),
                     json.dumps(record.response_body, sort_keys=True),
                     record.created_at.isoformat(),
