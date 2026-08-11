@@ -90,6 +90,30 @@ export interface PendingClassificationChange {
   /** The correlation id of the response that parked it, so FR-012's
    *  "reportable" applies to a conflict and not only to an inline error. */
   correlationId?: string;
+
+  /** The task revision the re-read observed when this entry was parked.
+   *
+   *  A 409 is answered by re-reading the task, and that revision is the only
+   *  one a resolution can be aimed at. Nothing writes it back to the screen's
+   *  copy of the task and a conflicted pass settles nothing, so resolving
+   *  against what the screen holds re-sends the same stale
+   *  `expected_revision`, earns the same 409, and puts the same sheet back up
+   *  for ever — a loop with no exit the person can reach. Absent when the
+   *  re-read itself could not be made. */
+  conflictServerRevision?: number;
+
+  /** What that same re-read found the task classified as.
+   *
+   *  The revision alone aims the resolution; this is what the resolution is
+   *  *about*. M-04's third row is the value "Keep mine, replace theirs" would
+   *  replace, and the screen's own copy of the task is not it — nothing
+   *  refreshes that copy when a pass ends in a conflict, so sourcing the row
+   *  from it names a value the server had already stopped holding. Naming it
+   *  wrong makes the choice one taken on false information, which is the
+   *  failure invariant 9 and FR-010's retained value exist to prevent. Absent,
+   *  like the revision, when no re-read could be made — and on an entry parked
+   *  before this field existed, where the screen's copy is all there is. */
+  conflictServerValue?: { projectId: string | null; tagIds: string[] };
 }
 
 /** Cached project and Tag lists, so the pickers work after a cold start with
