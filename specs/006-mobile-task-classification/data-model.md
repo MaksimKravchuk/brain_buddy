@@ -186,12 +186,34 @@ which is the literal thing FR-011 exists to prevent.
 
 ### Key derivation, for both stores
 
-`bb.<store>.${encodeURIComponent(serverUrl)}.${encodeURIComponent(accountId)}`
+```
+const esc = (x) => encodeURIComponent(x).replace(/\./g, "%2E");
+`bb.<store>.${esc(serverUrl)}.${esc(accountId)}`
+```
 
-Components are escaped separately. The key is the *sole* enforcement of SC-007
-— the design deliberately rejects a filter — and `serverUrl` is user-typed and
-always contains dots, so unescaped concatenation lets two distinct
-(serverUrl, accountId) pairings render to one key string.
+Components are escaped separately **and the separator is escaped inside each
+component**. The second half is not belt-and-braces; without it the key does not
+enforce SC-007 at all.
+
+`encodeURIComponent` leaves `.` unescaped, so escaping per component is not
+injective under a `.` separator:
+
+```
+queueKey("a.b", "c") === queueKey("a", "b.c") === "bb.pendingClassification.a.b.c"
+```
+
+`serverUrl` is a URL, so it *always* contains dots — this is reachable, not
+theoretical. And because the design deliberately rejects a filter, the key is
+the *sole* enforcement of SC-007: a collision here **is** one account reading
+another's queue, with no bug anywhere else in the feature.
+
+Escaping `.` to `%2E` leaves exactly two literal `.` boundaries and stays
+`decodeURIComponent`-reversible, so `parseClassificationKey()` is a constructive
+proof of injectivity rather than an assertion.
+
+An empty component **throws** rather than producing a key. An empty `accountId`
+would pool every account into one key, which is precisely the disclosure the
+keyed design exists to prevent, so it fails loudly.
 
 **Defence in depth, added despite the key:** every read also verifies each
 entry's own `accountId` and `serverUrl` fields against the active identity and
