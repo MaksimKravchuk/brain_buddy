@@ -118,6 +118,17 @@ ALLURE_AGGREGATION_REQUIREMENTS = (
         "Allure aggregation predicate over the two uploading stacks",
         'if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ]; then',
     ),
+    # Selected-to-run is not produced-something. A stack job is skipped when
+    # `spec-kit` is red, which is the normal state of a spec-driven branch, so
+    # the `changes` output alone reports stacks that uploaded nothing.
+    (
+        "Allure predicate conjoins selection with the backend job actually running",
+        "needs.changes.outputs.backend == 'true' && needs.backend.result == 'success'",
+    ),
+    (
+        "Allure predicate conjoins selection with the frontend job actually running",
+        "needs.changes.outputs.frontend == 'true' && needs.frontend.result == 'success'",
+    ),
     (
         "gate on the Allure download step",
         "      - name: Download Allure results\n        if: steps.aggregate.outputs.run == 'true'",

@@ -660,9 +660,19 @@ jobs:
       # validator, and this repository has now found that defect three times.
       - name: Decide whether there is anything to aggregate
         id: aggregate
+        # Selected-to-run is NOT the same question as produced-something, and
+        # the first version of this asked the wrong one. `changes` can mark a
+        # stack changed while its job is skipped anyway, because the stack jobs
+        # need `spec-kit` and a red spec gate skips them — which is exactly the
+        # state a spec-driven feature branch sits in. The predicate must be the
+        # conjunction: the stack was selected AND its job actually ran.
+        #
+        # Deliberately NOT "skip if the directory is empty". That would swallow
+        # the one case this validator exists for: a stack that ran and produced
+        # no results.
         env:
-          BACKEND: ${{ needs.changes.outputs.backend }}
-          FRONTEND: ${{ needs.changes.outputs.frontend }}
+          BACKEND: ${{ needs.changes.outputs.backend == 'true' && needs.backend.result == 'success' }}
+          FRONTEND: ${{ needs.changes.outputs.frontend == 'true' && needs.frontend.result == 'success' }}
         run: |
           if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"

@@ -389,6 +389,21 @@ export default defineConfig({
             )
             dropped_validator = self.run_validator("workflow", "--ci", str(no_validator))
 
+            # The predicate's first version asked whether a stack was *selected*
+            # rather than whether its job actually ran, and shipped red: the
+            # stack jobs need `spec-kit`, so a red spec gate skips them while
+            # `changes` still reports them changed — the normal state of a
+            # spec-driven branch. Guarded so the weaker form cannot come back.
+            selected_only = Path(tmp) / "ci-selected-only.yml"
+            selected_only.write_text(
+                text.replace(
+                    "needs.changes.outputs.backend == 'true' && needs.backend.result == 'success'",
+                    "needs.changes.outputs.backend",
+                ),
+                encoding="utf-8",
+            )
+            weaker_predicate = self.run_validator("workflow", "--ci", str(selected_only))
+
         self.assertNotEqual(missing_gate.returncode, 0)
         # Both anchored steps must be named, not just whichever fails first.
         # The first version of this guard used a bare "if: steps.aggregate..."
@@ -403,6 +418,12 @@ export default defineConfig({
         # to aggregate is the fix; skipping when there is, is the defect.
         self.assertNotEqual(dropped_validator.returncode, 0)
         self.assertIn("aggregate Allure taxonomy validation still runs", dropped_validator.stderr)
+
+        self.assertNotEqual(weaker_predicate.returncode, 0)
+        self.assertIn(
+            "conjoins selection with the backend job actually running",
+            weaker_predicate.stderr,
+        )
 
     def test_workflow_rejects_missing_pr_scoped_concurrency(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -575,8 +596,8 @@ jobs:
       - name: Decide whether there is anything to aggregate
         id: aggregate
         env:
-          BACKEND: ${{ needs.changes.outputs.backend }}
-          FRONTEND: ${{ needs.changes.outputs.frontend }}
+          BACKEND: ${{ needs.changes.outputs.backend == 'true' && needs.backend.result == 'success' }}
+          FRONTEND: ${{ needs.changes.outputs.frontend == 'true' && needs.frontend.result == 'success' }}
         run: |
           if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
