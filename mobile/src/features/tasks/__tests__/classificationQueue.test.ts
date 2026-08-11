@@ -511,6 +511,22 @@ describe("send transitions", () => {
     expect(q[0].observedAt).toBeUndefined();
   });
 
+  it("006-FR-008 applyRejected records WHY the entry was parked, not just that it was", () => {
+    // `conflicted` alone cannot tell a stale revision from a target deleted
+    // elsewhere. Without the reason the sheet renders the revision prompt for
+    // a deleted task and offers to replace something that no longer exists —
+    // the discard-only sheet built for that case becomes unreachable.
+    const queue = markSending([entry()], "key-existing", T0);
+    const parked = applyRejected(queue, "key-existing", "revision-conflict", undefined, {
+      reason: "target-missing",
+      correlationId: "corr-1",
+    });
+
+    expect(parked[0].sendState).toBe("conflicted");
+    expect(parked[0].conflictReason).toBe("target-missing");
+    expect(parked[0].correlationId).toBe("corr-1");
+  });
+
   it("006-FR-017 applyRejected re-mints the key on an Idempotency-Key conflict", () => {
     // The backend returns 409 for two unrelated things. Returning to `queued`
     // with the same key after a key conflict sends a byte-identical request,

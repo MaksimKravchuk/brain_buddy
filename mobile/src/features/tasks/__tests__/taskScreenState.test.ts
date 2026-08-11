@@ -767,6 +767,28 @@ describe("006-FR-010 an edit records what the DEVICE was showing, not the server
     expect("projectId" in edit.value).toBe(false);
   });
 
+  it("006-FR-010 dates the device's knowledge so M-04 can say how old it is", () => {
+    const read = ago(3 * DAY);
+    expect(
+      buildClassificationEdit("task-1", 4, { projectId: null, tagIds: [] }, {}, read).displayedAt,
+    ).toBe(read);
+  });
+
+  it.each<[string, string | null | undefined]>([
+    ["the caller cannot say when the task was last read", undefined],
+    ["there is no read time at all", null],
+    ["the read time is empty", ""],
+  ])("006-FR-010 omits the age rather than inventing one when %s", (_why, displayedAt) => {
+    const edit = buildClassificationEdit(
+      "task-1",
+      4,
+      { projectId: null, tagIds: [] },
+      {},
+      displayedAt,
+    );
+    expect("displayedAt" in edit).toBe(false);
+  });
+
   it("006-FR-010 copies the displayed value, so a later render cannot rewrite it", () => {
     const displayed = { projectId: "p1", tagIds: ["t1"] };
     const edit = buildClassificationEdit("task-1", 4, displayed, { projectId: "p9" });

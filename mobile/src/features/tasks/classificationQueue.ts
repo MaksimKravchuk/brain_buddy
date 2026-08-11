@@ -330,10 +330,19 @@ export function applyRejected(
   idempotencyKey: string,
   kind: RejectionKind,
   mintKey?: () => string,
+  context?: { reason?: string; correlationId?: string },
 ): PendingClassificationChange[] {
   return transition(queue, idempotencyKey, (entry) => {
+    // Carried onto the entry because `conflicted` alone cannot tell a stale
+    // revision from a target deleted elsewhere, and those need different
+    // sheets. Without it a 404 renders the revision prompt and offers to
+    // replace a task that no longer exists.
+    const trace = {
+      ...(context?.reason ? { conflictReason: context.reason } : {}),
+      ...(context?.correlationId ? { correlationId: context.correlationId } : {}),
+    };
     if (kind === "revision-conflict") {
-      return { ...entry, sendState: "conflicted" };
+      return { ...entry, ...trace, sendState: "conflicted" };
     }
     if (kind === "idempotency-key-conflict") {
       // Re-mint, or the retry is byte-identical to the request that was just
@@ -342,11 +351,11 @@ export function applyRejected(
       // it gets a stuck entry it can see rather than a silent one — the entry
       // stays `conflicted` so a person is asked instead of a drain spinning.
       if (!mintKey) {
-        return { ...entry, sendState: "conflicted" };
+        return { ...entry, ...trace, sendState: "conflicted" };
       }
-      return { ...entry, sendState: "queued", idempotencyKey: mintKey() };
+      return { ...entry, ...trace, sendState: "queued", idempotencyKey: mintKey() };
     }
-    return { ...entry, sendState: "queued" };
+    return { ...entry, ...trace, sendState: "queued" };
   });
 }
 

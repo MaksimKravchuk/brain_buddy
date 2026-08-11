@@ -289,7 +289,14 @@ export function resolveSendRejection({
     return {
       // `revision-conflict` is the reducer's word for "park it and ask"; a
       // deleted task (404) parks the same way for the same reason.
-      queue: applyRejected(queue, entry.idempotencyKey, "revision-conflict"),
+      // The reason rides onto the entry: `conflicted` alone cannot tell a
+      // stale revision from a target deleted elsewhere, and the sheet needs
+      // that to avoid offering "Keep mine, replace theirs" for a task that no
+      // longer exists.
+      queue: applyRejected(queue, entry.idempotencyKey, "revision-conflict", undefined, {
+        reason: decision.reason,
+        correlationId: decision.correlationId,
+      }),
       kind: decision.kind === "prompt" ? "conflicted" : "error",
       advanceLastSynced: false,
       continueDraining: false,
@@ -311,7 +318,10 @@ export function resolveSendRejection({
 
   return {
     kind: "error",
-    queue: applyRejected(queue, entry.idempotencyKey, "idempotency-key-conflict", mintKey),
+    queue: applyRejected(queue, entry.idempotencyKey, "idempotency-key-conflict", mintKey, {
+      reason: decision.reason,
+      correlationId: decision.correlationId,
+    }),
     advanceLastSynced: false,
     continueDraining: false,
     decision,

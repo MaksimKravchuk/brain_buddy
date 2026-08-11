@@ -746,12 +746,19 @@ export function resolveOnline(input: ConnectivityInput): boolean {
  * `value` carries only the fields this edit touched, and a cleared project
  * travels as an explicit `null` rather than as an omission (FR-001, FR-003) —
  * the two mean opposite things all the way down to the request body.
+ *
+ * `displayedAt` dates that knowledge for M-04's labelled row. It is omitted
+ * rather than guessed when the caller cannot say: an undated row is honest, and
+ * one dated from when the *change* was made would claim the phone's picture is
+ * 14 minutes old when it may be three weeks old — the precise falsehood the
+ * labelled row exists to prevent (FR-010).
  */
 export function buildClassificationEdit(
   taskId: string,
   observedRevision: number,
   displayed: ClassificationState,
   value: Partial<ClassificationValue>,
+  displayedAt?: string | null,
 ): Omit<ClassificationEdit, "accountId" | "serverUrl"> {
   const next: Partial<ClassificationValue> = {};
   if ("projectId" in value) {
@@ -765,5 +772,6 @@ export function buildClassificationEdit(
     observedRevision,
     displayedValue: { projectId: displayed.projectId, tagIds: [...displayed.tagIds] },
     value: next,
+    ...(displayedAt ? { displayedAt } : {}),
   };
 }

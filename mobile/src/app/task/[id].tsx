@@ -33,6 +33,7 @@ import { Sheet } from "@/components/Sheet";
 import { TopBar } from "@/components/shell/TopBar";
 import { dueLabel } from "@/components/TaskRow";
 import type { ClassificationValue } from "@/features/tasks/classificationTypes";
+import type { DecisionReason } from "@/features/tasks/conflictDecision";
 import { ConflictSheet } from "@/features/tasks/ConflictSheet";
 import type { NamedEntity } from "@/features/tasks/matchExisting";
 import { ProjectPicker } from "@/features/tasks/ProjectPicker";
@@ -354,8 +355,19 @@ export default function TaskDetailScreen() {
       (tags.data !== undefined && !tagsFromCache),
   });
 
+  // When the device last read this task from the server — not when the change
+  // was made. It dates M-04's "your phone last showed" row; guessing it would
+  // be the falsehood that row exists to prevent (FR-010).
   const enqueueClassification = (value: Partial<ClassificationValue>) =>
-    queue.enqueue(buildClassificationEdit(task.id, task.revision, effective, value));
+    queue.enqueue(
+      buildClassificationEdit(
+        task.id,
+        task.revision,
+        effective,
+        value,
+        query.dataUpdatedAt > 0 ? new Date(query.dataUpdatedAt).toISOString() : null,
+      ),
+    );
 
   const createProject = async (name: string): Promise<NamedEntity> => {
     // FR-004 — created and attached in one action. A rejection leaves the
@@ -389,6 +401,28 @@ export default function TaskDetailScreen() {
   // state, so a conflict queued against another task waits for that screen.
   const queuedConflict =
     queue.conflict && queue.conflict.entry.taskId === task.id ? queue.conflict : undefined;
+
+  const expiredNoticeCard = expiredNotice ? (
+    <View style={styles.noticeCard}>
+      <View accessible accessibilityRole="text" accessibilityLabel={expiredNotice.accessibilityLabel}>
+        {expiredNotice.lines.map((line) => (
+          <BBText key={line} variant="caption" color={colors.warningFg}>
+            {line}
+          </BBText>
+        ))}
+      </View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={expiredNotice.dismissLabel}
+        onPress={() => void queue.dismissExpiredNotice(task.id)}
+        style={styles.noticeDismiss}
+      >
+        <BBText variant="caption" weight="medium" color={colors.warningFg}>
+          {expiredNotice.dismissLabel}
+        </BBText>
+      </Pressable>
+    </View>
+  ) : null;
 
   return (
     <Screen padBottom>
@@ -509,27 +543,7 @@ export default function TaskDetailScreen() {
                 {/* FR-018: the notice names the field and what it reverted to,
                     and its labelled Dismiss sits in tab order right after the
                     row it explains. */}
-                {expiredNotice && expiredNotice.anchor === row.id ? (
-                  <View style={styles.noticeCard}>
-                    <View accessible accessibilityRole="text">
-                      {expiredNotice.lines.map((line) => (
-                        <BBText key={line} variant="caption" color={colors.warningFg}>
-                          {line}
-                        </BBText>
-                      ))}
-                    </View>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={expiredNotice.dismissLabel}
-                      onPress={() => void queue.dismissExpiredNotice(task.id)}
-                      style={styles.noticeDismiss}
-                    >
-                      <BBText variant="caption" weight="medium" color={colors.warningFg}>
-                        {expiredNotice.dismissLabel}
-                      </BBText>
-                    </Pressable>
-                  </View>
-                ) : null}
+                {expiredNotice?.anchor === row.id ? expiredNoticeCard : null}
               </Fragment>
             ))}
           </View>
@@ -622,6 +636,10 @@ export default function TaskDetailScreen() {
             })}
           </View>
         ) : null}
+        {/* The chip presentation has no row to anchor to, so the notice follows
+            the chips. FR-018 is a MUST regardless of which presentation the
+            screen is carrying — a completed task can hold a dropped change too. */}
+        {metadataChips ? expiredNoticeCard : null}
 
         {task.state === "waiting" ? (
           <View style={styles.waitingBlock}>
@@ -1021,11 +1039,12 @@ export default function TaskDetailScreen() {
           tagIds: task.tag_ids,
           revision: task.revision,
         }}
-        // The queue records that an entry is `conflicted` but not *why*, so the
-        // one reason that parks an entry any other way — a 404 on a deleted
-        // target — is not distinguishable here. Stale revision is the case
-        // `decideOnRejection` sends to the prompt in every other path.
-        reason="stale-revision"
+        // The entry now carries why it was parked, so a 404 on a deleted
+        // target gets the discard-only sheet instead of being offered "Keep
+        // mine, replace theirs" for something that no longer exists. Falls
+        // back to a stale revision only for an entry parked before the reason
+        // was recorded.
+        reason={(queue.conflict?.entry.conflictReason as DecisionReason) ?? "stale-revision"}
         names={{ projects: projects.data ?? null, tags: tags.data ?? null }}
         deviceObservedAt={queue.lastSyncedAt}
         onKeepMine={() => queue.keepMine(task.revision)}

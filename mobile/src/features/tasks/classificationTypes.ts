@@ -76,6 +76,20 @@ export interface PendingClassificationChange {
   idempotencyKey: string;
 
   sendState: SendState;
+
+  /** Why this entry was parked, when `sendState` is `conflicted`.
+   *
+   *  `conflicted` covers two outcomes that need different sheets: a stale
+   *  revision, and a 404 on a target deleted elsewhere. Recording only the
+   *  state makes them indistinguishable at the call site, so a deleted task
+   *  renders the revision prompt and offers "Keep mine, replace theirs" for
+   *  something that no longer exists. Typed loosely to avoid a cycle with
+   *  `conflictDecision.ts`, which imports this module. */
+  conflictReason?: string;
+
+  /** The correlation id of the response that parked it, so FR-012's
+   *  "reportable" applies to a conflict and not only to an inline error. */
+  correlationId?: string;
 }
 
 /** Cached project and Tag lists, so the pickers work after a cold start with
