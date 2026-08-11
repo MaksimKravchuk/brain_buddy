@@ -196,6 +196,407 @@ describe("smartAdd", () => {
     expect(stripLegacyProjectSigil("#not-project")).toBe("#not-project");
   });
 
+  it("matches a stored name whose own spacing and case are untidy", () => {
+    const untidy = [
+      { id: "tag-untidy", name: "  Deep   Work  ", state: "active" as const, revision: 1, open_task_count: 0 }
+    ];
+
+    expect(parseSmartAdd('Plan #"deep work"', { projects, tags: untidy })).toMatchObject({
+      tags: [{ id: "tag-untidy" }]
+    });
+  });
+
+  it("strips a legacy sigil only from the front of a name", () => {
+    expect(stripLegacySigil("c#sharp")).toBe("c#sharp");
+    expect(stripLegacyProjectSigil("mail@example.com")).toBe("mail@example.com");
+    expect(parseSmartAdd('Plan #"c#sharp"', { projects, tags })).toMatchObject({
+      tags: [{ name: "c#sharp" }]
+    });
+  });
+
+  it("leaves a lone backslash alone when no sigil follows it", () => {
+    expect(parseSmartAdd("Copy from C:\\ drive", { projects, tags })).toMatchObject({
+      cleanTitle: "Copy from C:\\ drive",
+      hasCompletedTokens: false
+    });
+  });
+
+  it("ignores a quoted token with an empty name instead of classifying it", () => {
+    expect(parseSmartAdd('Plan #"" today', { projects, tags })).toMatchObject({
+      cleanTitle: 'Plan #"" today',
+      tags: [],
+      hasCompletedTokens: false
+    });
+  });
+
+  it("treats a backslash-escaped sigil as literal text for both kinds", () => {
+    expect(parseSmartAdd("Ping \\@nobody today", { projects, tags })).toMatchObject({
+      cleanTitle: "Ping @nobody today",
+      project: null,
+      hasCompletedTokens: false
+    });
+    expect(parseSmartAdd("Mail \\#one and \\@two", { projects, tags })).toMatchObject({
+      cleanTitle: "Mail #one and @two",
+      tags: [],
+      project: null
+    });
+  });
+
+  it("only honours an escape that stands at a token boundary", () => {
+    // Mid-word the backslash is ordinary text, and the sigil behind it is not a
+    // token either, so the whole run survives into the title verbatim.
+    expect(parseSmartAdd("id\\#42 wins", { projects, tags })).toMatchObject({
+      cleanTitle: "id\\#42 wins",
+      tags: [],
+      hasCompletedTokens: false
+    });
+  });
+
+  it("matches an existing name regardless of case and inner spacing", () => {
+    expect(parseSmartAdd('Plan #"DEEP   WORK"', { projects, tags })).toMatchObject({
+      cleanTitle: "Plan",
+      tags: [{ id: "tag-deep" }]
+    });
+    expect(parseSmartAdd('Plan @"  vendor   LAUNCH  "', { projects, tags })).toMatchObject({
+      project: { id: "project-vendor" }
+    });
+  });
+
+  it("normalises the display name of a tag or project it is about to create", () => {
+    expect(parseSmartAdd('Plan #"  New   Tag  "', { projects, tags })).toMatchObject({
+      tags: [{ name: "New Tag" }]
+    });
+    expect(parseSmartAdd('Plan @"  Fresh   Project  "', { projects, tags })).toMatchObject({
+      project: { name: "Fresh Project" }
+    });
+  });
+
+  it("decodes an escaped backslash inside a quoted name", () => {
+    expect(parseSmartAdd('Plan #"back\\\\slash"', { projects, tags })).toMatchObject({
+      cleanTitle: "Plan",
+      tags: [{ name: "back\\slash" }]
+    });
+  });
+
+  it("abandons a quoted name broken by a carriage return, as it does for a newline", () => {
+    expect(parseSmartAdd('Plan #"broken\rname"', { projects, tags })).toMatchObject({
+      // The token is abandoned, and the stray control character collapses into
+      // ordinary spacing the way any other whitespace run does.
+      cleanTitle: 'Plan #"broken name"',
+      hasCompletedTokens: false
+    });
+  });
+
+  it("stops an unquoted name at a trailing separator instead of swallowing it", () => {
+    expect(parseSmartAdd("Ping #a- now", { projects, tags })).toMatchObject({
+      cleanTitle: "Ping - now",
+      tags: [{ name: "a" }]
+    });
+    expect(parseSmartAdd("Ping #a. now", { projects, tags })).toMatchObject({
+      cleanTitle: "Ping. now",
+      tags: [{ name: "a" }]
+    });
+  });
+
+  it("removes a bracket pair only when the token is the whole of it", () => {
+    expect(parseSmartAdd("Draft ( #work ) today", { projects, tags })).toMatchObject({
+      cleanTitle: "Draft today",
+      tags: [{ id: "tag-work" }]
+    });
+    expect(parseSmartAdd("( #work ) alone", { projects, tags })).toMatchObject({
+      cleanTitle: "alone"
+    });
+    expect(parseSmartAdd("Draft (see #work) today", { projects, tags })).toMatchObject({
+      cleanTitle: "Draft (see) today",
+      tags: [{ id: "tag-work" }]
+    });
+    expect(parseSmartAdd("Draft (#work extra) today", { projects, tags })).toMatchObject({
+      cleanTitle: "Draft ( extra) today",
+      tags: [{ id: "tag-work" }]
+    });
+  });
+
+  it("deduplicates a tag written with and without its legacy sigil", () => {
+    expect(parseSmartAdd('Plan #work #"#work"', { projects, tags })).toMatchObject({
+      tags: [{ id: "tag-work" }]
+    });
+    expect(parseSmartAdd('Plan #"brand new" #"BRAND   NEW"', { projects, tags })).toMatchObject({
+      tags: [{ name: "brand new" }]
+    });
+  });
+
+  it("accepts a draft at the length limit and rejects the one past it", () => {
+    const atLimit = parseSmartAdd(`${"x".repeat(500)} #work`, { projects, tags });
+    const overLimit = parseSmartAdd(`${"x".repeat(501)} #work`, { projects, tags });
+    const tagAtLimit = parseSmartAdd(`Plan #${"x".repeat(500)}`, { projects, tags });
+    const projectAtLimit = parseSmartAdd(`Plan @${"x".repeat(500)}`, { projects, tags });
+    const projectOverLimit = parseSmartAdd(`Plan @${"x".repeat(501)}`, { projects, tags });
+
+    expect(atLimit.isValid).toBe(true);
+    expect(overLimit.isValid).toBe(false);
+    expect(tagAtLimit.isValid).toBe(true);
+    expect(projectAtLimit.isValid).toBe(true);
+    expect(projectOverLimit.isValid).toBe(false);
+  });
+
+  it("ranks an exact name above a prefix, a word prefix, and a bare substring", () => {
+    const ranked = smartAddSuggestions("Plan #work", 10, {
+      projects,
+      tags: [
+        ...tags,
+        { id: "tag-workshop", name: "workshop", state: "active", revision: 1, open_task_count: 0 },
+        { id: "tag-homework", name: "homework", state: "active", revision: 1, open_task_count: 0 }
+      ]
+    });
+
+    expect(ranked.map((item) => item.label)).toEqual(["work", "workshop", "deep work", "homework"]);
+  });
+
+  it("treats a hyphen as a word break when matching a query to a name", () => {
+    const hyphenated = [
+      { id: "tag-deep-focus", name: "deep-focus", state: "active" as const, revision: 1, open_task_count: 0 }
+    ];
+
+    expect(smartAddSuggestions("Plan #focus", 11, { projects, tags: hyphenated }).map((item) => item.label)).toEqual([
+      "deep-focus",
+      "Create #focus"
+    ]);
+  });
+
+  it("ranks a whole-name prefix above a word prefix, and both above a bare substring", () => {
+    // "coworking" sorts before "deep work" alphabetically, so the two orderings
+    // this could collapse into are distinguishable: only real word-prefix
+    // scoring keeps "deep work" second.
+    const ranked = smartAddSuggestions("Plan #work", 10, {
+      projects,
+      tags: [
+        { id: "tag-workshop", name: "workshop", state: "active" as const, revision: 1, open_task_count: 0 },
+        { id: "tag-deep", name: "deep work", state: "active" as const, revision: 1, open_task_count: 0 },
+        { id: "tag-coworking", name: "coworking", state: "active" as const, revision: 1, open_task_count: 0 },
+        { id: "tag-rework", name: "rework", state: "active" as const, revision: 1, open_task_count: 0 },
+        { id: "tag-zebra", name: "zebra-rework", state: "active" as const, revision: 1, open_task_count: 0 }
+      ]
+    });
+
+    expect(ranked.map((item) => item.label)).toEqual([
+      "workshop",
+      "deep work",
+      "coworking",
+      "rework",
+      "zebra-rework",
+      "Create #work"
+    ]);
+  });
+
+  it("decodes escapes inside an in-progress quoted query", () => {
+    const quoted = [
+      { id: "tag-quote", name: 'a"b', state: "active" as const, revision: 1, open_task_count: 0 }
+    ];
+    const input = 'Plan #"a\\"b';
+
+    expect(smartAddSuggestions(input, input.length, { projects, tags: quoted }).map((item) => item.label)).toEqual([
+      'a"b'
+    ]);
+  });
+
+  it("stops looking for an active token at the nearest whitespace", () => {
+    expect(smartAddSuggestions("Plan #work more", "Plan #work more".length, { projects, tags })).toEqual([]);
+  });
+
+  it("quotes and escapes a serialized name that is not a bare identifier", () => {
+    expect(
+      applySmartAddSuggestion("Plan #q", 7, {
+        kind: "tag",
+        label: 'say "hi"',
+        ref: { name: 'say "hi"' },
+        create: true
+      })?.text
+    ).toBe('Plan #"say \\"hi\\"" ');
+
+    expect(
+      applySmartAddSuggestion("Plan #q", 7, {
+        kind: "tag",
+        label: "back\\slash",
+        ref: { name: "back\\slash" },
+        create: true
+      })?.text
+    ).toBe('Plan #"back\\\\slash" ');
+  });
+
+  it("sheds either legacy sigil from a tag label before serializing it", () => {
+    expect(
+      applySmartAddSuggestion("Plan #w", 7, {
+        kind: "tag",
+        label: "#work",
+        ref: { id: "tag-work" },
+        create: false
+      })?.text
+    ).toBe("Plan #work ");
+  });
+
+  it("keeps a digit after a separator inside a bare name", () => {
+    expect(
+      applySmartAddSuggestion("Plan #a", 7, {
+        kind: "tag",
+        label: "a-1",
+        ref: { name: "a-1" },
+        create: true
+      })?.text
+    ).toBe("Plan #a-1 ");
+  });
+
+  it("separates the token from whatever text runs straight into it", () => {
+    expect(
+      applySmartAddSuggestion("Plan #ca/path", 8, {
+        kind: "tag",
+        label: "calls",
+        ref: { id: "tag-calls" },
+        create: false
+      })
+    ).toEqual({ text: "Plan #calls /path", caret: "Plan #calls ".length });
+  });
+
+  it("keeps a project label's own leading sigil out of the serialized token", () => {
+    expect(
+      applySmartAddSuggestion("Plan @l", 7, {
+        kind: "project",
+        label: "@Launch",
+        ref: { id: "project-launch" },
+        create: false
+      })?.text
+    ).toBe("Plan @Launch ");
+
+    // A tag label may carry either legacy sigil; a project label only sheds @.
+    expect(
+      applySmartAddSuggestion("Plan @l", 7, {
+        kind: "project",
+        label: "#Hashed",
+        ref: { id: "project-launch" },
+        create: false
+      })?.text
+    ).toBe('Plan @"#Hashed" ');
+  });
+
+  it("adds no separator when the token already runs into one", () => {
+    expect(
+      applySmartAddSuggestion("Plan #ca]", 8, {
+        kind: "tag",
+        label: "calls",
+        ref: { id: "tag-calls" },
+        create: false
+      })
+    ).toEqual({ text: "Plan #calls]", caret: "Plan #calls".length });
+  });
+
+  it("accepts every name-char class in a bare unquoted name", () => {
+    // contracts/smart-add.md: name-char = Unicode Letter | Number | Mark | "_",
+    // with "-" and "." allowed between two name-chars.
+    expect(parseSmartAdd("Ping #q3_a-b.c now", { projects, tags })).toMatchObject({
+      cleanTitle: "Ping now",
+      tags: [{ name: "q3_a-b.c" }]
+    });
+    // A combining mark continues the name, and NFKC then composes the display
+    // spelling: "cafe" + U+0301 is stored as "café".
+    expect(parseSmartAdd("Ping #café now", { projects, tags })).toMatchObject({
+      cleanTitle: "Ping now",
+      tags: [{ name: "café" }]
+    });
+  });
+
+  it("folds case downwards, so a name only equal when upper-cased stays distinct", () => {
+    // "ß".toLocaleUpperCase() is "SS". Canonicalising upwards would silently
+    // resolve #ß onto an existing "ss" tag; lower-casing keeps them apart.
+    const sharp: TagResponse[] = [
+      { id: "tag-ss", name: "ss", state: "active", revision: 1, open_task_count: 0 }
+    ];
+
+    expect(parseSmartAdd("Plan #ß", { projects, tags: sharp })).toMatchObject({
+      tags: [{ name: "ß" }]
+    });
+  });
+
+  it("escapes only a sigil, leaving a boundary backslash before anything else", () => {
+    expect(parseSmartAdd("Copy \\ drive", { projects, tags })).toMatchObject({
+      cleanTitle: "Copy \\ drive",
+      hasCompletedTokens: false
+    });
+  });
+
+  it("keeps the contextual project when no inline project token supersedes it", () => {
+    expect(parseSmartAdd("Plan #work", { projects, tags, contextProjectId: "project-launch" })).toMatchObject({
+      cleanTitle: "Plan",
+      tags: [{ id: "tag-work" }],
+      project: { id: "project-launch" }
+    });
+  });
+
+  it("activates a token that opens the input, where start-of-input is the boundary", () => {
+    expect(smartAddSuggestions("#wo", 3, { projects, tags }).map((item) => item.label)).toEqual([
+      "work",
+      "deep work",
+      "Create #wo"
+    ]);
+  });
+
+  it("stops at a completed quoted token even when punctuation runs into it", () => {
+    // The quoted body closes before the caret, so the token is committed rather
+    // than active and the popup stays shut.
+    const input = 'Plan #"work",';
+
+    expect(smartAddSuggestions(input, input.length, { projects, tags })).toEqual([]);
+  });
+
+  it("closes the popup once whitespace separates the caret from an unclosed quote", () => {
+    // The active-token scan stops at the nearest whitespace, so a quoted query
+    // that has grown past a space is no longer caret-local. The contract permits
+    // this: unclosed quoted bodies *may* be active, they are not required to be.
+    const input = 'Plan #"deep wo';
+
+    expect(smartAddSuggestions(input, input.length, { projects, tags })).toEqual([]);
+  });
+
+  it("caps the ranked entities at eight before appending the create option", () => {
+    // contracts/smart-add.md: "Show at most eight entities", and separately
+    // "append one" Create option when the query has no exact match -- so the
+    // cap bounds the entities, and nine rows is the intended shape, not eight.
+    // 003-FR-004 words the same rule as "capped at eight visible results".
+    const many: TagResponse[] = "abcdefghijk".split("").map((suffix) => ({
+      id: `tag-${suffix}`,
+      name: `work${suffix}`,
+      state: "active" as const,
+      revision: 1,
+      open_task_count: 0
+    }));
+
+    const suggestions = smartAddSuggestions("Plan #work", 10, { projects, tags: many });
+
+    expect(suggestions.filter((item) => !item.create)).toHaveLength(8);
+    expect(suggestions.map((item) => item.label)).toEqual([
+      "worka",
+      "workb",
+      "workc",
+      "workd",
+      "worke",
+      "workf",
+      "workg",
+      "workh",
+      "Create #work"
+    ]);
+  });
+
+  it("keeps a name bare when a combining mark follows an internal separator", () => {
+    // "-" is internal punctuation when a name-char follows, and a Mark is a
+    // name-char, so this label serializes unquoted.
+    expect(
+      applySmartAddSuggestion("Plan #a", 7, {
+        kind: "tag",
+        label: "a-́b",
+        ref: { name: "a-́b" },
+        create: true
+      })?.text
+    ).toBe("Plan #a-́b ");
+  });
+
   it("retains an existing separator after accepting a suggestion and ignores plain text", () => {
     expect(applySmartAddSuggestion("Plan #ca tomorrow", 8, {
       kind: "tag",

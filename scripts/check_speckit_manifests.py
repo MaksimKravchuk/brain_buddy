@@ -31,10 +31,6 @@ PRESERVED_OVERRIDES: dict[str, tuple[str, str]] = {
         "Hermes; upstream has neither policy.",
         "preserved BrainBuddy override",
     ),
-    ".agents/skills/speckit-implement/SKILL.md": (
-        "Codex twin of the implement-directly policy.",
-        "preserved BrainBuddy override",
-    ),
     ".specify/templates/spec-template.md": (
         "Adds consent/local-first and mobile-first callouts required by the "
         "constitution.",

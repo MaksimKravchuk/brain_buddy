@@ -36,13 +36,27 @@ cd frontend && npm install
 make dev-frontend         # Vite at localhost:5173 (compose serves at 8080 instead)
 
 # Tests
-make test-frontend        # builds Docker test image and runs Vitest
+make test-frontend        # vitest with coverage, then the coverage floor and Allure taxonomy
 cd frontend && npm test   # vitest run (once)
 cd frontend && npm run test:watch
+
+# Lint / type check
+make lint-frontend        # eslint . --max-warnings=0
+make typecheck-frontend   # tsc --noEmit
+
+# Mutation testing (Stryker; ADR-0013). Report-only nightly, ~20 min locally.
+cd frontend && npm run test:mutation
+cd frontend && npx stryker run --mutate 'src/utils/error.ts'   # one module
 
 # Build
 cd frontend && npm run build
 ```
+
+Coverage floors live in `frontend/coverage-floor.json` and may only ratchet
+upward. There is no per-file escape hatch: `scripts/validate_ci_artifacts.py
+coverage-suppressions` rejects `istanbul ignore file` and every range form in
+`frontend/src` and `mobile/src`, because an excluded file is reported as neither
+covered nor uncovered — it silently leaves the measurement.
 
 ### Full stack
 
@@ -62,7 +76,7 @@ make lint-mobile           # eslint (every eslint-config-expo rule is enforced)
 make test-mobile           # jest unit tests + the mobile coverage floor
 make integration-mobile    # real api client vs disposable local backend (needs install-backend)
 make build-mobile          # expo export --platform ios (Metro bundle check)
-make mutation-mobile       # report-only Stryker campaign (ADR-0013 scope, ~5 min)
+make mutation-mobile       # report-only Stryker campaign (ADR-0015 scope, ~5 min)
 cd mobile && npx expo start   # run on an iPhone via Expo Go
 ```
 

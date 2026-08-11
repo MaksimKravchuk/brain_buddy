@@ -551,10 +551,10 @@ export default defineConfig({
     coverage: {
       provider: "istanbul",
       thresholds: {
-        statements: 95,
-        branches: 95,
-        functions: 95,
-        lines: 95
+        statements: 98,
+        branches: 97,
+        functions: 98,
+        lines: 98
       }
     }
   }
@@ -858,50 +858,113 @@ jobs:
         self.assertIn("report-only", completed.stderr)
         self.assertIn("mutation-summary", completed.stderr)
 
-    def test_mutation_workflow_requires_the_mobile_campaign_and_its_scope(self) -> None:
-        real = (REPO_ROOT / ".github" / "workflows" / "mutation-quality.yml").read_text(
-            encoding="utf-8"
-        )
-
-        with tempfile.TemporaryDirectory() as tmp:
-            workflow = Path(tmp) / "mutation.yml"
-            # Drop the mobile campaign but keep the backend one intact.
-            workflow.write_text(
-                real.replace("npx stryker run", "echo skipped").replace(
-                    "src/lifecycle/guards.ts", "src/lifecycle/nothing.ts"
-                ),
-                encoding="utf-8",
-            )
-
-            completed = self.run_validator("mutation-workflow", "--workflow", str(workflow))
-
-        self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("stryker", completed.stderr)
-        self.assertIn("src/lifecycle/guards.ts", completed.stderr)
-
-    def test_mutation_workflow_requires_the_mobile_evidence_artifacts(self) -> None:
-        real = (REPO_ROOT / ".github" / "workflows" / "mutation-quality.yml").read_text(
-            encoding="utf-8"
-        )
-
-        with tempfile.TemporaryDirectory() as tmp:
-            workflow = Path(tmp) / "mutation.yml"
-            workflow.write_text(
-                real.replace("mobile-mutation-survivors.txt", "nowhere.txt"),
-                encoding="utf-8",
-            )
-
-            completed = self.run_validator("mutation-workflow", "--workflow", str(workflow))
-
-        self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("mobile-mutation-survivors.txt", completed.stderr)
-
-    def test_the_real_mutation_workflow_passes_validation(self) -> None:
+    def test_mutation_workflow_requires_the_frontend_campaign_and_its_evidence(self) -> None:
         workflow = REPO_ROOT / ".github" / "workflows" / "mutation-quality.yml"
+        text = workflow.read_text(encoding="utf-8")
 
-        completed = self.run_validator("mutation-workflow", "--workflow", str(workflow))
+        with tempfile.TemporaryDirectory() as tmp:
+            without_frontend = Path(tmp) / "mutation.yml"
+            without_frontend.write_text(
+                text.replace("  frontend-observed-mutation:", "  frontend-disabled:"),
+                encoding="utf-8",
+            )
+            missing_job = self.run_validator(
+                "mutation-workflow", "--workflow", str(without_frontend)
+            )
+
+            without_evidence = Path(tmp) / "mutation-no-evidence.yml"
+            without_evidence.write_text(
+                text.replace("name: frontend-mutation-report", "name: something-else"),
+                encoding="utf-8",
+            )
+            missing_evidence = self.run_validator(
+                "mutation-workflow", "--workflow", str(without_evidence)
+            )
+
+        self.assertNotEqual(missing_job.returncode, 0)
+        self.assertIn("frontend observed-scope job", missing_job.stderr)
+        self.assertNotEqual(missing_evidence.returncode, 0)
+        self.assertIn("frontend-mutation-report", missing_evidence.stderr)
+
+    def test_mutation_workflow_requires_the_mobile_campaign_and_its_evidence(self) -> None:
+        workflow = REPO_ROOT / ".github" / "workflows" / "mutation-quality.yml"
+        text = workflow.read_text(encoding="utf-8")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            without_mobile = Path(tmp) / "mutation.yml"
+            without_mobile.write_text(
+                text.replace("  mobile-observed-mutation:", "  mobile-disabled:"),
+                encoding="utf-8",
+            )
+            missing_job = self.run_validator(
+                "mutation-workflow", "--workflow", str(without_mobile)
+            )
+
+            narrowed = Path(tmp) / "mutation-narrowed.yml"
+            narrowed.write_text(
+                text.replace("src/lifecycle/guards.ts", "src/lifecycle/nothing.ts"),
+                encoding="utf-8",
+            )
+            missing_scope = self.run_validator("mutation-workflow", "--workflow", str(narrowed))
+
+            without_evidence = Path(tmp) / "mutation-no-evidence.yml"
+            without_evidence.write_text(
+                text.replace("name: mobile-mutation-report", "name: something-else"),
+                encoding="utf-8",
+            )
+            missing_evidence = self.run_validator(
+                "mutation-workflow", "--workflow", str(without_evidence)
+            )
+
+        self.assertNotEqual(missing_job.returncode, 0)
+        self.assertIn("mobile observed-scope job", missing_job.stderr)
+        self.assertNotEqual(missing_scope.returncode, 0)
+        self.assertIn("src/lifecycle/guards.ts", missing_scope.stderr)
+        self.assertNotEqual(missing_evidence.returncode, 0)
+        self.assertIn("mobile-mutation-report", missing_evidence.stderr)
+
+    def test_the_repository_mutation_workflow_satisfies_every_campaign(self) -> None:
+        completed = self.run_validator(
+            "mutation-workflow",
+            "--workflow",
+            str(REPO_ROOT / ".github" / "workflows" / "mutation-quality.yml"),
+        )
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_mutation_evidence_carries_the_campaign_it_came_from(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            summary = root / "mutation-summary.txt"
+            survivors = root / "mutation-survivors.txt"
+            output = root / "mutation-evidence-result.json"
+            summary.write_text("src/utils/error.ts: 97.69%\n", encoding="utf-8")
+            survivors.write_text("No surviving mutants\n", encoding="utf-8")
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(MUTATION_EVIDENCE_SCRIPT),
+                    "--summary",
+                    str(summary),
+                    "--survivors",
+                    str(survivors),
+                    "--scope-label",
+                    "frontend",
+                    "--output",
+                    str(output),
+                ],
+                cwd=REPO_ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            evidence = json.loads(output.read_text(encoding="utf-8")) if output.exists() else {}
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("frontend", evidence["name"])
+        self.assertIn("report-only", evidence["name"])
+        self.assertEqual(evidence["fullName"], "quality.mutation.frontend.report_only_evidence")
 
     def test_mutation_evidence_is_explicitly_informational_not_a_product_test(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -936,6 +999,175 @@ jobs:
         self.assertIn("not a product test", evidence)
         self.assertIn("mutation-summary.txt", evidence)
         self.assertIn("mutation-survivors.txt", evidence)
+
+
+class CoverageSuppressionTests(unittest.TestCase):
+    def run_validator(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(SCRIPT), *args],
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def test_clean_source_tree_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "nested").mkdir()
+            (root / "nested" / "widget.tsx").write_text(
+                "export const widget = () => null;\n", encoding="utf-8"
+            )
+
+            completed = self.run_validator("coverage-suppressions", "--path", str(root))
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("no blanket coverage exclusions", completed.stdout)
+
+    def test_file_level_exclusion_is_rejected_with_its_location(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "shell.tsx").write_text(
+                "/* istanbul ignore file -- covered by Playwright */\n"
+                "export const shell = () => null;\n",
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("coverage-suppressions", "--path", str(root))
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertIn("shell.tsx:1", completed.stderr)
+        self.assertIn("blanket coverage suppression", completed.stderr)
+
+    def test_range_and_v8_exclusions_are_rejected_too(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "range.ts").write_text(
+                "/* c8 ignore start */\nconst hidden = 1;\n", encoding="utf-8"
+            )
+            (root / "v8.ts").write_text("/* v8 ignore file */\n", encoding="utf-8")
+
+            completed = self.run_validator("coverage-suppressions", "--path", str(root))
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertIn("c8 ignore start", completed.stderr)
+        self.assertIn("v8 ignore file", completed.stderr)
+
+    def test_narrow_exclusion_needs_a_justification(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "bare.ts").write_text(
+                "/* istanbul ignore next */\nconst guard = 1;\n", encoding="utf-8"
+            )
+            (root / "explained.ts").write_text(
+                "/* istanbul ignore next -- unreachable without a browser */\n"
+                "const other = 1;\n",
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("coverage-suppressions", "--path", str(root))
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertIn("bare.ts:1", completed.stderr)
+        self.assertNotIn("explained.ts", completed.stderr)
+
+    def test_missing_directory_is_an_error_rather_than_a_pass(self) -> None:
+        completed = self.run_validator(
+            "coverage-suppressions", "--path", "frontend/does-not-exist"
+        )
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertIn("does not exist", completed.stderr)
+
+    def test_the_repository_frontend_and_mobile_sources_are_clean(self) -> None:
+        completed = self.run_validator(
+            "coverage-suppressions",
+            "--path",
+            "frontend/src",
+            "--path",
+            "mobile/src",
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+
+class MutationScopeTests(unittest.TestCase):
+    def run_validator(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(SCRIPT), *args],
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def build(self, root: Path, observed: list[str], enforced: list[str]) -> tuple[Path, Path]:
+        for path in observed:
+            source = root / path
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text("export const value = 1;\n", encoding="utf-8")
+        config = root / "stryker.config.json"
+        config.write_text(json.dumps({"mutate": observed}), encoding="utf-8")
+        scope = root / "mutation-enforced-scope.txt"
+        scope.write_text("# the enforced tier\n" + "".join(f"{p}\n" for p in enforced), encoding="utf-8")
+        return config, scope
+
+    def test_an_enforced_subset_of_the_observed_scope_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config, scope = self.build(
+                Path(tmp), ["src/a.ts", "src/b.ts"], ["src/a.ts"]
+            )
+            completed = self.run_validator(
+                "mutation-scope", "--config", str(config), "--enforced", str(scope)
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("1 enforced file(s) within 2 observed file(s)", completed.stdout)
+
+    def test_an_enforced_file_outside_the_observed_scope_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, scope = self.build(root, ["src/a.ts"], ["src/a.ts", "src/gated.ts"])
+            (root / "src" / "gated.ts").write_text("export const g = 1;\n", encoding="utf-8")
+            completed = self.run_validator(
+                "mutation-scope", "--config", str(config), "--enforced", str(scope)
+            )
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertIn("never measure it", completed.stderr)
+
+    def test_a_scope_entry_that_no_longer_exists_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, scope = self.build(root, ["src/a.ts", "src/moved.ts"], ["src/a.ts"])
+            (root / "src" / "moved.ts").unlink()
+            completed = self.run_validator(
+                "mutation-scope", "--config", str(config), "--enforced", str(scope)
+            )
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertIn("src/moved.ts does not exist", completed.stderr)
+
+    def test_an_empty_enforced_list_is_rejected_rather_than_passing_vacuously(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config, scope = self.build(Path(tmp), ["src/a.ts"], [])
+            completed = self.run_validator(
+                "mutation-scope", "--config", str(config), "--enforced", str(scope)
+            )
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertIn("lists no files", completed.stderr)
+
+    def test_the_repository_frontend_tiers_are_consistent(self) -> None:
+        completed = self.run_validator(
+            "mutation-scope",
+            "--config",
+            "frontend/stryker.config.json",
+            "--enforced",
+            "frontend/mutation-enforced-scope.txt",
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
 
 
 if __name__ == "__main__":

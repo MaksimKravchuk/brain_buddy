@@ -13,7 +13,7 @@ npm run lint          # eslint — every eslint-config-expo rule is on; do not t
 npm test              # jest unit tests
 npm test -- --coverage  # also what the coverage floor is measured from
 npm run integration   # real client vs disposable local backend (needs backend pip deps)
-npm run mutation      # report-only Stryker campaign (ADR-0013 scope)
+npm run mutation      # report-only Stryker campaign (ADR-0015 scope)
 npx expo export --platform ios   # Metro bundle integrity check
 ```
 

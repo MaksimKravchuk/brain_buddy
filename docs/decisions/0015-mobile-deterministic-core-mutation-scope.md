@@ -1,9 +1,9 @@
-# ADR-0013: Give the mobile client a deterministic-core mutation scope
+# ADR-0015: Give the mobile client a deterministic-core mutation scope
 
 Date: 2026-08-10
 Status: Accepted
 Decision owner: BrainBuddy
-Related: ADR-0004, ADR-0006, ADR-0011
+Related: ADR-0004, ADR-0006, ADR-0011, ADR-0013
 
 ## Context
 

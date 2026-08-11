@@ -37,6 +37,9 @@
         "risk": {"enum": ["low", "medium", "high"]},
         "status": {"enum": ["approved", "founder-accepted"]},
         "reviewers": {"type": "array", "minItems": 5, "items": {"type": "string", "minLength": 1}},
+        "degraded_lenses": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "oracle_unknown_lenses": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "single_provider_panel": {"type": "boolean"},
         "human_signoff": {
           "type": ["object", "null"],
           "additionalProperties": false,
@@ -85,6 +88,16 @@
             }
           }
         }
+      },
+      "if": {"required": ["risk"], "properties": {"risk": {"const": "high"}}},
+      "then": {
+        "required": [
+          "degraded_lenses",
+          "oracle_unknown_lenses",
+          "single_provider_panel",
+          "human_signoff"
+        ],
+        "properties": {"human_signoff": {"type": "object"}}
       }
     },
     "product_decisions": {

@@ -46,8 +46,10 @@ make test-backend      # pytest + coverage + allure taxonomy
 make ci-backend        # both, in CI order
 ```
 
-Floors, enforced by `scripts/validate_backend_coverage.py`: **line ≥ 95%** and
-**branch ≥ 95%**. Below either is a merge blocker, not a warning.
+Floors live in `backend/coverage-floor.json` and are enforced by
+`scripts/validate_coverage_floor.py`, which also refuses a floor lower than the
+base branch's — the floor ratchets upward only. Currently **line ≥ 98.47%**,
+**branch ≥ 95.5%**. Below either is a merge blocker, not a warning.
 
 Single test: `cd backend && pytest tests/test_tree_service.py::test_create_tree -v`
 
@@ -58,13 +60,32 @@ from `conftest.py`.
 
 ```bash
 make lint-frontend
-make test-frontend     # vitest coverage + allure taxonomy
+make typecheck-frontend
+make test-frontend     # vitest coverage + coverage floor + allure taxonomy
 make build-frontend
-make ci-frontend       # all three
+make ci-frontend       # all four
 ```
 
-Floors: istanbul **95% across all four** metrics — statements, branches,
-functions, lines.
+Floors live in `frontend/coverage-floor.json` and ratchet upward only:
+statements **98.77%**, branches **97.56%**, functions **98.64%**, lines
+**98.84%**. The Vitest thresholds in `vite.config.ts` sit just under them so a
+local run fails on the same regression CI would catch.
+
+There is no coverage escape hatch: `validate_ci_artifacts.py
+coverage-suppressions` rejects `istanbul ignore file` and every range form in
+`frontend/src` and `mobile/src`. A file excluded from the report is not counted
+as uncovered, it is not counted at all — four modules once hid 2,385 lines that
+way while the floor still read green.
+
+Mutation, when you are changing behaviour rather than adding a test:
+
+```bash
+cd frontend && npm run test:mutation                    # observed scope, ~20 min
+cd frontend && npx stryker run --mutate 'src/utils/error.ts'   # one module
+python3 scripts/mutation_gate.py check-stryker \
+  --report frontend/mutation-artifacts/mutation-report.json \
+  --enforced frontend/mutation-enforced-scope.txt        # the enforced tier
+```
 
 Watch mode while iterating: `cd frontend && npm run test:watch`
 
@@ -85,7 +106,7 @@ Floors, in `mobile/coverage-floor.json` and enforced by
 functions ≥ 95%, lines ≥ 94%**. The floor may only ratchet upward, and CI
 checks a branch that edits it against the base branch's copy.
 
-`make mutation-mobile` runs the ADR-0013 deterministic-core campaign
+`make mutation-mobile` runs the ADR-0015 deterministic-core campaign
 (`src/braindump/{machine,manifest,uploader,waveform}.ts`,
 `src/lifecycle/guards.ts`, `src/config/serverUrl.ts`). It is report-only and
 does not gate merge; the last recorded score is 99.35% with two documented

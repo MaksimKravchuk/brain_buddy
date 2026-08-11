@@ -4,8 +4,10 @@ BrainBuddy uses the official GitHub Spec Kit as the mandatory authoring workflow
 for every new or materially changed feature specification.
 
 - Spec Kit version: `github/spec-kit` `v0.15.0`
-- Installed integrations: Claude Code skills under `.claude/skills/` and Codex
-  skills under `.agents/skills/`
+- Installed integration: Claude Code skills under `.claude/skills/`. The Codex
+  tree under `.agents/skills/` was removed — nobody authored specs in it. The
+  review gate's use of the `codex` CLI is a separate thing and is unaffected;
+  see "Degraded runs" below
 - Scope: feature specification and planning artifacts under `specs/`, plus the
   BrainBuddy-local stages that bracket them — business intake, design, the
   portable spec review gate (ADR-0011), acceptance and the delivery report
@@ -34,7 +36,10 @@ Expected version output:
 specify 0.15.0
 ```
 
-`specify check` should show both Claude Code and Codex CLI as available.
+`specify check` should show Claude Code as available. It does not need to show
+the Codex CLI: nothing authors specs there any more. The review gate still
+shells out to `codex` when it is present, but it invokes the binary directly
+rather than through a `specify` integration.
 If the CLI needs to be refreshed without modifying the global uv tool install,
 use the same pinned release through `uvx`:
 
@@ -50,7 +55,6 @@ manifest-aware upgrade path:
 ```bash
 specify integration status --json
 specify integration upgrade claude --force
-specify integration upgrade codex --force
 # If reviewed extensions are installed, update each pinned extension explicitly:
 # specify extension update <extension-id>
 ```
@@ -85,9 +89,12 @@ Decisions on the four installable extensions:
   hand-built pipeline lacked — closing an idea *before* requirements are
   elicited. `/speckit-interview` reads that verdict and refuses to proceed on a
   `kill`, which is what makes the gate load-bearing.
-  It ships Claude skills only (`.claude/skills/speckit-assess-*`), so it is
-  **not** registered under `hooks` in `.specify/extensions.yml`: a hooked
-  command with no `.agents/skills/` twin breaks Codex runs.
+  It is **not** registered under `hooks` in `.specify/extensions.yml`, and the
+  reason recorded here until `.agents/` was removed — no Codex twin — is now
+  void. What stands: stage 0 is optional by design, a mandatory hook would
+  charge every small change for a five-stage assessment, the `kill` gate
+  already works through `/speckit-interview` reading `decision.md`, and
+  `assess` is five commands rather than one command a hook could name.
 
 - **`git` — NOT INSTALLED**, and the reason is specific rather than blanket.
   It provides five commands; the extension installs all or none:
@@ -110,7 +117,7 @@ Decisions on the four installable extensions:
 
 **`specify extension add` rewrites `.specify/extensions.yml` and strips its
 comments.** After any install, restore the header from git history — it
-documents the hook contract and the Codex-parity requirement.
+documents the hook contract and why `assess` stays unhooked.
 
 `.specify/extensions.yml` is **not** a third-party extension install. It is
 first-party repository configuration that the ten v0.15.0 skills already read:
@@ -124,8 +131,8 @@ like product code; it is not covered by the extension prohibition above.
 Before a forced integration refresh, preserve every file in the
 preserved-overrides table below. Restore them after the refresh, inspect
 `git diff`, and accept only understood project-specific overrides. The current
-refresh installs v0.15.0 shared assets under `.specify/`, Claude Code skills
-under `.claude/skills/`, and Codex skills under `.agents/skills/`.
+refresh installs v0.15.0 shared assets under `.specify/` and Claude Code skills
+under `.claude/skills/`.
 
 ### Preserved overrides
 
@@ -142,7 +149,6 @@ marker string that upstream cannot contain — and runs in `make check-specs`.
 | `.specify/templates/tasks-template.md` | delivery gates restated: worktree, TDD, independent acceptance, ADR-0008 landing |
 | `.specify/templates/checklist-template.md` | BrainBuddy constitution gates |
 | `.claude/skills/speckit-implement/SKILL.md` | implements directly from `tasks.md`; upstream has no such policy, and the previous local version refused to run at all |
-| `.agents/skills/speckit-implement/SKILL.md` | Codex twin of the same policy |
 
 Run `python3 scripts/check_speckit_manifests.py --list` to see the markers.
 
@@ -249,56 +255,58 @@ is fixed. Carry campaign 1's findings forward into campaign 2. After campaign
 founder acceptance with the full record (see below).
 
 **Degraded runs.** Two of the five lenses shell out to the `codex` CLI. Where
-it is absent they cannot run and the campaign returns `escalated`, naming the
-missing lenses. A partial campaign is never reported as a clean one.
+it is absent they fall back to `claude`/`sonnet` rather than failing, because a
+gate that can never be reached is a gate people route around (ADR-0014). The
+substitution is never silent: each review records which oracle actually ran,
+and the summary carries `degraded_lenses`, `panel_correlated` and
+`panel_oracles`. A degraded campaign may reach `approved`, but it cannot look
+undegraded.
+
+A reviewer that is *installed and fails* still raises — absence is a gap a
+fallback can fill, failure is a defect in evidence that was produced. A lens
+that produces no review at all is still missing mandatory evidence and still
+returns `escalated`. A partial campaign is never reported as a clean one.
 
 For Claude Code and Hermes Agent in this repository, Spec Kit is installed as
 skills, so the invocation names use hyphens:
 
 ```text
 /speckit-constitution
+/speckit-interview
 /speckit-specify
 /speckit-clarify
+/speckit-design
 /speckit-plan
+/speckit-review
 /speckit-checklist
 /speckit-tasks
 /speckit-analyze
+/speckit-implement
+/speckit-accept
+/speckit-report
 ```
 
-Codex exposes the same skills with `$` skill invocations, including the five
-BrainBuddy stages:
+Thirteen, not the seven upstream ships: the list above is the full pipeline
+including the five BrainBuddy stages. It previously appeared in full only in
+the Codex `$`-invocation block, so removing `.agents/` would have left the
+seven-item core list as the only enumeration in this document — a shorter list
+that reads like a complete one. Merged here instead.
 
-```text
-$speckit-constitution
-$speckit-interview
-$speckit-specify
-$speckit-clarify
-$speckit-design
-$speckit-plan
-$speckit-review
-$speckit-checklist
-$speckit-tasks
-$speckit-analyze
-$speckit-implement
-$speckit-accept
-$speckit-report
-```
+`assess` is not in the list because it is not hooked and is invoked as
+`/speckit-assess-intake` and its four successors; see stage 0 above.
 
-`.specify/extensions.yml` is shared by both agent trees, so **every hooked
-command must exist in both**. A mandatory hook whose skill lives only under
-`.claude/skills/` makes a Codex run emit `EXECUTE_COMMAND` for a command that
-tree cannot invoke, stopping the pipeline at that stage.
-`scripts/test_check_speckit_manifests.py` enforces the parity.
+Every hooked command in `.specify/extensions.yml` must resolve to a SKILL.md
+under `.claude/skills/`, or the agent emits `EXECUTE_COMMAND` for a command it
+cannot invoke and the pipeline stops at that stage.
+`scripts/test_check_speckit_manifests.py` enforces that.
 
-The Codex twins are thin adapters: Codex has no subagent runtime, so where the
-Claude skill delegates to an agent under `.claude/agents/`, the twin applies
-that agent file's contract inline. Those agent files are plain markdown and
-remain the single source of truth for rubrics and procedures — do not fork them
-per runtime.
+Where a skill delegates to a subagent, the agent files under `.claude/agents/`
+are plain markdown and remain the single source of truth for rubrics and
+procedures — do not fork them per runtime.
 
 The generated artifacts do not prescribe a specific agent runtime. Standalone
-Claude Code, Codex, other agents, or a developer may implement them while
-preserving repository quality and release gates.
+Claude Code, other agents, or a developer may implement them while preserving
+repository quality and release gates.
 
 ## Optional managed-outcome overlay
 

@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
-  "_comment": "Mobile deterministic-core mutation scope. See docs/decisions/0013-mobile-deterministic-core-mutation-scope.md — the allow-list is the ADR's, and widening it needs an ADR, not a config edit.",
+  "_comment": "Mobile deterministic-core mutation scope. See docs/decisions/0015-mobile-deterministic-core-mutation-scope.md — the allow-list is the ADR's, and widening it needs an ADR, not a config edit.",
   "packageManager": "npm",
   "testRunner": "jest",
   "jest": {
