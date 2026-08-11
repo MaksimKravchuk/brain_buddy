@@ -6,7 +6,7 @@
     ".specify/workflows/speckit/handoff.schema.json": "089076b6df81ada79d7ba596b873c686a9d1748b8a921c592cce31f98dc82bf1",
     ".specify/workflows/speckit/review.schema.json": "59ddb9c1a8b3bdf2c0a572c12131426a7beea5fd68673d5d12a91251ee24b3c0",
     ".specify/workflows/speckit/workflow.yml": "019a936511cde48cee35c3832ec5078a45557da85869b170998da4d1df869832",
-    "Makefile": "6991c2e4379bb5c60e3ff35dbc76571970e32f05fa057a29822447a7e3592fd4",
+    "Makefile": "bdb79d2eaf48254c843dfb047f80f3219d78219ff17c578f044088b699f4fa59",
     "backend/mutation-enforced-scope.txt": "8c52d36416607e50f5b1f25541d14f83f5bc67019ef6c12e1906bfeb9c1f0386",
     "scripts/check_gate_integrity.py": "365631462465c5388ed42ae996a19ee5076c106036f6fcdefedb1e7fdeb2ca1d",
     "scripts/check_requirement_coverage.py": "d3bbfac84046d293e97e8ec5b5ffdcc430be23739c458167c5e0a0281c997268",

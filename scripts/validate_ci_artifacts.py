@@ -95,6 +95,25 @@ FRONTEND_MUTATION_EVIDENCE = (
     "name: frontend-mutation-evidence-allure-results",
 )
 
+# The mobile campaign (ADR-0015), same shape again. `check_mutate_scope`
+# compares this against the `mutate` array in mobile/stryker.config.json, which
+# is the list the campaign obeys — the workflow's header comment only describes
+# it.
+MOBILE_MUTATION_SCOPE = (
+    "src/braindump/machine.ts",
+    "src/braindump/manifest.ts",
+    "src/braindump/uploader.ts",
+    "src/braindump/waveform.ts",
+    "src/lifecycle/guards.ts",
+    "src/config/serverUrl.ts",
+)
+
+MOBILE_MUTATION_EVIDENCE = (
+    "--scope-label mobile",
+    "name: mobile-mutation-report",
+    "name: mobile-mutation-evidence-allure-results",
+)
+
 FRONTEND_CI_REQUIREMENTS = (
     ("frontend lint step", "npm run lint"),
     ("frontend coverage test step", "npm run test:coverage"),
@@ -570,7 +589,53 @@ def validate_workflow(
     return 0
 
 
-def validate_mutation_workflow(workflow: Path) -> int:
+def declared_mutate_scope(config: Path) -> list[str] | str:
+    """The `mutate` allow-list a Stryker config declares, or an error string."""
+
+    if not config.is_file():
+        return f"Stryker config does not exist: {config}"
+    try:
+        declared = json.loads(config.read_text(encoding="utf-8")).get("mutate")
+    except json.JSONDecodeError as exc:
+        return f"invalid Stryker config JSON in {config}: {exc}"
+    if not isinstance(declared, list) or not declared:
+        return f"{config} declares no 'mutate' scope"
+    return [str(path) for path in declared]
+
+
+def check_mutate_scope(config: Path, expected: tuple[str, ...], label: str) -> list[str]:
+    """Require a Stryker config's `mutate` list to be exactly ``expected``.
+
+    The workflow checks above read the header comment, which documents the
+    scope but does not drive it. This reads the file the campaign actually
+    obeys, so dropping a module from `mutate` cannot pass by leaving the
+    comment intact — the failure mode a reviewer caught on #149.
+    """
+
+    declared = declared_mutate_scope(config)
+    if isinstance(declared, str):
+        return [f"{label} {declared}"]
+
+    errors: list[str] = []
+    for path in sorted(set(expected) - set(declared)):
+        errors.append(
+            f"{label} scope {path} is missing from {config}; the campaign would "
+            "stop mutating it while the workflow comment still claims it"
+        )
+    for path in sorted(set(declared) - set(expected)):
+        errors.append(
+            f"{config} mutates {path}, which is not in the {label} scope this "
+            "validator knows about; widening the scope needs an ADR and a "
+            "matching update here"
+        )
+    return errors
+
+
+def validate_mutation_workflow(
+    workflow: Path,
+    frontend_stryker_config: Path | None = None,
+    mobile_stryker_config: Path | None = None,
+) -> int:
     """Reject a mutation workflow that can misrepresent its scope or evidence."""
 
     if not workflow.is_file():
@@ -607,6 +672,27 @@ def validate_mutation_workflow(workflow: Path) -> int:
             errors.append(
                 f"mutation workflow is missing frontend evidence artifact: {evidence}"
             )
+
+    if "  mobile-observed-mutation:" not in workflow_text:
+        errors.append("mutation workflow is missing the mobile observed-scope job")
+    for path in MOBILE_MUTATION_SCOPE:
+        if path not in workflow_text:
+            errors.append(f"mutation workflow is missing mobile observed scope: {path}")
+    for evidence in MOBILE_MUTATION_EVIDENCE:
+        if evidence not in workflow_text:
+            errors.append(
+                f"mutation workflow is missing mobile evidence artifact: {evidence}"
+            )
+
+    # The configs are the scope; the workflow only describes it.
+    if frontend_stryker_config is not None:
+        errors += check_mutate_scope(
+            frontend_stryker_config, FRONTEND_MUTATION_SCOPE, "frontend observed"
+        )
+    if mobile_stryker_config is not None:
+        errors += check_mutate_scope(
+            mobile_stryker_config, MOBILE_MUTATION_SCOPE, "mobile observed"
+        )
 
     if errors:
         for error in errors:
@@ -822,6 +908,16 @@ def build_parser() -> argparse.ArgumentParser:
         "mutation-workflow", help="validate report-only mutation workflow requirements"
     )
     mutation_workflow.add_argument("--workflow", type=Path, required=True)
+    mutation_workflow.add_argument(
+        "--frontend-stryker-config",
+        type=Path,
+        help="frontend Stryker config whose 'mutate' list must match the known scope",
+    )
+    mutation_workflow.add_argument(
+        "--mobile-stryker-config",
+        type=Path,
+        help="mobile Stryker config whose 'mutate' list must match the known scope",
+    )
 
     product_e2e_results = subparsers.add_parser(
         "product-e2e-results",
@@ -864,7 +960,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "workflow":
         return validate_workflow(args.ci, args.disallow_workflow, args.frontend_vite_config)
     if args.command == "mutation-workflow":
-        return validate_mutation_workflow(args.workflow)
+        return validate_mutation_workflow(
+            args.workflow,
+            frontend_stryker_config=args.frontend_stryker_config,
+            mobile_stryker_config=args.mobile_stryker_config,
+        )
     if args.command == "product-e2e-results":
         return validate_native_product_e2e_results(args.path)
     if args.command == "preview-workflow":

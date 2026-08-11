@@ -4,10 +4,12 @@ import {
   buildConsent,
   canCommit,
   CHUNK_BYTES,
+  INITIAL_POLL_DELAY_MS,
   isPollable,
   nextPollDelay,
   openConflictCount,
   planChunks,
+  processingStageLabel,
   visibleProposals,
 } from "../machine";
 
@@ -207,5 +209,66 @@ describe("planChunks", () => {
     for (const entry of planChunks(10_000_000)) {
       expect(entry.length).toBeLessThanOrEqual(CHUNK_BYTES);
     }
+  });
+});
+
+/**
+ * Cases the mutation campaign found unguarded: each one is a mutation that
+ * changed behaviour without failing a test.
+ */
+describe("buildConsent edges", () => {
+  it("defaults the language hints to none rather than inventing any", () => {
+    const consent = buildConsent({ accurate_stt: "whisper", reconciler: null });
+
+    expect(consent?.consent.language_hints).toEqual([]);
+    expect(consent?.consent.vocabulary).toEqual([]);
+  });
+
+  it("drops an absent reconciler from the provider list instead of listing null", () => {
+    const consent = buildConsent({ accurate_stt: "whisper", reconciler: null });
+
+    expect(consent?.consent.providers).toEqual(["whisper"]);
+  });
+});
+
+describe("nextPollDelay edges", () => {
+  it("restarts from the initial delay for a zero or negative previous delay", () => {
+    expect(nextPollDelay(0)).toBe(INITIAL_POLL_DELAY_MS);
+    expect(nextPollDelay(-500)).toBe(INITIAL_POLL_DELAY_MS);
+  });
+});
+
+describe("visibleProposals ordering", () => {
+  it("does not reorder the caller's array while sorting its own copy", () => {
+    const proposals = [
+      makeProposal({ id: "b", ordinal: 2 }),
+      makeProposal({ id: "a", ordinal: 1 }),
+    ];
+    const input = [...proposals];
+
+    const visible = visibleProposals(makeOperation({ proposals: input }));
+
+    expect(visible.map((item) => item.id)).toEqual(["a", "b"]);
+    expect(input).toEqual(proposals);
+  });
+});
+
+describe("planChunks edges", () => {
+  it("plans nothing for an empty or impossible size", () => {
+    expect(planChunks(0)).toEqual([]);
+    expect(planChunks(-1)).toEqual([]);
+    expect(planChunks(Number.NaN)).toEqual([]);
+    expect(planChunks(Number.POSITIVE_INFINITY)).toEqual([]);
+  });
+});
+
+describe("processingStageLabel coverage", () => {
+  it("names every pollable stage, and falls back for anything else", () => {
+    expect(processingStageLabel("sealing")).toBe("Finishing upload…");
+    expect(processingStageLabel("fast_processing")).toBe("Catching up on your audio…");
+    expect(processingStageLabel("accurate_transcribing")).toBe("Improving transcript…");
+    expect(processingStageLabel("reconciling")).toBe("Reconciling tasks…");
+    expect(processingStageLabel("committing")).toBe("Saving to inbox…");
+    expect(processingStageLabel("awaiting_confirmation")).toBe("Working…");
   });
 });

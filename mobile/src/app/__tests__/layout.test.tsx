@@ -1,0 +1,96 @@
+import { render, screen, waitFor } from "@testing-library/react-native";
+import * as SplashScreen from "expo-splash-screen";
+
+import { routerSpy, setPathname } from "@/test/expoRouterMock";
+import { FakeHttpError, installFakeBackend, makeMe, type FakeBackend } from "@/test/fakeBackend";
+
+import RootLayout from "../_layout";
+
+const mockFontState = { loaded: true };
+
+// Auto-mocked native modules are not jest.fn()s, so the splash calls would not
+// be observable; this makes "the splash was hidden" assertable.
+jest.mock("expo-splash-screen", () => ({
+  __esModule: true,
+  preventAutoHideAsync: jest.fn(async () => true),
+  hideAsync: jest.fn(async () => true),
+}));
+
+jest.mock("@expo-google-fonts/inter", () => ({
+  __esModule: true,
+  useFonts: () => [mockFontState.loaded],
+  Inter_400Regular: "Inter_400Regular",
+  Inter_500Medium: "Inter_500Medium",
+  Inter_600SemiBold: "Inter_600SemiBold",
+  Inter_700Bold: "Inter_700Bold",
+}));
+
+let backend: FakeBackend;
+
+beforeEach(() => {
+  mockFontState.loaded = true;
+});
+
+afterEach(() => backend?.restore());
+
+describe("root layout", () => {
+  it("renders nothing until the fonts are ready", async () => {
+    mockFontState.loaded = false;
+    backend = installFakeBackend({ "GET /auth/me": () => makeMe() });
+
+    const { toJSON } = await render(<RootLayout />);
+
+    expect(toJSON()).toBeNull();
+  });
+
+  it("mounts the navigator once the fonts are ready", async () => {
+    backend = installFakeBackend({ "GET /auth/me": () => makeMe() });
+
+    await render(<RootLayout />);
+
+    expect(await screen.findByTestId("stack")).toBeOnTheScreen();
+  });
+
+  it("hides the splash and sends a signed-out visitor to sign-in", async () => {
+    backend = installFakeBackend({
+      "GET /auth/me": () => new FakeHttpError(401, { message: "Not authenticated" }),
+    });
+    setPathname("/list/next");
+
+    await render(<RootLayout />);
+
+    await waitFor(() => expect(routerSpy().replace).toHaveBeenCalledWith("/sign-in"));
+    expect(SplashScreen.hideAsync).toHaveBeenCalled();
+  });
+
+  it("leaves a signed-out visitor already on sign-in where they are", async () => {
+    backend = installFakeBackend({
+      "GET /auth/me": () => new FakeHttpError(401, { message: "Not authenticated" }),
+    });
+    setPathname("/sign-in");
+
+    await render(<RootLayout />);
+
+    await waitFor(() => expect(SplashScreen.hideAsync).toHaveBeenCalled());
+    expect(routerSpy().replace).not.toHaveBeenCalled();
+  });
+
+  it("moves a signed-in visitor off the sign-in screen", async () => {
+    backend = installFakeBackend({ "GET /auth/me": () => makeMe() });
+    setPathname("/sign-in");
+
+    await render(<RootLayout />);
+
+    await waitFor(() => expect(routerSpy().replace).toHaveBeenCalledWith("/"));
+  });
+
+  it("leaves a signed-in visitor on a normal route alone", async () => {
+    backend = installFakeBackend({ "GET /auth/me": () => makeMe() });
+    setPathname("/list/next");
+
+    await render(<RootLayout />);
+
+    await waitFor(() => expect(SplashScreen.hideAsync).toHaveBeenCalled());
+    expect(routerSpy().replace).not.toHaveBeenCalled();
+  });
+});

@@ -103,9 +103,11 @@ export default function HistoryScreen() {
         onClose={() => setReopening(null)}
         onReopen={(payload) => {
           if (reopening) {
+            // Closed on success only: this screen has no other error surface,
+            // so a failed reopen has to stay in the sheet that raised it.
             transition.mutate(
               { taskId: reopening.id, payload },
-              { onSettled: () => setReopening(null) },
+              { onSuccess: () => setReopening(null) },
             );
           }
         }}

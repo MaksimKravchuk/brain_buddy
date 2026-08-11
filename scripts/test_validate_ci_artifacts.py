@@ -930,14 +930,154 @@ jobs:
         self.assertNotEqual(missing_evidence.returncode, 0)
         self.assertIn("frontend-mutation-report", missing_evidence.stderr)
 
-    def test_the_repository_mutation_workflow_satisfies_both_campaigns(self) -> None:
+    def test_mutation_workflow_requires_the_mobile_campaign_and_its_evidence(self) -> None:
+        workflow = REPO_ROOT / ".github" / "workflows" / "mutation-quality.yml"
+        text = workflow.read_text(encoding="utf-8")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            without_mobile = Path(tmp) / "mutation.yml"
+            without_mobile.write_text(
+                text.replace("  mobile-observed-mutation:", "  mobile-disabled:"),
+                encoding="utf-8",
+            )
+            missing_job = self.run_validator(
+                "mutation-workflow", "--workflow", str(without_mobile)
+            )
+
+            narrowed = Path(tmp) / "mutation-narrowed.yml"
+            narrowed.write_text(
+                text.replace("src/lifecycle/guards.ts", "src/lifecycle/nothing.ts"),
+                encoding="utf-8",
+            )
+            missing_scope = self.run_validator("mutation-workflow", "--workflow", str(narrowed))
+
+            without_evidence = Path(tmp) / "mutation-no-evidence.yml"
+            without_evidence.write_text(
+                text.replace("name: mobile-mutation-report", "name: something-else"),
+                encoding="utf-8",
+            )
+            missing_evidence = self.run_validator(
+                "mutation-workflow", "--workflow", str(without_evidence)
+            )
+
+        self.assertNotEqual(missing_job.returncode, 0)
+        self.assertIn("mobile observed-scope job", missing_job.stderr)
+        self.assertNotEqual(missing_scope.returncode, 0)
+        self.assertIn("src/lifecycle/guards.ts", missing_scope.stderr)
+        self.assertNotEqual(missing_evidence.returncode, 0)
+        self.assertIn("mobile-mutation-report", missing_evidence.stderr)
+
+    def test_the_repository_mutation_workflow_satisfies_every_campaign(self) -> None:
         completed = self.run_validator(
             "mutation-workflow",
             "--workflow",
             str(REPO_ROOT / ".github" / "workflows" / "mutation-quality.yml"),
+            "--frontend-stryker-config",
+            str(REPO_ROOT / "frontend" / "stryker.config.json"),
+            "--mobile-stryker-config",
+            str(REPO_ROOT / "mobile" / "stryker.config.json"),
         )
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def _workflow_with_stryker_configs(self, tmp: Path, **mutate: list[str]) -> list[str]:
+        """Validator args pointing at doctored copies of the Stryker configs."""
+
+        args = [
+            "mutation-workflow",
+            "--workflow",
+            str(REPO_ROOT / ".github" / "workflows" / "mutation-quality.yml"),
+        ]
+        for stack, flag in (("frontend", "--frontend-stryker-config"), ("mobile", "--mobile-stryker-config")):
+            source = REPO_ROOT / stack / "stryker.config.json"
+            config = json.loads(source.read_text(encoding="utf-8"))
+            if stack in mutate:
+                config["mutate"] = mutate[stack]
+            target = tmp / f"{stack}-stryker.config.json"
+            target.write_text(json.dumps(config), encoding="utf-8")
+            args += [flag, str(target)]
+        return args
+
+    def test_narrowing_the_mobile_stryker_config_fails_even_with_the_workflow_intact(
+        self,
+    ) -> None:
+        # The workflow's header comment names every mobile module, so a check
+        # that only reads the workflow would pass here. The config is what the
+        # campaign obeys.
+        full = json.loads(
+            (REPO_ROOT / "mobile" / "stryker.config.json").read_text(encoding="utf-8")
+        )["mutate"]
+        narrowed = [path for path in full if path != "src/lifecycle/guards.ts"]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            completed = self.run_validator(
+                *self._workflow_with_stryker_configs(Path(tmp), mobile=narrowed)
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("src/lifecycle/guards.ts", completed.stderr)
+        self.assertIn("mobile observed", completed.stderr)
+
+    def test_narrowing_the_frontend_stryker_config_fails_the_same_way(self) -> None:
+        full = json.loads(
+            (REPO_ROOT / "frontend" / "stryker.config.json").read_text(encoding="utf-8")
+        )["mutate"]
+        narrowed = [path for path in full if path != "src/utils/error.ts"]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            completed = self.run_validator(
+                *self._workflow_with_stryker_configs(Path(tmp), frontend=narrowed)
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("src/utils/error.ts", completed.stderr)
+        self.assertIn("frontend observed", completed.stderr)
+
+    def test_widening_a_stryker_config_past_the_known_scope_also_fails(self) -> None:
+        # Widening without an ADR is a scope change too; it must not slip in
+        # under a validator that only looks for missing entries.
+        full = json.loads(
+            (REPO_ROOT / "mobile" / "stryker.config.json").read_text(encoding="utf-8")
+        )["mutate"]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            completed = self.run_validator(
+                *self._workflow_with_stryker_configs(
+                    Path(tmp), mobile=[*full, "src/theme/tokens.ts"]
+                )
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("src/theme/tokens.ts", completed.stderr)
+
+    def test_an_unreadable_stryker_config_fails_rather_than_being_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            broken = Path(tmp) / "stryker.config.json"
+            broken.write_text("{not json", encoding="utf-8")
+
+            completed = self.run_validator(
+                "mutation-workflow",
+                "--workflow",
+                str(REPO_ROOT / ".github" / "workflows" / "mutation-quality.yml"),
+                "--mobile-stryker-config",
+                str(broken),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("invalid Stryker config JSON", completed.stderr)
+
+    def test_a_missing_stryker_config_fails_rather_than_being_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            completed = self.run_validator(
+                "mutation-workflow",
+                "--workflow",
+                str(REPO_ROOT / ".github" / "workflows" / "mutation-quality.yml"),
+                "--mobile-stryker-config",
+                str(Path(tmp) / "absent.json"),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("does not exist", completed.stderr)
 
     def test_mutation_evidence_carries_the_campaign_it_came_from(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
