@@ -630,6 +630,7 @@ jobs:
     name: Allure Report
     runs-on: ubuntu-latest
     needs:
+      - changes
       - backend
       - frontend
       - e2e
@@ -641,7 +642,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # Only `backend` and `frontend` upload Allure results, and the `e2e` job
+      # that uploads the Playwright ones derives its own RUN from those two.
+      # `mobile` produces none at all. So a change touching neither of those
+      # stacks uploads nothing, the download below matches no artifact, and
+      # `actions/download-artifact` does not create the directory — the
+      # validator then failed on a directory that was never going to exist.
+      # Every specs-only commit hit this, which is most of a spec-driven
+      # feature's history.
+      #
+      # Deliberately a step-level short circuit and not a job-level `if`:
+      # `full-ci` counts a skipped required job as a failure on purpose, so
+      # skipping this job would trade one red build for another.
+      #
+      # It must stay this narrow. "A stack ran and produced no results" is a
+      # real defect and still fails here — that is the whole point of the
+      # validator, and this repository has now found that defect three times.
+      - name: Decide whether there is anything to aggregate
+        id: aggregate
+        env:
+          BACKEND: ${{ needs.changes.outputs.backend }}
+          FRONTEND: ${{ needs.changes.outputs.frontend }}
+        run: |
+          if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "A stack that uploads Allure results was exercised; aggregating."
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Neither backend nor frontend was exercised, so no Allure results exist to aggregate. Nothing to validate."
+          fi
+
       - name: Download Allure results
+        if: steps.aggregate.outputs.run == 'true'
         uses: actions/download-artifact@v8
         with:
           pattern: '*-allure-results'
@@ -649,9 +681,11 @@ jobs:
           merge-multiple: true
 
       - name: Validate aggregate Allure results
+        if: steps.aggregate.outputs.run == 'true'
         run: python3 scripts/validate_allure_taxonomy.py --path allure-results --label aggregate-allure
 
       - name: Set up Node.js
+        if: steps.aggregate.outputs.run == 'true'
         uses: actions/setup-node@v7
         with:
           node-version: "20.19.0"
@@ -659,15 +693,18 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install Allure Report 3 CLI
+        if: steps.aggregate.outputs.run == 'true'
         working-directory: frontend
         run: npm ci
 
       - name: Generate Allure Report 3 HTML
+        if: steps.aggregate.outputs.run == 'true'
         run: |
           cd frontend
           npx allure generate ../allure-results -o ../allure-report
 
       - name: Upload Allure HTML report
+        if: steps.aggregate.outputs.run == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: allure-report-html
@@ -676,7 +713,7 @@ jobs:
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
       - name: Post PR Allure report link
-        if: github.event_name == 'pull_request'
+        if: steps.aggregate.outputs.run == 'true' && github.event_name == 'pull_request'
         uses: actions/github-script@v9
         with:
           script: |

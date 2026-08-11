@@ -90,6 +90,48 @@ NARROW_COVERAGE_SUPPRESSION = re.compile(
 )
 SOURCE_SUFFIXES = (".ts", ".tsx", ".js", ".jsx")
 EXECUTED_ALLURE_STATUSES = {"passed", "failed", "broken"}
+# A change touching no stack uploads no Allure results, and
+# `actions/download-artifact` does not create its target directory when nothing
+# matches. The aggregate validator then failed on a directory that was never
+# going to exist, which made every documentation-only pull request unmergeable
+# -- and stages 1 through 9 of a spec-driven feature produce nothing but
+# documentation commits. The short circuit these strings guard is the fix;
+# deleting it silently restores the breakage for the next spec-only branch.
+#
+# Narrow on purpose. Only `backend` and `frontend` upload results -- the `e2e`
+# job derives its own RUN from those two and `mobile` uploads none -- so those
+# two are the entire predicate. It must NOT grow to cover "a stack ran and
+# produced no results": that is a real defect and the validator exists to fail
+# on it.
+#
+# The step anchors below are deliberately two-line, binding the guard to the
+# `if:` on the specific steps it protects. A bare "if: steps.aggregate..."
+# substring was the first version and it did not bite: the "Post PR Allure
+# report link" step carries the same condition joined to another with `&&`, so
+# deleting the gate from the download and validate steps left the substring
+# present and the invariant green over a workflow that fails on every
+# specs-only branch. An invariant satisfiable by code that does not work is
+# worse than none.
+ALLURE_AGGREGATION_REQUIREMENTS = (
+    ("Allure aggregation short-circuit step", "      - name: Decide whether there is anything to aggregate\n        id: aggregate"),
+    (
+        "Allure aggregation predicate over the two uploading stacks",
+        'if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ]; then',
+    ),
+    (
+        "gate on the Allure download step",
+        "      - name: Download Allure results\n        if: steps.aggregate.outputs.run == 'true'",
+    ),
+    (
+        "gate on the aggregate Allure validation step",
+        "      - name: Validate aggregate Allure results\n        if: steps.aggregate.outputs.run == 'true'",
+    ),
+    (
+        "aggregate Allure taxonomy validation still runs",
+        "--path allure-results --label aggregate-allure",
+    ),
+)
+
 E2E_CI_REQUIREMENTS = (
     ("e2e CI job", "  e2e:"),
     ("Compose Playwright E2E job name", "Compose Playwright E2E"),
@@ -466,6 +508,14 @@ def _missing_e2e_ci_errors(workflow_text: str) -> list[str]:
     return errors
 
 
+def _missing_allure_aggregation_errors(workflow_text: str) -> list[str]:
+    errors: list[str] = []
+    for label, snippet in ALLURE_AGGREGATION_REQUIREMENTS:
+        if snippet not in workflow_text:
+            errors.append(f"missing {label}: {snippet}")
+    return errors
+
+
 def validate_workflow(
     ci: Path, disallowed_workflows: list[Path], frontend_vite_config: Path | None
 ) -> int:
@@ -478,6 +528,7 @@ def validate_workflow(
         errors.extend(_missing_artifact_errors(workflow_text))
         errors.extend(_missing_frontend_ci_errors(workflow_text))
         errors.extend(_missing_e2e_ci_errors(workflow_text))
+        errors.extend(_missing_allure_aggregation_errors(workflow_text))
         errors.extend(_path_filter_errors(workflow_text))
         errors.extend(_concurrency_errors(workflow_text))
         errors.extend(_retention_errors(workflow_text))
