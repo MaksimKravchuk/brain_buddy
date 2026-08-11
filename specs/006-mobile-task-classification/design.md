@@ -15,7 +15,7 @@ web client already has this capability and is out of scope, so there are no
 | id | surface | screen | purpose | FR refs |
 |---|---|---|---|---|
 | M-01 | mobile | Task detail — classification | The whole feature: project and Tags become editable where they are already displayed | FR-001, FR-002, FR-003, FR-013 |
-| M-01b | mobile | Task detail — queued change | A change accepted but not yet sent must look different from one the server has | FR-006, FR-007 |
+| M-01b | mobile | Task detail — changed offline | A change made with no connection looks exactly like one the server has; only the last-synced footer speaks | FR-006, FR-007 |
 | M-01c | mobile | Task detail — rollout flag OFF | With the flag off this is today's read-only screen, unchanged | FR-015 |
 | M-02 | mobile | Project picker | Pick one, clear it, or create one | FR-001, FR-003, FR-004, FR-005 |
 | M-03 | mobile | Tag picker | Attach and detach several; create is unavailable offline and says why | FR-002, FR-004, FR-005, FR-016 |
@@ -38,7 +38,7 @@ own. Their per-state rows live under M-01.
 | empty (filtered to nothing) | n/a on this screen | — | — | — |
 | error | save rejected for any reason other than revision | Row reverts to the server value, inline error, retry | "Could not save. Tap to try again." + correlation id | FR-012 |
 | partial failure | project saved, Tags rejected (or the reverse) | The succeeded half shows as saved, the failed half reverts and is named | "Project saved. Tags could not be saved." | FR-012 |
-| offline / interrupted | no connection at the moment of the change | Change applied locally with a **Not sent** marker; banner explains once | "No connection. Your changes are saved on this phone and will be sent when you are back online." | FR-006, FR-007, SC-004 |
+| offline / interrupted | no connection at the moment of the change | Change applied locally and shown as made. No marker, no banner, no per-row decoration. The footer's last-synced time is the only signal | "Last synced 14 minutes ago" | FR-006, FR-007, SC-004 |
 | flag OFF | server-owned flag defaults OFF | Exactly today's screen: values shown, no controls, no disabled affordances | — | FR-015 |
 
 ### M-02 — Project picker
@@ -69,13 +69,13 @@ own. Their per-state rows live under M-01.
 
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
-| default | queued change rejected on revision | Sheet naming both values side by side; two explicit choices | "This task changed somewhere else" | FR-008, SC-005 |
+| default | queued change rejected on revision | Sheet naming what was changed and when, both values side by side, two explicit choices. Naming the change is load-bearing: nothing on the task screen ever said it was in flight | "You changed the project 14 minutes ago. This task changed somewhere else since." | FR-008, SC-005 |
 | loading | resolution being sent | Chosen button shows progress; both stay visible | — | — |
 | empty | n/a | — | — | — |
 | error | the resolution itself fails | Sheet stays open, nothing discarded, retry offered | + correlation id | FR-012, SC-003 |
 | partial failure | several conflicted tasks | One sheet per task, queued; count shown | "1 of 3" | FR-008 |
 | offline / interrupted | connection lost while the sheet is open | Sheet stays, choice is queued, nothing decided automatically | — | FR-008, SC-005 |
-| dismissed | person backgrounds the app | Treated as "not yet answered"; the change stays pending and marked | — | FR-007, SC-005 |
+| dismissed | person backgrounds the app | Treated as "not yet answered"; the change stays queued and the sheet returns. Nothing on the task screen records it, so the sheet returning is the only reminder | — | SC-005 |
 
 ### M-05 — Discard-unsent warning
 
@@ -94,8 +94,7 @@ own. Their per-state rows live under M-01.
 |---|---|---|---|
 | M-01 | Project row | Opens M-02 | FR-001 |
 | M-01 | Tags row | Opens M-03 | FR-002 |
-| M-01 | "Not sent" marker | Distinguishes a queued change from a confirmed one | FR-007 |
-| M-01 | Offline banner | States once that changes are held locally | FR-006 |
+| M-01 | Last-synced footer | Says how current the screen is, once, for the whole screen | FR-007, SC-004 |
 | M-02 | "None" row | Clears the project | FR-001, FR-003 |
 | M-02 | Project row | Selects one, replacing any previous | FR-001, FR-003 |
 | M-02 | Search field | Filters, and seeds the create row | FR-005 |
@@ -154,12 +153,13 @@ else in the loop changes: no capture surface, no CRT canvas, no Weekly Review.
   opened the picker.
 - **Escape**: closes a picker, discarding nothing. On M-04 and M-05 it is the
   same as the non-destructive choice, and it never resolves a conflict.
-- **Accessible names**: the "Not sent" marker is a labelled status, not an icon
-  alone. The chevrons are decorative and hidden from assistive technology; the
-  row itself carries the name and current value.
-- **State communicated by color alone**: none. "Not sent" carries a dot, a
-  border and the words. The disabled create row states its reason in text
-  rather than relying on being greyed.
+- **Accessible names**: the chevrons are decorative and hidden from assistive
+  technology; the row itself carries the name and current value. The
+  last-synced footer is a live region that announces only when the time changes
+  materially, not on every tick.
+- **State communicated by color alone**: none. The disabled create row states
+  its reason in text rather than relying on being greyed, and the last-synced
+  footer is words rather than a colored dot.
 
 ## Design authority
 
@@ -169,10 +169,16 @@ else in the loop changes: no capture surface, no CRT canvas, no Weekly Review.
 
 ## Open decisions for the human
 
-1. **The "Not sent" marker sits on the changed row, not on the screen header.**
-   A person with two queued changes on one task sees one marker per row, which
-   is honest but repeats. A single header-level marker would be quieter and
-   less precise.
+1. **Resolved at sign-off, and it reversed an earlier answer: there is no
+   not-sent marker at all.** The human's instruction was to hold the data on the
+   device until there is a connection and show only when the last sync happened.
+   The consequence to watch is that unsent work is now invisible on the task
+   screen — the only surfaces that reveal it are the last-synced time, which
+   says *when* and never *what*, and the discard warning at M-05, which is also
+   the last moment to act on it. That is why M-05 lists the pending items rather
+   than only counting them, and why M-04 must name what was changed: a person
+   can reach a conflict prompt for a change nothing ever told them was in
+   flight.
 2. **M-05 lists every pending change.** With a large queue this sheet grows.
    The alternative is a count plus "see all", which is calmer but puts one tap
    between the person and knowing what they are about to lose.

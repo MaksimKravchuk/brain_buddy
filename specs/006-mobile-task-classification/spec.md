@@ -31,6 +31,18 @@ were verified against the codebase before being asked.
   What happens to pending entries on an account or server change?
   → A: Bind every entry to its account and server, and clear on any identity
   transition with the same warning as sign-out.
+- Q (design sign-off): per-change "not sent" marker on each changed row, or one
+  marker per screen? → A: **Neither — remove it.** "Store the data on the device
+  until there is internet; you can show the person when the last sync was."
+
+  **This reverses an earlier answer in the same run** and is recorded as a
+  reversal rather than quietly applied. Asked during the interview what should
+  happen offline, the human chose "show the new value with a not-sent marker"
+  over "just show the new value". The later answer came with its reasoning —
+  the app is offline-first, and per-field sync bookkeeping is the app's problem,
+  not the person's — so it is treated as a considered revision and it wins.
+  FR-007 and SC-004 are rewritten accordingly, and the consequence is recorded
+  under Assumptions.
 
 Still open, carried forward rather than answered: the KPI baseline (see
 Assumptions), the ordering rule when several queued changes touch one task,
@@ -104,11 +116,12 @@ the new project.
 
 ---
 
-### User Story 3 - Classify with no signal, and be told the truth about it (Priority: P3)
+### User Story 3 - Classify with no signal, without having to think about it (Priority: P3)
 
-A person triages on a train with no connectivity. Their changes are accepted,
-visibly marked as not yet sent, and delivered when the connection returns. If
-the task changed elsewhere in the meantime, they are asked which change wins.
+A person triages on a train with no connectivity. Their changes are accepted and
+simply look made — the app holds them on the device and delivers them when the
+connection returns, without asking the person to track what is in flight. If the
+task changed elsewhere in the meantime, they are asked which change wins.
 
 **Why this priority**: It is the largest slice and the only one whose absence
 still leaves a working feature — without it, the same actions simply fail
@@ -122,16 +135,18 @@ ordinary outcome of normal use, not a rare race. Deferred send without a conflic
 rule is not shippable.
 
 **Independent Test**: With connectivity disabled, change a task's project on the
-phone, observe the not-sent marker, re-enable connectivity, and confirm the
-change arrives and the marker clears.
+phone and confirm the screen shows it as made with no sync decoration, then
+re-enable connectivity and confirm the change arrives and the last-synchronised
+time advances.
 
 **Acceptance Scenarios**:
 
 1. **Given** no connectivity, **When** the person changes the project or tags,
-   **Then** the change is accepted, shown as applied, and carries a visible
-   not-sent marker.
+   **Then** the change is accepted and shown as made, with no per-change
+   not-sent decoration anywhere on the screen.
 2. **Given** a queued change, **When** connectivity returns, **Then** the change
-   is sent and the marker clears without the person doing anything.
+   is sent and the last-synchronised time advances, without the person doing
+   anything.
 3. **Given** a queued change and a task that changed elsewhere, **When** the
    server rejects the change, **Then** the person is asked whether to apply
    theirs over the newer state or abandon it, and neither is chosen for them.
@@ -176,6 +191,10 @@ change arrives and the marker clears.
   not both operations.
 - **Sign-out while the queue is mid-send.** The warning must reflect what is
   actually unsent at that moment, not a stale count.
+- **A conflict on a change the person no longer remembers making.** With no
+  per-change marker there is nothing on the task screen that said the change was
+  still in flight, so the conflict prompt must name what was changed and when,
+  not only the two values.
 - **A task with many tags.** The screen stays usable and the person can still
   reach the controls; no scroll trap.
 
@@ -196,8 +215,10 @@ change arrives and the marker clears.
   MUST offer the existing one rather than creating a duplicate.
 - **FR-006**: The system MUST accept a classification change while offline and
   send it when connectivity returns, without the person re-entering it.
-- **FR-007**: A change that has not been confirmed by the server MUST be visibly
-  marked as not sent, distinct from a confirmed change.
+- **FR-007**: The app MUST NOT mark individual unsent changes. A change is shown
+  as made, whether or not the server has it yet. The app MUST instead show when
+  it last synchronised with the server, so a person can judge freshness once for
+  the whole screen rather than field by field.
 - **FR-008**: When the server rejects a queued change because the task changed
   meanwhile, the system MUST ask the person whether their change wins or is
   abandoned, and MUST NOT decide for them.
@@ -270,8 +291,9 @@ against.
 - **SC-003**: A classification made with no connectivity is never lost: it is
   either delivered once connectivity returns, or abandoned by an explicit choice
   the person made.
-- **SC-004**: A person can always tell, without leaving the task screen, whether
-  what they are looking at has reached the server.
+- **SC-004**: A person can tell, without leaving the task screen, how current
+  what they are looking at is — by the last-synchronised time, not by per-change
+  bookkeeping they have to read and reconcile.
 - **SC-005**: No conflict is resolved without the person choosing. Zero
   classifications are overwritten or discarded silently.
 - **SC-007**: No pending change is ever shown to, or sent under, an account or
@@ -280,6 +302,14 @@ against.
   the same triage on the web client, so moving to mobile costs nothing in effort.
 
 ## Assumptions
+
+- **Removing the per-change marker moves the whole burden onto two places.**
+  With no not-sent decoration, the only surfaces that reveal unsent work are the
+  last-synchronised time — which says *when*, never *what* — and the discard
+  warning at an identity transition, which is also the last moment to act on it.
+  That is the accepted cost of the offline-first choice, not an oversight. It
+  raises the stakes on the discard warning listing what is pending rather than
+  only counting it, and on the conflict prompt naming what was changed.
 
 - **No numeric adoption target is claimed, and this is deliberate.** The intake
   names the objective — complete inbox triage from the phone — but the share of
