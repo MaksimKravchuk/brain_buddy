@@ -194,17 +194,28 @@ ALLURE_AGGREGATION_REQUIREMENTS = (
     # below can name MOBILE while the environment binds it to a constant, and
     # the invariant would still pass over exactly the regression it claims to
     # prevent. That is the defect this file's own header warns about.
+    #
+    # Hence anchored to the environment key, not a bare substring. Naming all
+    # three was necessary and not sufficient: the unanchored form asked whether
+    # the expression existed anywhere in the workflow, so binding `MOBILE` to a
+    # constant and leaving the real conjunction on an unread sibling key passed.
+    # The hole was closed only by the accident that each string appeared exactly
+    # once. `KEY: ${{ ... }}` binds the predicate to the variable the shell
+    # below actually reads, which is the property being asserted.
     (
         "Allure predicate conjoins selection with the backend job actually running",
-        "needs.changes.outputs.backend == 'true' && needs.backend.result != 'skipped'",
+        "          BACKEND: ${{ needs.changes.outputs.backend == 'true'"
+        " && needs.backend.result != 'skipped' }}\n",
     ),
     (
         "Allure predicate conjoins selection with the frontend job actually running",
-        "needs.changes.outputs.frontend == 'true' && needs.frontend.result != 'skipped'",
+        "          FRONTEND: ${{ needs.changes.outputs.frontend == 'true'"
+        " && needs.frontend.result != 'skipped' }}\n",
     ),
     (
         "Allure predicate conjoins selection with the mobile job actually running",
-        "needs.changes.outputs.mobile == 'true' && needs.mobile.result != 'skipped'",
+        "          MOBILE: ${{ needs.changes.outputs.mobile == 'true'"
+        " && needs.mobile.result != 'skipped' }}\n",
     ),
     (
         "gate on the Allure download step",

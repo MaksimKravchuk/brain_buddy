@@ -425,6 +425,63 @@ export default defineConfig({
             weaker_predicate.stderr,
         )
 
+    def test_workflow_rejects_an_aggregation_env_key_bound_to_a_constant(self) -> None:
+        """The conjunction must be bound to the key the shell actually reads.
+
+        The requirement was a bare substring over the whole workflow, so it
+        asked whether the expression existed *anywhere* rather than whether the
+        environment key the predicate consumes carries it. That is satisfiable
+        by code that does not work: bind `MOBILE` to a constant, leave the real
+        conjunction on an unused sibling key, and a mobile-only pull request
+        aggregates nothing while the invariant claiming to prevent exactly that
+        stays green. The file's own header warns about this failure mode, and
+        the mobile entry was added under a comment asserting the hole was
+        closed -- it was closed only by the accident that the string appeared
+        nowhere else.
+
+        Anchored to the key, so all three stacks are checked the same way.
+        """
+        workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+        text = workflow.read_text(encoding="utf-8")
+
+        stacks = (
+            ("MOBILE", "mobile"),
+            ("BACKEND", "backend"),
+            ("FRONTEND", "frontend"),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            for key, stack in stacks:
+                binding = (
+                    f"          {key}: "
+                    "${{ needs.changes.outputs."
+                    f"{stack} == 'true' && needs.{stack}.result != 'skipped' "
+                    "}}\n"
+                )
+                self.assertIn(binding, text)
+                # The shell line still names the key; the environment binds it
+                # to a constant and the conjunction survives, unread, alongside.
+                rewired = Path(tmp) / f"ci-{stack}-rewired.yml"
+                rewired.write_text(
+                    text.replace(
+                        binding,
+                        f"          {key}: false\n"
+                        + binding.replace(f"{key}:", f"{key}_ELIGIBLE:", 1),
+                    ),
+                    encoding="utf-8",
+                )
+
+                result = self.run_validator("workflow", "--ci", str(rewired))
+
+                self.assertNotEqual(
+                    result.returncode,
+                    0,
+                    f"{key} bound to a constant must fail: {result.stdout}",
+                )
+                self.assertIn(
+                    f"conjoins selection with the {stack} job actually running",
+                    result.stderr,
+                )
+
     def test_workflow_rejects_missing_pr_scoped_concurrency(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
