@@ -1164,13 +1164,14 @@ jobs:
         env:
           BACKEND: ${{ needs.changes.outputs.backend == 'true' && needs.backend.result == 'success' }}
           FRONTEND: ${{ needs.changes.outputs.frontend == 'true' && needs.frontend.result == 'success' }}
+          MOBILE: ${{ needs.changes.outputs.mobile == 'true' && needs.mobile.result == 'success' }}
         run: |
-          if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ]; then
+          if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ] || [ "$MOBILE" = "true" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "A stack that uploads Allure results was exercised; aggregating."
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "Neither backend nor frontend was exercised, so no Allure results exist to aggregate. Nothing to validate."
+            echo "No stack that uploads Allure results was exercised, so there is nothing to aggregate. Nothing to validate."
           fi
 
       - name: Download Allure results

@@ -173,8 +173,14 @@ EXECUTED_ALLURE_STATUSES = {"passed", "failed", "broken"}
 ALLURE_AGGREGATION_REQUIREMENTS = (
     ("Allure aggregation short-circuit step", "      - name: Decide whether there is anything to aggregate\n        id: aggregate"),
     (
-        "Allure aggregation predicate over the two uploading stacks",
-        'if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ]; then',
+        # Three, not two. `mobile` began uploading Allure results when the
+        # mobile Jest suite gained taxonomy, and this invariant was not moved
+        # with it — so a mobile-only pull request skipped every aggregation
+        # step and still went green, with no report and no link. An invariant
+        # that names the wrong set is worse than none: it reads as coverage of
+        # exactly the case it misses.
+        "Allure aggregation predicate over the three uploading stacks",
+        'if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ] || [ "$MOBILE" = "true" ]; then',
     ),
     # Selected-to-run is not produced-something. A stack job is skipped when
     # `spec-kit` is red, which is the normal state of a spec-driven branch, so

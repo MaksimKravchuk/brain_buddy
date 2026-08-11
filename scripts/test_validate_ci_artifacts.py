@@ -781,26 +781,6 @@ jobs:
           name: allure-report-html
           path: allure-report
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
-  allure-report:
-    name: Allure Report
-    steps:
-      - name: Decide whether there is anything to aggregate
-        id: aggregate
-        env:
-          BACKEND: ${{ needs.changes.outputs.backend == 'true' && needs.backend.result == 'success' }}
-          FRONTEND: ${{ needs.changes.outputs.frontend == 'true' && needs.frontend.result == 'success' }}
-        run: |
-          if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Download Allure results
-        if: steps.aggregate.outputs.run == 'true'
-        uses: actions/download-artifact@v4
-      - name: Validate aggregate Allure results
-        if: steps.aggregate.outputs.run == 'true'
-        run: python3 scripts/validate_allure_taxonomy.py --path allure-results --label aggregate-allure
   e2e:
     name: Compose Playwright E2E
     steps:
@@ -815,6 +795,7 @@ jobs:
     steps:
       - run: echo build
   allure-report:
+    name: Allure Report
     needs:
       - changes
       - backend
@@ -826,6 +807,24 @@ jobs:
       - mutation-head
       - mutation-gate
     steps:
+      - name: Decide whether there is anything to aggregate
+        id: aggregate
+        env:
+          BACKEND: ${{ needs.changes.outputs.backend == 'true' && needs.backend.result == 'success' }}
+          FRONTEND: ${{ needs.changes.outputs.frontend == 'true' && needs.frontend.result == 'success' }}
+          MOBILE: ${{ needs.changes.outputs.mobile == 'true' && needs.mobile.result == 'success' }}
+        run: |
+          if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ] || [ "$MOBILE" = "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Download Allure results
+        if: steps.aggregate.outputs.run == 'true'
+        uses: actions/download-artifact@v4
+      - name: Validate aggregate Allure results
+        if: steps.aggregate.outputs.run == 'true'
+        run: python3 scripts/validate_allure_taxonomy.py --path allure-results --label aggregate-allure
       - run: python3 scripts/validate_allure_taxonomy.py
       - run: npx allure generate ../allure-results -o ../allure-report
 """.strip(),
