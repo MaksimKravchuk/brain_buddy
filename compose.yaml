@@ -1,5 +1,10 @@
 services:
   backend:
+    # Naming the image explicitly lets a caller build it once, ahead of time,
+    # and have Compose start that exact image instead of rebuilding it. Without
+    # this the tag is derived from the Compose project name, which the E2E
+    # runner generates per run and therefore cannot be prebuilt against.
+    image: ${BRAIN_BUDDY_BACKEND_IMAGE:-brain-buddy-backend:local}
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -26,6 +31,7 @@ services:
       start_period: 5s
 
   frontend:
+    image: ${BRAIN_BUDDY_FRONTEND_IMAGE:-brain-buddy-frontend:local}
     build:
       context: .
       dockerfile: frontend/Dockerfile
