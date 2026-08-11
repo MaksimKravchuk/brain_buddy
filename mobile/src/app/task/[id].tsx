@@ -522,66 +522,66 @@ export default function TaskDetailScreen() {
             {metadataRows.map((row) => {
               const withheld = !classification.available && rowUsesClassificationQueue(row.id);
               return (
-              <Fragment key={row.id}>
-                <Pressable
-                  accessibilityRole="button"
-                  // The reason is part of the name, so it is heard rather than
-                  // inferred from the row looking greyed (design.md).
-                  accessibilityLabel={
-                    withheld
-                      ? `${row.accessibilityLabel}. ${classification.reason}`
-                      : row.accessibilityLabel
-                  }
-                  accessibilityState={{ disabled: withheld }}
-                  disabled={withheld}
-                  onPress={() => openMetadataRow(row.id)}
-                  style={[styles.metaRow, withheld ? styles.metaRowWithheld : null]}
-                >
-                  <BBText variant="micro" color={colors.fg5} style={styles.metaRowLabel}>
-                    {row.label}
-                  </BBText>
-                  <View style={styles.metaRowValue}>
-                    {row.pills.length > 0 ? (
-                      row.pills.map((pill) =>
-                        row.id === "project" ? (
-                          <View key={pill} style={styles.projectPill}>
-                            <BBText variant="caption" color={colors.brandPrimary}>
-                              {pill}
-                            </BBText>
-                          </View>
-                        ) : (
-                          <TagPill key={pill} name={pill} />
-                        ),
-                      )
-                    ) : (
-                      <BBText
-                        variant="body"
-                        color={row.placeholder ? colors.fg6 : colors.fg2}
-                        numberOfLines={1}
-                      >
-                        {row.value}
-                      </BBText>
-                    )}
-                  </View>
-                  <View
-                    accessibilityElementsHidden
-                    importantForAccessibility="no-hide-descendants"
+                <Fragment key={row.id}>
+                  <Pressable
+                    accessibilityRole="button"
+                    // The reason is part of the name, so it is heard rather than
+                    // inferred from the row looking greyed (design.md).
+                    accessibilityLabel={
+                      withheld
+                        ? `${row.accessibilityLabel}. ${classification.reason}`
+                        : row.accessibilityLabel
+                    }
+                    accessibilityState={{ disabled: withheld }}
+                    disabled={withheld}
+                    onPress={() => openMetadataRow(row.id)}
+                    style={[styles.metaRow, withheld ? styles.metaRowWithheld : null]}
                   >
-                    <ChevronRight size={18} color={colors.fg6} strokeWidth={2} />
-                  </View>
-                </Pressable>
-                {/* One sentence for the two rows it explains, under the later
-                    of them, so it is read as being about both. */}
-                {withheld && row.id === "tags" ? (
-                  <BBText variant="micro" color={colors.fg5}>
-                    {classification.reason}
-                  </BBText>
-                ) : null}
-                {/* FR-018: the notice names the field and what it reverted to,
-                    and its labelled Dismiss sits in tab order right after the
-                    row it explains. */}
-                {expiredNotice?.anchor === row.id ? expiredNoticeCard : null}
-              </Fragment>
+                    <BBText variant="micro" color={colors.fg5} style={styles.metaRowLabel}>
+                      {row.label}
+                    </BBText>
+                    <View style={styles.metaRowValue}>
+                      {row.pills.length > 0 ? (
+                        row.pills.map((pill) =>
+                          row.id === "project" ? (
+                            <View key={pill} style={styles.projectPill}>
+                              <BBText variant="caption" color={colors.brandPrimary}>
+                                {pill}
+                              </BBText>
+                            </View>
+                          ) : (
+                            <TagPill key={pill} name={pill} />
+                          ),
+                        )
+                      ) : (
+                        <BBText
+                          variant="body"
+                          color={row.placeholder ? colors.fg6 : colors.fg2}
+                          numberOfLines={1}
+                        >
+                          {row.value}
+                        </BBText>
+                      )}
+                    </View>
+                    <View
+                      accessibilityElementsHidden
+                      importantForAccessibility="no-hide-descendants"
+                    >
+                      <ChevronRight size={18} color={colors.fg6} strokeWidth={2} />
+                    </View>
+                  </Pressable>
+                  {/* One sentence for the two rows it explains, under the later
+                      of them, so it is read as being about both. */}
+                  {withheld && row.id === "tags" ? (
+                    <BBText variant="micro" color={colors.fg5}>
+                      {classification.reason}
+                    </BBText>
+                  ) : null}
+                  {/* FR-018: the notice names the field and what it reverted to,
+                      and its labelled Dismiss sits in tab order right after the
+                      row it explains. */}
+                  {expiredNotice?.anchor === row.id ? expiredNoticeCard : null}
+                </Fragment>
               );
             })}
           </View>

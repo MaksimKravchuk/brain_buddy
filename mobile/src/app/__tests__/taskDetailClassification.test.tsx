@@ -694,11 +694,6 @@ describe("task detail — work the 30-day bound discarded", () => {
 });
 
 describe("task detail — a queued change the server rejected", () => {
-  /**
-   * Mount t1 with one stale queued change on the device, over a server that
-   * 409s anything sent against the wrong revision. The cold-read drain sends
-   * it, is rejected, re-reads the task, and parks the entry for the person.
-   */
   /** A server that answers anything sent against the wrong revision with 409. */
   function revisionGuardedRoutes(read: () => TaskResponse, write: (next: TaskResponse) => void) {
     return {
@@ -730,6 +725,11 @@ describe("task detail — a queued change the server rejected", () => {
       .map((call) => (call.body as { expected_revision: number }).expected_revision);
   }
 
+  /**
+   * Mount t1 with one stale queued change on the device, over a server that
+   * 409s anything sent against the wrong revision. The cold-read drain sends
+   * it, is rejected, re-reads the task, and parks the entry for the person.
+   */
   async function openConflictedTask() {
     let stored = makeTask({ id: "t1", project_id: "p1", tag_ids: [], revision: 5 });
     await seedQueue([
@@ -812,17 +812,14 @@ describe("task detail — a queued change the server rejected", () => {
     // `expected_revision`, earns the same 409, and puts the same sheet back up
     // for ever. Nothing the person can do ends it.
     let stored = makeTask({ id: "t1", project_id: null, tag_ids: [], revision: 1 });
-    await openTask(
-      stored,
-      {
-        routes: revisionGuardedRoutes(
-          () => stored,
-          (next) => {
-            stored = next;
-          },
-        ),
-      },
-    );
+    await openTask(stored, {
+      routes: revisionGuardedRoutes(
+        () => stored,
+        (next) => {
+          stored = next;
+        },
+      ),
+    });
 
     // Somebody else moves the task on. This screen is not told, and nothing
     // refetches it: what it holds is revision 1 for the rest of the test.
