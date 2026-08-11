@@ -236,7 +236,9 @@ HTTP request
   (with a flat graph that gate is the only thing making a job required). `e2e` is
   never path filtered. It rebuilds only what changed: `main`'s Docker layers are
   reused via the shared `stack-*` buildx cache, so an untouched service starts
-  from main's image. Wait for CI green before deploying.
+  from main's image. `allure-report` closes the run — it is the last job before
+  `full-ci`, so the aggregate report and the link posted to the pull request
+  always describe a finished run. Wait for CI green before deploying.
 - **Mutation gate** — the `mutation-gate` job blocks a change that touches any module in `backend/mutation-enforced-scope.txt` (the ADR-0011 *enforced* tier: the tree/version/relation services and their repositories). It measures only the entries you touched and fails below 95%, on zero checked mutants, or on any regression against the base revision. Touch none of them and it costs nothing. Reproduce locally with `make mutation-gate-backend`. The nightly `mutation-quality.yml` stays report-only over the wider *observed* tier.
 - **Deeper docs** — architecture, API, troubleshooting, performance, and infra runbooks live under `docs/`. Feature specs (e.g. `001-relation-linking-refactor`) live under `specs/`.
 

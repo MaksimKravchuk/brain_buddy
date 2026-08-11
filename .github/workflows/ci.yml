@@ -1073,10 +1073,18 @@ jobs:
           if-no-files-found: warn
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
-  # Every `needs` here is a real data dependency: this job downloads the Allure
-  # results those lanes upload. `mobile` joined the list when the mobile suite
-  # started emitting evidence -- without it the aggregate could be generated
-  # before mobile finished writing its results.
+  # backend, frontend, mobile and e2e are real data dependencies: this job
+  # downloads the Allure results each of them uploads, and they are the only
+  # four that emit any. `mobile` joined when the mobile suite started producing
+  # evidence -- without it the aggregate could be generated before mobile
+  # finished writing its results, and Playwright's results arrive with `e2e`.
+  #
+  # `docker` is here for a different reason: this report is the run's closing
+  # artifact, and the pull request comment points at it. Generated while another
+  # job can still fail, that link can be published before the run is decided.
+  # Listing docker makes "last" a property of the graph rather than a
+  # coincidence of how long two parallel jobs happen to take. It costs the tail
+  # roughly 20 seconds, docker now being a cache hit rather than a full build.
   allure-report:
     name: Allure Report
     runs-on: ubuntu-latest
@@ -1085,6 +1093,7 @@ jobs:
       - frontend
       - mobile
       - e2e
+      - docker
     if: always()
     permissions:
       contents: read
