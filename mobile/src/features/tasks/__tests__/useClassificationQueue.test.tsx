@@ -387,6 +387,28 @@ describe("006-FR-008 a task that changed elsewhere becomes the person's decision
     });
   });
 
+  it("006-SC-005 asks rather than deciding when the re-read fails too", async () => {
+    await seed(IDENTITY, [queued()]);
+    install({
+      // Offline again between the two calls — the ordinary way a partial
+      // failure happens on a phone.
+      "PATCH /tasks/task-1": () => revisionConflict(),
+      "GET /tasks/task-1": unreachable,
+    });
+
+    const view = await renderQueue();
+    await waitFor(() => expect(view.result.current.conflict).toBeDefined());
+
+    // Deciding without the server's value is the unsafe direction, so with no
+    // value it asks. Nothing is resolved and nothing is discarded.
+    expect(traffic()).toEqual(["PATCH /tasks/task-1", "GET /tasks/task-1"]);
+    expect(view.result.current.conflict?.entry.conflictReason).toBe("stale-revision");
+    expect(view.result.current.queue[0].value).toEqual({
+      projectId: "proj-q3",
+      tagIds: ["tag-calls"],
+    });
+  });
+
   it("006-SC-005 keep-mine re-sends against the revision the person was shown, under a new key", async () => {
     await seed(IDENTITY, [queued()]);
     install({
@@ -431,6 +453,15 @@ describe("006-FR-008 a task that changed elsewhere becomes the person's decision
     expect(view.result.current.queue).toHaveLength(0);
     expect(view.result.current.conflict).toBeUndefined();
     expect(await onDevice(IDENTITY)).toBeNull();
+    expect(backend.callsTo("PATCH", "/tasks/task-1")).toHaveLength(1);
+
+    // The sheet is dismissed by the same gesture that answers it, so a second
+    // answer can arrive after the question is gone. It must not resurrect the
+    // change the person just discarded.
+    await act(async () => {
+      await view.result.current.keepMine(11);
+    });
+    expect(view.result.current.queue).toHaveLength(0);
     expect(backend.callsTo("PATCH", "/tasks/task-1")).toHaveLength(1);
   });
 });
@@ -752,5 +783,65 @@ describe("006-FR-006 an edit made while online does not wait for a trigger", () 
     expect(await onDevice(IDENTITY)).toMatchObject([
       { taskId: "task-1", sendState: "queued", value: { projectId: "proj-q3" } },
     ]);
+  });
+});
+
+describe("006-SC-007 nothing is written that cannot be attributed to an identity", () => {
+  it("drops an edit made with nobody signed in rather than guessing a key", async () => {
+    install({});
+
+    const view = await renderQueue({ identity: null });
+    await act(async () => {
+      await view.result.current.enqueue({
+        taskId: "task-1",
+        value: { projectId: "proj-q3" },
+        observedRevision: 4,
+        displayedValue: { projectId: null, tagIds: [] },
+      });
+      // The sheet cannot be open with no queue, but neither answer may write
+      // anything if it somehow is.
+      await view.result.current.discardMine(11);
+    });
+
+    expect(view.result.current.queue).toEqual([]);
+    // An empty half of the key would pool every account into one store, so the
+    // only safe answer is to write nothing at all.
+    expect(await onDevice(IDENTITY)).toBeNull();
+    expect(backend.calls).toEqual([]);
+  });
+
+  it("discards a cold read that only finishes after somebody else has signed in", async () => {
+    await seed(IDENTITY, [queued()]);
+    await seed(OTHER_IDENTITY, [
+      queued({ taskId: "task-2", accountId: OTHER_ACCOUNT, idempotencyKey: "key-2" }),
+    ]);
+    install({ "PATCH /tasks/task-1": unreachable, "PATCH /tasks/task-2": unreachable });
+
+    // Hold the first account's cold read at its very first storage call — a
+    // slow device, and the window in which the person signs in as somebody
+    // else. Only the first read is held; the second account's runs normally.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const readKeys = AsyncStorage.getAllKeys.bind(AsyncStorage);
+    jest.spyOn(AsyncStorage, "getAllKeys").mockImplementationOnce(async () => {
+      await held;
+      return readKeys();
+    });
+
+    const view = await renderQueue();
+    await view.rerender({ identity: OTHER_IDENTITY, enabled: true });
+    await waitFor(() =>
+      expect(view.result.current.queue.map((entry) => entry.taskId)).toEqual(["task-2"]),
+    );
+
+    await act(async () => {
+      release();
+    });
+
+    // The first account's entries land late and go on the floor: putting them
+    // on screen now would show one account another's unsent work.
+    expect(view.result.current.queue.map((entry) => entry.taskId)).toEqual(["task-2"]);
   });
 });
