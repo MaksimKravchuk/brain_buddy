@@ -26,10 +26,11 @@
 
 ## Phase 1: Setup
 
-- [ ] T001 Create the feature branch and worktree per `.claude/skills/speckit-implement`, basing on the current default branch
+- [x] T001 Develop on the designated feature branch. **The worktree is deliberately skipped**: the session's branch policy requires this branch, a second worktree fights that for no benefit, and the parallel agents are already isolated by disjoint file ownership rather than by directory
 - [ ] T002 [P] Add the `mobile/src/features/tasks/` directory with an `index.ts` barrel in mobile/src/features/tasks/index.ts
-- [ ] T003 [P] Add Allure taxonomy defaults for this feature to mobile/src/test/allureTaxonomy.ts (epic "Mobile", feature "Task classification")
+- [x] T003 **Dropped, and the original task was wrong.** `CLAUDE.md` scopes the Allure taxonomy rule to pytest, Vitest and Playwright; `mobile/` runs plain Jest and has no `src/test/allureTaxonomy.ts` to extend. Inventing one to satisfy a rule that does not apply would add a fixture nothing reads. The backend test in T039 still carries full Allure, because backend tests genuinely are in scope
 - [ ] T004 Confirm `make typecheck-mobile`, `make test-mobile` and `make build-mobile` are green on the untouched branch, so every later failure is attributable
+- [x] T004a Write the shared type contract in mobile/src/features/tasks/classificationTypes.ts before fanning out, so the reducer, storage adapter and drain hook can be built in parallel without racing on a shared file
 
 ---
 
