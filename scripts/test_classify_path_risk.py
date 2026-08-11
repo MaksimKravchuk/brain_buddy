@@ -69,6 +69,10 @@ ASK_PATHS = (
     # Secrets / permissions surfaces
     "backend/app/core/secrets.py",
     "infra/permissions/policy.json",
+    # 007-FR-007. The aggregate Allure quality gate's rules: this file decides what
+    # "passing" means for a whole CI run, yet its name carries no ASK token
+    # and it sits under no ASK prefix, so it classified SHIP.
+    "allurerc.mjs",
 )
 
 SHIP_PATHS = (
