@@ -16,8 +16,13 @@
  * are always arguments (plan.md's clock rule), and the hook passes
  * `Date.now` and `newIdempotencyKey`.
  *
- * The four seams this file owns, each with its data-model invariant:
+ * The five seams this file owns, each with its data-model invariant:
  *
+ * - **5b / FR-010** — a pass decides against the queue the device holds *now*,
+ *   never the snapshot it started from. An edit made while a request is in
+ *   flight is a successor entry that exists only on the device; a pass that
+ *   writes its own snapshot back deletes it, and FR-007 guarantees no surface
+ *   ever said it was pending. `DrainPort.latest` is that re-read.
  * - **5c / FR-021** — a cold read resets `sending` to `queued` *before* any
  *   drain, or invariant 5 makes every later drain skip an entry that was in
  *   flight when the app was killed.
@@ -103,6 +108,20 @@ export interface DrainPort {
    *  storage before the request goes out, or a kill mid-send loses the fact
    *  that an attempt happened at all. */
   persist?(queue: PendingClassificationChange[]): Promise<void>;
+  /**
+   * The queue as the device holds it *now*, or `undefined` when the caller can
+   * no longer vouch for it — another identity has signed in, and one account's
+   * queue may never be read, shown or sent under another's (SC-007).
+   *
+   * A pass owns one entry's outcome, never the whole queue. It can be awaiting
+   * the server for the length of a request timeout, and an edit made in that
+   * window lives here and nowhere else: `coalesce` appends it as a successor
+   * (invariant 5b) precisely so the acceptance of the entry in flight cannot
+   * delete it. Omitting this leaves the pass deciding against the snapshot it
+   * started from, which writes that successor back out of existence — silently,
+   * because FR-007 means no surface ever said it was pending.
+   */
+  latest?(): readonly PendingClassificationChange[] | undefined;
 }
 
 /** What the drain must do next with one entry. */
@@ -419,29 +438,62 @@ export async function drainQueue(
   let lastSyncedAt: string | undefined;
   const decisions: ConflictDecision[] = [];
 
+  /**
+   * Re-reads the queue from the device, and is called after **every** await
+   * below. That is invariant 5b at this layer.
+   *
+   * A pass owns one entry's outcome, never the whole queue. While it waits on
+   * the server — up to a request timeout — an edit to the same task becomes a
+   * successor entry (`coalesce`) that exists only in the live queue. Resolving
+   * against the snapshot instead of the live queue therefore produces a queue
+   * with that successor missing, and the write straight afterwards makes the
+   * deletion permanent. Nothing surfaces it: no request ever carried the edit,
+   * and FR-007 means no marker ever said it was pending.
+   *
+   * Adopting *before* the resolution rather than merging after it is what makes
+   * the successor land as well as survive: `applyAccepted` can only re-base an
+   * entry it can see, and a successor still carrying the revision from before
+   * the acceptance would 409 on its own turn.
+   */
+  const adopt = (known: PendingClassificationChange[]): PendingClassificationChange[] => {
+    const live = port.latest?.();
+    return live === undefined ? known : [...live];
+  };
+
+  const commit = async (
+    next: PendingClassificationChange[],
+  ): Promise<PendingClassificationChange[]> => {
+    await port.persist?.(next);
+    return adopt(next);
+  };
+
   for (let step = 0; step < MAX_DRAIN_STEPS; step += 1) {
     const plan = planDrainStep(current, port.now());
     if (plan.kind === "idle") {
       return { queue: plan.queue, settled, lastSyncedAt, stoppedBecause: "drained", decisions };
     }
 
-    current = plan.queue;
     // The `sending` marker must be on the device before the request leaves, or
     // a kill mid-send leaves no trace that an attempt was ever made.
-    await port.persist?.(current);
+    current = await commit(plan.queue);
 
     let resolution: DrainResolution;
     if (plan.kind === "reread") {
       try {
+        // Bound to a name rather than awaited inside the call: the queue has to
+        // be re-read *after* the request settles, not before it went out.
+        const task = await port.reread(plan.entry.taskId);
+        current = adopt(current);
         resolution = resolveRereadOutcome({
           queue: current,
           entry: plan.entry,
-          task: await port.reread(plan.entry.taskId),
+          task,
           mintKey: port.mintKey,
         });
       } catch (error) {
         // Nothing was sent, so the ordinary rejection rules apply: unreachable
         // goes back to `queued` with the same key and waits.
+        current = adopt(current);
         resolution = resolveSendRejection({
           queue: current,
           entry: plan.entry,
@@ -451,7 +503,9 @@ export async function drainQueue(
       }
     } else {
       try {
-        resolution = resolveSendSuccess(current, plan.entry, await port.send(plan.request));
+        const task = await port.send(plan.request);
+        current = adopt(current);
+        resolution = resolveSendSuccess(current, plan.entry, task);
       } catch (error) {
         let serverTask: ServerTaskState | null = null;
         if (shouldRereadAfterRejection(error)) {
@@ -464,6 +518,7 @@ export async function drainQueue(
             serverTask = null;
           }
         }
+        current = adopt(current);
         resolution = resolveSendRejection({
           queue: current,
           entry: plan.entry,
@@ -474,8 +529,7 @@ export async function drainQueue(
       }
     }
 
-    current = resolution.queue;
-    await port.persist?.(current);
+    current = await commit(resolution.queue);
     if (resolution.decision) {
       decisions.push(resolution.decision);
     }
@@ -778,20 +832,38 @@ export function useClassificationQueue(
     }
     drainingRef.current = true;
     try {
+      // A pass speaks only for the identity it started under. Once somebody
+      // else has signed in, the queue on the device is no longer this pass's to
+      // read, show or send (SC-007); it may still finish its own entry into its
+      // own key, which is the one thing that is unambiguously its work.
+      const owns = (): boolean => identityRef.current === active;
       const result = await drainQueue(queueRef.current, {
         now: () => Date.now(),
         mintKey: newIdempotencyKey,
         send: async ({ taskId, payload, idempotencyKey }) =>
           serverStateOf(await apiRef.current.updateTask(taskId, payload, idempotencyKey)),
         reread: async (taskId) => serverStateOf(await apiRef.current.getTask(taskId)),
+        // Where an edit made while a request was in flight lives, and until the
+        // pass adopts it, the only place it lives (invariant 5b).
+        latest: () => (owns() ? queueRef.current : undefined),
         persist: async (next) => {
-          queueRef.current = next;
-          setQueue(next);
+          if (owns()) {
+            // Before the storage write, and synchronously: an `enqueue` racing
+            // this one must coalesce onto the marker this pass has just set,
+            // not onto the queue as it was before the attempt.
+            queueRef.current = next;
+            setQueue(next);
+          }
           await saveQueue(active, next, Date.now());
         },
       });
-      queueRef.current = result.queue;
-      setQueue(result.queue);
+      if (owns()) {
+        // The pass adopted the device's queue after every await, so this is the
+        // live queue and not the snapshot it started from. Assigning the
+        // snapshot is what deleted an edit made during a send.
+        queueRef.current = result.queue;
+        setQueue(result.queue);
+      }
       if (result.lastSyncedAt) {
         setLastSyncedAt(result.lastSyncedAt);
       }

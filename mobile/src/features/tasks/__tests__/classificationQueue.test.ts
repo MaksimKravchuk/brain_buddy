@@ -417,6 +417,56 @@ describe("selectDrainable", () => {
     expect(selectDrainable(queue)).toBeUndefined();
   });
 
+  it("006-FR-017 does not return a queued successor while its predecessor waits on a person", () => {
+    // The predecessor was in flight when this edit was made, so the edit became
+    // a successor (invariant 5b) carrying the revision the person was looking
+    // at *before* the conflict. Sending it now earns a second conflict nobody
+    // caused, against a revision the conflict prompt has not yet resolved — the
+    // task's conflict chain, advanced out of order.
+    const queue = [
+      entry({ sendState: "conflicted", idempotencyKey: "key-conflicted" }),
+      entry({
+        sendState: "queued",
+        idempotencyKey: "key-successor",
+        firstQueuedAt: iso(T0 - MINUTE),
+      }),
+    ];
+
+    expect(selectDrainable(queue)).toBeUndefined();
+  });
+
+  it("006-FR-017 releases the successor once the predecessor is resolved, oldest first", () => {
+    // Keep-mine returns the predecessor to `queued` against the revision the
+    // person was shown. The block has to lift with it, or one answered conflict
+    // strands every later edit to that task for good.
+    const queue = [
+      entry({ sendState: "queued", idempotencyKey: "key-resolved", observedRevision: 11 }),
+      entry({
+        sendState: "queued",
+        idempotencyKey: "key-successor",
+        firstQueuedAt: iso(T0 - MINUTE),
+      }),
+    ];
+
+    expect(selectDrainable(queue)?.idempotencyKey).toBe("key-resolved");
+  });
+
+  it("006-FR-018 an expired notice does not block a later edit to the same task", () => {
+    // `expired` is a notice awaiting dismissal, not unresolved work. Blocking
+    // on one would hold every later edit to that task behind a dismissal the
+    // person may never make — FR-007 means no surface tells them it is there.
+    const queue = [
+      entry({ sendState: "expired", idempotencyKey: "key-expired" }),
+      entry({
+        sendState: "queued",
+        idempotencyKey: "key-later",
+        firstQueuedAt: iso(T0 - MINUTE),
+      }),
+    ];
+
+    expect(selectDrainable(queue)?.idempotencyKey).toBe("key-later");
+  });
+
   it("006-FR-017 still drains another task while one task is in flight", () => {
     const queue = [
       entry({ sendState: "sending", idempotencyKey: "key-inflight" }),

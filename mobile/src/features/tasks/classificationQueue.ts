@@ -238,21 +238,40 @@ export function coalesce(
 /**
  * FR-017 single flight. Returns the next entry to send, or `undefined`.
  *
- * An entry in `sending` is never returned, and neither is another entry for
- * the same task — a successor sent while its predecessor is in flight would
- * race it, and its `observedRevision` is only correct once the predecessor
- * settles. `conflicted` waits for the person's answer; `expired` waits for a
- * dismissal. Oldest first, so a predecessor always goes before its successor.
+ * Only a task's **earliest unresolved entry** may move, so a successor never
+ * overtakes the predecessor it was queued behind (invariant 5b). `sending` is
+ * the obvious case; `conflicted` is the one that is easy to miss and just as
+ * load-bearing. A successor's `observedRevision` was captured before its
+ * predecessor conflicted, so sending it while the person is still being asked
+ * earns a second conflict nobody caused and advances that task's conflict
+ * chain out of order — the app arguing with itself about which of two of the
+ * person's own edits is stale.
+ *
+ * `expired` deliberately does not block: it is a notice awaiting dismissal,
+ * not unresolved work, and blocking on one would strand every later edit to
+ * that task behind a dismissal the person may never make.
+ *
+ * Oldest first, both across tasks and within one.
  */
 export function selectDrainable(
   queue: readonly PendingClassificationChange[],
 ): PendingClassificationChange | undefined {
-  const inFlight = new Set(
-    queue.filter((entry) => entry.sendState === "sending").map((entry) => entry.taskId),
+  const oldestFirst = [...queue].sort(
+    (a, b) => Date.parse(a.firstQueuedAt) - Date.parse(b.firstQueuedAt),
   );
-  return queue
-    .filter((entry) => entry.sendState === "queued" && !inFlight.has(entry.taskId))
-    .sort((a, b) => Date.parse(a.firstQueuedAt) - Date.parse(b.firstQueuedAt))[0];
+  const claimed = new Set<string>();
+  for (const entry of oldestFirst) {
+    if (entry.sendState === "expired" || claimed.has(entry.taskId)) {
+      continue;
+    }
+    // The task's earliest unresolved entry, and therefore the only one of its
+    // entries that may go anywhere until it settles.
+    claimed.add(entry.taskId);
+    if (entry.sendState === "queued") {
+      return entry;
+    }
+  }
+  return undefined;
 }
 
 function transition(

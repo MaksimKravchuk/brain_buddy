@@ -1,29 +1,15 @@
 /**
  * 006-FR-021 / 006-FR-017 / 006-FR-008 / 006-FR-018 — the drain orchestration.
  *
- * `is now covered by render tests (main added a fake-backend harness after this was written) a component in a test, so a rule that lives inside a
- * `useEffect` has no evidence at all. Everything the drain decides is therefore
- * a pure function over the queue, and this file tests those functions rather
- * than the hook that calls them. The hook's own evidence is typecheck, bundle
- * and the numbered quickstart steps — which is genuinely weaker, and is stated
- * that way rather than dressed up.
+ * The drain's decisions live in pure functions over the queue, and this file
+ * tests those rather than the hook that calls them — a rule that lives inside
+ * a `useEffect` is hard to pin, and pushing it out is what makes it testable
+ * at all.
  *
- * Four seams are under test because each has already produced, or would
- * produce, a real defect:
- *
- * 1. **The cold read must reset `sending` before any drain** (invariant 5c).
- *    Without it invariant 5 makes every later drain skip a stranded entry, so
- *    it is never sent, never conflicts, never errors, and its only terminal
- *    outcome is the 30-day drop.
- * 2. **The idempotency 409 must re-mint.** Returning the entry to `queued`
- *    with the same key sends the same (key, payload) pair forever.
- * 3. **The two 30-day rules must not overlap** (invariant 8a). `expireQueue`
- *    retains the payload; the sweep deletes. Letting the deleting rule reach
- *    the active identity's entries silently loses FR-018's "retains the
- *    payload until dismissed".
- * 4. **Past 24 h the entry may not be retried blind** (invariant 10). The
- *    server has forgotten the key by then, so at-most-once is carried by
- *    `expected_revision` instead — which requires a re-read first.
+ * That split was originally forced: when this was written `mobile/` had no way
+ * to render a component in a test. It does now, and the screens that call this
+ * hook have their own render tests. The split stayed because it is the better
+ * shape, not because it is the only one available.
  */
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -272,6 +258,106 @@ describe("006-FR-017 at most one send of one entry is ever in flight", () => {
     ];
 
     expect(planDrainStep(queue, NOW).kind).toBe("idle");
+  });
+});
+
+describe("006-FR-010 a pass decides against the queue the device holds now (invariant 5b)", () => {
+  /**
+   * The successor `coalesce` appends while the predecessor is in flight: its
+   * own key, its own payload, and the revision the person was looking at.
+   */
+  const successor = (): PendingClassificationChange =>
+    entry({
+      idempotencyKey: "key-2",
+      value: { projectId: undefined, tagIds: ["tag-calls", "tag-home"] },
+      firstQueuedAt: iso(NOW - MINUTE),
+      lastEditedAt: iso(NOW - MINUTE),
+    });
+
+  /**
+   * A device the pass does not own. `persist` writes to it, `latest` reads it,
+   * and the edit made below appears in it and nowhere else — which is the whole
+   * point: a pass that keeps deciding against the snapshot it started from
+   * writes that edit back out of existence, and FR-007 guarantees no surface
+   * ever said it was pending.
+   */
+  function deviceHolding(initial: PendingClassificationChange[]) {
+    const state = { queue: initial };
+    return {
+      state,
+      wire: (port: DrainPort): DrainPort => ({
+        ...port,
+        latest: () => state.queue,
+        persist: async (queue) => {
+          state.queue = [...queue];
+        },
+      }),
+    };
+  }
+
+  it("adopts an edit made while the request was out, and re-bases it on the accepted revision", async () => {
+    const device = deviceHolding([entry()]);
+    const rec = recorder({
+      send: async ({ idempotencyKey }) => {
+        if (idempotencyKey === "key-1") {
+          // The person edits the same task while this request is in flight.
+          device.state.queue = [...device.state.queue, successor()];
+        }
+        return { revision: 9, projectId: "proj-q3", tagIds: ["tag-calls"] };
+      },
+    });
+
+    const result = await drainQueue([entry()], device.wire(rec.port));
+
+    // Sent rather than deleted — and against the revision the first send
+    // returned, so the person's own second edit does not land in a conflict of
+    // the app's making (invariant 5b's second half).
+    expect(rec.sent.map((call) => call.idempotencyKey)).toEqual(["key-1", "key-2"]);
+    expect(rec.sent[1].payload).toEqual({
+      expected_revision: 9,
+      tag_ids: ["tag-calls", "tag-home"],
+    });
+    expect(result.queue).toHaveLength(0);
+    expect(device.state.queue).toHaveLength(0);
+  });
+
+  it("leaves it on the device when the pass cannot send it yet", async () => {
+    const device = deviceHolding([entry()]);
+    const rec = recorder({
+      send: async ({ idempotencyKey }) => {
+        if (idempotencyKey === "key-1") {
+          device.state.queue = [...device.state.queue, successor()];
+          return { revision: 9, projectId: "proj-q3", tagIds: ["tag-calls"] };
+        }
+        throw new TypeError("Network request failed");
+      },
+    });
+
+    const result = await drainQueue([entry()], device.wire(rec.port));
+
+    // The pass settled the entry it knew about and kept the one it did not.
+    expect(result.stoppedBecause).toBe("retry-later");
+    expect(device.state.queue).toHaveLength(1);
+    expect(device.state.queue[0]).toMatchObject({
+      idempotencyKey: "key-2",
+      sendState: "queued",
+      observedRevision: 9,
+      value: { tagIds: ["tag-calls", "tag-home"] },
+    });
+  });
+
+  it("keeps its own view when the caller can no longer vouch for the device's", async () => {
+    // `latest` returning undefined is the caller saying the queue on the device
+    // is no longer the one this pass started under — another identity has
+    // signed in. Adopting it would send one account's work under another's.
+    const rec = recorder();
+    const port: DrainPort = { ...rec.port, latest: () => undefined };
+
+    const result = await drainQueue([entry()], port);
+
+    expect(rec.sent.map((call) => call.idempotencyKey)).toEqual(["key-1"]);
+    expect(result.queue).toHaveLength(0);
+    expect(result.settled).toBe(1);
   });
 });
 

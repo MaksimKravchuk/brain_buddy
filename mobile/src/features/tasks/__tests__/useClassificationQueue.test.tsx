@@ -338,6 +338,113 @@ describe("006-FR-017 two triggers, one flight", () => {
   });
 });
 
+describe("006-FR-010 an edit made while a send is in flight is not written over (invariant 5b)", () => {
+  /** A request that never answers until the test says so. */
+  function heldSend(): { held: Promise<void>; release: () => void } {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return { held, release };
+  }
+
+  /** The person attaches a second Tag while the first request is still out.
+   *  `coalesce` makes this a successor entry, because touching the entry in
+   *  flight would let its acceptance delete an edit that was never sent. */
+  async function attachSecondTag(view: QueueView): Promise<void> {
+    await act(async () => {
+      await view.result.current.enqueue({
+        taskId: "task-1",
+        value: { tagIds: ["tag-calls", "tag-home"] },
+        observedRevision: 4,
+        displayedValue: { projectId: "proj-q3", tagIds: ["tag-calls"] },
+      });
+    });
+  }
+
+  it("sends it after the one in flight, against the revision the server accepted", async () => {
+    const first = heldSend();
+    await seed(IDENTITY, [queued()]);
+    install({
+      "PATCH /tasks/task-1": async (call) => {
+        if (call.headers["Idempotency-Key"] !== "key-1") {
+          return makeTask({
+            id: "task-1",
+            project_id: "proj-q3",
+            tag_ids: ["tag-calls", "tag-home"],
+            revision: 10,
+          });
+        }
+        await first.held;
+        return accepted();
+      },
+    });
+
+    const view = await renderQueue();
+    await waitFor(() => expect(backend.callsTo("PATCH", "/tasks/task-1")).toHaveLength(1));
+
+    await attachSecondTag(view);
+    // Two entries for one task, which invariant 1 permits only here: the edit
+    // could not touch the one in flight without its acceptance deleting work
+    // that was never sent.
+    expect(view.result.current.queue.map((entry) => entry.value.tagIds)).toEqual([
+      ["tag-calls"],
+      ["tag-calls", "tag-home"],
+    ]);
+
+    await act(async () => {
+      first.release();
+    });
+    await waitFor(() => expect(view.result.current.queue).toHaveLength(0));
+
+    expect(keysSent()).toEqual(["key-1", uuidNumber(1)]);
+    // 9 is the revision the first send returned. The successor is re-based onto
+    // it, so the person's own second edit does not arrive as a stale revision
+    // and put a conflict of the app's making in front of them.
+    expect(backend.callsTo("PATCH", "/tasks/task-1")[1].body).toEqual({
+      expected_revision: 9,
+      tag_ids: ["tag-calls", "tag-home"],
+    });
+    expect(await onDevice(IDENTITY)).toBeNull();
+  });
+
+  it("006-FR-009 keeps it on the device when the pass cannot send it yet", async () => {
+    const first = heldSend();
+    await seed(IDENTITY, [queued()]);
+    install({
+      "PATCH /tasks/task-1": async (call) => {
+        if (call.headers["Idempotency-Key"] !== "key-1") {
+          return unreachable();
+        }
+        await first.held;
+        return accepted();
+      },
+    });
+
+    const view = await renderQueue();
+    await waitFor(() => expect(backend.callsTo("PATCH", "/tasks/task-1")).toHaveLength(1));
+    await attachSecondTag(view);
+
+    await act(async () => {
+      first.release();
+    });
+    await waitFor(() => expect(backend.callsTo("PATCH", "/tasks/task-1")).toHaveLength(2));
+
+    // The pass settled the entry it knew about and kept the one it did not.
+    // Deleting it here is silent: no request carried it, and FR-007 means no
+    // surface ever showed it as pending, so the Tag would simply appear to
+    // detach itself some time later.
+    expect(view.result.current.pendingFor("task-1")).toMatchObject({
+      sendState: "queued",
+      observedRevision: 9,
+      value: { tagIds: ["tag-calls", "tag-home"] },
+    });
+    expect(await onDevice(IDENTITY)).toMatchObject([
+      { idempotencyKey: uuidNumber(1), value: { tagIds: ["tag-calls", "tag-home"] } },
+    ]);
+  });
+});
+
 describe("006-FR-008 a task that changed elsewhere becomes the person's decision", () => {
   const revisionConflict = () =>
     new FakeHttpError(
@@ -808,6 +915,46 @@ describe("006-SC-007 nothing is written that cannot be attributed to an identity
     // only safe answer is to write nothing at all.
     expect(await onDevice(IDENTITY)).toBeNull();
     expect(backend.calls).toEqual([]);
+  });
+
+  it("never reads or sends the account that signed in while a pass was in flight", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await seed(IDENTITY, [queued()]);
+    install({
+      "PATCH /tasks/task-1": async () => {
+        await held;
+        return accepted();
+      },
+      "PATCH /tasks/task-2": unreachable,
+    });
+
+    const view = await renderQueue();
+    await waitFor(() => expect(backend.callsTo("PATCH", "/tasks/task-1")).toHaveLength(1));
+
+    // Somebody else signs in while the first account's request is still out.
+    await seed(OTHER_IDENTITY, [
+      queued({ taskId: "task-2", accountId: OTHER_ACCOUNT, idempotencyKey: "key-2" }),
+    ]);
+    await view.rerender({ identity: OTHER_IDENTITY, enabled: true });
+    await waitFor(() =>
+      expect(view.result.current.queue.map((entry) => entry.taskId)).toEqual(["task-2"]),
+    );
+
+    await act(async () => {
+      release();
+    });
+    await waitFor(() => expect(view.refetches).toEqual(["refetch"]));
+
+    // The second account's own drain never ran — one pass at a time, and the
+    // first account's was holding it — so the only thing that could have sent
+    // task-2 is a pass reaching into a queue that stopped being its own.
+    expect(backend.callsTo("PATCH", "/tasks/task-2")).toEqual([]);
+    // And what is on screen is still the account that is signed in.
+    expect(view.result.current.queue.map((entry) => entry.taskId)).toEqual(["task-2"]);
+    expect(await onDevice(OTHER_IDENTITY)).toMatchObject([{ taskId: "task-2" }]);
   });
 
   it("discards a cold read that only finishes after somebody else has signed in", async () => {
