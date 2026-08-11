@@ -44,9 +44,14 @@ device-local queue and the pure logic around it.
 
 **Consent & Safety.** No new consent surface: no new personal data is collected and no AI provider is involved. One new place account content rests — the device queue — and FR-011 bounds its lifetime to a single account-and-server pairing, clearing on any identity transition. No real data, secrets, transcripts, paths or fingerprints are committed or logged; the queue holds task ids and classification ids the device already had.
 
-**Tests.** Failing first, then passing: the queue reducer's coalescing and identity-binding tests (`006-FR-010`, `006-FR-011`), the conflict-decision table (`006-FR-008`), the offline create-guard (`006-FR-016`), and an integration test driving `PATCH /tasks/{id}` with a stale `expected_revision` to prove the rejection path is the ordinary one (`006-FR-008`). Edge cases from the spec — a queued change for a deleted task, a Tag added then removed before the drain, a mid-send sign-out — are table cases in the reducer suite.
+**Tests.** Failing first, then passing: the queue reducer's coalescing and identity-binding tests (`006-FR-010`, `006-FR-011`), the conflict-decision table (`006-FR-008`), the offline create-guard (`006-FR-016`), the single-flight and stable-key rules (`006-FR-017`), and an integration test driving `PATCH /tasks/{id}` with a stale `expected_revision` to prove the rejection path is the ordinary one (`006-FR-008`). A second integration test sends one entry's key twice and asserts one applied change, which is the only honest proof of `006-FR-017` — a unit test would assert that the mock was written. Edge cases from the spec — a queued change for a deleted task, a Tag added then removed before the drain, a mid-send sign-out — are table cases in the reducer suite.
 
-**Contracts.** **No contract changes.** `TaskUpdateRequest` already carries `project_id`, `tag_ids` and the required `expected_revision`; `POST /projects` and `POST /tags` already exist and are already called from `mobile/src/api/client.ts` with idempotency keys. The only backend edit is adding one name to `KNOWN_FEATURE_FLAGS` in `backend/app/core/config.py`, which widens an allow-list and breaks nothing. `/auth/me` already returns `feature_flags`, so the flag needs no new endpoint either.
+**Contracts.** **No contract changes.** `TaskUpdateRequest` already carries `project_id`, `tag_ids` and the required `expected_revision`; `POST /projects` and `POST /tags` already exist and are already called from `mobile/src/api/client.ts` with idempotency keys. The only backend edit is adding one name to `KNOWN_FEATURE_FLAGS` in `backend/app/core/config.py`, which widens an allow-list and breaks nothing. `/auth/me` already returns `feature_flags`, so the flag needs no new endpoint either. FR-017 needs no contract change
+either, and this was checked rather than assumed: `backend/app/api/tasks.py`
+already *requires* an `Idempotency-Key` header on every task mutation, and
+`mobile/src/api/client.ts` already takes the key as a caller-supplied argument
+rather than minting one per call. The queue entry owning its key is therefore a
+change to who generates the value, not to the wire.
 
 **Observability.** Every user-visible failure carries the correlation id of the failed request (FR-012), matching the rest of the product. The queue logs enqueue, drain-attempt and drain-outcome with the correlation id and the task id — never the classification names, which are user content.
 
@@ -93,6 +98,8 @@ backend/
 
 mobile/src/
 ├── auth/SessionProvider.tsx                # +1 flag read, fail closed, beside voiceEnabled
+│                                           # + persist accountId, + distinguish 401 from offline
+├── features/tasks/classificationCache.ts   # NEW: project/Tag lists survive a cold start offline
 ├── api/client.ts                           # unchanged — updateTask/createProject/createTag exist
 ├── features/tasks/
 │   ├── classificationQueue.ts              # NEW pure: enqueue, coalesce, bind identity, clear
@@ -107,8 +114,13 @@ mobile/src/
 └── app/task/[id].tsx                       # rows become editable; footer shows last synced
 
 mobile/src/features/tasks/__tests__/        # Jest over the pure modules only
-mobile/tests/integration/                   # real client vs disposable local backend
+mobile/integration/                         # real client vs disposable local backend
 ```
+
+The integration path is `mobile/integration/`, which is what `make
+integration-mobile` actually runs. An earlier draft of this plan wrote
+`mobile/tests/integration/`, a directory that does not exist; the constitution
+requires plans to name real paths, and a reviewer caught it.
 
 **Structure decision.** Four of the nine new mobile files are pure modules with
 no React import. That split is forced rather than stylistic: with no
@@ -116,6 +128,29 @@ component-render test library in `mobile/`, anything left inside a component is
 untestable except through the integration harness, so every rule worth asserting
 — coalescing, identity binding, conflict outcomes, staleness — is pushed out of
 the components and into functions that take state and return state.
+
+### Two mechanisms the review found missing
+
+Both are required by requirements already agreed, not by new ones. Neither was
+in the first draft of this plan, and without either the feature does not work
+after the case it exists for — a cold start with no connection.
+
+**Identity must be readable offline.** The storage key is
+`<serverUrl>.<accountId>`, but today the only source of `accountId` is
+`/auth/me`, which is exactly the call that fails offline. On a cold start with
+no connection the key cannot be constructed, so the queue cannot be read, so
+FR-009 fails. `SessionProvider` therefore persists the account id alongside the
+server URL on every successful `/auth/me`, and the queue reads that rather than
+the live session.
+
+**The pickers need a cache that survives a cold start.** `design.md` says
+existing projects and Tags stay "selectable from cache" offline. React Query's
+cache is in memory and `mobile/` installs no persister, so after a cold start
+that cache is empty and the claim is false — a person offline would see empty
+pickers and could classify nothing, which is the whole of FR-006. The project
+and Tag lists are therefore written to `AsyncStorage` on every successful fetch
+and read back when the fetch fails. This is a list of names the device already
+displayed, under the same identity key as the queue and cleared with it.
 
 ## Testing strategy
 
@@ -137,6 +172,24 @@ component in a test.** Three consequences shape the whole plan.
 The end-to-end criterion the human named — change it on the phone, see it in
 the web client — is a manual check. It is recorded as such in `quickstart.md`
 rather than dressed up as automation.
+
+### Every User Story 1 scenario, and what proves it
+
+The review found three of the five with no test path at all. Each now has one,
+and where the only honest answer is "a person looks at it", that is what it
+says — the acceptance auditor grades against this table.
+
+| scenario | evidence |
+|---|---|
+| 1 — set a project on a task that had none | integration: `PATCH` with `project_id`, re-read shows it |
+| 2 — clear a project | integration: `PATCH` with `project_id: null`, re-read shows none. The reducer's `null`-vs-`undefined` case is a unit test — `null` must survive coalescing as a deliberate clear |
+| 3 — add two tags, order-independent | reducer unit test over both orders producing one set; integration confirms the set round-trips |
+| 4 — remove one of two tags | integration: `PATCH` with the one-element set. Reducer test that removing a tag added in the same offline session leaves no entry at all |
+| 5 — pick a second project, only the newer survives | reducer unit test: two project changes coalesce to one entry, not two; integration confirms the server holds one project |
+
+Scenarios 2, 4 and 5 are all cases where the wrong answer is silent — an
+un-cleared project, a re-attached tag, a stale project — which is why each is
+pinned at the reducer, where the failure is a diff, and not only at the wire.
 
 ## Risks
 

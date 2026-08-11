@@ -37,7 +37,7 @@ own. Their per-state rows live under M-01.
 | empty (first run) | task has no project and no Tags | Rows present with muted placeholders, not hidden | "Add a project", "Add Tags" | FR-001, FR-002 |
 | empty (filtered to nothing) | n/a on this screen | — | — | — |
 | error | save rejected for any reason other than revision | Row reverts to the server value, inline error, retry | "Could not save. Tap to try again." + correlation id | FR-012 |
-| partial failure | project saved, Tags rejected (or the reverse) | The succeeded half shows as saved, the failed half reverts and is named | "Project saved. Tags could not be saved." | FR-012 |
+| partial failure | **unreachable as specified** — `PATCH /tasks/{id}` is atomic, so no event sequence produces a half-saved task. Open decision 4 | The succeeded half shows as saved, the failed half reverts and is named | "Project saved. Tags could not be saved." | FR-012 |
 | offline / interrupted | no connection at the moment of the change | Change applied locally and shown as made. No marker, no banner, no per-row decoration. The footer's last-synced time is the only signal | "Last synced 14 minutes ago" | FR-006, FR-007, SC-004 |
 | flag OFF | server-owned flag defaults OFF | Exactly today's screen: values shown, no controls, no disabled affordances | — | FR-015 |
 
@@ -51,7 +51,8 @@ own. Their per-state rows live under M-01.
 | empty (filtered to nothing) | search matches nothing | Create row carrying the typed name | "Create \"<typed>\"" | FR-004, FR-005 |
 | error | list fetch failed | Inline retry, the current value still shown and still clearable | + correlation id | FR-012 |
 | partial failure | n/a — one list, one call | — | — | — |
-| offline / interrupted | no connection | Existing projects still selectable from cache; create row disabled with a reason | "Needs a connection — new projects are named by the server" | FR-016 |
+| offline / interrupted | no connection | Existing projects still selectable — from the list last stored on the device, which survives a cold start; create row disabled with a reason | "Needs a connection — new projects are named by the server" | FR-016 |
+| offline, never fetched | offline and this device has never loaded the list | The empty-first-run copy would be a lie here, so it says so and offers no create row | "Can't load your projects without a connection" | FR-016 |
 
 ### M-03 — Tag picker
 
@@ -62,8 +63,9 @@ own. Their per-state rows live under M-01.
 | empty (first run) | no Tags exist | Create row only | "No Tags yet" | FR-004 |
 | empty (filtered to nothing) | search matches nothing | Create row carrying the typed name | "Create \"<typed>\"" | FR-004, FR-005 |
 | error | list fetch failed | Inline retry; already-attached Tags still shown | + correlation id | FR-012 |
-| partial failure | some Tag changes saved, others not | Named per Tag, not as one blanket failure | — | FR-012 |
-| offline / interrupted | no connection | Existing Tags selectable; create row disabled with the reason visible before it is tapped | "Needs a connection — new Tags are named by the server" | FR-016 |
+| partial failure | **unreachable as specified** — `tag_ids` is sent as one intended set, applied whole or not at all. Open decision 4 | Named per Tag, not as one blanket failure | — | FR-012 |
+| offline / interrupted | no connection | Existing Tags selectable from the list last stored on the device; create row disabled with the reason visible before it is tapped | "Needs a connection — new Tags are named by the server" | FR-016 |
+| offline, never fetched | offline and this device has never loaded the list | Stated plainly rather than shown as "no Tags yet" | "Can't load your Tags without a connection" | FR-016 |
 
 ### M-04 — Conflict resolution
 
@@ -115,6 +117,9 @@ own. Their per-state rows live under M-01.
 - **FR-010** (net effect of several queued changes) — deliberately invisible.
   The person sees one pending state per task, never a list of operations.
 - **FR-014** (no task route, no web change) — an architectural constraint.
+- **FR-017** (at most once) — correctness with no surface. Its absence would be
+  visible, though: a double-applied change is what a person would report as the
+  app undoing their work.
 - **FR-015** has the M-01c state rather than a control: the flag is
   server-owned, so there is nothing for a person to toggle here.
 
@@ -184,10 +189,11 @@ it, and the count-only discard warning, were both accepted.
    The consequence to watch is that unsent work is now invisible on the task
    screen — the only surfaces that reveal it are the last-synced time, which
    says *when* and never *what*, and the discard warning at M-05, which is also
-   the last moment to act on it. That is why M-05 lists the pending items rather
-   than only counting them, and why M-04 must name what was changed: a person
-   can reach a conflict prompt for a change nothing ever told them was in
-   flight.
+   the last moment to act on it. That is why M-04 must name what was changed: a
+   person can reach a conflict prompt for a change nothing ever told them was in
+   flight. M-05 does **not** name them — decision 2 below was taken in the same
+   session and deliberately went the other way, which is the whole reason both
+   decisions are recorded separately here.
 2. **Resolved at sign-off: M-05 shows the count only, no list.** With the
    per-change marker also gone, no surface in the app names an unsent change.
    The person can learn that two changes exist and that continuing destroys

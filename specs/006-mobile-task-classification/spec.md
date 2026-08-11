@@ -45,8 +45,40 @@ were verified against the codebase before being asked.
   under Assumptions.
 
 Still open, carried forward rather than answered: the KPI baseline (see
-Assumptions), the ordering rule when several queued changes touch one task,
-and what "connectivity returned" means concretely.
+Assumptions) and what "connectivity returned" means concretely.
+
+### Open product decisions
+
+Raised by the review campaign of 2026-08-11 (run
+`006-mobile-task-classification-c1`), put to the human, and **not yet
+answered**. They are recorded here rather than resolved because the review gate
+classifies them as product decisions: they trade user-visible behaviour against
+cost, and no reviewer or agent has standing to settle them. Implementation is
+blocked on all four. Each names what happens under the current text, so the
+cost of leaving one unanswered is visible rather than implied.
+
+1. **How long may an unsent change rest on the device?** No bound is stated
+   anywhere, so an entry lives until it sends or the person discards it. The
+   device queue is the only place in the product where account content has no
+   retention limit — `docs/data-retention.md` bounds everything else — and the
+   backend's idempotency replay window is 24 hours, so a retry older than that
+   is no longer protected against double-applying by FR-017's mechanism.
+2. **What happens to unsent work when the session ends involuntarily?** See
+   FR-011. `SessionProvider` treats a network failure at cold start the same as
+   a 401, so an offline launch is indistinguishable from a sign-out, and the
+   session token expires by itself after 30 days. Under the current text both
+   destroy the queue with no warning and no action to attach one to.
+3. **Is the coalescing rule settled, and does anything remember the original
+   value?** FR-010 states the net effect as a MUST while this section listed the
+   same question as open, so the two disagree about whether it was ever asked.
+   `data-model.md` implements a net-effect reducer that keeps the first
+   `observedRevision` — which means the value the person started from is not
+   retained, and M-04 cannot say "it was A, you set C" without it.
+4. **Does the partial-failure behaviour stay?** M-01 and M-03 both specify it
+   ("Project saved. Tags could not be saved."), and `PATCH /tasks/{id}` is
+   atomic, so no sequence of events can produce that state. Either the design
+   states an outcome that cannot occur, or the feature needs two calls per
+   change — which is a materially larger queue with a new desynchronised state.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -226,10 +258,19 @@ time advances.
 - **FR-010**: When several queued changes target the same task, the system MUST
   send the net effect rather than replaying each in turn.
 - **FR-011**: Every queued change MUST record the account and the server it was
-  made against, and MUST NOT be displayed or sent under any other. On sign-out,
-  an account change or a server change, unsent changes MUST be warned about and
-  then discarded, so no account's content is left on the device under another
-  identity.
+  made against, and MUST NOT be displayed or sent under any other. On a
+  **deliberate** sign-out, account change or server change, unsent changes MUST
+  be warned about and then discarded, so no account's content is left on the
+  device under another identity. What happens when the session ends without
+  anyone choosing it — an expired token, or a network failure the client cannot
+  currently tell apart from a rejection — is open decision 2 and MUST be settled
+  before implementation; the warning this requirement relies on cannot be shown
+  on a path where there was no action to warn about.
+- **FR-017**: A queued change MUST reach the server at most once. Each entry
+  MUST carry an idempotency key generated when the entry is created and reused
+  unchanged on every retry, and the system MUST NOT have two sends of one entry
+  in flight at the same time. A request that times out or loses its connection
+  MAY already have been applied; retrying it MUST NOT be able to apply it twice.
 - **FR-015**: Production exposure of this behavior MUST be controlled by a
   server-owned feature flag defaulting to OFF, per AGENTS.md. The flag governs
   exposure only and is never authorization.
