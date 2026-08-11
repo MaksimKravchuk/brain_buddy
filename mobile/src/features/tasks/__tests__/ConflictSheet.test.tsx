@@ -179,10 +179,7 @@ describe("006-FR-010 M-04 names all three values", () => {
       now: undefined,
     });
 
-    // Not on the first frame: React's purity rule forbids reading the clock
-    // during render, so the sheet states the change without its age until its
-    // own effect has run. Both ages then appear together.
-    expect(await screen.findByText("You changed the project 14 minutes ago")).toBeOnTheScreen();
+    expect(screen.getByText("You changed the project 14 minutes ago")).toBeOnTheScreen();
     expect(screen.getByText("as of 3 weeks ago")).toBeOnTheScreen();
   });
 
@@ -429,6 +426,7 @@ describe("006-SC-005 M-04 when there is nothing to decide", () => {
     }
 
     await render(<TaskScreen />);
+    await letTheSheetReadTheClock();
     // The scrim, standing in for Escape and for backgrounding the app.
     await fireEvent.press(screen.getByLabelText("Close"));
 
@@ -436,6 +434,7 @@ describe("006-SC-005 M-04 when there is nothing to decide", () => {
     expect(screen.queryByText(KEEP_MINE)).toBeNull();
 
     await fireEvent.press(screen.getByText("Back on the task"));
+    await letTheSheetReadTheClock();
 
     // Nothing was resolved and nothing discarded: the question comes back whole.
     expect(screen.getByText("You changed the project 14 minutes ago")).toBeOnTheScreen();

@@ -88,11 +88,12 @@ function TaskWithProjectPicker({
         onClose={() => setVisible(false)}
         value={value}
         onSelect={(projectId) => {
-          setValue(
-            projectId === null
-              ? null
-              : { id: projectId, ...(nameOf(projectId) === undefined ? {} : { name: nameOf(projectId)! }) },
-          );
+          if (projectId === null) {
+            setValue(null);
+            return;
+          }
+          const name = nameOf(projectId);
+          setValue(name === undefined ? { id: projectId } : { id: projectId, name });
         }}
         onCreate={
           onCreate ??
