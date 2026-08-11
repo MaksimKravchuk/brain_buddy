@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { StyleSheet, TextInput, View } from "react-native";
 
 import type { OpenTaskState, TaskResponse, TaskTransitionRequest } from "@/api/types";
@@ -20,20 +20,41 @@ interface ReopenSheetProps {
 
 /** Reopen requires an explicitly chosen destination (waiting also collects waiting_for). */
 export function ReopenSheet({ task, onClose, onReopen, pending = false, error }: ReopenSheetProps) {
+  return (
+    <Sheet visible={task !== null} onClose={onClose} title="Reopen task">
+      {/* Mounted per task, so opening the sheet always starts from an empty
+          form without an effect that clears it. A refetch of the same task no
+          longer discards a destination the user has already picked. */}
+      {task ? (
+        <ReopenForm
+          key={task.id}
+          task={task}
+          onReopen={onReopen}
+          pending={pending}
+          error={error}
+        />
+      ) : null}
+    </Sheet>
+  );
+}
+
+function ReopenForm({
+  task,
+  onReopen,
+  pending,
+  error,
+}: {
+  task: TaskResponse;
+  onReopen: (payload: TaskTransitionRequest) => void;
+  pending: boolean;
+  error?: unknown;
+}) {
   const [destination, setDestination] = useState<OpenTaskState | null>(null);
   const [waitingFor, setWaitingFor] = useState("");
   const [guardError, setGuardError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (task) {
-      setDestination(null);
-      setWaitingFor("");
-      setGuardError(null);
-    }
-  }, [task]);
-
   const submit = () => {
-    if (!task || !destination) {
+    if (!destination) {
       return;
     }
     const guard = buildTransition(task, {
@@ -51,39 +72,35 @@ export function ReopenSheet({ task, onClose, onReopen, pending = false, error }:
   };
 
   return (
-    <Sheet visible={task !== null} onClose={onClose} title="Reopen task">
-      {task ? (
-        <View style={styles.body}>
-          <BBText variant="body" color={colors.fg4} numberOfLines={2}>
-            {task.title}
-          </BBText>
-          <BBText variant="label">Reopen into</BBText>
-          <StatePicker value={destination} onChange={setDestination} />
-          {destination === "waiting" ? (
-            <View style={styles.field}>
-              <BBText variant="label">Waiting for</BBText>
-              <TextInput
-                style={styles.input}
-                value={waitingFor}
-                onChangeText={setWaitingFor}
-                placeholder="Who or what are you waiting on?"
-                placeholderTextColor={colors.fg6}
-                editable={!pending}
-              />
-            </View>
-          ) : null}
-          {guardError ? (
-            <BBText variant="caption" color={colors.dangerFg}>
-              {guardError}
-            </BBText>
-          ) : null}
-          {error ? <ErrorBanner error={error} /> : null}
-          <Button onPress={submit} disabled={!destination} loading={pending}>
-            Reopen
-          </Button>
+    <View style={styles.body}>
+      <BBText variant="body" color={colors.fg4} numberOfLines={2}>
+        {task.title}
+      </BBText>
+      <BBText variant="label">Reopen into</BBText>
+      <StatePicker value={destination} onChange={setDestination} />
+      {destination === "waiting" ? (
+        <View style={styles.field}>
+          <BBText variant="label">Waiting for</BBText>
+          <TextInput
+            style={styles.input}
+            value={waitingFor}
+            onChangeText={setWaitingFor}
+            placeholder="Who or what are you waiting on?"
+            placeholderTextColor={colors.fg6}
+            editable={!pending}
+          />
         </View>
       ) : null}
-    </Sheet>
+      {guardError ? (
+        <BBText variant="caption" color={colors.dangerFg}>
+          {guardError}
+        </BBText>
+      ) : null}
+      {error ? <ErrorBanner error={error} /> : null}
+      <Button onPress={submit} disabled={!destination} loading={pending}>
+        Reopen
+      </Button>
+    </View>
   );
 }
 

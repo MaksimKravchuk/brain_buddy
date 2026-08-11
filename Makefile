@@ -1,6 +1,6 @@
 .PHONY: install-backend install-frontend dev-backend dev-frontend lint-backend lint-frontend test-backend ci-backend test-frontend test-e2e build-frontend ci-frontend validate-ci check-specs install-mobile typecheck-mobile test-mobile integration-mobile build-mobile ci-mobile \
 	verify-all verify-backend verify-frontend verify-mobile typecheck-frontend lint-mobile format-backend format-check-backend mutation-backend mutation-frontend \
-	mutation-gate-backend
+	mutation-mobile mutation-gate-backend
 
 install-backend:
 	cd backend && python -m pip install -e .[dev]
@@ -131,7 +131,10 @@ validate-ci:
 	python3 -m unittest scripts/test_classify_path_risk.py -v
 	python3 -m unittest scripts/test_check_smoke_identity_cohort.py -v
 	python3 scripts/validate_ci_artifacts.py workflow --ci .github/workflows/ci.yml --frontend-vite-config frontend/vite.config.ts --disallow-workflow frontend/.github/workflows/playwright.yml
-	python3 scripts/validate_ci_artifacts.py mutation-workflow --workflow .github/workflows/mutation-quality.yml
+	python3 scripts/validate_ci_artifacts.py mutation-workflow \
+		--workflow .github/workflows/mutation-quality.yml \
+		--frontend-stryker-config frontend/stryker.config.json \
+		--mobile-stryker-config mobile/stryker.config.json
 	python3 scripts/validate_ci_artifacts.py coverage-suppressions --path frontend/src --path mobile/src
 	python3 scripts/validate_ci_artifacts.py mutation-scope --config frontend/stryker.config.json --enforced frontend/mutation-enforced-scope.txt
 	python3 scripts/validate_trunk_delivery.py trunk-ci --ci .github/workflows/ci.yml
@@ -162,6 +165,16 @@ test-mobile:
 	cd mobile && npx jest --coverage
 	python3 scripts/validate_coverage_floor.py --stack mobile --format istanbul-summary \
 		--report mobile/coverage/coverage-summary.json --floor mobile/coverage-floor.json
+
+# Report-only, like mutation-backend: the deterministic-core scope lives in
+# mobile/stryker.config.json and is fixed by ADR-0015.
+mutation-mobile:
+	cd mobile && rm -rf mutation-artifacts .stryker-tmp reports
+	cd mobile && npx stryker run || true
+	python3 scripts/mutation_gate.py summarize-stryker \
+		--report mobile/mutation-artifacts/mutation-report.json \
+		--summary-out mobile/mutation-artifacts/observed-summary.txt \
+		--survivors-out mobile/mutation-artifacts/observed-survivors.txt
 
 # Boots its own disposable backend (requires backend deps: make install-backend)
 integration-mobile:

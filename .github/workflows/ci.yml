@@ -45,7 +45,9 @@ jobs:
             --frontend-vite-config frontend/vite.config.ts \
             --disallow-workflow frontend/.github/workflows/playwright.yml
           python3 scripts/validate_ci_artifacts.py mutation-workflow \
-            --workflow .github/workflows/mutation-quality.yml
+            --workflow .github/workflows/mutation-quality.yml \
+            --frontend-stryker-config frontend/stryker.config.json \
+            --mobile-stryker-config mobile/stryker.config.json
           python3 scripts/validate_ci_artifacts.py preview-workflow \
             --workflow .github/workflows/fly-review-frontend.yml
 

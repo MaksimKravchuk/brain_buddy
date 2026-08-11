@@ -14,6 +14,13 @@ name: Mutation quality (report-only)
 # src/utils/error.ts and src/utils/telemetry.ts (ADR-0013). React component
 # trees are outside it: a mutant there is as likely to be caught by a snapshot
 # as by an assertion, which says nothing about the tests.
+#
+# Mobile scope is the deterministic core configured in
+# mobile/stryker.config.json: src/braindump/machine.ts,
+# src/braindump/manifest.ts, src/braindump/uploader.ts,
+# src/braindump/waveform.ts, src/lifecycle/guards.ts and
+# src/config/serverUrl.ts (ADR-0015). Screens, the hooks that drive them, and
+# the device boundaries they stand on are outside it, for the same reason.
 
 on:
   schedule:
@@ -224,6 +231,88 @@ jobs:
         with:
           name: frontend-mutation-evidence-allure-results
           path: frontend/mutation-allure-results
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Fail on mutation runner infrastructure errors
+        if: steps.mutation.outcome == 'failure'
+        run: |
+          echo "Stryker could not finish; raw evidence was uploaded for diagnosis." >&2
+          exit 1
+
+  mobile-observed-mutation:
+    name: Mobile observed-scope mutation evidence
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: mobile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          # Expo SDK 57 requires Node.js 22.13.x or newer.
+          node-version: "22.13.1"
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run mobile observed-scope mutation campaign
+        id: mutation
+        continue-on-error: true
+        run: |
+          rm -rf mutation-artifacts .stryker-tmp reports
+          npx stryker run
+
+      # Rendered from the same report a gate would read, by the same code that
+      # renders the backend's and the frontend's, so the three stacks' scores
+      # cannot come to mean different things.
+      - name: Summarize the mobile scope
+        if: always()
+        working-directory: .
+        run: |
+          mkdir -p mobile/mutation-artifacts mobile/mutation-allure-results
+          python3 scripts/mutation_gate.py summarize-stryker \
+            --report mobile/mutation-artifacts/mutation-report.json \
+            --summary-out mobile/mutation-allure-results/mutation-summary.txt \
+            --survivors-out mobile/mutation-allure-results/mutation-survivors.txt
+          {
+            echo "### Mobile mutation campaign (report-only)"
+            echo '```'
+            cat mobile/mutation-allure-results/mutation-summary.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create report-only Allure evidence
+        if: always()
+        working-directory: .
+        run: |
+          python3 scripts/create_mutation_allure_evidence.py \
+            --summary mobile/mutation-allure-results/mutation-summary.txt \
+            --survivors mobile/mutation-allure-results/mutation-survivors.txt \
+            --scope-label mobile \
+            --output mobile/mutation-allure-results/mutation-evidence-result.json
+
+      - name: Upload mobile mutation report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mobile-mutation-report
+          path: mobile/mutation-artifacts
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload mobile report-only Allure evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mobile-mutation-evidence-allure-results
+          path: mobile/mutation-allure-results
           if-no-files-found: error
           retention-days: 30
 

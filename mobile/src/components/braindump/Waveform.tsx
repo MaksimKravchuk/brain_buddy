@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
 
+import {
+  advanceLevels,
+  amplitudeFromMetering,
+  idleLevels,
+  WAVEFORM_TICK_MS,
+} from "@/braindump/waveform";
 import { colors } from "@/theme/tokens";
 
 interface WaveformProps {
@@ -12,25 +18,40 @@ interface WaveformProps {
 
 /** Sky bars driven by live mic metering — 4px bars per the design. */
 export function Waveform({ metering, active, bars = 24 }: WaveformProps) {
-  const [levels, setLevels] = useState<number[]>(() => Array(bars).fill(0.08));
+  // Mounting the live bars only while recording is what resets the rolling
+  // buffer between sessions: a new recording gets a new component instance and
+  // therefore starts from silence, with no state to clear.
+  return active ? (
+    <LiveBars key={bars} metering={metering} bars={bars} />
+  ) : (
+    <Bars levels={idleLevels(bars)} />
+  );
+}
+
+function LiveBars({ metering, bars }: { metering?: number; bars: number }) {
+  const [levels, setLevels] = useState<number[]>(() => idleLevels(bars));
+
+  // The interval reads the newest metering without re-subscribing on every
+  // reading, so the ref is written from an effect rather than during render.
   const meteringRef = useRef(metering);
-  meteringRef.current = metering;
+  useEffect(() => {
+    meteringRef.current = metering;
+  }, [metering]);
 
   useEffect(() => {
-    if (!active) {
-      setLevels(Array(bars).fill(0.08));
-      return;
-    }
     const timer = setInterval(() => {
-      const db = meteringRef.current;
-      // dBFS → 0..1 amplitude; -50 dB is treated as silence.
-      const amplitude =
-        typeof db === "number" ? Math.min(1, Math.max(0, (db + 50) / 50)) : 0.1;
-      setLevels((previous) => [...previous.slice(1), Math.max(0.08, amplitude)]);
-    }, 150);
-    return () => clearInterval(timer);
-  }, [active, bars]);
+      const amplitude = amplitudeFromMetering(meteringRef.current);
+      setLevels((previous) => advanceLevels(previous, amplitude));
+    }, WAVEFORM_TICK_MS);
+    return () => {
+      clearInterval(timer);
+    };
+  }, []);
 
+  return <Bars levels={levels} />;
+}
+
+function Bars({ levels }: { levels: readonly number[] }) {
   return (
     <View style={styles.row}>
       {levels.map((level, index) => (

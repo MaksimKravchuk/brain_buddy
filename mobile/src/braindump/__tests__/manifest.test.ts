@@ -56,3 +56,28 @@ describe("manifestHash", () => {
     expect(chunks[0].chunk_number).toBe(1);
   });
 });
+
+describe("manifestHash ordering", () => {
+  it("sorts chunks by number, so an out-of-order echo still hashes the same", () => {
+    const ordered = [
+      { chunk_number: 0, sha256: "aa", size_bytes: 10 },
+      { chunk_number: 1, sha256: "bb", size_bytes: 20 },
+      { chunk_number: 2, sha256: "cc", size_bytes: 30 },
+    ];
+    const shuffled = [ordered[2], ordered[0], ordered[1]];
+
+    expect(manifestHash(shuffled, 3)).toBe(manifestHash(ordered, 3));
+  });
+
+  it("does not reorder the caller's array", () => {
+    const chunks = [
+      { chunk_number: 1, sha256: "bb", size_bytes: 20 },
+      { chunk_number: 0, sha256: "aa", size_bytes: 10 },
+    ];
+    const snapshot = [...chunks];
+
+    manifestHash(chunks, 2);
+
+    expect(chunks).toEqual(snapshot);
+  });
+});
