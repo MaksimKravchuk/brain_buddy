@@ -148,6 +148,89 @@ NARROW_COVERAGE_SUPPRESSION = re.compile(
 )
 SOURCE_SUFFIXES = (".ts", ".tsx", ".js", ".jsx")
 EXECUTED_ALLURE_STATUSES = {"passed", "failed", "broken"}
+# A change touching no stack uploads no Allure results, and
+# `actions/download-artifact` does not create its target directory when nothing
+# matches. The aggregate validator then failed on a directory that was never
+# going to exist, which made every documentation-only pull request unmergeable
+# -- and stages 1 through 9 of a spec-driven feature produce nothing but
+# documentation commits. The short circuit these strings guard is the fix;
+# deleting it silently restores the breakage for the next spec-only branch.
+#
+# Narrow on purpose. Only `backend` and `frontend` upload results -- the `e2e`
+# job derives its own RUN from those two and `mobile` uploads none -- so those
+# two are the entire predicate. It must NOT grow to cover "a stack ran and
+# produced no results": that is a real defect and the validator exists to fail
+# on it.
+#
+# The step anchors below are deliberately two-line, binding the guard to the
+# `if:` on the specific steps it protects. A bare "if: steps.aggregate..."
+# substring was the first version and it did not bite: the "Post PR Allure
+# report link" step carries the same condition joined to another with `&&`, so
+# deleting the gate from the download and validate steps left the substring
+# present and the invariant green over a workflow that fails on every
+# specs-only branch. An invariant satisfiable by code that does not work is
+# worse than none.
+ALLURE_AGGREGATION_REQUIREMENTS = (
+    ("Allure aggregation short-circuit step", "      - name: Decide whether there is anything to aggregate\n        id: aggregate"),
+    (
+        # Three, not two. `mobile` began uploading Allure results when the
+        # mobile Jest suite gained taxonomy, and this invariant was not moved
+        # with it — so a mobile-only pull request skipped every aggregation
+        # step and still went green, with no report and no link. An invariant
+        # that names the wrong set is worse than none: it reads as coverage of
+        # exactly the case it misses.
+        "Allure aggregation predicate over the three uploading stacks",
+        'if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ] || [ "$MOBILE" = "true" ]; then',
+    ),
+    # Selected-to-run is not produced-something. A stack job is skipped when
+    # `spec-kit` is red, which is the normal state of a spec-driven branch, so
+    # the `changes` output alone reports stacks that uploaded nothing.
+    # One entry per uploading stack, and `!= 'skipped'` rather than
+    # `== 'success'`. A stack that ran and failed still uploaded its results
+    # under `always()`, and that is the run whose report a person most needs;
+    # requiring success hid it precisely then.
+    #
+    # Listing all three matters as much as the predicate itself: the shell line
+    # below can name MOBILE while the environment binds it to a constant, and
+    # the invariant would still pass over exactly the regression it claims to
+    # prevent. That is the defect this file's own header warns about.
+    #
+    # Hence anchored to the environment key, not a bare substring. Naming all
+    # three was necessary and not sufficient: the unanchored form asked whether
+    # the expression existed anywhere in the workflow, so binding `MOBILE` to a
+    # constant and leaving the real conjunction on an unread sibling key passed.
+    # The hole was closed only by the accident that each string appeared exactly
+    # once. `KEY: ${{ ... }}` binds the predicate to the variable the shell
+    # below actually reads, which is the property being asserted.
+    (
+        "Allure predicate conjoins selection with the backend job actually running",
+        "          BACKEND: ${{ needs.changes.outputs.backend == 'true'"
+        " && needs.backend.result != 'skipped' }}\n",
+    ),
+    (
+        "Allure predicate conjoins selection with the frontend job actually running",
+        "          FRONTEND: ${{ needs.changes.outputs.frontend == 'true'"
+        " && needs.frontend.result != 'skipped' }}\n",
+    ),
+    (
+        "Allure predicate conjoins selection with the mobile job actually running",
+        "          MOBILE: ${{ needs.changes.outputs.mobile == 'true'"
+        " && needs.mobile.result != 'skipped' }}\n",
+    ),
+    (
+        "gate on the Allure download step",
+        "      - name: Download Allure results\n        if: steps.aggregate.outputs.run == 'true'",
+    ),
+    (
+        "gate on the aggregate Allure validation step",
+        "      - name: Validate aggregate Allure results\n        if: steps.aggregate.outputs.run == 'true'",
+    ),
+    (
+        "aggregate Allure taxonomy validation still runs",
+        "--path allure-results --label aggregate-allure",
+    ),
+)
+
 E2E_CI_REQUIREMENTS = (
     ("e2e CI job", "  e2e:"),
     ("Compose Playwright E2E job name", "Compose Playwright E2E"),
@@ -710,6 +793,14 @@ def _missing_e2e_ci_errors(workflow_text: str) -> list[str]:
     return errors
 
 
+def _missing_allure_aggregation_errors(workflow_text: str) -> list[str]:
+    errors: list[str] = []
+    for label, snippet in ALLURE_AGGREGATION_REQUIREMENTS:
+        if snippet not in workflow_text:
+            errors.append(f"missing {label}: {snippet}")
+    return errors
+
+
 def validate_workflow(
     ci: Path, disallowed_workflows: list[Path], frontend_vite_config: Path | None
 ) -> int:
@@ -722,6 +813,7 @@ def validate_workflow(
         errors.extend(_missing_artifact_errors(workflow_text))
         errors.extend(_missing_frontend_ci_errors(workflow_text))
         errors.extend(_missing_e2e_ci_errors(workflow_text))
+        errors.extend(_missing_allure_aggregation_errors(workflow_text))
         errors.extend(_path_filter_errors(workflow_text))
         errors.extend(_job_graph_errors(workflow_text))
         errors.extend(_mutation_gate_errors(workflow_text))
