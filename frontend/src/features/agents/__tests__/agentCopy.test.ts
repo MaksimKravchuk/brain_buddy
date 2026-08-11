@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AgentConnectionResponse } from "../../../api/agentTypes";
 import {
+  awaitsAnswer,
   capabilityDisclosure,
   connectionStatusDetail,
   connectionStatusLabel,
@@ -27,6 +28,12 @@ const base: AgentConnectionResponse = {
 };
 
 describe("agentCopy", () => {
+  it("keeps a disclosed blocked question answerable even before needs_user is projected", () => {
+    expect(
+      awaitsAnswer({ question_text: "Approve?", needs_user: false, reported_state: "blocked" })
+    ).toBe(true);
+  });
+
   it("never calls an untested or failing connection ready", () => {
     expect(connectionStatusLabel({ ...base, status: "untested", ready_for_handoff: false })).toBe("Not tested");
     expect(connectionStatusLabel({ ...base, status: "invalid_credentials", ready_for_handoff: false })).toBe(
