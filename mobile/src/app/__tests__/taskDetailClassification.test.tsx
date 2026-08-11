@@ -934,6 +934,32 @@ describe("task detail — a queued change the server rejected", () => {
     ).toBeOnTheScreen();
   });
 
+  it("006-FR-010 still names a server value for an entry parked before one was recorded", async () => {
+    // Not a failing-first test: a parity guardrail on the fallback the fix
+    // introduced. An entry parked by the previous build carries a revision and
+    // no values, and it is found on the device after the upgrade like any
+    // other. The screen's own copy is then the only server value that exists,
+    // so the row is sourced from it — dropping to "None" would invent a clear
+    // nobody made, and dropping the row would leave the sheet naming two
+    // values where the choice turns on the third.
+    await seedQueue([
+      queuedChange({
+        sendState: "conflicted",
+        conflictReason: "stale-revision",
+        conflictServerRevision: 5,
+        observedRevision: 1,
+        lastEditedAt: new Date(Date.now() - 14 * MINUTE).toISOString(),
+        firstQueuedAt: new Date(Date.now() - 14 * MINUTE).toISOString(),
+      }),
+    ]);
+
+    await openTask(makeTask({ id: "t1", project_id: "p1", tag_ids: [], revision: 5 }));
+
+    expect(await screen.findByText("Keep mine, replace theirs")).toBeOnTheScreen();
+    expect(screen.getByLabelText("Now on server: Wedding")).toBeOnTheScreen();
+    expect(screen.getByLabelText("You changed it to: Q3 launch")).toBeOnTheScreen();
+  });
+
   it("006-SC-005 lets the question be left unanswered, and asks it again next time", async () => {
     // M-04 "dismissed": treated as not yet answered. The scrim and the
     // platform back gesture must close the sheet — a person who cannot leave
