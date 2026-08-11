@@ -148,11 +148,14 @@ describe("006-FR-011 M-05 what the person is told", () => {
     ["server-change", "Switching server discards them,"],
   ];
 
-  it.each(TRIGGERS)("006-FR-011 names the transition that discards, for %s", async (trigger, opening) => {
-    await renderSheet({ trigger });
+  it.each(TRIGGERS)(
+    "006-FR-011 names the transition that would discard the work: %s",
+    async (trigger, opening) => {
+      await renderSheet({ trigger });
 
-    expect(screen.getByText(new RegExp(`^${opening}`))).toBeOnTheScreen();
-  });
+      expect(screen.getByText(new RegExp(`^${opening}`))).toBeOnTheScreen();
+    },
+  );
 
   it("006-FR-011 shows nothing at all while it is closed", async () => {
     await renderSheet({ visible: false });

@@ -106,6 +106,11 @@ function rowNames(): string[] {
     .map((row) => String(row.props.accessibilityLabel));
 }
 
+/** The progress indicators inside one button — how a button says it is busy. */
+function progressIn(button: ReturnType<typeof screen.getByLabelText>) {
+  return button.queryAll((node) => node.type === "ActivityIndicator");
+}
+
 /** A promise the test settles, so the in-flight state can be looked at. */
 function deferred() {
   let settle: () => void = () => {};
@@ -263,9 +268,11 @@ describe("006-FR-008 M-04 choosing", () => {
     await fireEvent.press(screen.getByLabelText(KEEP_MINE));
 
     // The chosen button keeps its accessible name while its label gives way to
-    // the spinner, so it is still findable and still says what it is doing.
-    expect(screen.getByLabelText(KEEP_MINE)).toBeDisabled();
+    // a spinner, so it is still findable and still says what it is doing.
+    const chosen = screen.getByLabelText(KEEP_MINE);
+    expect(chosen).toBeDisabled();
     expect(screen.queryByText(KEEP_MINE)).toBeNull();
+    expect(progressIn(chosen)).toHaveLength(1);
 
     // The other is disabled and still on screen: hiding it lets a second tap
     // land on whatever moves into its place.
@@ -275,12 +282,16 @@ describe("006-FR-008 M-04 choosing", () => {
       `${DISCARD_MINE}. Waiting for the choice you made to finish`,
     );
     expect(other).toBeDisabled();
+    // Waiting, not working: only the button that was tapped shows progress.
+    expect(progressIn(other)).toHaveLength(0);
 
     await act(async () => {
       keep.settle();
     });
 
+    const settled = screen.getByLabelText(KEEP_MINE);
     expect(screen.getByText(KEEP_MINE)).toBeOnTheScreen();
+    expect(progressIn(settled)).toHaveLength(0);
     expect(screen.getByLabelText(DISCARD_MINE)).toBeOnTheScreen();
     expect(screen.queryByText("Waiting for the choice you made to finish")).toBeNull();
   });
