@@ -443,6 +443,83 @@ describe("006-FR-010 an edit made while a send is in flight is not written over 
       { idempotencyKey: uuidNumber(1), value: { tagIds: ["tag-calls", "tag-home"] } },
     ]);
   });
+
+  /**
+   * The same edit, but the two writers reach the device out of order.
+   *
+   * `enqueue` and the drain both persist a *snapshot* they captured before
+   * their own await, and nothing serialises them. AsyncStorage is a bridge to
+   * native, so its writes settle in whatever order the platform finishes them,
+   * and the loser overwrites the winner wholesale. `latest()` repairs the pass's
+   * in-memory view after every await; it does nothing for what has already been
+   * handed to storage.
+   *
+   * The visible damage is on the next launch, not this one: invariant 5c revives
+   * the resurrected `sending` entry, so a change the server already applied is
+   * replayed, and the successor goes back out carrying the revision it was
+   * queued with rather than the one the server accepted — a conflict of the
+   * app's own making, put in front of a person who did nothing wrong.
+   */
+  it("006-FR-010 leaves nothing behind when the two writers settle out of order", async () => {
+    const first = heldSend();
+    await seed(IDENTITY, [queued()]);
+    install({
+      "PATCH /tasks/task-1": async (call) => {
+        if (call.headers["Idempotency-Key"] !== "key-1") {
+          return makeTask({
+            id: "task-1",
+            project_id: "proj-q3",
+            tag_ids: ["tag-calls", "tag-home"],
+            revision: 10,
+          });
+        }
+        await first.held;
+        return accepted();
+      },
+    });
+
+    const view = await renderQueue();
+    await waitFor(() => expect(backend.callsTo("PATCH", "/tasks/task-1")).toHaveLength(1));
+
+    // The device boundary, holding the next write back so the edit's snapshot
+    // lands after the pass's. Nothing about the ordering is contrived: two
+    // unsynchronised writers to one key settle either way round, and this file
+    // may not assert on the half that happens to pass.
+    const store = AsyncStorage as unknown as Record<string, unknown>;
+    const write = store.setItem as (key: string, value: string) => Promise<void>;
+    let holdNext = true;
+    store.setItem = async (key: string, value: string): Promise<void> => {
+      if (holdNext) {
+        holdNext = false;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      return write.call(AsyncStorage, key, value);
+    };
+
+    try {
+      await act(async () => {
+        const edit = view.result.current.enqueue({
+          taskId: "task-1",
+          value: { tagIds: ["tag-calls", "tag-home"] },
+          observedRevision: 4,
+          displayedValue: { projectId: "proj-q3", tagIds: ["tag-calls"] },
+        });
+        first.release();
+        await edit;
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      });
+    } finally {
+      store.setItem = write;
+    }
+
+    // Both changes reached the server, in order, the second re-based onto the
+    // revision the first returned.
+    expect(keysSent()).toEqual(["key-1", uuidNumber(1)]);
+    expect(view.result.current.queue).toHaveLength(0);
+    // So the device must hold nothing. A queue that survives its own completion
+    // is re-sent on the next cold start under invariant 5c.
+    expect(await onDevice(IDENTITY)).toBeNull();
+  });
 });
 
 describe("006-FR-008 a task that changed elsewhere becomes the person's decision", () => {

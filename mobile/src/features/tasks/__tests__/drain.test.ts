@@ -26,6 +26,7 @@ import {
   drainQueue,
   effectiveClassification,
   hydrateQueue,
+  mergePassResult,
   planDrainStep,
   resolveConflictDiscardMine,
   resolveConflictKeepMine,
@@ -343,6 +344,49 @@ describe("006-FR-010 a pass decides against the queue the device holds now (inva
       sendState: "queued",
       observedRevision: 9,
       value: { tagIds: ["tag-calls", "tag-home"] },
+    });
+  });
+
+  describe("and the edit lands after the pass's last look", () => {
+    /**
+     * `latest` is called after every await, and the last one is still one
+     * microtask short of the caller writing the result back. `enqueue` writes
+     * the queue synchronously, so an edit made in that gap is present when the
+     * result is written and absent from the result — assigning deletes it.
+     */
+    it("keeps an entry the pass never saw", () => {
+      const settled = entry({ idempotencyKey: "key-1" });
+      const successor = entry({ idempotencyKey: "key-2" });
+
+      // The pass accepted key-1 and returned an empty queue; key-2 arrived
+      // afterwards and exists only in the live queue.
+      const merged = mergePassResult([], ["key-1"], [successor]);
+
+      expect(merged).toEqual([successor]);
+      expect(merged).not.toContainEqual(settled);
+    });
+
+    it("does not resurrect an entry the pass settled", () => {
+      const settled = entry({ idempotencyKey: "key-1" });
+
+      // The live queue still shows it only because the writer that produced it
+      // read the queue before the acceptance landed. The pass decided it.
+      expect(mergePassResult([], ["key-1"], [settled])).toEqual([]);
+    });
+
+    it("prefers the pass's own copy of an entry it decided", () => {
+      // Re-presented: same entry, new key, and the pass's version is the one
+      // carrying the revision the server just reported.
+      const represented = entry({ idempotencyKey: "key-9", observedRevision: 11 });
+      const stale = entry({ idempotencyKey: "key-9", observedRevision: 4 });
+
+      expect(mergePassResult([represented], ["key-1"], [stale])).toEqual([represented]);
+    });
+
+    it("is the identity when nothing moved underneath it", () => {
+      const parked = entry({ sendState: "conflicted" });
+
+      expect(mergePassResult([parked], ["key-1"], [parked])).toEqual([parked]);
     });
   });
 

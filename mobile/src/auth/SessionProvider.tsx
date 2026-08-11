@@ -10,7 +10,10 @@ import {
 
 import { createApiClient, type ApiClient } from "@/api/client";
 import type { MeResponse } from "@/api/types";
-import { saveServerTime } from "@/features/tasks/classificationQueue.storage";
+import {
+  clearIdentityStores,
+  saveServerTime,
+} from "@/features/tasks/classificationQueue.storage";
 import {
   currentServerUrl,
   DEFAULT_SERVER_URL,
@@ -254,19 +257,46 @@ export function SessionProvider({ children }: PropsWithChildren) {
   );
 
   /**
-   * A deliberate end. Unlike an involuntary one this forgets the identity, so
-   * callers MUST discard the queue behind the FR-011 warning **before**
-   * calling this — clearing the identity is what makes the queue's key
-   * unnameable.
+   * Forgets one identity on a deliberate transition — its device stores first,
+   * then the identity itself.
+   *
+   * The order is the whole of it. Both halves of every classification key are
+   * `serverUrl` + `accountId` (FR-011, SC-007), so clearing the identity first
+   * leaves the queue and the picker cache not merely present but
+   * **unnameable**: nothing left on the device can compose the key, and
+   * invariant 8b's sweep only deletes a foreign key once a *different* identity
+   * has signed in successfully. On a device where nobody signs in again, one
+   * account's unsent work and its whole project and Tag vocabulary — names the
+   * person wrote — stay on disk with nothing that knows how to ask for them.
+   *
+   * This was documented as the caller's job, and no caller did it. A rule that
+   * lives only in a comment above the function that breaks it is not a rule.
+   *
+   * Deliberate only. An involuntary end (a 401) keeps both the identity and the
+   * work, which is the whole of SC-008.
    */
+  const forgetIdentity = useCallback(async (url: string, fallbackAccountId?: string | null) => {
+    const known = await loadPersistedIdentity(url);
+    const accountId = known?.accountId ?? fallbackAccountId ?? null;
+    if (accountId) {
+      await clearIdentityStores({ serverUrl: url, accountId });
+    }
+    await clearPersistedIdentity(url);
+  }, []);
+
+  /** A deliberate end: the identity is forgotten, and its device stores go with
+   *  it rather than outliving the only thing that could name them. */
   const signOut = useCallback(async () => {
     const epoch = ++identityEpoch;
+    const url = currentServerUrl();
+    // Before the network call, which may hang or fail: a sign-out the person
+    // asked for must not leave the work behind because logout timed out.
+    await forgetIdentity(url, me?.id ?? identity?.accountId ?? null);
     try {
       await api.logout();
     } catch {
       // Signing out locally is fine even if the network call fails.
     }
-    await clearPersistedIdentity(currentServerUrl());
     if (identityEpoch !== epoch) {
       return;
     }
@@ -274,7 +304,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
     setIdentity(null);
     setFlags(null);
     setStatus("signed-out");
-  }, [api]);
+  }, [api, forgetIdentity, me, identity]);
 
   /**
    * A server change is a real identity transition, which is what settings
@@ -293,7 +323,10 @@ export function SessionProvider({ children }: PropsWithChildren) {
         return;
       }
       const epoch = ++identityEpoch;
-      await clearPersistedIdentity(previous);
+      // A server change is a deliberate identity transition, and settings says
+      // so before it happens, so the previous server's identity is owed the
+      // same clearing as an explicit sign-out.
+      await forgetIdentity(previous, me?.id ?? identity?.accountId ?? null);
       // `saveServerUrl` above already moved the live value; `config/serverUrl`
       // owns it since main #149, so there is no ref to keep in step — only the
       // rendering mirror below.
@@ -307,7 +340,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
       }
       await probe(AbortSignal.timeout(SERVER_CHANGE_PROBE_TIMEOUT_MS));
     },
-    [probe],
+    [probe, forgetIdentity, me, identity],
   );
 
   const refreshMe = useCallback(async () => {

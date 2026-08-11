@@ -156,6 +156,15 @@ export interface DrainPassResult {
   stoppedBecause: DrainStop;
   /** Newest last. Everything the person may need to be told about. */
   decisions: ConflictDecision[];
+  /**
+   * Every idempotency key this pass ever held, including the ones it removed
+   * and the ones it re-minted away from.
+   *
+   * `queue` alone cannot say whether a key missing from it was *settled* or
+   * simply never seen, and those need opposite treatment when the result is
+   * written back over a queue that has moved on — see `mergePassResult`.
+   */
+  decidedKeys: string[];
 }
 
 /**
@@ -438,6 +447,16 @@ export async function drainQueue(
   let lastSyncedAt: string | undefined;
   const decisions: ConflictDecision[] = [];
 
+  /** Every key this pass has had in hand, so the caller can tell an entry this
+   *  pass settled from one it never saw (`mergePassResult`). */
+  const decided = new Set<string>();
+  const remember = (entries: readonly PendingClassificationChange[]): void => {
+    for (const entry of entries) {
+      decided.add(entry.idempotencyKey);
+    }
+  };
+  remember(current);
+
   /**
    * Re-reads the queue from the device, and is called after **every** await
    * below. That is invariant 5b at this layer.
@@ -457,7 +476,9 @@ export async function drainQueue(
    */
   const adopt = (known: PendingClassificationChange[]): PendingClassificationChange[] => {
     const live = port.latest?.();
-    return live === undefined ? known : [...live];
+    const next = live === undefined ? known : [...live];
+    remember(next);
+    return next;
   };
 
   const commit = async (
@@ -470,7 +491,14 @@ export async function drainQueue(
   for (let step = 0; step < MAX_DRAIN_STEPS; step += 1) {
     const plan = planDrainStep(current, port.now());
     if (plan.kind === "idle") {
-      return { queue: plan.queue, settled, lastSyncedAt, stoppedBecause: "drained", decisions };
+      return {
+        queue: plan.queue,
+        settled,
+        lastSyncedAt,
+        stoppedBecause: "drained",
+        decisions,
+        decidedKeys: [...decided],
+      };
     }
 
     // The `sending` marker must be on the device before the request leaves, or
@@ -529,6 +557,7 @@ export async function drainQueue(
       }
     }
 
+    remember(resolution.queue);
     current = await commit(resolution.queue);
     if (resolution.decision) {
       decisions.push(resolution.decision);
@@ -540,11 +569,60 @@ export async function drainQueue(
       settled += 1;
     }
     if (!resolution.continueDraining) {
-      return { queue: current, settled, lastSyncedAt, stoppedBecause: stopReasonFor(resolution), decisions };
+      return {
+        queue: current,
+        settled,
+        lastSyncedAt,
+        stoppedBecause: stopReasonFor(resolution),
+        decisions,
+        decidedKeys: [...decided],
+      };
     }
   }
 
-  return { queue: current, settled, lastSyncedAt, stoppedBecause: "limit", decisions };
+  return {
+    queue: current,
+    settled,
+    lastSyncedAt,
+    stoppedBecause: "limit",
+    decisions,
+    decidedKeys: [...decided],
+  };
+}
+
+/**
+ * Reconciles a finished pass with the queue the device holds now — invariant
+ * 5b, at the one seam `DrainPort.latest` cannot reach.
+ *
+ * `latest` repairs the pass's view after every await, so the result speaks for
+ * every entry the pass saw. It cannot speak for one queued *after* its last
+ * adoption: the pass resolving, returning, and its caller writing the result
+ * back are separated by a microtask, and `enqueue` writes the queue
+ * synchronously. Assigning the result over that is the same deletion `latest`
+ * exists to prevent, arriving through the back door — silent, because no
+ * request ever carried the edit and FR-007 means no surface said it was
+ * pending.
+ *
+ * Identity is the idempotency key, which is what every transition in
+ * `classificationQueue.ts` already keys off. `decidedKeys` is what makes the
+ * merge safe in both directions: a key the pass held and removed was *settled*
+ * and must not come back, while a key it never saw is a concurrent successor
+ * and must survive. Without it the two are indistinguishable, and a merge that
+ * keeps everything missing from the result resurrects every accepted entry.
+ */
+export function mergePassResult(
+  result: readonly PendingClassificationChange[],
+  decidedKeys: readonly string[],
+  live: readonly PendingClassificationChange[],
+): PendingClassificationChange[] {
+  const decided = new Set(decidedKeys);
+  const resolved = new Set(result.map((entry) => entry.idempotencyKey));
+  const successors = live.filter(
+    (entry) => !resolved.has(entry.idempotencyKey) && !decided.has(entry.idempotencyKey),
+  );
+  // Appended, not spliced: `selectDrainable` orders by `firstQueuedAt`, and a
+  // successor is by construction younger than everything the pass decided.
+  return successors.length === 0 ? [...result] : [...result, ...successors];
 }
 
 // ------------------------------------------------------- reading the queue in
@@ -816,14 +894,50 @@ export function useClassificationQueue(
   const serverUrl = identity?.serverUrl ?? null;
   const accountId = identity?.accountId ?? null;
 
-  const commit = useCallback(async (next: PendingClassificationChange[]) => {
-    queueRef.current = next;
-    setQueue(next);
-    const active = identityRef.current;
-    if (active) {
-      await saveQueue(active, next, Date.now());
-    }
-  }, []);
+  /**
+   * Device writes, in order, each persisting the queue the device holds *at the
+   * moment it runs* rather than the snapshot its caller captured.
+   *
+   * Two writers share this key — `enqueue` and the drain's `persist` — and both
+   * used to hand `saveQueue` an array captured before their own await. Nothing
+   * serialised them, and AsyncStorage is a bridge to native, so the two settle
+   * in whatever order the platform finishes them. The loser overwrote the
+   * winner wholesale: a completed pass could be replaced on the device by a
+   * queue whose entries the server had already applied, and invariant 5c then
+   * revived and replayed them on the next launch, the successor among them
+   * carrying the revision it was queued with rather than the one that was
+   * accepted — a conflict of the app's own making.
+   *
+   * `snapshot` is for the one caller that must not read the live queue: a pass
+   * whose identity has since been replaced may still finish its own entry into
+   * its own key, but `queueRef` now belongs to somebody else (SC-007).
+   */
+  const writeChainRef = useRef<Promise<unknown>>(Promise.resolve());
+
+  const persistLive = useCallback(
+    (active: ClassificationIdentity, snapshot?: PendingClassificationChange[]): Promise<void> => {
+      const write = writeChainRef.current.then(() =>
+        saveQueue(active, snapshot ?? queueRef.current, Date.now()),
+      );
+      // The chain must survive a failed write, or one rejected save would strand
+      // every later one behind it. The caller still sees its own rejection.
+      writeChainRef.current = write.catch(() => undefined);
+      return write;
+    },
+    [],
+  );
+
+  const commit = useCallback(
+    async (next: PendingClassificationChange[]) => {
+      queueRef.current = next;
+      setQueue(next);
+      const active = identityRef.current;
+      if (active) {
+        await persistLive(active);
+      }
+    },
+    [persistLive],
+  );
 
   const drain = useCallback(async () => {
     const active = identityRef.current;
@@ -853,16 +967,26 @@ export function useClassificationQueue(
             // not onto the queue as it was before the attempt.
             queueRef.current = next;
             setQueue(next);
+            await persistLive(active);
+            return;
           }
-          await saveQueue(active, next, Date.now());
+          await persistLive(active, next);
         },
       });
       if (owns()) {
         // The pass adopted the device's queue after every await, so this is the
         // live queue and not the snapshot it started from. Assigning the
         // snapshot is what deleted an edit made during a send.
-        queueRef.current = result.queue;
-        setQueue(result.queue);
+        //
+        // Merged rather than assigned, because "after every await" stops one
+        // microtask short of here: the pass returning and this line running are
+        // separated by one, and `enqueue` writes `queueRef` synchronously.
+        const merged = mergePassResult(result.queue, result.decidedKeys, queueRef.current);
+        queueRef.current = merged;
+        setQueue(merged);
+        // The pass's own last write went out before this merge existed, so the
+        // device would otherwise keep a queue this line has already superseded.
+        await persistLive(active);
       }
       if (result.lastSyncedAt) {
         setLastSyncedAt(result.lastSyncedAt);
@@ -873,7 +997,7 @@ export function useClassificationQueue(
     } finally {
       drainingRef.current = false;
     }
-  }, []);
+  }, [persistLive]);
 
   // The cold read, and the drain trigger that follows it. Runs again on every
   // identity change: the key changes with it, and nothing of one identity's is
@@ -926,7 +1050,10 @@ export function useClassificationQueue(
       if (stale()) {
         return;
       }
-      await saveQueue(active, hydrated.queue, Date.now());
+      // An explicit snapshot: `queueRef` is not this identity's until the line
+      // below, so there is no live queue to read yet. Through the chain all the
+      // same, so a later write cannot overtake the cold read's.
+      await persistLive(active, hydrated.queue);
       if (stale()) {
         return;
       }
@@ -944,7 +1071,7 @@ export function useClassificationQueue(
     return () => {
       cancelled = true;
     };
-  }, [enabled, serverUrl, accountId, drain]);
+  }, [enabled, serverUrl, accountId, drain, persistLive]);
 
   // Trigger 1 of 2: the app comes to the foreground.
   useEffect(() => {
