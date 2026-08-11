@@ -88,9 +88,14 @@ export function ConnectionCard({
         {lastContactLabel(connection.last_contact_at)}
       </BBText>
 
-      {connection.last_test_error_code ? (
+      {connection.last_test_error_code ===
+      "legacy_invalid_auth_header_requires_reconfiguration" ? (
+        <BBText variant="caption" color={colors.warningFg}>
+          {`Enter a replacement credential for ${connection.auth_header_name}, then test the connection.`}
+        </BBText>
+      ) : connection.last_test_error_code ? (
         <BBText variant="caption" color={colors.dangerFg}>
-          {`Last test error: ${connection.last_test_error_code}`}
+          The last connection test failed. Test again after correcting the connection settings.
         </BBText>
       ) : null}
 

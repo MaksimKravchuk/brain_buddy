@@ -12,12 +12,14 @@ import hmac
 import json
 import sqlite3
 from collections import OrderedDict
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Event, Thread
 from typing import Any
 
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 
 from app.exceptions import ConflictError, NotFoundError, ValidationFailure
 from app.modules.agents.connector import (
@@ -26,7 +28,12 @@ from app.modules.agents.connector import (
     ConnectorTarget,
     ConnectorTestOutcome,
 )
-from app.modules.agents.domain import PROTOCOL_VERSION, AgentCapabilities
+from app.modules.agents.domain import (
+    PROTOCOL_VERSION,
+    AgentCapabilities,
+    AgentConnectionDocument,
+)
+from app.modules.agents.headers import RESERVED_AUTH_HEADER_NAMES
 from app.modules.agents.repository import AgentRepository
 from app.modules.agents.secrets import SecretBox
 from app.modules.agents.service import (
@@ -91,6 +98,33 @@ class BlockingTestConnector(FakeConnector):
         self.entered.set()
         assert self.release.wait(timeout=5)
         return self.test_outcome
+
+
+class BlockingIoConnector(FakeConnector):
+    def __init__(self) -> None:
+        super().__init__()
+        self.block_kind: str | None = None
+        self.entered = Event()
+        self.release = Event()
+
+    def _block(self, kind: str) -> None:
+        if self.block_kind == kind:
+            self.entered.set()
+            assert self.release.wait(timeout=5)
+
+    def start(
+        self, target: ConnectorTarget, *, envelope: dict[str, Any]
+    ) -> ConnectorStartOutcome:
+        self.starts.append(envelope)
+        self._block("start")
+        return self.start_outcome
+
+    def command(
+        self, target: ConnectorTarget, *, envelope: dict[str, Any]
+    ) -> ConnectorCommandOutcome:
+        self.commands.append(envelope)
+        self._block(str(envelope["type"]))
+        return self.command_outcome
 
 
 class Clock:
@@ -231,6 +265,37 @@ def dispatch(
 
 
 class TestConnectAnAgent:
+    def test_connection_document_defensively_rejects_a_blank_name(
+        self, clock: Clock
+    ) -> None:
+        with pytest.raises(PydanticValidationError):
+            AgentConnectionDocument(
+                id="agentconn_blank",
+                owner_id=OWNER,
+                name="   ",
+                endpoint_url="https://agent.example.com/hooks",
+                created_at=clock.now,
+                updated_at=clock.now,
+            )
+
+    @pytest.mark.parametrize(
+        "auth_header_name",
+        [*sorted(RESERVED_AUTH_HEADER_NAMES), "aUtHoRiZaTiOn", "X Bad"],
+    )
+    def test_connection_document_defensively_rejects_unsafe_auth_headers(
+        self, clock: Clock, auth_header_name: str
+    ) -> None:
+        with pytest.raises(PydanticValidationError):
+            AgentConnectionDocument(
+                id="agentconn_bad_header",
+                owner_id=OWNER,
+                name="Hermes",
+                endpoint_url="https://agent.example.com/hooks",
+                auth_header_name=auth_header_name,
+                created_at=clock.now,
+                updated_at=clock.now,
+            )
+
     def test_a_saved_connection_starts_untested_and_hides_its_secret(
         self, service: AgentRelayService
     ) -> None:
@@ -538,6 +603,271 @@ class TestConnectionTestConcurrency:
         assert service._target(persisted).credential == "Bearer rotated-token"
         assert persisted.last_tested_at is None
         assert tested and tested[0].status == "untested"
+
+
+class TestExternalIoLockScope:
+    @pytest.mark.parametrize("operation", ["start", "reply", "cancel"])
+    def test_slow_external_io_releases_global_and_sqlite_writer_locks(
+        self, tmp_path: Path, clock: Clock, operation: str
+    ) -> None:
+        connector = BlockingIoConnector()
+        repo = AgentRepository(tmp_path)
+        service = build_service(repo, connector, clock)
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+
+        if operation == "start":
+            confirmation = review(service, connection_id)
+
+            def invoke() -> None:
+                service.dispatch_run(
+                    "task_1",
+                    confirmation,
+                    owner_id=OWNER,
+                    idempotency_key="idem-slow-start",
+                )
+
+        else:
+            run = dispatch(service, connection_id)
+            if operation == "reply":
+                payload = AgentReplyRequest(
+                    message="Use staging.",
+                    expected_revision=service.get_run(run.id, owner_id=OWNER).revision,
+                )
+
+                def invoke() -> None:
+                    service.reply_to_run(
+                        run.id,
+                        payload,
+                        owner_id=OWNER,
+                        idempotency_key="idem-slow-reply",
+                    )
+
+            else:
+
+                def invoke() -> None:
+                    service.cancel_run(
+                        run.id,
+                        owner_id=OWNER,
+                        idempotency_key="idem-slow-cancel",
+                    )
+
+        connector.block_kind = operation
+        worker_errors: list[BaseException] = []
+
+        def run_worker() -> None:
+            try:
+                invoke()
+            except BaseException as exc:  # pragma: no cover - asserted below
+                worker_errors.append(exc)
+
+        worker = Thread(target=run_worker)
+        worker.start()
+        assert connector.entered.wait(timeout=5)
+
+        unrelated_finished = Event()
+        maintenance_finished = Event()
+
+        def unrelated_command() -> None:
+            with repo.command_lock(OTHER_OWNER):
+                unrelated_finished.set()
+
+        def maintenance_write() -> None:
+            repo.purge_expired_audit(now=clock.now)
+            maintenance_finished.set()
+
+        unrelated = Thread(target=unrelated_command)
+        maintenance = Thread(target=maintenance_write)
+        unrelated.start()
+        maintenance.start()
+        unrelated_during_io = unrelated_finished.wait(timeout=0.5)
+        maintenance_during_io = maintenance_finished.wait(timeout=0.5)
+        connector.release.set()
+        worker.join(timeout=5)
+        unrelated.join(timeout=5)
+        maintenance.join(timeout=5)
+
+        assert unrelated_during_io is True
+        assert maintenance_during_io is True
+        assert worker_errors == []
+
+    @pytest.mark.parametrize(
+        "transport_status", ["sent", "not_sent", "delivery_unconfirmed"]
+    )
+    @pytest.mark.parametrize(
+        ("callback_type", "callback_fields", "expire_content"),
+        [
+            ("accepted", {}, True),
+            ("completed", {"result": "Finished during dispatch"}, False),
+        ],
+    )
+    def test_authenticated_callback_during_start_owns_state_and_transport_merge_is_monotonic(
+        self,
+        tmp_path: Path,
+        clock: Clock,
+        monkeypatch: pytest.MonkeyPatch,
+        transport_status: Any,
+        callback_type: str,
+        callback_fields: dict[str, str],
+        expire_content: bool,
+    ) -> None:
+        connector = FakeConnector()
+        service = build_service(AgentRepository(tmp_path), connector, clock)
+        created = service.create_connection(
+            create_request(),
+            owner_id=OWNER,
+            idempotency_key="idem-callback-create",
+            reauthenticated=True,
+        )
+        make_ready(service, created.id)
+        preview = service.preview_handoff(
+            "task_1",
+            AgentHandoffPreviewRequest(connection_id=created.id),
+            owner_id=OWNER,
+        )
+        confirmation = AgentHandoffConfirmRequest(
+            connection_id=created.id,
+            manifest_token=preview.token,
+        )
+        before_io = clock.now
+
+        def start_with_callback(
+            target: ConnectorTarget, *, envelope: dict[str, Any]
+        ) -> ConnectorStartOutcome:
+            connector.starts.append(envelope)
+            clock.advance(timedelta(minutes=2))
+            event = {
+                "protocol_version": PROTOCOL_VERSION,
+                "connection_id": created.id,
+                "event_id": f"evt_sync_{callback_type}",
+                "run_id": preview.run_id,
+                "type": callback_type,
+                "run_version": 1,
+                **callback_fields,
+            }
+            body = json.dumps(event).encode("utf-8")
+            timestamp = int(clock.now.timestamp())
+            accepted = service.ingest_event(
+                raw_body=body,
+                connection_id=created.id,
+                timestamp=str(timestamp),
+                signature=sign(created.inbound_signing_secret, timestamp, body),
+            )
+            assert accepted.accepted is True
+            if expire_content:
+                persisted = service.agent_repo.get_run(preview.run_id, owner_id=OWNER)
+                clock.now = persisted.content_expires_at
+                service.agent_repo.expire_due_content(now=clock.now)
+            clock.advance(timedelta(seconds=1))
+            return ConnectorStartOutcome(transport_status, "stale_transport_error")
+
+        monkeypatch.setattr(connector, "start", start_with_callback)
+
+        run = service.dispatch_run(
+            "task_1",
+            confirmation,
+            owner_id=OWNER,
+            idempotency_key=f"idem-sync-start-{callback_type}-{transport_status}",
+        )
+
+        assert run.dispatch_state == "sent"
+        assert run.dispatch_error_code is None
+        assert run.reported_state == callback_type
+        assert run.run_version == 1
+        assert run.result_text == callback_fields.get("result")
+        assert run.content_expired is expire_content
+        persisted = service.agent_repo.get_run(run.id, owner_id=OWNER)
+        assert persisted.updated_at == clock.now
+        assert persisted.updated_at > before_io
+        assert len(connector.starts) == 1
+
+    @pytest.mark.parametrize("bypass_operation_lock", [False, True])
+    def test_concurrent_same_key_dispatches_contend_and_converge_only_with_lock(
+        self,
+        tmp_path: Path,
+        clock: Clock,
+        monkeypatch: pytest.MonkeyPatch,
+        bypass_operation_lock: bool,
+    ) -> None:
+        connector = BlockingIoConnector()
+        repo = AgentRepository(tmp_path)
+        service = build_service(repo, connector, clock)
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        confirmation = review(service, connection_id)
+        connector.block_kind = "start"
+        results: list[Any] = []
+        errors: list[BaseException] = []
+        attempts: list[tuple[str, str]] = []
+        second_attempted = Event()
+        second_acquired = Event()
+        second_finished = Event()
+        operation_lock = repo.operation_lock
+        expected_fingerprint = service._key_hashes(OWNER, "idem-concurrent-start")[0]
+
+        @contextmanager
+        def observed_operation_lock(owner_id: str, operation_fingerprint: str) -> Any:
+            attempts.append((owner_id, operation_fingerprint))
+            attempt_number = len(attempts)
+            if attempt_number == 2:
+                second_attempted.set()
+            if bypass_operation_lock:
+                if attempt_number == 2:
+                    second_acquired.set()
+                yield
+                return
+            with operation_lock(owner_id, operation_fingerprint):
+                if attempt_number == 2:
+                    second_acquired.set()
+                yield
+
+        monkeypatch.setattr(repo, "operation_lock", observed_operation_lock)
+
+        def invoke(*, second: bool = False) -> None:
+            try:
+                results.append(
+                    service.dispatch_run(
+                        "task_1",
+                        confirmation,
+                        owner_id=OWNER,
+                        idempotency_key="idem-concurrent-start",
+                    )
+                )
+            except BaseException as exc:  # pragma: no cover - asserted below
+                errors.append(exc)
+            finally:
+                if second:
+                    second_finished.set()
+
+        first = Thread(target=invoke)
+        second = Thread(target=lambda: invoke(second=True))
+        first.start()
+        assert connector.entered.wait(timeout=5)
+        second.start()
+        assert second_attempted.wait(timeout=5)
+        assert attempts == [
+            (OWNER, expected_fingerprint),
+            (OWNER, expected_fingerprint),
+        ]
+        if bypass_operation_lock:
+            assert second_acquired.wait(timeout=5)
+            assert second_finished.wait(timeout=5)
+        else:
+            assert second_acquired.is_set() is False
+            assert second_finished.is_set() is False
+        connector.release.set()
+        first.join(timeout=5)
+        second.join(timeout=5)
+
+        assert errors == []
+        assert len(connector.starts) == 1
+        assert len(results) == 2
+        assert results[0].id == results[1].id
+        if bypass_operation_lock:
+            assert results[0].model_dump() != results[1].model_dump()
+        else:
+            assert second_acquired.is_set() is True
+            assert results[0].model_dump() == results[1].model_dump()
 
 
 # --- User Story 2: review and hand one task to the agent ---------------------
@@ -1564,6 +1894,111 @@ class TestReplyAndCancel:
         assert [command.kind for command in run.commands if command.kind == "reply"]
         assert len(relay.service.connector.commands) == 1  # type: ignore[attr-defined]
 
+    def test_a_synchronous_callback_during_reply_wins_over_transport_merge(
+        self,
+        relay: Relay,
+        service: AgentRelayService,
+        connector: FakeConnector,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
+        expected_revision = relay.projection().revision
+
+        def command_with_callback(
+            target: ConnectorTarget, *, envelope: dict[str, Any]
+        ) -> ConnectorCommandOutcome:
+            connector.commands.append(envelope)
+            relay.emit(relay.event("evt_2", "running", 2, progress="Continuing"))
+            return ConnectorCommandOutcome("confirmed")
+
+        monkeypatch.setattr(connector, "command", command_with_callback)
+
+        run = service.reply_to_run(
+            relay.run.id,
+            AgentReplyRequest(
+                message="Use staging.", expected_revision=expected_revision
+            ),
+            owner_id=OWNER,
+            idempotency_key="idem-sync-reply",
+        )
+
+        assert run.reported_state == "running"
+        assert run.run_version == 2
+        assert run.progress_text == "Continuing"
+        assert run.reply_pending is False
+        assert len(connector.commands) == 1
+
+    def test_a_synchronous_callback_during_cancel_wins_over_transport_merge(
+        self,
+        relay: Relay,
+        service: AgentRelayService,
+        connector: FakeConnector,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def command_with_callback(
+            target: ConnectorTarget, *, envelope: dict[str, Any]
+        ) -> ConnectorCommandOutcome:
+            connector.commands.append(envelope)
+            relay.emit(relay.event("evt_1", "completed", 1, result="Already done"))
+            return ConnectorCommandOutcome("confirmed")
+
+        monkeypatch.setattr(connector, "command", command_with_callback)
+
+        run = service.cancel_run(
+            relay.run.id,
+            owner_id=OWNER,
+            idempotency_key="idem-sync-cancel",
+        )
+
+        assert run.reported_state == "completed"
+        assert run.result_text == "Already done"
+        assert run.cancel_requested is False
+        assert len(connector.commands) == 1
+
+    def test_a_synchronous_nonterminal_callback_during_cancel_preserves_cancellation_overlay(
+        self,
+        relay: Relay,
+        service: AgentRelayService,
+        connector: FakeConnector,
+        clock: Clock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        before = relay.projection()
+        attempted_at = clock.now
+        callback_at = attempted_at + timedelta(minutes=1)
+        mutation_at = attempted_at + timedelta(minutes=2)
+
+        def command_with_callback(
+            target: ConnectorTarget, *, envelope: dict[str, Any]
+        ) -> ConnectorCommandOutcome:
+            connector.commands.append(envelope)
+            clock.advance(timedelta(minutes=1))
+            relay.emit(
+                relay.event("evt_running", "running", 1, progress="Still working")
+            )
+            clock.advance(timedelta(minutes=1))
+            return ConnectorCommandOutcome("confirmed")
+
+        monkeypatch.setattr(connector, "command", command_with_callback)
+
+        run = service.cancel_run(
+            relay.run.id,
+            owner_id=OWNER,
+            idempotency_key="idem-sync-nonterminal-cancel",
+        )
+
+        persisted = service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
+        assert run.reported_state == "running"
+        assert run.run_version == 1
+        assert run.progress_text == "Still working"
+        assert run.cancel_requested is True
+        assert persisted.cancel_requested_at == attempted_at
+        assert persisted.updated_at >= callback_at
+        assert persisted.updated_at == mutation_at
+        assert run.revision == before.revision + 2
+        command = next(item for item in run.commands if item.kind == "cancel")
+        assert command.delivery == "confirmed"
+
     def test_a_stale_reply_revision_is_refused_before_connector_delivery(
         self, relay: Relay, service: AgentRelayService, connector: FakeConnector
     ) -> None:
@@ -1739,6 +2174,423 @@ class TestReplyAndCancel:
             service.cancel_run(
                 relay.run.id, owner_id=OTHER_OWNER, idempotency_key="idem-cancel"
             )
+
+
+class TestExternalIoMergeRaces:
+    @pytest.mark.parametrize("operation", ["reply", "cancel"])
+    @pytest.mark.parametrize("bypass_operation_lock", [False, True])
+    def test_concurrent_same_key_commands_contend_and_converge_only_with_lock(
+        self,
+        tmp_path: Path,
+        clock: Clock,
+        monkeypatch: pytest.MonkeyPatch,
+        operation: str,
+        bypass_operation_lock: bool,
+    ) -> None:
+        connector = BlockingIoConnector()
+        repo = AgentRepository(tmp_path)
+        service = build_service(repo, connector, clock)
+        relay = Relay(service, clock)
+        connector.commands.clear()
+        idempotency_key = f"idem-concurrent-{operation}"
+        if operation == "reply":
+            relay.emit(relay.event("evt_blocked", "blocked", 1))
+            payload = AgentReplyRequest(
+                message="Use staging.", expected_revision=relay.projection().revision
+            )
+
+            def invoke_command() -> Any:
+                return service.reply_to_run(
+                    relay.run.id,
+                    payload,
+                    owner_id=OWNER,
+                    idempotency_key=idempotency_key,
+                )
+
+        else:
+
+            def invoke_command() -> Any:
+                return service.cancel_run(
+                    relay.run.id,
+                    owner_id=OWNER,
+                    idempotency_key=idempotency_key,
+                )
+
+        connector.block_kind = operation
+        results: list[Any] = []
+        errors: list[BaseException] = []
+        attempts: list[tuple[str, str]] = []
+        second_attempted = Event()
+        second_acquired = Event()
+        second_finished = Event()
+        operation_lock = repo.operation_lock
+        expected_fingerprint = service._key_hashes(OWNER, idempotency_key)[0]
+
+        @contextmanager
+        def observed_operation_lock(owner_id: str, operation_fingerprint: str) -> Any:
+            attempts.append((owner_id, operation_fingerprint))
+            attempt_number = len(attempts)
+            if attempt_number == 2:
+                second_attempted.set()
+            if bypass_operation_lock:
+                if attempt_number == 2:
+                    second_acquired.set()
+                yield
+                return
+            with operation_lock(owner_id, operation_fingerprint):
+                if attempt_number == 2:
+                    second_acquired.set()
+                yield
+
+        monkeypatch.setattr(repo, "operation_lock", observed_operation_lock)
+
+        def invoke(*, second: bool = False) -> None:
+            try:
+                results.append(invoke_command())
+            except BaseException as exc:  # pragma: no cover - asserted below
+                errors.append(exc)
+            finally:
+                if second:
+                    second_finished.set()
+
+        first = Thread(target=invoke)
+        second = Thread(target=lambda: invoke(second=True))
+        first.start()
+        assert connector.entered.wait(timeout=5)
+        second.start()
+        assert second_attempted.wait(timeout=5)
+        assert attempts == [
+            (OWNER, expected_fingerprint),
+            (OWNER, expected_fingerprint),
+        ]
+        if bypass_operation_lock:
+            assert second_acquired.wait(timeout=5)
+            assert second_finished.wait(timeout=5)
+        else:
+            assert second_acquired.is_set() is False
+            assert second_finished.is_set() is False
+        connector.release.set()
+        first.join(timeout=5)
+        second.join(timeout=5)
+
+        assert errors == []
+        assert len(connector.commands) == 1
+        assert len(results) == 2
+        command_id = connector.commands[0]["command_id"]
+        assert results[0].id == results[1].id == relay.run.id
+        assert [item.id for item in results[0].commands if item.kind == operation] == [
+            command_id
+        ]
+        assert [item.id for item in results[1].commands if item.kind == operation] == [
+            command_id
+        ]
+        if bypass_operation_lock:
+            assert results[0].model_dump() != results[1].model_dump()
+        else:
+            assert second_acquired.is_set() is True
+            assert results[0].model_dump() == results[1].model_dump()
+
+    @pytest.mark.parametrize(
+        "race", ["terminal", "retention", "rotation", "disconnect"]
+    )
+    def test_cancel_transport_merge_cannot_revive_or_overwrite_newer_state(
+        self, tmp_path: Path, clock: Clock, race: str
+    ) -> None:
+        connector = BlockingIoConnector()
+        service = build_service(AgentRepository(tmp_path), connector, clock)
+        relay = Relay(service, clock)
+        connector.commands.clear()
+        connector.block_kind = "cancel"
+        errors: list[BaseException] = []
+
+        def invoke() -> None:
+            try:
+                service.cancel_run(
+                    relay.run.id,
+                    owner_id=OWNER,
+                    idempotency_key=f"idem-cancel-race-{race}",
+                )
+            except BaseException as exc:  # pragma: no cover - asserted below
+                errors.append(exc)
+
+        worker = Thread(target=invoke)
+        worker.start()
+        assert connector.entered.wait(timeout=5)
+        if race == "terminal":
+            relay.emit(relay.event("evt_cancel_done", "completed", 1, result="Done"))
+        elif race == "retention":
+            persisted = service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
+            service.agent_repo.expire_due_content(now=persisted.content_expires_at)
+        elif race == "rotation":
+            current = service.get_connection(relay.connection_id, owner_id=OWNER)
+            service.rotate_credential(
+                relay.connection_id,
+                AgentConnectionRotateRequest(
+                    credential="Bearer rotated-token",
+                    current_password="correct-horse-battery-staple",
+                    expected_revision=current.revision,
+                ),
+                owner_id=OWNER,
+                idempotency_key="idem-cancel-race-rotation-connection",
+                reauthenticated=True,
+            )
+        else:
+            current = service.get_connection(relay.connection_id, owner_id=OWNER)
+            service.disconnect_connection(
+                relay.connection_id,
+                AgentConnectionDisconnectRequest(
+                    current_password="correct-horse-battery-staple",
+                    expected_revision=current.revision,
+                ),
+                owner_id=OWNER,
+                idempotency_key="idem-cancel-race-disconnect-connection",
+                reauthenticated=True,
+            )
+        connector.release.set()
+        worker.join(timeout=5)
+
+        assert errors == []
+        run = service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
+        assert len(connector.commands) == 1
+        if race == "terminal":
+            assert run.reported_state == "completed"
+            assert run.cancel_requested_at is None
+        elif race == "retention":
+            assert run.content_expired is True
+            assert run.manifest is None
+        elif race == "rotation":
+            connection = service.agent_repo.get_connection(
+                relay.connection_id, owner_id=OWNER
+            )
+            assert connection.status == "untested"
+            assert run.cancel_requested_at is None
+        else:
+            assert run.connection_disconnected_at is not None
+            assert run.cancel_requested_at is None
+
+    def test_start_retention_race_is_a_write_barrier_not_content_revival(
+        self, tmp_path: Path, clock: Clock
+    ) -> None:
+        connector = BlockingIoConnector()
+        service = build_service(AgentRepository(tmp_path), connector, clock)
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        confirmation = review(service, connection_id)
+        reserved = service.agent_repo.list_runs_for_task("task_1", owner_id=OWNER)[0]
+        connector.block_kind = "start"
+        errors: list[BaseException] = []
+
+        def invoke() -> None:
+            try:
+                service.dispatch_run(
+                    "task_1",
+                    confirmation,
+                    owner_id=OWNER,
+                    idempotency_key="idem-start-retention-race",
+                )
+            except BaseException as exc:  # pragma: no cover - asserted below
+                errors.append(exc)
+
+        worker = Thread(target=invoke)
+        worker.start()
+        assert connector.entered.wait(timeout=5)
+        service.agent_repo.expire_due_content(now=clock.now + service.content_retention)
+        connector.release.set()
+        worker.join(timeout=5)
+
+        assert errors == []
+        current = service.agent_repo.get_run(reserved.id, owner_id=OWNER)
+        assert current.content_expired is True
+        assert current.manifest is None
+        assert len(connector.starts) == 1
+
+    @pytest.mark.parametrize("race", ["terminal", "rotation", "disconnect"])
+    def test_start_transport_merge_preserves_newer_terminal_or_connection_state(
+        self, tmp_path: Path, clock: Clock, race: str
+    ) -> None:
+        connector = BlockingIoConnector()
+        service = build_service(AgentRepository(tmp_path), connector, clock)
+        created = service.create_connection(
+            create_request(),
+            owner_id=OWNER,
+            idempotency_key="idem-start-race-create",
+            reauthenticated=True,
+        )
+        make_ready(service, created.id)
+        confirmation = review(service, created.id)
+        reserved = service.agent_repo.list_runs_for_task("task_1", owner_id=OWNER)[0]
+        connector.block_kind = "start"
+        errors: list[BaseException] = []
+
+        def invoke() -> None:
+            try:
+                service.dispatch_run(
+                    "task_1",
+                    confirmation,
+                    owner_id=OWNER,
+                    idempotency_key=f"idem-start-race-{race}",
+                )
+            except BaseException as exc:  # pragma: no cover - asserted below
+                errors.append(exc)
+
+        worker = Thread(target=invoke)
+        worker.start()
+        assert connector.entered.wait(timeout=5)
+        if race == "terminal":
+            event = {
+                "protocol_version": PROTOCOL_VERSION,
+                "connection_id": created.id,
+                "event_id": "evt_start_done",
+                "run_id": reserved.id,
+                "type": "completed",
+                "run_version": 1,
+                "result": "Already done",
+            }
+            body = json.dumps(event).encode("utf-8")
+            timestamp = int(clock.now.timestamp())
+            service.ingest_event(
+                raw_body=body,
+                connection_id=created.id,
+                timestamp=str(timestamp),
+                signature=sign(created.inbound_signing_secret, timestamp, body),
+            )
+        elif race == "rotation":
+            current = service.get_connection(created.id, owner_id=OWNER)
+            service.rotate_credential(
+                created.id,
+                AgentConnectionRotateRequest(
+                    credential="Bearer rotated-token",
+                    current_password="correct-horse-battery-staple",
+                    expected_revision=current.revision,
+                ),
+                owner_id=OWNER,
+                idempotency_key="idem-start-race-rotation-connection",
+                reauthenticated=True,
+            )
+        else:
+            current = service.get_connection(created.id, owner_id=OWNER)
+            service.disconnect_connection(
+                created.id,
+                AgentConnectionDisconnectRequest(
+                    current_password="correct-horse-battery-staple",
+                    expected_revision=current.revision,
+                ),
+                owner_id=OWNER,
+                idempotency_key="idem-start-race-disconnect-connection",
+                reauthenticated=True,
+            )
+        connector.release.set()
+        worker.join(timeout=5)
+
+        assert errors == []
+        current_run = service.agent_repo.get_run(reserved.id, owner_id=OWNER)
+        assert len(connector.starts) == 1
+        if race == "terminal":
+            assert current_run.reported_state == "completed"
+            assert current_run.result_text == "Already done"
+        elif race == "rotation":
+            connection = service.agent_repo.get_connection(created.id, owner_id=OWNER)
+            assert connection.status == "untested"
+            assert service._target(connection).credential == "Bearer rotated-token"
+        else:
+            assert current_run.connection_disconnected_at is not None
+
+    @pytest.mark.parametrize(
+        "race", ["terminal", "retention", "rotation", "disconnect"]
+    )
+    def test_reply_transport_merge_cannot_overwrite_newer_state(
+        self, tmp_path: Path, clock: Clock, race: str
+    ) -> None:
+        connector = BlockingIoConnector()
+        service = build_service(AgentRepository(tmp_path), connector, clock)
+        relay = Relay(service, clock)
+        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
+        payload = AgentReplyRequest(
+            message="Use staging.", expected_revision=relay.projection().revision
+        )
+        connector.block_kind = "reply"
+        results: list[Any] = []
+        errors: list[BaseException] = []
+
+        def invoke() -> None:
+            try:
+                results.append(
+                    service.reply_to_run(
+                        relay.run.id,
+                        payload,
+                        owner_id=OWNER,
+                        idempotency_key=f"idem-race-{race}",
+                    )
+                )
+            except BaseException as exc:  # pragma: no cover - asserted below
+                errors.append(exc)
+
+        worker = Thread(target=invoke)
+        worker.start()
+        assert connector.entered.wait(timeout=5)
+
+        if race == "terminal":
+            relay.emit(relay.event("evt_2", "completed", 2, result="Finished"))
+        elif race == "retention":
+            persisted = service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
+            service.agent_repo.expire_due_content(now=persisted.content_expires_at)
+        elif race == "rotation":
+            current = service.get_connection(relay.connection_id, owner_id=OWNER)
+            service.rotate_credential(
+                relay.connection_id,
+                AgentConnectionRotateRequest(
+                    credential="Bearer rotated-token",
+                    current_password="correct-horse-battery-staple",
+                    expected_revision=current.revision,
+                ),
+                owner_id=OWNER,
+                idempotency_key="idem-race-rotation-connection",
+                reauthenticated=True,
+            )
+        else:
+            current = service.get_connection(relay.connection_id, owner_id=OWNER)
+            service.disconnect_connection(
+                relay.connection_id,
+                AgentConnectionDisconnectRequest(
+                    current_password="correct-horse-battery-staple",
+                    expected_revision=current.revision,
+                ),
+                owner_id=OWNER,
+                idempotency_key="idem-race-disconnect-connection",
+                reauthenticated=True,
+            )
+
+        connector.release.set()
+        worker.join(timeout=5)
+
+        assert errors == []
+        assert len(results) == 1
+        current_run = service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
+        replies = service.agent_repo.list_commands(relay.run.id, owner_id=OWNER)
+        reply = next(command for command in replies if command.kind == "reply")
+        assert current_run.reply_pending_command_id is None
+        assert reply.delivery == "confirmed"
+
+        if race == "terminal":
+            assert current_run.reported_state == "completed"
+            assert current_run.result_text == "Finished"
+        elif race == "retention":
+            assert current_run.content_expired is True
+            assert current_run.manifest is None
+            assert reply.body is None
+        elif race == "rotation":
+            connection = service.agent_repo.get_connection(
+                relay.connection_id, owner_id=OWNER
+            )
+            assert connection.status == "untested"
+            assert service._target(connection).credential == "Bearer rotated-token"
+        else:
+            connection = service.agent_repo.get_connection(
+                relay.connection_id, owner_id=OWNER
+            )
+            assert connection.status == "disconnected"
+            assert connection.credential is None
+            assert current_run.connection_disconnected_at is not None
 
 
 class TestCommandReplayAfterTheWorldMoved:
@@ -2813,7 +3665,424 @@ class TestSigningSecretRotation:
 class TestRelayFailureRecoveryEdges:
     """Release-risk failures stay recoverable and fail closed without leakage."""
 
-    def test_retry_after_a_post_send_save_failure_reuses_the_reserved_command_id(
+    def test_invalid_header_migration_leaves_unparseable_rows_untouched(self) -> None:
+        database = sqlite3.connect(":memory:")
+        database.row_factory = sqlite3.Row
+        database.execute(
+            "CREATE TABLE agent_connections "
+            "(owner_id TEXT, id TEXT, status TEXT, payload TEXT)"
+        )
+        database.executemany(
+            "INSERT INTO agent_connections VALUES (?, ?, ?, ?)",
+            [
+                (OWNER, "malformed", "ready", "not-json"),
+                (OWNER, "wrong-shape", "ready", "[]"),
+            ],
+        )
+
+        AgentRepository._migrate_legacy_invalid_header_connections(database)
+
+        assert [
+            row[0]
+            for row in database.execute(
+                "SELECT payload FROM agent_connections ORDER BY id"
+            )
+        ] == ["not-json", "[]"]
+        database.close()
+
+    @pytest.mark.parametrize("operation", ["start", "reply", "cancel"])
+    @pytest.mark.parametrize(
+        "window", ["reservation", "reserved_before_marker", "marker_before_connector"]
+    )
+    def test_command_crash_windows_preserve_at_most_once_recovery(
+        self,
+        tmp_path: Path,
+        clock: Clock,
+        monkeypatch: pytest.MonkeyPatch,
+        operation: str,
+        window: str,
+    ) -> None:
+        connector = FakeConnector()
+        service = build_service(AgentRepository(tmp_path), connector, clock)
+        key = f"idem-window-{operation}-{window}"
+        if operation == "start":
+            connection_id = connect(service)
+            make_ready(service, connection_id)
+            payload: Any = review(service, connection_id)
+
+            def invoke() -> Any:
+                return service.dispatch_run(
+                    "task_1", payload, owner_id=OWNER, idempotency_key=key
+                )
+
+        else:
+            relay = Relay(service, clock)
+            connector.starts.clear()
+            connector.commands.clear()
+            if operation == "reply":
+                relay.emit(relay.event("evt_window_blocked", "blocked", 1))
+                payload = AgentReplyRequest(
+                    message="Use staging.",
+                    expected_revision=relay.projection().revision,
+                )
+
+                def invoke() -> Any:
+                    return service.reply_to_run(
+                        relay.run.id, payload, owner_id=OWNER, idempotency_key=key
+                    )
+
+            else:
+
+                def invoke() -> Any:
+                    return service.cancel_run(
+                        relay.run.id, owner_id=OWNER, idempotency_key=key
+                    )
+
+        if window == "reservation":
+            original_save_idempotency = service.agent_repo.save_idempotency
+
+            def fail_reservation(*, owner_id: str, record: Any) -> None:
+                if not record.completed and not record.delivery_attempted:
+                    raise RuntimeError("reservation write failed")
+                original_save_idempotency(owner_id=owner_id, record=record)
+
+            monkeypatch.setattr(
+                service.agent_repo, "save_idempotency", fail_reservation
+            )
+            expected = "reservation write failed"
+        elif window == "reserved_before_marker":
+            original_remember = service._remember
+
+            def fail_attempted_marker(**kwargs: Any) -> None:
+                if kwargs.get("delivery_attempted") is True:
+                    raise RuntimeError("attempted marker write failed")
+                original_remember(**kwargs)
+
+            monkeypatch.setattr(service, "_remember", fail_attempted_marker)
+            expected = "attempted marker write failed"
+        else:
+            original_begin_delivery_attempt = service._begin_delivery_attempt
+
+            def fail_after_marker(**kwargs: Any) -> None:
+                original_begin_delivery_attempt(**kwargs)
+                raise RuntimeError("marker_before_connector")
+
+            monkeypatch.setattr(service, "_begin_delivery_attempt", fail_after_marker)
+            expected = "marker_before_connector"
+
+        with pytest.raises(RuntimeError, match=expected):
+            invoke()
+        assert connector.starts == []
+        assert connector.commands == []
+
+        key_hash = service._key_hashes(OWNER, key)[0]
+        with sqlite3.connect(tmp_path / "agents.sqlite3") as database:
+            durable_row = database.execute(
+                "SELECT command_id, completed, delivery_attempted "
+                "FROM agent_idempotency WHERE owner_id = ? AND key_hash = ?",
+                (OWNER, key_hash),
+            ).fetchone()
+        if window == "reservation":
+            assert durable_row is None
+        elif window == "reserved_before_marker":
+            assert durable_row is not None
+            assert durable_row[0] is not None
+            assert durable_row[1:] == (0, 0)
+        else:
+            assert durable_row is not None
+            assert durable_row[0] is not None
+            assert durable_row[1:] == (0, 1)
+
+        service = build_service(AgentRepository(tmp_path), connector, clock)
+        recovered = invoke()
+
+        external_calls = (
+            connector.starts if operation == "start" else connector.commands
+        )
+        if window == "marker_before_connector":
+            assert external_calls == []
+            command = next(
+                item for item in recovered.commands if item.kind == operation
+            )
+            assert command.delivery == "unconfirmed"
+        else:
+            assert len(external_calls) == 1
+            wire_id = (
+                external_calls[0]["run_id"]
+                if operation == "start"
+                else external_calls[0]["command_id"]
+            )
+            projected_id = (
+                recovered.id
+                if operation == "start"
+                else next(
+                    item.id for item in recovered.commands if item.kind == operation
+                )
+            )
+            assert projected_id == wire_id
+
+    @pytest.mark.parametrize("operation", ["start", "reply", "cancel"])
+    @pytest.mark.parametrize("delivery_column_exists", [False, True])
+    def test_legacy_incomplete_command_rows_migrate_as_ambiguous_without_redelivery(
+        self,
+        tmp_path: Path,
+        clock: Clock,
+        operation: str,
+        delivery_column_exists: bool,
+    ) -> None:
+        connector = FakeConnector()
+        service = build_service(AgentRepository(tmp_path), connector, clock)
+        key = f"idem-legacy-incomplete-{operation}"
+        if operation == "start":
+            connection_id = connect(service)
+            make_ready(service, connection_id)
+            payload: Any = review(service, connection_id)
+            resource_id = service.agent_repo.list_runs_for_task(
+                "task_1", owner_id=OWNER
+            )[0].id
+            command = "dispatch_run"
+            canonical = service._canonical_request(command, payload, target="task_1")
+
+            def retry() -> Any:
+                return service.dispatch_run(
+                    "task_1", payload, owner_id=OWNER, idempotency_key=key
+                )
+
+            response_body: dict[str, object] = {"id": resource_id}
+        else:
+            relay = Relay(service, clock)
+            resource_id = relay.run.id
+            if operation == "reply":
+                relay.emit(
+                    relay.event(
+                        "evt_legacy_blocked",
+                        "blocked",
+                        1,
+                        question="Which environment?",
+                    )
+                )
+                payload = AgentReplyRequest(
+                    message="Use staging.",
+                    expected_revision=relay.projection().revision,
+                )
+                command = "reply_to_run"
+                canonical = service._canonical_request(
+                    command, payload, target=resource_id
+                )
+
+                def retry() -> Any:
+                    return service.reply_to_run(
+                        resource_id, payload, owner_id=OWNER, idempotency_key=key
+                    )
+
+                response_body = {"id": resource_id}
+            else:
+                command = "cancel_run"
+                canonical = service._canonical_request(command, {}, target=resource_id)
+
+                def retry() -> Any:
+                    return service.cancel_run(
+                        resource_id, owner_id=OWNER, idempotency_key=key
+                    )
+
+                connection = service.agent_repo.get_connection(
+                    relay.connection_id, owner_id=OWNER
+                )
+                response_body = {
+                    "id": resource_id,
+                    "connection_revision": connection.revision,
+                }
+
+        key_hash = service._key_hashes(OWNER, key)[0]
+        command_id = f"agentcmd_legacy_{operation}"
+        request_hash = service.secret_box.fingerprint(canonical)
+        database_path = tmp_path / "agents.sqlite3"
+        delivery_column = (
+            "delivery_attempted INTEGER NOT NULL DEFAULT 0,"
+            if delivery_column_exists
+            else ""
+        )
+        with sqlite3.connect(database_path) as database:
+            database.executescript(f"""
+                ALTER TABLE agent_idempotency RENAME TO agent_idempotency_new;
+                CREATE TABLE agent_idempotency (
+                    owner_id TEXT NOT NULL,
+                    key_hash TEXT NOT NULL,
+                    command TEXT NOT NULL,
+                    request_hash TEXT NOT NULL,
+                    resource_id TEXT NOT NULL,
+                    command_id TEXT,
+                    {delivery_column}
+                    completed INTEGER NOT NULL DEFAULT 1,
+                    response_body TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (owner_id, key_hash)
+                );
+                DROP TABLE agent_idempotency_new;
+                """)
+            database.execute(
+                "DELETE FROM agent_schema_migrations "
+                "WHERE name = 'delivery_attempted_backfill_v1'"
+            )
+            database.execute(
+                """
+                INSERT INTO agent_idempotency (
+                    owner_id, key_hash, command, request_hash, resource_id,
+                    command_id, completed, response_body, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+                """,
+                (
+                    OWNER,
+                    key_hash,
+                    command,
+                    request_hash,
+                    resource_id,
+                    command_id,
+                    json.dumps(response_body),
+                    clock.now.isoformat(),
+                ),
+            )
+
+        connector.starts.clear()
+        connector.commands.clear()
+        restarted = build_service(AgentRepository(tmp_path), connector, clock)
+        service = restarted
+        recovered = retry()
+
+        assert connector.starts == []
+        assert connector.commands == []
+        assert [item.id for item in recovered.commands if item.id == command_id] == [
+            command_id
+        ]
+        with sqlite3.connect(database_path) as database:
+            row = database.execute(
+                "SELECT completed, delivery_attempted FROM agent_idempotency "
+                "WHERE owner_id = ? AND key_hash = ?",
+                (OWNER, key_hash),
+            ).fetchone()
+        assert row == (1, 1)
+
+    def test_malformed_legacy_revision_is_safely_coerced_during_header_quarantine(
+        self,
+        relay: Relay,
+        tmp_path: Path,
+        clock: Clock,
+    ) -> None:
+        connection = relay.service.agent_repo.get_connection(
+            relay.connection_id, owner_id=OWNER
+        )
+        legacy_payload = connection.model_dump(mode="json")
+        legacy_payload.update(
+            auth_header_name="Authorization",
+            revision="not-an-int",
+            credential="plaintext-legacy-secret",
+        )
+        database_path = tmp_path / "agents.sqlite3"
+        with sqlite3.connect(database_path) as database:
+            database.execute(
+                "UPDATE agent_connections SET payload = ? WHERE owner_id = ? AND id = ?",
+                (json.dumps(legacy_payload), OWNER, relay.connection_id),
+            )
+
+        restarted = build_service(AgentRepository(tmp_path), FakeConnector(), clock)
+        migrated = restarted.agent_repo.get_connection(
+            relay.connection_id, owner_id=OWNER
+        )
+        assert migrated.auth_header_name == "X-Agent-Key"
+        assert migrated.credential is None
+        assert migrated.status == "untested"
+        assert migrated.revision == 2
+        assert migrated.updated_at >= connection.updated_at
+
+        restarted_again = build_service(
+            AgentRepository(tmp_path), FakeConnector(), clock
+        )
+        persisted = restarted_again.agent_repo.get_connection(
+            relay.connection_id, owner_id=OWNER
+        )
+        assert persisted.revision == migrated.revision
+        with sqlite3.connect(database_path) as database:
+            stored_payload = database.execute(
+                "SELECT payload FROM agent_connections WHERE owner_id = ? AND id = ?",
+                (OWNER, relay.connection_id),
+            ).fetchone()[0]
+        assert "plaintext-legacy-secret" not in stored_payload
+
+    @pytest.mark.parametrize(
+        "legacy_header",
+        [
+            "Authorization",
+            "aUtHoRiZaTiOn",
+            "Content-Type",
+            "Host",
+            "X Bad",
+            "TE",
+            123,
+            None,
+            ["X-Agent-Key"],
+        ],
+    )
+    def test_legacy_invalid_header_connection_is_migrated_to_safe_readable_state(
+        self,
+        relay: Relay,
+        tmp_path: Path,
+        clock: Clock,
+        legacy_header: object,
+    ) -> None:
+        connection = relay.service.agent_repo.get_connection(
+            relay.connection_id, owner_id=OWNER
+        )
+        legacy_payload = connection.model_dump(mode="json")
+        legacy_payload["auth_header_name"] = legacy_header
+        with sqlite3.connect(tmp_path / "agents.sqlite3") as database:
+            database.execute(
+                "UPDATE agent_connections SET payload = ? WHERE owner_id = ? AND id = ?",
+                (json.dumps(legacy_payload), OWNER, relay.connection_id),
+            )
+
+        connector = FakeConnector()
+        restarted = build_service(AgentRepository(tmp_path), connector, clock)
+        listed = restarted.list_connections(owner_id=OWNER)
+        run = restarted.get_run(relay.run.id, owner_id=OWNER)
+        migrated = restarted.agent_repo.get_connection(
+            relay.connection_id, owner_id=OWNER
+        )
+
+        assert [item.id for item in listed] == [relay.connection_id]
+        assert listed[0].auth_header_name == "X-Agent-Key"
+        assert listed[0].status == "untested"
+        assert (
+            listed[0].last_test_error_code
+            == "legacy_invalid_auth_header_requires_reconfiguration"
+        )
+        assert migrated.credential is None
+        assert migrated.revision == connection.revision + 1
+        assert migrated.updated_at > connection.updated_at
+        assert run.id == relay.run.id
+        assert run.connection_id == relay.connection_id
+        with pytest.raises(ValidationFailure) as refused:
+            restarted.test_connection(relay.connection_id, owner_id=OWNER)
+        assert refused.value.detail == {"reason": "credential_missing"}
+        with pytest.raises(ValidationFailure):
+            dispatch(
+                restarted,
+                relay.connection_id,
+                task_id="task_2",
+                key=f"idem-legacy-invalid-header-{legacy_header}",
+            )
+        assert connector.tests == []
+        assert connector.starts == []
+
+        restarted_again = build_service(
+            AgentRepository(tmp_path), FakeConnector(), clock
+        )
+        persisted = restarted_again.get_connection(relay.connection_id, owner_id=OWNER)
+        assert persisted.auth_header_name == "X-Agent-Key"
+        assert persisted.last_test_error_code == (
+            "legacy_invalid_auth_header_requires_reconfiguration"
+        )
+
+    def test_retry_after_a_post_send_save_failure_reconciles_the_reserved_command_id(
         self,
         relay: Relay,
         service: AgentRelayService,
@@ -2850,13 +4119,222 @@ class TestRelayFailureRecoveryEdges:
             idempotency_key="idem-crash-reply",
         )
 
-        assert [call["command_id"] for call in connector.commands] == [
-            connector.commands[0]["command_id"],
-            connector.commands[0]["command_id"],
-        ]
+        assert len(connector.commands) == 1
+        command_id = connector.commands[0]["command_id"]
+        command = next(item for item in recovered.commands if item.id == command_id)
+        assert command.delivery == "unconfirmed"
         assert [
             command.body for command in recovered.commands if command.kind == "reply"
         ] == ["Use staging."]
+
+    def test_reply_retry_after_post_delivery_failure_reconciles_without_redelivery_after_terminal_callback(
+        self,
+        relay: Relay,
+        service: AgentRelayService,
+        connector: FakeConnector,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
+        payload = AgentReplyRequest(
+            message="Use staging.", expected_revision=relay.projection().revision
+        )
+        save_command = service.agent_repo.save_command
+        failed_once = False
+
+        def fail_after_delivery(command: Any) -> None:
+            nonlocal failed_once
+            if not failed_once:
+                failed_once = True
+                raise RuntimeError("simulated post-delivery storage outage")
+            save_command(command)
+
+        monkeypatch.setattr(service.agent_repo, "save_command", fail_after_delivery)
+        with pytest.raises(RuntimeError, match="post-delivery"):
+            service.reply_to_run(
+                relay.run.id,
+                payload,
+                owner_id=OWNER,
+                idempotency_key="idem-terminal-crash-reply",
+            )
+        original_command_id = connector.commands[0]["command_id"]
+        relay.emit(relay.event("evt_2", "completed", 2, result="Already done"))
+
+        recovered = service.reply_to_run(
+            relay.run.id,
+            payload,
+            owner_id=OWNER,
+            idempotency_key="idem-terminal-crash-reply",
+        )
+        replayed = service.reply_to_run(
+            relay.run.id,
+            payload,
+            owner_id=OWNER,
+            idempotency_key="idem-terminal-crash-reply",
+        )
+
+        assert len(connector.commands) == 1
+        assert recovered == replayed
+        assert recovered.reported_state == "completed"
+        assert recovered.result_text == "Already done"
+        command = next(
+            item for item in recovered.commands if item.id == original_command_id
+        )
+        assert command.delivery == "unconfirmed"
+        assert command.body == "Use staging."
+
+    def test_cancel_retry_after_post_delivery_failure_reconciles_without_redelivery_after_terminal_callback(
+        self,
+        relay: Relay,
+        service: AgentRelayService,
+        connector: FakeConnector,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        save_command = service.agent_repo.save_command
+        failed_once = False
+
+        def fail_after_delivery(command: Any) -> None:
+            nonlocal failed_once
+            if not failed_once:
+                failed_once = True
+                raise RuntimeError("simulated post-delivery cancel outage")
+            save_command(command)
+
+        monkeypatch.setattr(service.agent_repo, "save_command", fail_after_delivery)
+        with pytest.raises(RuntimeError, match="cancel outage"):
+            service.cancel_run(
+                relay.run.id,
+                owner_id=OWNER,
+                idempotency_key="idem-terminal-crash-cancel",
+            )
+        original_command_id = connector.commands[0]["command_id"]
+        relay.emit(relay.event("evt_done", "completed", 1, result="Finished"))
+
+        recovered = service.cancel_run(
+            relay.run.id,
+            owner_id=OWNER,
+            idempotency_key="idem-terminal-crash-cancel",
+        )
+
+        assert len(connector.commands) == 1
+        assert recovered.reported_state == "completed"
+        assert recovered.cancel_requested is False
+        command = next(
+            item for item in recovered.commands if item.id == original_command_id
+        )
+        assert command.kind == "cancel"
+        assert command.delivery == "unconfirmed"
+
+    def test_cancel_retry_after_post_delivery_failure_preserves_nonterminal_cancellation_overlay(
+        self,
+        relay: Relay,
+        service: AgentRelayService,
+        connector: FakeConnector,
+        clock: Clock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        save_command = service.agent_repo.save_command
+        failed_once = False
+
+        def fail_after_delivery(command: Any) -> None:
+            nonlocal failed_once
+            if not failed_once:
+                failed_once = True
+                raise RuntimeError("simulated post-delivery cancel outage")
+            save_command(command)
+
+        monkeypatch.setattr(service.agent_repo, "save_command", fail_after_delivery)
+        with pytest.raises(RuntimeError, match="cancel outage"):
+            service.cancel_run(
+                relay.run.id,
+                owner_id=OWNER,
+                idempotency_key="idem-active-crash-cancel",
+            )
+
+        clock.advance(timedelta(minutes=1))
+        callback_at = clock.now
+        relay.emit(
+            relay.event("evt_cancel_recovery", "running", 1, progress="Still working")
+        )
+        clock.advance(timedelta(minutes=1))
+        recovery_at = clock.now
+
+        recovered = service.cancel_run(
+            relay.run.id,
+            owner_id=OWNER,
+            idempotency_key="idem-active-crash-cancel",
+        )
+
+        assert len(connector.commands) == 1
+        assert recovered.reported_state == "running"
+        assert recovered.progress_text == "Still working"
+        assert recovered.cancel_requested is True
+        persisted = service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
+        assert persisted.updated_at >= callback_at
+        assert persisted.updated_at == recovery_at
+        command = next(item for item in recovered.commands if item.kind == "cancel")
+        assert command.delivery == "unconfirmed"
+
+    def test_start_retry_after_ambiguous_storage_failure_reuses_wire_identifiers(
+        self,
+        service: AgentRelayService,
+        connector: FakeConnector,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        confirmation = review(service, connection_id)
+        save_command = service.agent_repo.save_command
+        calls = 0
+
+        def fail_final_delivery_merge(command: Any) -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise RuntimeError("simulated ambiguous start storage outage")
+            save_command(command)
+
+        monkeypatch.setattr(
+            service.agent_repo, "save_command", fail_final_delivery_merge
+        )
+        with pytest.raises(RuntimeError, match="ambiguous start"):
+            service.dispatch_run(
+                "task_1",
+                confirmation,
+                owner_id=OWNER,
+                idempotency_key="idem-crash-start",
+            )
+        current_connection = service.get_connection(connection_id, owner_id=OWNER)
+        service.disconnect_connection(
+            connection_id,
+            AgentConnectionDisconnectRequest(
+                current_password="correct-horse-battery-staple",
+                expected_revision=current_connection.revision,
+            ),
+            owner_id=OWNER,
+            idempotency_key="idem-disconnect-after-start-crash",
+            reauthenticated=True,
+        )
+
+        recovered = service.dispatch_run(
+            "task_1",
+            confirmation,
+            owner_id=OWNER,
+            idempotency_key="idem-crash-start",
+        )
+
+        assert len(connector.starts) == 1
+        assert connector.starts[0]["run_id"] == recovered.id
+        assert connector.starts[0]["idempotency_key"] == recovered.id
+        assert (
+            len([command for command in recovered.commands if command.kind == "start"])
+            == 1
+        )
+        assert (
+            next(
+                command for command in recovered.commands if command.kind == "start"
+            ).delivery
+            == "unconfirmed"
+        )
 
     def test_missing_stored_credential_refuses_network_use(
         self, service: AgentRelayService, connector: FakeConnector

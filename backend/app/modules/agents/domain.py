@@ -17,6 +17,7 @@ from pydantic import AfterValidator, Field, TypeAdapter, model_validator
 
 from app.schemas.common import StorageBaseModel, StrictBaseModel
 
+from .headers import validate_auth_header_name
 from .secrets import SealedSecret
 
 AgentConnectionStatus = Literal[
@@ -78,6 +79,7 @@ def _require_nonblank(value: str) -> str:
 
 
 NonBlankStr = Annotated[str, AfterValidator(_require_nonblank)]
+AuthHeaderName = Annotated[str, AfterValidator(validate_auth_header_name)]
 
 _ProgressText = Annotated[str, Field(max_length=MAX_PROGRESS_CHARS)]
 _QuestionText = Annotated[NonBlankStr, Field(max_length=MAX_QUESTION_CHARS)]
@@ -181,9 +183,9 @@ class AgentConnectionDocument(StorageBaseModel):
 
     id: str
     owner_id: str
-    name: str = Field(min_length=1, max_length=200)
+    name: Annotated[NonBlankStr, Field(max_length=200)]
     endpoint_url: str = Field(min_length=1, max_length=2_000)
-    auth_header_name: str = Field(default="Authorization", min_length=1, max_length=128)
+    auth_header_name: Annotated[AuthHeaderName, Field(max_length=128)] = "X-Agent-Key"
     credential: SealedSecret | None = None
     inbound_secret: SealedSecret | None = None
     capabilities: AgentCapabilities = Field(default_factory=AgentCapabilities)
@@ -344,10 +346,11 @@ class AgentIdempotencyRecord(StorageBaseModel):
     so the row can answer "same key, same request?" without ever holding the key
     or the payload.
 
-    ``command_id`` and ``completed`` are what make a network-bearing command
-    crash-safe: the reservation is written with ``completed=False`` *before* the
-    connector is called, so a retry after an ambiguous attempt reuses the exact
-    command ID rather than minting a second one.
+    ``command_id``, ``delivery_attempted``, and ``completed`` make a
+    network-bearing command crash-safe. The reservation is durable before the
+    attempt marker, and the marker is durable before connector I/O. A retry can
+    therefore resend a never-attempted command, but must reconcile an attempted
+    command as unconfirmed instead of risking a duplicate external action.
     """
 
     key_hash: str
@@ -355,6 +358,7 @@ class AgentIdempotencyRecord(StorageBaseModel):
     request_hash: str
     resource_id: str
     command_id: str | None = None
+    delivery_attempted: bool = False
     completed: bool = True
     response_body: dict[str, object]
     created_at: datetime

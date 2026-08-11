@@ -287,6 +287,52 @@ class TestConnectionRoutes:
         assert response.status_code == 403
         assert client.get("/api/agent-connections").json() == []
 
+    def test_creating_with_a_whitespace_only_name_is_rejected_before_action(
+        self, client: TestClient, connector: FakeConnector
+    ) -> None:
+        response = client.post(
+            "/api/agent-connections",
+            headers={"Idempotency-Key": "blank-name"},
+            json={
+                "name": "   ",
+                "endpoint_url": ENDPOINT,
+                "credential": "Bearer token",
+                "current_password": TEST_USER_PASSWORD,
+            },
+        )
+
+        assert response.status_code == 422
+        assert client.get("/api/agent-connections").json() == []
+        assert connector.starts == []
+        assert connector.commands == []
+
+    @pytest.mark.parametrize(
+        "auth_header_name",
+        ["Authorization", "content-type", "X Bad"],
+    )
+    def test_creating_with_an_owned_or_malformed_auth_header_is_rejected_before_action(
+        self,
+        client: TestClient,
+        connector: FakeConnector,
+        auth_header_name: str,
+    ) -> None:
+        response = client.post(
+            "/api/agent-connections",
+            headers={"Idempotency-Key": f"bad-header-{auth_header_name}"},
+            json={
+                "name": "Hermes",
+                "endpoint_url": ENDPOINT,
+                "auth_header_name": auth_header_name,
+                "credential": "Bearer token",
+                "current_password": TEST_USER_PASSWORD,
+            },
+        )
+
+        assert response.status_code == 422
+        assert client.get("/api/agent-connections").json() == []
+        assert connector.starts == []
+        assert connector.commands == []
+
     def test_creating_without_an_idempotency_key_is_rejected(
         self, client: TestClient
     ) -> None:
