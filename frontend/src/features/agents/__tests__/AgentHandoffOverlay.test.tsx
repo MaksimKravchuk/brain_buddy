@@ -128,6 +128,20 @@ describe("AgentHandoffOverlay", () => {
     expect(screen.getByText(manifest.external_copy_notice)).toBeInTheDocument();
   });
 
+  it("states explicitly when no details or context will be copied", async () => {
+    vi.mocked(apiClient.previewAgentHandoff).mockResolvedValue({
+      ...manifest,
+      details: null,
+      context_items: []
+    });
+    const user = userEvent.setup();
+    renderOverlay();
+    await selectReadyAgent(user);
+
+    expect(screen.getByText("No task details will be sent.")).toBeInTheDocument();
+    expect(screen.getByText("No context items will be sent.")).toBeInTheDocument();
+  });
+
   it("re-previews without the task details when the user excludes them", async () => {
     const user = userEvent.setup();
     renderOverlay();
@@ -280,10 +294,12 @@ describe("AgentHandoffOverlay", () => {
     await waitFor(() => expect(apiClient.previewAgentHandoff).toHaveBeenCalledTimes(2));
   });
 
-  it("shows an unrelated dispatch failure without silently re-previewing", async () => {
-    vi.spyOn(apiClient, "confirmAgentHandoff").mockRejectedValue(
-      new ApiError("Forbidden", 403, { message: "Current password is incorrect." }, "corr-handoff-4")
-    );
+  it.each(["forbidden", { detail: "not-a-structured-reason" }])(
+    "shows an unrelated dispatch failure without silently re-previewing for payload %#",
+    async (payload) => {
+      vi.spyOn(apiClient, "confirmAgentHandoff").mockRejectedValue(
+        new ApiError("Forbidden", 403, payload, "corr-handoff-4")
+      );
     const user = userEvent.setup();
     renderOverlay();
     await selectReadyAgent(user);
@@ -293,7 +309,7 @@ describe("AgentHandoffOverlay", () => {
     });
 
     await waitFor(() =>
-      expect(screen.getByRole("alert")).toHaveTextContent(/current password is incorrect.*corr-handoff-4/i)
+      expect(screen.getByRole("alert")).toHaveTextContent(/corr-handoff-4/i)
     );
     expect(apiClient.previewAgentHandoff).toHaveBeenCalledTimes(1);
   });

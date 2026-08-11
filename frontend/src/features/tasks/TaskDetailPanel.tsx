@@ -479,16 +479,27 @@ function TaskDetailBody({
 function AgentTaskRelay({ task, isTerminal }: { task: TaskResponse; isTerminal: boolean }): React.JSX.Element | null {
   const user = useAuthStore((state) => state.user);
   const enabled = hasFeatureFlag(user, "external_agent_relay");
-  const [reviewing, setReviewing] = useState(false);
-  const runsQuery = useAgentRuns(task.id, enabled);
-
-  useEffect(() => {
-    setReviewing(false);
-  }, [task.id]);
 
   if (!enabled) {
     return null;
   }
+
+  return <EnabledAgentTaskRelay task={task} isTerminal={isTerminal} />;
+}
+
+function EnabledAgentTaskRelay({
+  task,
+  isTerminal
+}: {
+  task: TaskResponse;
+  isTerminal: boolean;
+}): React.JSX.Element {
+  const [reviewing, setReviewing] = useState(false);
+  const runsQuery = useAgentRuns(task.id, true);
+
+  useEffect(() => {
+    setReviewing(false);
+  }, [task.id]);
 
   const runs = runsQuery.data ?? [];
 

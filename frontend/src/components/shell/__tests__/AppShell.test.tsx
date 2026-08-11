@@ -172,7 +172,7 @@ describe("AppShell canonical sidebar", () => {
     const user = userEvent.setup();
     renderShell();
 
-    await user.click(screen.getByRole("button", { name: "Account menu" }));
+    await user.click(screen.getByRole("button", { name: /Account menu/ }));
     const menu = screen.getByRole("menu", { name: "Account" });
     await user.click(within(menu).getByRole("menuitem", { name: "Connected agents" }));
 
