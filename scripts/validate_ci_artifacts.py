@@ -185,13 +185,26 @@ ALLURE_AGGREGATION_REQUIREMENTS = (
     # Selected-to-run is not produced-something. A stack job is skipped when
     # `spec-kit` is red, which is the normal state of a spec-driven branch, so
     # the `changes` output alone reports stacks that uploaded nothing.
+    # One entry per uploading stack, and `!= 'skipped'` rather than
+    # `== 'success'`. A stack that ran and failed still uploaded its results
+    # under `always()`, and that is the run whose report a person most needs;
+    # requiring success hid it precisely then.
+    #
+    # Listing all three matters as much as the predicate itself: the shell line
+    # below can name MOBILE while the environment binds it to a constant, and
+    # the invariant would still pass over exactly the regression it claims to
+    # prevent. That is the defect this file's own header warns about.
     (
         "Allure predicate conjoins selection with the backend job actually running",
-        "needs.changes.outputs.backend == 'true' && needs.backend.result == 'success'",
+        "needs.changes.outputs.backend == 'true' && needs.backend.result != 'skipped'",
     ),
     (
         "Allure predicate conjoins selection with the frontend job actually running",
-        "needs.changes.outputs.frontend == 'true' && needs.frontend.result == 'success'",
+        "needs.changes.outputs.frontend == 'true' && needs.frontend.result != 'skipped'",
+    ),
+    (
+        "Allure predicate conjoins selection with the mobile job actually running",
+        "needs.changes.outputs.mobile == 'true' && needs.mobile.result != 'skipped'",
     ),
     (
         "gate on the Allure download step",

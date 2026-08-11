@@ -397,7 +397,7 @@ export default defineConfig({
             selected_only = Path(tmp) / "ci-selected-only.yml"
             selected_only.write_text(
                 text.replace(
-                    "needs.changes.outputs.backend == 'true' && needs.backend.result == 'success'",
+                    "needs.changes.outputs.backend == 'true' && needs.backend.result != 'skipped'",
                     "needs.changes.outputs.backend",
                 ),
                 encoding="utf-8",
@@ -810,9 +810,9 @@ jobs:
       - name: Decide whether there is anything to aggregate
         id: aggregate
         env:
-          BACKEND: ${{ needs.changes.outputs.backend == 'true' && needs.backend.result == 'success' }}
-          FRONTEND: ${{ needs.changes.outputs.frontend == 'true' && needs.frontend.result == 'success' }}
-          MOBILE: ${{ needs.changes.outputs.mobile == 'true' && needs.mobile.result == 'success' }}
+          BACKEND: ${{ needs.changes.outputs.backend == 'true' && needs.backend.result != 'skipped' }}
+          FRONTEND: ${{ needs.changes.outputs.frontend == 'true' && needs.frontend.result != 'skipped' }}
+          MOBILE: ${{ needs.changes.outputs.mobile == 'true' && needs.mobile.result != 'skipped' }}
         run: |
           if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ] || [ "$MOBILE" = "true" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"

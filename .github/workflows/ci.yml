@@ -1162,9 +1162,9 @@ jobs:
         # the one case this validator exists for: a stack that ran and produced
         # no results.
         env:
-          BACKEND: ${{ needs.changes.outputs.backend == 'true' && needs.backend.result == 'success' }}
-          FRONTEND: ${{ needs.changes.outputs.frontend == 'true' && needs.frontend.result == 'success' }}
-          MOBILE: ${{ needs.changes.outputs.mobile == 'true' && needs.mobile.result == 'success' }}
+          BACKEND: ${{ needs.changes.outputs.backend == 'true' && needs.backend.result != 'skipped' }}
+          FRONTEND: ${{ needs.changes.outputs.frontend == 'true' && needs.frontend.result != 'skipped' }}
+          MOBILE: ${{ needs.changes.outputs.mobile == 'true' && needs.mobile.result != 'skipped' }}
         run: |
           if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ] || [ "$MOBILE" = "true" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
