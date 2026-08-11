@@ -49,7 +49,11 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     const onSignIn = segments[0] === "sign-in";
     if (status === "signed-out" && !onSignIn) {
       router.replace("/sign-in");
-    } else if (status === "signed-in" && onSignIn) {
+    } else if ((status === "signed-in" || status === "signed-in-offline") && onSignIn) {
+      // `signed-in-offline` is an authenticated person whose profile could not
+      // be refreshed — FR-019. Treating it as anything but signed in would
+      // strand them on the sign-in screen with a valid session and a queue full
+      // of unsent work, which is the offline cold start SC-009 exists for.
       router.replace("/");
     }
   }, [status, segments, router]);
