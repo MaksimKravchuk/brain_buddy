@@ -730,13 +730,16 @@ describe("006-SC-009 the pickers are fed from what the device holds", () => {
   });
 
   it.each<
-    [string, { status: "signed-in" | "signed-in-offline"; fromCache: boolean; listFailed: boolean; hasServerData: boolean }, boolean]
+    [string, { status: "signed-in" | "signed-in-offline"; fromCache: boolean; listUnreachable: boolean; hasServerData: boolean }, boolean]
   >([
-    ["the server answered just now", { status: "signed-in", fromCache: false, listFailed: false, hasServerData: true }, true],
-    ["the device answered from its cache", { status: "signed-in", fromCache: true, listFailed: false, hasServerData: false }, false],
-    ["the fetch failed outright", { status: "signed-in", fromCache: false, listFailed: true, hasServerData: false }, false],
-    ["the launch probe failed and nothing has loaded", { status: "signed-in-offline", fromCache: false, listFailed: false, hasServerData: false }, false],
-    ["the launch probe failed but the list has since come from the server", { status: "signed-in-offline", fromCache: false, listFailed: false, hasServerData: true }, true],
+    ["the server answered just now", { status: "signed-in", fromCache: false, listUnreachable: false, hasServerData: true }, true],
+    ["the device answered from its cache", { status: "signed-in", fromCache: true, listUnreachable: false, hasServerData: false }, false],
+    ["the server could not be reached", { status: "signed-in", fromCache: false, listUnreachable: true, hasServerData: false }, false],
+    // An HTTP failure from a server we DID reach is not offline: the picker's
+    // error row, the only one offering a Retry, renders only when online.
+    ["the server answered with an error", { status: "signed-in", fromCache: false, listUnreachable: false, hasServerData: false }, true],
+    ["the launch probe failed and nothing has loaded", { status: "signed-in-offline", fromCache: false, listUnreachable: false, hasServerData: false }, false],
+    ["the launch probe failed but the list has since come from the server", { status: "signed-in-offline", fromCache: false, listUnreachable: false, hasServerData: true }, true],
   ])("006-FR-016 online when %s", (_why, input, expected) => {
     expect(resolveOnline(input)).toBe(expected);
   });

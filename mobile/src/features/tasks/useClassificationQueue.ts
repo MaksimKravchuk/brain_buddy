@@ -830,16 +830,32 @@ export function useClassificationQueue(
     let cancelled = false;
 
     (async () => {
+      // The guard runs before every write, not only before the state update.
+      // These are destructive: a cold read for identity A that resumes after B
+      // has signed in would sweep with A's key active and delete B's live
+      // queue — the current person's unsent work, destroyed by a stale read of
+      // somebody else's. `cancelled` protecting only the React state below is
+      // not enough, because the damage is on the device.
+      const stale = () => cancelled || identityRef.current !== active;
+      if (stale()) {
+        return;
+      }
       // Invariant 8b, with 8a's guard: the sweep deletes foreign keys and this
       // identity's aged *cache*, and must be told which key is active or it
       // deletes this identity's unsent work too.
       await sweepAllIdentities({ activeKey: sweepActiveKey(active), now: Date.now() });
+      if (stale()) {
+        return;
+      }
       // Invariant 5c: `sending` is reset on the way in, before any drain.
       const stored = await loadQueue(active, { resetInterrupted });
       const serverNow = await loadServerTime();
       const hydrated = hydrateQueue(stored, Date.now(), serverNow ?? undefined);
+      if (stale()) {
+        return;
+      }
       await saveQueue(active, hydrated.queue, Date.now());
-      if (cancelled || identityRef.current !== active) {
+      if (stale()) {
         return;
       }
       queueRef.current = hydrated.queue;

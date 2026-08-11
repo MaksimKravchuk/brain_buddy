@@ -708,8 +708,13 @@ export interface ConnectivityInput {
   status: SessionStatusLike;
   /** A list answered from device storage rather than by the server. */
   fromCache: boolean;
-  /** A list fetch that failed with nothing cached to answer with. */
-  listFailed: boolean;
+  /** A list fetch that failed because the server could not be REACHED, with
+   *  nothing cached to answer with. An HTTP failure from a reachable server is
+   *  not this: treating the two alike made design.md's M-02/M-03 error row —
+   *  the only one carrying a Retry — unreachable, because the picker renders
+   *  it only when `online` is true. A 500 then read as "no connection", which
+   *  is both false and unretryable. */
+  listUnreachable: boolean;
   /** A list the server answered on this run. */
   hasServerData: boolean;
 }
@@ -725,7 +730,7 @@ export interface ConnectivityInput {
  * online direction blocks a create that would have worked.
  */
 export function resolveOnline(input: ConnectivityInput): boolean {
-  if (input.listFailed || input.fromCache) {
+  if (input.listUnreachable || input.fromCache) {
     return false;
   }
   if (input.hasServerData) {

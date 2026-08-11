@@ -10,6 +10,7 @@ import {
 
 import { createApiClient, type ApiClient } from "@/api/client";
 import type { MeResponse } from "@/api/types";
+import { saveServerTime } from "@/features/tasks/classificationQueue.storage";
 import {
   currentServerUrl,
   DEFAULT_SERVER_URL,
@@ -140,6 +141,14 @@ export function SessionProvider({ children }: PropsWithChildren) {
         getBaseUrl: currentServerUrl,
         onUnauthorized: () => {
           void handleUnauthorized();
+        },
+        // FR-018's second guard: the retention bound is cross-checked against
+        // the last time the SERVER said it was, so a device clock jumped
+        // forward cannot delete a queue on its own. Nothing recorded this
+        // before, so `loadServerTime()` was always null and the guard — which
+        // the adversarial review asked for by name — never ran.
+        onServerTime: (date) => {
+          void saveServerTime(date);
         },
       }),
     [handleUnauthorized],

@@ -70,6 +70,7 @@ import {
 } from "@/features/tasks/useClassificationQueue";
 import { availableTransitions, buildTransition } from "@/lifecycle/guards";
 import { colors, fonts, minHitTarget, radii, space, type as typeScale } from "@/theme/tokens";
+import { classifySessionFailure } from "@/auth/sessionOutcome";
 import { useServerDraft } from "@/utils/useServerDraft";
 import { newIdempotencyKey } from "@/utils/ids";
 
@@ -346,7 +347,12 @@ export default function TaskDetailScreen() {
   const online = resolveOnline({
     status,
     fromCache: projectsFromCache || tagsFromCache,
-    listFailed: projects.isError || tags.isError,
+    // Only an unreachable server means offline. An HTTP error from a server we
+    // did reach keeps `online` true, so the picker renders its error state
+    // with a Retry instead of a dead "no connection" message.
+    listUnreachable:
+      classifySessionFailure(projects.error) === "unreachable" ||
+      classifySessionFailure(tags.error) === "unreachable",
     hasServerData:
       (projects.data !== undefined && !projectsFromCache) ||
       (tags.data !== undefined && !tagsFromCache),

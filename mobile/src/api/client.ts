@@ -77,6 +77,11 @@ export interface ApiClientOptions {
   getBaseUrl: () => string;
   /** Called on any 401 response (session expired / signed out elsewhere). */
   onUnauthorized?: (() => void) | null;
+  /** Every successful response's `Date` header. Feature 006 persists it so
+   *  FR-018's retention bound can be cross-checked against a clock the person
+   *  cannot set — without it the bound trusts the device alone, which is the
+   *  hole the adversarial review opened. */
+  onServerTime?: ((date: string) => void) | null;
   /** Injectable fetch for tests; defaults to the global fetch. */
   fetchImpl?: typeof fetch;
   /** Request timeout in ms. Generous default: the Fly frontend cold-starts. */
@@ -105,7 +110,7 @@ export function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 }
 
 export function createApiClient(options: ApiClientOptions) {
-  const { getBaseUrl, onUnauthorized, fetchImpl, timeoutMs = DEFAULT_TIMEOUT_MS } = options;
+  const { getBaseUrl, onUnauthorized, onServerTime, fetchImpl, timeoutMs = DEFAULT_TIMEOUT_MS } = options;
   // Preserve the global binding: calling an unbound fetch reference throws in
   // some environments (illegal invocation).
   const doFetch: typeof fetch = fetchImpl ?? ((...args) => fetch(...args));
@@ -140,6 +145,13 @@ export function createApiClient(options: ApiClientOptions) {
 
     if (response.status === 401 && onUnauthorized) {
       onUnauthorized();
+    }
+
+    if (onServerTime && response.ok) {
+      const served = response.headers.get("Date");
+      if (served) {
+        onServerTime(served);
+      }
     }
 
     if (response.status === 204) {
