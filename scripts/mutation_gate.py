@@ -10,10 +10,13 @@ It runs only over the intersection of the enforced scope and the files a pull
 request actually changed, so a change that touches none of them costs nothing,
 and one that touches a single module does not pay for the whole campaign.
 
-Two failure modes are treated as equally disqualifying: a score below the
-threshold, and a run that checked no mutants at all. The second matters more
-than it looks -- a campaign that silently mutates nothing reports a perfect
-score, which is exactly how a gate comes to mean nothing.
+Three failure modes are treated as equally disqualifying: a score below the
+threshold, a score below the base revision's for the same scope, and a run that
+checked no mutants at all. The last matters more than it looks -- a campaign
+that silently mutates nothing reports a perfect score, which is exactly how a
+gate comes to mean nothing. The base comparison matters for the opposite
+reason: an absolute floor alone lets a module sitting at 99% shed four points
+of assertion strength without anyone noticing.
 
 The backend campaign runs mutmut and reports CI/CD stats; the frontend campaign
 runs Stryker and reports a mutation-report.json holding per-file mutants. Both
@@ -71,9 +74,20 @@ def mutation_score(stats: dict[str, object]) -> tuple[int, int, float]:
 
 
 def validate_score(
-    killed: int, checked: int, score: float, *, threshold: float = DEFAULT_THRESHOLD
+    killed: int,
+    checked: int,
+    score: float,
+    *,
+    threshold: float = DEFAULT_THRESHOLD,
+    base: tuple[int, int, float] | None = None,
 ) -> None:
-    """Raise when nothing was checked or the score is below ``threshold``."""
+    """Raise when nothing was checked, the score is below ``threshold``, or the
+    score is below ``base`` -- the same measurement taken at the base revision.
+
+    A ``base`` that checked no mutants means the base revision had nothing
+    comparable to measure -- a scoped file it does not contain, most obviously
+    -- so the comparison is skipped rather than treated as a score of zero.
+    """
 
     if checked == 0:
         raise ValueError(
@@ -85,14 +99,31 @@ def validate_score(
             f"mutation score {score:.2%} ({killed}/{checked} killed) is below "
             f"the required {threshold:.2%}."
         )
+    if base is not None:
+        base_killed, base_checked, base_score = base
+        if base_checked and score < base_score:
+            raise ValueError(
+                f"mutation score {score:.2%} ({killed}/{checked} killed) is below "
+                f"the base revision's {base_score:.2%} "
+                f"({base_killed}/{base_checked} killed) over the same scope; "
+                "the enforced scope may not regress."
+            )
 
 
 def validate_stats(
-    stats: dict[str, object], *, threshold: float = DEFAULT_THRESHOLD
+    stats: dict[str, object],
+    *,
+    threshold: float = DEFAULT_THRESHOLD,
+    base_stats: dict[str, object] | None = None,
 ) -> None:
-    """Raise when the campaign checked nothing or scored below ``threshold``."""
+    """Raise when the campaign checked nothing, scored below ``threshold``, or
+    regressed against the base revision."""
 
-    validate_score(*mutation_score(stats), threshold=threshold)
+    validate_score(
+        *mutation_score(stats),
+        threshold=threshold,
+        base=mutation_score(base_stats) if base_stats is not None else None,
+    )
 
 
 def validate_stryker(
@@ -204,6 +235,93 @@ def stryker_survivors(report: dict[str, object], scope: list[str] | None = None)
     return "\n".join(lines) + "\n"
 
 
+#: `mutmut results --all true` prints one `<mutant name>: <verdict>` line per
+#: mutant. Only killed and survived are a verdict about the tests, matching
+#: how ``mutation_score`` reads the aggregate stats.
+MUTMUT_RESULT_LINE = re.compile(r"^\s*(?P<mutant>[\w.]+ǁ?[\w.ǁ]*):\s*(?P<verdict>[a-z ]+)\s*$")
+
+
+def scope_module_prefixes(scope: list[str]) -> list[str]:
+    """Turn `app/services/tree_service.py` into `app.services.tree_service.`.
+
+    The trailing dot matters: without it `app.repositories.tree` would also
+    claim every mutant of a hypothetical `app.repositories.tree_service`.
+    """
+
+    prefixes = []
+    for entry in scope:
+        module = entry.removesuffix(".py").replace("/", ".")
+        prefixes.append(f"{module}.")
+    return prefixes
+
+
+def mutmut_results_score(
+    results_text: str, scope: list[str] | None = None
+) -> tuple[int, int, float]:
+    """Return (killed, checked, score) from `mutmut results --all true` output.
+
+    This is how one campaign yields two tier scores. The observed scope is a
+    superset of the enforced one, so the enforced number is a filter over the
+    same per-mutant verdicts rather than a second campaign -- which is what
+    makes ongoing enforced-tier evidence cost nothing.
+    """
+
+    prefixes = None if scope is None else scope_module_prefixes(scope)
+    killed = 0
+    survived = 0
+    for line in results_text.splitlines():
+        match = MUTMUT_RESULT_LINE.match(line)
+        if match is None:
+            continue
+        mutant = match.group("mutant")
+        if prefixes is not None and not any(mutant.startswith(p) for p in prefixes):
+            continue
+        verdict = match.group("verdict").strip()
+        if verdict == "killed":
+            killed += 1
+        elif verdict == "survived":
+            survived += 1
+
+    checked = killed + survived
+    if checked == 0:
+        return killed, 0, 0.0
+    return killed, checked, killed / checked
+
+
+def mutmut_summary(results_text: str, scope: list[str] | None = None) -> str:
+    """Render the per-module and overall score of a mutmut results dump."""
+
+    lines = []
+    if scope is not None:
+        for entry in scope:
+            killed, checked, score = mutmut_results_score(results_text, [entry])
+            lines.append(f"{entry}: {score:.2%} ({killed}/{checked} killed)")
+
+    killed, checked, score = mutmut_results_score(results_text, scope)
+    tier = "enforced scope" if scope is not None else "observed scope"
+    lines.append(f"TOTAL ({tier}): {score:.2%} ({killed}/{checked} killed)")
+    return "\n".join(lines) + "\n"
+
+
+def mutmut_survivors(results_text: str, scope: list[str] | None = None) -> str:
+    """Render every surviving mutant in ``scope`` as one reviewable line."""
+
+    prefixes = None if scope is None else scope_module_prefixes(scope)
+    lines: list[str] = []
+    for line in results_text.splitlines():
+        match = MUTMUT_RESULT_LINE.match(line)
+        if match is None or match.group("verdict").strip() != "survived":
+            continue
+        mutant = match.group("mutant")
+        if prefixes is not None and not any(mutant.startswith(p) for p in prefixes):
+            continue
+        lines.append(mutant)
+
+    if not lines:
+        return "No surviving mutants\n"
+    return "\n".join(lines) + "\n"
+
+
 def rewrite_only_mutate(pyproject: Path, scope: list[str]) -> None:
     """Narrow ``[tool.mutmut] only_mutate`` to ``scope`` in place.
 
@@ -247,6 +365,18 @@ def main(argv: list[str] | None = None) -> int:
     check = sub.add_parser("check", help="validate a mutmut CI/CD stats file")
     check.add_argument("--stats", type=Path, required=True)
     check.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
+    check.add_argument(
+        "--base-stats",
+        type=Path,
+        help=(
+            "stats from the base revision measured over the same scope; the "
+            "score may not fall below it. A file recording zero checked mutants "
+            "means the base had nothing comparable and the comparison is "
+            "skipped. Passing a path that does not exist is an error, so a "
+            "missing base measurement fails the gate instead of silently "
+            "downgrading it to a threshold-only check."
+        ),
+    )
 
     check_stryker = sub.add_parser(
         "check-stryker", help="validate a Stryker mutation report over a scope"
@@ -268,6 +398,20 @@ def main(argv: list[str] | None = None) -> int:
     summarize.add_argument("--summary-out", type=Path, required=True)
     summarize.add_argument("--survivors-out", type=Path, required=True)
 
+    summarize_mutmut = sub.add_parser(
+        "summarize-mutmut",
+        help="write the score summary and survivor list of a mutmut results dump",
+    )
+    summarize_mutmut.add_argument(
+        "--results",
+        type=Path,
+        required=True,
+        help="output of `mutmut results --all true`",
+    )
+    summarize_mutmut.add_argument("--enforced", type=Path)
+    summarize_mutmut.add_argument("--summary-out", type=Path, required=True)
+    summarize_mutmut.add_argument("--survivors-out", type=Path, required=True)
+
     args = parser.parse_args(argv)
 
     if args.command == "summarize-stryker":
@@ -282,6 +426,20 @@ def main(argv: list[str] | None = None) -> int:
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
+        for path, text in ((args.summary_out, summary), (args.survivors_out, survivors)):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        print(summary, end="")
+        return 0
+
+    if args.command == "summarize-mutmut":
+        if not args.results.is_file():
+            print(f"error: results do not exist: {args.results}", file=sys.stderr)
+            return 1
+        results_text = args.results.read_text(encoding="utf-8")
+        scope = load_enforced_scope(args.enforced) if args.enforced else None
+        summary = mutmut_summary(results_text, scope)
+        survivors = mutmut_survivors(results_text, scope)
         for path, text in ((args.summary_out, summary), (args.survivors_out, survivors)):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
@@ -316,14 +474,33 @@ def main(argv: list[str] | None = None) -> int:
     if not args.stats.is_file():
         print(f"error: stats file does not exist: {args.stats}", file=sys.stderr)
         return 1
+    base_stats = None
+    if args.base_stats is not None:
+        if not args.base_stats.is_file():
+            print(
+                f"error: base stats file does not exist: {args.base_stats}",
+                file=sys.stderr,
+            )
+            return 1
+        base_stats = json.loads(args.base_stats.read_text(encoding="utf-8"))
     stats = json.loads(args.stats.read_text(encoding="utf-8"))
     try:
-        validate_stats(stats, threshold=args.threshold)
+        validate_stats(stats, threshold=args.threshold, base_stats=base_stats)
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     killed, checked, score = mutation_score(stats)
-    print(f"mutation gate passed: {score:.2%} ({killed}/{checked} mutants killed)")
+    message = f"mutation gate passed: {score:.2%} ({killed}/{checked} mutants killed)"
+    if base_stats is not None:
+        base_killed, base_checked, base_score = mutation_score(base_stats)
+        if base_checked:
+            message += (
+                f"; base revision {base_score:.2%} "
+                f"({base_killed}/{base_checked} killed)"
+            )
+        else:
+            message += "; base revision had no comparable mutants"
+    print(message)
     return 0
 
 

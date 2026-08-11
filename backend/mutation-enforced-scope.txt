@@ -7,13 +7,62 @@
 # unchanged allow-list. Adding one without that evidence defeats the point of
 # having two tiers.
 #
-# NOT YET ENFORCING. Nothing reads this list in CI yet, and it must stay that
-# way until the score clears ADR-0004's bar.
+# ENFORCING. The `mutation-gate` job in .github/workflows/ci.yml reads this
+# file. On a pull request it measures only the entries the change actually
+# touches and fails below 95%, on zero checked mutants, or on any regression
+# against the base revision measured over the same scope. On the landing path
+# (push to main or trunk-candidate/**) it measures the whole list, because
+# SHIP/SHOW changes land without a pull request and that push is their only
+# gate. Editing this file changes what may block delivery.
 #
-# Measured over exactly this list on 2026-08-10: 1280 killed, 70 survived of
-# 1350 mutants — 94.81%, against a required 95%. Three more killed mutants
-# would clear it (1283/1350 = 95.04%). Twelve consecutive successful nightlies
-# satisfy the other half of the precondition.
+# Score, measured over exactly this list with `make mutation-gate-backend`:
+#
+#   2026-08-10  1279 killed, 70 survived, 1 timeout of 1350 — 94.81%  (misses)
+#   2026-08-10  1319 killed, 28 survived,  0 timeout of 1347 — 97.92%  (clears)
+#
+# The 70 survivors of the first measurement resolved as 39 killed by focused
+# tests in tests/test_mutation_survivor_exact.py, 3 that stopped existing when
+# the unreachable `or [...]` fallback in TreeService.generate_ai_feedback was
+# deleted, and 28 non-behavioral mutations. ADR-0004 requires every survivor to
+# be killed or justified individually, so the 28 are itemised here — each is a
+# mutant whose observable output is identical to the original, not an
+# exclusion:
+#
+#   redundant explicit defaults (11) — the mutation drops a keyword whose value
+#     already is the field's declared default: _node_to_document 19/20/26
+#     (visual, validation, author), _relation_to_document 28/44 (notes,
+#     author), relation_to_response 9 (kind="why"), _build_tree_document 30/37
+#     (description, version_refs), create_relation 29/35 (notes, author).
+#   unread local seeds (3) — create_relation 2, update_relation 18,
+#     create_version 2 change the `None` a nonlocal is initialised to; the
+#     closure assigns it unconditionally before anything reads it.
+#   defence in depth (4) — create_relation 14/15 and update_relation 72/73 blank
+#     the arguments of _ensure_not_duplicate. _validate_relations re-checks the
+#     same invariant on the post-update list and raises the identical message
+#     and detail, so the duplicate is still rejected.
+#   deep copy with nothing to detach (3) — _preserve_unrepresented_tree_data
+#     36/38/46 weaken `deep` on the relation merge copy. Every RelationDocument
+#     field not carried in that copy's `update` is a string.
+#   owner_id restored downstream (2) — _resolve_metadata 7/10 drop owner_id from
+#     the from_timestamps fallback; the return statement's
+#     `base.owner_id or owner_id` puts it back.
+#   falsy sentinel equals the literal (2) — _cache_store 4 (popitem(last=None))
+#     and export_tree 58 (ensure_ascii=None): both callees test the flag for
+#     truthiness, so None behaves exactly as False.
+#   serialisation no-ops (3) — export_tree 41/43/46 flip by_alias. Every
+#     serialization_alias reachable from TreeDetailResponse equals its own field
+#     name, so both spellings emit byte-identical JSON.
+#   case-insensitive codec name (1) — export_tree 66 turns "utf-8" into
+#     "UTF-8"; codec lookup normalises case.
+#
+# The nightly campaign in .github/workflows/mutation-quality.yml stays
+# report-only over the wider OBSERVED scope. It is not redundant with the gate:
+# it measures the modules still under calibration, which are not allowed to
+# block anything yet. It also reports THIS list's score from the same run --
+# the observed scope is a superset, so the enforced number is a filter over
+# per-mutant verdicts it already produced, at no extra runtime. That is the
+# only scheduled evidence this tier has, and drift here shows up nightly
+# rather than on whichever pull request happens to trip the gate.
 app/services/tree_service.py
 app/services/version_service.py
 app/services/relation_service.py
