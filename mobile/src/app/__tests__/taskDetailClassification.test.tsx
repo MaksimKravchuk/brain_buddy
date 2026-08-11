@@ -28,6 +28,7 @@ import { cacheKey, queueKey } from "@/features/tasks/storageKeys";
 import { resetAccountNoticeDismissals } from "@/features/tasks/taskScreenState";
 import { setSearchParams } from "@/test/expoRouterMock";
 import {
+  FakeHttpError,
   installFakeBackend,
   makeMe,
   makeProject,
@@ -576,6 +577,89 @@ describe("task detail — work the 30-day bound discarded", () => {
 
     await screen.findByText(/^Your change to Project from 31 days ago/);
     expect(screen.queryByText(/older than 30 days/)).toBeNull();
+  });
+});
+
+describe("task detail — a queued change the server rejected", () => {
+  /**
+   * Mount t1 with one stale queued change on the device, over a server that
+   * 409s anything sent against the wrong revision. The cold-read drain sends
+   * it, is rejected, re-reads the task, and parks the entry for the person.
+   */
+  async function openConflictedTask() {
+    let stored = makeTask({ id: "t1", project_id: "p1", tag_ids: [], revision: 5 });
+    await seedQueue([
+      queuedChange({
+        sendState: "queued",
+        observedRevision: 1,
+        lastEditedAt: new Date(Date.now() - 14 * MINUTE).toISOString(),
+        firstQueuedAt: new Date(Date.now() - 14 * MINUTE).toISOString(),
+      }),
+    ]);
+    await openTask(stored, {
+      routes: {
+        "GET /tasks/t1": () => stored,
+        "PATCH /tasks/t1": (call) => {
+          const body = call.body as { project_id?: string | null; expected_revision: number };
+          if (body.expected_revision !== stored.revision) {
+            return new FakeHttpError(409, {
+              message: "Revision mismatch",
+              detail: { resource: "Task", id: "t1" },
+            });
+          }
+          stored = { ...stored, project_id: body.project_id ?? null, revision: stored.revision + 1 };
+          return stored;
+        },
+      },
+    });
+    return () => stored;
+  }
+
+  it("006-SC-005 asks which value wins, naming all three, and resolves nothing on its own", async () => {
+    const server = await openConflictedTask();
+
+    expect(await screen.findByText("You changed the project 14 minutes ago")).toBeOnTheScreen();
+    expect(
+      screen.getByText(
+        "This task was updated somewhere else before your change was sent, so it was not " +
+          "applied. Choose which one to keep — nothing has been discarded yet.",
+      ),
+    ).toBeOnTheScreen();
+
+    // Three labelled rows, and the first is what this phone last showed —
+    // never presented as the server's own history.
+    expect(
+      screen.getByLabelText(
+        "Your phone last showed: None (the value this phone was showing you)",
+      ),
+    ).toBeOnTheScreen();
+    expect(screen.getByLabelText("You changed it to: Q3 launch")).toBeOnTheScreen();
+    expect(screen.getByLabelText("Now on server: Wedding")).toBeOnTheScreen();
+
+    // Nothing has been decided while the sheet is up.
+    expect(server().project_id).toBe("p1");
+  });
+
+  it("006-FR-008 sends the person's value again when they keep theirs", async () => {
+    const server = await openConflictedTask();
+
+    await fireEvent.press(await screen.findByText("Keep mine, replace theirs"));
+
+    await waitFor(() => expect(server().project_id).toBe("p2"));
+    expect(await screen.findByLabelText("Project, Q3 launch")).toBeOnTheScreen();
+    expect(screen.queryByText("Keep mine, replace theirs")).toBeNull();
+    expect(await AsyncStorage.getItem(QUEUE_KEY)).toBeNull();
+  });
+
+  it("006-FR-008 drops the queued change when they keep the server's", async () => {
+    const server = await openConflictedTask();
+
+    await fireEvent.press(await screen.findByText("Discard mine, keep the server's"));
+
+    await waitFor(() => expect(screen.queryByText("Discard mine, keep the server's")).toBeNull());
+    expect(screen.getByLabelText("Project, Wedding")).toBeOnTheScreen();
+    expect(server().project_id).toBe("p1");
+    expect(await AsyncStorage.getItem(QUEUE_KEY)).toBeNull();
   });
 });
 
