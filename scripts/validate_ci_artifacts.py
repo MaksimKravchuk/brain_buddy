@@ -16,6 +16,10 @@ from pathlib import Path
 REQUIRED_ARTIFACTS = {
     "backend-allure-results": "backend/allure-results",
     "frontend-allure-results": "frontend/allure-results",
+    # Mobile was the one lane whose tests produced no Allure evidence, so the
+    # aggregate report spoke for two stacks out of three while reading as if it
+    # covered the product.
+    "mobile-allure-results": "mobile/allure-results",
     "playwright-allure-results": "frontend/allure-results/playwright",
     "allure-report-html": "allure-report",
 }

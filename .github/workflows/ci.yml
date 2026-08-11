@@ -547,6 +547,24 @@ jobs:
           python3 scripts/validate_coverage_floor.py --stack mobile --format istanbul-summary \
             --report mobile/coverage/coverage-summary.json --floor mobile/coverage-floor.json "${base_args[@]}"
 
+      # Mobile was the one lane whose tests produced no Allure evidence at all,
+      # so the aggregate report covered two stacks out of three. Validated on
+      # the same terms as the others: every result carries epic/feature/story,
+      # a readable title and a meaningful step.
+      - name: Validate mobile Allure results
+        if: always() && env.RUN == 'true'
+        working-directory: .
+        run: python3 scripts/validate_allure_taxonomy.py --path mobile/allure-results --label mobile-jest
+
+      - name: Upload mobile Allure results
+        if: always() && env.RUN == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: mobile-allure-results
+          path: mobile/allure-results
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+
       - name: Set up Python for the integration backend
         if: env.RUN == 'true'
         uses: actions/setup-python@v7
@@ -1046,12 +1064,17 @@ jobs:
           if-no-files-found: warn
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
+  # Every `needs` here is a real data dependency: this job downloads the Allure
+  # results those lanes upload. `mobile` joined the list when the mobile suite
+  # started emitting evidence -- without it the aggregate could be generated
+  # before mobile finished writing its results.
   allure-report:
     name: Allure Report
     runs-on: ubuntu-latest
     needs:
       - backend
       - frontend
+      - mobile
       - e2e
     if: always()
     permissions:

@@ -1,6 +1,15 @@
 /** Unit tests only — the integration suite runs separately via `npm run integration`. */
 module.exports = {
   preset: "jest-expo",
+  // React Native's own environment, wrapped so every result lands in
+  // allure-results/. See jest.allure-environment.js for why the stock
+  // allure-jest environments cannot be used here.
+  testEnvironment: "<rootDir>/jest.allure-environment.js",
+  // Plain relative path on purpose: Jest does NOT interpolate <rootDir> inside
+  // testEnvironmentOptions, and a token here is written out verbatim -- it
+  // silently produced a directory literally named "<rootDir>". Resolved against
+  // the working directory, which is mobile/ for every documented entry point.
+  testEnvironmentOptions: { resultsDir: "allure-results" },
   testMatch: ["**/__tests__/**/*.test.ts", "**/__tests__/**/*.test.tsx"],
   testPathIgnorePatterns: ["/node_modules/", "/integration/"],
   setupFilesAfterEnv: ["<rootDir>/jest.setup.js"],

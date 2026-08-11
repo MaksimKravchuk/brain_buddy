@@ -594,6 +594,12 @@ jobs:
       - name: Type check
         if: env.RUN == 'true'
         run: npm run typecheck
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mobile-allure-results
+          path: mobile/allure-results
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
   mutation-base:
     name: Backend mutation base measurement
     env:
