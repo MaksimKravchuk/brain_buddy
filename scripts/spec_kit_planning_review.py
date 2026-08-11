@@ -928,9 +928,22 @@ def parse_workflow_inputs(payload: object) -> dict[str, Any]:
 def summarize(*, root: Path, run_id: str) -> Path:
     run_dir = run_directory(root, run_id)
     inputs_path = run_dir / "inputs.json"
-    if not inputs_path.is_file():
-        raise ReviewError("Workflow inputs.json is missing")
-    inputs = parse_workflow_inputs(json.loads(inputs_path.read_text(encoding="utf-8")))
+    # `inputs.json` is the workflow engine's record of what an operator
+    # declared. It is absent whenever the campaign is driven the way
+    # `speckit-review/SKILL.md` documents -- preflight, review, summarize --
+    # because nothing in that sequence writes it; only a managed runtime does.
+    #
+    # Hard-failing here made the gate startable but not finishable outside that
+    # runtime, which is precisely the portability ADR-0011 claims. Treat an
+    # absent file as "no operator declaration" instead.
+    #
+    # This cannot lower a class. DEFAULT_RISK is `medium`, never `low`, and
+    # derivation below still raises from it -- the "escalates, never
+    # de-escalates" property is untouched. An operator who *does* declare a
+    # class still has it read, exactly as before.
+    inputs: dict[str, Any] = {}
+    if inputs_path.is_file():
+        inputs = parse_workflow_inputs(json.loads(inputs_path.read_text(encoding="utf-8")))
     risk = inputs.get("risk", DEFAULT_RISK)
     if risk not in RISK_CLASSES:
         raise ReviewError(f"Unsupported risk value: {risk!r}")

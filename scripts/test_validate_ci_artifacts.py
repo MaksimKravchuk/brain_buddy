@@ -357,6 +357,131 @@ export default defineConfig({
         self.assertIn("frontend lint", completed.stderr)
         self.assertIn("frontend coverage threshold statements", completed.stderr)
 
+    def test_workflow_rejects_removing_the_allure_aggregation_short_circuit(self) -> None:
+        """Deleting the short circuit makes every specs-only branch unmergeable.
+
+        Nothing uploads Allure results when no stack changed, and
+        `actions/download-artifact` does not create its target directory when
+        the pattern matches nothing, so the aggregate validator failed on a
+        directory that was never going to exist. Stages 1 through 9 of a
+        spec-driven feature produce nothing but documentation commits, so this
+        was not one red build but the whole run.
+
+        Guarded because the regression is a one-line deletion and reads like
+        tidying: the `if:` on those steps looks redundant until you know a
+        specs-only commit exists.
+        """
+        workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+        text = workflow.read_text(encoding="utf-8")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ungated = Path(tmp) / "ci-ungated.yml"
+            ungated.write_text(
+                text.replace("        if: steps.aggregate.outputs.run == 'true'\n", ""),
+                encoding="utf-8",
+            )
+            missing_gate = self.run_validator("workflow", "--ci", str(ungated))
+
+            no_validator = Path(tmp) / "ci-no-validator.yml"
+            no_validator.write_text(
+                text.replace("--path allure-results --label aggregate-allure", "--help"),
+                encoding="utf-8",
+            )
+            dropped_validator = self.run_validator("workflow", "--ci", str(no_validator))
+
+            # The predicate's first version asked whether a stack was *selected*
+            # rather than whether its job actually ran, and shipped red: the
+            # stack jobs need `spec-kit`, so a red spec gate skips them while
+            # `changes` still reports them changed — the normal state of a
+            # spec-driven branch. Guarded so the weaker form cannot come back.
+            selected_only = Path(tmp) / "ci-selected-only.yml"
+            selected_only.write_text(
+                text.replace(
+                    "needs.changes.outputs.backend == 'true' && needs.backend.result != 'skipped'",
+                    "needs.changes.outputs.backend",
+                ),
+                encoding="utf-8",
+            )
+            weaker_predicate = self.run_validator("workflow", "--ci", str(selected_only))
+
+        self.assertNotEqual(missing_gate.returncode, 0)
+        # Both anchored steps must be named, not just whichever fails first.
+        # The first version of this guard used a bare "if: steps.aggregate..."
+        # substring and stayed green under exactly this mutation, because the
+        # "Post PR Allure report link" step joins the same condition to another
+        # with `&&`. The two-line anchors are what make the deletion visible.
+        self.assertIn("gate on the Allure download step", missing_gate.stderr)
+        self.assertIn("gate on the aggregate Allure validation step", missing_gate.stderr)
+
+        # The other direction: the short circuit must not become an excuse to
+        # drop the taxonomy validation itself. Skipping when there is nothing
+        # to aggregate is the fix; skipping when there is, is the defect.
+        self.assertNotEqual(dropped_validator.returncode, 0)
+        self.assertIn("aggregate Allure taxonomy validation still runs", dropped_validator.stderr)
+
+        self.assertNotEqual(weaker_predicate.returncode, 0)
+        self.assertIn(
+            "conjoins selection with the backend job actually running",
+            weaker_predicate.stderr,
+        )
+
+    def test_workflow_rejects_an_aggregation_env_key_bound_to_a_constant(self) -> None:
+        """The conjunction must be bound to the key the shell actually reads.
+
+        The requirement was a bare substring over the whole workflow, so it
+        asked whether the expression existed *anywhere* rather than whether the
+        environment key the predicate consumes carries it. That is satisfiable
+        by code that does not work: bind `MOBILE` to a constant, leave the real
+        conjunction on an unused sibling key, and a mobile-only pull request
+        aggregates nothing while the invariant claiming to prevent exactly that
+        stays green. The file's own header warns about this failure mode, and
+        the mobile entry was added under a comment asserting the hole was
+        closed -- it was closed only by the accident that the string appeared
+        nowhere else.
+
+        Anchored to the key, so all three stacks are checked the same way.
+        """
+        workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+        text = workflow.read_text(encoding="utf-8")
+
+        stacks = (
+            ("MOBILE", "mobile"),
+            ("BACKEND", "backend"),
+            ("FRONTEND", "frontend"),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            for key, stack in stacks:
+                binding = (
+                    f"          {key}: "
+                    "${{ needs.changes.outputs."
+                    f"{stack} == 'true' && needs.{stack}.result != 'skipped' "
+                    "}}\n"
+                )
+                self.assertIn(binding, text)
+                # The shell line still names the key; the environment binds it
+                # to a constant and the conjunction survives, unread, alongside.
+                rewired = Path(tmp) / f"ci-{stack}-rewired.yml"
+                rewired.write_text(
+                    text.replace(
+                        binding,
+                        f"          {key}: false\n"
+                        + binding.replace(f"{key}:", f"{key}_ELIGIBLE:", 1),
+                    ),
+                    encoding="utf-8",
+                )
+
+                result = self.run_validator("workflow", "--ci", str(rewired))
+
+                self.assertNotEqual(
+                    result.returncode,
+                    0,
+                    f"{key} bound to a constant must fail: {result.stdout}",
+                )
+                self.assertIn(
+                    f"conjoins selection with the {stack} job actually running",
+                    result.stderr,
+                )
+
     def test_workflow_rejects_missing_pr_scoped_concurrency(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -727,6 +852,7 @@ jobs:
     steps:
       - run: echo build
   allure-report:
+    name: Allure Report
     needs:
       - changes
       - backend
@@ -738,6 +864,24 @@ jobs:
       - mutation-head
       - mutation-gate
     steps:
+      - name: Decide whether there is anything to aggregate
+        id: aggregate
+        env:
+          BACKEND: ${{ needs.changes.outputs.backend == 'true' && needs.backend.result != 'skipped' }}
+          FRONTEND: ${{ needs.changes.outputs.frontend == 'true' && needs.frontend.result != 'skipped' }}
+          MOBILE: ${{ needs.changes.outputs.mobile == 'true' && needs.mobile.result != 'skipped' }}
+        run: |
+          if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ] || [ "$MOBILE" = "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Download Allure results
+        if: steps.aggregate.outputs.run == 'true'
+        uses: actions/download-artifact@v4
+      - name: Validate aggregate Allure results
+        if: steps.aggregate.outputs.run == 'true'
+        run: python3 scripts/validate_allure_taxonomy.py --path allure-results --label aggregate-allure
       - run: python3 scripts/validate_allure_taxonomy.py
       - run: npx allure generate ../allure-results -o ../allure-report
 """.strip(),
