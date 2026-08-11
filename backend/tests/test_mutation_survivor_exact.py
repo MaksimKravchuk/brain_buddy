@@ -18,13 +18,18 @@ from app.exceptions import ConflictError, NotFoundError, ValidationFailure
 from app.schemas.api import (
     AiFeedbackRequest,
     NodeCreateRequest,
+    NodeResponse,
     NodeUpdateRequest,
     Position,
     RelationCreateRequest,
     RelationUpdateRequest,
     TreeCreateRequest,
+    TreeMetadata,
+    TreeUpdateRequest,
     VersionCreateRequest,
 )
+from app.schemas.domain import TreeDocument, TreeVersionRef
+from app.services.tree_service import TreeService
 from app.services.version_service import VersionService
 
 # ---------------------------------------------------------------------------
@@ -2382,3 +2387,437 @@ def test_generate_ai_feedback_uses_half_node_relation_gap_threshold(
         "Review whether each relation flows from cause to effect.",
         "Consider linking more causes to effects to expose gaps.",
     ]
+
+
+# ---------------------------------------------------------------------------
+# TreeService — derived state removal, cache ownership, metadata merging
+# ---------------------------------------------------------------------------
+
+
+def test_remove_stale_tree_state_is_idempotent_for_uncached_and_unindexed_trees(
+    tree_service,
+) -> None:
+    """Account-purge retries must survive state that is already gone."""
+
+    # Never cached and never indexed: both the cache pop and the index delete
+    # have to tolerate a miss rather than raise.
+    tree_service.remove_stale_tree_state("tree_never_created")
+
+    tree = tree_service.create_tree(TreeCreateRequest(name="Stale"), owner_id="owner")
+    tree_service.remove_stale_tree_state(tree.id)
+    tree_service.remove_stale_tree_state(tree.id)
+
+    assert tree_service.list_trees(owner_id="owner") == []
+    assert tree_service._cache_get(tree.id) is None
+
+
+def test_build_tree_metadata_defaults_version_to_one_when_metadata_omits_it(
+    tree_service,
+) -> None:
+    timestamp = datetime(2026, 3, 4, 5, 6, tzinfo=UTC)
+    tree = TreeDocument(
+        id="tree_no_version",
+        title="No version",
+        description=None,
+        metadata={"layout": {"zoom": 1}},
+        owner_id="owner",
+        created_at=timestamp,
+        updated_at=timestamp,
+        nodes=[],
+        relations=[],
+        version_refs=[],
+    )
+
+    response = tree_service.to_response(tree)
+
+    assert response.metadata.version == 1
+
+
+def test_mutate_tree_merges_the_new_timestamp_into_the_existing_metadata_block(
+    tree_service,
+) -> None:
+    created_at = datetime(2026, 1, 1, tzinfo=UTC)
+    tree = tree_service.create_tree(
+        TreeCreateRequest(
+            name="Metadata",
+            metadata=TreeMetadata(
+                version=3,
+                created_at=created_at,
+                updated_at=created_at,
+                layout={"zoom": 2},
+                owner_id="owner",
+            ),
+        ),
+        owner_id="owner",
+    )
+
+    updated = tree_service.mutate_tree(
+        tree.id, lambda current: current.model_copy(update={"title": "Renamed"})
+    )
+
+    # The stamp is merged into the existing block, not substituted for it.
+    assert updated.metadata == {
+        "version": 3,
+        "layout": {"zoom": 2},
+        "owner_id": "owner",
+        "updated_at": updated.updated_at,
+    }
+
+
+def test_sync_index_carries_the_tree_description_into_the_index_entry(
+    tree_service,
+) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Described"), owner_id="owner"
+    )
+
+    tree_service.mutate_tree(
+        tree.id,
+        lambda current: current.model_copy(update={"description": "Why sales dipped"}),
+    )
+
+    entries = tree_service.list_trees(owner_id="owner")
+    assert [(entry.id, entry.description) for entry in entries] == [
+        (tree.id, "Why sales dipped")
+    ]
+
+
+def test_cache_maxsize_floor_is_one_entry_not_two(tree_service) -> None:
+    service = TreeService(
+        tree_service.tree_repo, tree_service.index_repo, cache_maxsize=1
+    )
+    first = tree_service.create_tree(TreeCreateRequest(name="First"), owner_id="owner")
+    second = tree_service.create_tree(
+        TreeCreateRequest(name="Second"), owner_id="owner"
+    )
+
+    service.get_tree(first.id)
+    service.get_tree(second.id)
+
+    assert service._cache_get(first.id) is None
+    assert service._cache_get(second.id) is not None
+
+
+# ---------------------------------------------------------------------------
+# TreeService — no caller-visible object may alias cached state
+# ---------------------------------------------------------------------------
+
+
+def _node_payload(label: str = "Original") -> NodeResponse:
+    return NodeResponse(
+        id="node_a", label=label, type="child", position=Position(x=1, y=2)
+    )
+
+
+def test_get_tree_warms_the_cache_and_returns_an_independent_deep_copy(
+    tree_service,
+) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Cached", nodes=[_node_payload()]), owner_id="owner"
+    )
+
+    # A second service over the same storage starts with a cold cache, so the
+    # read itself is what has to populate it.
+    cold = TreeService(tree_service.tree_repo, tree_service.index_repo)
+    returned = cold.get_tree(tree.id)
+
+    cached = cold._cache_get(tree.id)
+    assert cached is not None
+    assert returned is not cached
+    assert returned.nodes[0] is not cached.nodes[0]
+
+    returned.nodes[0].label = "Tampered by the caller"
+    assert cold._cache_get(tree.id).nodes[0].label == "Original"
+
+
+def test_create_tree_returns_a_copy_the_caller_cannot_corrupt_the_cache_through(
+    tree_service,
+) -> None:
+    created = tree_service.create_tree(
+        TreeCreateRequest(name="Clone", nodes=[_node_payload()]), owner_id="owner"
+    )
+
+    cached = tree_service._cache_get(created.id)
+    assert cached is not None
+    assert created.nodes[0] is not cached.nodes[0]
+
+    created.nodes[0].label = "Tampered by the caller"
+    assert tree_service._cache_get(created.id).nodes[0].label == "Original"
+
+
+def test_mutate_tree_returns_a_copy_the_caller_cannot_corrupt_the_cache_through(
+    tree_service,
+) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Mutated", nodes=[_node_payload()]), owner_id="owner"
+    )
+
+    updated = tree_service.mutate_tree(
+        tree.id, lambda current: current.model_copy(update={"title": "Renamed"})
+    )
+
+    cached = tree_service._cache_get(tree.id)
+    assert cached is not None
+    assert updated.nodes[0] is not cached.nodes[0]
+
+    updated.nodes[0].label = "Tampered by the caller"
+    assert tree_service._cache_get(tree.id).nodes[0].label == "Original"
+
+
+def test_update_tree_does_not_alias_caller_node_objects_into_stored_state(
+    tree_service,
+) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Aliasing", nodes=[_node_payload()]), owner_id="owner"
+    )
+
+    payload_position = Position(x=10, y=20)
+    payload = TreeUpdateRequest(
+        name="Renamed",
+        metadata=TreeMetadata(
+            version=1,
+            created_at=tree.created_at,
+            updated_at=tree.updated_at,
+            layout=None,
+            owner_id="owner",
+        ),
+        nodes=[
+            NodeResponse(
+                id="node_a", label="Kept", type="child", position=payload_position
+            )
+        ],
+        relations=[],
+    )
+
+    tree_service.update_tree(tree.id, payload, owner_id="owner")
+
+    cached = tree_service._cache_get(tree.id)
+    assert cached is not None
+    assert cached.nodes[0].position is not payload_position
+
+    payload_position.x = 999.0
+    assert tree_service._cache_get(tree.id).nodes[0].position.x == 10
+
+
+def test_update_tree_does_not_alias_nested_caller_metadata_into_stored_state(
+    tree_service,
+) -> None:
+    tree = tree_service.create_tree(TreeCreateRequest(name="Layout"), owner_id="owner")
+
+    pan = {"x": 0, "y": 0}
+    payload = TreeUpdateRequest(
+        name="Renamed",
+        metadata=TreeMetadata(
+            version=1,
+            created_at=tree.created_at,
+            updated_at=tree.updated_at,
+            layout={"zoom": 2, "pan": pan},
+            owner_id="owner",
+        ),
+        nodes=[],
+        relations=[],
+    )
+
+    tree_service.update_tree(tree.id, payload, owner_id="owner")
+
+    cached = tree_service._cache_get(tree.id)
+    assert cached is not None
+    assert cached.metadata["layout"] == {"zoom": 2, "pan": {"x": 0, "y": 0}}
+    # Validating ``layout`` rebuilds the outer dict but keeps the dicts nested
+    # inside it, so the service's own deep copy is the only thing standing
+    # between a caller's object and stored tree state.
+    assert cached.metadata["layout"]["pan"] is not pan
+
+    pan["x"] = 999
+    assert tree_service._cache_get(tree.id).metadata["layout"]["pan"] == {
+        "x": 0,
+        "y": 0,
+    }
+
+
+# ---------------------------------------------------------------------------
+# TreeRepository — every transaction takes the lock for its own tree
+# ---------------------------------------------------------------------------
+
+
+def test_tree_repository_transactions_lock_per_tree_and_never_share_one_lock(
+    tree_service,
+) -> None:
+    """A shared lock file would serialize unrelated trees and, worse, let a
+    delete run concurrently with a mutate that holds a different lock."""
+
+    repo = tree_service.tree_repo
+    lock_dir = repo.resolve(".locks")
+
+    read_tree = tree_service.create_tree(
+        TreeCreateRequest(name="Read"), owner_id="owner"
+    )
+    repo.read(read_tree.id)
+    assert (lock_dir / f"{read_tree.id}.lock").exists()
+
+    mutated_tree = tree_service.create_tree(
+        TreeCreateRequest(name="Mutate"), owner_id="owner"
+    )
+    repo.mutate(mutated_tree.id, update=lambda current: current)
+    assert (lock_dir / f"{mutated_tree.id}.lock").exists()
+
+    deleted_tree = tree_service.create_tree(
+        TreeCreateRequest(name="Delete"), owner_id="owner"
+    )
+    repo.delete(deleted_tree.id)
+    assert (lock_dir / f"{deleted_tree.id}.lock").exists()
+
+    assert sorted(path.name for path in lock_dir.iterdir()) == sorted(
+        [
+            f"{read_tree.id}.lock",
+            f"{mutated_tree.id}.lock",
+            f"{deleted_tree.id}.lock",
+        ]
+    )
+
+
+# ---------------------------------------------------------------------------
+# VersionService — snapshot independence, restored refs, restore timestamp
+# ---------------------------------------------------------------------------
+
+
+def test_create_version_stores_a_deep_copy_of_the_live_tree(
+    version_service, tree_service, monkeypatch
+) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Snapshot", nodes=[_node_payload()]), owner_id="owner"
+    )
+
+    captured: dict[str, TreeDocument] = {}
+    mutate_tree = tree_service.mutate_tree
+
+    def spy(tree_id, update, **kwargs):
+        def record(current: TreeDocument) -> TreeDocument:
+            captured["source"] = current
+            return update(current)
+
+        return mutate_tree(tree_id, record, **kwargs)
+
+    monkeypatch.setattr(tree_service, "mutate_tree", spy)
+
+    version = version_service.create_version(tree.id, VersionCreateRequest(label="v1"))
+
+    source = captured["source"]
+    assert version.tree.nodes[0] is not source.nodes[0]
+
+    source.nodes[0].label = "Tampered after the snapshot"
+    assert version.tree.nodes[0].label == "Original"
+
+
+def test_restore_version_does_not_alias_the_loaded_snapshot_into_cached_state(
+    version_service, tree_service, monkeypatch
+) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Restore copy", nodes=[_node_payload()]),
+        owner_id="owner",
+    )
+    version = version_service.create_version(tree.id, VersionCreateRequest(label="v1"))
+
+    captured: dict[str, object] = {}
+    load_version = version_service.load_version
+
+    def spy(tree_id: str, version_id: str):
+        document = load_version(tree_id, version_id)
+        captured["snapshot"] = document
+        return document
+
+    monkeypatch.setattr(version_service, "load_version", spy)
+
+    version_service.restore_version(tree.id, version.id)
+
+    snapshot = captured["snapshot"]
+    cached = tree_service._cache_get(tree.id)
+    assert cached is not None
+    assert cached.nodes[0] is not snapshot.tree.nodes[0]
+
+
+def test_restore_version_appends_a_ref_carrying_the_full_snapshot_metadata(
+    version_service, tree_service, node_service
+) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Restore meta"), owner_id="owner"
+    )
+    node, _ = node_service.create_node(
+        tree.id,
+        NodeCreateRequest(label="Before", type="child", position=Position(x=1, y=2)),
+    )
+    version_service.create_version(tree.id, VersionCreateRequest(label="first"))
+    node_service.update_node(tree.id, node.id, NodeUpdateRequest(label="After"))
+    second = version_service.create_version(
+        tree.id,
+        VersionCreateRequest(
+            label="second", author="captain", notes="before the risky change"
+        ),
+    )
+    assert len(second.conflicts) == 1
+
+    # Strip the refs from the live tree while leaving the snapshots on disk:
+    # this is the shape a restore of an unreferenced snapshot has to cope with.
+    tree_service.mutate_tree(
+        tree.id, lambda current: current.model_copy(update={"version_refs": []})
+    )
+
+    restored = version_service.restore_version(tree.id, second.id)
+
+    restored_ref = next(ref for ref in restored.version_refs if ref.id == second.id)
+    assert restored_ref.label == "second"
+    assert restored_ref.created_at == second.captured_at
+    assert restored_ref.author == "captain"
+    assert restored_ref.notes == "before the risky change"
+    assert restored_ref.diff_summary == second.diff
+    assert restored_ref.conflict_count == 1
+
+
+def test_restore_version_stamps_the_tree_with_its_own_captured_timestamp(
+    version_service, tree_service, monkeypatch
+) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Restore clock"), owner_id="owner"
+    )
+    version = version_service.create_version(tree.id, VersionCreateRequest(label="v1"))
+
+    # Only the version service's clock is frozen, so a restore that forwards
+    # its own captured timestamp is distinguishable from one that lets the
+    # tree transaction fall back to the real clock.
+    frozen = datetime(2031, 5, 6, 7, 8, 9, tzinfo=UTC)
+    monkeypatch.setattr("app.services.version_service.utcnow", lambda: frozen)
+
+    restored = version_service.restore_version(tree.id, version.id)
+
+    assert restored.updated_at == frozen
+    assert restored.metadata["updated_at"] == frozen
+
+
+def test_restore_version_never_appends_a_duplicate_version_ref(
+    version_service, tree_service
+) -> None:
+    tree = tree_service.create_tree(TreeCreateRequest(name="Dedupe"), owner_id="owner")
+    version = version_service.create_version(tree.id, VersionCreateRequest(label="v1"))
+
+    captured_at = datetime(2026, 2, 2, tzinfo=UTC)
+    sibling = TreeVersionRef(id="ver_sibling", label="sibling", created_at=captured_at)
+    self_reference = TreeVersionRef(id=version.id, label="self", created_at=captured_at)
+    # A snapshot written by an older revision can carry a repeated ref and a
+    # reference to itself; restore still has to yield each id exactly once.
+    snapshot = version_service.load_version(tree.id, version.id)
+    tampered = snapshot.model_copy(
+        update={
+            "tree": snapshot.tree.model_copy(
+                update={"version_refs": [sibling, sibling, self_reference]}
+            )
+        }
+    )
+    version_service.version_repo.save(tree.id, tampered)
+
+    tree_service.mutate_tree(
+        tree.id, lambda current: current.model_copy(update={"version_refs": []})
+    )
+
+    restored = version_service.restore_version(tree.id, version.id)
+
+    assert [ref.id for ref in restored.version_refs] == [version.id, "ver_sibling"]

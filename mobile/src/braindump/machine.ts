@@ -60,10 +60,13 @@ export const MAX_POLL_DELAY_MS = 8000;
 
 /** 1.5s → ×2 → 8s cap, as the web client polls. */
 export function nextPollDelay(previous: number | null): number {
-  if (previous === null || previous <= 0) {
+  // `previous ?? 0` rather than a separate null test: one condition, and no
+  // reliance on `null <= 0` coercing its way to the same answer.
+  const elapsed = previous ?? 0;
+  if (elapsed <= 0) {
     return INITIAL_POLL_DELAY_MS;
   }
-  return Math.min(previous * 2, MAX_POLL_DELAY_MS);
+  return Math.min(elapsed * 2, MAX_POLL_DELAY_MS);
 }
 
 /**
@@ -82,9 +85,10 @@ export function applyOperation(
 
 /** Active (undeleted) proposals in display order. */
 export function visibleProposals(operation: BrainDumpOperationResponse): BrainDumpProposal[] {
+  // `filter` already returns a fresh array, so sorting in place here cannot
+  // reach the caller's.
   return operation.proposals
     .filter((proposal) => !proposal.deleted)
-    .slice()
     .sort((a, b) => a.ordinal - b.ordinal);
 }
 
@@ -133,6 +137,10 @@ export interface ChunkPlanEntry {
 export const CHUNK_BYTES = 896 * 1024;
 
 export function planChunks(totalBytes: number, chunkBytes: number = CHUNK_BYTES): ChunkPlanEntry[] {
+  // NaN and Infinity have to be refused before the loop: `while (0 < NaN)` is
+  // false but `while (0 < Infinity)` never ends. Sizes at or below zero are
+  // refused here for the reader's sake — the loop would return an empty plan
+  // for them anyway, so mutations of `<= 0` alone are not observable.
   if (!Number.isFinite(totalBytes) || totalBytes <= 0) {
     return [];
   }

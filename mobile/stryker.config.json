@@ -1,0 +1,36 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "_comment": "Mobile deterministic-core mutation scope. See docs/decisions/0015-mobile-deterministic-core-mutation-scope.md — the allow-list is the ADR's, and widening it needs an ADR, not a config edit.",
+  "packageManager": "npm",
+  "testRunner": "jest",
+  "jest": {
+    "projectType": "custom",
+    "configFile": "jest.config.js",
+    "enableFindRelatedTests": true
+  },
+  "coverageAnalysis": "perTest",
+  "mutate": [
+    "src/braindump/machine.ts",
+    "src/braindump/manifest.ts",
+    "src/braindump/uploader.ts",
+    "src/braindump/waveform.ts",
+    "src/lifecycle/guards.ts",
+    "src/config/serverUrl.ts"
+  ],
+  "reporters": ["clear-text", "json", "progress"],
+  "jsonReporter": {
+    "fileName": "mutation-artifacts/mutation-report.json"
+  },
+  "clearTextReporter": {
+    "allowColor": false,
+    "maxTestsToLog": 0
+  },
+  "thresholds": {
+    "high": 95,
+    "low": 90,
+    "break": null
+  },
+  "timeoutMS": 20000,
+  "tempDirName": ".stryker-tmp",
+  "cleanTempDir": true
+}

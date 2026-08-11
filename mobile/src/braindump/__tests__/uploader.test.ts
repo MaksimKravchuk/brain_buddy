@@ -100,3 +100,12 @@ describe("uploadChunks", () => {
     ).rejects.toThrow("Short read");
   });
 });
+
+describe("EmptyRecordingError", () => {
+  it("carries a message and a name the UI can show and branch on", () => {
+    const error = new EmptyRecordingError();
+
+    expect(error.message).toBe("The recording is empty.");
+    expect(error.name).toBe("EmptyRecordingError");
+  });
+});

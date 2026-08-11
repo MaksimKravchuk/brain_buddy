@@ -14,6 +14,13 @@ name: Mutation quality (report-only)
 # src/utils/error.ts and src/utils/telemetry.ts (ADR-0013). React component
 # trees are outside it: a mutant there is as likely to be caught by a snapshot
 # as by an assertion, which says nothing about the tests.
+#
+# Mobile scope is the deterministic core configured in
+# mobile/stryker.config.json: src/braindump/machine.ts,
+# src/braindump/manifest.ts, src/braindump/uploader.ts,
+# src/braindump/waveform.ts, src/lifecycle/guards.ts and
+# src/config/serverUrl.ts (ADR-0015). Screens, the hooks that drive them, and
+# the device boundaries they stand on are outside it, for the same reason.
 
 on:
   schedule:
@@ -57,7 +64,11 @@ jobs:
           mutmut run
           mutation_exit=$?
           set -e
-          mutmut export-cicd-stats > mutation-artifacts/mutation-stats.json || true
+          # export-cicd-stats writes mutants/mutmut-cicd-stats.json and prints
+          # only a "Saved ..." line, so redirecting its stdout captured that
+          # sentence instead of the statistics. Copy the file it wrote.
+          mutmut export-cicd-stats || true
+          cp mutants/mutmut-cicd-stats.json mutation-artifacts/mutation-stats.json || true
           mutmut results > mutation-artifacts/mutation-summary.txt || true
           mutmut results --all true > mutation-artifacts/mutation-survivors.txt || true
           {
@@ -68,15 +79,44 @@ jobs:
           mv mutation-artifacts/mutation-summary.with-status.txt mutation-artifacts/mutation-summary.txt
           exit "${mutation_exit}"
 
+      # The enforced tier is what blocks a pull request, and until now nothing
+      # scheduled measured it: this campaign's `only_mutate` is the OBSERVED
+      # tier, which deliberately carries modules still under calibration and so
+      # can never clear 95%. ADR-0004's promotion precondition asks for
+      # scheduled evidence "for this unchanged allow-list" and had no producer.
+      #
+      # It costs nothing to produce. The observed tier is a superset of the
+      # enforced six, so the enforced score is a filter over the per-mutant
+      # verdicts this run already wrote -- not a second campaign.
+      - name: Summarize the enforced tier from the same run
+        if: always()
+        working-directory: .
+        run: |
+          python3 scripts/mutation_gate.py summarize-mutmut \
+            --results backend/mutation-artifacts/mutation-survivors.txt \
+            --enforced backend/mutation-enforced-scope.txt \
+            --summary-out backend/mutation-artifacts/enforced-summary.txt \
+            --survivors-out backend/mutation-artifacts/enforced-survivors.txt
+          {
+            echo "### Backend mutation campaign (report-only)"
+            echo '```'
+            echo "Enforced tier (this is the scope that gates pull requests):"
+            cat backend/mutation-artifacts/enforced-summary.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Create report-only Allure evidence
         if: always()
         run: |
           mkdir -p mutation-allure-results
           cp mutation-artifacts/mutation-summary.txt mutation-allure-results/
           cp mutation-artifacts/mutation-survivors.txt mutation-allure-results/
+          cp mutation-artifacts/enforced-summary.txt mutation-allure-results/
+          cp mutation-artifacts/enforced-survivors.txt mutation-allure-results/
           python ../scripts/create_mutation_allure_evidence.py \
             --summary mutation-allure-results/mutation-summary.txt \
             --survivors mutation-allure-results/mutation-survivors.txt \
+            --scope-label backend \
             --output mutation-allure-results/mutation-evidence-result.json
 
       - name: Upload raw mutmut state
@@ -191,6 +231,88 @@ jobs:
         with:
           name: frontend-mutation-evidence-allure-results
           path: frontend/mutation-allure-results
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Fail on mutation runner infrastructure errors
+        if: steps.mutation.outcome == 'failure'
+        run: |
+          echo "Stryker could not finish; raw evidence was uploaded for diagnosis." >&2
+          exit 1
+
+  mobile-observed-mutation:
+    name: Mobile observed-scope mutation evidence
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: mobile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          # Expo SDK 57 requires Node.js 22.13.x or newer.
+          node-version: "22.13.1"
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run mobile observed-scope mutation campaign
+        id: mutation
+        continue-on-error: true
+        run: |
+          rm -rf mutation-artifacts .stryker-tmp reports
+          npx stryker run
+
+      # Rendered from the same report a gate would read, by the same code that
+      # renders the backend's and the frontend's, so the three stacks' scores
+      # cannot come to mean different things.
+      - name: Summarize the mobile scope
+        if: always()
+        working-directory: .
+        run: |
+          mkdir -p mobile/mutation-artifacts mobile/mutation-allure-results
+          python3 scripts/mutation_gate.py summarize-stryker \
+            --report mobile/mutation-artifacts/mutation-report.json \
+            --summary-out mobile/mutation-allure-results/mutation-summary.txt \
+            --survivors-out mobile/mutation-allure-results/mutation-survivors.txt
+          {
+            echo "### Mobile mutation campaign (report-only)"
+            echo '```'
+            cat mobile/mutation-allure-results/mutation-summary.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create report-only Allure evidence
+        if: always()
+        working-directory: .
+        run: |
+          python3 scripts/create_mutation_allure_evidence.py \
+            --summary mobile/mutation-allure-results/mutation-summary.txt \
+            --survivors mobile/mutation-allure-results/mutation-survivors.txt \
+            --scope-label mobile \
+            --output mobile/mutation-allure-results/mutation-evidence-result.json
+
+      - name: Upload mobile mutation report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mobile-mutation-report
+          path: mobile/mutation-artifacts
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload mobile report-only Allure evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mobile-mutation-evidence-allure-results
+          path: mobile/mutation-allure-results
           if-no-files-found: error
           retention-days: 30
 

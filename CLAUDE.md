@@ -72,11 +72,18 @@ docker compose down --volumes
 ```bash
 make install-mobile        # npm install in mobile/
 make typecheck-mobile      # tsc --noEmit
-make test-mobile           # jest unit tests
+make lint-mobile           # eslint (every eslint-config-expo rule is enforced)
+make test-mobile           # jest unit tests + the mobile coverage floor
 make integration-mobile    # real api client vs disposable local backend (needs install-backend)
 make build-mobile          # expo export --platform ios (Metro bundle check)
+make mutation-mobile       # report-only Stryker campaign (ADR-0015 scope, ~5 min)
 cd mobile && npx expo start   # run on an iPhone via Expo Go
 ```
+
+Mobile unit tests run the real screens, hooks and api client against a fake
+backend installed over `global.fetch` (`mobile/src/test/fakeBackend.ts`); only
+device boundaries are stubbed, in `mobile/jest.setup.js`. `mutation-mobile` is
+not part of `ci-mobile`.
 
 See `mobile/README.md` for the device runbook and `mobile/AGENTS.md` for the
 wire-protocol contracts the client must keep (chunk hashing, manifest hash,
@@ -217,16 +224,17 @@ HTTP request
 - **CI** — `.github/workflows/ci.yml` runs as parallel lanes joined only by
   `full-ci`: one per service (`backend`, `frontend`, `mobile` — each its own
   lint/type/unit/integration, path filtered by the `changes` job), plus
-  `workflow-lint`, `spec-kit`, `docker` and `e2e`. An edge earns its place only
-  by consuming the other job's output, or by being a cheap check that should
-  fail the run before an expensive one spends runner minutes — `docker` and
-  `e2e` wait on `backend` and `frontend` for that second reason, and on nothing
-  else. `scripts/validate_ci_artifacts.py workflow` rejects any other edge, and
-  rejects a job missing from `full-ci`'s `needs` (with a flat graph that gate is
-  the only thing making a job required). `e2e` is never path filtered. It
-  rebuilds only what changed: `main`'s Docker layers are reused via the shared
-  `stack-*` buildx cache, so an untouched service starts from main's image.
-  Wait for CI green before deploying.
+  `workflow-lint`, `spec-kit`, the mutation gate, `docker` and `e2e`. An edge
+  earns its place only by consuming the other job's output, or by being a cheap
+  check that should fail the run before an expensive one spends runner minutes —
+  `docker`, `e2e` and the mutation jobs wait on the service lanes for that second
+  reason, and on nothing else. `scripts/validate_ci_artifacts.py workflow`
+  rejects any other edge, and rejects a job missing from `full-ci`'s `needs`
+  (with a flat graph that gate is the only thing making a job required). `e2e` is
+  never path filtered. It rebuilds only what changed: `main`'s Docker layers are
+  reused via the shared `stack-*` buildx cache, so an untouched service starts
+  from main's image. Wait for CI green before deploying.
+- **Mutation gate** — the `mutation-gate` job blocks a change that touches any module in `backend/mutation-enforced-scope.txt` (the ADR-0011 *enforced* tier: the tree/version/relation services and their repositories). It measures only the entries you touched and fails below 95%, on zero checked mutants, or on any regression against the base revision. Touch none of them and it costs nothing. Reproduce locally with `make mutation-gate-backend`. The nightly `mutation-quality.yml` stays report-only over the wider *observed* tier.
 - **Deeper docs** — architecture, API, troubleshooting, performance, and infra runbooks live under `docs/`. Feature specs (e.g. `001-relation-linking-refactor`) live under `specs/`.
 
 ### Environment variables

@@ -31,6 +31,7 @@ import {
   visibleProposals,
 } from "@/braindump/machine";
 import { newIdempotencyKey } from "@/utils/ids";
+import { useServerDraft } from "@/utils/useServerDraft";
 import { colors, fonts, minHitTarget, radii, shadows, space, type as typeScale } from "@/theme/tokens";
 
 export default function BrainDumpOperationScreen() {
@@ -446,12 +447,8 @@ function ProposalCard({
   onDelete: () => void;
   onResolveConflict: (resolution: "keep" | "accept") => void;
 }) {
-  const [draft, setDraft] = useState(proposal.title);
-
   // Adopt reconciled wording unless the user is the author of the change.
-  useEffect(() => {
-    setDraft(proposal.title);
-  }, [proposal.title]);
+  const [draft, setDraft] = useServerDraft(proposal.title);
 
   const conflicts = proposal.conflicts ?? [];
 

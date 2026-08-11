@@ -9,7 +9,7 @@ import {
   Sprout,
   XCircle,
 } from "lucide-react-native";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import {
   Animated,
   Easing,
@@ -26,6 +26,7 @@ import type { OpenTaskState } from "@/api/types";
 import { BBText } from "@/components/BBText";
 import { useTaskCounts } from "@/features/tasks/useTaskCounts";
 import { colors, durations, fonts, minHitTarget, radii, space } from "@/theme/tokens";
+import { useAnimatedValue } from "@/utils/useAnimatedValue";
 
 const DRAWER_WIDTH = 300;
 const PROJECT_FALLBACK_COLOR = colors.brandSecondary;
@@ -104,7 +105,7 @@ export function Drawer({ open, onClose }: DrawerProps) {
   const counts = useTaskCounts();
   const projects = useProjects();
   const tags = useTags();
-  const slide = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
+  const slide = useAnimatedValue(-DRAWER_WIDTH);
 
   useEffect(() => {
     if (open) {
