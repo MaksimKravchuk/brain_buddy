@@ -495,6 +495,22 @@ describe("send transitions", () => {
     expect(rejected[0].sendState).toBe("queued");
   });
 
+  it("006-FR-010 captures when the device last read the task, so the prompt can date it", () => {
+    // Without this the conflict sheet either omits the age or back-fills it
+    // from firstQueuedAt, which would claim the phone's knowledge is minutes
+    // old when it may be weeks old — the precise falsehood the labelled row
+    // exists to prevent.
+    const q = coalesce([], edit({ value: { projectId: "p-new" }, displayedAt: "2026-07-20T00:00:00.000Z" }), T0, () => "k1");
+
+    expect(q[0].observedAt).toBe("2026-07-20T00:00:00.000Z");
+  });
+
+  it("006-FR-010 omits the observation time rather than inventing one", () => {
+    const q = coalesce([], edit({ value: { projectId: "p-new" } }), T0, () => "k1");
+
+    expect(q[0].observedAt).toBeUndefined();
+  });
+
   it("006-FR-017 applyRejected re-mints the key on an Idempotency-Key conflict", () => {
     // The backend returns 409 for two unrelated things. Returning to `queued`
     // with the same key after a key conflict sends a byte-identical request,

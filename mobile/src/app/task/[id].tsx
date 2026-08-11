@@ -1,7 +1,8 @@
 import { useLocalSearchParams } from "expo-router";
-import { Calendar, Check, Flag } from "lucide-react-native";
-import { useEffect, useMemo, useState } from "react";
+import { Calendar, Check, ChevronRight, Flag } from "lucide-react-native";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   Pressable,
   ScrollView,
@@ -14,6 +15,8 @@ import { ApiError } from "@/api/client";
 import {
   useCreateComment,
   useCreateSubtask,
+  useProjects,
+  useTags,
   useTask,
   useTransitionSubtask,
   useTransitionTask,
@@ -29,11 +32,44 @@ import { Screen } from "@/components/Screen";
 import { Sheet } from "@/components/Sheet";
 import { TopBar } from "@/components/shell/TopBar";
 import { dueLabel } from "@/components/TaskRow";
+import type { ClassificationValue } from "@/features/tasks/classificationTypes";
+import { ConflictSheet } from "@/features/tasks/ConflictSheet";
+import type { NamedEntity } from "@/features/tasks/matchExisting";
+import { ProjectPicker } from "@/features/tasks/ProjectPicker";
 import { ReopenSheet } from "@/features/tasks/ReopenSheet";
 import { StatePicker } from "@/features/tasks/StatePicker";
+import { TagPicker } from "@/features/tasks/TagPicker";
+import {
+  LAST_SYNCED_TICK_MS,
+  PRIORITY_LABELS,
+  accountNoticeKey,
+  attachedEntities,
+  buildClassificationEdit,
+  buildExpiredNotice,
+  buildLastSyncedFooter,
+  buildMetadataChips,
+  buildMetadataRows,
+  hasDismissedAccountNotice,
+  rememberAccountNoticeDismissed,
+  resolveAccountExpiryNotice,
+  resolveClassificationSurface,
+  resolveListPhase,
+  resolveOnline,
+  servedFromCache,
+  shouldAnnounceLastSynced,
+  type LastSyncedFooter,
+  type MetadataInput,
+  type MetadataRowId,
+} from "@/features/tasks/taskScreenState";
 import { useClassificationNames } from "@/features/tasks/useClassificationNames";
+import {
+  effectiveClassification,
+  useClassificationQueue,
+  type ClassificationApiPort,
+} from "@/features/tasks/useClassificationQueue";
 import { availableTransitions, buildTransition } from "@/lifecycle/guards";
-import { colors, fonts, radii, space, type as typeScale } from "@/theme/tokens";
+import { colors, fonts, minHitTarget, radii, space, type as typeScale } from "@/theme/tokens";
+import { newIdempotencyKey } from "@/utils/ids";
 
 const STATE_LABELS: Record<string, string> = {
   inbox: "Inbox",
@@ -45,12 +81,6 @@ const STATE_LABELS: Record<string, string> = {
 };
 
 const PRIORITIES: TaskPriority[] = ["none", "low", "medium", "high"];
-const PRIORITY_LABELS: Record<TaskPriority, string> = {
-  none: "None",
-  low: "Low",
-  medium: "Medium",
-  high: "High",
-};
 const PRIORITY_COLORS: Record<string, string> = {
   high: colors.danger,
   medium: colors.warning,
@@ -105,7 +135,9 @@ export default function TaskDetailScreen() {
   const transitionSubtask = useTransitionSubtask(id);
   const createComment = useCreateComment(id);
   const { projectName, tagNames } = useClassificationNames();
-  const { me } = useSession();
+  const projects = useProjects();
+  const tags = useTags();
+  const { me, api, status, accountId, serverUrl, taskClassificationEnabled } = useSession();
 
   const task = query.data;
 
@@ -123,6 +155,12 @@ export default function TaskDetailScreen() {
   const [moveWaitingFor, setMoveWaitingFor] = useState("");
   const [moveGuardError, setMoveGuardError] = useState<string | null>(null);
   const [reopenVisible, setReopenVisible] = useState(false);
+  const [projectPickerVisible, setProjectPickerVisible] = useState(false);
+  const [tagPickerVisible, setTagPickerVisible] = useState(false);
+  const [accountNoticeDismissed, setAccountNoticeDismissed] = useState(false);
+  // SC-004's footer is the only thing on this screen that ages, so the clock is
+  // read here and passed down; nothing in `taskScreenState` reads it itself.
+  const [now, setNow] = useState(() => Date.now());
 
   // Sync drafts from the server copy whenever a fresh revision arrives —
   // including after a 409 refetch (edits in progress are the user's to redo
@@ -138,6 +176,77 @@ export default function TaskDetailScreen() {
   }, [task?.id, task?.revision]);
 
   const transitions = useMemo(() => (task ? availableTransitions(task) : null), [task]);
+  const taskOpen = (transitions?.moveTargets.length ?? 0) > 0;
+
+  /**
+   * FR-015 / SC-009 — which presentation this screen carries, and whether the
+   * device queue can be named at all. Every input resolves from persisted
+   * state, so an offline cold start reaches the same screen a live session
+   * does. Every rule behind it is asserted in
+   * `features/tasks/__tests__/taskScreenState.test.ts`.
+   */
+  const surface = useMemo(
+    () =>
+      resolveClassificationSurface({
+        status,
+        taskClassificationEnabled,
+        accountId,
+        serverUrl,
+        taskOpen,
+      }),
+    [status, taskClassificationEnabled, accountId, serverUrl, taskOpen],
+  );
+
+  // A narrow port rather than the client itself, so nothing in the queue hook
+  // imports the session.
+  const classificationApi = useMemo<ClassificationApiPort>(
+    () => ({
+      getTask: (taskId, signal) => api.getTask(taskId, signal),
+      updateTask: (taskId, payload, idempotencyKey) =>
+        api.updateTask(taskId, payload, idempotencyKey),
+    }),
+    [api],
+  );
+
+  const refetchTask = query.refetch;
+  const queue = useClassificationQueue({
+    identity: surface.identity,
+    api: classificationApi,
+    enabled: surface.queueEnabled,
+    onSynced: () => {
+      void refetchTask();
+    },
+  });
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), LAST_SYNCED_TICK_MS);
+    return () => clearInterval(timer);
+  }, []);
+
+  const footer = useMemo(
+    () => buildLastSyncedFooter(queue.lastSyncedAt, now),
+    [queue.lastSyncedAt, now],
+  );
+  const announcedFooter = useRef<LastSyncedFooter | null>(null);
+  useEffect(() => {
+    // design.md: the footer is a live region that announces only when the time
+    // changes materially, never on every tick — and never on first paint, where
+    // it is read as part of the screen the person just opened.
+    if (shouldAnnounceLastSynced(announcedFooter.current, footer)) {
+      AccessibilityInfo.announceForAccessibility(footer.label);
+    }
+    announcedFooter.current = footer;
+  }, [footer]);
+
+  const noticeKey = accountNoticeKey(surface.identity);
+  useEffect(() => {
+    setAccountNoticeDismissed(hasDismissedAccountNotice(noticeKey));
+  }, [noticeKey]);
+
+  const dismissAccountNotice = useCallback(() => {
+    rememberAccountNoticeDismissed(noticeKey);
+    setAccountNoticeDismissed(true);
+  }, [noticeKey]);
 
   if (query.isLoading || !task || !transitions) {
     return (
@@ -192,15 +301,118 @@ export default function TaskDetailScreen() {
 
   const done = task.state === "completed";
   const openTask = transitions.moveTargets.length > 0;
-  const taskTags = tagNames(task.tag_ids);
-  const project = projectName(task.project_id);
   const hasDetails = Boolean(task.details?.trim());
   const showDetailsEditor = detailsOpen || hasDetails;
+
+  // FR-007: the row shows the queued value if there is one and the server's
+  // otherwise, with no marker either way. Everything below reads `effective`,
+  // so a change made offline is presented exactly like one the server has.
+  const serverClassification = { projectId: task.project_id, tagIds: task.tag_ids };
+  const pendingEntry = queue.pendingFor(task.id);
+  const effective = effectiveClassification(serverClassification, pendingEntry);
+  const project = projectName(effective.projectId);
+  const taskTags = tagNames(effective.tagIds);
+
+  const metadata: MetadataInput = {
+    projectId: effective.projectId,
+    projectName: project,
+    tagIds: effective.tagIds,
+    tagNames: taskTags,
+    dueLabel: task.due_date ? dueLabel(task.due_date) : null,
+    priority: task.priority,
+  };
+  const metadataRows = surface.presentation === "rows" ? buildMetadataRows(metadata) : null;
+  const metadataChips =
+    surface.presentation === "chips"
+      ? buildMetadataChips({ ...metadata, openTask, stateLabel: STATE_LABELS[task.state] })
+      : null;
+
+  // FR-018 / SC-003. The per-task notice names the field and what it reverted
+  // to; the account-level one carries the total for the sweeps whose tasks this
+  // person may never reopen.
+  const expiredNotice = buildExpiredNotice(
+    queue.expiredNoticeFor(task.id, serverClassification),
+    { project: projectName, tags: tagNames },
+    now,
+  );
+  const accountNotice = resolveAccountExpiryNotice({
+    expiredTotal: queue.expiredTotal,
+    taskNoticeShown: expiredNotice !== null,
+    dismissed: accountNoticeDismissed,
+  });
+
+  // `mobile/` installs no NetInfo, so connectivity is inferred from what
+  // answered the list requests — see `resolveOnline`.
+  const projectsFromCache = servedFromCache(projects.data);
+  const tagsFromCache = servedFromCache(tags.data);
+  const online = resolveOnline({
+    status,
+    fromCache: projectsFromCache || tagsFromCache,
+    listFailed: projects.isError || tags.isError,
+    hasServerData:
+      (projects.data !== undefined && !projectsFromCache) ||
+      (tags.data !== undefined && !tagsFromCache),
+  });
+
+  const enqueueClassification = (value: Partial<ClassificationValue>) =>
+    queue.enqueue(buildClassificationEdit(task.id, task.revision, effective, value));
+
+  const createProject = async (name: string): Promise<NamedEntity> => {
+    // FR-004 — created and attached in one action. A rejection leaves the
+    // task's classification untouched, which is what the picker relies on.
+    const created = await api.createProject({ name }, newIdempotencyKey());
+    await enqueueClassification({ projectId: created.id });
+    void projects.refetch();
+    return { id: created.id, name: created.name };
+  };
+
+  const createTag = async (name: string): Promise<NamedEntity> => {
+    const created = await api.createTag({ name }, newIdempotencyKey());
+    await enqueueClassification({ tagIds: [...effective.tagIds, created.id] });
+    void tags.refetch();
+    return { id: created.id, name: created.name };
+  };
+
+  const openMetadataRow = (rowId: MetadataRowId) => {
+    if (rowId === "project") {
+      setProjectPickerVisible(true);
+    } else if (rowId === "tags") {
+      setTagPickerVisible(true);
+    } else if (rowId === "due") {
+      setDueVisible(true);
+    } else {
+      setPriorityVisible(true);
+    }
+  };
+
+  // M-04 belongs to the task it is about: `server` below is this task's own
+  // state, so a conflict queued against another task waits for that screen.
+  const queuedConflict =
+    queue.conflict && queue.conflict.entry.taskId === task.id ? queue.conflict : undefined;
 
   return (
     <Screen padBottom>
       <TopBar leading="back" />
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+        {/* FR-018, account level: one dismiss-once notice with the total, on
+            whichever task screen opens next after a sweep. */}
+        {accountNotice ? (
+          <View style={styles.noticeCard}>
+            <BBText variant="caption" color={colors.warningFg}>
+              {accountNotice.message}
+            </BBText>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={accountNotice.dismissLabel}
+              onPress={dismissAccountNotice}
+              style={styles.noticeDismiss}
+            >
+              <BBText variant="caption" weight="medium" color={colors.warningFg}>
+                {accountNotice.dismissLabel}
+              </BBText>
+            </Pressable>
+          </View>
+        ) : null}
         {conflict ? (
           <View style={styles.conflictCard}>
             <BBText variant="body" color={colors.warningFg}>
@@ -248,78 +460,168 @@ export default function TaskDetailScreen() {
           />
         </View>
 
-        {/* Chips: real metadata + compact add affordances */}
-        <View style={styles.chipRowIndented}>
-          {task.due_date ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Change due date"
-              disabled={!openTask}
-              onPress={() => setDueVisible(true)}
-              style={styles.dueChip}
-            >
-              <Calendar size={11} color={colors.dueFg} strokeWidth={2} />
-              <BBText variant="micro" color={colors.dueFg}>
-                {dueLabel(task.due_date)}
-              </BBText>
-            </Pressable>
-          ) : openTask ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Add due date"
-              onPress={() => setDueVisible(true)}
-              style={styles.addChip}
-            >
-              <Calendar size={11} color={colors.fg6} strokeWidth={2} />
-              <BBText variant="micro" color={colors.fg6}>
-                Add date
-              </BBText>
-            </Pressable>
-          ) : null}
+        {/* M-01 — four labelled rows, muted placeholders when unset rather than
+            hidden rows. The chevron is decorative: the row carries the name and
+            the current value (design.md, accessible names). */}
+        {metadataRows ? (
+          <View style={styles.metaRows}>
+            {metadataRows.map((row) => (
+              <Fragment key={row.id}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={row.accessibilityLabel}
+                  onPress={() => openMetadataRow(row.id)}
+                  style={styles.metaRow}
+                >
+                  <BBText variant="micro" color={colors.fg5} style={styles.metaRowLabel}>
+                    {row.label}
+                  </BBText>
+                  <View style={styles.metaRowValue}>
+                    {row.pills.length > 0 ? (
+                      row.pills.map((pill) =>
+                        row.id === "project" ? (
+                          <View key={pill} style={styles.projectPill}>
+                            <BBText variant="caption" color={colors.brandPrimary}>
+                              {pill}
+                            </BBText>
+                          </View>
+                        ) : (
+                          <TagPill key={pill} name={pill} />
+                        ),
+                      )
+                    ) : (
+                      <BBText
+                        variant="body"
+                        color={row.placeholder ? colors.fg6 : colors.fg2}
+                        numberOfLines={1}
+                      >
+                        {row.value}
+                      </BBText>
+                    )}
+                  </View>
+                  <View
+                    accessibilityElementsHidden
+                    importantForAccessibility="no-hide-descendants"
+                  >
+                    <ChevronRight size={18} color={colors.fg6} strokeWidth={2} />
+                  </View>
+                </Pressable>
+                {/* FR-018: the notice names the field and what it reverted to,
+                    and its labelled Dismiss sits in tab order right after the
+                    row it explains. */}
+                {expiredNotice && expiredNotice.anchor === row.id ? (
+                  <View style={styles.noticeCard}>
+                    <View accessible accessibilityRole="text">
+                      {expiredNotice.lines.map((line) => (
+                        <BBText key={line} variant="caption" color={colors.warningFg}>
+                          {line}
+                        </BBText>
+                      ))}
+                    </View>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={expiredNotice.dismissLabel}
+                      onPress={() => void queue.dismissExpiredNotice(task.id)}
+                      style={styles.noticeDismiss}
+                    >
+                      <BBText variant="caption" weight="medium" color={colors.warningFg}>
+                        {expiredNotice.dismissLabel}
+                      </BBText>
+                    </Pressable>
+                  </View>
+                ) : null}
+              </Fragment>
+            ))}
+          </View>
+        ) : null}
 
-          {task.priority !== "none" ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Change priority"
-              disabled={!openTask}
-              onPress={() => setPriorityVisible(true)}
-              style={styles.neutralChip}
-            >
-              <View
-                style={[styles.priorityDot, { backgroundColor: PRIORITY_COLORS[task.priority] }]}
-              />
-              <BBText variant="micro" color={colors.fg4}>
-                {PRIORITY_LABELS[task.priority]}
-              </BBText>
-            </Pressable>
-          ) : openTask ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Set priority"
-              onPress={() => setPriorityVisible(true)}
-              style={styles.addChip}
-            >
-              <Flag size={11} color={colors.fg6} strokeWidth={2} />
-              <BBText variant="micro" color={colors.fg6}>
-                Priority
-              </BBText>
-            </Pressable>
-          ) : null}
-
-          {taskTags.map((name) => (
-            <TagPill key={name} name={name} />
-          ))}
-          {project ? (
-            <BBText variant="micro" color={colors.fg6}>
-              {project}
-            </BBText>
-          ) : null}
-          {!openTask ? (
-            <BBText variant="micro" color={colors.fg6}>
-              {STATE_LABELS[task.state]}
-            </BBText>
-          ) : null}
-        </View>
+        {/* M-01c — with the rollout flag off this is today's chip row exactly:
+            values shown, no controls this feature added, no disabled rows. */}
+        {metadataChips ? (
+          <View style={styles.chipRowIndented}>
+            {metadataChips.map((chip) => {
+              if (chip.kind === "due") {
+                return (
+                  <Pressable
+                    key={chip.key}
+                    accessibilityRole="button"
+                    accessibilityLabel={chip.accessibilityLabel}
+                    disabled={chip.disabled}
+                    onPress={() => setDueVisible(true)}
+                    style={styles.dueChip}
+                  >
+                    <Calendar size={11} color={colors.dueFg} strokeWidth={2} />
+                    <BBText variant="micro" color={colors.dueFg}>
+                      {chip.label}
+                    </BBText>
+                  </Pressable>
+                );
+              }
+              if (chip.kind === "add-due") {
+                return (
+                  <Pressable
+                    key={chip.key}
+                    accessibilityRole="button"
+                    accessibilityLabel={chip.accessibilityLabel}
+                    onPress={() => setDueVisible(true)}
+                    style={styles.addChip}
+                  >
+                    <Calendar size={11} color={colors.fg6} strokeWidth={2} />
+                    <BBText variant="micro" color={colors.fg6}>
+                      {chip.label}
+                    </BBText>
+                  </Pressable>
+                );
+              }
+              if (chip.kind === "priority") {
+                return (
+                  <Pressable
+                    key={chip.key}
+                    accessibilityRole="button"
+                    accessibilityLabel={chip.accessibilityLabel}
+                    disabled={chip.disabled}
+                    onPress={() => setPriorityVisible(true)}
+                    style={styles.neutralChip}
+                  >
+                    <View
+                      style={[
+                        styles.priorityDot,
+                        { backgroundColor: PRIORITY_COLORS[chip.priority] },
+                      ]}
+                    />
+                    <BBText variant="micro" color={colors.fg4}>
+                      {chip.label}
+                    </BBText>
+                  </Pressable>
+                );
+              }
+              if (chip.kind === "add-priority") {
+                return (
+                  <Pressable
+                    key={chip.key}
+                    accessibilityRole="button"
+                    accessibilityLabel={chip.accessibilityLabel}
+                    onPress={() => setPriorityVisible(true)}
+                    style={styles.addChip}
+                  >
+                    <Flag size={11} color={colors.fg6} strokeWidth={2} />
+                    <BBText variant="micro" color={colors.fg6}>
+                      {chip.label}
+                    </BBText>
+                  </Pressable>
+                );
+              }
+              if (chip.kind === "tag") {
+                return <TagPill key={chip.key} name={chip.label} />;
+              }
+              return (
+                <BBText key={chip.key} variant="micro" color={colors.fg6}>
+                  {chip.label}
+                </BBText>
+              );
+            })}
+          </View>
+        ) : null}
 
         {task.state === "waiting" ? (
           <View style={styles.waitingBlock}>
@@ -511,6 +813,22 @@ export default function TaskDetailScreen() {
         <BBText variant="micro" color={colors.fg6} style={styles.metaLine}>
           {`Created ${new Date(task.created_at).toLocaleDateString()} · revision ${task.revision}`}
         </BBText>
+
+        {/* SC-004 / FR-007 — how current the screen is, said once for the whole
+            screen. Words, never a coloured dot, and never per-change. */}
+        {surface.queueEnabled ? (
+          <View
+            accessible
+            accessibilityRole="text"
+            accessibilityLabel={footer.accessibilityLabel}
+            accessibilityLiveRegion="polite"
+            style={styles.syncFooter}
+          >
+            <BBText variant="micro" color={colors.fg5}>
+              {footer.label}
+            </BBText>
+          </View>
+        ) : null}
       </ScrollView>
 
       {/* Due date sheet */}
@@ -644,6 +962,80 @@ export default function TaskDetailScreen() {
         pending={transition.isPending}
         error={transition.isError ? transition.error : null}
       />
+
+      {/* M-02 / M-03. Mounted only where the rows are, so the flag-off screen
+          carries none of this feature's controls at all. */}
+      {surface.presentation === "rows" ? (
+        <>
+          <ProjectPicker
+            visible={projectPickerVisible}
+            onClose={() => setProjectPickerVisible(false)}
+            value={
+              effective.projectId === null
+                ? null
+                : { id: effective.projectId, ...(project === undefined ? {} : { name: project }) }
+            }
+            onSelect={(projectId) => {
+              void enqueueClassification({ projectId });
+            }}
+            onCreate={createProject}
+            projects={projects.data ?? null}
+            listPhase={resolveListPhase({
+              pending: projects.isPending,
+              failed: projects.isError,
+              hasData: projects.data !== undefined,
+            })}
+            online={online}
+            onRetry={() => {
+              void projects.refetch();
+            }}
+          />
+          <TagPicker
+            visible={tagPickerVisible}
+            onClose={() => setTagPickerVisible(false)}
+            attached={attachedEntities(effective.tagIds, tags.data ?? null)}
+            onChange={(tagIds) => {
+              void enqueueClassification({ tagIds });
+            }}
+            onCreate={createTag}
+            tags={tags.data ?? null}
+            listPhase={resolveListPhase({
+              pending: tags.isPending,
+              failed: tags.isError,
+              hasData: tags.data !== undefined,
+            })}
+            online={online}
+            onRetry={() => {
+              void tags.refetch();
+            }}
+          />
+        </>
+      ) : null}
+
+      {/* M-04 — SC-005: nothing is resolved without the person choosing. */}
+      <ConflictSheet
+        visible={queuedConflict !== undefined}
+        conflict={queuedConflict}
+        server={{
+          projectId: task.project_id,
+          tagIds: task.tag_ids,
+          revision: task.revision,
+        }}
+        // The queue records that an entry is `conflicted` but not *why*, so the
+        // one reason that parks an entry any other way — a 404 on a deleted
+        // target — is not distinguishable here. Stale revision is the case
+        // `decideOnRejection` sends to the prompt in every other path.
+        reason="stale-revision"
+        names={{ projects: projects.data ?? null, tags: tags.data ?? null }}
+        deviceObservedAt={queue.lastSyncedAt}
+        onKeepMine={() => queue.keepMine(task.revision)}
+        onDiscardMine={() => queue.discardMine(task.revision)}
+        onDismiss={() => {
+          // "Not yet answered": nothing is resolved and nothing discarded. The
+          // entry stays queued and the sheet returns.
+        }}
+        now={now}
+      />
     </Screen>
   );
 }
@@ -703,6 +1095,62 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     paddingLeft: 34,
+  },
+  metaRows: {
+    gap: space.s2,
+  },
+  // 52 px per design.md's mobile viability note; comfortably over the 44 pt
+  // minimum for the whole row, which is the tap target.
+  metaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.s2,
+    minHeight: 52,
+    paddingHorizontal: 14,
+    paddingVertical: space.s2,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    backgroundColor: colors.surfaceRaised,
+  },
+  metaRowLabel: {
+    width: 64,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  metaRowValue: {
+    flex: 1,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 4,
+  },
+  projectPill: {
+    borderRadius: radii.full,
+    paddingHorizontal: 9,
+    paddingVertical: 2,
+    backgroundColor: colors.brandPrimarySoft,
+  },
+  noticeCard: {
+    backgroundColor: colors.warningBg,
+    borderWidth: 1,
+    borderColor: colors.warningBorder,
+    borderRadius: radii.md,
+    padding: space.s3,
+    gap: space.s2,
+  },
+  noticeDismiss: {
+    alignSelf: "flex-start",
+    minHeight: minHitTarget,
+    justifyContent: "center",
+    paddingHorizontal: space.s3,
+    borderWidth: 1,
+    borderColor: colors.warningBorder,
+    borderRadius: radii.sm,
+  },
+  syncFooter: {
+    alignItems: "center",
+    paddingTop: space.s2,
   },
   dueChip: {
     flexDirection: "row",

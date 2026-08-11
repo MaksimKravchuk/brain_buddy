@@ -47,6 +47,11 @@ export interface ClassificationEdit {
    *  `originalValue` when this edit opens a new entry; invariant 7 forbids
    *  refreshing it afterwards. */
   displayedValue: { projectId: string | null; tagIds: string[] };
+  /** When the device last read this task from the server. Becomes `observedAt`
+   *  and dates the value the conflict prompt shows. Omitted rather than guessed
+   *  when the caller cannot say — an undated row is honest, a wrongly dated one
+   *  is the falsehood FR-010 exists to stop. */
+  displayedAt?: string;
 }
 
 export type MintIdempotencyKey = () => string;
@@ -203,6 +208,7 @@ export function coalesce(
         value,
         observedRevision: edit.observedRevision,
         originalValue,
+        ...(edit.displayedAt ? { observedAt: edit.displayedAt } : {}),
         firstQueuedAt: nowIso,
         lastEditedAt: nowIso,
         idempotencyKey: mintKey(),

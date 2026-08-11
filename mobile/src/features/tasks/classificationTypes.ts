@@ -44,6 +44,18 @@ export interface PendingClassificationChange {
    *  false story about who changed what (FR-010, invariant 9). */
   originalValue: { projectId: string | null; tagIds: string[] };
 
+  /** When the DEVICE last read this task from the server — not when the change
+   *  was made. Immutable, and captured with `originalValue`.
+   *
+   *  Without it the conflict prompt cannot honestly date the value it shows.
+   *  Back-filling the age from `firstQueuedAt` would claim the phone's
+   *  knowledge is 14 minutes old when it may be three weeks old, which is the
+   *  precise falsehood the labelled row exists to prevent (FR-010,
+   *  invariant 9). Optional because a task read before this field existed has
+   *  no honest value to supply — the prompt then omits the age rather than
+   *  inventing one. */
+  observedAt?: string;
+
   /** Immutable. Pairs with `originalValue` and `observedRevision`. */
   firstQueuedAt: string;
   /** Refreshed on every coalesce. FR-018's 30 days runs from this, so a live
