@@ -307,9 +307,12 @@ against.
   With no not-sent decoration, the only surfaces that reveal unsent work are the
   last-synchronised time — which says *when*, never *what* — and the discard
   warning at an identity transition, which is also the last moment to act on it.
-  That is the accepted cost of the offline-first choice, not an oversight. It
-  raises the stakes on the discard warning listing what is pending rather than
-  only counting it, and on the conflict prompt naming what was changed.
+  That is the accepted cost of the offline-first choice, not an oversight.
+  Sign-off then narrowed the second surface too: the discard warning states a
+  count and no list. So no surface in the app names an unsent change — a person
+  can be told that two exist and that continuing destroys them, never which
+  two. The one place that still names anything is the conflict prompt, and only
+  for the change that happened to conflict.
 
 - **No numeric adoption target is claimed, and this is deliberate.** The intake
   names the objective — complete inbox triage from the phone — but the share of

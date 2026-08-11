@@ -81,11 +81,11 @@ own. Their per-state rows live under M-01.
 
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
-| default | sign-out, account change or server change with a non-empty queue | Count, a list of what is pending, and which action discards it | "2 changes have not been sent" | FR-011, SC-007 |
+| default | sign-out, account change or server change with a non-empty queue | The count and which action discards it. **No list** — decided at sign-off | "2 changes have not been sent" | FR-011, SC-007 |
 | loading | queue draining while the sheet is open | Count decrements live rather than showing a stale number | — | FR-011 |
 | empty | queue empty | Sheet never appears; the action proceeds | — | FR-011 |
 | error | drain fails during the wait | Count stays, the person can still choose | + correlation id | FR-012 |
-| partial failure | some entries sent, some not | Only the still-unsent ones are listed | — | FR-011 |
+| partial failure | some entries sent, some not | The count reflects only the still-unsent ones | — | FR-011 |
 | offline / interrupted | no connection | "Stay and let them send" is disabled with the reason; discarding is still available | "Nothing can be sent without a connection" | FR-006, FR-011 |
 
 ## Affordance → requirement map
@@ -106,7 +106,7 @@ own. Their per-state rows live under M-01.
 | M-04 | "Discard mine, keep the server's" | Drops the queued entry | FR-008 |
 | M-04 | Correlation id | Makes the rejection reportable | FR-012 |
 | M-05 | "Stay and let them send" | Cancels the identity transition | FR-011 |
-| M-05 | "Discard N changes and continue" | Proceeds, discarding | FR-011, SC-007 |
+| M-05 | "Discard N changes and continue" | Proceeds, discarding. The count is the whole of what the person is told | FR-011, SC-007 |
 
 ### Requirements with no affordance
 
@@ -139,9 +139,12 @@ else in the loop changes: no capture surface, no CRT canvas, no Weekly Review.
 - **One-handed reach**: the two destructive or consequential choices (M-04,
   M-05) are bottom sheets, so the buttons sit in the lower third. The
   non-destructive option is always the upper of the two.
-- **Destructive actions**: M-05 names the count and lists the pending items
-  before discarding, and says the discard cannot be undone. M-04 discards
-  nothing until a choice is made — dismissing it leaves the change pending.
+- **Destructive actions**: M-05 states the count and that the discard cannot be
+  undone. It does **not** name the items — decided at sign-off. Combined with
+  the removal of the per-change marker, the consequence is that a person can
+  discard work they were never able to identify; that is the accepted trade,
+  recorded here so it is visible to review rather than discovered later. M-04
+  discards nothing until a choice is made.
 
 ## Keyboard and focus
 
@@ -167,7 +170,13 @@ else in the loop changes: no capture surface, no CRT canvas, no Weekly Review.
 - Vocabulary check (ADR-0006, `Tag` not the forbidden alternatives): pass
 - `python3 -m unittest scripts/test_validate_brain_buddy_design_skill.py`: pass
 
-## Open decisions for the human
+## Human sign-off
+
+Signed off by MaksimKravchuk on 2026-08-11, after one round of changes. The
+first presentation was declined on the not-sent marker; the revision removing
+it, and the count-only discard warning, were both accepted.
+
+## Decisions taken at sign-off
 
 1. **Resolved at sign-off, and it reversed an earlier answer: there is no
    not-sent marker at all.** The human's instruction was to hold the data on the
@@ -179,9 +188,11 @@ else in the loop changes: no capture surface, no CRT canvas, no Weekly Review.
    than only counting them, and why M-04 must name what was changed: a person
    can reach a conflict prompt for a change nothing ever told them was in
    flight.
-2. **M-05 lists every pending change.** With a large queue this sheet grows.
-   The alternative is a count plus "see all", which is calmer but puts one tap
-   between the person and knowing what they are about to lose.
+2. **Resolved at sign-off: M-05 shows the count only, no list.** With the
+   per-change marker also gone, no surface in the app names an unsent change.
+   The person can learn that two changes exist and that continuing destroys
+   them, but never which two. Recorded as the decision it is, so the review
+   lenses can weigh it rather than assume it was an oversight.
 3. **The flag-off state is today's screen exactly** — values shown, no controls
    at all. The alternative is showing disabled rows so the capability is
    discoverable before rollout, at the cost of advertising something nobody can
