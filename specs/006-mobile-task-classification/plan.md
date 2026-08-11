@@ -128,7 +128,7 @@ mobile/src/
 │   └── DiscardUnsentSheet.tsx              # NEW (M-05)
 └── app/task/[id].tsx                       # rows become editable; footer shows last synced
 
-mobile/src/features/tasks/__tests__/        # Jest over the pure modules only
+mobile/src/features/tasks/__tests__/        # Jest: pure modules AND rendered components
 mobile/integration/                         # real client vs disposable local backend
 ```
 
@@ -195,7 +195,7 @@ component in a test.** Three consequences shape the whole plan.
    `make integration-mobile` runs the real API client against a disposable
    local backend. The stale-`expected_revision` rejection is exercised there
    for real, because a mocked 409 would prove only that the mock was written.
-3. **Rendering is proved by typecheck and build.** `make typecheck-mobile` and
+3. **Rendering is proved by render tests against the fake backend, with typecheck and build as corroboration.** `make typecheck-mobile` and
    `make build-mobile` (Metro bundle) are the evidence that the components
    compile and bundle. That is genuinely weaker than a render test, and the
    acceptance stage must not be allowed to describe it as more than it is.

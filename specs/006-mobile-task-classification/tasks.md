@@ -32,10 +32,16 @@
 - **No module reads the clock except through an argument.** `expireQueue` and
   `formatLastSynced` take `now`. There is no fake-timer precedent in `mobile/`,
   so an internal `Date.now()` makes the 30-day boundary untestable.
-- **Allure taxonomy on backend tests only.** `CLAUDE.md` scopes the rule to
-  pytest, Vitest and Playwright. `mobile/` runs plain Jest with no taxonomy
-  helper, so the backend test carries full `epic`/`feature`/`story` and a named
-  step, and the Jest suites carry none. See T003.
+- **Allure taxonomy applies to the mobile suite too, and is supplied for you.**
+  An earlier draft of this file said `mobile/` "runs plain Jest with no taxonomy
+  helper" and exempted it. That was wrong on the ref these tasks were written
+  against: `mobile/src/test/allureTaxonomy.ts` exists, `allure-jest` is a
+  dependency, and `jest.config.js` already runs a custom Allure environment.
+  Taxonomy is assigned automatically from path rules — `/features/tasks/`,
+  `/auth/` and `/api/` are all covered — so add no decorators, and do not
+  restate the exemption. T003's "dropped" note is left as written, with this
+  correction beside it: the record of a wrong call is more useful than a tidy
+  one.
 
 ---
 

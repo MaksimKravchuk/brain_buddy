@@ -166,9 +166,17 @@ pass is not cleanup; it is where this bug class exclusively lives.**
   criterion whose only honest evidence is a person looking at the screen
   (SC-001, SC-006, and the rendering halves of FR-007 and FR-012) is therefore
   ungraded. `/speckit-accept` must not be run until they are.
-- **Component-layer evidence is genuinely weaker than the rest.** `mobile/`
-  installs no React renderer, so `.tsx` files have typecheck and a bundle and
-  nothing else. The lanes pushed every decision they could into pure modules —
-  `pickerState`, `sheetState`, `taskScreenState`, `drainStep` — to shrink that
-  gap, and two of them checked the Hermes bundle by byte-search rather than
-  trusting a passing export. The residue is real and is recorded here.
+- **Component-layer evidence was weaker, and then was not.** While the lanes
+  were building, this said `mobile/` installs no React renderer, so `.tsx`
+  files had typecheck and a bundle and nothing else — and the lanes pushed
+  every decision they could into pure modules (`pickerState`, `sheetState`,
+  `taskScreenState`, `drainStep`) to shrink that gap, two of them checking the
+  Hermes bundle by byte-search rather than trusting a passing export.
+
+  That paragraph is kept because the caution was real at the time and shaped
+  the architecture. It is no longer the state of the work: the components are
+  now covered by tests that mount them, and closing that gap is what found the
+  picker error state nobody could reach, the offline detach that could not be
+  undone, and a green test asserting the exact behaviour that was broken. The
+  same expired premise appeared in four places in these artifacts and was
+  corrected in each — see the "Implementation outcome" note above.
