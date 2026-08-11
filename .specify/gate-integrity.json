@@ -12,6 +12,6 @@
     "scripts/check_spec_kit_specs.py": "1b5d2bc387d2224ddccf13bed88a04da175d48827784612045d75b427ec697ad",
     "scripts/check_speckit_manifests.py": "e5fb29295f3bb0fa9569362fc74cd871ab5715912dca2c25dec531e7eaa92408",
     "scripts/classify_path_risk.py": "a51e4bf3821c60e6e8aa1829475449e388f1c72bcf33327febb9c87bee5cce7a",
-    "scripts/spec_kit_planning_review.py": "f81f81eb85f4c823aba21c7852669c557c63058b4f063f1134b9eb249d9402ec"
+    "scripts/spec_kit_planning_review.py": "610a5259468d29050667e02e31be9068035553df78d0dd420c935783345a33eb"
   }
 }
