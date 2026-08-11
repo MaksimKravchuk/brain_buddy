@@ -497,28 +497,33 @@ def _job_needs(workflow_text: str, job: str) -> set[str] | None:
 # The job graph is deliberately flat: independent work runs as independent
 # lanes, and `full-ci` is the single join. Two things then need guarding.
 #
-# First, a lane must not grow a dependency it does not consume. Chaining the
-# stack jobs behind the documentation and workflow-lint gates once put roughly
-# 35 seconds of markdown validation in front of every test in the run, and put
-# the Docker build -- which reads nothing either test job writes -- behind both
-# of them. None of it changed a single result.
+# First, a lane must not grow an edge that buys nothing. There are exactly two
+# reasons an edge earns its place -- the job consumes the other's output, or the
+# other is a cheap check that should fail the run before this expensive one
+# spends runner minutes. Chaining the stack jobs behind the documentation and
+# workflow-lint gates satisfies neither: it once put roughly 35 seconds of
+# markdown validation in front of every test in the run without changing a
+# single result.
 #
 # Second, and more dangerous: with a flat graph `full-ci` is the ONLY thing
 # making a job required. A new job that nobody adds to its `needs` is not a
 # lenient check, it is an absent one, and the run stays green without it. The
 # completeness check below is what makes flattening safe.
 LANE_DEPENDENCY_LIMITS = {
-    # The stack lanes consume exactly one thing: the changed-stack decision that
-    # drives their RUN gate.
+    # The service lanes consume exactly one thing: the changed-stack decision
+    # that drives their RUN gate. Nothing else may precede them -- they are the
+    # cheap checks everything else is allowed to wait for.
     "backend": {"changes"},
     "frontend": {"changes"},
     "mobile": {"changes"},
-    # E2E is never path filtered and never queued behind a per-service lane. It
-    # is the only check that exercises the services against each other, so
-    # "my own suite is green" must not be a precondition for running it.
-    "e2e": set(),
-    # An image build reads nothing a test lane produces.
-    "docker": set(),
+    # The two expensive whole-stack jobs. They consume nothing the service lanes
+    # produce, but they may wait for them so a failing linter or unit test stops
+    # the run before anything pays to build or boot the stack. They may wait for
+    # NOTHING ELSE: not mobile (which ships in neither image), not the
+    # documentation or workflow gates, and not each other -- the edge between
+    # them existed only to share an image build, which the layer cache replaces.
+    "e2e": {"backend", "frontend"},
+    "docker": {"backend", "frontend"},
 }
 FULL_CI_JOB = "full-ci"
 

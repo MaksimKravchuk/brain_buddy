@@ -469,7 +469,10 @@ jobs:
         self.assertIn("backend job declares needs it does not consume", completed.stderr)
         self.assertIn("spec-kit", completed.stderr)
 
-    def test_workflow_rejects_e2e_queued_behind_the_per_service_lanes(self) -> None:
+    def test_workflow_rejects_e2e_queued_behind_gates_that_do_not_guard_it(self) -> None:
+        # Waiting on backend and frontend is allowed -- they are the cheap checks
+        # that should fail before the stack is built. Waiting on the markdown
+        # gate, or on a service that ships in neither image, is not.
         with tempfile.TemporaryDirectory() as tmp:
             workflow = Path(tmp) / "ci.yml"
             workflow.write_text(
@@ -480,6 +483,8 @@ jobs:
     needs:
       - backend
       - frontend
+      - mobile
+      - spec-kit
     steps:
       - run: make test-e2e
 """.strip(),
@@ -490,7 +495,38 @@ jobs:
 
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("e2e job declares needs it does not consume", completed.stderr)
-        self.assertIn("independent lane", completed.stderr)
+        self.assertIn("mobile", completed.stderr)
+        self.assertIn("spec-kit", completed.stderr)
+        # The legitimate cost gates must not be reported as surplus.
+        self.assertNotIn("'backend'", completed.stderr)
+
+    def test_workflow_accepts_expensive_lanes_gated_on_the_cheap_service_lanes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "ci.yml"
+            workflow.write_text(
+                """
+jobs:
+  e2e:
+    needs:
+      - backend
+      - frontend
+    steps:
+      - run: make test-e2e
+  docker:
+    needs:
+      - backend
+      - frontend
+    steps:
+      - run: docker buildx build .
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        # The fixture is a fragment, so other checks still fail it; what matters
+        # is that the job-graph rule raised no complaint about these two.
+        self.assertNotIn("declares needs it does not consume", completed.stderr)
 
     def test_workflow_rejects_a_job_absent_from_the_full_ci_gate(self) -> None:
         # A flat graph makes full-ci the only thing that makes a job required,

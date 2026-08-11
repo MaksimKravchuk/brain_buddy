@@ -531,13 +531,17 @@ jobs:
   # check on main (docs/autonomous-delivery-runbook.md), so the job name is
   # load-bearing and must not be renamed.
   #
-  # It holds no `needs`: an image build consumes nothing a test lane produces,
-  # and gating it on the test lanes only pushed it -- and everything behind it
-  # -- later into the run. The layer cache below makes it cheap enough to run
-  # unconditionally rather than only when backend/ or frontend/ changed.
+  # Gated on the two services whose code ships inside the images. Not because it
+  # consumes anything they produce -- it does not -- but because building an
+  # image out of code whose own linter or unit tests just failed cannot tell us
+  # anything we want to know, and runner minutes spent proving it are wasted. It
+  # deliberately does NOT wait on mobile, which ships in neither image.
   docker:
     name: Docker Images
     runs-on: ubuntu-latest
+    needs:
+      - backend
+      - frontend
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -585,18 +589,27 @@ jobs:
             sleep "$((attempt * 10))"
           done
 
-  # The whole-stack lane. Unlike the per-service lanes this one is NEVER path
-  # filtered and holds no `needs`: it is the only check that exercises the
-  # backend and the frontend against each other, so "nothing in my stack
-  # changed" is not a reason to skip it -- a change on either side of the wire
-  # can break the pair while both services' own suites stay green.
+  # The whole-stack lane, and the most expensive job in the run.
   #
-  # It starts at the same moment as the unit lanes rather than after them. That
-  # trades a little compute on a run that was going to fail anyway for roughly
-  # half the wall clock on every run that passes.
+  # It is NEVER path filtered: it is the only check that exercises the backend
+  # and the frontend against each other, so "nothing in my stack changed" is not
+  # a reason to skip it -- a change on either side of the wire can break the pair
+  # while both services' own suites stay green.
+  #
+  # It is still gated on those two services, though. Booting a stack built from
+  # code whose own linter or unit tests just failed proves nothing, and this is
+  # the job that would waste the most runner time doing it. Cheap checks first,
+  # then the expensive one. Same reasoning as the docker job, and like it this
+  # lane does not wait on mobile, which is not part of the Compose stack.
+  #
+  # It does NOT need `docker`. That edge existed only because both jobs built
+  # the same images, and the shared layer cache below replaces it.
   e2e:
     name: Compose Playwright E2E
     runs-on: ubuntu-latest
+    needs:
+      - backend
+      - frontend
     env:
       # Pinned so the prebuilt images below are exactly what Compose starts.
       BRAIN_BUDDY_BACKEND_IMAGE: brain-buddy-backend:ci

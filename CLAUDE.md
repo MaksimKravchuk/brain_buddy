@@ -217,11 +217,13 @@ HTTP request
 - **CI** — `.github/workflows/ci.yml` runs as parallel lanes joined only by
   `full-ci`: one per service (`backend`, `frontend`, `mobile` — each its own
   lint/type/unit/integration, path filtered by the `changes` job), plus
-  `workflow-lint`, `spec-kit`, `docker` and `e2e`. A lane may declare `needs`
-  only for a job whose output it actually consumes; `scripts/validate_ci_artifacts.py
-  workflow` rejects anything else, and rejects a job missing from `full-ci`'s
-  `needs` (with a flat graph that gate is the only thing making a job required).
-  `e2e` is never path filtered and never queued behind a service lane. It
+  `workflow-lint`, `spec-kit`, `docker` and `e2e`. An edge earns its place only
+  by consuming the other job's output, or by being a cheap check that should
+  fail the run before an expensive one spends runner minutes — `docker` and
+  `e2e` wait on `backend` and `frontend` for that second reason, and on nothing
+  else. `scripts/validate_ci_artifacts.py workflow` rejects any other edge, and
+  rejects a job missing from `full-ci`'s `needs` (with a flat graph that gate is
+  the only thing making a job required). `e2e` is never path filtered. It
   rebuilds only what changed: `main`'s Docker layers are reused via the shared
   `stack-*` buildx cache, so an untouched service starts from main's image.
   Wait for CI green before deploying.
