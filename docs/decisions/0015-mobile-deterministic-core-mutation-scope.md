@@ -50,9 +50,13 @@ nightly report-only campaign:
 - `src/lifecycle/guards.ts`
 - `src/config/serverUrl.ts`
 
-The allow-list lives in `mobile/stryker.config.json` and is read back by
-`scripts/validate_ci_artifacts.py mutation-workflow`, so narrowing it requires
-editing two files and one of them is checked in CI.
+The allow-list lives in `mobile/stryker.config.json`, which is the file the
+campaign actually obeys, and `scripts/validate_ci_artifacts.py
+mutation-workflow` parses that `mutate` array and requires it to match this
+ADR's list exactly — narrowing it *or* widening it fails CI. The workflow's
+header comment names the same modules, but it only documents the scope; an
+earlier revision of this validator read the comment alone, which meant the
+config could be narrowed silently while the comment still claimed otherwise.
 
 Out of scope, for the same reason ASGI fixtures are out of the backend's:
 React components and screens, the hooks that drive them, and the device
@@ -141,8 +145,10 @@ not just the number, and nothing about a new runner has been observed yet.
 ## Verification
 
 `python3 scripts/validate_ci_artifacts.py mutation-workflow --workflow
-.github/workflows/mutation-quality.yml` checks that the workflow still runs
-both campaigns, names every module in both allow-lists, keeps the report-only
-event policy, and retains the evidence for 30 days.
+.github/workflows/mutation-quality.yml --frontend-stryker-config
+frontend/stryker.config.json --mobile-stryker-config
+mobile/stryker.config.json` checks that the workflow still runs every campaign,
+keeps the report-only event policy, retains the evidence for 30 days, and that
+each Stryker config's `mutate` array is exactly the scope its ADR fixed.
 `make mutation-mobile` reproduces the campaign locally and writes the same
 summary and survivor list the nightly uploads.
