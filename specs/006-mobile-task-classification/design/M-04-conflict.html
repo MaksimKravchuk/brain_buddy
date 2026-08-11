@@ -79,6 +79,12 @@ body{font-family:var(--bb-font-sans);background:#e2e8f0;padding:24px;color:var(-
 @keyframes p{0%,100%{opacity:1}50%{opacity:.5}}
 .foot{border-top:1px solid var(--bb-border);background:var(--bb-surface-raised);
   padding:10px 16px;font-size:12px;color:var(--bb-fg-5);text-align:center}
+/* Campaign 2, FR-010: the sheet must name all three values, not two. The
+   first is what the DEVICE last showed, so it is labelled and dated rather
+   than presented as server history — a stale cache would otherwise tell a
+   confident and false story about who changed what. */
+.asof{font-size:11px;color:var(--bb-fg-5);margin-left:6px}
+.multi{font-size:12px;color:var(--bb-fg-5);margin:8px 0 0}
 </style></head>
 <body><div class="caption">M-04 — the queued change was rejected: the person chooses</div><div class="phone">
 <div class="status"><span>9:41</span><span>Brain&nbsp;Buddy</span></div><div class="nav"><button>&#8249; Back</button><h1>Task</h1><button>&nbsp;</button></div>
@@ -88,13 +94,16 @@ body{font-family:var(--bb-font-sans);background:#e2e8f0;padding:24px;color:var(-
 </div>
 <div class="scrim"></div>
 <div class="sheet">
-  <h2>This task changed somewhere else</h2>
-  <p>Your change was made before the task was updated elsewhere, so it was not applied.
-     Choose which one to keep &mdash; nothing has been discarded yet.</p>
+  <h2>You changed the project 14 minutes ago</h2>
+  <p>This task was updated somewhere else before your change was sent, so it was not
+     applied. Choose which one to keep &mdash; nothing has been discarded yet.</p>
   <div class="diff">
-    <div><span class="k">Yours</span> <span class="pill project">Q3 planning</span></div>
+    <div><span class="k">Your phone last showed</span> <span class="pill project">Inbox</span>
+      <span class="asof">as of 3 weeks ago</span></div>
+    <div><span class="k">You changed it to</span> <span class="pill project">Q3 planning</span></div>
     <div><span class="k">Now on server</span> <span class="pill project">Onboarding drop-off</span></div>
   </div>
+  <p class="multi">This task has changed more than once since your phone last saw it.</p>
   <button class="btn primary">Keep mine, replace theirs</button>
   <button class="btn ghost">Discard mine, keep the server&rsquo;s</button>
   <div class="corr">correlation id 4f2a91c0-8e7b</div>

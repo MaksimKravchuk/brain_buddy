@@ -34,7 +34,7 @@ device-local queue and the pure logic around it.
 
 **Constraints**: no new task route (`backend/app/api/tasks.py` is ASK-classified by exact path); offline-capable by requirement, not by aspiration; the queue must be bound to account and server.
 
-**Scale/Scope**: 7 designed screens/states, 16 functional requirements, 3 user stories. Roughly 6 new mobile modules, 1 backend line, 1 client flag read.
+**Scale/Scope**: 7 designed screens/states, 21 functional requirements, 9 success criteria, 3 user stories. Roughly 9 new mobile modules, 1 backend line, 1 client flag read plus its persistence.
 
 ## Constitution Check
 
@@ -68,7 +68,7 @@ below names the screen and state ids it realizes:
 
 | implementation section | design ids realized |
 |---|---|
-| Task screen classification rows | M-01 default, empty-first-run, error, partial-failure, flag-OFF (M-01c) |
+| Task screen classification rows | M-01 default, empty-first-run, error, expired-unsent-work, session-ended-by-itself, flag-OFF (M-01c) |
 | Pickers | M-02 all states, M-03 all states including the offline create-guard |
 | Queue and drain | M-01b, plus M-01's offline row and the last-synced footer |
 | Conflict resolution | M-04 all states including `dismissed` |
@@ -100,10 +100,21 @@ backend/
 └── app/core/config.py                      # +1 name in KNOWN_FEATURE_FLAGS (FR-015)
 
 mobile/src/
-├── auth/SessionProvider.tsx                # +1 flag read, fail closed, beside voiceEnabled
-│                                           # + persist accountId, + FR-019 401-vs-offline split
-│                                           # involuntary end keeps the queue (FR-011)
+├── auth/SessionProvider.tsx                # persists identity + resolved flag on EVERY
+│                                           # MeResponse (/auth/me, login, signup — not just
+│                                           # the probe); FR-019 401-vs-offline split; a fourth
+│                                           # SessionStatus for authenticated-but-offline;
+│                                           # updateServerUrl becomes a real identity transition
+├── auth/sessionOutcome.ts                  # NEW pure: classifySessionFailure(error) ->
+│                                           # unauthenticated | unreachable | other. Extracted so
+│                                           # FR-019 is testable at all — see below
 ├── features/tasks/classificationCache.ts   # NEW: project/Tag lists survive a cold start offline
+├── api/hooks.ts                            # useUpdateTask must accept the entry's key instead of
+│                                           # minting its own; useProjects/useTags write through
+│                                           # to the cache
+├── app/settings.tsx                        # M-05 gate on BOTH sign-out and server change —
+│                                           # the only call sites, and previously unlisted
+├── app/sign-in.tsx                         # the other signOut call site
 ├── api/client.ts                           # unchanged — updateTask/createProject/createTag exist
 ├── features/tasks/
 │   ├── classificationQueue.ts              # NEW pure: enqueue, coalesce, bind identity, clear
@@ -133,7 +144,7 @@ untestable except through the integration harness, so every rule worth asserting
 — coalescing, identity binding, conflict outcomes, staleness — is pushed out of
 the components and into functions that take state and return state.
 
-### Two mechanisms the review found missing
+### Three mechanisms the review found missing
 
 Both are required by requirements already agreed, not by new ones. Neither was
 in the first draft of this plan, and without either the feature does not work
@@ -154,7 +165,23 @@ that cache is empty and the claim is false — a person offline would see empty
 pickers and could classify nothing, which is the whole of FR-006. The project
 and Tag lists are therefore written to `AsyncStorage` on every successful fetch
 and read back when the fetch fails. This is a list of names the device already
-displayed, under the same identity key as the queue and cleared with it.
+displayed, under its own identity-scoped key, cleared with the queue **and also
+when the queue is empty**, since M-05 never appears in that case.
+
+**The rollout flag must survive a cold start too, and this one gates the other
+two.** Campaign 2 found it after campaign 1 fixed the first two: the flag is
+resolved server-side and delivered only in `/auth/me`, so an offline launch
+leaves `me` null, the flag reads `false` beside `voiceEnabled`, and M-01c
+renders — a screen deliberately indistinguishable from the pre-rollout one. The
+person cannot classify, cannot open a picker, and cannot see the queue the same
+launch just rehydrated. Fixing identity and the lists while leaving the flag
+live would have shipped a feature that is off exactly when it is needed. The
+resolved value is therefore persisted per identity, and fail-closed means closed
+when the answer has never been known for this identity (FR-020).
+
+`SessionStatus` also gains a fourth value. It is `loading | signed-out |
+signed-in` today, with nowhere to put "authenticated, offline, no live profile"
+— the state FR-019 requires the client to be able to hold.
 
 ## Testing strategy
 
@@ -176,6 +203,50 @@ component in a test.** Three consequences shape the whole plan.
 The end-to-end criterion the human named — change it on the phone, see it in
 the web client — is a manual check. It is recorded as such in `quickstart.md`
 rather than dressed up as automation.
+
+### Every requirement, and what carries its id
+
+`scripts/check_requirement_coverage.py` requires a feature-qualified id for
+every FR and SC, and it scans only `mobile/src` and `mobile/integration` for
+paths containing `test`, `spec` or `__tests__` — a quickstart step cannot
+satisfy it. `/speckit-accept` runs that gate as its mechanical close, so a plan
+naming 7 of 30 ids reaches acceptance with 23 requirements unnamed. Spec 003
+traces 1 of 20, so there is no house pattern to copy and this table is the fix.
+
+**Clock rule for the whole feature:** `expireQueue(entries, now)` and
+`formatLastSynced(lastSyncedAt, now)` take time as an argument, and no other
+module reads the clock. `mobile/` has no fake-timer precedent and every time
+read today is an inline `Date.now()`, so without this the 30-day boundary is
+untestable and `syncStatus.ts` is clock-flaky.
+
+| id | evidence |
+|---|---|
+| FR-001, FR-002, FR-003 | `classificationQueue.test.ts` reducer cases + integration round-trip |
+| FR-004 | integration: create-then-attach lands entity and reference in one outcome |
+| FR-005 | `matchExisting.test.ts` — exact, case difference, whitespace; substring must NOT match |
+| FR-006, FR-009 | queue survives a simulated cold start with no network |
+| FR-007 | typecheck/build + quickstart step 2 (no per-change decoration anywhere) |
+| FR-008 | `conflictDecision.test.ts` table + integration stale-`expected_revision` 409 |
+| FR-010 | reducer: after N coalesces including a `null` clear, `originalValue` unchanged |
+| FR-011, SC-007, SC-008 | `resolveQueueOnIdentityEvent` table — involuntary+same → keep, involuntary+different → discard, deliberate → warn-then-discard; plus the cross-key sweep deleting a foreign key |
+| FR-012 | correlation id present on every surfaced error (client test) |
+| FR-013 | lint rule / grep for the forbidden term |
+| FR-014 | `git diff --stat` shows no `backend/app/api/tasks.py` change |
+| FR-015, FR-020 | flag resolves `true` from persisted state with a null `me`; resolves `false` when never known |
+| FR-016 | create affordance disabled offline, with reason, before it is tapped |
+| FR-017 | reducer: `sending` entry not returned by a second `selectDrainable`; key byte-identical across an unchanged retry; key **changes** when coalescing alters the payload; injected sender counts one call for two concurrent triggers |
+| FR-018 | `expireQueue` boundary table: 29d23h kept, 30d1m expired, payload retained, count returned; future timestamp clamped; server-`Date` cross-check |
+| FR-019 | `sessionOutcome.test.ts`: `ApiError(401)` → unauthenticated, `ApiError(503)` → other, bare `TypeError` → unreachable; plus `client.test.ts` asserting `onUnauthorized` fires on 401 and not on a rejected `fetchImpl` |
+| FR-021 | queue fixture containing a `sending` entry loads and is drained |
+| SC-001, SC-002, SC-006 | manual, `quickstart.md` — SC-002 paired with an integration assertion that the server holds what the phone sent; SC-006 is a counted comparison against a ceiling stated before implementation |
+| SC-003 | all four outcomes as reducer cases, plus the quickstart expiry-notice step |
+| SC-004 | `formatLastSynced` table over `now - lastSyncedAt` |
+| SC-005 | reducer: no path removes an entry without either an accepted send or an explicit choice |
+| SC-009 | integration/manual: offline cold start reaches a usable classification screen |
+
+Where the only honest evidence is a person looking at it, the row says manual —
+but the id still lands on a named check the gate can see, so acceptance grades
+the manual half as manual rather than finding the criterion missing.
 
 ### Every User Story 1 scenario, and what proves it
 
@@ -220,7 +291,19 @@ this feature may treat the flag as a permission check.
 | Conflict resolution UI | `expected_revision` is required, so rejection is ordinary, not rare | Last-write-wins — silently discards someone's work |
 | Four pure modules | No component-render test library; logic inside components is untestable | Testing through the integration harness only — slower and it would not cover the table cases |
 
-Nothing else new. No new dependency, no new endpoint, no new backend module.
+Plus `docs/data-retention.md`, which FR-018 cites and which had no row for
+device-local storage until this feature added one.
+
+No new dependency, no new endpoint, no new backend module.
+
+`app/task/[id].tsx` is a **relayout**, not an edit-enable. The screen has no
+Project or Tags rows today: due date and priority are chips in one wrapped row,
+project is a micro text label, tags are pills beside it, and both are omitted
+entirely when unset. M-01 draws four labelled rows with chevrons and requires
+muted placeholders rather than hidden rows when empty. The screen therefore
+carries both presentations behind the flag read, and `design.md`'s sign-off
+decision 3 should be read as *today's values*, not today's layout — the M-01c
+mock draws rows, which today's screen does not have.
 
 ## Constitution Check — post-design re-evaluation
 

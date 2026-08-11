@@ -39,8 +39,9 @@ own. Their per-state rows live under M-01.
 | error | save rejected for any reason other than revision | Row reverts to the server value, inline error, retry | "Could not save. Tap to try again." + correlation id | FR-012 |
 | ~~partial failure~~ | **removed.** `PATCH /tasks/{id}` applies project and Tags in one atomic request, so no event sequence produces a half-saved task. Keeping the state would have meant two calls per change — double the queue and a new desynchronised state — for a screen nobody can reach | — | — | — |
 | offline / interrupted | no connection at the moment of the change | Change applied locally and shown as made. No marker, no banner, no per-row decoration. The footer's last-synced time is the only signal | "Last synced 14 minutes ago" | FR-006, FR-007, SC-004 |
-| expired unsent work | opening the app with queued changes older than 30 days | The rows show the server's values again, and a dismissible line says how many changes were dropped and why. FR-007 removed per-change markers, so without this the values would simply appear to revert on their own | "3 changes older than 30 days were not sent and have been discarded" | FR-018 |
-| session ended by itself | expired token, or a launch with no connection | The queue is untouched and nothing is discarded. A launch with no connection is not treated as a sign-out at all | — | FR-011, FR-019 |
+| expired unsent work | opening this task with its queued change past 30 days | The row shows the server's value again, and a dismissible line **names the field and what it reverted to** — not a count. A task carries at most one coalesced entry, so a per-task banner reading "N changes" could never be truthful. FR-007 removed per-change markers, so without this the value simply appears to revert on its own | "Your change to Project from 31 days ago was not sent and has been discarded. This now shows Onboarding drop-off." | FR-018, SC-003 |
+| expired unsent work, account-level | an expiry pass dropped entries the person may never revisit | One dismiss-once notice with the total, on whichever task screen or task list opens next. Triage happens from lists, so a per-task banner alone would leave FR-018's MUST unmet for anyone who does not reopen that exact task | "3 changes older than 30 days were not sent and have been discarded" | FR-018 |
+| session ended by itself | expired token, or a launch with no connection | The queue is untouched and nothing is discarded; on the next sign-in to the same account it simply drains. A launch with no connection is not treated as a sign-out at all. No prompt — "offered" means made available, and a prompt would be new chrome for sync bookkeeping FR-007 just removed | — | FR-011, FR-019, SC-008 |
 | flag OFF | server-owned flag defaults OFF | Exactly today's screen: values shown, no controls, no disabled affordances | — | FR-015 |
 
 ### M-02 — Project picker
@@ -54,7 +55,7 @@ own. Their per-state rows live under M-01.
 | error | list fetch failed | Inline retry, the current value still shown and still clearable | + correlation id | FR-012 |
 | partial failure | n/a — one list, one call | — | — | — |
 | offline / interrupted | no connection | Existing projects still selectable — from the list last stored on the device, which survives a cold start; create row disabled with a reason | "Needs a connection — new projects are named by the server" | FR-016 |
-| offline, never fetched | offline and this device has never loaded the list | The empty-first-run copy would be a lie here, so it says so and offers no create row | "Can't load your projects without a connection" | FR-016 |
+| offline, never fetched | offline and this device has never loaded the list | The empty-first-run copy would be a lie here, so it says so and offers no create row — but **"None" remains available**, since clearing needs no fetched list | "Can't load your projects without a connection" | FR-016, FR-001 |
 
 ### M-03 — Tag picker
 
@@ -67,14 +68,17 @@ own. Their per-state rows live under M-01.
 | error | list fetch failed | Inline retry; already-attached Tags still shown | + correlation id | FR-012 |
 | ~~partial failure~~ | **removed.** `tag_ids` is sent as one intended set, applied whole or not at all — per-Tag failure cannot occur | — | — | — |
 | offline / interrupted | no connection | Existing Tags selectable from the list last stored on the device; create row disabled with the reason visible before it is tapped | "Needs a connection — new Tags are named by the server" | FR-016 |
-| offline, never fetched | offline and this device has never loaded the list | Stated plainly rather than shown as "no Tags yet" | "Can't load your Tags without a connection" | FR-016 |
+| offline, never fetched | offline and this device has never loaded the list | Stated plainly rather than shown as "no Tags yet" — but the task's **own attached Tags stay listed and detachable**, sourced from the task rather than the uncached list. Detaching never needed the full list, and a first-ever visit that happens to be offline must not make FR-002's detach unreachable. Only attaching a not-yet-attached Tag and creating one require a connection | "Can't load your Tags without a connection" | FR-016, FR-002 |
 
 ### M-04 — Conflict resolution
 
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
-| default | queued change rejected on revision | Sheet naming what was changed and when, and **all three** values: what it was when they started, what they set, what the server holds now. Two explicit choices. Naming the change is load-bearing: nothing on the task screen ever said it was in flight | "You changed the project 14 minutes ago — Inbox → Q3 Launch. It is now Archive here." | FR-008, FR-010, SC-005 |
-| loading | resolution being sent | Chosen button shows progress; both stay visible | — | — |
+| default | queued change rejected on revision | Sheet naming the field, when, and **all three** values as labelled rows — *Started* / *You changed it to* / *Now on server*. The first is sourced as what the device last showed, with its age, never as server history. Two explicit choices | "You changed the project 14 minutes ago. Your phone last showed Inbox (as of 3 weeks ago) → you set Q3 Launch. It is now Archive here." | FR-008, FR-010, SC-005 |
+| default, Tags or both fields | the coalesced entry touched Tags, or Tags and project together | One heading line per changed field, each with its own three-row diff, stacked vertically. Three tag *sets* side by side do not fit 390px, so they are never laid out that way | "You changed the Tags 14 minutes ago." then its own diff | FR-002, FR-010 |
+| default, device was far behind | `serverRevision − observedRevision > 1` | An extra line: the task changed more than once since the phone last saw it. Without it a sequence of edits the person was never party to reads as a two-party disagreement, and "Keep mine" destroys work they would have kept | "This task has changed more than once since your phone last saw it." | FR-010, SC-005 |
+| already applied | the server already holds exactly what the entry intended | No prompt at all — the entry is dropped and last-synced advances. There is no disagreement to put to the person. The one explicit exception to SC-005, because nothing is overwritten or discarded | — | FR-017, SC-005 |
+| loading | resolution being sent | Chosen button shows progress; both stay visible, and the non-chosen one is **disabled, not hidden** — otherwise a double-tap starts a second, conflicting resolution before the first returns. Re-enabled only if the attempt errors | — | — |
 | empty | n/a | — | — | — |
 | error | the resolution itself fails | Sheet stays open, nothing discarded, retry offered | + correlation id | FR-012, SC-003 |
 | partial failure | several conflicted tasks | One sheet per task, queued; count shown | "1 of 3" | FR-008 |
@@ -124,6 +128,11 @@ own. Their per-state rows live under M-01.
 - **FR-017** (at most once) — correctness with no surface. Its absence would be
   visible, though: a double-applied change is what a person would report as the
   app undoing their work.
+- **FR-019** (401 versus unreachable) — the *absence* of a surface is the point.
+  Getting it wrong shows a sign-in screen to someone who never signed out.
+- **FR-021** (in-flight change survives a kill) — correctness with no surface.
+  Its absence is invisible by construction, which is what makes it dangerous:
+  the change is never sent, never errors, and ages out silently.
 - **FR-015** has the M-01c state rather than a control: the flag is
   server-owned, so there is nothing for a person to toggle here.
 
@@ -163,6 +172,12 @@ else in the loop changes: no capture surface, no CRT canvas, no Weekly Review.
   the sheet heading, not a button, so no destructive action is one keypress
   from an accidental confirm. **Focus restored on close to**: the row that
   opened the picker.
+- **Focus in the states added at campaign 2**: in M-02/M-03's "offline, never
+  fetched" state, focus goes to the message or Cancel rather than a search field
+  with nothing to filter. The expired-work notice's dismiss control is a
+  labelled button ("Dismiss", never icon-only), in tab order immediately after
+  the row it explains; focus does not jump to it on appearance, because the
+  notice is not the reason the person opened the screen.
 - **Escape**: closes a picker, discarding nothing. On M-04 and M-05 it is the
   same as the non-destructive choice, and it never resolves a conflict.
 - **Accessible names**: the chevrons are decorative and hidden from assistive
