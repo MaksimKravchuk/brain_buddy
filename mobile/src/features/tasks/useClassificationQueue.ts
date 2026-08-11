@@ -324,6 +324,9 @@ export function resolveSendRejection({
       queue: applyRejected(queue, entry.idempotencyKey, "revision-conflict", undefined, {
         reason: decision.reason,
         correlationId: decision.correlationId,
+        // What the re-read saw, kept because it is the only revision the
+        // resolution can be aimed at — see `conflictServerRevision`.
+        ...(serverTask ? { serverRevision: serverTask.revision } : {}),
       }),
       kind: decision.kind === "prompt" ? "conflicted" : "error",
       advanceLastSynced: false,
@@ -803,6 +806,23 @@ export function resolveConflictKeepMine(
   );
 }
 
+/**
+ * The revision a resolution must be aimed at.
+ *
+ * The entry's own is what the 409's re-read **saw**. The fallback is the
+ * screen's copy of the task, which nothing refreshes when a pass ends in a
+ * conflict — a conflicted pass settles nothing, so `onSynced` never fires. So
+ * preferring the fallback aims the retry at the revision the server has
+ * already rejected once, and goes on doing so: the same 409, the same sheet,
+ * for ever. It is used only when no re-read could be made at all.
+ */
+export function resolutionRevision(
+  entry: PendingClassificationChange,
+  fallback: number,
+): number {
+  return entry.conflictServerRevision ?? fallback;
+}
+
 /** "Discard mine, keep the server's" (M-04). The entry goes, and a successor
  *  edit made while it was in flight starts from the server's revision. */
 export function resolveConflictDiscardMine(
@@ -1114,7 +1134,12 @@ export function useClassificationQueue(
         return;
       }
       await commit(
-        resolveConflictKeepMine(queueRef.current, pending.entry, serverRevision, newIdempotencyKey),
+        resolveConflictKeepMine(
+          queueRef.current,
+          pending.entry,
+          resolutionRevision(pending.entry, serverRevision),
+          newIdempotencyKey,
+        ),
       );
       await drain();
     },
@@ -1127,7 +1152,16 @@ export function useClassificationQueue(
       if (!pending) {
         return;
       }
-      await commit(resolveConflictDiscardMine(queueRef.current, pending.entry, serverRevision));
+      await commit(
+        // Discarding re-bases any successor edit for this task onto the
+        // server's revision, so a stale one here simply moves the conflict to
+        // the next entry.
+        resolveConflictDiscardMine(
+          queueRef.current,
+          pending.entry,
+          resolutionRevision(pending.entry, serverRevision),
+        ),
+      );
     },
     [commit],
   );

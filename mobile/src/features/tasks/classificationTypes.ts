@@ -90,6 +90,17 @@ export interface PendingClassificationChange {
   /** The correlation id of the response that parked it, so FR-012's
    *  "reportable" applies to a conflict and not only to an inline error. */
   correlationId?: string;
+
+  /** The task revision the re-read observed when this entry was parked.
+   *
+   *  A 409 is answered by re-reading the task, and that revision is the only
+   *  one a resolution can be aimed at. Nothing writes it back to the screen's
+   *  copy of the task and a conflicted pass settles nothing, so resolving
+   *  against what the screen holds re-sends the same stale
+   *  `expected_revision`, earns the same 409, and puts the same sheet back up
+   *  for ever — a loop with no exit the person can reach. Absent when the
+   *  re-read itself could not be made. */
+  conflictServerRevision?: number;
 }
 
 /** Cached project and Tag lists, so the pickers work after a cold start with

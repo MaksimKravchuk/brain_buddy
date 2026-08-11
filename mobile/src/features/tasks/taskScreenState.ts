@@ -70,6 +70,16 @@ export const PRIORITY_LABELS: Record<TaskPriority, string> = {
 export const EXPIRY_DISMISS_LABEL = "Dismiss";
 export const ACCOUNT_EXPIRY_DISMISS_LABEL = "Dismiss";
 
+/**
+ * Why the Project and Tags rows are not available yet (FR-006, FR-009).
+ *
+ * Said in words, because design.md's rule for this feature is that no state is
+ * communicated by colour alone, and FR-016's disabled create row already sets
+ * the pattern: the reason is readable before the control is reached, rather
+ * than after something has failed.
+ */
+export const CLASSIFICATION_NOT_READY_REASON = "Checking for changes this phone hasn't sent yet";
+
 /** What an unset value is called to assistive technology. */
 const NONE_SET = "none set";
 
@@ -164,6 +174,46 @@ export function resolveClassificationSurface(
 // ------------------------------------------------------------ T046, the rows
 
 export type MetadataRowId = "project" | "tags" | "due" | "priority";
+
+/**
+ * Which rows are written through the device queue.
+ *
+ * Due and priority are sent straight to the server by the screen's own mutation
+ * and never touch the queue, so nothing about the queue's state may take them
+ * away.
+ */
+export function rowUsesClassificationQueue(id: MetadataRowId): boolean {
+  return id === "project" || id === "tags";
+}
+
+export interface ClassificationAvailability {
+  available: boolean;
+  /** Rendered as text wherever a row is withheld. Null when available. */
+  reason: string | null;
+}
+
+/**
+ * FR-006 / FR-009 — whether a classification change may be made yet.
+ *
+ * The persisted queue is read asynchronously, so a cached render paints the
+ * rows before the device knows what this identity already has waiting. An edit
+ * queued in that window coalesces against an empty queue and is then persisted
+ * **over** the unsent work that was there; earlier still, before the identity
+ * is installed, it is dropped without a word. Neither is recoverable and
+ * neither is visible, so the two rows wait instead — briefly, and saying so.
+ *
+ * With the queue disabled the screen carries no rows at all (M-01c), so there
+ * is nothing to withhold and nothing to explain.
+ */
+export function resolveClassificationAvailability(input: {
+  queueEnabled: boolean;
+  queueReady: boolean;
+}): ClassificationAvailability {
+  if (!input.queueEnabled || input.queueReady) {
+    return { available: true, reason: null };
+  }
+  return { available: false, reason: CLASSIFICATION_NOT_READY_REASON };
+}
 
 export interface MetadataInput {
   projectId: string | null;

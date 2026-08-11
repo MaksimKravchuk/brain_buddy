@@ -6,7 +6,7 @@ import { useSession } from "@/auth/SessionProvider";
 import { BBText } from "@/components/BBText";
 import { Button } from "@/components/Button";
 import { Screen } from "@/components/Screen";
-import { DEFAULT_SERVER_URL } from "@/config/serverUrl";
+import { DEFAULT_SERVER_URL, currentServerUrl, normalizeServerUrl } from "@/config/serverUrl";
 import { clearIdentityStores, loadQueue } from "@/features/tasks/classificationQueue.storage";
 import type { PendingClassificationChange } from "@/features/tasks/classificationTypes";
 import { DiscardUnsentSheet } from "@/features/tasks/DiscardUnsentSheet";
@@ -72,11 +72,31 @@ export default function SettingsScreen() {
     [status, accountId, serverUrl],
   );
 
+  const confirmSaved = () => {
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  /**
+   * FR-011 — the comparison has to happen **before** the gate, not inside
+   * `updateServerUrl`.
+   *
+   * `updateServerUrl` does nothing when the normalized URL is unchanged, so by
+   * the time it declines there is nothing left to decline: the person has
+   * already been warned that continuing discards their unsent work, and
+   * continuing has already discarded it. With an empty queue no sheet appears
+   * at all and the discard is silent — the cached project and Tag lists go for
+   * a save that changed nothing. Normalized, because that is the comparison
+   * `updateServerUrl` itself makes: a trailing slash is the same server.
+   */
   const saveServer = async () => {
+    if (normalizeServerUrl(serverDraft) === currentServerUrl()) {
+      confirmSaved();
+      return;
+    }
     await gate("server-change", async () => {
       await updateServerUrl(serverDraft);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      confirmSaved();
     });
   };
 

@@ -53,9 +53,11 @@ import {
   hasDismissedAccountNotice,
   rememberAccountNoticeDismissed,
   resolveAccountExpiryNotice,
+  resolveClassificationAvailability,
   resolveClassificationSurface,
   resolveListPhase,
   resolveOnline,
+  rowUsesClassificationQueue,
   servedFromCache,
   shouldAnnounceLastSynced,
   type LastSyncedFooter,
@@ -166,6 +168,9 @@ export default function TaskDetailScreen() {
   const [projectPickerVisible, setProjectPickerVisible] = useState(false);
   const [tagPickerVisible, setTagPickerVisible] = useState(false);
   const [accountNoticeDismissed, setAccountNoticeDismissed] = useState(false);
+  // M-04 "dismissed": which question was set aside, by the key that identifies
+  // it. Deliberately nothing more durable — see the sheet below.
+  const [dismissedConflict, setDismissedConflict] = useState<string | null>(null);
   // SC-004's footer is the only thing on this screen that ages, so the clock is
   // read here and passed down; nothing in `taskScreenState` reads it itself.
   const [now, setNow] = useState(() => Date.now());
@@ -321,6 +326,13 @@ export default function TaskDetailScreen() {
     priority: task.priority,
   };
   const metadataRows = surface.presentation === "rows" ? buildMetadataRows(metadata) : null;
+  // FR-009. Until the device has read the queue it cannot know what this
+  // identity already has waiting, and an edit made first would be persisted
+  // over it. The two rows the queue owns wait, and say why.
+  const classification = resolveClassificationAvailability({
+    queueEnabled: surface.queueEnabled,
+    queueReady: queue.ready,
+  });
   const metadataChips =
     surface.presentation === "chips"
       ? buildMetadataChips({ ...metadata, openTask, stateLabel: STATE_LABELS[task.state] })
@@ -404,6 +416,11 @@ export default function TaskDetailScreen() {
   // state, so a conflict queued against another task waits for that screen.
   const queuedConflict =
     queue.conflict && queue.conflict.entry.taskId === task.id ? queue.conflict : undefined;
+  // M-04 "dismissed": the question is set aside, not answered. Keyed by the
+  // entry, so the next question — including this one re-presented against a
+  // fresh revision, which mints a new key — is asked rather than swallowed.
+  const conflictAsked =
+    queuedConflict !== undefined && dismissedConflict !== queuedConflict.entry.idempotencyKey;
 
   const expiredNoticeCard = expiredNotice ? (
     <View style={styles.noticeCard}>
@@ -502,13 +519,23 @@ export default function TaskDetailScreen() {
             the current value (design.md, accessible names). */}
         {metadataRows ? (
           <View style={styles.metaRows}>
-            {metadataRows.map((row) => (
+            {metadataRows.map((row) => {
+              const withheld = !classification.available && rowUsesClassificationQueue(row.id);
+              return (
               <Fragment key={row.id}>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={row.accessibilityLabel}
+                  // The reason is part of the name, so it is heard rather than
+                  // inferred from the row looking greyed (design.md).
+                  accessibilityLabel={
+                    withheld
+                      ? `${row.accessibilityLabel}. ${classification.reason}`
+                      : row.accessibilityLabel
+                  }
+                  accessibilityState={{ disabled: withheld }}
+                  disabled={withheld}
                   onPress={() => openMetadataRow(row.id)}
-                  style={styles.metaRow}
+                  style={[styles.metaRow, withheld ? styles.metaRowWithheld : null]}
                 >
                   <BBText variant="micro" color={colors.fg5} style={styles.metaRowLabel}>
                     {row.label}
@@ -543,12 +570,20 @@ export default function TaskDetailScreen() {
                     <ChevronRight size={18} color={colors.fg6} strokeWidth={2} />
                   </View>
                 </Pressable>
+                {/* One sentence for the two rows it explains, under the later
+                    of them, so it is read as being about both. */}
+                {withheld && row.id === "tags" ? (
+                  <BBText variant="micro" color={colors.fg5}>
+                    {classification.reason}
+                  </BBText>
+                ) : null}
                 {/* FR-018: the notice names the field and what it reverted to,
                     and its labelled Dismiss sits in tab order right after the
                     row it explains. */}
                 {expiredNotice?.anchor === row.id ? expiredNoticeCard : null}
               </Fragment>
-            ))}
+              );
+            })}
           </View>
         ) : null}
 
@@ -1035,7 +1070,7 @@ export default function TaskDetailScreen() {
 
       {/* M-04 — SC-005: nothing is resolved without the person choosing. */}
       <ConflictSheet
-        visible={queuedConflict !== undefined}
+        visible={conflictAsked}
         conflict={queuedConflict}
         server={{
           projectId: task.project_id,
@@ -1053,8 +1088,14 @@ export default function TaskDetailScreen() {
         onKeepMine={() => queue.keepMine(task.revision)}
         onDiscardMine={() => queue.discardMine(task.revision)}
         onDismiss={() => {
-          // "Not yet answered": nothing is resolved and nothing discarded. The
-          // entry stays queued and the sheet returns.
+          // "Not yet answered": nothing is resolved and nothing discarded, and
+          // the entry stays exactly as it is. Only this screen, for as long as
+          // it is open, stops asking — so the sheet returns on the next visit,
+          // which M-04 makes the only reminder there is. Leaving the sheet up
+          // instead would trap the person on a question they may not be able
+          // to answer yet: the scrim and the platform back gesture would both
+          // do nothing.
+          setDismissedConflict(queuedConflict?.entry.idempotencyKey ?? null);
         }}
         now={now}
       />
@@ -1134,6 +1175,10 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radii.md,
     backgroundColor: colors.surfaceRaised,
+  },
+  // Muted as well as unavailable — never *instead of* the sentence beneath.
+  metaRowWithheld: {
+    backgroundColor: colors.surfaceSunken,
   },
   metaRowLabel: {
     width: 64,

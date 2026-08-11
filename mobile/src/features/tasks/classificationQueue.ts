@@ -349,16 +349,24 @@ export function applyRejected(
   idempotencyKey: string,
   kind: RejectionKind,
   mintKey?: () => string,
-  context?: { reason?: string; correlationId?: string },
+  context?: { reason?: string; correlationId?: string; serverRevision?: number },
 ): PendingClassificationChange[] {
   return transition(queue, idempotencyKey, (entry) => {
     // Carried onto the entry because `conflicted` alone cannot tell a stale
     // revision from a target deleted elsewhere, and those need different
     // sheets. Without it a 404 renders the revision prompt and offers to
     // replace a task that no longer exists.
+    //
+    // `serverRevision` is the other half: it is what the re-read *saw*, and
+    // the only revision a resolution can be aimed at. Nothing else on the
+    // device records it, so without it "keep mine" retries against the stale
+    // one it already knows the server rejected.
     const trace = {
       ...(context?.reason ? { conflictReason: context.reason } : {}),
       ...(context?.correlationId ? { correlationId: context.correlationId } : {}),
+      ...(context?.serverRevision === undefined
+        ? {}
+        : { conflictServerRevision: context.serverRevision }),
     };
     if (kind === "revision-conflict") {
       return { ...entry, ...trace, sendState: "conflicted" };

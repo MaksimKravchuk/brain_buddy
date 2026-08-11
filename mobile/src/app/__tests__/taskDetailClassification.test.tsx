@@ -50,9 +50,13 @@ const DAY = 24 * 60 * MINUTE;
 
 let backend: FakeBackend;
 
+/** The store's own jest mock, kept so `stallQueueRead` can always be undone. */
+const realGetItem = AsyncStorage.getItem;
+
 afterEach(async () => {
   backend?.restore();
   jest.restoreAllMocks();
+  AsyncStorage.getItem = realGetItem;
   // The "dismiss once" latch is module state keyed by identity, so it would
   // otherwise carry a dismissal from one test into the next.
   resetAccountNoticeDismissals();
@@ -129,6 +133,48 @@ function queuedChange(
 
 async function seedQueue(entries: PendingClassificationChange[]): Promise<void> {
   await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(entries));
+}
+
+/**
+ * The queue entries the device holds right now, as it holds them.
+ *
+ * Read through the store's own function rather than the screen's view of it,
+ * so it answers even while `stallQueueRead` is holding the app's read open.
+ */
+async function heldQueue(): Promise<PendingClassificationChange[]> {
+  const raw = await realGetItem.call(AsyncStorage, QUEUE_KEY);
+  return raw === null ? [] : (JSON.parse(raw) as PendingClassificationChange[]);
+}
+
+/**
+ * Hold the persisted queue's read open, and return the release.
+ *
+ * The read is asynchronous on the device too — this only makes the window
+ * deterministic instead of a few microtasks wide. AsyncStorage is a device
+ * boundary, already stood in for in `jest.setup.js`; every other key still
+ * reads through to it, so the screen resolves its session, flags and lists
+ * exactly as it would otherwise.
+ *
+ * Swapped rather than `jest.spyOn`-ed: the store's own jest mock defines
+ * `getItem` as a `jest.fn`, and `spyOn` hands back that same mock instead of
+ * wrapping it — so `restoreAllMocks` would not undo it and a second stall would
+ * call itself. `afterEach` puts the real one back.
+ */
+function stallQueueRead(): () => void {
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  AsyncStorage.getItem = (async (key: string) => {
+    if (key === QUEUE_KEY) {
+      await gate;
+    }
+    return realGetItem.call(AsyncStorage, key);
+  }) as typeof AsyncStorage.getItem;
+  return () => {
+    AsyncStorage.getItem = realGetItem;
+    release();
+  };
 }
 
 /**
@@ -495,6 +541,73 @@ describe("task detail — a change made with no connection", () => {
   });
 });
 
+describe("task detail — before the device has read what it has not sent", () => {
+  it("006-FR-009 keeps the classification rows unavailable, and says why in words", async () => {
+    // The read is asynchronous, so on a cached render the rows paint before the
+    // device knows what is already queued for this identity. An edit made in
+    // that window coalesces against nothing and is persisted over the unsent
+    // work that was there — FR-009's "queued changes survive" lost to a race.
+    // The window is small and real; the only honest answer is not to offer the
+    // control yet, and to say why in text (FR-016's pattern, design.md's rule
+    // that no state in this feature is communicated by colour alone).
+    const release = stallQueueRead();
+    const reason = "Checking for changes this phone hasn't sent yet";
+    try {
+      await openTask(makeTask({ id: "t1", project_id: "p1", tag_ids: ["g1"] }));
+
+      expect(await screen.findByText(reason)).toBeOnTheScreen();
+      // Heard, not merely seen: the reason is part of each row's own name.
+      const projectRow = screen.getByLabelText(`Project, Wedding. ${reason}`);
+      expect(projectRow).toBeDisabled();
+      expect(screen.getByLabelText(`Tags, errand. ${reason}`)).toBeDisabled();
+
+      // Unavailable, not merely discouraging: the picker does not open.
+      await fireEvent.press(projectRow);
+      expect(screen.queryByText("A task has one project, or none")).toBeNull();
+
+      // Due and Priority never touch the queue, so they are untouched by it.
+      expect(screen.getByLabelText("Due, none set")).not.toBeDisabled();
+      expect(screen.getByLabelText("Priority, none set")).not.toBeDisabled();
+    } finally {
+      release();
+    }
+
+    // And the moment the device knows what it holds, they are ordinary rows.
+    expect(await screen.findByLabelText("Project, Wedding")).toBeOnTheScreen();
+    expect(screen.queryByText(reason)).toBeNull();
+    await fireEvent.press(screen.getByLabelText("Project, Wedding"));
+    expect(await screen.findByText("A task has one project, or none")).toBeOnTheScreen();
+  });
+
+  it("006-FR-009 offers no way to overwrite the unsent work it is still reading", async () => {
+    await seedQueue([
+      queuedChange({
+        sendState: "queued",
+        value: { projectId: "p2", tagIds: undefined },
+        lastEditedAt: new Date(Date.now() - MINUTE).toISOString(),
+        firstQueuedAt: new Date(Date.now() - MINUTE).toISOString(),
+      }),
+    ]);
+    const release = stallQueueRead();
+    try {
+      await openTask(makeTask({ id: "t1", project_id: null, tag_ids: [] }), {
+        routes: { "PATCH /tasks/t1": unreachable },
+      });
+
+      // Every classification control on the screen, tried before the read lands.
+      await fireEvent.press(screen.getByLabelText(/^Project, /));
+      await fireEvent.press(screen.getByLabelText(/^Tags, /));
+
+      expect(screen.queryByText("A task has one project, or none")).toBeNull();
+      expect(screen.queryByText("No Tags selected")).toBeNull();
+      // The change this person made offline yesterday is still on the device.
+      expect((await heldQueue()).map((entry) => entry.value.projectId)).toEqual(["p2"]);
+    } finally {
+      release();
+    }
+  });
+});
+
 describe("task detail — work the 30-day bound discarded", () => {
   it("006-FR-018 006-SC-003 names the field, what it reverted to, and offers a labelled Dismiss", async () => {
     await seedQueue([queuedChange()]);
@@ -586,6 +699,37 @@ describe("task detail — a queued change the server rejected", () => {
    * 409s anything sent against the wrong revision. The cold-read drain sends
    * it, is rejected, re-reads the task, and parks the entry for the person.
    */
+  /** A server that answers anything sent against the wrong revision with 409. */
+  function revisionGuardedRoutes(read: () => TaskResponse, write: (next: TaskResponse) => void) {
+    return {
+      "GET /tasks/t1": () => read(),
+      "PATCH /tasks/t1": (call: { body: unknown }) => {
+        const body = call.body as { project_id?: string | null; expected_revision: number };
+        const stored = read();
+        if (body.expected_revision !== stored.revision) {
+          return new FakeHttpError(409, {
+            message: "Revision mismatch",
+            detail: { resource: "Task", id: "t1" },
+          });
+        }
+        const next = {
+          ...stored,
+          project_id: body.project_id ?? null,
+          revision: stored.revision + 1,
+        };
+        write(next);
+        return next;
+      },
+    };
+  }
+
+  /** The `expected_revision` of every classification write, in order. */
+  function revisionsSent(): number[] {
+    return backend
+      .callsTo("PATCH", "/tasks/t1")
+      .map((call) => (call.body as { expected_revision: number }).expected_revision);
+  }
+
   async function openConflictedTask() {
     let stored = makeTask({ id: "t1", project_id: "p1", tag_ids: [], revision: 5 });
     await seedQueue([
@@ -596,27 +740,26 @@ describe("task detail — a queued change the server rejected", () => {
         firstQueuedAt: new Date(Date.now() - 14 * MINUTE).toISOString(),
       }),
     ]);
-    await openTask(stored, {
-      routes: {
-        "GET /tasks/t1": () => stored,
-        "PATCH /tasks/t1": (call) => {
-          const body = call.body as { project_id?: string | null; expected_revision: number };
-          if (body.expected_revision !== stored.revision) {
-            return new FakeHttpError(409, {
-              message: "Revision mismatch",
-              detail: { resource: "Task", id: "t1" },
-            });
-          }
-          stored = { ...stored, project_id: body.project_id ?? null, revision: stored.revision + 1 };
-          return stored;
-        },
+    const routes = revisionGuardedRoutes(
+      () => stored,
+      (next) => {
+        stored = next;
       },
-    });
-    return () => stored;
+    );
+    let rendered = await openTask(stored, { routes });
+    return {
+      server: () => stored,
+      /** Leave the screen and come back to it, as the person would. */
+      reopen: async () => {
+        await rendered.unmount();
+        backend.restore();
+        rendered = await openTask(stored, { routes });
+      },
+    };
   }
 
   it("006-SC-005 asks which value wins, naming all three, and resolves nothing on its own", async () => {
-    const server = await openConflictedTask();
+    const { server } = await openConflictedTask();
 
     expect(await screen.findByText("You changed the project 14 minutes ago")).toBeOnTheScreen();
     expect(
@@ -641,7 +784,7 @@ describe("task detail — a queued change the server rejected", () => {
   });
 
   it("006-FR-008 sends the person's value again when they keep theirs", async () => {
-    const server = await openConflictedTask();
+    const { server } = await openConflictedTask();
 
     await fireEvent.press(await screen.findByText("Keep mine, replace theirs"));
 
@@ -652,7 +795,7 @@ describe("task detail — a queued change the server rejected", () => {
   });
 
   it("006-FR-008 drops the queued change when they keep the server's", async () => {
-    const server = await openConflictedTask();
+    const { server } = await openConflictedTask();
 
     await fireEvent.press(await screen.findByText("Discard mine, keep the server's"));
 
@@ -660,6 +803,71 @@ describe("task detail — a queued change the server rejected", () => {
     expect(screen.getByLabelText("Project, Wedding")).toBeOnTheScreen();
     expect(server().project_id).toBe("p1");
     expect(await AsyncStorage.getItem(QUEUE_KEY)).toBeNull();
+  });
+
+  it("006-FR-008 keeps mine against the revision the conflict found, not the one the screen loaded", async () => {
+    // The screen reads the task once. When the drain's 409 re-read discovers a
+    // newer revision, nothing writes it back to that copy — so resolving
+    // against what the screen holds re-sends the same stale
+    // `expected_revision`, earns the same 409, and puts the same sheet back up
+    // for ever. Nothing the person can do ends it.
+    let stored = makeTask({ id: "t1", project_id: null, tag_ids: [], revision: 1 });
+    await openTask(
+      stored,
+      {
+        routes: revisionGuardedRoutes(
+          () => stored,
+          (next) => {
+            stored = next;
+          },
+        ),
+      },
+    );
+
+    // Somebody else moves the task on. This screen is not told, and nothing
+    // refetches it: what it holds is revision 1 for the rest of the test.
+    stored = { ...stored, project_id: "p1", revision: 5 };
+    await screen.findByText("revision 1", { exact: false });
+
+    await fireEvent.press(await screen.findByLabelText("Project, none set"));
+    await fireEvent.press(await screen.findByLabelText("Q3 launch"));
+
+    expect(await screen.findByText("Keep mine, replace theirs")).toBeOnTheScreen();
+    await fireEvent.press(screen.getByText("Keep mine, replace theirs"));
+
+    await waitFor(() => expect(stored.project_id).toBe("p2"));
+    expect(screen.queryByText("Keep mine, replace theirs")).toBeNull();
+    expect(await AsyncStorage.getItem(QUEUE_KEY)).toBeNull();
+    // One rejected attempt, then one aimed at what the re-read actually saw.
+    expect(revisionsSent()).toEqual([1, 5]);
+  });
+
+  it("006-SC-005 lets the question be left unanswered, and asks it again next time", async () => {
+    // M-04 "dismissed": treated as not yet answered. The scrim and the
+    // platform back gesture must close the sheet — a person who cannot leave
+    // this screen without answering is trapped by it — and nothing on the task
+    // screen records the dismissal, so the sheet returning is the only
+    // reminder that the change is still waiting.
+    const { server, reopen } = await openConflictedTask();
+    await screen.findByText("Keep mine, replace theirs");
+
+    await fireEvent.press(screen.getByLabelText("Close"));
+
+    await waitFor(() => expect(screen.queryByText("Keep mine, replace theirs")).toBeNull());
+    expect(screen.queryByText("Discard mine, keep the server's")).toBeNull();
+    // The task screen itself is reachable again, and carries no trace of it.
+    expect(screen.getByLabelText("Project, Q3 launch")).toBeOnTheScreen();
+    expect(screen.queryByText(/conflict/i)).toBeNull();
+
+    // Nothing was decided: the server still holds its own value and the change
+    // is still queued, still waiting to be asked about.
+    expect(server().project_id).toBe("p1");
+    expect((await heldQueue()).map((entry) => entry.sendState)).toEqual(["conflicted"]);
+
+    await reopen();
+
+    expect(await screen.findByText("Keep mine, replace theirs")).toBeOnTheScreen();
+    expect(screen.getByText("You changed the project 14 minutes ago")).toBeOnTheScreen();
   });
 });
 

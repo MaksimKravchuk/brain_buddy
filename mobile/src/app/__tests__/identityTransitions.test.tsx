@@ -285,6 +285,57 @@ describe("settings — changing the server", () => {
     expect(screen.getByText("dana@example.test")).toBeOnTheScreen();
     expect(screen.queryByText("Not signed in")).toBeNull();
   });
+
+  it("006-FR-011 saving the URL it already has warns about nothing and discards nothing", async () => {
+    // Saving an unchanged URL is not an identity transition — `updateServerUrl`
+    // itself does nothing with it. Warning first, and then discarding on
+    // "continue", destroys unsent work to accomplish exactly nothing.
+    await seedDevice(1);
+    await openSettings();
+
+    await fireEvent.press(screen.getByText("Save server URL"));
+
+    expect(await screen.findByText("Saved")).toBeOnTheScreen();
+    expect(screen.queryByText("1 change has not been sent")).toBeNull();
+    expect(screen.queryByText(/discards it/)).toBeNull();
+    expect(currentServerUrl()).toBe(DEFAULT_SERVER_URL);
+    const held = await deviceStores();
+    expect(held.queue).not.toBeNull();
+    expect(held.cache).not.toBeNull();
+  });
+
+  it("006-FR-011 treats a trailing slash as the server it is already on", async () => {
+    // `normalizeServerUrl` is what decides whether this is a transition at all,
+    // so the comparison in front of the warning has to be the same one — a raw
+    // string compare makes an added slash a full identity change.
+    await seedDevice(1);
+    await openSettings();
+
+    await fireEvent.changeText(
+      screen.getByDisplayValue(DEFAULT_SERVER_URL),
+      `${DEFAULT_SERVER_URL}/`,
+    );
+    await fireEvent.press(screen.getByText("Save server URL"));
+
+    expect(await screen.findByText("Saved")).toBeOnTheScreen();
+    expect(screen.queryByText("1 change has not been sent")).toBeNull();
+    expect(screen.getByText("dana@example.test")).toBeOnTheScreen();
+    expect(currentServerUrl()).toBe(DEFAULT_SERVER_URL);
+    expect((await deviceStores()).queue).not.toBeNull();
+  });
+
+  it("006-FR-011 keeps the cached vocabulary when the server did not change", async () => {
+    // With an empty queue no sheet is shown at all, so the discard that follows
+    // the gate is silent: the account's whole project and Tag vocabulary — the
+    // names the person wrote — would go for a save that changed nothing.
+    await seedDevice(0);
+    await openSettings();
+
+    await fireEvent.press(screen.getByText("Save server URL"));
+
+    expect(await screen.findByText("Saved")).toBeOnTheScreen();
+    expect((await deviceStores()).cache).not.toBeNull();
+  });
 });
 
 describe("sign-in — changing the server before signing in", () => {
