@@ -10,7 +10,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import type { MeResponse } from "../../api/types";
-import { TASK_CLASSIFICATION_FLAG, flagStorageKey } from "../flagResolution";
+import { TASK_CLASSIFICATION_FLAG, flagStorageKey, identityStorageKey } from "../flagResolution";
 import {
   clearPersistedIdentity,
   loadPersistedFlags,
@@ -136,6 +136,25 @@ describe("persisted identity", () => {
     expect(await markSessionRejected(SERVER)).toBeNull();
     expect(await AsyncStorage.getAllKeys()).toEqual([]);
   });
+
+  it("006-FR-011 clearing a server that holds nothing is a no-op, not a throw", async () => {
+    await expect(clearPersistedIdentity(SERVER)).resolves.toBeUndefined();
+    expect(await AsyncStorage.getAllKeys()).toEqual([]);
+  });
+
+  it.each([
+    ["not json at all", "{not json"],
+    ["a record with no account id", JSON.stringify({ savedAt: "2026-08-11T09:00:00.000Z" })],
+    ["a record whose account id is not a string", JSON.stringify({ accountId: 7 })],
+    ["a record whose account id is empty", JSON.stringify({ accountId: "" })],
+    ["a JSON scalar", JSON.stringify("acct-1")],
+  ])("006-FR-009 reads %s as no identity, rather than a broken one", async (_label, stored) => {
+    // A broken identity would derive a storage key that belongs to nobody, so
+    // the safe direction is to have none: the person signs in again.
+    await AsyncStorage.setItem(identityStorageKey(SERVER), stored);
+
+    expect(await loadPersistedIdentity(SERVER)).toBeNull();
+  });
 });
 
 describe("persisted rollout flags", () => {
@@ -160,5 +179,26 @@ describe("persisted rollout flags", () => {
     await AsyncStorage.setItem(flagStorageKey(SERVER, "acct-1"), "{not json");
 
     expect(await loadPersistedFlags(SERVER, "acct-1")).toBeNull();
+  });
+
+  it.each([
+    ["a record with no flags object", JSON.stringify({ savedAt: "2026-08-11T09:00:00.000Z" })],
+    ["a record whose flags are not an object", JSON.stringify({ flags: "on" })],
+  ])("006-FR-015 reads %s as never known", async (_label, stored) => {
+    await AsyncStorage.setItem(flagStorageKey(SERVER, "acct-1"), stored);
+
+    expect(await loadPersistedFlags(SERVER, "acct-1")).toBeNull();
+  });
+
+  it("006-FR-015 drops a non-boolean flag value on write, so a malformed payload cannot turn one on", async () => {
+    const malformed = {
+      id: "acct-1",
+      email: "acct-1@example.test",
+      feature_flags: { [TASK_CLASSIFICATION_FLAG]: "true" },
+    } as unknown as MeResponse;
+
+    await persistIdentity(SERVER, malformed);
+
+    expect(await loadPersistedFlags(SERVER, "acct-1")).toEqual({});
   });
 });

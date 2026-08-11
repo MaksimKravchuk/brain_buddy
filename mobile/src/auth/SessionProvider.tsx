@@ -92,10 +92,20 @@ export function SessionProvider({ children }: PropsWithChildren) {
   /** A 401 anywhere in the app: the session ended without anyone choosing it. */
   const handleUnauthorized = useCallback(async () => {
     const epoch = ++epochRef.current;
+    const url = serverUrlRef.current;
+    // Reading first gives a sign-in that raced this 401 a chance to win: if
+    // the epoch moved, the newer session owns the identity and nothing here
+    // is written. Should one still slip through, the cost is a signed-out
+    // offline launch that the next successful `/auth/me` rewrites — the
+    // fail-closed direction.
+    const current = await loadPersistedIdentity(url);
+    if (epochRef.current !== epoch) {
+      return;
+    }
     // The identity itself is kept — FR-011 keeps unsent work through an
     // involuntary end, and the queue is offered back on the next sign-in to
     // the same account. Only the marker changes.
-    const marked = await markSessionRejected(serverUrlRef.current);
+    const marked = current ? await markSessionRejected(url) : null;
     if (epochRef.current !== epoch) {
       return;
     }

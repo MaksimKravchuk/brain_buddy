@@ -12,9 +12,10 @@
  *   with nothing pending shows no warning at all — and without this clear it
  *   would leave one account's whole vocabulary on the device for the next
  *   person, which is the literal thing FR-011 exists to prevent.
- * - **The 30-day bound of FR-018 runs from `fetchedAt`**, and the sweep applies
- *   it across every stored identity, not just the active one: read-scoped
- *   expiry never runs on a key nobody reads (data-model invariant 8b).
+ * - **The 30-day bound of FR-018 runs from `fetchedAt`**, and a read that finds
+ *   an expired or unreadable blob deletes it rather than leaving it behind.
+ *   That covers the active identity only; every *other* stored identity is
+ *   reached by the cross-identity sweep — see the note at the end.
  *
  * The storage key is an argument, not an import, so nothing here depends on how
  * identity is encoded. The store is an AsyncStorage-shaped interface for the

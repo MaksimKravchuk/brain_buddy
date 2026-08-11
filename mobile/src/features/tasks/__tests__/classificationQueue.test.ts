@@ -495,6 +495,34 @@ describe("send transitions", () => {
     expect(rejected[0].sendState).toBe("queued");
   });
 
+  it("006-FR-017 applyRejected re-mints the key on an Idempotency-Key conflict", () => {
+    // The backend returns 409 for two unrelated things. Returning to `queued`
+    // with the same key after a key conflict sends a byte-identical request,
+    // gets the same 409, and loops until FR-018 drops the entry 30 days later
+    // with nothing having told the person. This is the spec-review defect
+    // reappearing at the reducer/decision seam.
+    const queue = markSending([entry()], "key-existing", T0);
+    const rejected = applyRejected(
+      queue,
+      "key-existing",
+      "idempotency-key-conflict",
+      () => "key-fresh",
+    );
+
+    expect(rejected[0].sendState).toBe("queued");
+    expect(rejected[0].idempotencyKey).toBe("key-fresh");
+  });
+
+  it("006-FR-017 applyRejected stops rather than loops when no minter is given", () => {
+    // A caller that forgets the minter gets a stuck entry a person can see,
+    // never a drain silently spinning on a request that cannot succeed.
+    const queue = markSending([entry()], "key-existing", T0);
+    const rejected = applyRejected(queue, "key-existing", "idempotency-key-conflict");
+
+    expect(rejected[0].sendState).toBe("conflicted");
+    expect(rejected[0].idempotencyKey).toBe("key-existing");
+  });
+
   it("006-FR-017 applyTimeout returns the entry to queued for another try", () => {
     const queue = markSending([entry()], "key-existing", T0);
     const timed = applyTimeout(queue, "key-existing");

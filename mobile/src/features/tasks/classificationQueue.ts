@@ -53,7 +53,25 @@ export type MintIdempotencyKey = () => string;
 
 /** Why the server refused a send. Only a stale revision is the person's
  *  question to answer (FR-008); anything else is retried. */
-export type RejectionKind = "revision-conflict" | "other";
+/**
+ * `idempotency-key-conflict` is a third kind rather than a flavour of `other`,
+ * and the distinction is load-bearing.
+ *
+ * The backend returns 409 for two unrelated conditions: a stale
+ * `expected_revision`, and a stored key replayed with a different request hash.
+ * Only `detail.resource` separates them. Collapsing the second into `other`
+ * returns the entry to `queued` with the same key, so the next drain sends the
+ * same (key, payload) pair and gets the same 409 — forever, until FR-018 drops
+ * it 30 days later with nothing having told the person.
+ *
+ * That is the exact defect the spec review caught in the requirement text. It
+ * reappeared here at the seam between the reducer and the decision module,
+ * because neither owned both sides of it.
+ */
+export type RejectionKind =
+  | "revision-conflict"
+  | "idempotency-key-conflict"
+  | "other";
 
 export interface QueueIdentity {
   accountId: string;
@@ -305,11 +323,25 @@ export function applyRejected(
   queue: readonly PendingClassificationChange[],
   idempotencyKey: string,
   kind: RejectionKind,
+  mintKey?: () => string,
 ): PendingClassificationChange[] {
-  return transition(queue, idempotencyKey, (entry) => ({
-    ...entry,
-    sendState: kind === "revision-conflict" ? "conflicted" : "queued",
-  }));
+  return transition(queue, idempotencyKey, (entry) => {
+    if (kind === "revision-conflict") {
+      return { ...entry, sendState: "conflicted" };
+    }
+    if (kind === "idempotency-key-conflict") {
+      // Re-mint, or the retry is byte-identical to the request that was just
+      // rejected. `mintKey` is required here in practice; falling back to the
+      // existing key would rebuild the infinite loop, so a caller that omits
+      // it gets a stuck entry it can see rather than a silent one — the entry
+      // stays `conflicted` so a person is asked instead of a drain spinning.
+      if (!mintKey) {
+        return { ...entry, sendState: "conflicted" };
+      }
+      return { ...entry, sendState: "queued", idempotencyKey: mintKey() };
+    }
+    return { ...entry, sendState: "queued" };
+  });
 }
 
 /**

@@ -165,8 +165,16 @@ export function rejectionFromError(error: unknown): SendRejection {
   };
 }
 
-/** Retriable with the same key and the same payload: the drain may just try again. */
-function retry(reason: DecisionReason, rejection: SendRejection, automatic: boolean): ConflictDecision {
+/**
+ * Sendable again unchanged, with the same key. `automatic` says whether the
+ * drain may do that on its own or whether something else has to happen first —
+ * a session, in the one case where it is false.
+ */
+function retry(
+  reason: DecisionReason,
+  rejection: SendRejection,
+  automatic: boolean,
+): ConflictDecision {
   return {
     kind: "retry",
     reason,

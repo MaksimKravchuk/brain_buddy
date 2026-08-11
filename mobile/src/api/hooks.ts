@@ -27,7 +27,6 @@ import type {
   TaskTransitionRequest,
   TaskUpdateRequest,
 } from "@/api/types";
-import { loadPersistedIdentity } from "@/auth/identityStorage";
 import {
   readClassificationCache,
   writeClassificationCache,
@@ -79,24 +78,15 @@ function cacheableEntries(
  * The cache key of the identity these lists belong to, or `null` when the
  * device cannot name one.
  *
- * `serverUrl` comes from the session, which restores it from storage before it
- * probes. The account id falls back to storage, because on the cold start with
- * no connection that this cache exists for, `/auth/me` never answers and the
- * live profile is null — `persistIdentity` is written from every path that
- * establishes a session precisely so this read works then (006-FR-009).
+ * Both halves come from the session, which resolves them from storage when
+ * there is no live profile — the cold start with no connection this cache
+ * exists for is exactly when `/auth/me` never answers (006-FR-009).
  *
  * Returns `null` rather than falling back to an unscoped key: a shared key is a
  * cross-account read (006-SC-007), and no cache at all is the safe failure.
  */
-async function activeCacheKey(
-  serverUrl: string,
-  liveAccountId: string | null,
-): Promise<string | null> {
-  if (!serverUrl) {
-    return null;
-  }
-  const accountId = liveAccountId ?? (await loadPersistedIdentity(serverUrl))?.accountId ?? null;
-  return accountId ? cacheKey(serverUrl, accountId) : null;
+function activeCacheKey(serverUrl: string, accountId: string | null): string | null {
+  return serverUrl && accountId ? cacheKey(serverUrl, accountId) : null;
 }
 
 /**
@@ -117,16 +107,16 @@ let cacheWrites: Promise<unknown> = Promise.resolve();
  */
 function cacheListsInBackground(
   serverUrl: string,
-  liveAccountId: string | null,
+  accountId: string | null,
   half: { projects: CachedEntry[] } | { tags: CachedEntry[] },
 ): void {
+  const key = activeCacheKey(serverUrl, accountId);
+  if (!key) {
+    return;
+  }
   cacheWrites = cacheWrites
     .catch(() => undefined)
     .then(async () => {
-      const key = await activeCacheKey(serverUrl, liveAccountId);
-      if (!key) {
-        return;
-      }
       const now = Date.now();
       const current = await readClassificationCache({ store: AsyncStorage, key, now });
       await writeClassificationCache({
@@ -147,14 +137,14 @@ function cacheListsInBackground(
 /** The device's answer for one half of the lists, or `null` if it has none. */
 async function cachedHalf<K extends "projects" | "tags">(
   serverUrl: string,
-  liveAccountId: string | null,
+  accountId: string | null,
   half: K,
 ): Promise<CachedEntry[] | null> {
+  const key = activeCacheKey(serverUrl, accountId);
+  if (!key) {
+    return null;
+  }
   try {
-    const key = await activeCacheKey(serverUrl, liveAccountId);
-    if (!key) {
-      return null;
-    }
     const cached = await readClassificationCache({ store: AsyncStorage, key, now: Date.now() });
     return cached?.[half].length ? cached[half] : null;
   } catch {
@@ -200,18 +190,18 @@ export function useTask(taskId: string) {
  */
 export function useProjects() {
   const api = useApi();
-  const { serverUrl, me } = useSession();
+  const { serverUrl, accountId } = useSession();
   return useQuery({
     queryKey: taskKeys.projects,
     queryFn: async ({ signal }): Promise<ProjectResponse[]> => {
       try {
         const projects = await api.listProjects(signal);
-        cacheListsInBackground(serverUrl, me?.id ?? null, {
+        cacheListsInBackground(serverUrl, accountId, {
           projects: cacheableEntries(projects),
         });
         return projects;
       } catch (error) {
-        const cached = await cachedHalf(serverUrl, me?.id ?? null, "projects");
+        const cached = await cachedHalf(serverUrl, accountId, "projects");
         if (!cached) {
           // Nothing on the device to answer with: surface the real failure
           // rather than an empty list that reads as "you have no projects".
@@ -233,16 +223,16 @@ export function useProjects() {
 /** Tags, cached and read back exactly as `useProjects` — see its comment. */
 export function useTags() {
   const api = useApi();
-  const { serverUrl, me } = useSession();
+  const { serverUrl, accountId } = useSession();
   return useQuery({
     queryKey: taskKeys.tags,
     queryFn: async ({ signal }): Promise<TagResponse[]> => {
       try {
         const tags = await api.listTags(signal);
-        cacheListsInBackground(serverUrl, me?.id ?? null, { tags: cacheableEntries(tags) });
+        cacheListsInBackground(serverUrl, accountId, { tags: cacheableEntries(tags) });
         return tags;
       } catch (error) {
-        const cached = await cachedHalf(serverUrl, me?.id ?? null, "tags");
+        const cached = await cachedHalf(serverUrl, accountId, "tags");
         if (!cached) {
           throw error;
         }

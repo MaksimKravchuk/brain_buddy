@@ -137,13 +137,14 @@ describe("006-FR-011 a deliberate identity transition clears the cache", () => {
 });
 
 describe("006-FR-018 the 30-day bound runs from fetchedAt", () => {
-  it.each<[string, number, boolean]>([
-    ["written a minute ago", MINUTE, false],
-    ["one hour short of the bound", 30 * DAY - HOUR, false],
-    ["one minute short of the bound", 30 * DAY - MINUTE, false],
-    ["a minute past the bound", 30 * DAY + MINUTE, true],
-    ["a year past the bound", 365 * DAY, true],
-  ])("%s: expired = %s", (_why, age, expired) => {
+  it.each([
+    { why: "written a minute ago", age: MINUTE, expired: false },
+    { why: "one hour short of the bound", age: 30 * DAY - HOUR, expired: false },
+    { why: "one minute short of the bound", age: 30 * DAY - MINUTE, expired: false },
+    { why: "the bound exactly, which is not yet past it", age: 30 * DAY, expired: false },
+    { why: "a minute past the bound", age: 30 * DAY + MINUTE, expired: true },
+    { why: "a year past the bound", age: 365 * DAY, expired: true },
+  ])("$why: expired = $expired", ({ age, expired }) => {
     expect(isCacheExpired(new Date(NOW - age).toISOString(), NOW)).toBe(expired);
   });
 
