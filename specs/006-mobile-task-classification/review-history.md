@@ -180,3 +180,130 @@ pass is not cleanup; it is where this bug class exclusively lives.**
   undone, and a green test asserting the exact behaviour that was broken. The
   same expired premise appeared in four places in these artifacts and was
   corrected in each — see the "Implementation outcome" note above.
+
+## Post-merge review, 2026-08-13
+
+The five-PR stack merged, and adversarial review of the merged diff found nine
+further defects. They are recorded here because the acceptance record above is
+what a later reader will consult, and it would otherwise close on the state of
+the code the day it landed rather than the state it is in.
+
+Eight are the kind the gate is not shaped to catch — they live in wiring,
+serialisation order and process lifetime, not in requirements:
+
+- **A drain pass kept sending after its identity was replaced.** `owns()` scoped
+  what a pass *read and wrote on the device* and nothing scoped what it *sent*;
+  the api client resolves its base URL and cookie at call time, so the next
+  entry in the loop went out as account A's write under account B's session —
+  SC-007 over the wire, which is where it matters most.
+- **A queued device write could be redirected by a later identity.** Writes are
+  serialised and each reads the live queue when its turn comes, which is what
+  stops two writers clobbering each other; but the identity-change effect
+  empties that ref, so a write for A waiting behind another called
+  `saveQueue(A, [])` and deleted the unsent work FR-011 keeps *specifically*
+  through an involuntary end.
+- **Clearing an identity's stores was not a barrier.** A stale drain pass and
+  the fire-and-forget picker-cache write both outlive the clear and could put
+  the queue, or the project and Tag names the person wrote, back on a device
+  that had just forgotten how to name them.
+- **A different account signing in deleted only the previous account's flag
+  record**, leaving its queue and picker cache to a sweep that runs only when
+  the *new* account has the rollout flag on. A retention rule conditional on an
+  unrelated feature flag is not a retention rule.
+- **The per-pass safety limit stranded the rest of the queue.** 25 bounds a
+  pass, not a triage session, and the pass holds the drain lock while it runs.
+- **The conflict sheet dated the phone's value from the account-wide sync
+  clock**, which advances on any successful send for any task — so a task last
+  read three weeks ago was labelled "as of just now".
+- **The dismiss-once expiry notice reappeared on every task screen**, because
+  the latch was consulted only when the identity key changed, and on an ordinary
+  remount it has not.
+- **Sign-in compared the server URL raw** where Settings compares it normalized,
+  so a trailing slash took the discard path for a save that changed nothing.
+
+Each carries a test that was mutation-checked: with the production change
+reverted the new test fails, and with it restored it passes.
+
+Review of those eight fixes then found three more, and the pattern in all three
+is the same one: **a guard placed before an `await` is not a guard.**
+
+- The pass checked ownership at the head of each iteration, then wrote the
+  `sending` marker — an await — and issued its first request. An identity
+  change landing inside that write slipped straight through; the extra check
+  added for the rejection path only ever covered the *second* request of a
+  step. Every request the pass issues is now preceded by a check with no await
+  between the two.
+- The cache writer checked the fence, then read the existing cache — an await —
+  and wrote the merge. A sign-out inside the read was followed by a write that
+  put the names back.
+- The store fence was a boolean tombstone lifted when the same identity signed
+  in again. The comment above it *acknowledged* that gap and argued past it on
+  the grounds that an account resurrecting its own work is not a disclosure.
+  That reasoning was sound and incomplete: the other half is that the stale
+  pass's now-empty result deletes work the **new** session queued in the
+  meantime, which is plain data loss and has nothing to do with disclosure. A
+  documented exception is not a safe one — writing the gap down made it feel
+  handled. Replaced with a generation counter, which answers "forgotten since
+  *I* started" rather than "forgotten at all", and needs no lifting step.
+
+The ninth is different in kind, and is the one worth carrying forward.
+
+### FR-008 was violated by the shipped code
+
+Past the 24 h replay window the drain re-reads the task before retrying. That
+read has three possible answers; the code branched on two. Anything that was
+not "the server already holds what I intended" was re-presented against the
+revision just observed — which rebases `observedRevision`, so the send that
+follows **cannot** 409, and the 409 is the only thing that ever opens M-04. An
+entry attempted once, left more than 24 h (FR-018 permits 30 days), on a task
+somebody else had reclassified meanwhile, therefore overwrote their work in
+silence.
+
+That is FR-008 ("MUST ask whether their change wins or is abandoned; MUST NOT
+decide for them") and SC-005 ("zero classifications are overwritten or
+discarded silently"), both, on the one path where the device already had in
+hand every piece of evidence needed to ask.
+
+What makes it worth recording rather than just fixing:
+
+- **The doc comment above the function reasoned about "the conflict prompt"**
+  while the code guaranteed it could not fire. Prose and behaviour disagreed and
+  nothing compared them.
+- **A passing test asserted the defect.** `drain.test.ts` "then sends it,
+  carrying the revision the re-read observed" seeded eight revisions of somebody
+  else's work and asserted the overwrite, with an approving comment. Test
+  coverage was not the missing control; the test *was* the bug, written down.
+- **Invariant 10 and T068 both described the two-branch rule**, so the artifact
+  chain was internally consistent end to end. Six lenses, a requirement-coverage
+  gate and a founder acceptance all passed a feature whose specification of this
+  path was itself incomplete. Consistency checking cannot find a case nobody
+  enumerated.
+- **It survived founder acceptance**, and was found only by review of the merged
+  diff. The lesson is not that the gate should have caught it — it is that "the
+  artifacts agree with each other" and "the artifacts are complete" are
+  different properties, and the campaign only ever measured the first.
+
+Fixed by giving the re-read its missing third branch: park the entry
+`conflicted` with the re-read's revision and values, `originalValue`
+deliberately unrefreshed. The comparison is scoped to the fields the change
+carries, so a title edit — or a Tag edit under a project-only change — is still
+a plain resend and raises no prompt. `data-model.md` invariant 10 and T068 now
+state all three branches; no requirement was weakened to fit the code. The fix
+is mutation-checked: reverted, the new tests fail; restored, they pass.
+
+### The evidence for all of this was being thrown away
+
+One more, found in the same pass and not about the feature's code at all. The
+Allure aggregation predicate named three uploading lanes and there are four:
+`e2e` is never path filtered and uploads `playwright-allure-results` under a
+bare `always()`. The three stack jobs run-but-skip-their-steps rather than
+skipping — ADR-0008 counts a skipped required job as a failure — so `e2e` is
+never skipped either. A docs-only pull request therefore ran the whole Compose
+suite and then discarded its results: no aggregate report, no pull request
+link, on precisely the branches a spec-driven feature is mostly made of, which
+is most of this feature's own history. The validator now requires the fourth
+term, key-anchored like the other three so it cannot be re-broken by binding
+the key to a constant.
+
+SC-001, SC-006 and the rendering halves of FR-007 and FR-012 remain ungraded —
+T052 and T069 still need a physical iPhone.

@@ -28,7 +28,7 @@ import {
   saveServerTime,
   sweepAllIdentities,
 } from "../classificationQueue.storage";
-import { cacheKey, queueKey } from "../storageKeys";
+import { cacheKey, identityStoreGeneration, queueKey } from "../storageKeys";
 
 jest.mock("@react-native-async-storage/async-storage", () => {
   const store = new Map<string, string>();
@@ -453,5 +453,77 @@ describe("006-FR-018 the cross-identity sweep", () => {
 
     expect(await read(queueKey(SERVER_B, ACCOUNT_B))).toBeNull();
     expect(result.deletedKeys).toEqual([queueKey(SERVER_B, ACCOUNT_B)]);
+  });
+});
+
+describe("006-FR-011 clearing an identity fences the writers already in flight", () => {
+  const IDENTITY_A = { serverUrl: SERVER_A, accountId: ACCOUNT_A };
+
+  it("refuses a queue write scheduled before the clear", async () => {
+    // The interleaving this exists for: a drain pass whose identity has been
+    // replaced still finishes its own entry into its own key — deliberately,
+    // because that outcome is unambiguously its work — and the writes are
+    // serialised, so one can be sitting behind another when a sign-out lands.
+    // Without a fence it re-creates the queue the sign-out just deleted, under
+    // a key nothing left on the device can name.
+    const generation = identityStoreGeneration(SERVER_A, ACCOUNT_A);
+    await saveQueue(IDENTITY_A, [entry()]);
+
+    await clearIdentityStores(IDENTITY_A);
+    await saveQueue(IDENTITY_A, [entry()], Date.now(), generation);
+
+    expect(await AsyncStorage.getItem(queueKey(SERVER_A, ACCOUNT_A))).toBeNull();
+  });
+
+  it("keeps refusing it after the same account signs back in", async () => {
+    // A boolean tombstone lifted on re-adoption, and that is not the same
+    // question. Sign out and back in as the SAME account while a request is
+    // still in flight and the old pass resumes into a lifted tombstone: if its
+    // request succeeded, its now-empty result deletes work the NEW session has
+    // queued since; if it failed, it restores work the sign-out discarded.
+    // Neither is a disclosure, which is how the first version reasoned its way
+    // past them — but the first is plain data loss for the person holding the
+    // phone. The generation answers "forgotten since *I* started", which is the
+    // question that actually matters.
+    const stalePass = identityStoreGeneration(SERVER_A, ACCOUNT_A);
+    await clearIdentityStores(IDENTITY_A);
+
+    // The same account signs back in and queues something new.
+    const freshSession = identityStoreGeneration(SERVER_A, ACCOUNT_A);
+    await saveQueue(IDENTITY_A, [entry({ idempotencyKey: "idem-new" })], Date.now(), freshSession);
+
+    // Now the pass from before the sign-out finally settles, with nothing left
+    // in the queue it was carrying.
+    await saveQueue(IDENTITY_A, [], Date.now(), stalePass);
+
+    // The new session's work is untouched.
+    expect(await AsyncStorage.getItem(queueKey(SERVER_A, ACCOUNT_A))).toContain("idem-new");
+  });
+
+  it("lets a writer that started after the clear through", async () => {
+    // The fence must not become a permanent lock: the account that just signed
+    // back in has to be able to queue work.
+    await clearIdentityStores(IDENTITY_A);
+
+    const generation = identityStoreGeneration(SERVER_A, ACCOUNT_A);
+    await saveQueue(IDENTITY_A, [entry()], Date.now(), generation);
+
+    expect(await AsyncStorage.getItem(queueKey(SERVER_A, ACCOUNT_A))).toContain("idem-1");
+  });
+
+  it("fences each identity separately", async () => {
+    // Forgetting A must not wedge B, which is the account that has just signed
+    // in and is about to queue its own work.
+    await clearIdentityStores(IDENTITY_A);
+
+    const generation = identityStoreGeneration(SERVER_A, ACCOUNT_B);
+    await saveQueue(
+      { serverUrl: SERVER_A, accountId: ACCOUNT_B },
+      [entry({ accountId: ACCOUNT_B, idempotencyKey: "idem-b" })],
+      Date.now(),
+      generation,
+    );
+
+    expect(await AsyncStorage.getItem(queueKey(SERVER_A, ACCOUNT_B))).toContain("idem-b");
   });
 });

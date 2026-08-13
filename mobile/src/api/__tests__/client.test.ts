@@ -142,6 +142,31 @@ describe("createApiClient", () => {
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
 
+  it("binds a late 401 to the epoch captured before request I/O", async () => {
+    let epoch = 7;
+    let resolveResponse!: (response: Response) => void;
+    const fetchImpl = jest.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveResponse = resolve;
+        }),
+    ) as unknown as typeof fetch;
+    const onUnauthorized = jest.fn();
+    const client = createApiClient({
+      getBaseUrl: () => "https://example.test/api",
+      getSessionEpoch: () => epoch,
+      onUnauthorized,
+      fetchImpl,
+    });
+
+    const request = client.me();
+    epoch = 8;
+    resolveResponse(jsonResponse({ message: "Old session expired" }, 401));
+
+    await expect(request).rejects.toBeInstanceOf(ApiError);
+    expect(onUnauthorized).toHaveBeenCalledWith(7);
+  });
+
   it("brain-dump commands send only expected_revision", async () => {
     const { client, calls } = makeClient([jsonResponse({ id: "op1" })]);
     await client.commandBrainDump("op1", "commit", 12, "key-2");

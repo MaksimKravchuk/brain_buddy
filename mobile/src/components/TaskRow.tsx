@@ -1,15 +1,18 @@
-import { Calendar, Check } from "lucide-react-native";
+import { Bot, Calendar, Check } from "lucide-react-native";
 import { Pressable, StyleSheet, View } from "react-native";
 
 import { BBText } from "@/components/BBText";
 import { PriorityDot, TagPill } from "@/components/Chip";
-import type { TaskResponse } from "@/api/types";
+import type { AgentRunSummaryResponse, TaskResponse } from "@/api/types";
+import { lastContactLabel } from "@/agents/machine";
 import { colors, fonts, minHitTarget, radii, shadows, space } from "@/theme/tokens";
 
 interface TaskRowProps {
   task: TaskResponse;
   projectName?: string;
   tagNames?: string[];
+  /** The latest external run for this task, when it has one at all. */
+  agentRun?: AgentRunSummaryResponse;
   onPress?: () => void;
   onToggleComplete?: () => void;
   completing?: boolean;
@@ -47,6 +50,7 @@ export function TaskRow({
   task,
   projectName,
   tagNames = [],
+  agentRun,
   onPress,
   onToggleComplete,
   completing = false,
@@ -55,7 +59,7 @@ export function TaskRow({
   const cancelled = task.state === "cancelled";
   const hasMeta =
     task.due_date || (task.state === "waiting" && task.waiting_for) || tagNames.length > 0 ||
-    projectName || task.priority !== "none";
+    projectName || task.priority !== "none" || agentRun;
 
   return (
     <Pressable
@@ -110,6 +114,31 @@ export function TaskRow({
               <BBText variant="micro" color={colors.fg6} numberOfLines={1}>
                 {projectName}
               </BBText>
+            ) : null}
+            {agentRun ? (
+              <>
+                <View
+                  style={[styles.agentChip, agentRun.needs_user ? styles.agentChipNeedsYou : null]}
+                >
+                  <Bot
+                    size={11}
+                    color={agentRun.needs_user ? colors.warningFg : colors.infoFg}
+                    strokeWidth={2}
+                  />
+                  {/* The server's own label, verbatim: a task row can never
+                      describe a run more confidently than the detail does. */}
+                  <BBText
+                    variant="micro"
+                    color={agentRun.needs_user ? colors.warningFg : colors.infoFg}
+                    numberOfLines={1}
+                  >
+                    {`${agentRun.agent_name} · ${agentRun.primary_state_label}`}
+                  </BBText>
+                </View>
+                <BBText variant="micro" color={colors.fg6} numberOfLines={1}>
+                  {lastContactLabel(agentRun.last_contact_at)}
+                </BBText>
+              </>
             ) : null}
           </View>
         ) : null}
@@ -188,5 +217,21 @@ const styles = StyleSheet.create({
   },
   note: {
     flexShrink: 1,
+  },
+  agentChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderRadius: radii.full,
+    paddingHorizontal: space.s2,
+    paddingVertical: 2,
+    backgroundColor: colors.infoBg,
+    borderWidth: 1,
+    borderColor: colors.infoBorder,
+    flexShrink: 1,
+  },
+  agentChipNeedsYou: {
+    backgroundColor: colors.warningBg,
+    borderColor: colors.warningBorder,
   },
 });

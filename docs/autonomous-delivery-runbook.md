@@ -226,12 +226,12 @@ by `scripts/capture_fly_release_image.py` (tolerant of Fly's JSON field casings;
 present — is a known successful terminal state: `complete`, `succeeded`, or
 `success`); failed capture aborts the run before any mutation. It then stages the smoke identity into the Fly backend with
 `flyctl secrets set --stage` (`BRAIN_BUDDY_ADMIN_EMAIL`, `BRAIN_BUDDY_ADMIN_PASSWORD`,
-`BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS`, and
-`BRAIN_BUDDY_FEATURE_FLAGS=delivery_canary=internal,voice_brain_dump=on`; values are
-never printed), so the deploy release seeds the admin smoke account and marks it
-internal. That staged value is the authoritative production flag state — it is
-restaged on every deploy, so a manual `flyctl secrets set BRAIN_BUDDY_FEATURE_FLAGS`
-is reverted by the next release; change the rollout in the workflow instead.
+`BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS`, and the production feature-flag assignment;
+values are never printed), so the deploy release seeds the admin smoke account and marks it
+internal. The trusted deploy workflow is authoritative for the exact production flag
+assignment. Its staged value is restaged on every deploy, so a manual
+`flyctl secrets set BRAIN_BUDDY_FEATURE_FLAGS` is reverted by the next release; change the
+rollout in the workflow instead.
 
 After deploying it
 verifies reachability and runs `scripts/production_smoke.sh` (authenticated login

@@ -37,6 +37,7 @@ import type { DecisionReason } from "@/features/tasks/conflictDecision";
 import { ConflictSheet } from "@/features/tasks/ConflictSheet";
 import type { NamedEntity } from "@/features/tasks/matchExisting";
 import { ProjectPicker } from "@/features/tasks/ProjectPicker";
+import { TaskAgentSection } from "@/features/agents/TaskAgentSection";
 import { ReopenSheet } from "@/features/tasks/ReopenSheet";
 import { StatePicker } from "@/features/tasks/StatePicker";
 import { TagPicker } from "@/features/tasks/TagPicker";
@@ -143,7 +144,15 @@ export default function TaskDetailScreen() {
   const { projectName, tagNames } = useClassificationNames();
   const projects = useProjects();
   const tags = useTags();
-  const { me, api, status, accountId, serverUrl, taskClassificationEnabled } = useSession();
+  const {
+    me,
+    api,
+    status,
+    accountId,
+    serverUrl,
+    taskClassificationEnabled,
+    agentRelayEnabled,
+  } = useSession();
 
   const task = query.data;
 
@@ -168,7 +177,6 @@ export default function TaskDetailScreen() {
   const [reopenVisible, setReopenVisible] = useState(false);
   const [projectPickerVisible, setProjectPickerVisible] = useState(false);
   const [tagPickerVisible, setTagPickerVisible] = useState(false);
-  const [accountNoticeDismissed, setAccountNoticeDismissed] = useState(false);
   // M-04 "dismissed": which question was set aside, by the key that identifies
   // it. Deliberately nothing more durable — see the sheet below.
   const [dismissedConflict, setDismissedConflict] = useState<string | null>(null);
@@ -243,6 +251,17 @@ export default function TaskDetailScreen() {
   // so it happens during render. In an effect it cascaded a render on every
   // pass, which is what `react-hooks/set-state-in-effect` is there to stop.
   const noticeKey = accountNoticeKey(surface.identity);
+  // Seeded FROM the latch, not from `false`.
+  //
+  // The notice is dismissed once per run for the whole account, and every task
+  // screen is a fresh mount. Seeding `false` and consulting the latch only when
+  // the key *changes* means a normal remount never consults it at all: the key
+  // is already current, the branch below never fires, and a notice the person
+  // dismissed comes back on the next task they open — which is the one thing
+  // "dismiss once" is supposed to buy them.
+  const [accountNoticeDismissed, setAccountNoticeDismissed] = useState(() =>
+    hasDismissedAccountNotice(noticeKey),
+  );
   const [noticeKeyRead, setNoticeKeyRead] = useState(noticeKey);
   if (noticeKeyRead !== noticeKey) {
     setNoticeKeyRead(noticeKey);
@@ -756,6 +775,13 @@ export default function TaskDetailScreen() {
           </Pressable>
         ) : null}
 
+        <TaskAgentSection
+          task={task}
+          projectName={project ?? null}
+          tagNames={taskTags}
+          enabled={agentRelayEnabled}
+        />
+
         {/* Subtasks */}
         <View style={styles.field}>
           <BBText variant="label">Subtasks</BBText>
@@ -1093,7 +1119,14 @@ export default function TaskDetailScreen() {
         // was recorded.
         reason={(queue.conflict?.entry.conflictReason as DecisionReason) ?? "stale-revision"}
         names={{ projects: projects.data ?? null, tags: tags.data ?? null }}
-        deviceObservedAt={queue.lastSyncedAt}
+        // The entry's own observation, never the account-wide sync clock.
+        // `queue.lastSyncedAt` advances on ANY successful send for ANY task, so
+        // a conflict on a task last read three weeks ago would be labelled "as
+        // of two minutes ago" the moment some other entry drained — the precise
+        // falsehood this row exists to prevent (FR-010, invariant 9). Absent on
+        // an entry queued before the field existed, and the sheet then omits
+        // the age rather than inventing one.
+        deviceObservedAt={queuedConflict?.entry.observedAt ?? null}
         onKeepMine={() => queue.keepMine(task.revision)}
         onDiscardMine={() => queue.discardMine(task.revision)}
         onDismiss={() => {

@@ -25,6 +25,7 @@ import {
 import { chunkSha256Hex, manifestHash } from "../src/braindump/manifest";
 import { uploadChunks } from "../src/braindump/uploader";
 import { startBackend } from "./backend";
+import { verifyNodeSafeClientImport } from "./clientNodeImport";
 import { createCookieFetch } from "./cookieFetch";
 import { makeWav } from "./wav";
 
@@ -74,6 +75,8 @@ function resolvePort(): number {
 }
 
 async function main() {
+  verifyNodeSafeClientImport();
+  ok("API client imports in Node and preserves relay intent snapshots");
   const port = resolvePort();
   console.log("Booting backend…");
   const backend = await startBackend(port);

@@ -2,8 +2,9 @@ import { useRouter } from "expo-router";
 import { useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, View } from "react-native";
 
-import { useTaskList, useTransitionTask } from "@/api/hooks";
+import { useAgentRunSummaries, useTaskList, useTransitionTask } from "@/api/hooks";
 import type { OpenTaskState, TaskResponse } from "@/api/types";
+import { useSession } from "@/auth/SessionProvider";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { Screen } from "@/components/Screen";
@@ -59,6 +60,15 @@ export function TaskListScreen({
   const totalKnown = tasks.length;
   const hasMore = query.hasNextPage;
 
+  // Only the tasks actually listed are asked about, for any signed-in account.
+  // Existing-run monitoring remains available when new relay handoffs are
+  // rolled back. A failed summary fetch degrades to no chips rather than an
+  // error: the list itself is still perfectly usable.
+  const { accountId } = useSession();
+  const visibleTaskIds = useMemo(() => tasks.map((task) => task.id), [tasks]);
+  const agentRunQuery = useAgentRunSummaries(visibleTaskIds, accountId !== null);
+  const agentRuns = agentRunQuery.data ?? {};
+
   const countLabel = `${totalKnown}${hasMore ? "+" : ""} ${totalKnown === 1 && !hasMore ? "task" : "tasks"}`;
   const meta =
     state === "inbox"
@@ -109,6 +119,7 @@ export function TaskListScreen({
               task={item}
               projectName={projectId ? undefined : projectName(item.project_id)}
               tagNames={tagId ? [] : tagNames(item.tag_ids)}
+              agentRun={agentRuns[item.id]}
               onPress={() => router.push({ pathname: "/task/[id]", params: { id: item.id, from: title } })}
               onToggleComplete={() => completeTask(item)}
               completing={transition.isPending}
@@ -126,7 +137,9 @@ export function TaskListScreen({
           refreshControl={
             <RefreshControl
               refreshing={query.isRefetching && !query.isFetchingNextPage}
-              onRefresh={() => query.refetch()}
+              onRefresh={() => {
+                void Promise.all([query.refetch(), agentRunQuery.refetch()]);
+              }}
               tintColor={colors.brandPrimary}
             />
           }

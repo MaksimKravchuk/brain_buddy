@@ -25,6 +25,12 @@ const PATH_RULES: Array<{ match: RegExp } & EpicFeatureStory> = [
     story: "Profile, export, and deletion lifecycle",
   },
   {
+    match: /e2e\/agents/,
+    epic: "End-to-end journeys",
+    feature: "External agent relay",
+    story: "Connect an agent and gate the hand-off honestly",
+  },
+  {
     match: /e2e\/auth/,
     epic: "End-to-end journeys",
     feature: "Authentication & access",
