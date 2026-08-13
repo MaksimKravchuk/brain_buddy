@@ -238,7 +238,10 @@ class GenericHttpConnector:
                 },
             )
         except DestinationRejected as exc:
-            return ConnectorStartOutcome("not_sent", error_code=exc.code)
+            status: StartStatus = (
+                "delivery_unconfirmed" if exc.delivery_attempted else "not_sent"
+            )
+            return ConnectorStartOutcome(status, error_code=exc.code)
         except httpx.ConnectError:
             # Nothing ever reached the peer, so this is definitive non-delivery.
             return ConnectorStartOutcome("not_sent", error_code="connector_unreachable")

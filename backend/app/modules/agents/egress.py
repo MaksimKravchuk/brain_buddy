@@ -54,12 +54,15 @@ DESTINATION_REDIRECT_NOT_ALLOWED = "destination_redirect_not_allowed"
 
 
 class DestinationRejected(ValueError):
-    """A destination was refused before any credential or content was sent."""
+    """A destination or its response was refused at a known delivery phase."""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(
+        self, code: str, message: str, *, delivery_attempted: bool = False
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
+        self.delivery_attempted = delivery_attempted
 
 
 @dataclass(frozen=True, slots=True)
@@ -373,12 +376,18 @@ def pinned_request(
                 DESTINATION_REDIRECT_NOT_ALLOWED,
                 "The agent endpoint answered with a redirect, which is not "
                 "followed for credential-bearing requests.",
+                delivery_attempted=True,
             )
-        body = _bounded_response_body(
-            response,
-            max_response_bytes=max_response_bytes,
-            decoder_factory=decoder_factory,
-        )
+        try:
+            body = _bounded_response_body(
+                response,
+                max_response_bytes=max_response_bytes,
+                decoder_factory=decoder_factory,
+            )
+        except DestinationRejected as exc:
+            raise DestinationRejected(
+                exc.code, exc.message, delivery_attempted=True
+            ) from None
         return PinnedResponse(status_code=response.status_code, body=bytes(body))
 
 

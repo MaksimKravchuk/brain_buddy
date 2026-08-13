@@ -456,6 +456,40 @@ class TestConnections:
             repo.export_owner_data(owner_id="user_a", now=NOW)
         )
 
+    @pytest.mark.parametrize("revision", ["not-a-number", None])
+    def test_startup_repairs_invalid_legacy_header_with_safe_revision(
+        self, tmp_path: Path, revision: object
+    ) -> None:
+        """Header-only legacy corruption is repaired even with a bad revision."""
+
+        initial = AgentRepository(tmp_path)
+        legacy = make_connection().model_dump(mode="json")
+        legacy.update(auth_header_name="Host", revision=revision)
+        with sqlite3.connect(initial.db_path) as conn:
+            conn.execute(
+                "INSERT INTO agent_connections "
+                "(owner_id, id, status, created_at, payload) VALUES (?, ?, ?, ?, ?)",
+                (
+                    "user_a",
+                    "agentconn_legacy",
+                    "ready",
+                    NOW.isoformat(),
+                    json.dumps(legacy),
+                ),
+            )
+
+        repaired = AgentRepository(tmp_path).get_connection(
+            "agentconn_legacy", owner_id="user_a"
+        )
+
+        assert repaired.auth_header_name == "X-Agent-Key"
+        assert repaired.revision == 2
+        assert repaired.status == "untested"
+        assert repaired.last_test_error_code == (
+            "legacy_invalid_auth_header_requires_reconfiguration"
+        )
+        assert repaired.credential is None
+
     def test_startup_quarantines_malformed_connections_without_hiding_healthy_rows(
         self, tmp_path: Path
     ) -> None:
@@ -654,6 +688,27 @@ class TestConnections:
 
 
 class TestRuns:
+    def test_saving_a_run_persists_a_lifecycle_transition(
+        self, repo: AgentRepository
+    ) -> None:
+        """A reserved run can be updated without replacing its reviewed identity."""
+
+        repo.create_connection(make_connection())
+        reserved = make_run()
+        repo.create_run(reserved)
+        dispatched = reserved.model_copy(
+            update={
+                "status": "working",
+                "dispatched_at": NOW + timedelta(seconds=1),
+                "updated_at": NOW + timedelta(seconds=1),
+                "revision": reserved.revision + 1,
+            }
+        )
+
+        repo.save_run(dispatched)
+
+        assert repo.get_run(dispatched.id, owner_id=dispatched.owner_id) == dispatched
+
     def test_runs_are_listed_for_a_task_newest_first(
         self, repo: AgentRepository
     ) -> None:

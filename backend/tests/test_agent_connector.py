@@ -921,6 +921,49 @@ class TestStart:
         assert outcome.error_code == "destination_network_not_allowed"
         assert seen == []
 
+    @pytest.mark.parametrize(
+        ("response", "expected_code"),
+        [
+            (
+                httpx.Response(302, headers={"Location": "https://elsewhere.example"}),
+                "destination_redirect_not_allowed",
+            ),
+            (
+                httpx.Response(
+                    200,
+                    headers={"Content-Encoding": "br"},
+                    stream=httpx.ByteStream(b"opaque"),
+                ),
+                "destination_invalid",
+            ),
+            (
+                httpx.Response(200, content=b"x" * 64_001),
+                "destination_invalid",
+            ),
+            (
+                httpx.Response(
+                    200,
+                    headers={"Content-Encoding": "gzip"},
+                    stream=httpx.ByteStream(b"not-gzip"),
+                ),
+                "destination_invalid",
+            ),
+        ],
+        ids=["redirect", "unsupported-encoding", "oversized", "decompression"],
+    )
+    def test_response_rejection_after_post_is_delivery_unconfirmed(
+        self, response: httpx.Response, expected_code: str
+    ) -> None:
+        """Once POST is issued, rejecting its response cannot prove non-delivery."""
+
+        connector, seen = build_connector(lambda request: response)
+
+        outcome = connector.start(TARGET, envelope=self._envelope())
+
+        assert len(seen) == 1
+        assert outcome.status == "delivery_unconfirmed"
+        assert outcome.error_code == expected_code
+
     def test_a_client_rejection_proves_nothing_was_started(self) -> None:
         """A 4xx is a definitive refusal, so the run was never accepted."""
 
