@@ -180,3 +180,51 @@ pass is not cleanup; it is where this bug class exclusively lives.**
   undone, and a green test asserting the exact behaviour that was broken. The
   same expired premise appeared in four places in these artifacts and was
   corrected in each — see the "Implementation outcome" note above.
+
+## Post-merge review, 2026-08-13
+
+The five-PR stack merged, and adversarial review of the merged diff found a
+requirement violation that every gate above had passed.
+
+### FR-008 was violated by the shipped code
+
+Past the 24 h replay window the drain re-reads the task before retrying. That
+read has three possible answers; the code branched on two. Anything that was
+not "the server already holds what I intended" was re-presented against the
+revision just observed — which rebases `observedRevision`, so the send that
+follows **cannot** 409, and the 409 is the only thing that ever opens M-04. An
+entry attempted once, left more than 24 h (FR-018 permits 30 days), on a task
+somebody else had reclassified meanwhile, therefore overwrote their work in
+silence.
+
+That is FR-008 ("MUST ask whether their change wins or is abandoned; MUST NOT
+decide for them") and SC-005 ("zero classifications are overwritten or
+discarded silently"), both, on the one path where the device already had in
+hand every piece of evidence needed to ask.
+
+What makes it worth recording rather than just fixing:
+
+- **The doc comment above the function reasoned about "the conflict prompt"**
+  while the code guaranteed it could not fire. Prose and behaviour disagreed and
+  nothing compared them.
+- **A passing test asserted the defect.** `drain.test.ts` "then sends it,
+  carrying the revision the re-read observed" seeded eight revisions of somebody
+  else's work and asserted the overwrite, with an approving comment. Test
+  coverage was not the missing control; the test *was* the bug, written down.
+- **Invariant 10 and T068 both described the two-branch rule**, so the artifact
+  chain was internally consistent end to end. Six lenses, a requirement-coverage
+  gate and a founder acceptance all passed a feature whose specification of this
+  path was itself incomplete. Consistency checking cannot find a case nobody
+  enumerated.
+- **It survived founder acceptance**, and was found only by review of the merged
+  diff. The lesson is not that the gate should have caught it — it is that "the
+  artifacts agree with each other" and "the artifacts are complete" are
+  different properties, and the campaign only ever measured the first.
+
+Fixed by giving the re-read its missing third branch: park the entry
+`conflicted` with the re-read's revision and values, `originalValue`
+deliberately unrefreshed. The comparison is scoped to the fields the change
+carries, so a title edit — or a Tag edit under a project-only change — is still
+a plain resend and raises no prompt. `data-model.md` invariant 10 and T068 now
+state all three branches; no requirement was weakened to fit the code. The fix
+is mutation-checked: reverted, the new tests fail; restored, they pass.

@@ -124,6 +124,38 @@ export function serverHoldsIntendedValue(
   return true;
 }
 
+/**
+ * Whether the server still holds what the phone last showed, over the fields
+ * this change is actually about.
+ *
+ * The companion to {@link serverHoldsIntendedValue}: that one asks "is my work
+ * already done", this one asks "has anybody else moved since I looked". Between
+ * them they separate the three outcomes of a re-read — already applied, safe to
+ * resend, and somebody else got there first — where only the first two were
+ * ever distinguished.
+ *
+ * Scoped to the touched fields on purpose. A change that only sets the project
+ * overwrites nothing when somebody else edited only the Tags, and prompting
+ * there would ask a person to arbitrate a disagreement that does not exist.
+ * `originalValue` rather than `observedRevision` is the comparison, because a
+ * revision moves for edits to the title as readily as to the classification,
+ * and a prompt raised by somebody fixing a typo is noise FR-008 does not ask
+ * for.
+ */
+export function serverStillHoldsOriginal(
+  value: ClassificationValue,
+  originalValue: { projectId: string | null; tagIds: readonly string[] },
+  serverState: ClassificationState,
+): boolean {
+  if (value.projectId !== undefined && originalValue.projectId !== serverState.projectId) {
+    return false;
+  }
+  if (value.tagIds !== undefined && !sameTagSet(originalValue.tagIds, serverState.tagIds)) {
+    return false;
+  }
+  return true;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)

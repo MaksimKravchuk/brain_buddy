@@ -67,6 +67,7 @@ import {
   decideOnRejection,
   rejectionFromError,
   serverHoldsIntendedValue,
+  serverStillHoldsOriginal,
   type ClassificationState,
   type ConflictDecision,
 } from "./conflictDecision";
@@ -383,11 +384,26 @@ export interface RereadInput {
  *   and ask nobody anything. This is the one explicit exception to SC-005:
  *   nothing is overwritten and nothing is discarded, so there is no decision to
  *   put to a person and inventing one would be noise.
- * - otherwise → re-present it against the revision just observed, with a new
- *   key and a refreshed `originalValue`. Refreshing the original is the single
- *   sanctioned exception to invariant 7, and it is sound precisely because the
- *   device has *just* read the server: the conflict prompt would otherwise diff
- *   against a value up to 30 days stale and name the wrong disagreement.
+ * - the server still holds what the phone last showed → nobody else has been
+ *   here, so this is a plain resend. Re-present it against the revision just
+ *   observed, with a new key and a refreshed `originalValue`. Refreshing the
+ *   original is the single sanctioned exception to invariant 7, and it is sound
+ *   precisely because the device has *just* read the server: the conflict
+ *   prompt would otherwise diff against a value up to 30 days stale and name
+ *   the wrong disagreement.
+ * - the server holds a **third** value → somebody else moved a field this
+ *   change is about, and FR-008 says the person decides. Park it for M-04.
+ *
+ * That third branch did not exist, and its absence was a silent overwrite on a
+ * path where the device had the evidence in hand. Re-presenting rebases
+ * `observedRevision` onto the revision just read, so the send that follows
+ * cannot 409 — and the 409 is the only thing that would ever have opened the
+ * sheet. An entry attempted once, left more than 24h (FR-018 permits 30 days),
+ * on a task somebody else reclassified meanwhile, therefore overwrote their
+ * work without a word: FR-008's "MUST NOT decide for them" and SC-005's "zero
+ * classifications are overwritten or discarded silently", both, on the one path
+ * where asking was free. The comment above this function reasoned about "the
+ * conflict prompt" while the code guaranteed it could not fire.
  *
  * `lastEditedAt` deliberately does not move — a re-present is not an edit, and
  * refreshing it would keep an entry alive past FR-018's bound forever.
@@ -406,6 +422,31 @@ export function resolveRereadOutcome({
       queue: applyAccepted(queue, entry.idempotencyKey, task.revision),
       advanceLastSynced: true,
       continueDraining: true,
+    };
+  }
+
+  if (!serverStillHoldsOriginal(entry.value, entry.originalValue, serverState)) {
+    return {
+      kind: "conflicted",
+      // The same parking the 409 path uses, for the same reason and with the
+      // same evidence: the revision aims a resolution, the values are what it
+      // is about, and neither is recorded anywhere else on the device.
+      //
+      // `originalValue` is pointedly NOT refreshed on this branch. It is what
+      // the phone showed, M-04's first row states it as exactly that, and
+      // replacing it with the server's value collapses the three-way choice
+      // into a two-way one in which the person's own starting point has
+      // quietly become their opponent's.
+      queue: applyRejected(queue, entry.idempotencyKey, "revision-conflict", undefined, {
+        reason: "stale-revision",
+        serverRevision: task.revision,
+        serverValue: { projectId: serverState.projectId, tagIds: [...serverState.tagIds] },
+      }),
+      // False, as on the 409 path: a conflicted pass settles nothing, and a
+      // footer reading "synced just now" over an unanswered question overstates
+      // what the device actually knows.
+      advanceLastSynced: false,
+      continueDraining: false,
     };
   }
 

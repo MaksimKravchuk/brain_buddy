@@ -682,8 +682,18 @@ describe("006-FR-017 past the replay window the drain looks before it leaps", ()
   });
 
   it("re-presents against the current revision with a new key and a refreshed original", () => {
-    const sending = { ...aged(), sendState: "sending" as const };
-    const server: ServerTaskState = { revision: 12, projectId: "proj-inbox", tagIds: ["tag-home"] };
+    // Only the project is being changed, and the project is exactly where the
+    // phone left it — so nothing of anybody else's is at stake and this is a
+    // plain resend, not a disagreement. Somebody did move the Tags, which is
+    // why the revision advanced; the refreshed original picks that up, so a
+    // later prompt diffs against what the server holds rather than a value up
+    // to 30 days stale.
+    const sending = {
+      ...aged(),
+      sendState: "sending" as const,
+      value: { projectId: "proj-q3", tagIds: undefined },
+    };
+    const server: ServerTaskState = { revision: 12, projectId: null, tagIds: ["tag-home"] };
 
     const resolution = resolveRereadOutcome({
       queue: [sending],
@@ -695,7 +705,7 @@ describe("006-FR-017 past the replay window the drain looks before it leaps", ()
     const next = resolution.queue[0];
     expect(next.sendState).toBe("queued");
     expect(next.observedRevision).toBe(12);
-    expect(next.originalValue).toEqual({ projectId: "proj-inbox", tagIds: ["tag-home"] });
+    expect(next.originalValue).toEqual({ projectId: null, tagIds: ["tag-home"] });
     expect(next.idempotencyKey).not.toBe("key-1");
     // A fresh key gets its own replay window, or the very next step re-reads again.
     expect(next.firstSentAt).toBeUndefined();
@@ -703,7 +713,10 @@ describe("006-FR-017 past the replay window the drain looks before it leaps", ()
 
   it("then sends it, carrying the revision the re-read observed", async () => {
     const rec = recorder({
-      reread: async () => ({ revision: 12, projectId: "proj-inbox", tagIds: ["tag-home"] }),
+      // The classification is untouched — somebody edited the title. The
+      // revision moved, nobody else's classification did, so the entry is
+      // simply re-aimed and sent.
+      reread: async () => ({ revision: 12, projectId: null, tagIds: [] }),
       send: async () => ({ revision: 13, projectId: "proj-q3", tagIds: ["tag-calls"] }),
     });
 
@@ -716,6 +729,60 @@ describe("006-FR-017 past the replay window the drain looks before it leaps", ()
       tag_ids: ["tag-calls"],
     });
     expect(rec.sent[0].idempotencyKey).not.toBe("key-1");
+    expect(result.queue).toHaveLength(0);
+  });
+
+  it("006-FR-008 asks instead, when the re-read finds somebody else's value", async () => {
+    // The branch that did not exist. Re-presenting rebases `observedRevision`
+    // onto the revision just read, so the send that follows CANNOT 409 — and
+    // the 409 is the only thing that ever opens M-04. An entry attempted once,
+    // left more than 24h, on a task somebody else reclassified meanwhile,
+    // therefore overwrote their work in silence. FR-008 says the person
+    // decides; SC-005 says zero classifications are overwritten silently.
+    const rec = recorder({
+      reread: async () => ({ revision: 12, projectId: "proj-inbox", tagIds: ["tag-home"] }),
+      send: async () => ({ revision: 13, projectId: "proj-q3", tagIds: ["tag-calls"] }),
+    });
+
+    const result = await drainQueue([aged()], rec.port);
+
+    // Nothing went out. The pass stops and hands the question over.
+    expect(rec.sent).toHaveLength(0);
+    expect(result.stoppedBecause).toBe("conflict");
+
+    const parked = result.queue[0];
+    expect(parked.sendState).toBe("conflicted");
+    expect(parked.conflictReason).toBe("stale-revision");
+    // Both halves of M-04's third row, from the read that found the divergence.
+    expect(parked.conflictServerRevision).toBe(12);
+    expect(parked.conflictServerValue).toEqual({
+      projectId: "proj-inbox",
+      tagIds: ["tag-home"],
+    });
+    // NOT refreshed. It is what the phone showed, and M-04's first row says so
+    // in those words; overwriting it with the server's value would leave the
+    // person choosing between two copies of their opponent's answer.
+    expect(parked.originalValue).toEqual({ projectId: null, tagIds: [] });
+  });
+
+  it("006-FR-008 resends without asking when the edit somebody else made cannot collide", async () => {
+    // The scope rule, stated as behaviour: this entry sets only the project,
+    // and only the Tags moved. Prompting would ask a person to arbitrate a
+    // disagreement that does not exist, so it sends.
+    const projectOnly = entry({
+      firstSentAt: iso(NOW - SERVER_REPLAY_WINDOW_MS - MINUTE),
+      sendState: "queued",
+      value: { projectId: "proj-q3", tagIds: undefined },
+    });
+    const rec = recorder({
+      reread: async () => ({ revision: 12, projectId: null, tagIds: ["tag-home"] }),
+      send: async () => ({ revision: 13, projectId: "proj-q3", tagIds: ["tag-home"] }),
+    });
+
+    const result = await drainQueue([projectOnly], rec.port);
+
+    expect(rec.sent).toHaveLength(1);
+    expect(rec.sent[0].payload).toEqual({ expected_revision: 12, project_id: "proj-q3" });
     expect(result.queue).toHaveLength(0);
   });
 
