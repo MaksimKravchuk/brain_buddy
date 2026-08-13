@@ -730,8 +730,11 @@ describe("006-FR-017 past the replay window the drain looks before it leaps", ()
   it("re-presents it against the revision the re-read observed, under a new key", async () => {
     await seed(IDENTITY, [aged()]);
     install({
+      // The classification is exactly where the phone left it; the revision
+      // moved because somebody edited the title. Nothing of theirs is at stake,
+      // so the entry is re-aimed and sent rather than put to the person.
       "GET /tasks/task-1": () =>
-        makeTask({ id: "task-1", project_id: "proj-inbox", tag_ids: ["tag-home"], revision: 12 }),
+        makeTask({ id: "task-1", project_id: null, tag_ids: [], revision: 12 }),
       "PATCH /tasks/task-1": () => accepted(),
     });
 
@@ -749,6 +752,39 @@ describe("006-FR-017 past the replay window the drain looks before it leaps", ()
       tag_ids: ["tag-calls"],
     });
     expect(sent.headers["Idempotency-Key"]).toBe(uuidNumber(1));
+  });
+
+  it("006-FR-008 surfaces the conflict instead when somebody else reclassified it", async () => {
+    // Same shape as the test above, one thing different: the re-read finds a
+    // classification that is neither what this entry intends nor what the phone
+    // last showed. That is somebody else's work, and sending over it is what
+    // FR-008 and SC-005 forbid. The whole difference between the two tests is
+    // whether anybody else has been here.
+    await seed(IDENTITY, [aged()]);
+    install({
+      "GET /tasks/task-1": () =>
+        makeTask({ id: "task-1", project_id: "proj-inbox", tag_ids: ["tag-home"], revision: 12 }),
+      "PATCH /tasks/task-1": () => accepted(),
+    });
+
+    const view = await renderQueue();
+    await coldReadDone(view);
+    await waitFor(() => expect(view.result.current.conflict).toBeDefined());
+
+    // It looked, and then did not leap: no PATCH was ever issued.
+    expect(traffic()).toEqual(["GET /tasks/task-1"]);
+    expect(backend.callsTo("PATCH", "/tasks/task-1")).toHaveLength(0);
+
+    const parked = view.result.current.conflict?.entry;
+    expect(parked?.sendState).toBe("conflicted");
+    expect(parked?.conflictServerRevision).toBe(12);
+    expect(parked?.conflictServerValue).toEqual({
+      projectId: "proj-inbox",
+      tagIds: ["tag-home"],
+    });
+    // Still on the device, still unsent, waiting on a person — not discarded
+    // and not applied.
+    expect(await onDevice(IDENTITY)).toHaveLength(1);
   });
 });
 
