@@ -836,7 +836,7 @@ jobs:
           if-no-files-found: error
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
-  # ADR-0004's blocking verdict over the ADR-0011 enforced tier. It fails below
+  # ADR-0004's blocking verdict over the ADR-0016 enforced tier. It fails below
   # 95%, fails when the campaign checked no mutants at all, and on a pull
   # request also fails on any regression against the base revision.
   #

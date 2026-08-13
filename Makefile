@@ -91,7 +91,7 @@ mutation-frontend:
 		--summary-out frontend/mutation-artifacts/enforced-summary.txt \
 		--survivors-out frontend/mutation-artifacts/enforced-survivors.txt
 
-# The ENFORCED-tier measurement (ADR-0011). mutation-backend above measures the
+# The ENFORCED-tier measurement (ADR-0016). mutation-backend above measures the
 # OBSERVED tier, which deliberately includes modules still under calibration, so
 # its score must not be checked against ADR-0004's bar. This target narrows the
 # scope to backend/mutation-enforced-scope.txt and asserts the bar with the
@@ -165,6 +165,7 @@ test-mobile:
 	cd mobile && npx jest --coverage
 	python3 scripts/validate_coverage_floor.py --stack mobile --format istanbul-summary \
 		--report mobile/coverage/coverage-summary.json --floor mobile/coverage-floor.json
+	python3 scripts/validate_allure_taxonomy.py --path mobile/allure-results --label mobile-jest
 
 # Report-only, like mutation-backend: the deterministic-core scope lives in
 # mobile/stryker.config.json and is fixed by ADR-0015.

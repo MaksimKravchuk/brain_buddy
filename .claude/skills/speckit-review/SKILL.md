@@ -99,15 +99,33 @@ produces no review at all is still missing mandatory evidence and still returns
 **`escalated`**, not a pass — a partial campaign is never reported as a clean
 one.
 
-The three Claude lenses run as in-session subagents
-(`.claude/agents/architecture-consistency-reviewer.md`,
-`security-privacy-reviewer.md`, `ux-a11y-reviewer.md`). Write every reviewer's
-JSON to `.specify/workflows/runs/<run-id>/reviews/<role>.json`.
+The three Claude lenses do **not** run as in-session subagents. `build_review_command`
+spawns a separate headless process per lens:
+
+```
+claude -p --model <model> --effort max --permission-mode plan \
+       --allowedTools Read,Grep,Glob --no-session-persistence \
+       --output-format json --json-schema <review.schema.json> <prompt>
+```
+
+This matters when you change a lens. The `.claude/agents/*.md` files supply the
+**rubric body only** — the prompt tells the process to read the file and apply
+it verbatim. Their frontmatter is inert: `--allowedTools` is hardcoded in the
+command above, and the model comes from `ROLE_CONFIGS` in
+`scripts/spec_kit_planning_review.py`, not from the agent's `model:` line. Those
+two places state the model separately and nothing keeps them in sync, so change
+both or neither.
+
+The agent files remain the single source of **rubric** truth — the driver points
+reviewers at them rather than restating the rubric, so the rubric cannot drift.
+Three lenses carry one: `architecture-consistency-reviewer`,
+`security-privacy-reviewer`, `ux-a11y-reviewer`. The two codex lenses
+(`requirements-consistency`, `testability-evidence`) have no agent file; their
+whole instruction is the `focus` string in `ROLE_CONFIGS`.
 
 Each reviewer returns JSON valid against
-`.specify/workflows/speckit/review.schema.json`. The agent files are the
-single source of rubric truth — the driver points reviewers at them rather
-than restating the rubric, so the two cannot drift.
+`.specify/workflows/speckit/review.schema.json`, written to
+`.specify/workflows/runs/<run-id>/reviews/<role>.json`.
 
 ## Step 3 — aggregate
 

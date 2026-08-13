@@ -166,7 +166,7 @@ testpaths = ["tests"]
 
 [tool.mutmut]
 source_paths = ["app"]
-# This is the OBSERVED scope (ADR-0011): everything the nightly report-only
+# This is the OBSERVED scope (ADR-0016): everything the nightly report-only
 # campaign mutates. The ENFORCED scope that gates pull requests is narrower and
 # is configured with the gate itself; a module graduates from the first list to
 # the second only after clearing ADR-0004's 95% bar on its own.

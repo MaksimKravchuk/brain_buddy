@@ -1,4 +1,4 @@
-# The ENFORCED mutation tier (ADR-0011): modules whose score may block a pull
+# The ENFORCED mutation tier (ADR-0016): modules whose score may block a pull
 # request. Narrower than `only_mutate` in pyproject.toml, which is the OBSERVED
 # tier the nightly campaign measures.
 #
