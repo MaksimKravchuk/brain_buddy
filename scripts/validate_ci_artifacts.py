@@ -22,6 +22,10 @@ REQUIRED_ARTIFACTS = {
     "mobile-allure-results": "mobile/allure-results",
     "playwright-allure-results": "frontend/allure-results/playwright",
     "allure-report-html": "allure-report",
+    # Additional to the report above, never a replacement. The uploaded path is
+    # the FILE: `allure awesome --single-file` writes summary.json beside it,
+    # and an artifact named "single file" that unzips to two is a small lie.
+    "allure-report-single-file": "allure-report-single/index.html",
 }
 
 MUTATION_SCOPE = (
@@ -809,6 +813,79 @@ def _job_graph_errors(workflow_text: str) -> list[str]:
     return errors
 
 
+# The aggregate report used to be published and never graded: a red test
+# reached the artifact and the run stayed green. Each entry names the failure it
+# prevents rather than the string it looks for.
+QUALITY_GATE_REQUIREMENTS = (
+    ("the aggregate quality-gate verdict", "allure quality-gate"),
+    # An explicit path makes a deleted config a loud error instead of a silent
+    # fallback to Allure's defaults, which declare no quality gate at all.
+    ("explicit quality-gate config discovery", "--config ../allurerc.mjs"),
+    ("single-file report generation", "--single-file"),
+    ("the quality-gate canary", "allure_quality_gate_selftest.sh"),
+)
+
+# Any of these makes the CLI build the gate from the flag and DISCARD the
+# ruleset the config declares -- it does not override one value, it replaces
+# the gate. `--rerun` is officially incompatible with the gate.
+GATE_REPLACING_ARGUMENTS = (
+    "--max-failures",
+    "--min-tests-count",
+    "--success-rate",
+    "--fast-fail",
+    "--known-issues",
+    "--rerun",
+)
+
+# Diagnostics that must survive a red verdict, so they run before it.
+GATE_DIAGNOSTICS = (
+    ("the multi-file report upload", "name: allure-report-html"),
+    ("the single-file report upload", "name: allure-report-single-file"),
+    ("the pull-request report comment", "brain-buddy-allure-report"),
+)
+
+
+def _quality_gate_errors(workflow_text: str) -> list[str]:
+    block = _job_block(workflow_text, ALLURE_REPORT_JOB)
+    if block is None:
+        return [f"missing {ALLURE_REPORT_JOB} job that grades the aggregate report"]
+
+    errors = [
+        f"missing {label}: {snippet!r}"
+        for label, snippet in QUALITY_GATE_REQUIREMENTS
+        if snippet not in block
+    ]
+    errors += [
+        f"{argument} replaces the ruleset allurerc.mjs declares, so the gate would "
+        "no longer be the reviewed one"
+        for argument in GATE_REPLACING_ARGUMENTS
+        if argument in block
+    ]
+    if "continue-on-error" in block:
+        errors.append(
+            f"continue-on-error makes the {ALLURE_REPORT_JOB} job warn-only; a gate "
+            "that cannot fail the run is not a gate"
+        )
+
+    verdict = block.find("allure quality-gate")
+    if verdict < 0:
+        return errors
+
+    for label, marker in GATE_DIAGNOSTICS:
+        position = block.find(marker)
+        if position < 0 or position > verdict:
+            errors.append(
+                f"{label} must run before the quality-gate verdict, otherwise a red "
+                "gate takes the report away exactly when someone needs to read it"
+            )
+    if "- name:" in block[verdict:]:
+        errors.append(
+            "the quality-gate verdict must be the last step of the "
+            f"{ALLURE_REPORT_JOB} job, so nothing it fails can skip the evidence"
+        )
+    return errors
+
+
 def _missing_e2e_ci_errors(workflow_text: str) -> list[str]:
     errors: list[str] = []
     for label, snippet in E2E_CI_REQUIREMENTS:
@@ -887,6 +964,7 @@ def validate_workflow(
         errors.extend(_path_filter_errors(workflow_text))
         errors.extend(_job_graph_errors(workflow_text))
         errors.extend(_mutation_gate_errors(workflow_text))
+        errors.extend(_quality_gate_errors(workflow_text))
         errors.extend(_concurrency_errors(workflow_text))
         errors.extend(_retention_errors(workflow_text))
         errors.extend(_status_context_errors(workflow_text))
