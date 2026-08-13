@@ -68,6 +68,22 @@ KNOWN_FEATURE_FLAGS: tuple[str, ...] = (
     "external_agent_relay",
 )
 
+# Server-owned flags that are configured exactly like the ones above but are
+# deliberately **not** projected into the member-facing ``feature_flags``
+# payload of ``/api/auth/me``, ``/login`` and ``/signup``. Adding a flag to
+# ``KNOWN_FEATURE_FLAGS`` changes that shared response shape for every member
+# and broadcasts its rollout state to callers who can never use it.
+#
+# ``admin_portal`` (spec 009, 009-FR-013) gates the `/admin` operator surface.
+# It ships default OFF, is read only by ``require_admin_portal_enabled`` after
+# authorization has already succeeded (009-FR-002 precedence), and stays off
+# the member payload so 009-FR-010 keeps holding: no member-facing response
+# shape changes, and a non-operator can never observe the rollout state.
+PRIVATE_FEATURE_FLAGS: tuple[str, ...] = ("admin_portal",)
+
+# Every flag name ``BRAIN_BUDDY_FEATURE_FLAGS`` may configure.
+ALL_FEATURE_FLAGS: tuple[str, ...] = KNOWN_FEATURE_FLAGS + PRIVATE_FEATURE_FLAGS
+
 
 class FeatureFlagState(str, Enum):
     """Rollout stage of one allow-listed feature flag."""
@@ -97,19 +113,16 @@ class FeatureFlagSettings(BaseModel):
     def validate_states(
         cls, states: Mapping[str, FeatureFlagState]
     ) -> Mapping[str, FeatureFlagState]:
-        unknown = sorted(set(states) - set(KNOWN_FEATURE_FLAGS))
+        unknown = sorted(set(states) - set(ALL_FEATURE_FLAGS))
         if unknown:
             raise ValueError(
                 f"Unknown feature flag(s) {unknown}; allowed flags are "
-                f"{sorted(KNOWN_FEATURE_FLAGS)}."
+                f"{sorted(ALL_FEATURE_FLAGS)}."
             )
         # The frozen model only blocks attribute assignment; the proxy makes
         # the mapping itself read-only so items cannot be mutated either.
         return MappingProxyType(
-            {
-                name: states.get(name, FeatureFlagState.OFF)
-                for name in KNOWN_FEATURE_FLAGS
-            }
+            {name: states.get(name, FeatureFlagState.OFF) for name in ALL_FEATURE_FLAGS}
         )
 
     @field_serializer("states")
@@ -134,20 +147,38 @@ class FeatureFlagSettings(BaseModel):
             normalized.add(candidate)
         return frozenset(normalized)
 
-    def effective_flags(self, email: str | None) -> dict[str, bool]:
-        """Effective boolean flag payload for one authenticated user."""
-
+    def _is_effective(self, name: str, email: str | None) -> bool:
         normalized = (email or "").strip().lower()
-        effective: dict[str, bool] = {}
-        for name in KNOWN_FEATURE_FLAGS:
-            state = self.states[name]
-            if state is FeatureFlagState.ON:
-                effective[name] = True
-            elif state is FeatureFlagState.INTERNAL:
-                effective[name] = bool(normalized) and normalized in self.internal_users
-            else:
-                effective[name] = False
-        return effective
+        state = self.states[name]
+        if state is FeatureFlagState.ON:
+            return True
+        if state is FeatureFlagState.INTERNAL:
+            return bool(normalized) and normalized in self.internal_users
+        return False
+
+    def effective_flags(self, email: str | None) -> dict[str, bool]:
+        """Effective boolean flag payload for one authenticated user.
+
+        Deliberately projects only `KNOWN_FEATURE_FLAGS`: this dict is the
+        member-facing `/api/auth/me` (and `/login`, `/signup`) payload, so a
+        private flag must never appear here (009-FR-010, 009-FR-013).
+        """
+
+        return {name: self._is_effective(name, email) for name in KNOWN_FEATURE_FLAGS}
+
+    def private_flag_effective(self, name: str, email: str | None) -> bool:
+        """Effective value of one `PRIVATE_FEATURE_FLAGS` entry.
+
+        Read only server-side, by a dependency that has already made its
+        authorization decision — never serialized into any response.
+        """
+
+        if name not in PRIVATE_FEATURE_FLAGS:
+            raise ValueError(
+                f"'{name}' is not a private feature flag; "
+                f"private flags are {sorted(PRIVATE_FEATURE_FLAGS)}."
+            )
+        return self._is_effective(name, email)
 
 
 class AdminSettings(BaseModel):
@@ -815,8 +846,10 @@ def get_config() -> AppConfig:
 
 
 __all__ = [
+    "ALL_FEATURE_FLAGS",
     "CANONICAL_PUBLIC_CALLBACK_HOSTS",
     "KNOWN_FEATURE_FLAGS",
+    "PRIVATE_FEATURE_FLAGS",
     "AdminSettings",
     "AgentRelaySettings",
     "AppConfig",

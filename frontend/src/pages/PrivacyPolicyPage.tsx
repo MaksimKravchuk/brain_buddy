@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 
 // Update these two constants when the policy text changes or the contact moves.
 const CONTACT_EMAIL = "maksim.v.kravchuk@gmail.com";
-const LAST_UPDATED = "August 6, 2026";
+const LAST_UPDATED = "August 13, 2026";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
   return (
@@ -69,7 +69,10 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
           </p>
           <p>
             <strong>Legitimate interest</strong> (Art. 6(1)(f)): security logging and rate
-            limiting to protect accounts.
+            limiting to protect accounts, and account administration — an authorised
+            operator can look up one account (its id, email, display name and whether
+            deletion is pending) and sign it out of every device, to recover accounts
+            and answer support requests. Operators never see your content.
           </p>
         </Section>
 
@@ -81,6 +84,14 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
             Account data and content are kept until you delete your account. Deletion has a
             14-day grace period during which signing back in cancels it; after that, everything
             is permanently erased.
+          </p>
+          <p>
+            When an operator looks up an account or signs it out, we record that it happened
+            as a content-free line in our platform logs — the operator's account id, the
+            account id it concerned, and the outcome. No email, name, or content. Those log
+            lines are kept for our hosting provider's log-retention window, are not part of
+            your data export, and are not erased by account deletion: they are records of
+            what we did, not of you.
           </p>
         </Section>
 

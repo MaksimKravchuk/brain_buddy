@@ -64,6 +64,7 @@ class AuthService:
         invite_repo: InviteRepository,
         password_policy: PasswordPolicy,
         session_settings: SessionSettings,
+        reserved_emails: frozenset[str] = frozenset(),
         deletion_grace: timedelta = ACCOUNT_DELETION_GRACE,
     ) -> None:
         self.user_repo = user_repo
@@ -71,6 +72,10 @@ class AuthService:
         self.invite_repo = invite_repo
         self.password_policy = password_policy
         self.session_settings = session_settings
+        # Normalized operator allow-list, injected as a plain config value:
+        # signup must not depend on AdminService to answer "is this address
+        # reserved?" (009-FR-012).
+        self.reserved_emails = reserved_emails
         self.deletion_grace = deletion_grace
         self._hasher = PasswordHasher()
         # Precomputed dummy hash used to equalize login timing in the
@@ -177,7 +182,14 @@ class AuthService:
         if invite is None or invite.is_used:
             raise InvalidInviteError()
 
-        if self.user_repo.get_by_email(normalized_email) is not None:
+        if (
+            normalized_email in self.reserved_emails
+            or self.user_repo.get_by_email(normalized_email) is not None
+        ):
+            # A configured operator address is reserved (009-FR-012): only
+            # `seed_admin` may bind it. The refusal is the existing
+            # already-registered conflict, byte-identical either way, so a
+            # signup attempt can never enumerate the allow-list.
             raise ConflictError("User", normalized_email)
 
         user_id = f"user_{uuid.uuid4().hex[:12]}"
@@ -274,7 +286,11 @@ class AuthService:
         account unseeded.
 
         Bypasses the invite flow entirely: the admin account is created
-        directly without consuming an invite.
+        directly without consuming an invite — and deliberately bypasses the
+        009-FR-012 reservation too. This is the *only* path allowed to
+        provision or rotate a configured operator identity; every
+        member-driven path (`signup`, `AccountService.change_email`) refuses
+        it, so operator authority cannot be self-claimed.
         """
 
         self._validate_password_format(password)

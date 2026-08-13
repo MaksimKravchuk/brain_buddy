@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from app.container import Container
 from app.core.config import (
+    ALL_FEATURE_FLAGS,
     KNOWN_FEATURE_FLAGS,
     FeatureFlagSettings,
     FeatureFlagState,
@@ -53,7 +54,9 @@ def test_default_settings_turn_every_known_flag_off() -> None:
     """All declared flags default OFF with an empty internal cohort."""
 
     settings = FeatureFlagSettings()
-    assert set(settings.states) == set(KNOWN_FEATURE_FLAGS)
+    # Every configurable flag, member-facing and private alike: the private
+    # ones are excluded from the response payload, not from the state map.
+    assert set(settings.states) == set(ALL_FEATURE_FLAGS)
     assert all(state is FeatureFlagState.OFF for state in settings.states.values())
     assert settings.internal_users == frozenset()
 
