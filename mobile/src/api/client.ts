@@ -13,6 +13,19 @@
  */
 
 import type {
+  AgentConnectionCreatedResponse,
+  AgentConnectionCreateRequest,
+  AgentConnectionDisconnectRequest,
+  AgentConnectionResponse,
+  AgentConnectionRotateRequest,
+  AgentConnectionRotateSigningSecretRequest,
+  AgentConnectionSigningSecretResponse,
+  AgentHandoffConfirmRequest,
+  AgentHandoffPreviewRequest,
+  AgentManifestResponse,
+  AgentReplyRequest,
+  AgentRunResponse,
+  AgentRunSummaryResponse,
   BrainDumpAction,
   BrainDumpOperationResponse,
   BrainDumpProvidersResponse,
@@ -40,6 +53,7 @@ import type {
   TaskTransitionRequest,
   TaskUpdateRequest,
 } from "./types";
+import { IntentSnapshotRegistry, requireIdempotencyKey } from "@/utils/intentSnapshot";
 
 export class ApiError extends Error {
   status: number;
@@ -75,13 +89,15 @@ export class ApiError extends Error {
 export interface ApiClientOptions {
   /** Returns the API base URL, e.g. `https://host/api` (no trailing slash needed). */
   getBaseUrl: () => string;
-  /** Called on any 401 response (session expired / signed out elsewhere). */
-  onUnauthorized?: (() => void) | null;
+  /** Captures the account/session scope at request start. */
+  getSessionEpoch?: (() => number) | null;
+  /** Called on a 401 with the exact scope that issued the request. */
+  onUnauthorized?: ((requestEpoch: number | undefined) => void) | null;
   /** Every successful response's `Date` header. Feature 006 persists it so
    *  FR-018's retention bound can be cross-checked against a clock the person
    *  cannot set — without it the bound trusts the device alone, which is the
    *  hole the adversarial review opened. */
-  onServerTime?: ((date: string) => void) | null;
+  onServerTime?: ((date: string, monotonicTimeMs: number, requestEpoch: number | undefined) => void) | null;
   /** Injectable fetch for tests; defaults to the global fetch. */
   fetchImpl?: typeof fetch;
   /** Request timeout in ms. Generous default: the Fly frontend cold-starts. */
@@ -93,9 +109,31 @@ type JsonRequestOptions = {
   headers?: Record<string, string>;
   body?: unknown;
   signal?: AbortSignal;
+  requestEpoch?: number;
+  baseUrl?: string;
 };
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+
+/**
+ * 4xx statuses that still leave the outcome unknown.
+ *
+ * A request timeout can fire after the server read and executed the body, and a
+ * throttle can come from an edge that has already forwarded it. Neither is
+ * evidence that nothing was sent (FR-006), so both hold the relay key on the
+ * same terms as a dropped connection or a 5xx.
+ */
+const AMBIGUOUS_STATUSES: ReadonlySet<number> = new Set([408, 429]);
+
+/** True only when the server's answer proves the command did not take effect. */
+function isDefinitiveOutcome(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    error.status >= 400 &&
+    error.status < 500 &&
+    !AMBIGUOUS_STATUSES.has(error.status)
+  );
+}
 
 function normalizeBaseUrl(raw: string): string {
   return raw.replace(/\/+$/, "");
@@ -110,13 +148,23 @@ export function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 }
 
 export function createApiClient(options: ApiClientOptions) {
-  const { getBaseUrl, onUnauthorized, onServerTime, fetchImpl, timeoutMs = DEFAULT_TIMEOUT_MS } = options;
+  const {
+    getBaseUrl,
+    getSessionEpoch,
+    onUnauthorized,
+    onServerTime,
+    fetchImpl,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+  } = options;
   // Preserve the global binding: calling an unbound fetch reference throws in
   // some environments (illegal invocation).
   const doFetch: typeof fetch = fetchImpl ?? ((...args) => fetch(...args));
+  const relayIntents = new IntentSnapshotRegistry();
 
   async function request<T>(path: string, opts: JsonRequestOptions = {}): Promise<T> {
+    const requestEpoch = opts.requestEpoch ?? getSessionEpoch?.();
     const { body, headers: extraHeaders, method = "GET", signal } = opts;
+    const baseUrl = opts.baseUrl ?? normalizeBaseUrl(getBaseUrl());
     const headers: Record<string, string> = { ...extraHeaders };
 
     let requestBody: string | ArrayBuffer | undefined;
@@ -135,7 +183,7 @@ export function createApiClient(options: ApiClientOptions) {
     const timeout = AbortSignal.timeout(timeoutMs);
     const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
 
-    const response = await doFetch(`${normalizeBaseUrl(getBaseUrl())}${path}`, {
+    const response = await doFetch(`${baseUrl}${path}`, {
       method,
       headers,
       body: requestBody,
@@ -144,13 +192,13 @@ export function createApiClient(options: ApiClientOptions) {
     });
 
     if (response.status === 401 && onUnauthorized) {
-      onUnauthorized();
+      onUnauthorized(requestEpoch);
     }
 
     if (onServerTime && response.ok) {
       const served = response.headers.get("Date");
       if (served) {
-        onServerTime(served);
+        onServerTime(served, performance.now(), requestEpoch);
       }
     }
 
@@ -168,6 +216,42 @@ export function createApiClient(options: ApiClientOptions) {
     }
 
     return data as T;
+  }
+
+  async function relayMutation<T>(
+    operation: string,
+    path: string,
+    body: unknown,
+    idempotencyKey: string,
+  ): Promise<T> {
+    const key = requireIdempotencyKey(operation, idempotencyKey);
+    const requestEpoch = getSessionEpoch?.();
+    const baseUrl = normalizeBaseUrl(getBaseUrl());
+    relayIntents.hold(operation, key, {
+      method: "POST",
+      baseUrl,
+      requestEpoch,
+      path,
+      ...(body === undefined ? {} : { body }),
+    });
+    try {
+      const result = await request<T>(path, {
+        method: "POST",
+        headers: { "Idempotency-Key": key },
+        requestEpoch,
+        baseUrl,
+        ...(body === undefined ? {} : { body }),
+      });
+      relayIntents.settle(key);
+      return result;
+    } catch (error) {
+      if (isDefinitiveOutcome(error)) {
+        relayIntents.settle(key);
+      } else {
+        relayIntents.preserve(key);
+      }
+      throw error;
+    }
   }
 
   return {
@@ -490,6 +574,147 @@ export function createApiClient(options: ApiClientOptions) {
         headers: { "Idempotency-Key": idempotencyKey },
         body: { expected_revision: expectedRevision },
       });
+    },
+
+    // --- External agents ---
+
+    listAgentConnections(signal?: AbortSignal) {
+      return request<AgentConnectionResponse[]>("/agent-connections", { signal });
+    },
+
+    /**
+     * The 201 body is the only time the inbound signing secret is ever
+     * returned — show it once and never persist it.
+     */
+    createAgentConnection(payload: AgentConnectionCreateRequest, idempotencyKey: string) {
+      return relayMutation<AgentConnectionCreatedResponse>(
+        "createAgentConnection",
+        "/agent-connections",
+        payload,
+        idempotencyKey,
+      );
+    },
+
+    getAgentConnection(connectionId: string, signal?: AbortSignal) {
+      return request<AgentConnectionResponse>(`/agent-connections/${connectionId}`, { signal });
+    },
+
+    /**
+     * Deliberately not a `relayMutation`: the backend's `test_agent_connection`
+     * accepts no `Idempotency-Key` and passes none to the service. Holding a
+     * relay key here would block the user's retry on a duplicate the server
+     * never deduplicates.
+     */
+    testAgentConnection(connectionId: string) {
+      return request<AgentConnectionResponse>(`/agent-connections/${connectionId}/test`, {
+        method: "POST",
+      });
+    },
+
+    rotateAgentCredential(
+      connectionId: string,
+      payload: AgentConnectionRotateRequest,
+      idempotencyKey: string,
+    ) {
+      return relayMutation<AgentConnectionResponse>(
+        "rotateAgentCredential",
+        `/agent-connections/${connectionId}/credential`,
+        payload,
+        idempotencyKey,
+      );
+    },
+
+    rotateAgentSigningSecret(
+      connectionId: string,
+      payload: AgentConnectionRotateSigningSecretRequest,
+      idempotencyKey: string,
+    ) {
+      return relayMutation<AgentConnectionSigningSecretResponse>(
+        "rotateAgentSigningSecret",
+        `/agent-connections/${connectionId}/signing-secret`,
+        payload,
+        idempotencyKey,
+      );
+    },
+
+    disconnectAgentConnection(
+      connectionId: string,
+      payload: AgentConnectionDisconnectRequest,
+      idempotencyKey: string,
+    ) {
+      return relayMutation<AgentConnectionResponse>(
+        "disconnectAgentConnection",
+        `/agent-connections/${connectionId}/disconnect`,
+        payload,
+        idempotencyKey,
+      );
+    },
+
+    /**
+     * Reserves and returns the manifest to review. Nothing leaves yet, so like
+     * `testAgentConnection` this is not a `relayMutation`: `preview_agent_handoff`
+     * takes no `Idempotency-Key`. The key enters at `confirmAgentHandoff`,
+     * derived from the token this call mints.
+     */
+    previewAgentHandoff(taskId: string, payload: AgentHandoffPreviewRequest) {
+      return request<AgentManifestResponse>(`/tasks/${taskId}/agent-runs/preview`, {
+        method: "POST",
+        body: payload,
+      });
+    },
+
+    confirmAgentHandoff(
+      taskId: string,
+      payload: AgentHandoffConfirmRequest,
+      idempotencyKey: string,
+    ) {
+      return relayMutation<AgentRunResponse>(
+        "confirmAgentHandoff",
+        `/tasks/${taskId}/agent-runs`,
+        payload,
+        idempotencyKey,
+      );
+    },
+
+    listAgentRuns(taskId: string, signal?: AbortSignal) {
+      return request<AgentRunResponse[]>(`/tasks/${taskId}/agent-runs`, { signal });
+    },
+
+    getAgentRun(runId: string, signal?: AbortSignal) {
+      return request<AgentRunResponse>(`/agent-runs/${runId}`, { signal });
+    },
+
+    /**
+     * The latest run for each of the given tasks, keyed by task ID and sparse:
+     * a task with no hand-off is absent from the answer.
+     */
+    listAgentRunSummaries(taskIds: string[], signal?: AbortSignal) {
+      const query = taskIds
+        .map((taskId) => `task_id=${encodeURIComponent(taskId)}`)
+        .join("&");
+      return request<Record<string, AgentRunSummaryResponse>>(
+        `/agent-run-summaries?${query}`,
+        { signal },
+      );
+    },
+
+    replyToAgentRun(runId: string, payload: AgentReplyRequest, idempotencyKey: string) {
+      return relayMutation<AgentRunResponse>(
+        "replyToAgentRun",
+        `/agent-runs/${runId}/reply`,
+        payload,
+        idempotencyKey,
+      );
+    },
+
+    /** Cancel carries no body: the run id in the path is the whole request. */
+    cancelAgentRun(runId: string, idempotencyKey: string) {
+      return relayMutation<AgentRunResponse>(
+        "cancelAgentRun",
+        `/agent-runs/${runId}/cancel`,
+        undefined,
+        idempotencyKey,
+      );
     },
   };
 }

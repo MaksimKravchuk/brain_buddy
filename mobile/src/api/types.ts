@@ -344,3 +344,223 @@ export type BrainDumpAction =
   | "review_provisional"
   | "withdraw_consent"
   | "delete_raw_audio";
+
+// --- External agents ---
+//
+// Mirrors `backend/app/schemas/agents.py` (and the web client's agent types).
+// Two rules survive the port: no response type can carry a saved credential,
+// and connector-reported facts, BrainBuddy-derived conditions, and pending
+// commands stay in separate fields so no client blends them into an invented
+// progress number.
+
+/** What the connector disclosed. A false capability hides its control. */
+export interface AgentCapabilities {
+  progress: boolean;
+  reply: boolean;
+  cancel: boolean;
+}
+
+export type AgentConnectionStatus =
+  | "untested"
+  | "ready"
+  | "invalid_credentials"
+  | "unreachable"
+  | "unsupported"
+  | "disconnected";
+
+export type AgentDispatchState = "not_sent" | "sent" | "delivery_unconfirmed";
+
+export type AgentReportedState =
+  | "accepted"
+  | "running"
+  | "blocked"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type AgentCommandKind = "start" | "reply" | "cancel";
+export type AgentCommandDelivery = "unconfirmed" | "confirmed";
+
+export interface AgentConnectionResponse {
+  id: string;
+  name: string;
+  endpoint_url: string;
+  auth_header_name: string;
+  status: AgentConnectionStatus;
+  /** Server-derived from the clock: last contact older than the threshold. */
+  stale: boolean;
+  ready_for_handoff: boolean;
+  capabilities: AgentCapabilities;
+  last_test_error_code: string | null;
+  last_contact_at: string | null;
+  last_tested_at: string | null;
+  stale_after_seconds: number;
+  created_at: string;
+  revision: number;
+}
+
+/** The only response that ever carries the inbound signing secret — once. */
+export interface AgentConnectionCreatedResponse extends AgentConnectionResponse {
+  inbound_signing_secret: string;
+}
+
+export interface AgentConnectionCreateRequest {
+  name: string;
+  endpoint_url: string;
+  auth_header_name?: string;
+  credential: string;
+  current_password: string;
+}
+
+export interface AgentConnectionRotateRequest {
+  credential: string;
+  current_password: string;
+  expected_revision: number;
+}
+
+export interface AgentConnectionRotateSigningSecretRequest {
+  current_password: string;
+  expected_revision: number;
+}
+
+/** Returned once after replacing the inbound signing secret; never cache it. */
+export interface AgentConnectionSigningSecretResponse extends AgentConnectionResponse {
+  inbound_signing_secret: string;
+}
+
+export interface AgentConnectionDisconnectRequest {
+  current_password: string;
+  expected_revision: number;
+}
+
+export interface AgentContextItem {
+  label: string;
+  body: string;
+}
+
+export interface AgentHandoffPreviewRequest {
+  connection_id: string;
+  include_details?: boolean;
+  context_items?: AgentContextItem[];
+}
+
+export interface AgentHandoffConfirmRequest extends AgentHandoffPreviewRequest {
+  manifest_token: string;
+  current_password?: string | null;
+}
+
+export interface AgentReportingContract {
+  callback_url: string;
+  connection_id: string;
+  connection_header: "X-BrainBuddy-Connection";
+  timestamp_header: "X-BrainBuddy-Timestamp";
+  signature_header: "X-BrainBuddy-Signature";
+  timestamp_format: "ascii-base-10-unix-seconds-no-sign-space-or-leading-zero";
+  signature_algorithm: "hmac-sha256";
+  signing_bytes: "timestamp_bytes + b'.' + raw_body";
+  signature_format: "v1=<lowercase hex>";
+  body_envelope_version: string;
+}
+
+/** Exactly what will leave Brain Buddy, itemised for review. */
+export interface AgentManifestResponse {
+  token: string;
+  run_id: string;
+  task_id: string;
+  connection_id: string;
+  agent_name: string;
+  title: string;
+  details: string | null;
+  context_items: AgentContextItem[];
+  reporting: AgentReportingContract;
+  reporting_instructions: string;
+  instructions_version: string;
+  protocol_version: string;
+  destination_endpoint: string;
+  external_copy_notice: string;
+  reauthentication_required: boolean;
+}
+
+export interface AgentReplyRequest {
+  message: string;
+  expected_revision: number;
+}
+
+export interface AgentRunEvent {
+  id: string;
+  type: AgentReportedState;
+  run_version: number;
+  received_at: string;
+  summary: string | null;
+}
+
+export interface AgentRunCommand {
+  id: string;
+  kind: AgentCommandKind;
+  body: string | null;
+  delivery: AgentCommandDelivery;
+  created_at: string;
+  confirmed_at: string | null;
+}
+
+export interface AgentRunResponse {
+  id: string;
+  task_id: string;
+  connection_id: string;
+  agent_name: string;
+
+  // What Brain Buddy knows about its own outbound request.
+  dispatch_state: AgentDispatchState;
+  dispatch_error_code: string | null;
+
+  // What the connector last authenticated as, and its authoritative version.
+  reported_state: AgentReportedState | null;
+  run_version: number;
+
+  // Conditions Brain Buddy derived or the user requested — never blended into
+  // the reported state above.
+  stopped_reporting: boolean;
+  connection_disconnected: boolean;
+  reply_pending: boolean;
+  cancel_requested: boolean;
+  needs_user: boolean;
+
+  /** Already honest and user-facing: render verbatim, never recompute. */
+  primary_state_label: string;
+
+  progress_text: string | null;
+  question_text: string | null;
+  result_text: string | null;
+  result_link: string | null;
+  result_link_interactive: boolean;
+  failure_reason: string | null;
+
+  content_expired: boolean;
+  content_expires_at: string;
+  last_contact_at: string | null;
+  reporting_window_seconds: number;
+  capabilities: AgentCapabilities;
+  manifest: AgentManifestResponse | null;
+  events: AgentRunEvent[];
+  commands: AgentRunCommand[];
+  created_at: string;
+  revision: number;
+}
+
+/**
+ * The compact task list's view of a run: latest only, no timeline.
+ *
+ * Deliberately narrower than `AgentRunResponse` — a task row shows that an
+ * agent is involved and whether it needs the user, and routes to the task
+ * detail for anything more.
+ */
+export interface AgentRunSummaryResponse {
+  id: string;
+  task_id: string;
+  agent_name: string;
+  /** Server-owned honest label. Render verbatim; never re-derive or embellish. */
+  primary_state_label: string;
+  needs_user: boolean;
+  stopped_reporting: boolean;
+  last_contact_at: string | null;
+}
