@@ -14,11 +14,11 @@ those would be a second implementation of something the CLI already does.
 
 | File | Change |
 | --- | --- |
-| `allurerc.mjs` | new, ~17 lines: one rule, `maxFailures: 0` (007-FR-001) |
-| `.github/workflows/ci.yml` | `allure-report` job only: generate the single-file report, upload it, truthful comment, canary, verdict last (007-FR-002…005, 008) |
-| `scripts/allure_quality_gate_selftest.sh` + two fixtures | the canary (007-FR-005) |
-| `scripts/classify_path_risk.py` | one entry: `allurerc.mjs` is ASK (007-FR-007) |
-| `scripts/validate_ci_artifacts.py` | one function, `_quality_gate_errors`, wired into the existing `workflow` subcommand (007-FR-004, 006) |
+| `allurerc.mjs` | new, ~17 lines: one rule, `maxFailures: 0` (008-FR-001) |
+| `.github/workflows/ci.yml` | `allure-report` job only: generate the single-file report, upload it, truthful comment, canary, verdict last (008-FR-002…005, 008) |
+| `scripts/allure_quality_gate_selftest.sh` + two fixtures | the canary (008-FR-005) |
+| `scripts/classify_path_risk.py` | one entry: `allurerc.mjs` is ASK (008-FR-007) |
+| `scripts/validate_ci_artifacts.py` | one function, `_quality_gate_errors`, wired into the existing `workflow` subcommand (008-FR-004, 006) |
 | `.specify/gate-integrity.json` | re-record the classifier's hash — mechanical, required by the existing guard |
 | `docs/allure-quality-gate.md`, `CLAUDE.md` | one short doc, one pointer to it |
 
@@ -36,7 +36,7 @@ those would be a second implementation of something the CLI already does.
    an implicit lookup would turn a deleted config into a silent pass.
 4. **A canary, not a unit test of the config.** A test that asserts the file
    contains `maxFailures: 0` proves nothing about the CLI. Running the real CLI
-   over a clean and a dirty fixture proves the property itself (007-FR-005).
+   over a clean and a dirty fixture proves the property itself (008-FR-005).
 5. **ASK class only.** The config is a gate surface, so it must not land through
    automatic promotion. It is deliberately *not* added to the gate-integrity
    hash manifest: one enforcement mechanism per property.
