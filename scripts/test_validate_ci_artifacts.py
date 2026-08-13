@@ -1,3 +1,4 @@
+import importlib.util
 import subprocess
 import sys
 import tempfile
@@ -1058,6 +1059,27 @@ jobs:
         run: python3 scripts/validate_allure_taxonomy.py --path allure-results --label aggregate-allure
       - run: python3 scripts/validate_allure_taxonomy.py
       - run: npx allure generate ../allure-results -o ../allure-report
+      - run: npx allure awesome ../allure-results --single-file -o ../allure-report-single
+      - name: Upload Allure HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report-html
+          path: allure-report
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+      - name: Upload the single-file Allure report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report-single-file
+          path: allure-report-single/index.html
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+      - name: Post PR Allure report link
+        if: always() && github.event_name == 'pull_request'
+        run: echo '<!-- brain-buddy-allure-report -->'
+      - run: ./scripts/allure_quality_gate_selftest.sh
+      - name: Enforce the Allure quality gate
+        run: npx allure quality-gate ../allure-results --config ../allurerc.mjs
 """.strip(),
                 encoding="utf-8",
             )
@@ -1983,6 +2005,65 @@ class MutationScopeTests(unittest.TestCase):
         )
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
+
+
+def _load_validator():
+    spec = importlib.util.spec_from_file_location("validate_ci_artifacts", SCRIPT)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class AllureQualityGateWorkflowTests(unittest.TestCase):
+    """008-FR-004/008-FR-006: the aggregate report is graded, last, un-overridably.
+
+    Before this, `allure-report` published the aggregate and never judged it: a
+    red test reached the artifact and the run stayed green. Ordering is half the
+    property -- a verdict that ran before the uploads would take the report away
+    exactly when someone needs to read it.
+    """
+
+    def setUp(self) -> None:
+        self.quality_gate_errors = _load_validator()._quality_gate_errors
+        self.workflow = (REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+
+    def _verdict_step(self) -> tuple[str, str]:
+        """The shipped verdict step, and the workflow with it cut out."""
+
+        start = self.workflow.index("      - name: Enforce the Allure quality gate")
+        end = self.workflow.index("\n  full-ci:", start)
+        return self.workflow[start:end], self.workflow[:start] + self.workflow[end:]
+
+    def test_shipped_workflow_grades_the_aggregate(self) -> None:
+        self.assertEqual(self.quality_gate_errors(self.workflow), [])
+
+    def test_rejects_a_missing_verdict(self) -> None:
+        _, without = self._verdict_step()
+        self.assertTrue(any("quality-gate" in error for error in self.quality_gate_errors(without)))
+
+    def test_rejects_a_verdict_that_is_not_the_last_step(self) -> None:
+        trailing = self.workflow.replace(
+            "\n  full-ci:", "\n      - name: Something later\n        run: echo later\n\n  full-ci:"
+        )
+        errors = self.quality_gate_errors(trailing)
+        self.assertTrue(any("last step" in error for error in errors), errors)
+
+    def test_rejects_a_verdict_that_runs_before_the_diagnostics(self) -> None:
+        step, without = self._verdict_step()
+        anchor = without.index("      - name: Upload Allure HTML report")
+        moved = without[:anchor] + step + "\n" + without[anchor:]
+        errors = self.quality_gate_errors(moved)
+        self.assertTrue(any("before the quality-gate verdict" in error for error in errors), errors)
+
+    def test_rejects_warn_only_and_rule_replacing_overrides(self) -> None:
+        weakened = self.workflow.replace(
+            "      - name: Enforce the Allure quality gate\n",
+            "      - name: Enforce the Allure quality gate\n        continue-on-error: true\n",
+        ).replace("--config ../allurerc.mjs\n\n  full-ci:", "--config ../allurerc.mjs --max-failures 5\n\n  full-ci:")
+        errors = self.quality_gate_errors(weakened)
+        self.assertTrue(any("continue-on-error" in error for error in errors), errors)
+        self.assertTrue(any("--max-failures" in error for error in errors), errors)
 
 
 if __name__ == "__main__":
