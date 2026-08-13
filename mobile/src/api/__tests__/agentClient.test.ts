@@ -106,6 +106,31 @@ describe("agent connections", () => {
     expect(calls[0].init.method).toBe("GET");
   });
 
+  it("updates connection metadata with PUT, revision, and idempotency key", async () => {
+    const { client, calls } = makeClient([jsonResponse({ id: "conn1", revision: 5 })]);
+
+    await client.updateAgentConnection(
+      "conn1",
+      {
+        name: "Renamed agent",
+        endpoint_url: "https://next.example.test/hook",
+        current_password: "correct-horse",
+        expected_revision: 4,
+      },
+      "key-update",
+    );
+
+    expect(calls[0].url).toBe("https://example.test/api/agent-connections/conn1");
+    expect(calls[0].init.method).toBe("PUT");
+    expect(headersOf(calls[0])["Idempotency-Key"]).toBe("key-update");
+    expect(bodyOf(calls[0])).toEqual({
+      name: "Renamed agent",
+      endpoint_url: "https://next.example.test/hook",
+      current_password: "correct-horse",
+      expected_revision: 4,
+    });
+  });
+
   // `test_agent_connection` (backend/app/api/agents.py) declares no
   // `Idempotency-Key` header and passes none to the service, so a key sent here
   // would be discarded by FastAPI. Sending one anyway would advertise a dedupe

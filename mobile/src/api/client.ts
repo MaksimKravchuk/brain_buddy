@@ -20,6 +20,7 @@ import type {
   AgentConnectionRotateRequest,
   AgentConnectionRotateSigningSecretRequest,
   AgentConnectionSigningSecretResponse,
+  AgentConnectionUpdateRequest,
   AgentHandoffConfirmRequest,
   AgentHandoffPreviewRequest,
   AgentManifestResponse,
@@ -223,12 +224,13 @@ export function createApiClient(options: ApiClientOptions) {
     path: string,
     body: unknown,
     idempotencyKey: string,
+    method = "POST",
   ): Promise<T> {
     const key = requireIdempotencyKey(operation, idempotencyKey);
     const requestEpoch = getSessionEpoch?.();
     const baseUrl = normalizeBaseUrl(getBaseUrl());
     relayIntents.hold(operation, key, {
-      method: "POST",
+      method,
       baseUrl,
       requestEpoch,
       path,
@@ -236,7 +238,7 @@ export function createApiClient(options: ApiClientOptions) {
     });
     try {
       const result = await request<T>(path, {
-        method: "POST",
+        method,
         headers: { "Idempotency-Key": key },
         requestEpoch,
         baseUrl,
@@ -597,6 +599,20 @@ export function createApiClient(options: ApiClientOptions) {
 
     getAgentConnection(connectionId: string, signal?: AbortSignal) {
       return request<AgentConnectionResponse>(`/agent-connections/${connectionId}`, { signal });
+    },
+
+    updateAgentConnection(
+      connectionId: string,
+      payload: AgentConnectionUpdateRequest,
+      idempotencyKey: string,
+    ) {
+      return relayMutation<AgentConnectionResponse>(
+        "updateAgentConnection",
+        `/agent-connections/${connectionId}`,
+        payload,
+        idempotencyKey,
+        "PUT",
+      );
     },
 
     /**

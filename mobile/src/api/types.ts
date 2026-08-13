@@ -412,6 +412,13 @@ export interface AgentConnectionCreateRequest {
   current_password: string;
 }
 
+export interface AgentConnectionUpdateRequest {
+  name?: string;
+  endpoint_url?: string;
+  current_password?: string;
+  expected_revision: number;
+}
+
 export interface AgentConnectionRotateRequest {
   credential: string;
   current_password: string;

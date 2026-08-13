@@ -33,6 +33,7 @@ import type {
   AgentConnectionRotateRequest,
   AgentConnectionRotateSigningSecretRequest,
   AgentConnectionSigningSecretResponse,
+  AgentConnectionUpdateRequest,
   AgentHandoffConfirmRequest,
   AgentHandoffPreviewRequest,
   AgentReplyRequest,
@@ -674,6 +675,30 @@ export function useTestAgentConnection() {
  * the server. Minting a key here would turn that one attempt into a second
  * command on retry, so every hook requires and forwards the caller's exact key.
  */
+export function useUpdateAgentConnection() {
+  const { api, owner } = useAgentContext();
+  const invalidate = useInvalidateAgents(owner);
+  return useRelayMutation({
+    mutationKey: agentKeys.mutation(owner, "update-connection"),
+    mutationFn: (input: {
+      connectionId: string;
+      payload: AgentConnectionUpdateRequest;
+      idempotencyKey: string;
+    }) =>
+      api.updateAgentConnection(
+        input.connectionId,
+        input.payload,
+        requireIdempotencyKey("useUpdateAgentConnection", input.idempotencyKey),
+      ),
+    onSuccess: invalidate,
+    onError: (error: unknown) => {
+      if (error instanceof ApiError && error.status === 409) {
+        invalidate();
+      }
+    },
+  });
+}
+
 export function useRotateAgentCredential() {
   const { api, owner } = useAgentContext();
   const invalidate = useInvalidateAgents(owner);

@@ -50,6 +50,19 @@ let identityEpoch = 0;
 
 export type SessionStatus = "loading" | "signed-out" | "signed-in" | "signed-in-offline";
 
+export type ServerTimeAnchor = { serverTimeMs: number; monotonicTimeMs: number };
+
+export function advanceServerTimeAnchor(
+  current: ServerTimeAnchor | null,
+  incoming: ServerTimeAnchor,
+): ServerTimeAnchor {
+  if (!current) {
+    return incoming;
+  }
+  const projectedCurrent = current.serverTimeMs + (incoming.monotonicTimeMs - current.monotonicTimeMs);
+  return incoming.serverTimeMs >= projectedCurrent ? incoming : current;
+}
+
 interface SessionContextValue {
   status: SessionStatus;
   me: MeResponse | null;
@@ -63,7 +76,7 @@ interface SessionContextValue {
   /** Snapshot token captured by private async work at dispatch time. */
   getIdentityEpoch(): number;
   api: ApiClient;
-  serverTimeAnchor: { serverTimeMs: number; monotonicTimeMs: number } | null;
+  serverTimeAnchor: ServerTimeAnchor | null;
   /** True when the account's voice_brain_dump flag is on (fail closed). */
   voiceEnabled: boolean;
   /**
@@ -97,10 +110,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
   const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
   const [identity, setIdentity] = useState<PersistedIdentity | null>(null);
   const [flags, setFlags] = useState<FeatureFlagRecord | null>(null);
-  const [serverTimeAnchor, setServerTimeAnchor] = useState<{
-    serverTimeMs: number;
-    monotonicTimeMs: number;
-  } | null>(null);
+  const [serverTimeAnchor, setServerTimeAnchor] = useState<ServerTimeAnchor | null>(null);
 
   /**
    * Every identity transition bumps this. Anything that started under an
@@ -179,7 +189,9 @@ export function SessionProvider({ children }: PropsWithChildren) {
           void saveServerTime(date);
           const serverTimeMs = Date.parse(date);
           if (!Number.isNaN(serverTimeMs)) {
-            setServerTimeAnchor({ serverTimeMs, monotonicTimeMs });
+            setServerTimeAnchor((current) =>
+              advanceServerTimeAnchor(current, { serverTimeMs, monotonicTimeMs }),
+            );
           }
         },
       }),
