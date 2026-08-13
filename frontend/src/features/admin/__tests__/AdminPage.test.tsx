@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdminAccountResponse } from "../../../api/adminTypes";
 import { ApiError, apiClient } from "../../../api/client";
 import { useAuthStore } from "../../../stores/authStore";
+import { bindAdminSession } from "../../../api/adminHooks";
 import { AdminPage } from "../AdminPage";
 
 const account: AdminAccountResponse = {
@@ -522,5 +523,68 @@ describe("AdminPage input classification and partial failures (009-SC-001, 009-S
     expect(
       within(screen.getByRole("dialog")).getByText(/this is your own account/i)
     ).toBeInTheDocument();
+  });
+});
+
+describe("AdminPage capability isolation across sessions (009-FR-005)", () => {
+  beforeEach(() => {
+    mockTaskShellQueries();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function renderPageWith(client: QueryClient) {
+    return render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/admin"]}>
+          <Routes>
+            <Route path="/admin" element={<AdminPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+  }
+
+  it("009-FR-005: a non-operator signing in after an operator sees denied, never the cached form", async () => {
+    const spy = vi
+      .spyOn(apiClient, "getAdminStatus")
+      .mockResolvedValueOnce({ is_operator: true })
+      .mockRejectedValueOnce(new ApiError("Forbidden", 403, null));
+    // One process-global cache, exactly as main.tsx wires it.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const unbind = bindAdminSession(client);
+
+    act(() => {
+      useAuthStore.setState({
+        user: { id: "operator-1", email: "operator@example.com" },
+        status: "authed",
+        deletionCancelledNotice: false
+      });
+    });
+    const operatorView = renderPageWith(client);
+    expect(await screen.findByLabelText(/account id or email/i)).toBeInTheDocument();
+    operatorView.unmount();
+
+    await act(async () => {
+      await useAuthStore.getState().logout();
+    });
+    act(() => {
+      useAuthStore.setState({
+        user: { id: "member-2", email: "member@example.com" },
+        status: "authed",
+        deletionCancelledNotice: false
+      });
+    });
+
+    renderPageWith(client);
+
+    // No lookup control may exist at any point for the new session.
+    expect(screen.queryByLabelText(/account id or email/i)).not.toBeInTheDocument();
+    expect(await screen.findByText("Access denied")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/account id or email/i)).not.toBeInTheDocument();
+    expect(spy).toHaveBeenCalledTimes(2);
+    unbind();
   });
 });
