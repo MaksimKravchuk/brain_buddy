@@ -37,6 +37,7 @@ import type { DecisionReason } from "@/features/tasks/conflictDecision";
 import { ConflictSheet } from "@/features/tasks/ConflictSheet";
 import type { NamedEntity } from "@/features/tasks/matchExisting";
 import { ProjectPicker } from "@/features/tasks/ProjectPicker";
+import { TaskAgentSection } from "@/features/agents/TaskAgentSection";
 import { ReopenSheet } from "@/features/tasks/ReopenSheet";
 import { StatePicker } from "@/features/tasks/StatePicker";
 import { TagPicker } from "@/features/tasks/TagPicker";
@@ -143,7 +144,15 @@ export default function TaskDetailScreen() {
   const { projectName, tagNames } = useClassificationNames();
   const projects = useProjects();
   const tags = useTags();
-  const { me, api, status, accountId, serverUrl, taskClassificationEnabled } = useSession();
+  const {
+    me,
+    api,
+    status,
+    accountId,
+    serverUrl,
+    taskClassificationEnabled,
+    agentRelayEnabled,
+  } = useSession();
 
   const task = query.data;
 
@@ -765,6 +774,13 @@ export default function TaskDetailScreen() {
             </BBText>
           </Pressable>
         ) : null}
+
+        <TaskAgentSection
+          task={task}
+          projectName={project ?? null}
+          tagNames={taskTags}
+          enabled={agentRelayEnabled}
+        />
 
         {/* Subtasks */}
         <View style={styles.field}>

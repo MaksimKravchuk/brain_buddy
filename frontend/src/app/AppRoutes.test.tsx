@@ -249,6 +249,19 @@ describe("AppRoutes", () => {
     });
   });
 
+  it("preserves owner connection reads when the external-agent relay rollout is off", async () => {
+    renderRoutes("/settings/agents");
+
+    expect(await screen.findByRole("heading", { name: "Connected agents" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining("/agent-connections"),
+        expect.objectContaining({ method: "GET" })
+      );
+    });
+    expect(screen.queryByRole("form", { name: /add an agent/i })).not.toBeInTheDocument();
+  });
+
   it("keeps direct CRT routes inert until the feature is available", async () => {
     renderRoutes("/crt/demo-tree");
 

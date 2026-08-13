@@ -22,24 +22,27 @@ _VOICE_SWEEP_INTERVAL_SECONDS = float(
 )
 
 
-def _run_maintenance_sweep(container: Container) -> None:
-    """One pass of the backend's periodic maintenance duties.
+def _run_privacy_maintenance_sweep(container: Container) -> tuple[int, int]:
+    """Purge due accounts and relay content behind independent error boundaries."""
 
-    Recovers due/expired provider-run leases, advances due provider runs,
-    resumes operations frozen mid-commit, purges raw audio and uncommitted
-    working artifacts past their configured retention, then hard-deletes
-    accounts whose deletion grace period has elapsed. A single bad pass must
-    never kill the loop that calls this.
-    """
-
-    # Account purging runs under its own error boundary, before and
-    # independent of the voice duties: a persistently failing voice
-    # operation must never starve GDPR erasure (and vice versa).
     purged_accounts = 0
     try:
         purged_accounts = container.account_service.purge_due_accounts()
     except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
         logger.exception("Account purge sweep iteration failed")
+
+    expired_agent_runs = 0
+    try:
+        expired_agent_runs = container.agent_relay_service.run_retention_sweep()
+    except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
+        logger.exception("External-agent retention sweep iteration failed")
+    return purged_accounts, expired_agent_runs
+
+
+def _run_voice_maintenance_sweep(
+    container: Container,
+) -> tuple[int, int, int, int, int]:
+    """Run voice recovery and retention without affecting privacy scheduling."""
 
     try:
         recovered_leases = (
@@ -57,7 +60,34 @@ def _run_maintenance_sweep(container: Container) -> None:
         )
     except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
         logger.exception("Voice maintenance sweep iteration failed")
-        return
+        return (0, 0, 0, 0, 0)
+    return (
+        recovered_leases,
+        advanced_runs,
+        resumed_commits,
+        purged_raw_audio,
+        purged_working_artifacts,
+    )
+
+
+def _run_maintenance_sweep(container: Container) -> None:
+    """One pass of the backend's periodic maintenance duties.
+
+    Recovers due/expired provider-run leases, advances due provider runs,
+    resumes operations frozen mid-commit, purges raw audio and uncommitted
+    working artifacts past their configured retention, then hard-deletes
+    accounts whose deletion grace period has elapsed. A single bad pass must
+    never kill the loop that calls this.
+    """
+
+    purged_accounts, expired_agent_runs = _run_privacy_maintenance_sweep(container)
+    (
+        recovered_leases,
+        advanced_runs,
+        resumed_commits,
+        purged_raw_audio,
+        purged_working_artifacts,
+    ) = _run_voice_maintenance_sweep(container)
     if (
         recovered_leases
         or advanced_runs
@@ -65,17 +95,19 @@ def _run_maintenance_sweep(container: Container) -> None:
         or purged_raw_audio
         or purged_working_artifacts
         or purged_accounts
+        or expired_agent_runs
     ):
         logger.info(
             "Maintenance sweep: recovered %s lease(s), resumed %s commit(s), "
             "purged %s raw-audio, %s working-artifact operation(s), advanced "
-            "%s provider run(s), purged %s account(s)",
+            "%s provider run(s), purged %s account(s), expired %s agent run(s)",
             recovered_leases,
             resumed_commits,
             purged_raw_audio,
             purged_working_artifacts,
             advanced_runs,
             purged_accounts,
+            expired_agent_runs,
         )
 
 
@@ -95,9 +127,25 @@ def _start_voice_sweep_thread(
             wake_event.clear()
             if stop_event.is_set():
                 break
-            _run_maintenance_sweep(container)
+            _run_voice_maintenance_sweep(container)
 
     thread = threading.Thread(target=_loop, name="voice-operation-sweep", daemon=True)
+    thread.start()
+    return thread
+
+
+def _start_privacy_maintenance_thread(
+    container: Container, stop_event: threading.Event, *, interval_seconds: float
+) -> threading.Thread:
+    """Start the privacy scheduler on an interval independent from voice work."""
+
+    def _loop() -> None:
+        while not stop_event.wait(interval_seconds):
+            _run_privacy_maintenance_sweep(container)
+
+    thread = threading.Thread(
+        target=_loop, name="privacy-maintenance-sweep", daemon=True
+    )
     thread.start()
     return thread
 
@@ -141,16 +189,20 @@ def create_app() -> FastAPI:
 
     app.state.voice_sweep_stop_event = threading.Event()
     app.state.voice_sweep_wake_event = threading.Event()
+    app.state.privacy_maintenance_stop_event = threading.Event()
     app.state.container.voice_brain_dump_service.runner_wake = (
         app.state.voice_sweep_wake_event.set
     )
     app.state.voice_sweep_thread = None
+    app.state.privacy_maintenance_thread = None
     enable_test_voice_sweep = (
         os.getenv("BRAIN_BUDDY_ENABLE_VOICE_SWEEP_IN_TEST", "").strip() == "1"
     )
-    if _VOICE_SWEEP_INTERVAL_SECONDS > 0 and (
+    background_maintenance_enabled = (
         config.environment is not AppEnvironment.TEST or enable_test_voice_sweep
-    ):
+    )
+
+    if _VOICE_SWEEP_INTERVAL_SECONDS > 0 and background_maintenance_enabled:
         # A real periodic sweep thread is only started outside tests: the
         # test suite builds many short-lived apps/repositories per process,
         # and TaskRepository.command_lock is a process-wide class lock, so a
@@ -162,13 +214,27 @@ def create_app() -> FastAPI:
             app.state.voice_sweep_stop_event,
             app.state.voice_sweep_wake_event,
         )
+    if background_maintenance_enabled:
+        app.state.privacy_maintenance_thread = _start_privacy_maintenance_thread(
+            app.state.container,
+            app.state.privacy_maintenance_stop_event,
+            interval_seconds=config.agent_relay.retention_sweep_interval_seconds,
+        )
+
+    if (
+        app.state.voice_sweep_thread is not None
+        or app.state.privacy_maintenance_thread is not None
+    ):
 
         @app.on_event("shutdown")
-        def _stop_voice_sweep() -> None:
+        def _stop_maintenance_sweeps() -> None:
             app.state.voice_sweep_stop_event.set()
             app.state.voice_sweep_wake_event.set()
+            app.state.privacy_maintenance_stop_event.set()
             if app.state.voice_sweep_thread is not None:
                 app.state.voice_sweep_thread.join(timeout=5)
+            if app.state.privacy_maintenance_thread is not None:
+                app.state.privacy_maintenance_thread.join(timeout=5)
 
     app.add_middleware(CorrelationIdMiddleware)
     register_exception_handlers(app)

@@ -48,6 +48,7 @@ ASK_PATHS = (
     ".dockerignore",
     "deploy/nginx.conf",
     ".env.example",
+    "mobile/eas.json",
     # Auth / session / user / invite code
     "backend/app/api/auth.py",
     "backend/app/schemas/auth.py",
@@ -154,6 +155,11 @@ class ClassifyPathTest(unittest.TestCase):
             with self.subTest(path=path):
                 classification, _ = classify_path(path)
                 self.assertEqual(classification, SHIP)
+
+    def test_eas_release_configuration_is_ask(self) -> None:
+        classification, reason = classify_path("mobile/eas.json")
+        self.assertEqual(classification, ASK)
+        self.assertIn("mobile release", reason)
 
     def test_token_matching_is_exact_not_substring(self) -> None:
         """'useTreeStore' must not match 'user', 'usership' must not match, etc."""

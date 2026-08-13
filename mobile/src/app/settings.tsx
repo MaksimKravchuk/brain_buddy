@@ -29,8 +29,16 @@ interface PendingTransition {
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { me, status, accountId, serverUrl, updateServerUrl, signOut, voiceEnabled } =
-    useSession();
+  const {
+    me,
+    status,
+    accountId,
+    serverUrl,
+    updateServerUrl,
+    signOut,
+    voiceEnabled,
+    agentRelayEnabled,
+  } = useSession();
   const [serverDraft, setServerDraft] = useState(serverUrl);
   const [saved, setSaved] = useState(false);
   const [pending, setPending] = useState<PendingTransition | null>(null);
@@ -122,6 +130,18 @@ export default function SettingsScreen() {
               ? "Voice brain dump is enabled for this account."
               : "Voice brain dump is not enabled for this account."}
           </BBText>
+        </View>
+
+        <BBText variant="label">External agents</BBText>
+        <View style={styles.card}>
+          <BBText variant="caption" color={colors.fg5}>
+            {agentRelayEnabled
+              ? "Manage agents you run and the credentials Brain Buddy uses to contact them."
+              : "Relay rollout is off. Existing connection and run history remains available, but new relay mutations are disabled."}
+          </BBText>
+          <Button variant="secondary" onPress={() => router.push("/agents")}>
+            Connected agents
+          </Button>
         </View>
 
         <BBText variant="label">Server</BBText>
