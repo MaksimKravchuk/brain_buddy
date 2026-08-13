@@ -32,7 +32,7 @@ heavier, general-purpose audit platform the spec explicitly rules out).
 | `backend/app/container.py` | wire `AdminService` into `Container` |
 | `backend/app/main.py` | mount the admin router at `{api_prefix}/admin` |
 | `frontend/src/api/adminTypes.ts`, `frontend/src/api/client.ts` | typed request/response, `adminLookupAccount` / `adminRevokeSessions` methods |
-| `frontend/src/features/admin/AdminPortalPage.tsx` | new page: lookup form, found/not-found/denied states, confirm-then-revoke dialog (reuses `Overlay`, `Button`, `Field`, `Feedback`, `SectionCard`) (009-FR-005, 006) |
+| `frontend/src/features/admin/AdminPage.tsx` | new page: lookup form, found/not-found/denied states, confirm-then-revoke dialog (reuses `Overlay`, `Button`, `Field`, `Feedback`, `SectionCard`) (009-FR-005, 006) |
 | `frontend/src/app/AppRoutes.tsx` | new `/admin` route behind `ProtectedRoute` |
 | `.env.example` | document `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS` |
 

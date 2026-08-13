@@ -41,8 +41,21 @@ class AdminRevokeSessionsResponse(StrictBaseModel):
     revoked_count: int = Field(ge=0, description="Number of sessions revoked.")
 
 
+class AdminStatusResponse(StrictBaseModel):
+    """Server-issued operator capability check (009-FR-002).
+
+    Only ever reachable after `require_operator` succeeds, so `is_operator`
+    is always `true`; a caller who is not an operator gets 401/403 instead
+    of a response body. Separate from the shared signup/login/me payload,
+    which stays byte-shape compatible with no admin field.
+    """
+
+    is_operator: bool = Field(description="Always true when this response is returned.")
+
+
 __all__ = [
     "AdminAccountLookupRequest",
     "AdminAccountResponse",
     "AdminRevokeSessionsResponse",
+    "AdminStatusResponse",
 ]

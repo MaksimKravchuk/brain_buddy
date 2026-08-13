@@ -32,13 +32,13 @@ Vertical RED → GREEN. See [plan.md](plan.md) for why each exists.
 
 ## Phase 3 — frontend portal
 
-- [x] **T006** RED: `frontend/src/features/admin/__tests__/AdminPortalPage.test.tsx`
+- [x] **T006** RED: `frontend/src/features/admin/__tests__/AdminPage.test.tsx`
   — renders the lookup form, shows found/not-found/denied states, requires
   the explicit confirm step before calling revoke, shows the revoked count.
   *(009-FR-005, 006)*
 - [x] **T007** GREEN: `frontend/src/api/adminTypes.ts`, `adminLookupAccount`/
   `adminRevokeSessions` in `frontend/src/api/client.ts`,
-  `frontend/src/features/admin/AdminPortalPage.tsx`, `/admin` route in
+  `frontend/src/features/admin/AdminPage.tsx`, `/admin` route in
   `frontend/src/app/AppRoutes.tsx`. Make T006 pass.
 
 ## Phase 4 — docs and verification

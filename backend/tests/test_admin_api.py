@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Generator
 from pathlib import Path
 
@@ -185,26 +186,6 @@ def test_009_FR_007_revoke_sessions_unknown_account_is_404(admin_world) -> None:
     assert resp.status_code == 404
 
 
-def test_009_FR_009_revoke_sessions_rejects_cross_origin_request(
-    admin_world,
-) -> None:
-    operator_client, _operator_me, _member_client, member_me = admin_world
-    resp = operator_client.post(
-        f"/api/admin/accounts/{member_me['id']}/revoke-sessions",
-        headers={"Origin": "https://attacker.example"},
-    )
-    assert resp.status_code == 403
-
-
-def test_009_FR_009_revoke_sessions_allows_matching_origin(admin_world) -> None:
-    operator_client, _operator_me, _member_client, member_me = admin_world
-    resp = operator_client.post(
-        f"/api/admin/accounts/{member_me['id']}/revoke-sessions",
-        headers={"Origin": "http://testserver"},
-    )
-    assert resp.status_code == 200
-
-
 def test_009_FR_007_revoke_sessions_is_idempotent_on_zero_active_sessions(
     admin_world,
 ) -> None:
@@ -245,3 +226,60 @@ def test_009_FR_010_existing_auth_me_is_unaffected_by_this_feature(
     resp = operator_client.get("/api/auth/me")
     assert resp.status_code == 200
     assert resp.json()["id"] == operator_me["id"]
+
+
+def test_009_FR_002_status_operator_sees_is_operator_true(admin_world) -> None:
+    operator_client, *_ = admin_world
+    resp = operator_client.get("/api/admin/status")
+    assert resp.status_code == 200
+    assert resp.json() == {"is_operator": True}
+
+
+def test_009_FR_002_status_unauthenticated_is_401(
+    anonymous_api_client: TestClient,
+) -> None:
+    resp = anonymous_api_client.get("/api/admin/status")
+    assert resp.status_code == 401
+
+
+def test_009_FR_002_status_non_operator_is_403(admin_world) -> None:
+    _operator_client, _operator_me, member_client, _member_me = admin_world
+    resp = member_client.get("/api/admin/status")
+    assert resp.status_code == 403
+    assert "is_operator" not in resp.json()
+
+
+def test_009_FR_008_status_401_log_carries_no_token_cookie_or_email(
+    anonymous_api_client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A denied, unauthenticated call must not leak the bogus cookie it was denied for (009-SC-004)."""
+
+    bogus_token = (
+        "not-a-real-session-token"  # noqa: S105 - test fixture, not a real secret
+    )
+    with caplog.at_level(logging.WARNING, logger="app.api.dependencies"):
+        resp = anonymous_api_client.get(
+            "/api/admin/status",
+            cookies={"brainbuddy_session": bogus_token},
+        )
+    assert resp.status_code == 401
+
+    joined = "\n".join(record.getMessage() for record in caplog.records)
+    assert bogus_token not in joined
+    assert "@" not in joined
+
+
+def test_009_FR_008_status_403_log_has_account_id_but_not_email(
+    admin_world, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A denied, authenticated non-operator's id is loggable; their email is not (009-SC-004)."""
+
+    _operator_client, _operator_me, member_client, member_me = admin_world
+
+    with caplog.at_level(logging.WARNING, logger="app.api.dependencies"):
+        resp = member_client.get("/api/admin/status")
+    assert resp.status_code == 403
+
+    joined = "\n".join(record.getMessage() for record in caplog.records)
+    assert member_me["id"] in joined
+    assert member_me["email"] not in joined

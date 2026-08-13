@@ -40,6 +40,7 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
         ("/api/auth/logout", "post"): set(),
         ("/api/auth/me", "get"): {"401"},
         ("/api/auth/signup", "post"): {"400", "409", "422"},
+        ("/api/admin/status", "get"): {"401", "403"},
         ("/api/admin/accounts/lookup", "post"): {"401", "403", "404", "422"},
         ("/api/admin/accounts/{account_id}/revoke-sessions", "post"): {
             "401",

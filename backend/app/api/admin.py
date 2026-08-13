@@ -3,9 +3,9 @@
 Every route requires `require_operator` — a valid session AND allow-list
 membership — checked before any account lookup or mutation runs, so a
 denial never varies with whether the target account exists (009-FR-002).
-The mutation additionally requires `require_same_origin`, an explicit check
-on top of the repository's existing `SameSite=Lax` session-cookie posture
-(009-FR-009).
+The mutation relies on the repository's existing `SameSite=Lax`
+session-cookie posture like every other mutating route (009-FR-009); no
+additional origin check is added.
 """
 
 from __future__ import annotations
@@ -16,12 +16,13 @@ from app.schemas.admin import (
     AdminAccountLookupRequest,
     AdminAccountResponse,
     AdminRevokeSessionsResponse,
+    AdminStatusResponse,
 )
 from app.schemas.auth import User
 from app.services import AdminService
 
 from .contracts import error_responses
-from .dependencies import get_admin_service, require_operator, require_same_origin
+from .dependencies import get_admin_service, require_operator
 
 router = APIRouter(tags=["admin"])
 
@@ -33,6 +34,22 @@ def _account_response(user: User) -> AdminAccountResponse:
         display_name=user.display_name,
         deletion_requested=user.deletion_requested_at is not None,
     )
+
+
+@router.get(
+    "/status",
+    response_model=AdminStatusResponse,
+    responses=error_responses(401, 403),
+)
+def admin_status(_operator: User = Depends(require_operator)) -> AdminStatusResponse:
+    """Server-issued operator capability check for the frontend (009-FR-002).
+
+    Kept off the shared signup/login/me payload so a non-operator's response
+    shape never signals the allow-list's existence; a caller only ever learns
+    `is_operator` by reaching this route, which itself requires being one.
+    """
+
+    return AdminStatusResponse(is_operator=True)
 
 
 @router.post(
@@ -63,7 +80,6 @@ def lookup_account(
 def revoke_sessions(
     account_id: str,
     operator: User = Depends(require_operator),
-    _same_origin: None = Depends(require_same_origin),
     admin_service: AdminService = Depends(get_admin_service),
 ) -> AdminRevokeSessionsResponse:
     revoked = admin_service.revoke_sessions(

@@ -25,6 +25,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentType, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
+import { useAdminStatus } from "../../api/adminHooks";
 import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts } from "../../api/taskTypes";
 import { useAuthStore } from "../../stores/authStore";
 import { ShellToastContext } from "./shellToast";
@@ -196,6 +197,8 @@ function AccountMenu(): React.JSX.Element {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
+  const adminStatus = useAdminStatus();
+  const isOperator = adminStatus.isSuccess && adminStatus.data?.is_operator === true;
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const initial = (user?.display_name?.[0] ?? user?.email?.[0])?.toUpperCase() ?? "M";
@@ -287,7 +290,7 @@ function AccountMenu(): React.JSX.Element {
           >
             <FileText className="h-4 w-4 text-slate-500" aria-hidden /> Privacy policy
           </button>
-          {user?.is_operator === true ? (
+          {isOperator ? (
             <button
               type="button"
               role="menuitem"

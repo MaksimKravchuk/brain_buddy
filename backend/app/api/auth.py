@@ -5,12 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from app.api.contracts import error_responses
-from app.api.dependencies import (
-    get_admin_service,
-    get_auth_service,
-    get_config_dep,
-    get_current_user,
-)
+from app.api.dependencies import get_auth_service, get_config_dep, get_current_user
 from app.core.config import AppConfig
 from app.core.rate_limit import login_rate_limiter
 from app.exceptions import ConflictError
@@ -20,12 +15,7 @@ from app.schemas.auth import (
     SignupRequest,
     User,
 )
-from app.services import (
-    AdminService,
-    AuthService,
-    InvalidCredentialsError,
-    InvalidInviteError,
-)
+from app.services import AuthService, InvalidCredentialsError, InvalidInviteError
 
 router = APIRouter(tags=["auth"])
 
@@ -60,7 +50,6 @@ def _clear_session_cookie(response: Response, config: AppConfig) -> None:
 def _me_response(
     user: User,
     config: AppConfig,
-    admin_service: AdminService,
     *,
     deletion_cancelled: bool = False,
 ) -> MeResponse:
@@ -70,7 +59,6 @@ def _me_response(
         display_name=user.display_name,
         deletion_cancelled=deletion_cancelled,
         feature_flags=config.feature_flags.effective_flags(user.email),
-        is_operator=admin_service.is_operator(user.email),
     )
 
 
@@ -85,7 +73,6 @@ def signup(
     response: Response,
     auth_service: AuthService = Depends(get_auth_service),
     config: AppConfig = Depends(get_config_dep),
-    admin_service: AdminService = Depends(get_admin_service),
 ) -> MeResponse:
     try:
         user, raw_token = auth_service.signup(
@@ -104,7 +91,7 @@ def signup(
         ) from exc
 
     _set_session_cookie(response, raw_token, config)
-    return _me_response(user, config, admin_service)
+    return _me_response(user, config)
 
 
 @router.post(
@@ -116,7 +103,6 @@ def login(
     response: Response,
     auth_service: AuthService = Depends(get_auth_service),
     config: AppConfig = Depends(get_config_dep),
-    admin_service: AdminService = Depends(get_admin_service),
 ) -> MeResponse:
     if not login_rate_limiter.check(_client_ip(request)):
         raise HTTPException(
@@ -133,9 +119,7 @@ def login(
         ) from exc
 
     _set_session_cookie(response, raw_token, config)
-    return _me_response(
-        user, config, admin_service, deletion_cancelled=deletion_cancelled
-    )
+    return _me_response(user, config, deletion_cancelled=deletion_cancelled)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -155,6 +139,5 @@ def logout(
 def me(
     current_user: User = Depends(get_current_user),
     config: AppConfig = Depends(get_config_dep),
-    admin_service: AdminService = Depends(get_admin_service),
 ) -> MeResponse:
-    return _me_response(current_user, config, admin_service)
+    return _me_response(current_user, config)

@@ -32,7 +32,8 @@ import type {
 import type {
   AdminAccountLookupRequest,
   AdminAccountResponse,
-  AdminRevokeSessionsResponse
+  AdminRevokeSessionsResponse,
+  AdminStatusResponse
 } from "./adminTypes";
 import type {
   AgentConnectionCreateRequest,
@@ -576,6 +577,10 @@ export const apiClient = {
 
   // Minimum admin portal (009): exact account lookup and session revoke,
   // gated server-side on the operator allow-list.
+  getAdminStatus(signal?: AbortSignal) {
+    return request<AdminStatusResponse>("/admin/status", { signal });
+  },
+
   lookupAdminAccount(payload: AdminAccountLookupRequest) {
     return request<AdminAccountResponse>("/admin/accounts/lookup", { method: "POST", body: payload });
   },
