@@ -325,17 +325,26 @@ jobs:
   mutation-allure-report:
     name: Mutation Allure evidence report
     runs-on: ubuntu-latest
-    needs: deterministic-core-mutation
+    needs:
+      - deterministic-core-mutation
+      - frontend-observed-mutation
+      - mobile-observed-mutation
     if: always()
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # By pattern, not by name. This downloaded `mutation-evidence-allure-results`
+      # alone while the workflow uploads three — the frontend and mobile
+      # campaigns' evidence was produced on every run and reached no report.
+      # Same discovery failure as the aggregate in `ci.yml`, in the workflow
+      # whose entire output is the report.
       - name: Download report-only Allure evidence
         uses: actions/download-artifact@v8
         with:
-          name: mutation-evidence-allure-results
+          pattern: "*-allure-results"
           path: mutation-allure-results
+          merge-multiple: true
 
       - name: Set up Node.js
         uses: actions/setup-node@v7

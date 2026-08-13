@@ -780,24 +780,34 @@ jobs:
       # Written here rather than in the verdict job so a failing gate still
       # ships its evidence, and tolerant of a campaign that died before writing
       # any: a run that crashed is exactly when someone needs the artifacts.
+      #
+      # The directory and the artifact are both named `*-allure-results` so the
+      # aggregate below actually discovers them. They were called
+      # `mutation-gate-evidence`, which produced a valid Allure result that no
+      # report ever contained: the aggregate downloads by `*-allure-results`
+      # pattern, and this is the BLOCKING gate — the one result a person most
+      # needs in the report was the one silently missing from it. The two `.txt`
+      # files stay in the same directory because the result declares them as
+      # attachments by bare filename, which Allure resolves relative to the
+      # results directory.
       - name: Create blocking-gate Allure evidence
         if: always() && env.RUN == 'true'
         run: |
-          mkdir -p backend/mutation-gate-evidence
+          mkdir -p backend/mutation-gate-allure-results
           for evidence in mutation-summary.txt mutation-survivors.txt; do
             if [ -f "backend/mutation-artifacts/${evidence}" ]; then
-              cp "backend/mutation-artifacts/${evidence}" backend/mutation-gate-evidence/
+              cp "backend/mutation-artifacts/${evidence}" backend/mutation-gate-allure-results/
             else
               echo "the campaign did not produce ${evidence}; see the raw mutmut state" \
-                > "backend/mutation-gate-evidence/${evidence}"
+                > "backend/mutation-gate-allure-results/${evidence}"
             fi
           done
           python3 scripts/create_mutation_allure_evidence.py \
             --mode blocking-gate \
             --scope-label backend \
-            --summary backend/mutation-gate-evidence/mutation-summary.txt \
-            --survivors backend/mutation-gate-evidence/mutation-survivors.txt \
-            --output backend/mutation-gate-evidence/mutation-gate-result.json
+            --summary backend/mutation-gate-allure-results/mutation-summary.txt \
+            --survivors backend/mutation-gate-allure-results/mutation-survivors.txt \
+            --output backend/mutation-gate-allure-results/mutation-gate-result.json
 
       - name: Upload raw mutmut state
         if: always() && env.RUN == 'true'
@@ -821,8 +831,8 @@ jobs:
         if: always() && env.RUN == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: mutation-gate-evidence
-          path: backend/mutation-gate-evidence
+          name: mutation-gate-allure-results
+          path: backend/mutation-gate-allure-results
           if-no-files-found: error
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 

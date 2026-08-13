@@ -482,6 +482,81 @@ export default defineConfig({
                     result.stderr,
                 )
 
+    def test_workflow_rejects_an_allure_producer_the_aggregate_cannot_discover(
+        self,
+    ) -> None:
+        """Naming the uploading lanes is necessary and not sufficient.
+
+        The predicate enumerates lanes that upload `*-allure-results`. By
+        construction that can only ever name artifacts already called the right
+        thing, so a producer whose artifact is named anything else is invisible
+        to it: the invariant stays green while the report silently omits the
+        result. The list cannot catch the bug the list has, twice, been wrong
+        about.
+
+        `mutation-head` was exactly that. It writes a real Allure result for the
+        **blocking** mutation gate and uploaded it as `mutation-gate-evidence`,
+        which the aggregate's `*-allure-results` pattern does not match — so the
+        one result a person most needs when the gate fails was the one no report
+        ever contained, and no invariant noticed.
+
+        This asks the question from the producing end instead: every
+        `create_mutation_allure_evidence.py --output` directory must be uploaded
+        under a matching name. A new producer is caught by construction.
+        """
+        workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+        text = workflow.read_text(encoding="utf-8")
+
+        # The premise. If the blocking gate stops writing Allure evidence this
+        # test should fail loudly rather than quietly assert nothing.
+        self.assertTrue(
+            "create_mutation_allure_evidence.py" in text,
+            "the blocking mutation gate must still write Allure evidence",
+        )
+        self.assertTrue(
+            "          name: mutation-gate-allure-results\n" in text,
+            "the blocking gate's evidence must upload under a discoverable name",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # The literal pre-fix name: a valid Allure result no report can find.
+            undiscoverable = Path(tmp) / "ci-undiscoverable.yml"
+            undiscoverable.write_text(
+                text.replace(
+                    "          name: mutation-gate-allure-results\n",
+                    "          name: mutation-gate-evidence\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            renamed = self.run_validator("workflow", "--ci", str(undiscoverable))
+
+            # And the other shape: the result is written somewhere nothing
+            # uploads at all.
+            unuploaded = Path(tmp) / "ci-unuploaded.yml"
+            unuploaded.write_text(
+                text.replace(
+                    "          path: backend/mutation-gate-allure-results\n",
+                    "          path: backend/mutation-artifacts\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            missing = self.run_validator("workflow", "--ci", str(unuploaded))
+
+        self.assertNotEqual(
+            renamed.returncode,
+            0,
+            "an Allure result uploaded under a name the aggregate cannot discover "
+            "must fail validation",
+        )
+        self.assertIn("does not match", renamed.stderr)
+        self.assertNotEqual(
+            missing.returncode,
+            0,
+            "an Allure result written to a directory nothing uploads must fail",
+        )
+
     def test_workflow_rejects_an_aggregation_predicate_that_ignores_the_e2e_lane(
         self,
     ) -> None:
@@ -875,7 +950,12 @@ jobs:
         if: always() && env.RUN == 'true'
         run: |
           python3 scripts/create_mutation_allure_evidence.py --mode blocking-gate \
-            --summary s.txt --survivors v.txt --output r.json
+            --summary e/s.txt --survivors e/v.txt --output e/r.json
+      - name: Upload blocking-gate Allure evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-allure-results
+          path: e
   mutation-gate:
     name: Backend mutation gate
     env:

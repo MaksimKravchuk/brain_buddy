@@ -825,6 +825,51 @@ def _missing_allure_aggregation_errors(workflow_text: str) -> list[str]:
     return errors
 
 
+def _undiscoverable_allure_producer_errors(workflow_text: str) -> list[str]:
+    """Every Allure result a job writes must be uploaded where the aggregate looks.
+
+    The predicate above enumerates the lanes that upload. That is necessary and
+    not sufficient, and the difference is the whole reason this function exists:
+    an enumeration can only name artifacts that are *already* called
+    ``*-allure-results``, so a producer whose artifact is named anything else is
+    invisible to it — the invariant stays green while the report silently omits
+    the result. That is not hypothetical. ``mutation-head`` wrote a valid Allure
+    result for the **blocking** mutation gate and uploaded it as
+    ``mutation-gate-evidence``; the aggregate downloads by ``*-allure-results``
+    pattern, so the one result a person most needs when the gate fails was the
+    one no report ever contained.
+
+    So this asks the question from the producing end instead: for every
+    ``create_mutation_allure_evidence.py --output <dir>/<file>`` in the
+    workflow, is ``<dir>`` uploaded under a name the aggregate's pattern
+    matches? A new producer is then caught by construction rather than by
+    somebody remembering to extend a list.
+    """
+    errors: list[str] = []
+    outputs = re.findall(
+        r"create_mutation_allure_evidence\.py[^\n]*(?:\\\s*\n[^\n]*)*?--output\s+(\S+)",
+        workflow_text,
+    )
+    for output in outputs:
+        directory = output.rsplit("/", 1)[0] if "/" in output else output
+        uploaded = re.search(
+            r"name:\s*(\S+)\n\s*path:\s*" + re.escape(directory) + r"\s*\n",
+            workflow_text,
+        )
+        if uploaded is None:
+            errors.append(
+                "an Allure result is written to "
+                f"{directory} but no artifact uploads that directory"
+            )
+        elif not uploaded.group(1).endswith("-allure-results"):
+            errors.append(
+                f"the Allure result written to {directory} is uploaded as "
+                f"'{uploaded.group(1)}', which the aggregate's '*-allure-results' "
+                "pattern does not match, so no report will ever contain it"
+            )
+    return errors
+
+
 def validate_workflow(
     ci: Path, disallowed_workflows: list[Path], frontend_vite_config: Path | None
 ) -> int:
@@ -838,6 +883,7 @@ def validate_workflow(
         errors.extend(_missing_frontend_ci_errors(workflow_text))
         errors.extend(_missing_e2e_ci_errors(workflow_text))
         errors.extend(_missing_allure_aggregation_errors(workflow_text))
+        errors.extend(_undiscoverable_allure_producer_errors(workflow_text))
         errors.extend(_path_filter_errors(workflow_text))
         errors.extend(_job_graph_errors(workflow_text))
         errors.extend(_mutation_gate_errors(workflow_text))
