@@ -265,7 +265,7 @@ class CheckCommandTests(unittest.TestCase):
             self.assertEqual(main(["check", "--stats", str(head)]), 0)
 
 
-#: An observed-tier dump: the enforced modules plus the two ADR-0011 admitted
+#: An observed-tier dump: the enforced modules plus the two ADR-0016 admitted
 #: under calibration, which is exactly the shape the nightly produces.
 OBSERVED_DUMP = "\n".join(
     [

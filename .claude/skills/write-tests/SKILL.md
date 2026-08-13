@@ -140,7 +140,7 @@ Note that `mutmut export-cicd-stats` writes `mutants/mutmut-cicd-stats.json`
 and prints only a "Saved ..." line — redirecting its stdout captures that
 sentence, not the statistics.
 
-The scope tiers, per ADR-0011:
+The scope tiers, per ADR-0016:
 
 - **Observed** — `only_mutate` in `backend/pyproject.toml`: the ADR-0004 Reality
   Tree modules plus `app/modules/tasks/repository.py` and
@@ -182,7 +182,7 @@ When you add a mutation-compatible test module, add it to
 not select cannot kill anything. `mutate_only_covered_lines = true` is also set,
 so an uncovered line produces no mutants at all — a module with weak coverage
 reports a flattering score about the wrong subset of itself. That is exactly why
-ADR-0011 keeps `app/repositories/session.py` and `app/repositories/user.py` out
+ADR-0016 keeps `app/repositories/session.py` and `app/repositories/user.py` out
 of both tiers: 65% and 62% non-ASGI line coverage would make the measurement
 meaningless.
 
@@ -205,7 +205,7 @@ database, `WHERE owner_id = ? AND id = ?` and `WHERE id = ?` select the same
 row, and `DELETE ... WHERE owner_id = ?` and `DELETE` empty the same table. The
 assertion passes identically before and after the mutation, so the test carries
 no information about the predicate at all. Coverage still reports the line as
-executed — that is precisely the failure mode ADR-0011 describes.
+executed — that is precisely the failure mode ADR-0016 describes.
 
 Two owners in **one** database make the difference observable:
 

@@ -50,7 +50,7 @@ finished run.
 ## Mutation gate
 
 The `mutation-gate` job blocks a change that touches any module in
-`backend/mutation-enforced-scope.txt` (the ADR-0011 *enforced* tier: the
+`backend/mutation-enforced-scope.txt` (the ADR-0016 *enforced* tier: the
 tree/version/relation services and their repositories). It measures only the
 entries you touched and fails below 95%, on zero checked mutants, or on any
 regression against the base revision. Touch none of them and it costs nothing.

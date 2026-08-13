@@ -1,4 +1,4 @@
-"""Contract tests for the Architect-owned Spec Kit planning review campaign."""
+"""Contract tests for the portable Spec Kit planning review campaign."""
 
 from __future__ import annotations
 
@@ -923,6 +923,55 @@ class ReviewerIndependenceTests(unittest.TestCase):
                 continue
             path = ROOT / ".claude" / "agents" / f"{agent}.md"
             self.assertTrue(path.is_file(), f"{role} points at missing {path}")
+
+
+class ReviewerPromptPortabilityTests(unittest.TestCase):
+    """The prompt must not contradict the authorities that govern the gate.
+
+    Until 2026-08-13 every reviewer prompt asserted "Hermes Kanban remains the
+    sole execution runtime". CLAUDE.md, docs/spec-kit-workflow.md, .hermes.md
+    and the speckit-implement skill all make Hermes strictly opt-in, so the
+    campaign shipped a contradiction of its own repository into every review —
+    invisibly, because nobody reads a prompt that a script assembles.
+    """
+
+    def setUp(self) -> None:
+        self.module = load_module()
+        self.root = ROOT
+        self.feature_dir = ROOT / "specs" / "006-mobile-task-classification"
+
+    def _prompts(self) -> dict[str, str]:
+        return {
+            role: self.module.build_prompt(
+                role=role, feature_dir=self.feature_dir, root=self.root
+            )
+            for role in self.module.ROLE_CONFIGS
+        }
+
+    def test_no_prompt_assumes_a_managed_execution_runtime(self) -> None:
+        forbidden = ("Hermes", "Kanban", "sole execution runtime", "second scheduler")
+        for role, prompt in self._prompts().items():
+            for phrase in forbidden:
+                self.assertNotIn(
+                    phrase,
+                    prompt,
+                    f"{role} prompt assumes a managed runtime via {phrase!r}; "
+                    "the gate is portable (ADR-0011)",
+                )
+
+    def test_every_prompt_still_forbids_mutating_the_repository(self) -> None:
+        """Dropping the runtime claim must not drop the read-only boundary."""
+        for role, prompt in self._prompts().items():
+            self.assertIn("read-only review", prompt, role)
+            self.assertIn("Do not edit files", prompt, role)
+
+    def test_rubric_lenses_are_pointed_at_their_agent_file(self) -> None:
+        prompts = self._prompts()
+        for role, config in self.module.ROLE_CONFIGS.items():
+            agent = config.get("agent")
+            if agent is None:
+                continue
+            self.assertIn(f".claude/agents/{agent}.md", prompts[role], role)
 
 
 class OracleFallbackTests(unittest.TestCase):
