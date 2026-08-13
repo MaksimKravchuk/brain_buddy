@@ -1,6 +1,6 @@
 # Implementation Plan: Escape closes the Task menu first
 
-**Branch**: `paperclip/bra-1-escape-menu` | **Date**: 2026-08-04 | **Spec**: `specs/006-escape-task-menu/spec.md`
+**Branch**: `paperclip/bra-1-escape-menu` | **Date**: 2026-08-04 | **Spec**: `specs/009-escape-task-menu/spec.md`
 **Input**: BRA-2 and the repository behavior at `TaskDetailPanel.tsx:89-139` and `TaskListPage.tsx:123-142`
 
 ## Summary

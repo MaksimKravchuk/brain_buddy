@@ -2,10 +2,10 @@
   "schema_version": "speckit-hermes-handoff/v1",
   "root_outcome": "For a selected non-terminal Task detail, Escape dismisses the open Task menu first, restores focus to its trigger, preserves the selected detail and emits no request; only a later eligible Escape closes Task detail under the existing parent exclusions.",
   "artifacts": {
-    "spec": "specs/006-escape-task-menu/spec.md",
-    "plan": "specs/006-escape-task-menu/plan.md",
-    "tasks": "specs/006-escape-task-menu/tasks.md",
-    "checklist": "specs/006-escape-task-menu/checklists/requirements.md",
+    "spec": "specs/009-escape-task-menu/spec.md",
+    "plan": "specs/009-escape-task-menu/plan.md",
+    "tasks": "specs/009-escape-task-menu/tasks.md",
+    "checklist": "specs/009-escape-task-menu/checklists/requirements.md",
     "adrs": [
       "docs/decisions/0001-vnext-modular-monolith-and-workflow-contracts.md",
       "docs/decisions/0006-native-gtd-lifecycle-and-capability-baseline.md",

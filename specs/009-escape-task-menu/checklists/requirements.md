@@ -2,7 +2,7 @@
 
 **Purpose**: Verify that the single keyboard behavior is unambiguous and independently testable before ratification.
 **Created**: 2026-08-04
-**Feature**: `specs/006-escape-task-menu/spec.md`
+**Feature**: `specs/009-escape-task-menu/spec.md`
 
 ## Observable behavior
 

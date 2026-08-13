@@ -1,6 +1,6 @@
 # Tasks: Escape closes the Task menu first
 
-**Input**: `specs/006-escape-task-menu/spec.md` and `plan.md`
+**Input**: `specs/009-escape-task-menu/spec.md` and `plan.md`
 **Tests**: Required; one baseline characterization guard followed by one vertical RED → GREEN behavior slice.
 **Execution**: Planning input only. Hermes Kanban owns implementation and independent review.
 
