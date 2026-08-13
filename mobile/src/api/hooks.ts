@@ -856,11 +856,11 @@ export function useAgentRuns(
 /**
  * The latest run per task, for the compact task list.
  *
- * Asked only about the task IDs actually on screen, and only while the
- * account's `external_agent_relay` flag is on — the backend answers 404
- * otherwise, and a list of tasks must never manufacture an error for a
- * capability the user cannot see. The answer is sparse: a task with no hand-off
- * is simply absent, so its row stays exactly as it was.
+ * Asked only about the task IDs actually on screen for a signed-in owner.
+ * Existing-run monitoring stays available when the rollout flag disables new
+ * handoffs; the backend remains the authority for owner access. The answer is
+ * sparse: a task with no hand-off is simply absent, so its row stays exactly as
+ * it was.
  */
 export function useAgentRunSummaries(
   taskIds: string[],

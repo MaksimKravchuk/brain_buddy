@@ -287,32 +287,19 @@ describe("AgentRunSection", () => {
     await unmount();
   });
 
-  it("uses the effective deadline, redacts content and keeps safe cancellation", async () => {
+  it("does not wall-clock reproject an authoritative feed projection", async () => {
     const run = makeRun({
       content_expired: false,
       content_expires_at: "2000-01-01T00:00:00Z",
-      reported_state: "blocked",
-      needs_user: true,
-      question_text: "Private question",
-      progress_text: "Private progress",
-      result_text: "Private result",
-      events: [{
-        id: "event-private",
-        type: "blocked",
-        run_version: 2,
-        summary: "Private event",
-        received_at: "2000-01-01T00:00:00Z",
-      }],
+      progress_text: "Authoritative retained progress",
     });
     const { renderer, unmount } = await renderWithProviders(
       <AgentRunSection {...props({ runs: [run] })} />,
     );
 
     const text = visibleText(renderer);
-    expect(text).toContain("Content expired under retention policy");
-    expect(text).not.toMatch(/Private (question|progress|result|event)/);
-    expect(queryByText(renderer, "Send answer")).toBeNull();
-    expect(queryByText(renderer, "Request cancellation")).not.toBeNull();
+    expect(text).not.toContain("Content expired under retention policy");
+    expect(text).toContain("Authoritative retained progress");
 
     await unmount();
   });

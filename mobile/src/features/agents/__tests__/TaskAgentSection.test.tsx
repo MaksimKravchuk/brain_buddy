@@ -31,6 +31,12 @@ const mockApi = {
   confirmAgentHandoff: (...args: unknown[]) => mockConfirm(...args),
 };
 let mockActiveApi = mockApi;
+let mockAccountId = "user-test";
+let mockServerUrl = "https://brain.example.test/api";
+let mockServerTimeAnchor: { serverTimeMs: number; monotonicTimeMs: number } | null = {
+  serverTimeMs: Date.parse("2026-08-09T12:00:00Z"),
+  monotonicTimeMs: 1_000,
+};
 
 jest.mock("expo-crypto", () => ({ randomUUID: () => "idem_key_test" }));
 
@@ -52,8 +58,10 @@ jest.mock("react-native-safe-area-context", () => ({
 jest.mock("@/auth/SessionProvider", () => ({
   useApi: () => mockActiveApi,
   useSession: () => ({
-    api: mockApi,
-    serverUrl: "https://brain.example.test/api",
+    api: mockActiveApi,
+    serverUrl: mockServerUrl,
+    accountId: mockAccountId,
+    serverTimeAnchor: mockServerTimeAnchor,
     me: { id: "user-test" },
   }),
 }));
@@ -69,13 +77,21 @@ function props(overrides: Partial<Parameters<typeof TaskAgentSection>[0]> = {}) 
 }
 
 beforeEach(() => {
+  jest.spyOn(performance, "now").mockReturnValue(1_000);
   mockActiveApi = mockApi;
+  mockAccountId = "user-test";
+  mockServerUrl = "https://brain.example.test/api";
+  mockServerTimeAnchor = { serverTimeMs: FIXED_NOW, monotonicTimeMs: 1_000 };
   mockListConnections.mockReset();
   mockListRuns.mockReset();
   mockPreview.mockReset();
   mockConfirm.mockReset();
   mockInspectFeed.mockReset();
   mockListRuns.mockResolvedValue([]);
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
 });
 
 describe("TaskAgentSection", () => {
@@ -142,6 +158,23 @@ describe("TaskAgentSection", () => {
 
     await unmount();
   });
+
+  it("uses the authoritative server anchor instead of the consumer wall clock", async () => {
+    mockListRuns.mockResolvedValue([
+      makeRun({
+        progress_text: "Still retained by server time",
+        content_expires_at: "2026-08-09T12:00:01Z",
+      }),
+    ]);
+    const dateNow = jest.spyOn(Date, "now").mockReturnValue(Date.parse("2036-08-09T12:00:00Z"));
+    const { renderer, unmount } = await renderWithProviders(<TaskAgentSection {...props()} />);
+    await settle();
+
+    expect(visibleText(renderer)).toContain("Still retained by server time");
+
+    dateNow.mockRestore();
+    await unmount();
+  });
 });
 
 const FIXED_NOW = Date.parse("2026-08-09T12:00:00Z");
@@ -161,7 +194,7 @@ function recordingRuntime(): {
   const scheduled: ScheduledPoll[] = [];
   return {
     runtime: {
-      now: () => FIXED_NOW,
+      now: () => 1_000,
       schedule: (callback, delay) => {
         const entry: ScheduledPoll = { callback, delay, cancelled: false };
         scheduled.push(entry);
@@ -205,6 +238,7 @@ function FeedScopeHarness({
       <Pressable
         onPress={() => {
           mockActiveApi = apiB;
+          mockAccountId = "user-b";
           forceApiRender((version) => version + 1);
         }}
       >
@@ -480,8 +514,7 @@ describe("useAgentRunsFeed absorb polling", () => {
   });
 
   it("uses its single wake timer to redact UI at an earlier retention deadline", async () => {
-    const start = Date.parse("2026-08-09T12:00:00Z");
-    let now = start;
+    let now = 1_000;
     const scheduled: { callback: () => void; delay: number; cancelled: boolean }[] = [];
     const runtime: AgentRunsPollRuntime = {
       now: () => now,
@@ -506,7 +539,7 @@ describe("useAgentRunsFeed absorb polling", () => {
     expect(scheduled.filter((entry) => !entry.cancelled)).toHaveLength(1);
     expect(scheduled.find((entry) => !entry.cancelled)?.delay).toBe(1000);
 
-    now = start + 1000;
+    now = 2_000;
     const wake = scheduled.find((entry) => !entry.cancelled);
     if (!wake) {
       throw new Error("Expected an expiry wake");
@@ -536,6 +569,26 @@ describe("useAgentRunsFeed absorb polling", () => {
     expect(armed()).toHaveLength(1);
     expect(armed()[0].delay).toBe(2_147_483_647);
     expect(scheduled).toHaveLength(1);
+    await unmount();
+  });
+
+  it("fails closed and arms no retention timer without an authoritative server anchor", async () => {
+    mockServerTimeAnchor = null;
+    const { runtime, scheduled, armed } = recordingRuntime();
+    mockListRuns.mockResolvedValue([
+      makeRun({
+        dispatch_state: "sent",
+        reported_state: "completed",
+        progress_text: "Must not survive without an anchor",
+        content_expires_at: "2026-09-08T12:00:00Z",
+      }),
+    ]);
+    const { renderer, unmount } = await renderWithProviders(<FeedExpiryProbe runtime={runtime} />);
+    await settle();
+
+    expect(visibleText(renderer)).toBe("true:redacted");
+    expect(armed()).toHaveLength(0);
+    expect(scheduled).toHaveLength(0);
     await unmount();
   });
 });
