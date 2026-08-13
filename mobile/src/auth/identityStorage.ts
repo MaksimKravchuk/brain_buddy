@@ -15,6 +15,7 @@
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+import { clearIdentityStores } from "../features/tasks/classificationQueue.storage";
 import type { MeResponse } from "../api/types";
 import { flagStorageKey, identityStorageKey, type FeatureFlagRecord } from "./flagResolution";
 
@@ -80,6 +81,16 @@ export async function loadPersistedIdentity(serverUrl: string): Promise<Persiste
  * are deleted rather than left unread — identity-in-the-key closes
  * disclosure, but invisible is not erased and nothing ever reads a key it
  * will never open again (FR-011).
+ *
+ * "Stored keys" means all three. This used to delete the previous account's
+ * flag record only, and leave its classification queue and its project/Tag
+ * cache to invariant 8b's cross-identity sweep. That sweep lives inside the
+ * classification hook, so it runs only when the *new* account has the rollout
+ * flag on: sign in as B with the flag off and A's unsent work and A's whole
+ * project and Tag vocabulary stay on the device indefinitely. A retention rule
+ * that holds only when an unrelated feature flag happens to be enabled is not
+ * a retention rule. Deleted here, where the previous account id is still in
+ * hand, so it does not depend on anything the next session chooses to do.
  */
 export async function persistIdentity(
   serverUrl: string,
@@ -89,8 +100,8 @@ export async function persistIdentity(
   const previous = await loadPersistedIdentity(serverUrl);
   if (previous && previous.accountId !== profile.id) {
     await AsyncStorage.removeItem(flagStorageKey(serverUrl, previous.accountId));
+    await clearIdentityStores({ serverUrl, accountId: previous.accountId });
   }
-
   const savedAt = now.toISOString();
   const identity: PersistedIdentity = { accountId: profile.id, savedAt };
   const flags: PersistedFlagRecord = { flags: sanitizeFlags(profile.feature_flags), savedAt };

@@ -71,7 +71,11 @@ import {
   type ClassificationState,
   type ConflictDecision,
 } from "./conflictDecision";
-import { queueKey, type ClassificationIdentity } from "./storageKeys";
+import {
+  identityStoreGeneration,
+  queueKey,
+  type ClassificationIdentity,
+} from "./storageKeys";
 
 // ------------------------------------------------------------------ contracts
 
@@ -123,6 +127,21 @@ export interface DrainPort {
    * because FR-007 means no surface ever said it was pending.
    */
   latest?(): readonly PendingClassificationChange[] | undefined;
+
+  /**
+   * Whether the pass still speaks for the identity it started under. Absent
+   * means "always", for the callers that have no identity to lose.
+   *
+   * `latest` and `persist` protect what the pass *reads and writes on the
+   * device*; this protects what it *sends*. They are not the same guarantee.
+   * The api client resolves its base URL from `currentServerUrl()` and carries
+   * whatever cookie the app now holds, so a pass that keeps stepping after
+   * somebody else has signed in issues account A's mutations against account
+   * B's session — over the wire, against real data, which is precisely what
+   * SC-007 forbids. Isolating A's *storage* while still sending A's writes
+   * under B is the worst of both.
+   */
+  owned?(): boolean;
 }
 
 /** What the drain must do next with one entry. */
@@ -147,7 +166,14 @@ export interface DrainResolution {
   decision?: ConflictDecision;
 }
 
-export type DrainStop = "drained" | "conflict" | "retry-later" | "error" | "limit";
+export type DrainStop =
+  | "drained"
+  | "conflict"
+  | "retry-later"
+  | "error"
+  | "limit"
+  /** Somebody else signed in mid-pass. Nothing further may be sent. */
+  | "disowned";
 
 export interface DrainPassResult {
   queue: PendingClassificationChange[];
@@ -539,22 +565,48 @@ export async function drainQueue(
     return adopt(next);
   };
 
+  /** Absent means the caller has no identity that can be taken from it. */
+  const owned = (): boolean => port.owned?.() ?? true;
+
+  const stop = (
+    queue: PendingClassificationChange[],
+    stoppedBecause: DrainStop,
+  ): DrainPassResult => ({
+    queue,
+    settled,
+    lastSyncedAt,
+    stoppedBecause,
+    decisions,
+    decidedKeys: [...decided],
+  });
+
   for (let step = 0; step < MAX_DRAIN_STEPS; step += 1) {
+    if (!owned()) {
+      // Checked at the head of every iteration, so no request is ever *issued*
+      // under an identity that has been replaced. An iteration already under
+      // way still finishes its own entry — that outcome is unambiguously this
+      // pass's work, and abandoning it mid-flight is what would lose it.
+      return stop(current, "disowned");
+    }
+
     const plan = planDrainStep(current, port.now());
     if (plan.kind === "idle") {
-      return {
-        queue: plan.queue,
-        settled,
-        lastSyncedAt,
-        stoppedBecause: "drained",
-        decisions,
-        decidedKeys: [...decided],
-      };
+      return stop(plan.queue, "drained");
     }
 
     // The `sending` marker must be on the device before the request leaves, or
     // a kill mid-send leaves no trace that an attempt was ever made.
     current = await commit(plan.queue);
+
+    // And again here, because `commit` is an await. The head-of-iteration check
+    // has already passed by the time that storage write resumes, so an identity
+    // change landing inside it would let the *first* request of this step go
+    // out under the new session — the rejection-path check below only guards
+    // the optional second one. Every request this pass issues is now preceded
+    // by a check with no await between the two.
+    if (!owned()) {
+      return stop(current, "disowned");
+    }
 
     let resolution: DrainResolution;
     if (plan.kind === "reread") {
@@ -587,7 +639,11 @@ export async function drainQueue(
         resolution = resolveSendSuccess(current, plan.entry, task);
       } catch (error) {
         let serverTask: ServerTaskState | null = null;
-        if (shouldRereadAfterRejection(error)) {
+        // `owned()` again, because this is a *second* request in the same
+        // iteration and the identity can have changed during the first. A
+        // re-read issued now would ask the new session about the old account's
+        // task and answer the conflict with whatever it said.
+        if (shouldRereadAfterRejection(error) && owned()) {
           try {
             serverTask = await port.reread(plan.entry.taskId);
           } catch {
@@ -620,25 +676,11 @@ export async function drainQueue(
       settled += 1;
     }
     if (!resolution.continueDraining) {
-      return {
-        queue: current,
-        settled,
-        lastSyncedAt,
-        stoppedBecause: stopReasonFor(resolution),
-        decisions,
-        decidedKeys: [...decided],
-      };
+      return stop(current, stopReasonFor(resolution));
     }
   }
 
-  return {
-    queue: current,
-    settled,
-    lastSyncedAt,
-    stoppedBecause: "limit",
-    decisions,
-    decidedKeys: [...decided],
-  };
+  return stop(current, "limit");
 }
 
 /**
@@ -1017,10 +1059,37 @@ export function useClassificationQueue(
   const writeChainRef = useRef<Promise<unknown>>(Promise.resolve());
 
   const persistLive = useCallback(
-    (active: ClassificationIdentity, snapshot?: PendingClassificationChange[]): Promise<void> => {
-      const write = writeChainRef.current.then(() =>
-        saveQueue(active, snapshot ?? queueRef.current, Date.now()),
-      );
+    (
+      active: ClassificationIdentity,
+      snapshot?: PendingClassificationChange[],
+      /** The generation of the *operation* this write belongs to, when that
+       *  operation is longer-lived than the write — a drain pass, whose request
+       *  may have been in flight across a whole sign-out. Omitted by callers
+       *  that are themselves the operation, like a single enqueue. */
+      passGeneration?: number,
+    ): Promise<void> => {
+      // Captured now, used only as the floor if the ref stops being `active`'s
+      // before this write's turn comes.
+      const scheduled = snapshot ?? queueRef.current;
+      // What matters is not whether this identity has ever been forgotten, but
+      // whether it was forgotten after the operation this write belongs to
+      // began. For a lone enqueue that is now; for a drain pass it is when the
+      // pass started, which is why it may be passed in — see below.
+      const generation =
+        passGeneration ?? identityStoreGeneration(active.serverUrl, active.accountId);
+      const write = writeChainRef.current.then(() => {
+        // `queueRef` is read late on purpose — that is what makes a write that
+        // waited behind another persist what the device holds *now*. But the
+        // identity-change effect sets `queueRef.current = EMPTY` the moment an
+        // identity goes away, and a 401 does exactly that. A write for A still
+        // queued at that instant would then call `saveQueue(A, [])` and delete
+        // A's persisted queue — the unsent work FR-011 keeps *specifically*
+        // through an involuntary end, destroyed by the mechanism meant to stop
+        // writes clobbering each other. Read live only while the ref is still
+        // A's; otherwise it says nothing about A at all.
+        const live = identityRef.current === active ? queueRef.current : scheduled;
+        return saveQueue(active, snapshot ?? live, Date.now(), generation);
+      });
       // The chain must survive a failed write, or one rejected save would strand
       // every later one behind it. The caller still sees its own rejection.
       writeChainRef.current = write.catch(() => undefined);
@@ -1053,48 +1122,82 @@ export function useClassificationQueue(
       // read, show or send (SC-007); it may still finish its own entry into its
       // own key, which is the one thing that is unambiguously its work.
       const owns = (): boolean => identityRef.current === active;
-      const result = await drainQueue(queueRef.current, {
-        now: () => Date.now(),
-        mintKey: newIdempotencyKey,
-        send: async ({ taskId, payload, idempotencyKey }) =>
-          serverStateOf(await apiRef.current.updateTask(taskId, payload, idempotencyKey)),
-        reread: async (taskId) => serverStateOf(await apiRef.current.getTask(taskId)),
-        // Where an edit made while a request was in flight lives, and until the
-        // pass adopts it, the only place it lives (invariant 5b).
-        latest: () => (owns() ? queueRef.current : undefined),
-        persist: async (next) => {
-          if (owns()) {
-            // Before the storage write, and synchronously: an `enqueue` racing
-            // this one must coalesce onto the marker this pass has just set,
-            // not onto the queue as it was before the attempt.
-            queueRef.current = next;
-            setQueue(next);
-            await persistLive(active);
-            return;
-          }
-          await persistLive(active, next);
-        },
-      });
-      if (owns()) {
-        // The pass adopted the device's queue after every await, so this is the
-        // live queue and not the snapshot it started from. Assigning the
-        // snapshot is what deleted an edit made during a send.
-        //
-        // Merged rather than assigned, because "after every await" stops one
-        // microtask short of here: the pass returning and this line running are
-        // separated by one, and `enqueue` writes `queueRef` synchronously.
-        const merged = mergePassResult(result.queue, result.decidedKeys, queueRef.current);
-        queueRef.current = merged;
-        setQueue(merged);
-        // The pass's own last write went out before this merge existed, so the
-        // device would otherwise keep a queue this line has already superseded.
-        await persistLive(active);
-      }
-      if (result.lastSyncedAt) {
-        setLastSyncedAt(result.lastSyncedAt);
-      }
-      if (result.settled > 0) {
-        onSyncedRef.current?.();
+
+      // Captured once, here, and used for every write this pass makes.
+      //
+      // Reading it per-write reads it when the write is *scheduled*, and a pass
+      // whose request was in flight across a sign-out schedules its writes
+      // afterwards — by which time the counter has already moved and, if the
+      // same account signed back in, the pass captures the NEW generation and
+      // sails through its own fence. Its stale successful result then deletes
+      // the new session's queue; its stale failure resurrects the one the
+      // sign-out discarded. The fence has to be stamped when the pass begins,
+      // because the pass is the thing being fenced.
+      const passGeneration = identityStoreGeneration(active.serverUrl, active.accountId);
+
+      // `MAX_DRAIN_STEPS` bounds one *pass*, not the queue. An offline triage
+      // session can leave far more than that behind, and a pass that stopped on
+      // the cap simply returned with the rest still queued: nothing read
+      // `stoppedBecause`, and the lock this pass holds is exactly what stops
+      // the "after a successful request" trigger from starting another. The
+      // 26th change then waited for an unrelated edit or a foreground
+      // transition — on a queue whose whole purpose is to drain itself.
+      //
+      // Continued only while the cap was reached *and* the pass settled
+      // something, so every turn strictly shortens the queue. Without that
+      // second condition a queue of 25 permanently-retryable entries would spin
+      // here for ever.
+      for (;;) {
+        const result = await drainQueue(queueRef.current, {
+          now: () => Date.now(),
+          mintKey: newIdempotencyKey,
+          send: async ({ taskId, payload, idempotencyKey }) =>
+            serverStateOf(await apiRef.current.updateTask(taskId, payload, idempotencyKey)),
+          reread: async (taskId) => serverStateOf(await apiRef.current.getTask(taskId)),
+          // Where an edit made while a request was in flight lives, and until
+          // the pass adopts it, the only place it lives (invariant 5b).
+          latest: () => (owns() ? queueRef.current : undefined),
+          // What stops the pass *sending* under somebody else's session, which
+          // `latest` and `persist` do not cover — they scope storage, not the
+          // wire.
+          owned: owns,
+          persist: async (next) => {
+            if (owns()) {
+              // Before the storage write, and synchronously: an `enqueue`
+              // racing this one must coalesce onto the marker this pass has
+              // just set, not onto the queue as it was before the attempt.
+              queueRef.current = next;
+              setQueue(next);
+              await persistLive(active, undefined, passGeneration);
+              return;
+            }
+            await persistLive(active, next, passGeneration);
+          },
+        });
+        if (owns()) {
+          // The pass adopted the device's queue after every await, so this is
+          // the live queue and not the snapshot it started from. Assigning the
+          // snapshot is what deleted an edit made during a send.
+          //
+          // Merged rather than assigned, because "after every await" stops one
+          // microtask short of here: the pass returning and this line running
+          // are separated by one, and `enqueue` writes `queueRef` synchronously.
+          const merged = mergePassResult(result.queue, result.decidedKeys, queueRef.current);
+          queueRef.current = merged;
+          setQueue(merged);
+          // The pass's own last write went out before this merge existed, so
+          // the device would otherwise keep a queue this line has superseded.
+          await persistLive(active, undefined, passGeneration);
+        }
+        if (result.lastSyncedAt) {
+          setLastSyncedAt(result.lastSyncedAt);
+        }
+        if (result.settled > 0) {
+          onSyncedRef.current?.();
+        }
+        if (result.stoppedBecause !== "limit" || result.settled === 0 || !owns()) {
+          return;
+        }
       }
     } finally {
       drainingRef.current = false;
