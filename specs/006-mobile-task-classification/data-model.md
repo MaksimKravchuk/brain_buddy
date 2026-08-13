@@ -163,9 +163,36 @@ the exact path the feature exists for.
    server forgets an idempotency key after `IDEMPOTENCY_RETENTION = 24 h`
    (`backend/app/modules/tasks/repository.py:39`) while FR-018 permits 30 days,
    so for most of an entry's life the key is not a dedupe token at all. Beyond
-   the window the drain first re-reads the task, then either drops the entry if
-   the server already holds the intended value, or re-presents it against the
-   current revision with a new key and a refreshed `originalValue`.
+   the window the drain first re-reads the task, and the read has **three**
+   answers, not two:
+
+   - the server already holds the intended value → drop the entry, ask nobody;
+   - the server still holds what the phone last showed (`originalValue`), over
+     the fields this change touches → nobody else has been here, so re-present
+     it against the current revision with a new key and a refreshed
+     `originalValue`;
+   - the server holds a third value → somebody else reclassified the task, and
+     FR-008 gives the person the decision. Park it `conflicted` for M-04, with
+     the re-read's revision and values, and **without** refreshing
+     `originalValue` — it is what the phone showed, and M-04's first row says
+     so in those words.
+
+   This invariant originally named only the first two, and the omission was a
+   silent overwrite. Re-presenting rebases `observedRevision` onto the revision
+   just read, so the send that follows cannot 409 — and the 409 is the only
+   thing that ever opens M-04. An entry attempted once, left more than 24 h
+   (FR-018 permits 30 days), on a task somebody else had reclassified meanwhile,
+   therefore overwrote their work without a word: FR-008's "MUST NOT decide for
+   them" and SC-005's "zero classifications are overwritten or discarded
+   silently", on the one path where the device already held the evidence needed
+   to ask. Found after founder acceptance, by review on the merged stack; the
+   requirements were never in doubt, only the code and this paragraph.
+
+   The comparison is `originalValue`, not `observedRevision`, and it is scoped
+   to the fields the change actually carries. A revision moves for a title edit
+   as readily as for a classification one, and a change that sets only the
+   project collides with nobody when only the Tags moved — prompting there would
+   ask a person to arbitrate a disagreement that does not exist.
 
    At-most-once is therefore delivered by the key inside 24 h and by
    `expected_revision` outside it. Stating this matters because the plan's
