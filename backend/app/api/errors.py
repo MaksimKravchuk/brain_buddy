@@ -22,6 +22,20 @@ from app.schemas import ErrorResponse
 from .middleware import CORRELATION_HEADER
 
 
+def _public_validation_errors(exc: RequestValidationError) -> list[dict[str, object]]:
+    """Return useful validation metadata without reflecting request values.
+
+    Pydantic includes the rejected ``input`` in ``errors()``. That is unsafe for
+    password and credential fields and also widens response-telemetry exposure,
+    so the public API never serializes it for any field.
+    """
+
+    return [
+        {key: value for key, value in error.items() if key != "input"}
+        for error in exc.errors()
+    ]
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     """Attach exception handlers for known error types."""
 
@@ -32,7 +46,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         correlation_id = getattr(request.state, "correlation_id", None)
         payload = ErrorResponse(
             message="Request validation failed.",
-            detail=jsonable_encoder(exc.errors()),
+            detail=jsonable_encoder(_public_validation_errors(exc)),
             reference_id=correlation_id,
         )
         response = JSONResponse(

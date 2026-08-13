@@ -391,6 +391,32 @@ def test_public_validation_response_serializes_sanitized_endpoint_errors() -> No
     assert canary not in response.text
 
 
+@pytest.mark.parametrize("secret_field", ["credential", "current_password"])
+def test_public_validation_response_never_reflects_secret_inputs(
+    secret_field: str,
+) -> None:
+    canary = f"secret-validation-canary-{secret_field}"
+    app = FastAPI()
+    register_exception_handlers(app)
+
+    @app.post("/connections")
+    def create_connection(payload: AgentConnectionCreateRequest) -> None:
+        return None
+
+    request = {
+        "name": "Agent",
+        "endpoint_url": "https://agent.example.com/hooks",
+        "credential": "credential",
+        "current_password": "password",
+    }
+    request[secret_field] = canary * 500
+    response = TestClient(app).post("/connections", json=request)
+
+    assert response.status_code == 422
+    assert canary not in response.text
+    assert all("input" not in error for error in response.json()["detail"])
+
+
 def test_connection_responses_cannot_serialize_saved_credentials() -> None:
     """Ordinary responses reject credential fields while issue responses expose one secret."""
 
