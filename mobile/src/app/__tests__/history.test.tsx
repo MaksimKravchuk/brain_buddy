@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 
-import { setSearchParams } from "@/test/expoRouterMock";
+import { routerSpy, setSearchParams } from "@/test/expoRouterMock";
 import {
   FakeHttpError,
   installFakeBackend,
@@ -21,6 +21,7 @@ let backend: FakeBackend;
 afterEach(() => backend?.restore());
 
 function history(kind: string | undefined, routes: Record<string, RouteHandler> = {}) {
+  backend?.restore();
   backend = installFakeBackend({
     "GET /auth/me": () => makeMe(),
     "GET /projects": () => [makeProject({ id: "p1", name: "Wedding" })],
@@ -91,6 +92,18 @@ describe("history", () => {
     await fireEvent.press(screen.getByText("Retry"));
 
     expect(await screen.findByText("Called the notary")).toBeOnTheScreen();
+  });
+
+  it("opens terminal rows for recovery without navigating to task detail", async () => {
+    await history(undefined, {
+      "GET /tasks": () =>
+        makeTaskPage([makeTask({ id: "t1", title: "Called the notary", state: "completed" })]),
+    });
+
+    await fireEvent.press(await screen.findByLabelText("Called the notary"));
+
+    expect(await screen.findByText("Reopen into")).toBeOnTheScreen();
+    expect(routerSpy().push).not.toHaveBeenCalled();
   });
 
   it("reopens a task into an explicitly chosen list", async () => {

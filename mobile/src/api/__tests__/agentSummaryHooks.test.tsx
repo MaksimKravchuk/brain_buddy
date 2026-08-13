@@ -29,8 +29,8 @@ jest.mock("@/auth/SessionProvider", () => ({
   }),
 }));
 
-function Probe({ taskIds, enabled }: { taskIds: string[]; enabled: boolean }) {
-  const summaries = useAgentRunSummaries(taskIds, enabled);
+function Probe({ taskIds, enabled, interval }: { taskIds: string[]; enabled: boolean; interval?: number }) {
+  const summaries = useAgentRunSummaries(taskIds, enabled, interval);
   return <Text>{Object.keys(summaries.data ?? {}).join(",") || "no summaries"}</Text>;
 }
 
@@ -93,6 +93,17 @@ describe("useAgentRunSummaries", () => {
     // Tasks without a hand-off are simply absent rather than present-and-empty.
     expect(visibleText(renderer)).toBe("task_2");
 
+    await unmount();
+  });
+
+  it("polls boundedly so externally changing compact summaries converge", async () => {
+    const { unmount } = await renderWithProviders(
+      <Probe taskIds={["task_1"]} enabled interval={10} />,
+    );
+    await settle();
+    expect(mockListSummaries).toHaveBeenCalledTimes(1);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(mockListSummaries.mock.calls.length).toBeGreaterThanOrEqual(2);
     await unmount();
   });
 });
