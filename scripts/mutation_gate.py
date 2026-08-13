@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gate a pull request on the mutation score of the enforced scope.
 
-ADR-0004 specified this gate and its calibration precondition; ADR-0011 split
+ADR-0004 specified this gate and its calibration precondition; ADR-0016 split
 scope into an observed tier (what the nightly campaign measures) and an enforced
 tier (what may block a pull request). ADR-0013 extends both tiers to the
 frontend. This script implements the enforced tier for either stack.

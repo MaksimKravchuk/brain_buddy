@@ -10,8 +10,8 @@
 
 ## Build, Test, and Development Commands
 - `make dev-backend` / `make dev-frontend`: run backend with uvicorn reload and Vite dev server.
-- `make test-backend`: execute pytest suite (`backend/tests`).
-- `make test-frontend`: run Vitest unit tests.
+- `make test-backend` / `make test-frontend` / `make test-mobile` / `make test-e2e`: each runs its suite **plus** the coverage floor and the Allure taxonomy validator. The bare runner (`cd backend && pytest`) skips both gates.
+- `make verify-all`: the whole chain in CI order — `check-specs validate-ci verify-backend verify-frontend verify-mobile test-e2e`. Run this before reporting a change done.
 - `npm run build` (frontend) / `docker compose up --build`: produce production bundles and compose stack.
 - `./scripts/smoke_test.sh`: call core API endpoints against the compose stack.
 
@@ -23,7 +23,9 @@
 ## Testing Guidelines
 - Backend uses pytest with FastAPI TestClient; mirror test names after module under test (`test_tree_service.py`).
 - Frontend leverages Vitest + Testing Library; place component specs beside feature folders.
-- Every pytest, Vitest, and Playwright product test must emit Allure Report 3 taxonomy: non-empty `epic`, `feature`, `story`, a human-readable title, and at least one named step. Use the central helpers in `backend/tests/allure_taxonomy.py`, `frontend/src/test/allureTaxonomy.ts`, and `frontend/tests/allure.fixtures.ts`; override explicitly only when a test needs narrower labels. See `docs/test-allure-taxonomy.md`.
+- Mobile uses Jest; specs live in `mobile/src/**/__tests__/`. See `mobile/AGENTS.md`.
+- Every pytest, Vitest, Jest, and Playwright product test must emit Allure Report 3 taxonomy: non-empty `epic`, `feature`, `story`, a human-readable title, and at least one named step. Use the central helpers in `backend/tests/allure_taxonomy.py`, `frontend/src/test/allureTaxonomy.ts`, `mobile/src/test/allureTaxonomy.ts`, and `frontend/tests/allure.fixtures.ts`; override explicitly only when a test needs narrower labels. See `docs/test-allure-taxonomy.md`.
+- Coverage floors (`backend/`, `frontend/`, `mobile/coverage-floor.json`) may only ratchet upward, and there is no per-file escape hatch — `scripts/validate_ci_artifacts.py coverage-suppressions` rejects every `istanbul ignore` form in `frontend/src` and `mobile/src`.
 - Ensure new features include targeted tests; run both test suites before pushing.
 
 ## Commit & Pull Request Guidelines
@@ -43,10 +45,14 @@
 - Native GTD capability status, Task lifecycle transitions, Waiting/recovery behavior, date and Priority semantics, and implementation-ready UI/API gaps are fixed in `docs/decisions/0006-native-gtd-lifecycle-and-capability-baseline.md`.
 - Autonomous delivery, visual preview eligibility, and production release/rollback authority are governed by `docs/decisions/0003-autonomous-delivery-guardrails.md` and `docs/autonomous-delivery-runbook.md`.
 - Verified trunk serial landing (PR-less SHIP/SHOW delivery, Ship/Show/Ask classification, feature-flag rollout, deploy rollback) is governed by `docs/decisions/0008-verified-trunk-serial-landing.md`, which partially supersedes ADR-0003.
+- The spec review gate is ADR-0011 (portable stage), amended by ADR-0012 (risk classes, escalation, gate integrity) and ADR-0014 (hybrid reviewer fallback with recorded degradation).
+- Mutation-testing scope is ADR-0004, split into observed and enforced tiers by ADR-0016, extended to the frontend by ADR-0013 and to mobile by ADR-0015. **ADR-0016 was accepted as ADR-0011**: two agents took the same number on 2026-08-10, and it was renumbered on 2026-08-13. Read any older "ADR-0011" reference in context.
 
 ## Mandatory Spec Kit Workflow
 - GitHub Spec Kit is the canonical authoring workflow for every new or materially changed BrainBuddy feature spec; use the repo-pinned official CLI version documented in `docs/spec-kit-workflow.md`.
-- The portable artifact sequence is constitution → `/speckit-specify` (what/why) → `/speckit-clarify` → `/speckit-plan` (how/architecture) → `/speckit-checklist` → `/speckit-tasks` → `/speckit-analyze`. Amend the spec first whenever implementation intent changes.
+- The portable artifact sequence is constitution → `/speckit-interview` (business requirements, human) → `/speckit-specify` (what/why) → `/speckit-clarify` (human) → `/speckit-design` (screens + numbered state inventory) → `/speckit-plan` (how/architecture; MUST cite `design.md`) → `/speckit-review` (five-lens gate, ADR-0011) → `/speckit-checklist` → `/speckit-tasks` → `/speckit-analyze` → `/speckit-implement` → `/speckit-accept` → `/speckit-report`. Amend the spec first whenever implementation intent changes.
+- `/speckit-design` and `/speckit-review` are **mandatory**, not advisory: `.specify/extensions.yml` registers them as `optional: false` hooks on `after_clarify` and `after_plan`. Implementation must not start unless the review verdict is `approved` or `founder-accepted`. `/speckit-assess-*` is an optional stage 0 that can kill an idea before any requirement is elicited.
+- Feature numbers are reserved across every git ref. Two branches that each claim `specs/NNN-` merge without a git conflict and then satisfy each other's requirement-coverage gate, because `scripts/check_requirement_coverage.py` matches `NNN[-_]FR[-_]nnn` repository-wide. `scripts/check_spec_kit_specs.py` rejects duplicates.
 - Spec Kit owns versioned planning artifacts under `specs/` plus `.specify/`. Generated `tasks.md` is planning input, not permission to bypass isolated worktrees, TDD, independent review, CI, landing, or release gates.
 - Execution tooling is selected by the work context. Standalone agents may implement from the validated artifacts; opt-in Hermes-managed outcomes additionally follow `.hermes.md`, ADR-0010, and `docs/spec-driven-kanban.md`.
 - Before adding or changing a feature spec, run `python3 scripts/check_spec_kit_specs.py` (or `make check-specs`) and preserve documented grandfathering for historical specs.
@@ -60,21 +66,27 @@
 - There are currently no customer or valuable production data: prioritize MVP velocity, but preserve the candidate → CI → landing → verified deploy traceability.
 
 ## Active Technologies
-- Python 3.11 (backend), TypeScript (strict) + React (frontend) + FastAPI, Pydantic, pytest; React, Vite, Zustand, React Query, React Flow-like canvas, Vitest/Testing Library (001-reality-tree-ui)
-- File-backed tree data under backend/data with LRU caching; cloud persistence for signed-in users (reuse existing storage path) (001-reality-tree-ui)
-- Python 3.11 (backend), TypeScript (strict) + React (frontend), Compose v2 + FastAPI, Pydantic, pytest; Vite/React/Tailwind/TypeScript; Nginx (deploy), Docker/Compose (001-reality-tree-ui)
-- File-backed tree data volume (`backend/data`) with LRU cache; optional persisted volume in Compose (001-reality-tree-ui)
-- Python 3.11 (backend), TypeScript (strict) + React (frontend) + FastAPI, Pydantic, pytest/FastAPI TestClient; Vite, React, Zustand, React Query, Vitest/Testing Library (001-reality-tree-ui)
-- File-backed tree data under `backend/data` with LRU cache; optional cloud persistence for signed-in users (API key gated) (001-reality-tree-ui)
-- Python 3.11 (backend), TypeScript (strict) + React (frontend) + FastAPI, Pydantic; React, Vite, Zustand, React Query, Testing Library/Vites (001-remove-ui-minimize)
-- Existing file-backed tree data (unchanged for this feature) (001-remove-ui-minimize)
-- Python 3.11 (backend), TypeScript strict + React (frontend) + FastAPI, Pydantic, pytest; Vite, React, Zustand, React Query, Tailwind, Vitest/Testing Library (001-remove-ui-minimize)
-- File-backed tree data in `backend/data` with LRU cache; optional compose volume for persistence (no new data added for this feature) (001-remove-ui-minimize)
-- Python 3.11; TypeScript (strict) + React (Vite). + FastAPI + Pydantic backend; React + Zustand + React Query frontend; Docker/Compose for local stack. (001-local-deploy-setup)
-- File-backed tree data under `backend/data` with LRU cache (local volume). (001-local-deploy-setup)
-- Python 3.11 (backend), TypeScript (strict) + React (frontend) + FastAPI, Pydantic, pytest; Vite, React, Zustand, React Query, Vitest/Testing Library (001-refactor-node-relations)
-- File-backed node data with LRU caching; optional compose volume (001-refactor-node-relations)
-- Python 3.11 (backend), TypeScript (strict) + React (frontend) + FastAPI, Pydantic, pytest/FastAPI TestClient; React, Vite, Zustand, React Query, React Flow-like canvas, Vitest + Testing Library (001-relation-linking-refactor)
+
+`.specify/scripts/bash/update-agent-context.sh` appends here on `/speckit-plan`.
+It had accumulated fifteen near-identical lines naming four features that no
+longer exist under `specs/` — pruned 2026-08-13. Prune again rather than letting
+it grow; this is a summary, not an append-only log.
+
+- Backend: Python 3.11, FastAPI, Pydantic, pytest. Layered `app/api/` ->
+  `app/services/` -> `app/repositories/`, wired in `app/container.py`.
+- Frontend: TypeScript (strict), React, Vite, Zustand, React Query, Tailwind;
+  Vitest + Testing Library, Playwright for e2e.
+- Mobile: Expo SDK 57 / React Native 0.86 / TypeScript strict / expo-router;
+  Jest. See `mobile/AGENTS.md`.
+- Persistence: file-backed tree data under `backend/data` with a 16-entry LRU
+  cache, plus `tasks.sqlite3` for the task module.
+- Deploy: Docker/Compose locally, Nginx in the frontend image, Fly.io in
+  production.
 
 ## Recent Changes
-- 001-reality-tree-ui: Added Python 3.11 (backend), TypeScript (strict) + React (frontend) + FastAPI, Pydantic, pytest; React, Vite, Zustand, React Query, React Flow-like canvas, Vitest/Testing Library
+
+See `git log` and `docs/decisions/`. One caveat when reading older records:
+ADR-0016 was accepted as ADR-0011 and renumbered on 2026-08-13, because two
+parallel agents took that number on the same day. A pre-2026-08-13 reference to
+"ADR-0011" may mean either the portable spec review stage (which keeps the
+number) or the observed/enforced mutation scope tiers (now ADR-0016).

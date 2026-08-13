@@ -165,6 +165,7 @@ test-mobile:
 	cd mobile && npx jest --coverage
 	python3 scripts/validate_coverage_floor.py --stack mobile --format istanbul-summary \
 		--report mobile/coverage/coverage-summary.json --floor mobile/coverage-floor.json
+	python3 scripts/validate_allure_taxonomy.py --path mobile/allure-results --label mobile-jest
 
 # Report-only, like mutation-backend: the deterministic-core scope lives in
 # mobile/stryker.config.json and is fixed by ADR-0015.
