@@ -81,6 +81,10 @@ ASK_EXACT_PATHS: dict[str, str] = {
     "backend/app/api/tasks.py": (
         "auth/per-owner privacy enforcement surface (owner-filtered task API)"
     ),
+    # Decides what "passing" means for a whole CI run, yet its name carries no
+    # ASK token and it sits under no ASK prefix, so it classified SHIP: a
+    # raised failure budget could have landed through automatic promotion.
+    "allurerc.mjs": "quality-gate configuration surface (Allure gate rules)",
 }
 
 AUTH_TOKENS: frozenset[str] = frozenset(
