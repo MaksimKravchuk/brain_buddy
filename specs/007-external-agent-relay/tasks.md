@@ -28,12 +28,12 @@ cumulative completion after the corresponding artifacts and gates exist in the s
 - [ ] T012 Add failing API, guard, state-machine, and task-section tests, including rollout-`OFF` coverage proving that new connection/test/rotate/dispatch affordances are absent while an existing run remains monitorable and its supported safe reply/cancel controls remain available.
 - [ ] T013 Implement connection settings, reviewed hand-off sheet, run monitor, reply/cancel guards, and polling/offline semantics.
 - [ ] T014 Wire `TaskAgentSection` into the real Expo task detail route so existing-run monitoring and supported safe reply/cancel remain mounted when `agentRelayEnabled` is `OFF`; apply the flag only to new connection/test/rotate and hand-off/dispatch affordances.
-- [ ] T015 Add EAS development/preview/production profiles without credentials.
+- [x] T015 Add EAS development/preview/production profiles without credentials.
 
 ## Phase 4 — Release evidence
 
-- [ ] T016 Separate optional work into `backlog.md` and add production/TestFlight/App Store runbook.
-- [ ] T017 Run full backend, web, mobile, Expo export, spec, and diff gates; fix changed-path failures.
+- [x] T016 Separate optional work into `backlog.md` and add production/TestFlight/App Store runbook.
+- [ ] T017 Run full backend, web, mobile, Expo export, spec, and diff gates; fix changed-path failures. (External/canonical exact-candidate evidence is not yet recorded.)
 - [ ] T018 Commit a clean focused candidate, then complete two independent implementation reviews — one web and one iOS — with both reviews bound to that exact candidate SHA and no blockers; any candidate change invalidates both reviews until repeated on the new SHA.
 - [ ] T019 Open the ASK PR and require evidence that both T018 reviews and required CI cover the same exact candidate SHA; landing remains blocked pending separate explicit ASK merge authority, which no review, CI result, or prior semantic approval supplies.
 - [ ] T020 Verify protected main landing and Fly production smoke with internal rollout.
