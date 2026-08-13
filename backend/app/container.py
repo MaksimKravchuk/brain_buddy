@@ -343,7 +343,7 @@ def build_container(config: AppConfig) -> Container:
         ),
         secret_box=_build_agent_secret_box(config, agent_repo),
         task_snapshot=_task_snapshot,
-        callback_url=relay_settings.callback_url,
+        callback_url=config.agent_relay_callback_url,
         stale_after=timedelta(seconds=relay_settings.stale_after_seconds),
         reporting_window=timedelta(seconds=relay_settings.reporting_window_seconds),
         content_retention=timedelta(seconds=relay_settings.content_retention_seconds),
