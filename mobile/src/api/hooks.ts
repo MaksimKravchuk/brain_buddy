@@ -12,13 +12,31 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
+
+  type MutateOptions,
+  type UseMutationOptions,
+  type UseMutationResult,
 } from "@tanstack/react-query";
+import { useCallback, useEffect, useRef } from "react";
 
 import { ApiError } from "@/api/client";
+import { projectRunsAt } from "@/agents/machine";
+import { PRIVATE_AGENT_ROOT } from "@/api/privateAgentCache";
 
 import { useApi, useSession } from "@/auth/SessionProvider";
 import type {
   ProjectResponse,
+  AgentConnectionCreateRequest,
+  AgentConnectionCreatedResponse,
+  AgentConnectionDisconnectRequest,
+  AgentConnectionResponse,
+  AgentConnectionRotateRequest,
+  AgentConnectionRotateSigningSecretRequest,
+  AgentConnectionSigningSecretResponse,
+  AgentHandoffConfirmRequest,
+  AgentHandoffPreviewRequest,
+  AgentReplyRequest,
+  AgentRunResponse,
   SmartAddTaskCreateRequest,
   TagResponse,
   TaskCreateRequest,
@@ -37,7 +55,7 @@ import {
   identityStoreGeneration,
   isStoreGenerationCurrent,
 } from "@/features/tasks/storageKeys";
-import { newIdempotencyKey } from "@/utils/ids";
+import { newIdempotencyKey, requireIdempotencyKey } from "@/utils/ids";
 
 export const taskKeys = {
   root: ["tasks"] as const,
@@ -46,6 +64,25 @@ export const taskKeys = {
   projects: ["tasks", "projects"] as const,
   tags: ["tasks", "tags"] as const,
 };
+
+export const agentKeys = {
+  root: PRIVATE_AGENT_ROOT,
+  owner: (owner: string) => [...agentKeys.root, owner] as const,
+  connections: (owner: string) => [...agentKeys.owner(owner), "connections"] as const,
+  connection: (owner: string, connectionId: string) =>
+    [...agentKeys.connections(owner), connectionId] as const,
+  taskRuns: (owner: string, taskId: string) =>
+    [...agentKeys.owner(owner), "runs", "task", taskId] as const,
+  run: (owner: string, runId: string) => [...agentKeys.owner(owner), "runs", runId] as const,
+  summaries: (owner: string, taskIds: string[]) =>
+    [...agentKeys.owner(owner), "summaries", taskIds] as const,
+  mutation: (owner: string, action: string) =>
+    [...agentKeys.owner(owner), "mutation", action] as const,
+};
+
+export function agentOwnerIdentity(serverUrl: string, userId: string | null | undefined): string {
+  return `${serverUrl.replace(/\/+$/, "")}|${userId ?? "signed-out"}`;
+}
 
 const PAGE_SIZE = 50;
 
@@ -420,5 +457,466 @@ export function useCreateComment(taskId: string) {
     mutationFn: (body: string) => api.createComment(taskId, { body }, newIdempotencyKey()),
     onSuccess: invalidate,
     onError: onConflict,
+  });
+}
+
+// --- External agents ---
+//
+// Agent state lives under the `["agents"]` root so a connection change never
+// silently invalidates task lists (and vice versa). Runs are attached to a
+// task but are not part of it: a connector report never mutates the Task.
+
+/**
+ * Relay writes and their write-like probes must execute the caller's one
+ * explicit attempt even when React Query believes the device is offline.
+ *
+ * The default `online` mutation mode pauses before `mutationFn`, then silently
+ * resumes on reconnect. FR-018 forbids that queue/auto-send behavior. `always`
+ * lets the transport fail now and leaves an ambiguous retry in the caller's
+ * hands, where the original idempotency key is preserved.
+ */
+const RELAY_MUTATION_NETWORK = { networkMode: "always" as const };
+
+const STALE_RELAY_MUTATION_MESSAGE = "Relay mutation scope is stale.";
+
+class StaleRelayMutationScopeError extends Error {
+  constructor() {
+    super(STALE_RELAY_MUTATION_MESSAGE);
+    this.name = "StaleRelayMutationScopeError";
+  }
+}
+
+interface RelayDispatch<TVariables> {
+  variables: TVariables;
+  scope: { identityEpoch: number; owner: string };
+}
+
+function useRelayMutation<TTransport, TData = TTransport, TVariables = void>(
+  options: Omit<UseMutationOptions<TData, Error, TVariables>, "mutationFn"> & {
+    mutationFn(variables: TVariables): Promise<TTransport>;
+    consume?: (result: TTransport) => TData;
+  },
+): UseMutationResult<TData, Error, TVariables> {
+  const session = useSession();
+  const queryClient = useQueryClient();
+  const getIdentityEpoch = session.getIdentityEpoch ?? (() => 0);
+  const owner = agentOwnerIdentity(session.serverUrl, session.accountId ?? undefined);
+  const { mutationFn, consume, ...settlementOptions } = options;
+  const currentDispatchRef = useRef<RelayDispatch<TVariables> | undefined>(undefined);
+  const isDispatchCurrent = (dispatch: RelayDispatch<TVariables>) =>
+    getIdentityEpoch() === dispatch.scope.identityEpoch && dispatch.scope.owner === owner;
+  const removeDispatchMutation = (dispatch: RelayDispatch<TVariables>) => {
+    const exactMutation = queryClient
+      .getMutationCache()
+      .getAll()
+      .find((candidate: { state: { variables: unknown } }) =>
+        candidate.state.variables === dispatch);
+    if (exactMutation) {
+      queueMicrotask(() => {
+        queryClient.getMutationCache().remove(exactMutation);
+        if (currentDispatchRef.current === dispatch) {
+          mutation.reset();
+        }
+      });
+    }
+  };
+  const stale = (dispatch: RelayDispatch<TVariables>): never => {
+    removeDispatchMutation(dispatch);
+    throw new StaleRelayMutationScopeError();
+  };
+  const mutationOptions = {
+    ...settlementOptions,
+    ...RELAY_MUTATION_NETWORK,
+    onSuccess: (data: TData, dispatch: RelayDispatch<TVariables>, result: unknown, context: unknown) => {
+      if (isDispatchCurrent(dispatch)) {
+        settlementOptions.onSuccess?.(data, dispatch.variables, result, context as never);
+      }
+    },
+    onError: (error: Error, dispatch: RelayDispatch<TVariables>, result: unknown, context: unknown) => {
+      if (isDispatchCurrent(dispatch) && !(error instanceof StaleRelayMutationScopeError)) {
+        settlementOptions.onError?.(error, dispatch.variables, result, context as never);
+      }
+    },
+    onSettled: (data: TData | undefined, error: Error | null, dispatch: RelayDispatch<TVariables>, result: unknown, context: unknown) => {
+      if (isDispatchCurrent(dispatch) && !(error instanceof StaleRelayMutationScopeError)) {
+        settlementOptions.onSettled?.(data, error, dispatch.variables, result, context as never);
+      }
+    },
+    mutationFn: async (dispatch: RelayDispatch<TVariables>) => {
+      if (!isDispatchCurrent(dispatch)) {
+        return stale(dispatch);
+      }
+      let result: TTransport;
+      try {
+        result = await mutationFn(dispatch.variables);
+      } catch (error) {
+        if (!isDispatchCurrent(dispatch)) {
+          return stale(dispatch);
+        }
+        throw error;
+      }
+      if (!isDispatchCurrent(dispatch)) {
+        return stale(dispatch);
+      }
+      return consume ? consume(result) : (result as unknown as TData);
+    },
+  } as unknown as UseMutationOptions<TData, Error, RelayDispatch<TVariables>>;
+  const mutation = useMutation<TData, Error, RelayDispatch<TVariables>>(mutationOptions);
+  const scope = () => ({ identityEpoch: getIdentityEpoch(), owner });
+  const wrapMutateOptions = (
+    mutateOptions?: MutateOptions<TData, Error, TVariables>,
+  ): MutateOptions<TData, Error, RelayDispatch<TVariables>> | undefined => mutateOptions && ({
+    onSuccess: (data, dispatch, result, context) => {
+      if (isDispatchCurrent(dispatch)) {
+        mutateOptions.onSuccess?.(data, dispatch.variables, result, context as never);
+      }
+    },
+    onError: (error, dispatch, result, context) => {
+      if (isDispatchCurrent(dispatch) && !(error instanceof StaleRelayMutationScopeError)) {
+        mutateOptions.onError?.(error, dispatch.variables, result, context as never);
+      }
+    },
+    onSettled: (data, error, dispatch, result, context) => {
+      if (isDispatchCurrent(dispatch) && !(error instanceof StaleRelayMutationScopeError)) {
+        mutateOptions.onSettled?.(data, error, dispatch.variables, result, context as never);
+      }
+    },
+  });
+  const mutate = (
+    variables: TVariables,
+    mutateOptions?: MutateOptions<TData, Error, TVariables>,
+  ) => {
+    const dispatch = { variables, scope: scope() };
+    currentDispatchRef.current = dispatch;
+    mutation.mutate(
+      dispatch,
+      wrapMutateOptions(mutateOptions),
+    );
+  };
+  const mutateAsync = (
+    variables: TVariables,
+    mutateOptions?: MutateOptions<TData, Error, TVariables>,
+  ) => {
+    const dispatch = { variables, scope: scope() };
+    currentDispatchRef.current = dispatch;
+    return mutation.mutateAsync(dispatch, wrapMutateOptions(mutateOptions));
+  };
+  return { ...mutation, mutate, mutateAsync } as UseMutationResult<TData, Error, TVariables>;
+}
+
+function useAgentContext() {
+  const { api, serverUrl, accountId } = useSession();
+  return { api, owner: agentOwnerIdentity(serverUrl, accountId ?? undefined) };
+}
+
+function useInvalidateAgents(owner: string) {
+  const queryClient = useQueryClient();
+  return () => queryClient.invalidateQueries({ queryKey: agentKeys.owner(owner) });
+}
+
+export function useAgentConnections(enabled = true) {
+  const { api, owner } = useAgentContext();
+  return useQuery({
+    queryKey: agentKeys.connections(owner),
+    queryFn: ({ signal }) => api.listAgentConnections(signal),
+    enabled,
+  });
+}
+
+export function useAgentConnection(connectionId: string, enabled = true) {
+  const { api, owner } = useAgentContext();
+  return useQuery({
+    queryKey: agentKeys.connection(owner, connectionId),
+    queryFn: ({ signal }) => api.getAgentConnection(connectionId, signal),
+    enabled,
+  });
+}
+
+/**
+ * The 201 body carries the inbound signing secret exactly once. It is returned
+ * to the caller for a one-time panel and deliberately never written into the
+ * query cache.
+ */
+export function useCreateAgentConnection(options?: { onSigningSecret(secret: string): void }) {
+  const { api, owner } = useAgentContext();
+  const invalidate = useInvalidateAgents(owner);
+  return useRelayMutation<AgentConnectionCreatedResponse, AgentConnectionResponse, {
+    payload: AgentConnectionCreateRequest;
+    idempotencyKey: string;
+  }>({
+    mutationKey: agentKeys.mutation(owner, "create-connection"),
+    mutationFn: (input) => api.createAgentConnection(
+      input.payload,
+      requireIdempotencyKey("useCreateAgentConnection", input.idempotencyKey),
+    ),
+    consume: ({ inbound_signing_secret: secret, ...connection }) => {
+      options?.onSigningSecret(secret);
+      return connection;
+    },
+    onSuccess: invalidate,
+  });
+}
+
+export function useTestAgentConnection() {
+  const { api, owner } = useAgentContext();
+  const invalidate = useInvalidateAgents(owner);
+  return useRelayMutation({
+    mutationKey: agentKeys.mutation(owner, "test-connection"),
+    mutationFn: (connectionId: string) => api.testAgentConnection(connectionId),
+    onSuccess: invalidate,
+  });
+}
+
+/**
+ * The caller owns the relay intent key, and there is no fallback.
+ *
+ * A relay mutation that times out is ambiguous — it may already have reached
+ * the server. Minting a key here would turn that one attempt into a second
+ * command on retry, so every hook requires and forwards the caller's exact key.
+ */
+export function useRotateAgentCredential() {
+  const { api, owner } = useAgentContext();
+  const invalidate = useInvalidateAgents(owner);
+  return useRelayMutation({
+    mutationKey: agentKeys.mutation(owner, "rotate-credential"),
+    mutationFn: (input: {
+      connectionId: string;
+      payload: AgentConnectionRotateRequest;
+      idempotencyKey: string;
+    }) =>
+      api.rotateAgentCredential(
+        input.connectionId,
+        input.payload,
+        requireIdempotencyKey("useRotateAgentCredential", input.idempotencyKey),
+      ),
+    onSuccess: invalidate,
+    onError: (error: unknown) => {
+      if (error instanceof ApiError && error.status === 409) {
+        invalidate();
+      }
+    },
+  });
+}
+
+export function useRotateAgentSigningSecret(options?: { onSigningSecret(secret: string): void }) {
+  const { api, owner } = useAgentContext();
+  const invalidate = useInvalidateAgents(owner);
+  return useRelayMutation<AgentConnectionSigningSecretResponse, AgentConnectionResponse, {
+    connectionId: string;
+    payload: AgentConnectionRotateSigningSecretRequest;
+    idempotencyKey: string;
+  }>({
+    mutationKey: agentKeys.mutation(owner, "rotate-signing-secret"),
+    mutationFn: (input) => api.rotateAgentSigningSecret(
+      input.connectionId,
+      input.payload,
+      requireIdempotencyKey("useRotateAgentSigningSecret", input.idempotencyKey),
+    ),
+    consume: ({ inbound_signing_secret: secret, ...connection }) => {
+      options?.onSigningSecret(secret);
+      return connection;
+    },
+    onSuccess: invalidate,
+    onError: (error: unknown) => {
+      if (error instanceof ApiError && error.status === 409) {
+        invalidate();
+      }
+    },
+  });
+}
+
+export function useDisconnectAgentConnection() {
+  const { api, owner } = useAgentContext();
+  const invalidate = useInvalidateAgents(owner);
+  return useRelayMutation({
+    mutationKey: agentKeys.mutation(owner, "disconnect-connection"),
+    mutationFn: (input: {
+      connectionId: string;
+      payload: AgentConnectionDisconnectRequest;
+      idempotencyKey: string;
+    }) =>
+      api.disconnectAgentConnection(
+        input.connectionId,
+        input.payload,
+        requireIdempotencyKey("useDisconnectAgentConnection", input.idempotencyKey),
+      ),
+    onSuccess: invalidate,
+    onError: (error: unknown) => {
+      if (error instanceof ApiError && error.status === 409) {
+        invalidate();
+      }
+    },
+  });
+}
+
+export interface AgentRunsExpiryRuntime {
+  /** Monotonic time source; wall-clock changes must not affect retention. */
+  now: () => number;
+  schedule: (callback: () => void, delayMs: number) => () => void;
+}
+
+const defaultAgentRunsExpiryRuntime: AgentRunsExpiryRuntime = {
+  now: () => performance.now(),
+  schedule: (callback, delayMs) => {
+    const timer = setTimeout(callback, delayMs);
+    return () => clearTimeout(timer);
+  },
+};
+
+export function useAgentRuns(
+  taskId: string,
+  enabled = true,
+  expiryRuntime: AgentRunsExpiryRuntime = defaultAgentRunsExpiryRuntime,
+) {
+  const { api, owner } = useAgentContext();
+  const { serverTimeAnchor } = useSession();
+  const queryClient = useQueryClient();
+  const queryKey = agentKeys.taskRuns(owner, taskId);
+  const authoritativeNow = useCallback(
+    () =>
+      serverTimeAnchor
+        ? serverTimeAnchor.serverTimeMs + (expiryRuntime.now() - serverTimeAnchor.monotonicTimeMs)
+        : null,
+    [expiryRuntime, serverTimeAnchor],
+  );
+  const query = useQuery({
+    queryKey,
+    queryFn: async ({ signal }) => {
+      const runs = await api.listAgentRuns(taskId, signal);
+      const now = authoritativeNow();
+      // Without a current session-scoped server anchor, privacy wins: do not
+      // retain content based on a device wall clock that may be skewed.
+      return projectRunsAt(runs, now ?? Number.POSITIVE_INFINITY);
+    },
+    enabled,
+  });
+
+  useEffect(() => {
+    const now = authoritativeNow();
+    if (now === null) {
+      return;
+    }
+    const nextDeadline = (query.data ?? [])
+      .filter((run) => !run.content_expired)
+      .map((run) => Date.parse(run.content_expires_at))
+      .filter((deadline) => !Number.isNaN(deadline) && deadline > now)
+      .reduce<number | null>((earliest, deadline) =>
+        earliest === null || deadline < earliest ? deadline : earliest, null);
+    if (nextDeadline === null) {
+      return;
+    }
+    const delay = Math.min(nextDeadline - now, 2_147_483_647);
+    let active = true;
+    const cancel = expiryRuntime.schedule(() => {
+      if (!active) {
+        return;
+      }
+      const callbackNow = authoritativeNow();
+      if (callbackNow === null) {
+        return;
+      }
+      queryClient.setQueryData<AgentRunResponse[]>(queryKey, (cached) =>
+        cached ? projectRunsAt(cached, callbackNow) : cached,
+      );
+    }, delay);
+    return () => {
+      active = false;
+      cancel();
+    };
+  }, [authoritativeNow, expiryRuntime, query.data, queryClient, queryKey]);
+
+  return query;
+}
+
+/**
+ * The latest run per task, for the compact task list.
+ *
+ * Asked only about the task IDs actually on screen, and only while the
+ * account's `external_agent_relay` flag is on — the backend answers 404
+ * otherwise, and a list of tasks must never manufacture an error for a
+ * capability the user cannot see. The answer is sparse: a task with no hand-off
+ * is simply absent, so its row stays exactly as it was.
+ */
+export function useAgentRunSummaries(taskIds: string[], enabled: boolean) {
+  const { api, owner } = useAgentContext();
+  return useQuery({
+    queryKey: agentKeys.summaries(owner, taskIds),
+    queryFn: ({ signal }) => api.listAgentRunSummaries(taskIds, signal),
+    enabled: enabled && taskIds.length > 0,
+  });
+}
+
+/**
+ * Reserves a run id and returns the manifest to review. Nothing is sent, and no
+ * relay key is minted or required — the key appears at confirmation, derived
+ * from the manifest token this call returns.
+ */
+export function usePreviewAgentHandoff(taskId: string) {
+  const { api, owner } = useAgentContext();
+  return useRelayMutation({
+    mutationKey: agentKeys.mutation(owner, "preview-handoff"),
+    mutationFn: (payload: AgentHandoffPreviewRequest) => api.previewAgentHandoff(taskId, payload),
+  });
+}
+
+/**
+ * The key is derived from the reviewed manifest token, not from a fresh random
+ * value, so retrying the hand-off the user actually reviewed returns the
+ * original run instead of starting a second one. Matches the web semantics in
+ * `frontend/src/features/agents/AgentHandoffOverlay.tsx`; re-previewing mints a
+ * new token, which is exactly when a new key is wanted.
+ */
+export function useConfirmAgentHandoff(taskId: string) {
+  const { api, owner } = useAgentContext();
+  const invalidate = useInvalidateAgents(owner);
+  return useRelayMutation({
+    mutationKey: agentKeys.mutation(owner, "confirm-handoff"),
+    mutationFn: (input: {
+      payload: AgentHandoffConfirmRequest;
+      idempotencyKey: string;
+    }) =>
+      api.confirmAgentHandoff(
+        taskId,
+        input.payload,
+        requireIdempotencyKey("useConfirmAgentHandoff", input.idempotencyKey),
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+/**
+ * The caller owns the key (see `useIntentKey`): a reply that timed out may
+ * already have reached the server, so the retry must carry the same key.
+ */
+export function useReplyToAgentRun() {
+  const { api, owner } = useAgentContext();
+  const invalidate = useInvalidateAgents(owner);
+  return useRelayMutation({
+    mutationKey: agentKeys.mutation(owner, "reply-run"),
+    mutationFn: (input: {
+      runId: string;
+      payload: AgentReplyRequest;
+      idempotencyKey: string;
+    }) =>
+      api.replyToAgentRun(
+        input.runId,
+        input.payload,
+        requireIdempotencyKey("useReplyToAgentRun", input.idempotencyKey),
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+export function useCancelAgentRun() {
+  const { api, owner } = useAgentContext();
+  const invalidate = useInvalidateAgents(owner);
+  return useRelayMutation({
+    mutationKey: agentKeys.mutation(owner, "cancel-run"),
+    mutationFn: (input: { runId: string; idempotencyKey: string }) =>
+      api.cancelAgentRun(
+        input.runId,
+        requireIdempotencyKey("useCancelAgentRun", input.idempotencyKey),
+      ),
+    onSuccess: invalidate,
   });
 }
