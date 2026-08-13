@@ -30,6 +30,11 @@ import type {
   ProfileUpdatePayload
 } from "./accountTypes";
 import type {
+  AdminAccountLookupRequest,
+  AdminAccountResponse,
+  AdminRevokeSessionsResponse
+} from "./adminTypes";
+import type {
   AgentConnectionCreateRequest,
   AgentConnectionCreatedResponse,
   AgentConnectionDisconnectRequest,
@@ -567,5 +572,18 @@ export const apiClient = {
 
   requestAccountDeletion(payload: AccountDeletePayload) {
     return request<AccountDeleteResponse>("/account/delete", { method: "POST", body: payload });
+  },
+
+  // Minimum admin portal (009): exact account lookup and session revoke,
+  // gated server-side on the operator allow-list.
+  lookupAdminAccount(payload: AdminAccountLookupRequest) {
+    return request<AdminAccountResponse>("/admin/accounts/lookup", { method: "POST", body: payload });
+  },
+
+  revokeAdminAccountSessions(accountId: string) {
+    return request<AdminRevokeSessionsResponse>(
+      `/admin/accounts/${encodeURIComponent(accountId)}/revoke-sessions`,
+      { method: "POST" }
+    );
   }
 };

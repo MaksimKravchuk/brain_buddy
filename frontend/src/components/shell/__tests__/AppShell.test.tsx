@@ -453,6 +453,28 @@ describe("AppShell account menu", () => {
     expect(screen.getByRole("menu", { name: "Account" })).toBeInTheDocument();
   });
 
+  it("hides Admin portal from the account menu for a non-operator", async () => {
+    const user = userEvent.setup();
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Account menu for max@example.test" }));
+    expect(screen.queryByRole("menuitem", { name: "Admin portal" })).not.toBeInTheDocument();
+  });
+
+  it("shows Admin portal for an operator and navigates to /admin", async () => {
+    const user = userEvent.setup();
+    act(() => {
+      useAuthStore.setState({
+        user: { id: "user-1", email: "max@example.test", is_operator: true }
+      });
+    });
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Account menu for max@example.test" }));
+    await user.click(screen.getByRole("menuitem", { name: "Admin portal" }));
+    expect(currentLocation()).toBe("/admin");
+  });
+
   it("stays open while the pointer lands inside the menu itself", async () => {
     const user = userEvent.setup();
     renderShell();

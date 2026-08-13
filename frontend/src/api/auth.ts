@@ -13,6 +13,10 @@ export type AuthUser = {
   // `delivery_canary`). Absent on older backends that predate the field, so
   // callers must fail closed and treat a missing flag as OFF.
   feature_flags?: Record<string, boolean>;
+  // Server-issued: whether this user is on the admin operator allow-list.
+  // Never inferred client-side (e.g. from email) -- absent or false means no
+  // admin access.
+  is_operator?: boolean;
 };
 
 // Reads a server rollout flag, defaulting to OFF (fail-closed) when the flag —
