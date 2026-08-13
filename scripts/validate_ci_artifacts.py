@@ -156,11 +156,16 @@ EXECUTED_ALLURE_STATUSES = {"passed", "failed", "broken"}
 # documentation commits. The short circuit these strings guard is the fix;
 # deleting it silently restores the breakage for the next spec-only branch.
 #
-# Narrow on purpose. Only `backend` and `frontend` upload results -- the `e2e`
-# job derives its own RUN from those two and `mobile` uploads none -- so those
-# two are the entire predicate. It must NOT grow to cover "a stack ran and
-# produced no results": that is a real defect and the validator exists to fail
-# on it.
+# Narrow on purpose in one direction only: it must NOT grow to cover "a lane ran
+# and produced no results". That is a real defect and the validator exists to
+# fail on it.
+#
+# It must, however, name every lane that uploads. This comment previously said
+# only `backend` and `frontend` upload results, that the `e2e` job "derives its
+# own RUN from those two", and that `mobile` uploads none. Each claim decayed
+# separately, and each time the predicate was left behind. Four artifacts match
+# the `*-allure-results` download pattern today: backend, frontend, mobile and
+# playwright.
 #
 # The step anchors below are deliberately two-line, binding the guard to the
 # `if:` on the specific steps it protects. A bare "if: steps.aggregate..."
@@ -173,14 +178,20 @@ EXECUTED_ALLURE_STATUSES = {"passed", "failed", "broken"}
 ALLURE_AGGREGATION_REQUIREMENTS = (
     ("Allure aggregation short-circuit step", "      - name: Decide whether there is anything to aggregate\n        id: aggregate"),
     (
-        # Three, not two. `mobile` began uploading Allure results when the
-        # mobile Jest suite gained taxonomy, and this invariant was not moved
-        # with it — so a mobile-only pull request skipped every aggregation
-        # step and still went green, with no report and no link. An invariant
-        # that names the wrong set is worse than none: it reads as coverage of
-        # exactly the case it misses.
-        "Allure aggregation predicate over the three uploading stacks",
-        'if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ] || [ "$MOBILE" = "true" ]; then',
+        # Four, not three, and not two. This set has been wrong twice for the
+        # same reason: a lane started uploading Allure results and the
+        # invariant was not moved with it. First `mobile`, when the Jest suite
+        # gained taxonomy — a mobile-only pull request then skipped every
+        # aggregation step and still went green. Then `e2e`, which uploads
+        # `playwright-allure-results` under a bare `always()` in a job that is
+        # never path filtered, so it produces results on a docs-only run where
+        # all three stacks are false; the aggregation short-circuited and threw
+        # a complete Playwright suite away. An invariant that names the wrong
+        # set is worse than none: it reads as coverage of exactly the case it
+        # misses.
+        "Allure aggregation predicate over the four uploading lanes",
+        'if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ] || [ "$MOBILE" = "true" ]'
+        ' || [ "$E2E" = "true" ]; then',
     ),
     # Selected-to-run is not produced-something. A stack job is skipped when
     # `spec-kit` is red, which is the normal state of a spec-driven branch, so
@@ -216,6 +227,19 @@ ALLURE_AGGREGATION_REQUIREMENTS = (
         "Allure predicate conjoins selection with the mobile job actually running",
         "          MOBILE: ${{ needs.changes.outputs.mobile == 'true'"
         " && needs.mobile.result != 'skipped' }}\n",
+    ),
+    # One conjunct, not two, and that asymmetry is the point. The three stack
+    # lanes are path filtered, so "was it selected" is a real question for them.
+    # `e2e` is deliberately never path filtered and its upload carries a bare
+    # `always()` with no RUN guard, so the job produces results whenever it is
+    # not skipped -- there is no `changes.outputs.e2e` to conjoin, and adding
+    # one would reintroduce the bug by making a docs-only run look empty.
+    #
+    # Anchored to the key for the same reason as the three above: the shell line
+    # can name E2E while the environment binds it to a constant.
+    (
+        "Allure predicate accounts for the never-path-filtered e2e lane",
+        "          E2E: ${{ needs.e2e.result != 'skipped' }}\n",
     ),
     (
         "gate on the Allure download step",
@@ -801,6 +825,51 @@ def _missing_allure_aggregation_errors(workflow_text: str) -> list[str]:
     return errors
 
 
+def _undiscoverable_allure_producer_errors(workflow_text: str) -> list[str]:
+    """Every Allure result a job writes must be uploaded where the aggregate looks.
+
+    The predicate above enumerates the lanes that upload. That is necessary and
+    not sufficient, and the difference is the whole reason this function exists:
+    an enumeration can only name artifacts that are *already* called
+    ``*-allure-results``, so a producer whose artifact is named anything else is
+    invisible to it — the invariant stays green while the report silently omits
+    the result. That is not hypothetical. ``mutation-head`` wrote a valid Allure
+    result for the **blocking** mutation gate and uploaded it as
+    ``mutation-gate-evidence``; the aggregate downloads by ``*-allure-results``
+    pattern, so the one result a person most needs when the gate fails was the
+    one no report ever contained.
+
+    So this asks the question from the producing end instead: for every
+    ``create_mutation_allure_evidence.py --output <dir>/<file>`` in the
+    workflow, is ``<dir>`` uploaded under a name the aggregate's pattern
+    matches? A new producer is then caught by construction rather than by
+    somebody remembering to extend a list.
+    """
+    errors: list[str] = []
+    outputs = re.findall(
+        r"create_mutation_allure_evidence\.py[^\n]*(?:\\\s*\n[^\n]*)*?--output\s+(\S+)",
+        workflow_text,
+    )
+    for output in outputs:
+        directory = output.rsplit("/", 1)[0] if "/" in output else output
+        uploaded = re.search(
+            r"name:\s*(\S+)\n\s*path:\s*" + re.escape(directory) + r"\s*\n",
+            workflow_text,
+        )
+        if uploaded is None:
+            errors.append(
+                "an Allure result is written to "
+                f"{directory} but no artifact uploads that directory"
+            )
+        elif not uploaded.group(1).endswith("-allure-results"):
+            errors.append(
+                f"the Allure result written to {directory} is uploaded as "
+                f"'{uploaded.group(1)}', which the aggregate's '*-allure-results' "
+                "pattern does not match, so no report will ever contain it"
+            )
+    return errors
+
+
 def validate_workflow(
     ci: Path, disallowed_workflows: list[Path], frontend_vite_config: Path | None
 ) -> int:
@@ -814,6 +883,7 @@ def validate_workflow(
         errors.extend(_missing_frontend_ci_errors(workflow_text))
         errors.extend(_missing_e2e_ci_errors(workflow_text))
         errors.extend(_missing_allure_aggregation_errors(workflow_text))
+        errors.extend(_undiscoverable_allure_producer_errors(workflow_text))
         errors.extend(_path_filter_errors(workflow_text))
         errors.extend(_job_graph_errors(workflow_text))
         errors.extend(_mutation_gate_errors(workflow_text))
