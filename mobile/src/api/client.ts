@@ -127,7 +127,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const AMBIGUOUS_STATUSES: ReadonlySet<number> = new Set([408, 429]);
 
 /** True only when the server's answer proves the command did not take effect. */
-function isDefinitiveOutcome(error: unknown): boolean {
+export function isDefinitiveMutationFailure(error: unknown): boolean {
   return (
     error instanceof ApiError &&
     error.status >= 400 &&
@@ -247,7 +247,7 @@ export function createApiClient(options: ApiClientOptions) {
       relayIntents.settle(key);
       return result;
     } catch (error) {
-      if (isDefinitiveOutcome(error)) {
+      if (isDefinitiveMutationFailure(error)) {
         relayIntents.settle(key);
       } else {
         relayIntents.preserve(key);

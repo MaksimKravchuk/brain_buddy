@@ -12,14 +12,21 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 
+import { disposeQueryClient } from "@/test/queryClient";
+
+const activeRenderCleanups = new Set<() => Promise<void>>();
+
+afterEach(async () => {
+  for (const cleanup of [...activeRenderCleanups]) {
+    await cleanup();
+  }
+});
+
 export function testQueryClient(): QueryClient {
   return new QueryClient({
     defaultOptions: {
       queries: { retry: false, gcTime: 0, staleTime: 0 },
-      // Mutations keep a garbage-collection timer alive too; without this the
-      // Jest process lingers for the default five minutes after a test that
-      // mutates.
-      mutations: { retry: false, gcTime: 0 },
+      mutations: { retry: false },
     },
   });
 }
@@ -27,6 +34,7 @@ export function testQueryClient(): QueryClient {
 export interface RenderResult {
   renderer: ReactTestRenderer;
   client: QueryClient;
+  rerender: (element: ReactElement) => Promise<void>;
   unmount: () => Promise<void>;
 }
 
@@ -36,15 +44,28 @@ export async function renderWithProviders(element: ReactElement): Promise<Render
   await act(async () => {
     renderer = create(<QueryClientProvider client={client}>{element}</QueryClientProvider>);
   });
+  let disposed = false;
+  const cleanup = async () => {
+    if (disposed) {
+      return;
+    }
+    disposed = true;
+    activeRenderCleanups.delete(cleanup);
+    await act(async () => {
+      renderer.unmount();
+    });
+    disposeQueryClient(client);
+  };
+  activeRenderCleanups.add(cleanup);
   return {
     renderer,
     client,
-    unmount: async () => {
+    rerender: async (next: ReactElement) => {
       await act(async () => {
-        renderer.unmount();
+        renderer.update(<QueryClientProvider client={client}>{next}</QueryClientProvider>);
       });
-      client.clear();
     },
+    unmount: cleanup,
   };
 }
 

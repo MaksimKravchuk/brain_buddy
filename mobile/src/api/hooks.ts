@@ -862,12 +862,21 @@ export function useAgentRuns(
  * capability the user cannot see. The answer is sparse: a task with no hand-off
  * is simply absent, so its row stays exactly as it was.
  */
-export function useAgentRunSummaries(taskIds: string[], enabled: boolean) {
+export function useAgentRunSummaries(
+  taskIds: string[],
+  enabled: boolean,
+  refetchInterval = 15_000,
+) {
   const { api, owner } = useAgentContext();
   return useQuery({
     queryKey: agentKeys.summaries(owner, taskIds),
     queryFn: ({ signal }) => api.listAgentRunSummaries(taskIds, signal),
     enabled: enabled && taskIds.length > 0,
+    // Connector reports arrive independently of this process, so invalidation
+    // alone cannot converge a mounted list. This bounded interval is active
+    // only while the query has observers; React Query also refetches on focus.
+    refetchInterval,
+    refetchOnWindowFocus: true,
   });
 }
 
