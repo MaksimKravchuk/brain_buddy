@@ -15,6 +15,24 @@ afterEach(async () => {
 });
 
 describe("settings", () => {
+  it("navigates to connected agents when the relay flag is enabled", async () => {
+    backend = installFakeBackend({
+      "GET /auth/me": () => makeMe({ feature_flags: { external_agent_relay: true } }),
+    });
+    await renderWithSession(<SettingsScreen />);
+
+    await fireEvent.press(screen.getByText("Connected agents"));
+    expect(routerSpy().push).toHaveBeenCalledWith("/agents");
+  });
+
+  it("keeps connected-agent history navigation available when the relay flag is disabled", async () => {
+    backend = installFakeBackend({ "GET /auth/me": () => makeMe({ feature_flags: {} }) });
+    await renderWithSession(<SettingsScreen />);
+
+    expect(screen.getByText("Connected agents")).toBeOnTheScreen();
+    expect(screen.getByText(/Relay rollout is off/)).toBeOnTheScreen();
+  });
+
   it("shows the signed-in account and its voice entitlement", async () => {
     backend = installFakeBackend({
       "GET /auth/me": () =>

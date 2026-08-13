@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   Archive,
   ArrowRight,
+  Bot,
   CalendarDays,
   CalendarRange,
   Clock,
@@ -262,6 +263,17 @@ function AccountMenu(): React.JSX.Element {
             }}
           >
             <Settings className="h-4 w-4 text-slate-500" aria-hidden /> Account settings
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className={itemClass}
+            onClick={() => {
+              setOpen(false);
+              navigate("/settings/agents");
+            }}
+          >
+            <Bot className="h-4 w-4 text-slate-500" aria-hidden /> Connected agents
           </button>
           <button
             type="button"

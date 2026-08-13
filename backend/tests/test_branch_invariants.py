@@ -392,6 +392,61 @@ def test_voice_sweep_iteration_runs_all_three_duties_and_survives_a_failure(
     assert calls == ["recover", "resume_commits", "raw_audio", "working_artifacts"]
 
 
+def test_privacy_retention_runs_when_voice_sweep_is_disabled(
+    data_dir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Relay expiry is periodic even when the unrelated voice runner is disabled."""
+
+    import threading
+    from datetime import timedelta
+
+    from app import main as main_module
+    from app.core import get_config
+    from tests.test_agent_repository import NOW, make_connection, make_run
+
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "production")
+    monkeypatch.setenv(
+        "BRAIN_BUDDY_PUBLIC_BASE_URL", "https://brain-buddy-backend.fly.dev"
+    )
+    monkeypatch.setenv("BRAIN_BUDDY_FEATURE_FLAGS", "external_agent_relay=off")
+    monkeypatch.delenv("BRAIN_BUDDY_AGENT_RELAY_KEYS", raising=False)
+    monkeypatch.setattr(main_module, "_VOICE_SWEEP_INTERVAL_SECONDS", 0)
+    monkeypatch.setenv("BRAIN_BUDDY_AGENT_RETENTION_SWEEP_INTERVAL_SECONDS", "1")
+    get_config.cache_clear()
+    real_start = main_module._start_privacy_maintenance_thread
+
+    def start_privacy(container, stop_event, *, interval_seconds):
+        assert interval_seconds == 1
+        return real_start(container, stop_event, interval_seconds=0.01)
+
+    monkeypatch.setattr(main_module, "_start_privacy_maintenance_thread", start_privacy)
+    app = create_app()
+    repo = app.state.container.agent_repo
+    service = app.state.container.agent_relay_service
+    service._now = lambda: NOW + timedelta(days=31)
+    expired = threading.Event()
+    real_expire = repo.expire_due_content
+
+    def expire_due_content(*, now):
+        count = real_expire(now=now)
+        if count:
+            expired.set()
+        return count
+
+    repo.expire_due_content = expire_due_content
+    repo.create_connection(make_connection())
+    repo.create_run(make_run(result_text="must expire"))
+
+    try:
+        with TestClient(app):
+            assert expired.wait(timeout=2), "privacy retention never ran periodically"
+        assert repo.get_run("agentrun_1", owner_id="user_a").content_expired is True
+        assert app.state.voice_sweep_thread is None
+    finally:
+        get_config.cache_clear()
+
+
 def test_voice_sweep_thread_wakes_immediately_and_stops_cleanly(container) -> None:
     """The periodic sweep runs on a thread that is referenced (not an
     untracked fire-and-forget task) and stops promptly once signalled."""

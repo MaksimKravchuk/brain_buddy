@@ -1,0 +1,1323 @@
+"""SQLite persistence for the external-agent relay module.
+
+Deliberately SQLite-only: unlike the task module this repository writes no JSON
+mirror, because these rows carry sealed connector credentials and relayed user
+content, and a second plaintext-path copy would widen both the retention surface
+(FR-015) and the blast radius of a disk leak.
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import threading
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any, ClassVar, TypeVar
+from weakref import WeakValueDictionary
+
+from pydantic import BaseModel, ValidationError
+
+from app.exceptions import (
+    ConflictError,
+    NotFoundError,
+    RepositoryError,
+    StorageUnavailableError,
+)
+from app.repositories.base import BaseRepository
+
+from .domain import (
+    AgentAuditEntryDocument,
+    AgentConnectionDocument,
+    AgentIdempotencyRecord,
+    AgentRunCommandDocument,
+    AgentRunDocument,
+    AgentRunEventDocument,
+    project_run_for_access,
+)
+from .headers import validate_auth_header_name
+from .secrets import fingerprint_key_id, key_id_from_sealed
+
+ModelT = TypeVar("ModelT", bound=BaseModel)
+
+
+@dataclass(frozen=True, slots=True)
+class LiveIdempotencyKeys:
+    """Readable key ids and the count of live rows that cannot be parsed."""
+
+    key_ids: frozenset[str]
+    unreadable: int
+
+
+IDEMPOTENCY_RETENTION = timedelta(hours=24)
+"""How long a replayed relay command stays addressable by its key."""
+
+AUDIT_RETENTION = timedelta(days=90)
+"""Upper bound on audit metadata (FR-015). Content retention is far shorter."""
+
+EVENT_ID_RETENTION = timedelta(days=30)
+"""How long a consumed event ID blocks a replay; matches content retention."""
+
+
+@contextmanager
+def _sqlite_guard(resource: str, identifier: str) -> Iterator[None]:
+    """Translate raw ``sqlite3`` failures into the app's domain exceptions."""
+
+    try:
+        yield
+    except sqlite3.IntegrityError as exc:
+        raise ConflictError(
+            resource,
+            identifier,
+            f"{resource} '{identifier}' conflicts with existing records.",
+        ) from exc
+    except sqlite3.OperationalError as exc:
+        raise StorageUnavailableError(
+            "Agent storage is temporarily unavailable; retry the request."
+        ) from exc
+    except sqlite3.Error as exc:
+        raise RepositoryError(
+            f"Agent storage failed while writing {resource} '{identifier}'."
+        ) from exc
+
+
+class AgentRepository(BaseRepository):
+    """Store relay records in one owner-isolated SQLite database."""
+
+    _thread_state: ClassVar[threading.local] = threading.local()
+    _process_lock: ClassVar[threading.RLock] = threading.RLock()
+    _operation_locks_guard: ClassVar[threading.Lock] = threading.Lock()
+    _operation_locks: ClassVar[WeakValueDictionary[tuple[str, str, str], Any]] = (
+        WeakValueDictionary()
+    )
+
+    def __init__(self, root: Path) -> None:
+        super().__init__(root)
+        self.db_path = self.resolve("agents.sqlite3")
+        self._initialize_database()
+
+    def has_any_relay_data(self) -> bool:
+        """Whether any relay-owned table contains a durable record."""
+
+        with self._connection() as conn:
+            row = conn.execute("""
+                SELECT 1 FROM agent_connections LIMIT 1
+                """).fetchone()
+            if row is not None:
+                return True
+            for query in (
+                "SELECT 1 FROM agent_runs LIMIT 1",
+                "SELECT 1 FROM agent_run_events LIMIT 1",
+                "SELECT 1 FROM agent_run_commands LIMIT 1",
+                "SELECT 1 FROM agent_audit LIMIT 1",
+                "SELECT 1 FROM agent_event_ids LIMIT 1",
+                "SELECT 1 FROM agent_idempotency LIMIT 1",
+            ):
+                if conn.execute(query).fetchone() is not None:
+                    return True
+        return False
+
+    # --- connection plumbing ------------------------------------------------
+
+    @contextmanager
+    def operation_lock(
+        self, owner_id: str, operation_fingerprint: str
+    ) -> Iterator[None]:
+        """Serialize one idempotent intent without holding a database writer."""
+
+        coordinate = (str(self.db_path), owner_id, operation_fingerprint)
+        with self._operation_locks_guard:
+            lock = self._operation_locks.get(coordinate)
+            if lock is None:
+                lock = threading.RLock()
+                self._operation_locks[coordinate] = lock
+        with lock:
+            yield
+
+    @contextmanager
+    def command_lock(self, owner_id: str) -> Iterator[None]:
+        """Serialize owner-scoped commands and wrap writes in one transaction."""
+
+        with self._process_lock:
+            conn = self._connect()
+            previous = getattr(self._thread_state, "conn", None)
+            self._thread_state.conn = conn
+            try:
+                with _sqlite_guard("Agent command", owner_id):
+                    conn.execute("BEGIN IMMEDIATE")
+                    yield
+                    conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                self._thread_state.conn = previous
+                conn.close()
+
+    def commit_checkpoint(self) -> None:
+        """Durably land what the open command has written so far.
+
+        A command that is about to leave the process has to have its
+        reservation on disk *first*: if the call is lost mid-flight the agent
+        may already hold that command ID, and a rolled-back reservation would
+        let the retry mint a second one for the same intent. The owner's
+        process lock is still held across the seam, so no other command of
+        theirs can interleave here.
+        """
+
+        conn = getattr(self._thread_state, "conn", None)
+        if conn is None:
+            return
+        with _sqlite_guard("Agent command", "checkpoint"):
+            conn.commit()
+            conn.execute("BEGIN IMMEDIATE")
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path, timeout=5.0, isolation_level=None)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 5000")
+        conn.execute("PRAGMA journal_mode = WAL")
+        return conn
+
+    @contextmanager
+    def _owned_connection(self) -> Iterator[sqlite3.Connection]:
+        conn = self._connect()
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        active = getattr(self._thread_state, "conn", None)
+        if active is not None:
+            yield active
+            return
+        with self._owned_connection() as conn:
+            yield conn
+
+    def _initialize_database(self) -> None:
+        with self._owned_connection() as conn:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS agent_connections (
+                    owner_id TEXT NOT NULL,
+                    id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    PRIMARY KEY (owner_id, id)
+                );
+                CREATE TABLE IF NOT EXISTS agent_runs (
+                    owner_id TEXT NOT NULL,
+                    id TEXT NOT NULL,
+                    connection_id TEXT NOT NULL,
+                    task_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    dispatched_at TEXT,
+                    manifest_token TEXT,
+                    content_expires_at TEXT NOT NULL,
+                    content_expired INTEGER NOT NULL DEFAULT 0,
+                    payload TEXT NOT NULL,
+                    PRIMARY KEY (owner_id, id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_runs_task
+                    ON agent_runs(owner_id, task_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_agent_runs_expiry
+                    ON agent_runs(content_expired, content_expires_at);
+                CREATE INDEX IF NOT EXISTS idx_agent_runs_token
+                    ON agent_runs(owner_id, manifest_token);
+                CREATE TABLE IF NOT EXISTS agent_run_events (
+                    owner_id TEXT NOT NULL,
+                    id TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    run_version INTEGER NOT NULL,
+                    received_at TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    PRIMARY KEY (owner_id, run_id, id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_events_run
+                    ON agent_run_events(owner_id, run_id, run_version);
+                CREATE TABLE IF NOT EXISTS agent_run_commands (
+                    owner_id TEXT NOT NULL,
+                    id TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    PRIMARY KEY (owner_id, id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_commands_run
+                    ON agent_run_commands(owner_id, run_id, created_at);
+                CREATE TABLE IF NOT EXISTS agent_event_ids (
+                    owner_id TEXT NOT NULL,
+                    connection_id TEXT NOT NULL,
+                    event_id TEXT NOT NULL,
+                    consumed_at TEXT NOT NULL,
+                    PRIMARY KEY (owner_id, connection_id, event_id)
+                );
+                CREATE TABLE IF NOT EXISTS agent_audit (
+                    owner_id TEXT NOT NULL,
+                    id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    PRIMARY KEY (owner_id, id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_audit_created
+                    ON agent_audit(created_at);
+                CREATE TABLE IF NOT EXISTS agent_idempotency (
+                    owner_id TEXT NOT NULL,
+                    key_hash TEXT NOT NULL,
+                    command TEXT NOT NULL,
+                    request_hash TEXT NOT NULL,
+                    resource_id TEXT NOT NULL,
+                    command_id TEXT,
+                    completed INTEGER NOT NULL DEFAULT 1,
+                    response_body TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (owner_id, key_hash)
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_idempotency_created
+                    ON agent_idempotency(created_at);
+                """)
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS agent_schema_migrations ("
+                "name TEXT PRIMARY KEY)"
+            )
+            migration_name = "delivery_attempted_backfill_v1"
+            migrated = conn.execute(
+                "SELECT 1 FROM agent_schema_migrations WHERE name = ?",
+                (migration_name,),
+            ).fetchone()
+            if migrated is None:
+                # Keep ALTER, conservative legacy backfill, and the durable marker
+                # in one SQLite transaction. If startup stops anywhere in this
+                # block, the entire migration rolls back and the next startup
+                # retries it rather than authorizing an ambiguous redelivery.
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    columns = {
+                        row["name"]
+                        for row in conn.execute("PRAGMA table_info(agent_idempotency)")
+                    }
+                    if "delivery_attempted" not in columns:
+                        conn.execute(
+                            "ALTER TABLE agent_idempotency "
+                            "ADD COLUMN delivery_attempted "
+                            "INTEGER NOT NULL DEFAULT 0"
+                        )
+                        columns.add("delivery_attempted")
+                    if {
+                        "completed",
+                        "command_id",
+                        "delivery_attempted",
+                    }.issubset(columns):
+                        conn.execute(
+                            "UPDATE agent_idempotency "
+                            "SET delivery_attempted = 1 "
+                            "WHERE completed = 0 AND command_id IS NOT NULL "
+                            "AND delivery_attempted = 0"
+                        )
+                    conn.execute(
+                        "INSERT INTO agent_schema_migrations(name) VALUES (?)",
+                        (migration_name,),
+                    )
+                    conn.commit()
+                except BaseException:
+                    conn.rollback()
+                    raise
+            self._migrate_legacy_invalid_connections(conn)
+
+    def _migration_boundary(self, stage: str) -> None:
+        """Deterministic interleaving/failure-injection seam for atomicity tests."""
+
+    @staticmethod
+    def _quarantine_record(
+        owner_id: str, connection_id: str
+    ) -> AgentConnectionDocument:
+        """The secret-free record an unreadable legacy row is replaced with.
+
+        Deliberately a pure function of the row's coordinates: two startups that
+        both decide to quarantine the same row write byte-identical payloads, so
+        a redundant repair is invisible rather than a spurious change.
+        """
+
+        quarantine_time = datetime(1970, 1, 1, tzinfo=UTC)
+        return AgentConnectionDocument(
+            id=connection_id,
+            owner_id=owner_id,
+            name="Connection requires reconfiguration",
+            endpoint_url="https://reconfigure.invalid/",
+            status="untested",
+            last_test_error_code="legacy_invalid_connection_requires_reconfiguration",
+            created_at=quarantine_time,
+            updated_at=quarantine_time,
+        )
+
+    @staticmethod
+    def _migrate_legacy_invalid_header_connections(
+        conn: sqlite3.Connection,
+    ) -> None:
+        """Repair legacy header-only failures without consuming corrupt rows."""
+
+        rows = conn.execute(
+            "SELECT owner_id, id, payload FROM agent_connections"
+        ).fetchall()
+        for row in rows:
+            try:
+                payload = json.loads(row["payload"])
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            raw_header = payload.get("auth_header_name")
+            if isinstance(raw_header, str):
+                try:
+                    validate_auth_header_name(raw_header)
+                except ValueError:
+                    pass
+                else:
+                    continue
+            raw_revision = payload.get("revision", 1)
+            try:
+                legacy_revision = int(raw_revision)
+            except (TypeError, ValueError, OverflowError):
+                legacy_revision = 1
+            legacy_revision = min(max(legacy_revision, 1), 2_147_483_646)
+            payload.update(
+                auth_header_name="X-Agent-Key",
+                credential=None,
+                capabilities={"progress": False, "reply": False, "cancel": False},
+                status="untested",
+                last_test_error_code=(
+                    "legacy_invalid_auth_header_requires_reconfiguration"
+                ),
+                last_contact_at=None,
+                last_tested_at=None,
+                scope_verified_at=None,
+                first_dispatch_at=None,
+                revision=legacy_revision + 1,
+                updated_at=datetime.now(UTC).isoformat(),
+            )
+            conn.execute(
+                "UPDATE agent_connections SET status = ?, payload = ? "
+                "WHERE owner_id = ? AND id = ?",
+                (
+                    "untested",
+                    json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                    row["owner_id"],
+                    row["id"],
+                ),
+            )
+
+    def _migrate_legacy_invalid_connections(self, conn: sqlite3.Connection) -> None:
+        """Replace unreadable legacy rows with a secret-free remediation record.
+
+        Discovery, the quarantine verdict, and the write all happen inside one
+        ``BEGIN IMMEDIATE``. Reading first and writing second would leave a
+        window in which another startup repairs or replaces a row: this one
+        would still be holding the verdict it formed against the payload that
+        row *used* to have, and would overwrite a healthy connection with a
+        quarantine stub. Taking the write lock before the SELECT makes the
+        snapshot the migration reasons about the same one it mutates.
+
+        Nothing survives a failure: the transaction rolls back whole, so a
+        startup that dies mid-scan leaves the legacy rows exactly as they were.
+        Re-running is safe and reaches the same verdict, because the scan
+        re-reads under its own lock and the quarantine record is deterministic.
+        """
+
+        self._migration_boundary("before_transaction")
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            self._migrate_legacy_invalid_header_connections(conn)
+            rows = conn.execute(
+                "SELECT owner_id, id, payload FROM agent_connections"
+            ).fetchall()
+            for row in rows:
+                try:
+                    AgentConnectionDocument.model_validate(json.loads(row["payload"]))
+                except (TypeError, ValueError):
+                    pass
+                else:
+                    continue
+                quarantine = self._quarantine_record(
+                    str(row["owner_id"]), str(row["id"])
+                )
+                conn.execute(
+                    "UPDATE agent_connections SET status = ?, payload = ? "
+                    "WHERE owner_id = ? AND id = ?",
+                    (
+                        quarantine.status,
+                        self._connection_payload(quarantine),
+                        row["owner_id"],
+                        row["id"],
+                    ),
+                )
+                self._migration_boundary("quarantined")
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+
+    @staticmethod
+    def _payload(model: BaseModel) -> str:
+        return json.dumps(
+            model.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+        )
+
+    @staticmethod
+    def _model(row: sqlite3.Row, model_cls: type[ModelT]) -> ModelT:
+        try:
+            return model_cls.model_validate(json.loads(row["payload"]))
+        except (TypeError, ValueError) as exc:  # pragma: no cover - corrupt row
+            raise RepositoryError("Invalid agent-relay payload") from exc
+
+    # --- connections --------------------------------------------------------
+
+    def create_connection(self, connection: AgentConnectionDocument) -> None:
+        with (
+            self._connection() as conn,
+            _sqlite_guard("Agent connection", connection.id),
+        ):
+            existing = conn.execute(
+                "SELECT 1 FROM agent_connections WHERE owner_id = ? AND id = ?",
+                (connection.owner_id, connection.id),
+            ).fetchone()
+            if existing is not None:
+                raise ConflictError("Agent connection", connection.id)
+            self._upsert_connection(conn, connection)
+
+    def save_connection(self, connection: AgentConnectionDocument) -> None:
+        with (
+            self._connection() as conn,
+            _sqlite_guard("Agent connection", connection.id),
+        ):
+            self._upsert_connection(conn, connection)
+
+    def _connection_payload(self, connection: AgentConnectionDocument) -> str:
+        """Serialize a connection, refusing anything its own type forbids.
+
+        ``model_copy(update=...)`` and ``model_construct`` are how ordinary
+        service code builds a revised document, and neither re-runs the field
+        validators — so an ``endpoint_url`` carrying a query string can reach
+        this layer even though ``AgentConnectionDocument`` rejects one. Storage
+        is the last boundary before that URL becomes a row and, through
+        ``export_owner_data``, a line in a GDPR export, so the exact JSON about
+        to be written is re-validated rather than trusted. Validating the
+        serialized bytes rather than the object means what is checked is
+        precisely what would be stored.
+        """
+
+        payload = self._payload(connection)
+        try:
+            AgentConnectionDocument.model_validate(json.loads(payload))
+        except ValidationError:
+            pass
+        else:
+            return payload
+        # Raised clear of the handler on purpose. A pydantic error quotes the
+        # value it rejected, and the value here is the thing being kept out of
+        # storage; chaining it would put the query secret in the traceback of an
+        # exception that is allowed to be logged.
+        raise RepositoryError("Agent connection is not persistable.")
+
+    def _upsert_connection(
+        self, conn: sqlite3.Connection, connection: AgentConnectionDocument
+    ) -> None:
+        payload = self._connection_payload(connection)
+        conn.execute(
+            """
+            INSERT INTO agent_connections (owner_id, id, status, created_at, payload)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(owner_id, id) DO UPDATE SET
+                status = excluded.status,
+                payload = excluded.payload
+            """,
+            (
+                connection.owner_id,
+                connection.id,
+                connection.status,
+                connection.created_at.isoformat(),
+                payload,
+            ),
+        )
+
+    def get_connection(
+        self, connection_id: str, *, owner_id: str
+    ) -> AgentConnectionDocument:
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT payload FROM agent_connections WHERE owner_id = ? AND id = ?",
+                (owner_id, connection_id),
+            ).fetchone()
+        if row is None:
+            raise NotFoundError("Agent connection", connection_id)
+        return self._model(row, AgentConnectionDocument)
+
+    def list_connections(self, *, owner_id: str) -> list[AgentConnectionDocument]:
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT payload FROM agent_connections
+                WHERE owner_id = ? ORDER BY created_at ASC, id ASC
+                """,
+                (owner_id,),
+            ).fetchall()
+        return [self._model(row, AgentConnectionDocument) for row in rows]
+
+    # --- runs ---------------------------------------------------------------
+
+    def create_run(self, run: AgentRunDocument) -> None:
+        with self._connection() as conn, _sqlite_guard("Agent run", run.id):
+            existing = conn.execute(
+                "SELECT 1 FROM agent_runs WHERE owner_id = ? AND id = ?",
+                (run.owner_id, run.id),
+            ).fetchone()
+            if existing is not None:
+                raise ConflictError("Agent run", run.id)
+            self._upsert_run(conn, run)
+
+    def save_run(self, run: AgentRunDocument) -> None:
+        with self._connection() as conn, _sqlite_guard("Agent run", run.id):
+            self._upsert_run(conn, run)
+
+    def _upsert_run(self, conn: sqlite3.Connection, run: AgentRunDocument) -> None:
+        conn.execute(
+            """
+            INSERT INTO agent_runs
+                (owner_id, id, connection_id, task_id, created_at, dispatched_at,
+                 manifest_token, content_expires_at, content_expired, payload)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(owner_id, id) DO UPDATE SET
+                dispatched_at = excluded.dispatched_at,
+                manifest_token = excluded.manifest_token,
+                content_expires_at = excluded.content_expires_at,
+                content_expired = excluded.content_expired,
+                payload = excluded.payload
+            """,
+            (
+                run.owner_id,
+                run.id,
+                run.connection_id,
+                run.task_id,
+                run.created_at.isoformat(),
+                run.dispatched_at.isoformat() if run.dispatched_at else None,
+                run.manifest.token if run.manifest else None,
+                run.content_expires_at.isoformat(),
+                int(run.content_expired),
+                self._payload(run),
+            ),
+        )
+
+    def find_run_by_manifest_token(
+        self, token: str, *, owner_id: str
+    ) -> AgentRunDocument | None:
+        """Resolve the reservation a confirmation names, if it still exists."""
+
+        with self._connection() as conn:
+            row = conn.execute(
+                """
+                SELECT payload FROM agent_runs
+                WHERE owner_id = ? AND manifest_token = ?
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (owner_id, token),
+            ).fetchone()
+        return None if row is None else self._model(row, AgentRunDocument)
+
+    def find_connection_anywhere(
+        self, connection_id: str
+    ) -> AgentConnectionDocument | None:
+        """Look a connection up without an owner, for inbound event routing.
+
+        Inbound events arrive unauthenticated as a user; the connection is what
+        identifies the owner, and the signature is what proves the caller may
+        act as it. Every downstream read is then re-scoped to that owner.
+        """
+
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT payload FROM agent_connections WHERE id = ? LIMIT 2",
+                (connection_id,),
+            ).fetchall()
+        if len(rows) != 1:
+            return None
+        return self._model(rows[0], AgentConnectionDocument)
+
+    def prune_undispatched_runs(self, *, before: datetime) -> int:
+        """Drop abandoned review reservations so they cannot accumulate."""
+
+        with self._connection() as conn, _sqlite_guard("Agent run", "reservations"):
+            cursor = conn.execute(
+                """
+                DELETE FROM agent_runs
+                WHERE dispatched_at IS NULL AND created_at < ?
+                """,
+                (before.isoformat(),),
+            )
+            return int(cursor.rowcount or 0)
+
+    def get_run(self, run_id: str, *, owner_id: str) -> AgentRunDocument:
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT payload FROM agent_runs WHERE owner_id = ? AND id = ?",
+                (owner_id, run_id),
+            ).fetchone()
+        if row is None:
+            raise NotFoundError("Agent run", run_id)
+        return self._model(row, AgentRunDocument)
+
+    def list_runs_for_task(
+        self, task_id: str, *, owner_id: str
+    ) -> list[AgentRunDocument]:
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT payload FROM agent_runs
+                WHERE owner_id = ? AND task_id = ?
+                ORDER BY created_at DESC, id DESC
+                """,
+                (owner_id, task_id),
+            ).fetchall()
+        return [self._model(row, AgentRunDocument) for row in rows]
+
+    def list_runs_for_owner(self, *, owner_id: str) -> list[AgentRunDocument]:
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT payload FROM agent_runs
+                WHERE owner_id = ? ORDER BY created_at DESC, id DESC
+                """,
+                (owner_id,),
+            ).fetchall()
+        return [self._model(row, AgentRunDocument) for row in rows]
+
+    def latest_runs_by_task(
+        self, *, owner_id: str, task_ids: Sequence[str]
+    ) -> dict[str, AgentRunDocument]:
+        """The newest run per task, for the compact Task surface (FR-010)."""
+
+        unique = list(dict.fromkeys(task_ids))
+        if not unique:
+            return {}
+        latest: dict[str, AgentRunDocument] = {}
+        with self._connection() as conn:
+            for task_id in unique:
+                row = conn.execute(
+                    """
+                    SELECT task_id, payload FROM agent_runs
+                    WHERE owner_id = ? AND dispatched_at IS NOT NULL
+                        AND task_id = ?
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (owner_id, task_id),
+                ).fetchone()
+                if row is not None:
+                    latest[row["task_id"]] = self._model(row, AgentRunDocument)
+        return latest
+
+    # --- events -------------------------------------------------------------
+
+    def consume_event_id(
+        self, *, owner_id: str, connection_id: str, event_id: str, now: datetime
+    ) -> bool:
+        """Atomically claim one replay identifier. ``False`` means duplicate.
+
+        Executed as a single conditional INSERT so two concurrent deliveries of
+        the same event can never both proceed to mutate the projection (FR-009).
+        """
+
+        with self._connection() as conn, _sqlite_guard("Agent event", event_id):
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO agent_event_ids
+                    (owner_id, connection_id, event_id, consumed_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (owner_id, connection_id, event_id, now.isoformat()),
+            )
+            return cursor.rowcount == 1
+
+    def append_event(self, event: AgentRunEventDocument) -> None:
+        with (
+            self._content_insert_transaction(event.owner_id) as conn,
+            _sqlite_guard("Agent event", event.id),
+        ):
+            event = event.model_copy(
+                update={
+                    "summary": self._retained_content(
+                        conn, event.owner_id, event.run_id, event.summary
+                    )
+                }
+            )
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO agent_run_events
+                    (owner_id, id, run_id, run_version, received_at, payload)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event.owner_id,
+                    event.id,
+                    event.run_id,
+                    event.run_version,
+                    event.received_at.isoformat(),
+                    self._payload(event),
+                ),
+            )
+
+    def list_events(self, run_id: str, *, owner_id: str) -> list[AgentRunEventDocument]:
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT payload FROM agent_run_events
+                WHERE owner_id = ? AND run_id = ?
+                ORDER BY run_version ASC, received_at ASC, id ASC
+                """,
+                (owner_id, run_id),
+            ).fetchall()
+        return [self._model(row, AgentRunEventDocument) for row in rows]
+
+    # --- commands -----------------------------------------------------------
+
+    def save_command(self, command: AgentRunCommandDocument) -> None:
+        with (
+            self._content_insert_transaction(command.owner_id) as conn,
+            _sqlite_guard("Agent command", command.id),
+        ):
+            command = command.model_copy(
+                update={
+                    "body": self._retained_content(
+                        conn, command.owner_id, command.run_id, command.body
+                    )
+                }
+            )
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO agent_run_commands
+                    (owner_id, id, run_id, created_at, payload)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    command.owner_id,
+                    command.id,
+                    command.run_id,
+                    command.created_at.isoformat(),
+                    self._payload(command),
+                ),
+            )
+
+    def get_command(
+        self, command_id: str, *, owner_id: str
+    ) -> AgentRunCommandDocument | None:
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT payload FROM agent_run_commands WHERE owner_id = ? AND id = ?",
+                (owner_id, command_id),
+            ).fetchone()
+        return None if row is None else self._model(row, AgentRunCommandDocument)
+
+    def list_commands(
+        self, run_id: str, *, owner_id: str
+    ) -> list[AgentRunCommandDocument]:
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT payload FROM agent_run_commands
+                WHERE owner_id = ? AND run_id = ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (owner_id, run_id),
+            ).fetchall()
+        return [self._model(row, AgentRunCommandDocument) for row in rows]
+
+    @contextmanager
+    def _content_insert_transaction(
+        self, owner_id: str
+    ) -> Iterator[sqlite3.Connection]:
+        """Serialize a child-content insert with retention's expiry transaction."""
+
+        active = getattr(self._thread_state, "conn", None)
+        if active is not None:
+            yield active
+            return
+        with self._process_lock, self._owned_connection() as conn:
+            try:
+                with _sqlite_guard("Agent content", owner_id):
+                    conn.execute("BEGIN IMMEDIATE")
+                    yield conn
+                    conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
+
+    @staticmethod
+    def _retained_content(
+        conn: sqlite3.Connection,
+        owner_id: str,
+        run_id: str,
+        content: str | None,
+    ) -> str | None:
+        row = conn.execute(
+            "SELECT content_expired FROM agent_runs WHERE owner_id = ? AND id = ?",
+            (owner_id, run_id),
+        ).fetchone()
+        if row is not None and bool(row["content_expired"]):
+            return None
+        return content
+
+    # --- audit --------------------------------------------------------------
+
+    def append_audit(self, entry: AgentAuditEntryDocument) -> None:
+        with self._connection() as conn, _sqlite_guard("Agent audit", entry.id):
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO agent_audit (owner_id, id, created_at, payload)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    entry.owner_id,
+                    entry.id,
+                    entry.created_at.isoformat(),
+                    self._payload(entry),
+                ),
+            )
+
+    def list_audit(self, *, owner_id: str) -> list[AgentAuditEntryDocument]:
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT payload FROM agent_audit
+                WHERE owner_id = ? ORDER BY created_at DESC, id DESC
+                """,
+                (owner_id,),
+            ).fetchall()
+        return [self._model(row, AgentAuditEntryDocument) for row in rows]
+
+    def purge_expired_audit(self, *, now: datetime) -> int:
+        cutoff = (now - AUDIT_RETENTION).isoformat()
+        with self._connection() as conn, _sqlite_guard("Agent audit", "retention"):
+            cursor = conn.execute(
+                "DELETE FROM agent_audit WHERE created_at < ?", (cutoff,)
+            )
+            return int(cursor.rowcount or 0)
+
+    def export_owner_data(
+        self, *, owner_id: str, now: datetime
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Return portable owner content without relay secrets or replay receipts."""
+
+        connection_excludes = {"credential", "inbound_secret"}
+        with self._connection() as conn:
+            connection_rows = conn.execute(
+                "SELECT payload FROM agent_connections WHERE owner_id = ? "
+                "ORDER BY created_at ASC, id ASC",
+                (owner_id,),
+            ).fetchall()
+            run_rows = conn.execute(
+                "SELECT payload FROM agent_runs WHERE owner_id = ? "
+                "ORDER BY created_at ASC, id ASC",
+                (owner_id,),
+            ).fetchall()
+            event_rows = conn.execute(
+                "SELECT payload FROM agent_run_events WHERE owner_id = ? "
+                "ORDER BY received_at ASC, id ASC",
+                (owner_id,),
+            ).fetchall()
+            command_rows = conn.execute(
+                "SELECT payload FROM agent_run_commands WHERE owner_id = ? "
+                "ORDER BY created_at ASC, id ASC",
+                (owner_id,),
+            ).fetchall()
+            audit_rows = conn.execute(
+                "SELECT payload FROM agent_audit WHERE owner_id = ? "
+                "ORDER BY created_at ASC, id ASC",
+                (owner_id,),
+            ).fetchall()
+
+        runs = [self._model(row, AgentRunDocument) for row in run_rows]
+        redacted_run_ids = {
+            run.id
+            for run in runs
+            if run.content_expired or run.content_expires_at <= now
+        }
+        projected_runs = [project_run_for_access(run, now=now) for run in runs]
+        events = [self._model(row, AgentRunEventDocument) for row in event_rows]
+        commands = [self._model(row, AgentRunCommandDocument) for row in command_rows]
+        audit_cutoff = now - AUDIT_RETENTION
+
+        return {
+            "connections": [
+                self._model(row, AgentConnectionDocument).model_dump(
+                    mode="json", exclude=connection_excludes
+                )
+                for row in connection_rows
+            ],
+            "runs": [run.model_dump(mode="json") for run in projected_runs],
+            "events": [
+                (
+                    event.model_copy(update={"summary": None})
+                    if event.run_id in redacted_run_ids
+                    else event
+                ).model_dump(mode="json")
+                for event in events
+            ],
+            "commands": [
+                (
+                    command.model_copy(update={"body": None})
+                    if command.run_id in redacted_run_ids
+                    else command
+                ).model_dump(mode="json")
+                for command in commands
+            ],
+            "audit": [
+                entry.model_dump(mode="json")
+                for row in audit_rows
+                if (entry := self._model(row, AgentAuditEntryDocument)).created_at
+                > audit_cutoff
+            ],
+        }
+
+    # --- retention ----------------------------------------------------------
+
+    def _retention_mutation_boundary(self, boundary: str) -> None:
+        """Deterministic failure-injection seam for atomicity tests."""
+
+    def expire_due_content(self, *, now: datetime) -> int:
+        """Atomically erase expired run, event, and command content."""
+
+        stamp = now.isoformat()
+        with self._process_lock, self._owned_connection() as conn:
+            try:
+                with _sqlite_guard("Agent run", "retention"):
+                    conn.execute("BEGIN IMMEDIATE")
+                    rows = conn.execute(
+                        """
+                        SELECT payload FROM agent_runs
+                        WHERE content_expired = 0 AND dispatched_at IS NOT NULL
+                            AND content_expires_at <= ?
+                        """,
+                        (stamp,),
+                    ).fetchall()
+                    if not rows:
+                        conn.commit()
+                        return 0
+                    for row in rows:
+                        run = self._model(row, AgentRunDocument)
+                        redacted = run.model_copy(
+                            update={
+                                "manifest": None,
+                                "progress_text": None,
+                                "question_text": None,
+                                "result_text": None,
+                                "result_link": None,
+                                "failure_reason": None,
+                                "content_expired": True,
+                                "updated_at": now,
+                                "revision": run.revision + 1,
+                            }
+                        )
+                        self._upsert_run(conn, redacted)
+                        self._retention_mutation_boundary("run")
+
+                        event_rows = conn.execute(
+                            """
+                            SELECT payload FROM agent_run_events
+                            WHERE owner_id = ? AND run_id = ?
+                            """,
+                            (run.owner_id, run.id),
+                        ).fetchall()
+                        for event_row in event_rows:
+                            event = self._model(event_row, AgentRunEventDocument)
+                            if event.summary is None:
+                                continue
+                            conn.execute(
+                                """
+                                UPDATE agent_run_events SET payload = ?
+                                WHERE owner_id = ? AND run_id = ? AND id = ?
+                                """,
+                                (
+                                    self._payload(
+                                        event.model_copy(update={"summary": None})
+                                    ),
+                                    run.owner_id,
+                                    run.id,
+                                    event.id,
+                                ),
+                            )
+                            self._retention_mutation_boundary("event")
+
+                        command_rows = conn.execute(
+                            """
+                            SELECT payload FROM agent_run_commands
+                            WHERE owner_id = ? AND run_id = ?
+                            """,
+                            (run.owner_id, run.id),
+                        ).fetchall()
+                        for command_row in command_rows:
+                            command = self._model(command_row, AgentRunCommandDocument)
+                            if command.body is None:
+                                continue
+                            conn.execute(
+                                """
+                                UPDATE agent_run_commands SET payload = ?
+                                WHERE owner_id = ? AND run_id = ? AND id = ?
+                                """,
+                                (
+                                    self._payload(
+                                        command.model_copy(update={"body": None})
+                                    ),
+                                    run.owner_id,
+                                    run.id,
+                                    command.id,
+                                ),
+                            )
+                            self._retention_mutation_boundary("command")
+                    conn.commit()
+                    return len(rows)
+            except BaseException:
+                conn.rollback()
+                raise
+
+    def purge_expired_event_ids(self, *, now: datetime) -> int:
+        cutoff = (now - EVENT_ID_RETENTION).isoformat()
+        with self._connection() as conn, _sqlite_guard("Agent event", "retention"):
+            cursor = conn.execute(
+                "DELETE FROM agent_event_ids WHERE consumed_at < ?", (cutoff,)
+            )
+            return int(cursor.rowcount or 0)
+
+    # --- idempotency --------------------------------------------------------
+
+    def get_idempotency(
+        self, *, owner_id: str, key_hashes: Sequence[str]
+    ) -> AgentIdempotencyRecord | None:
+        """Find the record stored under any of ``key_hashes``, newest key first.
+
+        The caller passes one candidate per configured relay key, so a record
+        written before a rotation — or written by an instance whose ring differs
+        from this one's — is still found while its key remains configured. The
+        raw key never reaches this layer at all.
+        """
+
+        candidates = list(key_hashes)
+        if not candidates:
+            return None
+        with self._connection() as conn:
+            for candidate in candidates:
+                row = conn.execute(
+                    """
+                    SELECT key_hash, command, request_hash, resource_id, command_id,
+                           delivery_attempted, completed, response_body, created_at
+                    FROM agent_idempotency
+                    WHERE owner_id = ? AND key_hash = ?
+                    """,
+                    (owner_id, candidate),
+                ).fetchone()
+                if row is not None:
+                    return AgentIdempotencyRecord(
+                        key_hash=row["key_hash"],
+                        command=row["command"],
+                        request_hash=row["request_hash"],
+                        resource_id=row["resource_id"],
+                        command_id=row["command_id"],
+                        delivery_attempted=bool(row["delivery_attempted"]),
+                        completed=bool(row["completed"]),
+                        response_body=json.loads(row["response_body"]),
+                        created_at=row["created_at"],
+                    )
+        return None
+
+    def save_idempotency(
+        self, *, owner_id: str, record: AgentIdempotencyRecord
+    ) -> None:
+        # The guard's identifier is deliberately the resource, not the key or
+        # its hash: it can end up in an error message and a log line.
+        with (
+            self._connection() as conn,
+            _sqlite_guard("Idempotency-Key", record.resource_id),
+        ):
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO agent_idempotency
+                    (owner_id, key_hash, command, request_hash, resource_id,
+                     command_id, delivery_attempted, completed, response_body, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    owner_id,
+                    record.key_hash,
+                    record.command,
+                    record.request_hash,
+                    record.resource_id,
+                    record.command_id,
+                    int(record.delivery_attempted),
+                    int(record.completed),
+                    json.dumps(record.response_body, sort_keys=True),
+                    record.created_at.isoformat(),
+                ),
+            )
+
+    def live_sealed_key_ids(
+        self, *, now: datetime, owner_id: str | None = None
+    ) -> LiveIdempotencyKeys:
+        """Key ids referenced by every live sealed value owned by ``owner_id``.
+
+        Connection credentials and inbound signing secrets live until disconnect,
+        replacement, or deletion. Signing-secret replay receipts live only for the
+        idempotency retention window. This reads key labels from stored envelopes;
+        it never opens ciphertext or exposes malformed stored values.
+        """
+
+        cutoff = (now - IDEMPOTENCY_RETENTION).isoformat()
+        with self._connection() as conn:
+            if owner_id is None:
+                connection_rows = conn.execute(
+                    "SELECT payload FROM agent_connections"
+                ).fetchall()
+                receipt_rows = conn.execute(
+                    "SELECT key_hash, response_body FROM agent_idempotency "
+                    "WHERE created_at >= ?",
+                    (cutoff,),
+                ).fetchall()
+            else:
+                connection_rows = conn.execute(
+                    "SELECT payload FROM agent_connections WHERE owner_id = ?",
+                    (owner_id,),
+                ).fetchall()
+                receipt_rows = conn.execute(
+                    "SELECT key_hash, response_body FROM agent_idempotency "
+                    "WHERE owner_id = ? AND created_at >= ?",
+                    (owner_id, cutoff),
+                ).fetchall()
+
+        key_ids: set[str] = set()
+        unreadable = 0
+        for row in connection_rows:
+            try:
+                payload = json.loads(row["payload"])
+            except (TypeError, json.JSONDecodeError):
+                unreadable += 1
+                continue
+            if not isinstance(payload, dict):
+                unreadable += 1
+                continue
+            for field in ("credential", "inbound_secret"):
+                sealed = payload.get(field)
+                if sealed is None:
+                    continue
+                key_id = key_id_from_sealed(sealed)
+                if key_id is None:
+                    unreadable += 1
+                else:
+                    key_ids.add(key_id)
+
+        for row in receipt_rows:
+            fingerprint_id = fingerprint_key_id(str(row["key_hash"]))
+            if fingerprint_id is None:
+                unreadable += 1
+            else:
+                key_ids.add(fingerprint_id)
+            try:
+                response = json.loads(row["response_body"])
+            except (TypeError, json.JSONDecodeError):
+                unreadable += 1
+                continue
+            if not isinstance(response, dict):
+                unreadable += 1
+                continue
+            sealed = response.get("sealed_signing_secret")
+            if sealed is None:
+                continue
+            key_id = key_id_from_sealed(sealed)
+            if key_id is None:
+                unreadable += 1
+            else:
+                key_ids.add(key_id)
+
+        return LiveIdempotencyKeys(frozenset(key_ids), unreadable)
+
+    def live_idempotency_key_ids(
+        self, *, owner_id: str, now: datetime
+    ) -> LiveIdempotencyKeys:
+        """Which relay key ids this owner's unexpired records are stored under.
+
+        A ``key_hash`` is ``<key_id>:<mac>``, and the key id half is a
+        configuration label rather than a secret — the same label already sits
+        in cleartext on every sealed credential. Reading it back is what lets
+        the service notice that a key was retired while records only findable
+        under it are still within retention, instead of silently missing them.
+        """
+
+        cutoff = (now - IDEMPOTENCY_RETENTION).isoformat()
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT key_hash FROM agent_idempotency "
+                "WHERE owner_id = ? AND created_at >= ?",
+                (owner_id, cutoff),
+            ).fetchall()
+        key_ids: set[str] = set()
+        unreadable = 0
+        for row in rows:
+            key_id = fingerprint_key_id(str(row["key_hash"]))
+            if key_id is None:
+                unreadable += 1
+            else:
+                key_ids.add(key_id)
+        return LiveIdempotencyKeys(frozenset(key_ids), unreadable)
+
+    def purge_expired_idempotency(self, *, owner_id: str, now: datetime) -> int:
+        cutoff = (now - IDEMPOTENCY_RETENTION).isoformat()
+        with self._connection() as conn, _sqlite_guard("Idempotency-Key", owner_id):
+            cursor = conn.execute(
+                "DELETE FROM agent_idempotency WHERE owner_id = ? AND created_at < ?",
+                (owner_id, cutoff),
+            )
+            return int(cursor.rowcount or 0)
+
+    def purge_all_expired_idempotency(self, *, now: datetime) -> int:
+        """Drop every expired reservation, for every owner.
+
+        The per-owner form only runs when that owner makes a request, so an
+        account that goes quiet would keep its rows forever. Retention is a
+        promise about the data, not about the traffic, so the sweep is global.
+        """
+
+        cutoff = (now - IDEMPOTENCY_RETENTION).isoformat()
+        with self._connection() as conn, _sqlite_guard("Idempotency-Key", "retention"):
+            cursor = conn.execute(
+                "DELETE FROM agent_idempotency WHERE created_at < ?", (cutoff,)
+            )
+            return int(cursor.rowcount or 0)
+
+    # --- purge --------------------------------------------------------------
+
+    def delete_all_for_owner(self, *, owner_id: str) -> None:
+        """Erase every relay record belonging to one owner. Idempotent."""
+
+        with self.command_lock(owner_id), self._connection() as conn:
+            conn.execute("DELETE FROM agent_run_events WHERE owner_id = ?", (owner_id,))
+            conn.execute(
+                "DELETE FROM agent_run_commands WHERE owner_id = ?", (owner_id,)
+            )
+            conn.execute("DELETE FROM agent_runs WHERE owner_id = ?", (owner_id,))
+            conn.execute("DELETE FROM agent_event_ids WHERE owner_id = ?", (owner_id,))
+            conn.execute(
+                "DELETE FROM agent_connections WHERE owner_id = ?", (owner_id,)
+            )
+            conn.execute("DELETE FROM agent_audit WHERE owner_id = ?", (owner_id,))
+            conn.execute(
+                "DELETE FROM agent_idempotency WHERE owner_id = ?", (owner_id,)
+            )
+
+
+__all__ = [
+    "AUDIT_RETENTION",
+    "EVENT_ID_RETENTION",
+    "IDEMPOTENCY_RETENTION",
+    "AgentRepository",
+]
