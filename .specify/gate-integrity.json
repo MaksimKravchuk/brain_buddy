@@ -12,7 +12,7 @@
     "scripts/check_requirement_coverage.py": "755229af528cd0a1ca678cca0a5403b58669d1383577c1d5e8cf929f51c92b70",
     "scripts/check_spec_kit_specs.py": "dc56ef6f5d3a7eef316483fb856f751934daf4ca8a89c726dba80503fe8d0c5b",
     "scripts/check_speckit_manifests.py": "89d94268cdf01a5e408c93e018b197d044d02f865b4fe4851c396a2b6fa2c182",
-    "scripts/classify_path_risk.py": "a51e4bf3821c60e6e8aa1829475449e388f1c72bcf33327febb9c87bee5cce7a",
+    "scripts/classify_path_risk.py": "49ab7c4d5b5dfaab3ce561269e07faab611537d3428d1d5b317ca1dc52c55a44",
     "scripts/mutation_gate.py": "4452787971ea6bcfa9bbf1c10df97bf1f3d172711098f69e1b2cf6e8f57ed96a",
     "scripts/spec_kit_planning_review.py": "e3d5aa65c51f7ff5a690c1ee56249519d768d41a0c87f2bb341a7e92a083695b"
   }

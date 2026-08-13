@@ -62,6 +62,7 @@ const PATH_RULES: Array<{ match: RegExp; epic: string; feature: string }> = [
   { match: /\/components\/layout\//, epic: "App shell", feature: "Layout & navigation" },
   { match: /\/components\/shell\//, epic: "App shell", feature: "Task shell chrome" },
   { match: /\/components\/auth\//, epic: "Authentication UI", feature: "Route guards" },
+  { match: /\/features\/agents\//, epic: "External agent relay", feature: "Connections & runs" },
   { match: /\/features\/brain-dump\//, epic: "Brain dump", feature: "Capture & review" },
   { match: /\/features\/account\//, epic: "Account & privacy", feature: "Account settings" },
   { match: /PrivacyPolicyPage/, epic: "Account & privacy", feature: "Privacy policy" },

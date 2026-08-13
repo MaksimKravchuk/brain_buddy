@@ -1,7 +1,8 @@
-import { createRef } from "react";
-import { render, screen, within } from "@testing-library/react";
+import { act, createRef } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   ProjectResponse,
@@ -11,8 +12,40 @@ import type {
   TaskState,
   TaskSubtaskResponse
 } from "../../../api/taskTypes";
+import { apiClient } from "../../../api/client";
 import { ShellToastContext } from "../../../components/shell/shellToast";
+import { useAuthStore } from "../../../stores/authStore";
 import { TaskDetailEmptyPanel, TaskDetailPanel } from "../TaskDetailPanel";
+
+vi.mock("../../agents/AgentRunSection", () => ({
+  AgentRunSection: ({ runs }: { runs: Array<{ capabilities?: { reply: boolean; cancel: boolean }; reported_state?: string }> }) => (
+    <div data-testid="agent-run-count">
+      {runs.length}
+      {runs.some((run) => run.reported_state === "blocked" && run.capabilities?.reply) ? <button>Send answer</button> : null}
+      {runs.some((run) => run.capabilities?.cancel) ? <button>Request cancellation</button> : null}
+    </div>
+  )
+}));
+
+vi.mock("../../agents/AgentHandoffOverlay", () => ({
+  AgentHandoffOverlay: ({
+    onClose,
+    onDispatched
+  }: {
+    onClose: () => void;
+    onDispatched: (run: never) => void;
+  }) => (
+    <div>
+      <h2>Hand this task to an agent</h2>
+      <button type="button" onClick={onClose}>
+        Close handoff
+      </button>
+      <button type="button" onClick={() => onDispatched({} as never)}>
+        Simulate dispatch
+      </button>
+    </div>
+  )
+}));
 
 const projects: ProjectResponse[] = [
   { id: "project-launch", name: "Launch v2", color: "#0ea5e9", state: "active", revision: 1, open_task_count: 2 },
@@ -78,22 +111,32 @@ function renderPanel(overrides: Partial<PanelProps> = {}) {
   };
   const notify = vi.fn();
   const headingRef = createRef<HTMLHeadingElement>();
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(
-    <ShellToastContext.Provider value={notify}>
-      <TaskDetailPanel
-        task={taskFixture()}
-        projects={projects}
-        tags={tags}
-        isLoading={false}
-        error={null}
-        headingRef={headingRef}
-        {...handlers}
-        {...overrides}
-      />
-    </ShellToastContext.Provider>
+    <QueryClientProvider client={queryClient}>
+      <ShellToastContext.Provider value={notify}>
+        <TaskDetailPanel
+          task={taskFixture()}
+          projects={projects}
+          tags={tags}
+          isLoading={false}
+          error={null}
+          headingRef={headingRef}
+          {...handlers}
+          {...overrides}
+        />
+      </ShellToastContext.Provider>
+    </QueryClientProvider>
   );
   return { ...view, ...handlers, notify, headingRef };
 }
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  act(() => {
+    useAuthStore.setState({ user: null, status: "loading", deletionCancelledNotice: false });
+  });
+});
 
 describe("TaskDetailEmptyPanel", () => {
   it("invites the reader to pick a task instead of showing an empty form", () => {
@@ -106,6 +149,120 @@ describe("TaskDetailEmptyPanel", () => {
 });
 
 describe("TaskDetailPanel chrome", () => {
+  it("ignores submit events after their named draft control has disappeared", () => {
+    const { onCreateSubtask, onCreateComment } = renderPanel();
+    const subtaskInput = screen.getByLabelText("New subtask title");
+    const subtaskForm = subtaskInput.closest("form");
+    if (!subtaskForm) throw new Error("Subtask form is missing");
+    subtaskInput.remove();
+    fireEvent.submit(subtaskForm);
+
+    const commentInput = screen.getByLabelText("New comment");
+    const commentForm = commentInput.closest("form");
+    if (!commentForm) throw new Error("Comment form is missing");
+    commentInput.remove();
+    fireEvent.submit(commentForm);
+
+    expect(onCreateSubtask).not.toHaveBeenCalled();
+    expect(onCreateComment).not.toHaveBeenCalled();
+  });
+
+  it("shows an enabled relay entry point for an open task and hides it for an empty terminal history", async () => {
+    vi.spyOn(apiClient, "listAgentRuns").mockResolvedValue([]);
+    vi.spyOn(apiClient, "listAgentConnections").mockResolvedValue([]);
+    act(() => {
+      useAuthStore.setState({
+        user: {
+          id: "user-1",
+          email: "max@example.test",
+          feature_flags: { external_agent_relay: true }
+        },
+        status: "authed",
+        deletionCancelledNotice: false
+      });
+    });
+
+    const open = renderPanel();
+    const user = userEvent.setup();
+    const handoff = await screen.findByRole("button", { name: "Hand to agent" });
+    expect(handoff).toBeInTheDocument();
+    expect(
+      screen.getByText("Review exactly what would be sent before anything leaves BrainBuddy.")
+    ).toBeInTheDocument();
+    await user.click(handoff);
+    expect(await screen.findByRole("heading", { name: "Hand this task to an agent" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Close handoff" }));
+    expect(screen.queryByRole("heading", { name: "Hand this task to an agent" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Hand to agent" }));
+    await user.click(screen.getByRole("button", { name: "Simulate dispatch" }));
+    expect(screen.queryByRole("heading", { name: "Hand this task to an agent" })).not.toBeInTheDocument();
+
+    open.unmount();
+    const terminalEmpty = renderPanel({
+      task: taskFixture({
+        state: "completed",
+        completed_at: "2026-07-17T08:00:00Z"
+      })
+    });
+    expect(await screen.findByText("Fix onboarding drop-off")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Hand to agent" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "External agent" })).not.toBeInTheDocument();
+
+    terminalEmpty.unmount();
+    vi.mocked(apiClient.listAgentRuns).mockResolvedValue([{} as never]);
+    renderPanel({
+      task: taskFixture({
+        state: "completed",
+        completed_at: "2026-07-17T08:00:00Z"
+      })
+    });
+    expect(await screen.findByRole("heading", { name: "External agent" })).toBeInTheDocument();
+    expect(screen.getByTestId("agent-run-count")).toHaveTextContent("1");
+    expect(screen.queryByRole("button", { name: "Hand to agent" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Review exactly what would be sent before anything leaves BrainBuddy.")).not.toBeInTheDocument();
+  });
+
+  it("keeps an existing actionable run visible while rollout is off without exposing a new handoff", async () => {
+    vi.spyOn(apiClient, "listAgentRuns").mockResolvedValue([
+      { reported_state: "blocked", capabilities: { progress: true, reply: true, cancel: true } } as never
+    ]);
+    act(() => {
+      useAuthStore.setState({
+        user: { id: "user-1", email: "max@example.test", feature_flags: {} },
+        status: "authed",
+        deletionCancelledNotice: false
+      });
+    });
+
+    renderPanel();
+
+    await waitFor(() => expect(screen.getByTestId("agent-run-count")).toHaveTextContent("1"));
+    expect(apiClient.listAgentRuns).toHaveBeenCalledWith("task-1", expect.any(AbortSignal));
+    expect(screen.getByRole("button", { name: "Send answer" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Request cancellation" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Hand to agent" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/review exactly what would be sent/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Hand this task to an agent" })).not.toBeInTheDocument();
+  });
+
+  it("keeps rollout-off tasks with no run unobtrusive", async () => {
+    vi.spyOn(apiClient, "listAgentRuns").mockResolvedValue([]);
+    act(() => {
+      useAuthStore.setState({
+        user: { id: "user-1", email: "max@example.test", feature_flags: {} },
+        status: "authed",
+        deletionCancelledNotice: false
+      });
+    });
+
+    renderPanel();
+
+    await screen.findByText("Fix onboarding drop-off");
+    expect(apiClient.listAgentRuns).toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { name: "External agent" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("agent-run-count")).toHaveTextContent("0");
+  });
+
   it("closes on the chevron and routes the placeholder canvas through the shell toast", async () => {
     const user = userEvent.setup();
     const { onClose, notify } = renderPanel();
@@ -192,12 +349,21 @@ describe("TaskDetailPanel chrome", () => {
       onTransitionSubtask: vi.fn(),
       onCreateComment: vi.fn()
     };
-    const { rerender } = render(<TaskDetailPanel task={taskFixture()} {...props} />);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <TaskDetailPanel task={taskFixture()} {...props} />
+      </QueryClientProvider>
+    );
 
     await user.click(screen.getByRole("button", { name: "Task menu" }));
     expect(screen.getByRole("button", { name: "Cancel task" })).toBeInTheDocument();
 
-    rerender(<TaskDetailPanel task={taskFixture({ id: "task-2", title: "Second task" })} {...props} />);
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <TaskDetailPanel task={taskFixture({ id: "task-2", title: "Second task" })} {...props} />
+      </QueryClientProvider>
+    );
 
     expect(screen.queryByRole("button", { name: "Cancel task" })).not.toBeInTheDocument();
   });

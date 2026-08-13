@@ -1,8 +1,13 @@
-import { Check, ChevronRight, Inbox, MoreHorizontal, Network, X } from "lucide-react";
+import { Bot, Check, ChevronRight, Inbox, MoreHorizontal, Network, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { RefObject } from "react";
 
+import { useAgentRuns } from "../../api/agentHooks";
+import { hasFeatureFlag } from "../../api/auth";
 import { apiClient } from "../../api/client";
+import { AgentHandoffOverlay } from "../agents/AgentHandoffOverlay";
+import { AgentRunSection } from "../agents/AgentRunSection";
+import { useAuthStore } from "../../stores/authStore";
 import type {
   OpenTaskState,
   ProjectResponse,
@@ -367,6 +372,8 @@ function TaskDetailBody({
         </div>
       </div>
 
+      <AgentTaskRelay task={task} isTerminal={isTerminal} />
+
       <div className="flex flex-col gap-2 border-t border-slate-200 px-4 py-3">
         <div className="flex items-center gap-2">
           <h3 className="m-0 flex-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
@@ -458,6 +465,69 @@ function TaskDetailBody({
         </span>
       </div>
     </div>
+  );
+}
+
+/**
+ * Existing task runs remain observable and actionable after rollout is disabled.
+ * The flag gates only creation of new hand-offs; it must not strand work that
+ * already left BrainBuddy.
+ */
+function AgentTaskRelay({ task, isTerminal }: { task: TaskResponse; isTerminal: boolean }): React.JSX.Element | null {
+  const user = useAuthStore((state) => state.user);
+  const handoffEnabled = hasFeatureFlag(user, "external_agent_relay");
+  const [reviewing, setReviewing] = useState(false);
+  const runsQuery = useAgentRuns(task.id, Boolean(user));
+
+  useEffect(() => {
+    setReviewing(false);
+  }, [task.id, handoffEnabled]);
+
+  // Some older deployments/tests may answer a non-list projection while this
+  // read is rolling out independently. Fail closed to an empty monitor rather
+  // than crashing the entire task panel.
+  const runs = Array.isArray(runsQuery.data) ? runsQuery.data : [];
+  const canStartHandoff = handoffEnabled && !isTerminal;
+
+  return (
+    <>
+      {runs.length || canStartHandoff ? (
+        <div className="flex flex-col gap-2 border-t border-slate-200 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <h3 className="m-0 flex-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
+              External agent
+            </h3>
+            {canStartHandoff ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                leftIcon={<Bot className="h-[13px] w-[13px]" aria-hidden />}
+                onClick={() => setReviewing(true)}
+              >
+                Hand to agent
+              </Button>
+            ) : null}
+          </div>
+          {!runs.length && canStartHandoff ? (
+            <p className="m-0 text-[12px] text-slate-500">
+              Review exactly what would be sent before anything leaves BrainBuddy.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      <AgentRunSection taskId={task.id} runs={runs} isLoading={runsQuery.isLoading} error={runsQuery.error} />
+
+      {reviewing && canStartHandoff ? (
+        <AgentHandoffOverlay
+          taskId={task.id}
+          taskTitle={task.title}
+          onClose={() => setReviewing(false)}
+          onDispatched={() => setReviewing(false)}
+        />
+      ) : null}
+    </>
   );
 }
 

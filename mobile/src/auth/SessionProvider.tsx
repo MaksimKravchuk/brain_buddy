@@ -7,8 +7,10 @@ import {
   useState,
   type PropsWithChildren,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { createApiClient, type ApiClient } from "@/api/client";
+import { resetPrivateAgentState } from "@/api/privateAgentCache";
 import type { MeResponse } from "@/api/types";
 import {
   clearIdentityStores,
@@ -48,6 +50,19 @@ let identityEpoch = 0;
 
 export type SessionStatus = "loading" | "signed-out" | "signed-in" | "signed-in-offline";
 
+export type ServerTimeAnchor = { serverTimeMs: number; monotonicTimeMs: number };
+
+export function advanceServerTimeAnchor(
+  current: ServerTimeAnchor | null,
+  incoming: ServerTimeAnchor,
+): ServerTimeAnchor {
+  if (!current) {
+    return incoming;
+  }
+  const projectedCurrent = current.serverTimeMs + (incoming.monotonicTimeMs - current.monotonicTimeMs);
+  return incoming.serverTimeMs >= projectedCurrent ? incoming : current;
+}
+
 interface SessionContextValue {
   status: SessionStatus;
   me: MeResponse | null;
@@ -58,7 +73,10 @@ interface SessionContextValue {
    * key (FR-011, SC-007). Null whenever there is no usable session.
    */
   accountId: string | null;
+  /** Snapshot token captured by private async work at dispatch time. */
+  getIdentityEpoch(): number;
   api: ApiClient;
+  serverTimeAnchor: ServerTimeAnchor | null;
   /** True when the account's voice_brain_dump flag is on (fail closed). */
   voiceEnabled: boolean;
   /**
@@ -68,6 +86,8 @@ interface SessionContextValue {
    * down (FR-020). Exposure control only — never authorization.
    */
   taskClassificationEnabled: boolean;
+  /** True when the account's external_agent_relay flag is on (fail closed). */
+  agentRelayEnabled: boolean;
   signIn(email: string, password: string): Promise<void>;
   signUp(email: string, password: string, inviteCode: string): Promise<void>;
   signOut(): Promise<void>;
@@ -84,11 +104,13 @@ const SessionContext = createContext<SessionContextValue | null>(null);
 const SERVER_CHANGE_PROBE_TIMEOUT_MS = 8_000;
 
 export function SessionProvider({ children }: PropsWithChildren) {
+  const queryClient = useQueryClient();
   const [status, setStatus] = useState<SessionStatus>("loading");
   const [me, setMe] = useState<MeResponse | null>(null);
   const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
   const [identity, setIdentity] = useState<PersistedIdentity | null>(null);
   const [flags, setFlags] = useState<FeatureFlagRecord | null>(null);
+  const [serverTimeAnchor, setServerTimeAnchor] = useState<ServerTimeAnchor | null>(null);
 
   /**
    * Every identity transition bumps this. Anything that started under an
@@ -106,9 +128,17 @@ export function SessionProvider({ children }: PropsWithChildren) {
   // what this actually is instead of dressing it as component state.
 
   /** A 401 anywhere in the app: the session ended without anyone choosing it. */
-  const handleUnauthorized = useCallback(async () => {
+  const handleUnauthorized = useCallback(async (requestEpoch: number | undefined) => {
+    if (requestEpoch === undefined || requestEpoch !== identityEpoch) {
+      return;
+    }
     const epoch = ++identityEpoch;
     const url = currentServerUrl();
+    const ownsScope = () => identityEpoch === epoch;
+    await resetPrivateAgentState(queryClient, ownsScope);
+    if (!ownsScope()) {
+      return;
+    }
     // Reading first gives a sign-in that raced this 401 a chance to win: if
     // the epoch moved, the newer session owns the identity and nothing here
     // is written. Should one still slip through, the cost is a signed-out
@@ -127,9 +157,10 @@ export function SessionProvider({ children }: PropsWithChildren) {
     }
     setMe(null);
     setFlags(null);
+    setServerTimeAnchor(null);
     setIdentity(marked);
     setStatus("signed-out");
-  }, []);
+  }, [queryClient]);
 
   // NOTE: `react-hooks/refs` flags this memo — `handleUnauthorized` reads
   // `epochRef`, and the rule traces that read into the memo body. The read
@@ -142,16 +173,26 @@ export function SessionProvider({ children }: PropsWithChildren) {
     () =>
       createApiClient({
         getBaseUrl: currentServerUrl,
-        onUnauthorized: () => {
-          void handleUnauthorized();
+        getSessionEpoch: () => identityEpoch,
+        onUnauthorized: (requestEpoch) => {
+          void handleUnauthorized(requestEpoch);
         },
         // FR-018's second guard: the retention bound is cross-checked against
         // the last time the SERVER said it was, so a device clock jumped
         // forward cannot delete a queue on its own. Nothing recorded this
         // before, so `loadServerTime()` was always null and the guard — which
         // the adversarial review asked for by name — never ran.
-        onServerTime: (date) => {
+        onServerTime: (date, monotonicTimeMs, requestEpoch) => {
+          if (requestEpoch === undefined || requestEpoch !== identityEpoch) {
+            return;
+          }
           void saveServerTime(date);
+          const serverTimeMs = Date.parse(date);
+          if (!Number.isNaN(serverTimeMs)) {
+            setServerTimeAnchor((current) =>
+              advanceServerTimeAnchor(current, { serverTimeMs, monotonicTimeMs }),
+            );
+          }
         },
       }),
     [handleUnauthorized],
@@ -167,28 +208,32 @@ export function SessionProvider({ children }: PropsWithChildren) {
    * offline and force-quits could not name their own queue key at the next
    * cold start (FR-009, FR-020).
    */
-  const adoptProfile = useCallback(async (profile: MeResponse) => {
-    const epoch = ++identityEpoch;
+  const adoptProfile = useCallback(async (profile: MeResponse, epoch: number) => {
+    const ownsScope = () => identityEpoch === epoch;
+    await resetPrivateAgentState(queryClient, ownsScope);
+    if (!ownsScope()) {
+      return;
+    }
     setMe(profile);
     setFlags(profile.feature_flags ?? null);
     setStatus("signed-in");
     const record = await persistIdentity(currentServerUrl(), profile);
-    if (identityEpoch !== epoch) {
+    if (!ownsScope()) {
       return;
     }
     setIdentity(record);
-  }, []);
+  }, [queryClient]);
 
   const probe = useCallback(
     async (signal?: AbortSignal) => {
-      const epoch = identityEpoch;
+      const epoch = ++identityEpoch;
       const url = currentServerUrl();
       try {
         const profile = await api.me(signal);
         if (identityEpoch !== epoch) {
           return;
         }
-        await adoptProfile(profile);
+        await adoptProfile(profile, epoch);
       } catch (error) {
         if (identityEpoch !== epoch) {
           // A 401 was already handled by `onUnauthorized`, or a newer
@@ -238,22 +283,24 @@ export function SessionProvider({ children }: PropsWithChildren) {
 
   const signIn = useCallback(
     async (email: string, password: string) => {
+      const epoch = ++identityEpoch;
       const profile = await api.login({ email: email.trim(), password });
-      await adoptProfile(profile);
+      await adoptProfile(profile, epoch);
     },
-    [api, adoptProfile],
+    [adoptProfile, api],
   );
 
   const signUp = useCallback(
     async (email: string, password: string, inviteCode: string) => {
+      const epoch = ++identityEpoch;
       const profile = await api.signup({
         email: email.trim(),
         password,
         invite_code: inviteCode.trim(),
       });
-      await adoptProfile(profile);
+      await adoptProfile(profile, epoch);
     },
-    [api, adoptProfile],
+    [adoptProfile, api],
   );
 
   /**
@@ -300,11 +347,17 @@ export function SessionProvider({ children }: PropsWithChildren) {
     if (identityEpoch !== epoch) {
       return;
     }
+    const ownsScope = () => identityEpoch === epoch;
+    await resetPrivateAgentState(queryClient, ownsScope);
+    if (!ownsScope()) {
+      return;
+    }
     setMe(null);
     setIdentity(null);
     setFlags(null);
+    setServerTimeAnchor(null);
     setStatus("signed-out");
-  }, [api, forgetIdentity, me, identity]);
+  }, [api, forgetIdentity, me, identity, queryClient]);
 
   /**
    * A server change is a real identity transition, which is what settings
@@ -327,6 +380,11 @@ export function SessionProvider({ children }: PropsWithChildren) {
       // so before it happens, so the previous server's identity is owed the
       // same clearing as an explicit sign-out.
       await forgetIdentity(previous, me?.id ?? identity?.accountId ?? null);
+      const ownsScope = () => identityEpoch === epoch;
+      await resetPrivateAgentState(queryClient, ownsScope);
+      if (!ownsScope()) {
+        return;
+      }
       // `saveServerUrl` above already moved the live value; `config/serverUrl`
       // owns it since main #149, so there is no ref to keep in step — only the
       // rendering mirror below.
@@ -334,13 +392,14 @@ export function SessionProvider({ children }: PropsWithChildren) {
       setMe(null);
       setIdentity(null);
       setFlags(null);
+      setServerTimeAnchor(null);
       setStatus("signed-out");
       if (identityEpoch !== epoch) {
         return;
       }
       await probe(AbortSignal.timeout(SERVER_CHANGE_PROBE_TIMEOUT_MS));
     },
-    [probe, forgetIdentity, me, identity],
+    [probe, forgetIdentity, me, identity, queryClient],
   );
 
   const refreshMe = useCallback(async () => {
@@ -354,9 +413,12 @@ export function SessionProvider({ children }: PropsWithChildren) {
       me,
       serverUrl,
       accountId: hasSession ? (me?.id ?? identity?.accountId ?? null) : null,
+      getIdentityEpoch: () => identityEpoch,
       api,
+      serverTimeAnchor,
       voiceEnabled: resolveFeatureFlag("voice_brain_dump", me, null),
       taskClassificationEnabled: resolveFeatureFlag(TASK_CLASSIFICATION_FLAG, me, flags),
+      agentRelayEnabled: resolveFeatureFlag("external_agent_relay", me, flags),
       signIn,
       signUp,
       signOut,
@@ -370,6 +432,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
     identity,
     flags,
     api,
+    serverTimeAnchor,
     signIn,
     signUp,
     signOut,

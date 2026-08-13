@@ -21,6 +21,8 @@ dependencies = [
   "typer>=0.9,<1.0",
   "argon2-cffi>=23.1,<26",
   "email-validator>=2.1,<3.0",
+  # AES-GCM for external-agent connection credentials at rest (spec 006 / FR-003).
+  "cryptography>=42.0,<47",
 ]
 
 [project.optional-dependencies]

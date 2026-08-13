@@ -12,6 +12,16 @@ import type { ReactElement, ReactNode } from "react";
 import { View } from "react-native";
 
 import { SessionProvider, useSession } from "@/auth/SessionProvider";
+import { disposeQueryClient } from "@/test/queryClient";
+
+const ownedQueryClients = new Set<QueryClient>();
+
+afterEach(() => {
+  for (const client of ownedQueryClients) {
+    disposeQueryClient(client);
+  }
+  ownedQueryClients.clear();
+});
 
 export function makeQueryClient(): QueryClient {
   return new QueryClient({
@@ -63,14 +73,25 @@ export interface SessionRenderResult {
  */
 export async function renderWithSession(
   ui: ReactElement,
-  { queryClient = makeQueryClient() }: { queryClient?: QueryClient } = {},
+  options: { queryClient?: QueryClient } = {},
 ): Promise<SessionRenderResult> {
+  const queryClient = options.queryClient ?? makeQueryClient();
+  const ownsQueryClient = options.queryClient === undefined;
+  if (ownsQueryClient) {
+    ownedQueryClients.add(queryClient);
+  }
   const result = await render(withProviders(ui, queryClient));
   await waitFor(() => expect(screen.queryByTestId("session-loading")).toBeNull());
   return {
     queryClient,
     rerender: (next: ReactElement) => result.rerender(withProviders(next, queryClient)),
-    unmount: result.unmount,
+    unmount: async () => {
+      await result.unmount();
+      if (ownsQueryClient) {
+        ownedQueryClients.delete(queryClient);
+        disposeQueryClient(queryClient);
+      }
+    },
     container: result.container,
   };
 }

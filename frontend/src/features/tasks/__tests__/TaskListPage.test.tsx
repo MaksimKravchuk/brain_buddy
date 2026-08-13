@@ -37,7 +37,9 @@ vi.mock("../../../api/client", async () => {
       archiveProject: vi.fn(),
       createTag: vi.fn(),
       updateTag: vi.fn(),
-      deleteTag: vi.fn()
+      deleteTag: vi.fn(),
+      listAgentRunSummaries: vi.fn(),
+      listAgentRuns: vi.fn()
     }
   };
 });
@@ -160,6 +162,8 @@ beforeEach(() => {
   mocked.createTag.mockResolvedValue(tags[0]);
   mocked.updateTag.mockResolvedValue(tags[0]);
   mocked.deleteTag.mockResolvedValue({ ...tags[0], state: "deleted" });
+  mocked.listAgentRunSummaries.mockResolvedValue({});
+  mocked.listAgentRuns.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -170,6 +174,54 @@ afterEach(() => {
 });
 
 describe("TaskListPage projections", () => {
+  it("shows honest agent and needs-you chips and still queries them when rollout is off", async () => {
+    act(() => {
+      useAuthStore.setState({
+        user: {
+          id: "user-1",
+          email: "max@example.test",
+          feature_flags: {}
+        },
+        status: "authed"
+      });
+    });
+    mocked.listTasks.mockImplementation(async () =>
+      listResponse([
+        taskFixture(),
+        taskFixture({ id: "task-2", title: "Approve staging", order_key: 2 })
+      ])
+    );
+    mocked.listAgentRunSummaries.mockResolvedValue({
+      "task-1": {
+        id: "agentrun-1",
+        task_id: "task-1",
+        agent_name: "Hermes",
+        primary_state_label: "Running",
+        needs_user: false,
+        stopped_reporting: false,
+        last_contact_at: "2026-08-11T12:00:00Z"
+      },
+      "task-2": {
+        id: "agentrun-2",
+        task_id: "task-2",
+        agent_name: "Hermes",
+        primary_state_label: "Needs you",
+        needs_user: true,
+        stopped_reporting: false,
+        last_contact_at: "2026-08-11T12:01:00Z"
+      }
+    });
+
+    renderPage();
+
+    expect(await screen.findByText("Running")).toBeInTheDocument();
+    expect(screen.getByText("Needs you")).toBeInTheDocument();
+    expect(mocked.listAgentRunSummaries).toHaveBeenCalledWith(
+      ["task-1", "task-2"],
+      expect.any(AbortSignal)
+    );
+  });
+
   it("titles each projection from the route and groups tasks by project by default", async () => {
     renderPage("/tasks/next");
 
