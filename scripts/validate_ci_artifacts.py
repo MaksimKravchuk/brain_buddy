@@ -156,11 +156,16 @@ EXECUTED_ALLURE_STATUSES = {"passed", "failed", "broken"}
 # documentation commits. The short circuit these strings guard is the fix;
 # deleting it silently restores the breakage for the next spec-only branch.
 #
-# Narrow on purpose. Only `backend` and `frontend` upload results -- the `e2e`
-# job derives its own RUN from those two and `mobile` uploads none -- so those
-# two are the entire predicate. It must NOT grow to cover "a stack ran and
-# produced no results": that is a real defect and the validator exists to fail
-# on it.
+# Narrow on purpose in one direction only: it must NOT grow to cover "a lane ran
+# and produced no results". That is a real defect and the validator exists to
+# fail on it.
+#
+# It must, however, name every lane that uploads. This comment previously said
+# only `backend` and `frontend` upload results, that the `e2e` job "derives its
+# own RUN from those two", and that `mobile` uploads none. Each claim decayed
+# separately, and each time the predicate was left behind. Four artifacts match
+# the `*-allure-results` download pattern today: backend, frontend, mobile and
+# playwright.
 #
 # The step anchors below are deliberately two-line, binding the guard to the
 # `if:` on the specific steps it protects. A bare "if: steps.aggregate..."
@@ -173,14 +178,20 @@ EXECUTED_ALLURE_STATUSES = {"passed", "failed", "broken"}
 ALLURE_AGGREGATION_REQUIREMENTS = (
     ("Allure aggregation short-circuit step", "      - name: Decide whether there is anything to aggregate\n        id: aggregate"),
     (
-        # Three, not two. `mobile` began uploading Allure results when the
-        # mobile Jest suite gained taxonomy, and this invariant was not moved
-        # with it — so a mobile-only pull request skipped every aggregation
-        # step and still went green, with no report and no link. An invariant
-        # that names the wrong set is worse than none: it reads as coverage of
-        # exactly the case it misses.
-        "Allure aggregation predicate over the three uploading stacks",
-        'if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ] || [ "$MOBILE" = "true" ]; then',
+        # Four, not three, and not two. This set has been wrong twice for the
+        # same reason: a lane started uploading Allure results and the
+        # invariant was not moved with it. First `mobile`, when the Jest suite
+        # gained taxonomy — a mobile-only pull request then skipped every
+        # aggregation step and still went green. Then `e2e`, which uploads
+        # `playwright-allure-results` under a bare `always()` in a job that is
+        # never path filtered, so it produces results on a docs-only run where
+        # all three stacks are false; the aggregation short-circuited and threw
+        # a complete Playwright suite away. An invariant that names the wrong
+        # set is worse than none: it reads as coverage of exactly the case it
+        # misses.
+        "Allure aggregation predicate over the four uploading lanes",
+        'if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ] || [ "$MOBILE" = "true" ]'
+        ' || [ "$E2E" = "true" ]; then',
     ),
     # Selected-to-run is not produced-something. A stack job is skipped when
     # `spec-kit` is red, which is the normal state of a spec-driven branch, so
@@ -216,6 +227,19 @@ ALLURE_AGGREGATION_REQUIREMENTS = (
         "Allure predicate conjoins selection with the mobile job actually running",
         "          MOBILE: ${{ needs.changes.outputs.mobile == 'true'"
         " && needs.mobile.result != 'skipped' }}\n",
+    ),
+    # One conjunct, not two, and that asymmetry is the point. The three stack
+    # lanes are path filtered, so "was it selected" is a real question for them.
+    # `e2e` is deliberately never path filtered and its upload carries a bare
+    # `always()` with no RUN guard, so the job produces results whenever it is
+    # not skipped -- there is no `changes.outputs.e2e` to conjoin, and adding
+    # one would reintroduce the bug by making a docs-only run look empty.
+    #
+    # Anchored to the key for the same reason as the three above: the shell line
+    # can name E2E while the environment binds it to a constant.
+    (
+        "Allure predicate accounts for the never-path-filtered e2e lane",
+        "          E2E: ${{ needs.e2e.result != 'skipped' }}\n",
     ),
     (
         "gate on the Allure download step",

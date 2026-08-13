@@ -1133,14 +1133,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # Only `backend` and `frontend` upload Allure results, and the `e2e` job
-      # that uploads the Playwright ones derives its own RUN from those two.
-      # `mobile` produces none at all. So a change touching neither of those
-      # stacks uploads nothing, the download below matches no artifact, and
+      # Four artifacts match the `*-allure-results` pattern downloaded below,
+      # and the predicate has to account for every one of them:
+      # `backend-allure-results`, `frontend-allure-results`,
+      # `mobile-allure-results` and `playwright-allure-results`. When a change
+      # produces none of them the download matches no artifact, and
       # `actions/download-artifact` does not create the directory — the
       # validator then failed on a directory that was never going to exist.
       # Every specs-only commit hit this, which is most of a spec-driven
       # feature's history.
+      #
+      # This comment used to claim that only `backend` and `frontend` upload
+      # results, that `e2e` "derives its own RUN from those two", and that
+      # `mobile` produces none at all. All three had stopped being true, and
+      # the predicate below was built on them.
       #
       # Deliberately a step-level short circuit and not a job-level `if`:
       # `full-ci` counts a skipped required job as a failure on purpose, so
@@ -1161,17 +1167,36 @@ jobs:
         # Deliberately NOT "skip if the directory is empty". That would swallow
         # the one case this validator exists for: a stack that ran and produced
         # no results.
+        #
+        # E2E is the fourth uploading lane and it is asked a DIFFERENT question,
+        # because it is filtered differently. The three stack lanes are path
+        # filtered, so for them "was this selected" is a real question. `e2e` is
+        # never path filtered (see the job) and it uploads
+        # `playwright-allure-results` under a bare `always()` with no RUN guard,
+        # so it produces evidence on every run it is part of — including a
+        # docs-only one. There is no `changes.outputs.e2e` to conjoin and there
+        # must not be; the only question left is whether the job ran.
+        #
+        # Omitting that term is what this fixes. A docs-only pull request marks
+        # all three stacks false, yet `backend` and `frontend` still RUN with
+        # their steps skipped (see the `changes` job: skipping the jobs would
+        # trip ADR-0008), so `e2e` is not skipped either — it runs the whole
+        # Compose stack and uploads a full set of Playwright results. The
+        # three-stack predicate then short-circuited to run=false and threw them
+        # away: no aggregate report and no pull request link, on precisely the
+        # branches that are nothing but docs commits.
         env:
           BACKEND: ${{ needs.changes.outputs.backend == 'true' && needs.backend.result != 'skipped' }}
           FRONTEND: ${{ needs.changes.outputs.frontend == 'true' && needs.frontend.result != 'skipped' }}
           MOBILE: ${{ needs.changes.outputs.mobile == 'true' && needs.mobile.result != 'skipped' }}
+          E2E: ${{ needs.e2e.result != 'skipped' }}
         run: |
-          if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ] || [ "$MOBILE" = "true" ]; then
+          if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ] || [ "$MOBILE" = "true" ] || [ "$E2E" = "true" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "A stack that uploads Allure results was exercised; aggregating."
+            echo "A lane that uploads Allure results was exercised; aggregating."
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "No stack that uploads Allure results was exercised, so there is nothing to aggregate. Nothing to validate."
+            echo "No lane that uploads Allure results was exercised, so there is nothing to aggregate. Nothing to validate."
           fi
 
       - name: Download Allure results

@@ -482,6 +482,99 @@ export default defineConfig({
                     result.stderr,
                 )
 
+    def test_workflow_rejects_an_aggregation_predicate_that_ignores_the_e2e_lane(
+        self,
+    ) -> None:
+        """The fourth uploading lane must be in the predicate, not just the other three.
+
+        `e2e` uploads `playwright-allure-results`, which matches the
+        `*-allure-results` pattern the aggregation downloads, under a bare
+        `always()` with no RUN guard -- and the job is deliberately never path
+        filtered. The three stack lanes are path filtered but still RUN with
+        their steps skipped, because skipping the jobs would trip ADR-0008's
+        rule that Full CI treats a skipped required job as a failure. So on a
+        docs-only pull request `backend` and `frontend` succeed, `e2e` is
+        therefore not skipped, it runs the whole Compose stack, and it uploads a
+        complete set of Playwright results.
+
+        The three-stack predicate read all three `changes` outputs as false and
+        short-circuited to run=false, discarding those results: no aggregate
+        report and no pull request link, on exactly the specs-only branches that
+        make up most of a spec-driven feature's history. The invariant named the
+        three stacks and so read as coverage of the case it missed -- the same
+        failure mode as the mobile entry before it, for the same reason.
+
+        Guarded in all three shapes the regression can take: dropping the term
+        from the shell predicate, dropping the environment key it reads, and
+        binding that key to a constant while the real expression survives unread
+        on a sibling.
+        """
+        workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+        text = workflow.read_text(encoding="utf-8")
+
+        binding = "          E2E: ${{ needs.e2e.result != 'skipped' }}\n"
+        # The premise the predicate rests on. If e2e ever stops uploading under
+        # an unguarded always(), this test is asserting the wrong thing and
+        # should fail loudly rather than quietly keep passing.
+        #
+        # `assertTrue` rather than `assertIn` throughout: the container here is
+        # the whole 56KB workflow, and assertIn renders it into the failure
+        # message, burying the one line that matters.
+        unguarded_upload = (
+            "      - name: Upload Playwright Allure results\n        if: always()\n"
+        )
+        self.assertTrue(
+            unguarded_upload in text,
+            "e2e must still upload Playwright Allure results unconditionally; "
+            "without that upload the E2E term below is asserting the wrong thing",
+        )
+        self.assertTrue(
+            binding in text,
+            f"the aggregation predicate must bind the e2e lane: {binding!r}",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # The literal pre-fix workflow: three stacks, no e2e term.
+            three_stacks = Path(tmp) / "ci-three-stacks.yml"
+            three_stacks.write_text(
+                text.replace(' || [ "$E2E" = "true" ]; then', "; then"),
+                encoding="utf-8",
+            )
+            dropped_term = self.run_validator("workflow", "--ci", str(three_stacks))
+
+            no_binding = Path(tmp) / "ci-no-e2e-binding.yml"
+            no_binding.write_text(text.replace(binding, ""), encoding="utf-8")
+            dropped_binding = self.run_validator("workflow", "--ci", str(no_binding))
+
+            rewired = Path(tmp) / "ci-e2e-rewired.yml"
+            unread_sibling = binding.replace("E2E:", "E2E_ELIGIBLE:", 1)
+            rewired.write_text(
+                text.replace(binding, "          E2E: false\n" + unread_sibling),
+                encoding="utf-8",
+            )
+            constant_binding = self.run_validator("workflow", "--ci", str(rewired))
+
+        self.assertNotEqual(
+            dropped_term.returncode,
+            0,
+            f"a predicate ignoring the e2e lane must fail: {dropped_term.stdout}",
+        )
+        self.assertIn("predicate over the four uploading lanes", dropped_term.stderr)
+
+        self.assertNotEqual(
+            dropped_binding.returncode,
+            0,
+            f"a missing E2E environment key must fail: {dropped_binding.stdout}",
+        )
+        self.assertIn("never-path-filtered e2e lane", dropped_binding.stderr)
+
+        self.assertNotEqual(
+            constant_binding.returncode,
+            0,
+            f"E2E bound to a constant must fail: {constant_binding.stdout}",
+        )
+        self.assertIn("never-path-filtered e2e lane", constant_binding.stderr)
+
     def test_workflow_rejects_missing_pr_scoped_concurrency(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -870,8 +963,9 @@ jobs:
           BACKEND: ${{ needs.changes.outputs.backend == 'true' && needs.backend.result != 'skipped' }}
           FRONTEND: ${{ needs.changes.outputs.frontend == 'true' && needs.frontend.result != 'skipped' }}
           MOBILE: ${{ needs.changes.outputs.mobile == 'true' && needs.mobile.result != 'skipped' }}
+          E2E: ${{ needs.e2e.result != 'skipped' }}
         run: |
-          if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ] || [ "$MOBILE" = "true" ]; then
+          if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ] || [ "$MOBILE" = "true" ] || [ "$E2E" = "true" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"

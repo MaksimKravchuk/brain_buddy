@@ -269,5 +269,19 @@ a plain resend and raises no prompt. `data-model.md` invariant 10 and T068 now
 state all three branches; no requirement was weakened to fit the code. The fix
 is mutation-checked: reverted, the new tests fail; restored, they pass.
 
+### The evidence for all of this was being thrown away
+
+One more, found in the same pass and not about the feature's code at all. The
+Allure aggregation predicate named three uploading lanes and there are four:
+`e2e` is never path filtered and uploads `playwright-allure-results` under a
+bare `always()`. The three stack jobs run-but-skip-their-steps rather than
+skipping — ADR-0008 counts a skipped required job as a failure — so `e2e` is
+never skipped either. A docs-only pull request therefore ran the whole Compose
+suite and then discarded its results: no aggregate report, no pull request
+link, on precisely the branches a spec-driven feature is mostly made of, which
+is most of this feature's own history. The validator now requires the fourth
+term, key-anchored like the other three so it cannot be re-broken by binding
+the key to a constant.
+
 SC-001, SC-006 and the rendering halves of FR-007 and FR-012 remain ungraded —
 T052 and T069 still need a physical iPhone.
