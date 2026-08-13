@@ -3,6 +3,36 @@
 Date: 2026-07-16
 Status: Accepted
 Amended: 2026-07-25 — repository pin upgraded from `v0.12.17` to `v0.14.2`; ADR-0009 adds the Architect-owned planning review control plane
+Amended: 2026-08-11 — the pin has moved again, to `v0.15.0`. Every version
+number below is the record of a past state, not the live pin.
+`docs/spec-kit-workflow.md` is the single live source for the pinned version;
+this ADR deliberately no longer restates it.
+Superseded in part. The body below is preserved as written; these specific
+claims in it are no longer true, and a reader must not act on them:
+
+1. "the canonical path ... -> validated Hermes Kanban handoff" (Decision).
+   ADR-0010 made that handoff opt-in rather than the terminus, and ADR-0011
+   inserted the portable review gate ahead of checklist/tasks. For the current
+   path read `docs/spec-kit-workflow.md`.
+2. "BrainBuddy ... disables `/speckit-implement`" (Decision), and "the
+   installed workflow cannot advance into implementation outside Hermes
+   Kanban, PR review, and CI gates" (Consequences), and the tradeoff note about
+   preserving "the local disabled `/speckit-implement` stub". The opposite now
+   holds: `.claude/skills/speckit-implement/SKILL.md` is a preserved override
+   that implements **directly** from `tasks.md`, and
+   `scripts/check_speckit_manifests.py` plus
+   `test_implement_skill_is_not_disabled` exist specifically to stop the
+   disabled stub coming back.
+3. "Hermes Kanban remains responsible for ... CI/PR traceability, and release
+   gates" (Decision), and "they do not replace ... CI, PRs, or releases"
+   (Rationale). ADR-0008 (2026-07-22) owns landing and release: SHIP/SHOW land
+   PR-less through verified trunk, and Kanban holds no release authority even
+   inside a managed outcome (ADR-0010, Decision item 7).
+
+Not superseded: the reasons for adopting Spec Kit, the pinned-release and
+preserved-override discipline, and the refusal to let a generated `tasks.md`
+become an unreviewed implementation authority. That last one still holds — what
+changed is which gates enforce it, not that they do.
 Decision owner: BrainBuddy
 Related: `.specify/`, `.claude/skills/`, official Hermes Spec Kit skills,
 `specs/`, `docs/spec-kit-workflow.md`, ADR-0001, ADR-0002, Kanban task
@@ -25,7 +55,8 @@ starts.
 
 Adopt the official `github/spec-kit` release as BrainBuddy's mandatory
 feature-spec authoring workflow. The initial adoption used `v0.12.17`; the
-current reviewed pin is `v0.14.2`. Refresh the existing repository scaffold using
+reviewed pin at the time of the 2026-07-25 amendment was `v0.14.2`, and the live
+pin is whatever `docs/spec-kit-workflow.md` records. Refresh the repository scaffold using
 the pinned CLI through isolated `uv tool`/`uvx`, keep the supported Claude Code
 project integration, and provision the official Hermes planning skills into the
 architect profile. Preserve existing specs, ADRs, and constitution history.

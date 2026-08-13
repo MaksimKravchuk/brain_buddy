@@ -2,9 +2,9 @@
   "schema_version": "1.0",
   "workflows": {
     "speckit": {
-      "name": "Spec Kit Planning Cycle",
-      "version": "1.0.0",
-      "description": "Runs specify \u2192 clarify \u2192 plan \u2192 checklist \u2192 tasks, then stops for Hermes Kanban handoff",
+      "name": "BrainBuddy Portable Spec Review",
+      "version": "3.0.0",
+      "description": "Portable spec review gate (ADR-0011): five read-only reviewer lenses fan out over the feature planning artifacts and fan in to one schema-validated verdict. Runs for every feature, with or without a managed outcome.",
       "source": "bundled",
       "installed_at": "2026-07-16T21:45:36.739772+00:00",
       "updated_at": "2026-07-16T21:45:36.739776+00:00"
