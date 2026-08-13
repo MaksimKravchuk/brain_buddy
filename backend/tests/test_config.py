@@ -60,6 +60,38 @@ def test_get_config_uses_environment(
     assert config.data.schema_version == "2024.04"
 
 
+def test_relay_manifest_callback_uses_the_configured_api_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "test")
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BRAIN_BUDDY_PUBLIC_BASE_URL", "https://relay.example.test")
+    monkeypatch.setenv("BRAIN_BUDDY_API_PREFIX", "/custom")
+
+    config = get_config()
+    container = build_container(config)
+
+    assert config.agent_relay.public_base_url == "https://relay.example.test"
+    assert container.agent_relay_service.callback_url == (
+        "https://relay.example.test/custom/agent-events"
+    )
+
+
+def test_relay_manifest_callback_defaults_to_api_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "test")
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BRAIN_BUDDY_PUBLIC_BASE_URL", "https://relay.example.test")
+    monkeypatch.delenv("BRAIN_BUDDY_API_PREFIX", raising=False)
+
+    container = build_container(get_config())
+
+    assert container.agent_relay_service.callback_url == (
+        "https://relay.example.test/api/agent-events"
+    )
+
+
 def test_get_config_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("BRAIN_BUDDY_ENV", raising=False)
     monkeypatch.delenv("BRAIN_BUDDY_DATA_DIR", raising=False)
@@ -453,7 +485,7 @@ class TestAgentRelayCallbackOrigin:
             config.agent_relay.public_base_url == "https://brain-buddy-backend.fly.dev"
         )
         assert (
-            config.agent_relay.callback_url
+            config.agent_relay_callback_url
             == "https://brain-buddy-backend.fly.dev/api/agent-events"
         )
 
@@ -471,7 +503,7 @@ class TestAgentRelayCallbackOrigin:
         config = get_config()
 
         assert (
-            config.agent_relay.callback_url
+            config.agent_relay_callback_url
             == "https://brain-buddy-backend.fly.dev/api/agent-events"
         )
 
@@ -496,7 +528,7 @@ class TestAgentRelayCallbackOrigin:
         monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
         monkeypatch.setenv("BRAIN_BUDDY_PUBLIC_BASE_URL", raw)
 
-        assert get_config().agent_relay.callback_url == expected
+        assert get_config().agent_relay_callback_url == expected
 
     @pytest.mark.parametrize(
         "raw",
@@ -781,7 +813,7 @@ class TestAgentRelayCallbackStartup:
         config = get_config()
 
         assert config.agent_relay.public_base_url == deployed
-        assert config.agent_relay.callback_url == f"{deployed}/api/agent-events"
+        assert config.agent_relay_callback_url == f"{deployed}/api/agent-events"
 
     def test_production_resolves_a_non_allowlisted_origin_before_accepting_it(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -803,7 +835,7 @@ class TestAgentRelayCallbackStartup:
 
         assert asked == ["relay.example.com"]
         assert (
-            config.agent_relay.callback_url
+            config.agent_relay_callback_url
             == "https://relay.example.com/api/agent-events"
         )
 

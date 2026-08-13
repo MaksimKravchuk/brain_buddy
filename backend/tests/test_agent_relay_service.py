@@ -3261,6 +3261,91 @@ class TestDisconnectAndRetention:
         assert len(connector.commands) == 1
         assert all(command.body is None for command in replay.commands)
 
+    def test_event_at_exact_retention_boundary_advances_only_coarse_state(
+        self,
+        relay: Relay,
+        clock: Clock,
+        service: AgentRelayService,
+        tmp_path: Path,
+    ) -> None:
+        relay.emit(relay.event("evt_before_due", "blocked", 1, question="Secret?"))
+        service.reply_to_run(
+            relay.run.id,
+            AgentReplyRequest(
+                message="Secret answer", expected_revision=relay.projection().revision
+            ),
+            owner_id=OWNER,
+            idempotency_key="idem-before-due",
+        )
+        persisted = service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
+        clock.now = persisted.content_expires_at
+
+        relay.emit(
+            relay.event(
+                "evt_due",
+                "running",
+                2,
+                progress="Secret progress at the boundary",
+            )
+        )
+
+        stored = service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
+        assert stored.content_expired is True
+        assert stored.reported_state == "running"
+        assert stored.run_version == 2
+        assert stored.last_contact_at == clock.now
+        assert stored.manifest is None
+        assert stored.progress_text is None
+        assert stored.question_text is None
+        assert stored.result_text is None
+        assert stored.result_link is None
+        assert stored.failure_reason is None
+        events = service.agent_repo.list_events(relay.run.id, owner_id=OWNER)
+        assert events[-1].summary is None
+
+        with sqlite3.connect(tmp_path / "agents.sqlite3") as conn:
+            event_payloads = [
+                json.loads(row[0])
+                for row in conn.execute(
+                    "SELECT payload FROM agent_run_events WHERE run_id = ?",
+                    (relay.run.id,),
+                )
+            ]
+            command_payloads = [
+                json.loads(row[0])
+                for row in conn.execute(
+                    "SELECT payload FROM agent_run_commands WHERE run_id = ?",
+                    (relay.run.id,),
+                )
+            ]
+        assert any(event["summary"] is not None for event in event_payloads)
+        assert any(command["body"] is not None for command in command_payloads)
+
+        revision = stored.revision
+        assert service.run_retention_sweep() == 0
+
+        with sqlite3.connect(tmp_path / "agents.sqlite3") as conn:
+            event_payloads = [
+                json.loads(row[0])
+                for row in conn.execute(
+                    "SELECT payload FROM agent_run_events WHERE run_id = ?",
+                    (relay.run.id,),
+                )
+            ]
+            command_payloads = [
+                json.loads(row[0])
+                for row in conn.execute(
+                    "SELECT payload FROM agent_run_commands WHERE run_id = ?",
+                    (relay.run.id,),
+                )
+            ]
+        assert all(event["summary"] is None for event in event_payloads)
+        assert all(command["body"] is None for command in command_payloads)
+        assert (
+            service.agent_repo.get_run(relay.run.id, owner_id=OWNER).revision
+            == revision
+        )
+
     @pytest.mark.parametrize(
         ("event_type", "content"),
         [
