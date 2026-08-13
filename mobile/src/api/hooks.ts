@@ -113,14 +113,16 @@ function cacheListsInBackground(
   serverUrl: string,
   accountId: string | null,
   half: { projects: CachedEntry[] } | { tags: CachedEntry[] },
+  /** Read before the fetch that produced `half` went out. Reading it here
+   *  instead would read it *after* the response arrived, so a sign-out that
+   *  happened during the request would already be behind us and this write
+   *  would put the old account's names back. */
+  generation: number,
 ): void {
   const key = activeCacheKey(serverUrl, accountId);
   if (!key) {
     return;
   }
-  // Captured before the write is queued, so a clear landing at any point after
-  // this line — including inside the read below — fences it out.
-  const generation = identityStoreGeneration(serverUrl, accountId ?? "");
   cacheWrites = cacheWrites
     .catch(() => undefined)
     .then(async () => {
@@ -217,11 +219,19 @@ export function useProjects() {
   return useQuery({
     queryKey: taskKeys.projects,
     queryFn: async ({ signal }): Promise<ProjectResponse[]> => {
+      // Before the request, not after it. Read on the way back, this is
+      // already the post-sign-out value: a clear that happened while the fetch
+      // was in flight would be behind us, both checks in the writer would pass,
+      // and the old account's project names would go back onto the device.
+      const generation = identityStoreGeneration(serverUrl, accountId ?? "");
       try {
         const projects = await api.listProjects(signal);
-        cacheListsInBackground(serverUrl, accountId, {
-          projects: cacheableEntries(projects),
-        });
+        cacheListsInBackground(
+          serverUrl,
+          accountId,
+          { projects: cacheableEntries(projects) },
+          generation,
+        );
         return projects;
       } catch (error) {
         const cached = await cachedHalf(serverUrl, accountId, "projects");
@@ -250,9 +260,16 @@ export function useTags() {
   return useQuery({
     queryKey: taskKeys.tags,
     queryFn: async ({ signal }): Promise<TagResponse[]> => {
+      // Before the request, for the same reason as `useProjects` above.
+      const generation = identityStoreGeneration(serverUrl, accountId ?? "");
       try {
         const tags = await api.listTags(signal);
-        cacheListsInBackground(serverUrl, accountId, { tags: cacheableEntries(tags) });
+        cacheListsInBackground(
+          serverUrl,
+          accountId,
+          { tags: cacheableEntries(tags) },
+          generation,
+        );
         return tags;
       } catch (error) {
         const cached = await cachedHalf(serverUrl, accountId, "tags");

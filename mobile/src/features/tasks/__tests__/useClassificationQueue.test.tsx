@@ -43,8 +43,12 @@ import {
 } from "@/test/fakeBackend";
 
 import type { PendingClassificationChange } from "../classificationTypes";
-import { SERVER_TIME_KEY } from "../classificationQueue.storage";
-import { queueKey, type ClassificationIdentity } from "../storageKeys";
+import { SERVER_TIME_KEY, clearIdentityStores, saveQueue } from "../classificationQueue.storage";
+import {
+  identityStoreGeneration,
+  queueKey,
+  type ClassificationIdentity,
+} from "../storageKeys";
 import {
   MAX_DRAIN_STEPS,
   useClassificationQueue,
@@ -1231,5 +1235,53 @@ describe("006-FR-011 a write already queued cannot be redirected by a later iden
     // waiting for that account to sign back in.
     const kept = await onDevice(IDENTITY);
     expect(kept?.map((change) => change.taskId).sort()).toEqual(["task-1", "task-2"]);
+  });
+});
+
+describe("006-FR-011 a pass is fenced by the generation it started under", () => {
+  it("cannot write over work queued after its own identity was cleared", async () => {
+    // The fence is stamped when the PASS starts, not when each of its writes is
+    // scheduled. A pass whose request was in flight across a sign-out schedules
+    // its writes afterwards — so a per-write capture reads the counter after it
+    // has already moved, the pass sails through its own fence, and its stale
+    // result either deletes the new session's queue or resurrects the one the
+    // sign-out discarded. Third time this exact reasoning error has been made
+    // on this feature, one level earlier each time.
+    await seed(IDENTITY, [queued()]);
+    let release = (): void => {};
+    const inFlight = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    install({
+      "PATCH /tasks/task-1": async () => {
+        await inFlight;
+        return accepted();
+      },
+    });
+
+    const view = await renderQueue();
+    await coldReadDone(view);
+    await waitFor(() => expect(backend.callsTo("PATCH", "/tasks/task-1")).toHaveLength(1));
+
+    // Sign-out clears the stores while that PATCH is outstanding, and the same
+    // account signs back in and queues something new.
+    await clearIdentityStores(IDENTITY);
+    const freshSession = identityStoreGeneration(SERVER, ACCOUNT);
+    await saveQueue(
+      IDENTITY,
+      [queued({ taskId: "task-9", idempotencyKey: "key-9" })],
+      Date.now(),
+      freshSession,
+    );
+
+    await act(async () => {
+      release();
+      await Promise.resolve();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // The new session's work is still there: the old pass could not write.
+    const kept = await onDevice(IDENTITY);
+    expect(kept?.map((change) => change.taskId)).toEqual(["task-9"]);
   });
 });

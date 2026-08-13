@@ -167,4 +167,38 @@ describe("classification list cache", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(await AsyncStorage.getItem(key)).toBeNull();
   });
+
+  it("006-FR-011 does not cache a response that arrived after the sign-out", async () => {
+    // The fence has to be stamped when the REQUEST starts, not when its
+    // response is handled. Read on the way back it is already the post-clear
+    // value, so a sign-out that happened while the fetch was in flight is
+    // behind us: both guards in the writer pass, and the old account's project
+    // names go back onto a device that just forgot them. Capturing one step
+    // earlier each time is how this was got wrong twice.
+    const key = cacheKey(DEFAULT_SERVER_URL, "user-1");
+    let release = (): void => {};
+    const inFlight = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    backend = installFakeBackend({
+      "GET /auth/me": () => makeMe({ id: "user-1" }),
+      "GET /projects": async () => {
+        await inFlight;
+        return [
+          { id: "p-1", name: "Wedding", color: null, state: "active", revision: 1, open_task_count: 0 },
+        ];
+      },
+    });
+
+    await renderWithSession(<Projects />);
+
+    // The person signs out while the request is still outstanding.
+    await clearIdentityStores({ serverUrl: DEFAULT_SERVER_URL, accountId: "user-1" });
+    release();
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ok"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(await AsyncStorage.getItem(key)).toBeNull();
+  });
 });
