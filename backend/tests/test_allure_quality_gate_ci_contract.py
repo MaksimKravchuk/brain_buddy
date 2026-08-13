@@ -27,8 +27,8 @@ def _load(path: Path, name: str):
     return module
 
 
-def test_007_FR_001_native_zero_failure_gate_is_final_and_explicit() -> None:
-    """007-FR-001 007-FR-006."""
+def test_008_FR_001_native_zero_failure_gate_is_final_and_explicit() -> None:
+    """008-FR-001 008-FR-006."""
 
     validator = _load(VALIDATOR, "validate_ci_artifacts")
     workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -38,8 +38,8 @@ def test_007_FR_001_native_zero_failure_gate_is_final_and_explicit() -> None:
     assert validator._quality_gate_errors(workflow) == []
 
 
-def test_007_FR_002_both_reports_precede_the_verdict() -> None:
-    """007-FR-002 007-FR-003 007-FR-004 007-SC-002."""
+def test_008_FR_002_both_reports_precede_the_verdict() -> None:
+    """008-FR-002 008-FR-003 008-FR-004 008-SC-002."""
 
     workflow = WORKFLOW.read_text(encoding="utf-8")
     verdict = workflow.index("npx allure quality-gate")
@@ -51,16 +51,16 @@ def test_007_FR_002_both_reports_precede_the_verdict() -> None:
     assert workflow.index("name: allure-report-single-file") < verdict
 
 
-def test_007_FR_007_gate_config_is_ask_classified() -> None:
-    """007-FR-007."""
+def test_008_FR_007_gate_config_is_ask_classified() -> None:
+    """008-FR-007."""
 
     classifier = _load(CLASSIFIER, "classify_path_risk")
     change_class, _ = classifier.classify_path("allurerc.mjs")
     assert change_class == classifier.ASK
 
 
-def test_007_FR_008_comment_is_truthful_and_actionable() -> None:
-    """007-FR-008."""
+def test_008_FR_008_comment_is_truthful_and_actionable() -> None:
+    """008-FR-008."""
 
     workflow = WORKFLOW.read_text(encoding="utf-8")
     assert "- **Start here: `allure-report-single-file`**" in workflow

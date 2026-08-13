@@ -1,6 +1,6 @@
 # Business Intake: Allure 3 aggregate Quality Gate and single-file report
 
-**Feature**: `specs/007-allure3-quality-gate/` · **Date**: 2026-08-11
+**Feature**: `specs/008-allure3-quality-gate/` · **Date**: 2026-08-11
 **Interviewee**: BrainBuddy founder, via written brief (Hermes → Claude Code)
 
 No live elicitation: this run is non-interactive, so `AskUserQuestion` is

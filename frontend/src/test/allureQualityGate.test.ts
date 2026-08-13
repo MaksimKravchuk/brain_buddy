@@ -7,8 +7,8 @@ const allure = "node_modules/.bin/allure";
 const config = "../allurerc.mjs";
 const fixtures = "../scripts/fixtures/allure-quality-gate";
 
-describe("007-FR-005 aggregate quality-gate canary", () => {
-  it("007-SC-001 passes clean results and rejects a failed result", () => {
+describe("008-FR-005 aggregate quality-gate canary", () => {
+  it("008-SC-001 passes clean results and rejects a failed result", () => {
     const clean = spawnSync(
       allure,
       ["quality-gate", `${fixtures}/passing`, "--config", config],

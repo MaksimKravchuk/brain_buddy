@@ -7,14 +7,14 @@ Non-destructive consistency pass over [spec.md](spec.md), [plan.md](plan.md) and
 
 | Requirement | Task | Executable check |
 | --- | --- | --- |
-| 007-FR-001 | T003, T009 | canary + `_quality_gate_errors` (verdict present, explicit config) |
-| 007-FR-002 | T006 | `REQUIRED_ARTIFACTS["allure-report-html"]`, unchanged generate step |
-| 007-FR-003 | T006, T007 | `REQUIRED_ARTIFACTS["allure-report-single-file"] = allure-report-single/index.html`; `--single-file` required |
-| 007-FR-004 | T005, T007 | ordering + last-step assertions |
-| 007-FR-005 | T010 | `scripts/allure_quality_gate_selftest.sh`, real CLI, both exit codes |
-| 007-FR-006 | T005 | warn-only and gate-replacing arguments rejected |
-| 007-FR-007 | T001, T004 | `test_classify_path_risk.py` ASK list |
-| 007-FR-008 | T008 | comment copy asserted against the workflow's retention expression |
+| 008-FR-001 | T003, T009 | canary + `_quality_gate_errors` (verdict present, explicit config) |
+| 008-FR-002 | T006 | `REQUIRED_ARTIFACTS["allure-report-html"]`, unchanged generate step |
+| 008-FR-003 | T006, T007 | `REQUIRED_ARTIFACTS["allure-report-single-file"] = allure-report-single/index.html`; `--single-file` required |
+| 008-FR-004 | T005, T007 | ordering + last-step assertions |
+| 008-FR-005 | T010 | `scripts/allure_quality_gate_selftest.sh`, real CLI, both exit codes |
+| 008-FR-006 | T005 | warn-only and gate-replacing arguments rejected |
+| 008-FR-007 | T001, T004 | `test_classify_path_risk.py` ASK list |
+| 008-FR-008 | T008 | comment copy asserted against the workflow's retention expression |
 
 No requirement is unimplemented; no task serves no requirement.
 

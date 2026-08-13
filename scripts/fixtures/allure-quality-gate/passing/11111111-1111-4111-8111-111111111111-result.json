@@ -9,6 +9,6 @@
   "labels": [
     { "name": "epic", "value": "Delivery quality gates" },
     { "name": "feature", "value": "Allure 3 aggregate quality gate" },
-    { "name": "story", "value": "007-SC-001 the gate passes a clean aggregate and fails a dirty one" }
+    { "name": "story", "value": "008-SC-001 the gate passes a clean aggregate and fails a dirty one" }
   ]
 }

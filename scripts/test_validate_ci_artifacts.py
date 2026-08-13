@@ -1842,7 +1842,7 @@ def _load_validator():
 
 
 class AllureQualityGateWorkflowTests(unittest.TestCase):
-    """007-FR-004/007-FR-006: the aggregate report is graded, last, un-overridably.
+    """008-FR-004/008-FR-006: the aggregate report is graded, last, un-overridably.
 
     Before this, `allure-report` published the aggregate and never judged it: a
     red test reached the artifact and the run stayed green. Ordering is half the

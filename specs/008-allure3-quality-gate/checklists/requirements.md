@@ -15,8 +15,8 @@ from and to accept against? Ticked at authoring time; re-checked at acceptance.
 ## Coverage
 
 - [x] Every requirement has a task in [tasks.md](tasks.md).
-- [x] Every success criterion has a way to observe it: 007-SC-001 the canary and
-      007-SC-002 workflow ordering assertions. Browser usability and diff-only
+- [x] Every success criterion has a way to observe it: 008-SC-001 the canary and
+      008-SC-002 workflow ordering assertions. Browser usability and diff-only
       capability counts are explicitly manual acceptance checks.
 - [x] The failure mode that motivated the feature — a red test in a green run —
       is covered by an executable check, not only by review.
