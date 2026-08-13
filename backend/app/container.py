@@ -36,6 +36,7 @@ from app.repositories import (
 )
 from app.services import (
     AccountService,
+    AdminService,
     AuthService,
     NodeService,
     RelationService,
@@ -84,6 +85,7 @@ class Container:
     validation_service: ValidationService
     auth_service: AuthService
     account_service: AccountService
+    admin_service: AdminService
     task_service: TaskService
     voice_brain_dump_service: VoiceBrainDumpService
     agent_relay_service: AgentRelayService
@@ -379,6 +381,11 @@ def build_container(config: AppConfig) -> Container:
         auth_service=auth_service,
         deletion_grace=deletion_grace,
     )
+    admin_service = AdminService(
+        user_repo=user_repo,
+        session_repo=session_repo,
+        operator_emails=config.admin.operator_emails,
+    )
 
     return Container(
         tree_repo=tree_repo,
@@ -399,6 +406,7 @@ def build_container(config: AppConfig) -> Container:
         validation_service=validation_service,
         auth_service=auth_service,
         account_service=account_service,
+        admin_service=admin_service,
         task_service=task_service,
         voice_brain_dump_service=voice_brain_dump_service,
         agent_relay_service=agent_relay_service,

@@ -17,6 +17,7 @@ import {
   RotateCcw,
   Search,
   Settings,
+  Shield,
   Sprout,
   X
 } from "lucide-react";
@@ -286,6 +287,19 @@ function AccountMenu(): React.JSX.Element {
           >
             <FileText className="h-4 w-4 text-slate-500" aria-hidden /> Privacy policy
           </button>
+          {user?.is_operator === true ? (
+            <button
+              type="button"
+              role="menuitem"
+              className={itemClass}
+              onClick={() => {
+                setOpen(false);
+                navigate("/admin");
+              }}
+            >
+              <Shield className="h-4 w-4 text-slate-500" aria-hidden /> Admin portal
+            </button>
+          ) : null}
           <div className="my-1 h-px bg-slate-100" aria-hidden />
           <button
             type="button"

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from typing import cast
+from urllib.parse import urlsplit
 
 from fastapi import Depends, HTTPException, Request, status
 
@@ -13,6 +15,7 @@ from app.modules.tasks import TaskService
 from app.schemas.auth import User
 from app.services import (
     AccountService,
+    AdminService,
     AuthService,
     NodeService,
     RelationService,
@@ -21,6 +24,8 @@ from app.services import (
     VersionService,
 )
 from app.workflows.voice_brain_dump.service import VoiceBrainDumpService
+
+logger = logging.getLogger(__name__)
 
 
 def get_container(request: Request) -> Container:
@@ -73,6 +78,12 @@ def get_account_service(
     return container.account_service
 
 
+def get_admin_service(
+    container: Container = Depends(get_container),
+) -> AdminService:
+    return container.admin_service
+
+
 def get_task_service(container: Container = Depends(get_container)) -> TaskService:
     return container.task_service
 
@@ -107,6 +118,52 @@ def get_current_user(
             detail="Authentication required.",
         )
     return user
+
+
+def require_operator(
+    current_user: User = Depends(get_current_user),
+    admin_service: AdminService = Depends(get_admin_service),
+) -> User:
+    """Gate every `/admin` route on the server-owned operator allow-list.
+
+    Runs after `get_current_user` (401 for no/invalid session), so an
+    unauthenticated caller is refused before this check. An authenticated
+    caller not on the allow-list gets 403 -- checked before any account
+    lookup or mutation runs, so the denial can never vary with whether a
+    target account exists (009-FR-002). The denial is logged content-free:
+    the caller's account id only, never their email.
+    """
+
+    if not admin_service.is_operator(current_user.email):
+        logger.warning(
+            "Admin access denied for user %s: not an operator", current_user.id
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized."
+        )
+    return current_user
+
+
+def require_same_origin(request: Request) -> None:
+    """Reject a request whose `Origin` header names a different host.
+
+    Belt-and-suspenders on top of the repository's `SameSite=Lax` cookie
+    posture (docs/auth.md #4): a browser only ever attaches `Origin` to a
+    same-origin fetch/XHR unless the request is actually cross-site, so this
+    never fires for the real frontend. Missing `Origin` (older browsers,
+    non-browser callers) is left to the cookie policy, same as every other
+    mutating route -- this only adds an explicit check for the one header a
+    cross-origin POST *would* carry (009-FR-009).
+    """
+
+    origin = request.headers.get("origin")
+    if origin is None:
+        return
+    if urlsplit(origin).netloc != request.headers.get("host", ""):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cross-origin request rejected.",
+        )
 
 
 def voice_brain_dump_enabled(user: User, config: AppConfig) -> bool:

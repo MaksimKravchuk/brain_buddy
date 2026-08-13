@@ -150,6 +150,36 @@ class FeatureFlagSettings(BaseModel):
         return effective
 
 
+class AdminSettings(BaseModel):
+    """Server-owned allow-list of operators for the `/admin` portal (009-FR-001).
+
+    Deliberately separate from `FeatureFlagSettings.internal_users`: that list
+    gates feature *exposure* for a rollout cohort, this one gates a real
+    authorization decision (account lookup, session revoke). Reusing one list
+    for both would let a feature-flag test cohort silently gain admin power.
+    """
+
+    operator_emails: frozenset[str] = Field(
+        default_factory=frozenset,
+        description="Normalized emails authorized to use the admin portal.",
+    )
+
+    model_config = ConfigDict(frozen=True)
+
+    @field_validator("operator_emails")
+    @classmethod
+    def validate_operator_emails(cls, emails: frozenset[str]) -> frozenset[str]:
+        normalized: set[str] = set()
+        for email in emails:
+            candidate = email.strip().lower()
+            if not candidate or "@" not in candidate:
+                raise ValueError(
+                    f"Admin operator email '{email}' is not an email address."
+                )
+            normalized.add(candidate)
+        return frozenset(normalized)
+
+
 class LoggingSettings(BaseModel):
     """Logging configuration values."""
 
@@ -488,6 +518,7 @@ class AppConfig(BaseModel):
     voice: VoiceSettings = Field(default_factory=VoiceSettings)
     agent_relay: AgentRelaySettings = Field(default_factory=AgentRelaySettings)
     feature_flags: FeatureFlagSettings = Field(default_factory=FeatureFlagSettings)
+    admin: AdminSettings = Field(default_factory=AdminSettings)
 
     model_config = ConfigDict(frozen=True)
 
@@ -544,6 +575,15 @@ def _build_feature_flags() -> FeatureFlagSettings:
         if value.strip()
     )
     return FeatureFlagSettings(states=states, internal_users=internal_users)
+
+
+def _build_admin_settings() -> AdminSettings:
+    operator_emails = frozenset(
+        value.strip()
+        for value in os.getenv("BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS", "").split(",")
+        if value.strip()
+    )
+    return AdminSettings(operator_emails=operator_emails)
 
 
 def _read_schema_version(data_dir: Path) -> str:
@@ -763,6 +803,7 @@ def _build_config() -> AppConfig:
         voice=voice,
         agent_relay=agent_relay,
         feature_flags=_build_feature_flags(),
+        admin=_build_admin_settings(),
     )
 
 
@@ -776,6 +817,7 @@ def get_config() -> AppConfig:
 __all__ = [
     "CANONICAL_PUBLIC_CALLBACK_HOSTS",
     "KNOWN_FEATURE_FLAGS",
+    "AdminSettings",
     "AgentRelaySettings",
     "AppConfig",
     "AppEnvironment",

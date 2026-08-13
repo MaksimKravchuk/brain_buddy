@@ -99,6 +99,13 @@ class MeResponse(StrictBaseModel):
             "resolved boolean is exposed — never rollout stages or cohorts."
         ),
     )
+    is_operator: bool = Field(
+        default=False,
+        description=(
+            "Whether this user is on the server-owned admin operator "
+            "allow-list. Server-issued only -- never inferred client-side."
+        ),
+    )
 
 
 __all__ = [
