@@ -959,3 +959,69 @@ describe("006-FR-007 a queued change is shown as made, with no per-change marker
     });
   });
 });
+
+describe("006-SC-007 a pass that loses its identity stops sending", () => {
+  it("issues no further request once the pass stops owning the queue", async () => {
+    let owned = true;
+    const rec = recorder({
+      send: async () => {
+        // Somebody signs in as another account while the first send is in
+        // flight. This is the whole window: `latest` and `persist` already
+        // isolate the *device*, and used to be the only guards, so the loop
+        // simply carried on to the next entry.
+        owned = false;
+        return { revision: 9, projectId: "proj-q3", tagIds: ["tag-calls"] };
+      },
+    });
+
+    const result = await drainQueue([entry(), entry({ taskId: "task-2", idempotencyKey: "key-2" })], {
+      ...rec.port,
+      owned: () => owned,
+    });
+
+    // task-1's outcome is this pass's own work and is kept. task-2 is never
+    // sent: the api client resolves its base URL and its cookie at call time,
+    // so that request would have gone out as account A's write carrying account
+    // B's session — one account's classification applied to another's data.
+    expect(rec.sent.map((request) => request.taskId)).toEqual(["task-1"]);
+    expect(result.stoppedBecause).toBe("disowned");
+  });
+
+  it("issues nothing when ownership is lost inside the send-marker write", async () => {
+    // `commit(plan.queue)` is an await — it puts the `sending` marker on the
+    // device before the request leaves. The head-of-iteration check has already
+    // passed by the time it resumes, so an identity change landing inside that
+    // write used to let the step's FIRST request go out under the new session.
+    // The rejection-path check only ever guarded the optional second one.
+    let owned = true;
+    const rec = recorder();
+
+    const result = await drainQueue([entry()], {
+      ...rec.port,
+      owned: () => owned,
+      persist: async () => {
+        // Somebody signs in while the marker is being written.
+        owned = false;
+      },
+    });
+
+    expect(rec.sent).toHaveLength(0);
+    expect(rec.reread).toHaveLength(0);
+    expect(result.stoppedBecause).toBe("disowned");
+  });
+
+  it("sends everything when the caller names no identity to lose", async () => {
+    // `owned` is optional, and its absence means "nothing can take this from
+    // me" — not "assume the worst". A caller with no identity must not be
+    // treated as one that has lost it.
+    const rec = recorder();
+
+    const result = await drainQueue(
+      [entry(), entry({ taskId: "task-2", idempotencyKey: "key-2" })],
+      rec.port,
+    );
+
+    expect(rec.sent).toHaveLength(2);
+    expect(result.stoppedBecause).toBe("drained");
+  });
+});

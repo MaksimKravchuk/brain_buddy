@@ -732,6 +732,34 @@ describe("task detail — work the 30-day bound discarded", () => {
     expect(screen.getByText(/^Your change to Project from 31 days ago/)).toBeOnTheScreen();
   });
 
+  it("006-FR-018 stays dismissed on the next task the person opens", async () => {
+    // "Dismiss once" is once per account per run, and every task screen is a
+    // fresh mount. The latch that records the dismissal is module state, and
+    // the screen consulted it only when the identity key *changed* — which on
+    // an ordinary remount it has not. So the notice came back on the next task
+    // opened, and the one thing dismissing it buys anybody is that it does not.
+    await seedQueue([
+      queuedChange({ taskId: "t1", idempotencyKey: "key-1" }),
+      queuedChange({ taskId: "t2", idempotencyKey: "key-2" }),
+      queuedChange({ taskId: "t3", idempotencyKey: "key-3" }),
+    ]);
+    const total = "3 changes older than 30 days were not sent and have been discarded";
+
+    const first = await openTask(makeTask({ id: "t1", project_id: "p1", tag_ids: [] }));
+    await screen.findByText(total);
+    await fireEvent.press(screen.getAllByLabelText("Dismiss")[0]);
+    await waitFor(() => expect(screen.queryByText(total)).toBeNull());
+
+    await first.unmount();
+    backend.restore();
+    await openTask(makeTask({ id: "t2", project_id: "p1", tag_ids: [] }));
+
+    // The per-task notice is this task's own and is still owed to the person;
+    // the account-wide one has been answered and does not ask again.
+    expect(await screen.findByText(/^Your change to Project from 31 days ago/)).toBeOnTheScreen();
+    expect(screen.queryByText(total)).toBeNull();
+  });
+
   it("006-FR-018 does not repeat a total of one this screen already names in full", async () => {
     await seedQueue([queuedChange()]);
 
@@ -918,8 +946,12 @@ describe("task detail — a queued change the server rejected", () => {
     expect(await screen.findByText("Keep mine, replace theirs")).toBeOnTheScreen();
 
     // Three values, three different truths, each labelled as whose it is.
+    // Dated, because this entry was made through the screen and so carries the
+    // moment the screen read the task: the phone really did last show "None",
+    // and it really did read that just now. The undated wording is for an entry
+    // that has no honest date to give — see the parity test below.
     expect(
-      screen.getByLabelText("Your phone last showed: None (the value this phone was showing you)"),
+      screen.getByLabelText("Your phone last showed: None (as of just now)"),
     ).toBeOnTheScreen();
     expect(screen.getByLabelText("You changed it to: Q3 launch")).toBeOnTheScreen();
     expect(screen.getByLabelText("Now on server: Wedding")).toBeOnTheScreen();
@@ -958,6 +990,65 @@ describe("task detail — a queued change the server rejected", () => {
     expect(await screen.findByText("Keep mine, replace theirs")).toBeOnTheScreen();
     expect(screen.getByLabelText("Now on server: Wedding")).toBeOnTheScreen();
     expect(screen.getByLabelText("You changed it to: Q3 launch")).toBeOnTheScreen();
+  });
+
+  it("006-FR-010 dates the phone's value from this entry, not from the account's sync clock", async () => {
+    // `lastSyncedAt` advances on ANY successful send for ANY task — it is what
+    // SC-004's footer is made of. Sourcing the conflict's "as of" from it makes
+    // the row's age a property of the account's last network success rather
+    // than of this task's last read, and the two are unrelated: a change queued
+    // against a task the phone read three weeks ago is labelled "as of just
+    // now" the moment some unrelated entry drains. That is the labelled row
+    // stating, in words and with confidence, something untrue about how current
+    // the phone's knowledge is — the precise failure FR-010's retained value
+    // and invariant 9 exist to prevent.
+    //
+    // So: two entries. t2 drains cleanly and drags the account clock to now;
+    // t1 then 409s and is parked. They are ordered that way deliberately —
+    // a conflict stops the pass, so t2 has to go first to get its send in.
+    const observed = new Date(Date.now() - 3 * DAY).toISOString();
+    let stored = makeTask({ id: "t1", project_id: "p1", tag_ids: [], revision: 5 });
+    await seedQueue([
+      queuedChange({
+        taskId: "t2",
+        idempotencyKey: "key-t2",
+        sendState: "queued",
+        observedRevision: 1,
+        observedAt: observed,
+        lastEditedAt: new Date(Date.now() - 14 * MINUTE).toISOString(),
+        firstQueuedAt: new Date(Date.now() - 14 * MINUTE).toISOString(),
+      }),
+      queuedChange({
+        sendState: "queued",
+        observedRevision: 1,
+        observedAt: observed,
+        lastEditedAt: new Date(Date.now() - 14 * MINUTE).toISOString(),
+        firstQueuedAt: new Date(Date.now() - 14 * MINUTE).toISOString(),
+      }),
+    ]);
+
+    await openTask(stored, {
+      routes: {
+        // t2 accepts anything, so the pass records a successful send and the
+        // account-wide clock moves to now.
+        "GET /tasks/t2": () => makeTask({ id: "t2", project_id: null, tag_ids: [], revision: 1 }),
+        "PATCH /tasks/t2": () =>
+          makeTask({ id: "t2", project_id: "p2", tag_ids: [], revision: 2 }),
+        ...revisionGuardedRoutes(
+          () => stored,
+          (next) => {
+            stored = next;
+          },
+        ),
+      },
+    });
+
+    expect(await screen.findByText("Keep mine, replace theirs")).toBeOnTheScreen();
+    // Three days, from this entry's own observation — not "just now", which is
+    // all the account clock knows.
+    expect(
+      screen.getByLabelText("Your phone last showed: None (as of 3 days ago)"),
+    ).toBeOnTheScreen();
   });
 
   it("006-SC-005 lets the question be left unanswered, and asks it again next time", async () => {

@@ -32,7 +32,11 @@ import {
   writeClassificationCache,
 } from "@/features/tasks/classificationCache";
 import type { CachedClassificationLists } from "@/features/tasks/classificationTypes";
-import { cacheKey } from "@/features/tasks/storageKeys";
+import {
+  cacheKey,
+  identityStoreGeneration,
+  isStoreGenerationCurrent,
+} from "@/features/tasks/storageKeys";
 import { newIdempotencyKey } from "@/utils/ids";
 
 export const taskKeys = {
@@ -109,6 +113,11 @@ function cacheListsInBackground(
   serverUrl: string,
   accountId: string | null,
   half: { projects: CachedEntry[] } | { tags: CachedEntry[] },
+  /** Read before the fetch that produced `half` went out. Reading it here
+   *  instead would read it *after* the response arrived, so a sign-out that
+   *  happened during the request would already be behind us and this write
+   *  would put the old account's names back. */
+  generation: number,
 ): void {
   const key = activeCacheKey(serverUrl, accountId);
   if (!key) {
@@ -117,8 +126,24 @@ function cacheListsInBackground(
   cacheWrites = cacheWrites
     .catch(() => undefined)
     .then(async () => {
+      // Checked here rather than above, because "is this identity still on the
+      // device" is only meaningful when the write actually runs. This chain is
+      // fire-and-forget from a query callback: a sign-out or server change can
+      // land between the fetch that scheduled it and its turn, and writing then
+      // would put one account's whole project and Tag vocabulary — names the
+      // person wrote — back on a device that has just forgotten them.
+      if (!isStoreGenerationCurrent(key, generation)) {
+        return;
+      }
       const now = Date.now();
       const current = await readClassificationCache({ store: AsyncStorage, key, now });
+      // Again after the read, which is itself an await: a sign-out landing
+      // inside it would otherwise be followed by a write that re-creates the
+      // cache it just deleted, leaving one account's project and Tag names on
+      // the device after a deliberate transition.
+      if (!isStoreGenerationCurrent(key, generation)) {
+        return;
+      }
       await writeClassificationCache({
         store: AsyncStorage,
         key,
@@ -194,11 +219,19 @@ export function useProjects() {
   return useQuery({
     queryKey: taskKeys.projects,
     queryFn: async ({ signal }): Promise<ProjectResponse[]> => {
+      // Before the request, not after it. Read on the way back, this is
+      // already the post-sign-out value: a clear that happened while the fetch
+      // was in flight would be behind us, both checks in the writer would pass,
+      // and the old account's project names would go back onto the device.
+      const generation = identityStoreGeneration(serverUrl, accountId ?? "");
       try {
         const projects = await api.listProjects(signal);
-        cacheListsInBackground(serverUrl, accountId, {
-          projects: cacheableEntries(projects),
-        });
+        cacheListsInBackground(
+          serverUrl,
+          accountId,
+          { projects: cacheableEntries(projects) },
+          generation,
+        );
         return projects;
       } catch (error) {
         const cached = await cachedHalf(serverUrl, accountId, "projects");
@@ -227,9 +260,16 @@ export function useTags() {
   return useQuery({
     queryKey: taskKeys.tags,
     queryFn: async ({ signal }): Promise<TagResponse[]> => {
+      // Before the request, for the same reason as `useProjects` above.
+      const generation = identityStoreGeneration(serverUrl, accountId ?? "");
       try {
         const tags = await api.listTags(signal);
-        cacheListsInBackground(serverUrl, accountId, { tags: cacheableEntries(tags) });
+        cacheListsInBackground(
+          serverUrl,
+          accountId,
+          { tags: cacheableEntries(tags) },
+          generation,
+        );
         return tags;
       } catch (error) {
         const cached = await cachedHalf(serverUrl, accountId, "tags");

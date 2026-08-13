@@ -43,9 +43,14 @@ import {
 } from "@/test/fakeBackend";
 
 import type { PendingClassificationChange } from "../classificationTypes";
-import { SERVER_TIME_KEY } from "../classificationQueue.storage";
-import { queueKey, type ClassificationIdentity } from "../storageKeys";
+import { SERVER_TIME_KEY, clearIdentityStores, saveQueue } from "../classificationQueue.storage";
 import {
+  identityStoreGeneration,
+  queueKey,
+  type ClassificationIdentity,
+} from "../storageKeys";
+import {
+  MAX_DRAIN_STEPS,
   useClassificationQueue,
   type ClassificationApiPort,
   type ClassificationQueue,
@@ -143,6 +148,9 @@ async function onDevice(
   const raw = await AsyncStorage.getItem(queueKey(identity.serverUrl, identity.accountId));
   return raw === null ? null : (JSON.parse(raw) as PendingClassificationChange[]);
 }
+
+/** The store's own jest mock, captured before any test can swap it. */
+const realSetItem = AsyncStorage.setItem;
 
 let backend: FakeBackend;
 
@@ -1103,5 +1111,177 @@ describe("006-SC-007 nothing is written that cannot be attributed to an identity
     // The first account's entries land late and go on the floor: putting them
     // on screen now would show one account another's unsent work.
     expect(view.result.current.queue.map((entry) => entry.taskId)).toEqual(["task-2"]);
+  });
+});
+
+describe("006-FR-007 the per-pass safety limit does not strand the rest of the queue", () => {
+  it("drains everything, though one pass may only settle MAX_DRAIN_STEPS of it", async () => {
+    // `MAX_DRAIN_STEPS` bounds one *pass*; an offline triage session bounds
+    // nothing. The pass holds the drain lock for its whole run, so the
+    // "after a successful request" trigger cannot start the next one — which
+    // meant stopping on the cap left the remainder waiting for an unrelated
+    // edit or a foreground transition, on a queue whose entire purpose is to
+    // drain itself.
+    const count = MAX_DRAIN_STEPS + 3;
+    const entries = Array.from({ length: count }, (_, index) =>
+      queued({ taskId: `task-${index}`, idempotencyKey: `key-${index}` }),
+    );
+    await seed(IDENTITY, entries);
+
+    const routes: Record<string, RouteHandler> = {};
+    for (let index = 0; index < count; index += 1) {
+      routes[`PATCH /tasks/task-${index}`] = () =>
+        makeTask({
+          id: `task-${index}`,
+          project_id: "proj-q3",
+          tag_ids: ["tag-calls"],
+          revision: 9,
+        });
+    }
+    install(routes);
+
+    const view = await renderQueue();
+    await coldReadDone(view);
+    await waitFor(() => expect(view.result.current.queue).toHaveLength(0));
+
+    // Every one of them reached the server, not just the first pass's worth.
+    expect(backend.calls.filter((call) => call.method === "PATCH")).toHaveLength(count);
+    expect(await onDevice(IDENTITY)).toBeNull();
+  });
+
+  it("stops rather than spinning when the cap is reached with nothing settled", async () => {
+    // The continuation is conditional on progress. Without that, a queue of
+    // permanently-retryable entries would turn this into a hot loop — and a
+    // 5xx on every entry is exactly that queue.
+    const count = MAX_DRAIN_STEPS + 3;
+    const entries = Array.from({ length: count }, (_, index) =>
+      queued({ taskId: `task-${index}`, idempotencyKey: `key-${index}` }),
+    );
+    await seed(IDENTITY, entries);
+
+    const routes: Record<string, RouteHandler> = {};
+    for (let index = 0; index < count; index += 1) {
+      routes[`PATCH /tasks/task-${index}`] = () =>
+        new FakeHttpError(503, { message: "Service unavailable" });
+    }
+    install(routes);
+
+    const view = await renderQueue();
+    await coldReadDone(view);
+    await waitFor(() => expect(view.result.current.queue).toHaveLength(count));
+
+    // A 5xx stops the pass at the first entry — it is retryable, so nothing
+    // after it is attempted and nothing is lost.
+    expect(backend.calls.filter((call) => call.method === "PATCH")).toHaveLength(1);
+  });
+});
+
+describe("006-FR-011 a write already queued cannot be redirected by a later identity", () => {
+  it("keeps the unsent work when the session ends between scheduling and writing", async () => {
+    // Device writes are serialised, and each reads the live queue when its turn
+    // comes rather than the snapshot its caller captured — that is what stops
+    // two writers clobbering each other. But the identity-change effect empties
+    // `queueRef` the instant an identity goes away, and a 401 does exactly
+    // that. A write for A still waiting its turn then called `saveQueue(A, [])`
+    // and deleted A's persisted queue: the unsent work FR-011 keeps
+    // *specifically* through an involuntary end, destroyed by the mechanism
+    // meant to protect it.
+    install({ "PATCH /tasks/task-1": unreachable, "PATCH /tasks/task-2": unreachable });
+    const view = await renderQueue();
+    await coldReadDone(view);
+
+    // Hold the first device write open so the second one queues behind it.
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // Swapped rather than `jest.spyOn`-ed: the store's own jest mock is already
+    // a `jest.fn`, and spying on a spy is how this recursed the first time.
+    let stalled = false;
+    AsyncStorage.setItem = async (key: string, value: string) => {
+      if (!stalled && key === queueKey(SERVER, ACCOUNT)) {
+        stalled = true;
+        await held;
+      }
+      return realSetItem.call(AsyncStorage, key, value);
+    };
+
+    const edits = await act(async () => {
+      const first = view.result.current.enqueue({
+        taskId: "task-1",
+        value: { projectId: "proj-q3" },
+        observedRevision: 4,
+        displayedValue: { projectId: null, tagIds: [] },
+      });
+      const second = view.result.current.enqueue({
+        taskId: "task-2",
+        value: { projectId: "proj-q3" },
+        observedRevision: 4,
+        displayedValue: { projectId: null, tagIds: [] },
+      });
+      return [first, second];
+    });
+
+    // The session ends while both writes are still outstanding.
+    await view.rerender({ identity: null, enabled: true });
+
+    await act(async () => {
+      release();
+      await Promise.all(edits);
+    });
+    AsyncStorage.setItem = realSetItem;
+
+    // Both changes are still on the device, under the identity that made them,
+    // waiting for that account to sign back in.
+    const kept = await onDevice(IDENTITY);
+    expect(kept?.map((change) => change.taskId).sort()).toEqual(["task-1", "task-2"]);
+  });
+});
+
+describe("006-FR-011 a pass is fenced by the generation it started under", () => {
+  it("cannot write over work queued after its own identity was cleared", async () => {
+    // The fence is stamped when the PASS starts, not when each of its writes is
+    // scheduled. A pass whose request was in flight across a sign-out schedules
+    // its writes afterwards — so a per-write capture reads the counter after it
+    // has already moved, the pass sails through its own fence, and its stale
+    // result either deletes the new session's queue or resurrects the one the
+    // sign-out discarded. Third time this exact reasoning error has been made
+    // on this feature, one level earlier each time.
+    await seed(IDENTITY, [queued()]);
+    let release = (): void => {};
+    const inFlight = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    install({
+      "PATCH /tasks/task-1": async () => {
+        await inFlight;
+        return accepted();
+      },
+    });
+
+    const view = await renderQueue();
+    await coldReadDone(view);
+    await waitFor(() => expect(backend.callsTo("PATCH", "/tasks/task-1")).toHaveLength(1));
+
+    // Sign-out clears the stores while that PATCH is outstanding, and the same
+    // account signs back in and queues something new.
+    await clearIdentityStores(IDENTITY);
+    const freshSession = identityStoreGeneration(SERVER, ACCOUNT);
+    await saveQueue(
+      IDENTITY,
+      [queued({ taskId: "task-9", idempotencyKey: "key-9" })],
+      Date.now(),
+      freshSession,
+    );
+
+    await act(async () => {
+      release();
+      await Promise.resolve();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // The new session's work is still there: the old pass could not write.
+    const kept = await onDevice(IDENTITY);
+    expect(kept?.map((change) => change.taskId)).toEqual(["task-9"]);
   });
 });

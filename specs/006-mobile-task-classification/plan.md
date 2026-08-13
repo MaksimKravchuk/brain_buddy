@@ -151,12 +151,24 @@ in the first draft of this plan, and without either the feature does not work
 after the case it exists for — a cold start with no connection.
 
 **Identity must be readable offline.** The storage key is
-`<serverUrl>.<accountId>`, but today the only source of `accountId` is
-`/auth/me`, which is exactly the call that fails offline. On a cold start with
-no connection the key cannot be constructed, so the queue cannot be read, so
-FR-009 fails. `SessionProvider` therefore persists the account id alongside the
-server URL on every successful `/auth/me`, and the queue reads that rather than
-the live session.
+`<serverUrl>.<accountId>`, but the only live source of `accountId` is a
+`MeResponse` from the server, and on a cold start with no connection nothing
+that yields one succeeds. The key cannot be constructed, so the queue cannot be
+read, so FR-009 fails. `SessionProvider` therefore persists the account id
+alongside the server URL from **every** response that yields a `MeResponse` —
+`/auth/me`, `/auth/login` and `/auth/signup` alike, all three funnelled through
+one `adoptProfile` path — and the queue reads that rather than the live
+session.
+
+This paragraph previously said "on every successful `/auth/me`", which is
+narrower than what ships and than what the file inventory above already
+specified. Restated rather than quietly dropped, because the narrow rule is
+wrong in a way worth keeping visible: `signIn`/`signUp` set the session from
+their own responses and never call the probe, so persisting only on the probe
+would leave a person who signs in, goes offline and force-quits with no stored
+identity and therefore no nameable queue key (FR-009, FR-020). `tasks.md` T010
+was written against the wider rule and the shipped
+`SessionProvider.adoptProfile` implements it.
 
 **The pickers need a cache that survives a cold start.** `design.md` says
 existing projects and Tags stay "selectable from cache" offline. React Query's
