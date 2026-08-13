@@ -282,6 +282,21 @@ DEPLOY_REQUIREMENTS = (
         "the delivery canary must be pinned to the internal cohort",
     ),
     (
+        "operator allow-list bound to the seeded admin identity",
+        'BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_EMAIL}"',
+        "spec 009 PD-2/009-FR-001: production operator authority is exactly "
+        "the seeded admin identity, restaged on every release — drift or "
+        "removal of this binding silently changes who can look up any account "
+        "and revoke its sessions",
+    ),
+    (
+        "admin portal staged off",
+        "admin_portal=off",
+        "spec 009 009-FR-013: the /admin surface ships default OFF and its "
+        "production state is this line, not the code default; enabling it is "
+        "a deliberate ASK-class edit here plus a deploy",
+    ),
+    (
         "documented release image capture",
         "--image --json",
         "rollback capture must use the documented flyctl releases form",

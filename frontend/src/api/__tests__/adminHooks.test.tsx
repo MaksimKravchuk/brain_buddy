@@ -53,6 +53,34 @@ describe("adminHooks", () => {
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
+  it("009-FR-011: caches the answer for the session and never refetches on focus", async () => {
+    const spy = vi.spyOn(apiClient, "getAdminStatus").mockResolvedValue({ is_operator: true });
+    act(() => {
+      useAuthStore.setState({
+        user: { id: "operator-1", email: "operator@example.com" },
+        status: "authed",
+        deletionCancelledNotice: false
+      });
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const sharedWrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+
+    const first = renderHook(() => useAdminStatus(), { wrapper: sharedWrapper });
+    await waitFor(() => expect(first.result.current.isSuccess).toBe(true));
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+      window.dispatchEvent(new Event("visibilitychange"));
+    });
+    // A remount (navigating back to /admin) must reuse the cached answer too.
+    const second = renderHook(() => useAdminStatus(), { wrapper: sharedWrapper });
+    await waitFor(() => expect(second.result.current.isSuccess).toBe(true));
+
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
   it("009-FR-002: a denial is terminal and is never retried", async () => {
     const spy = vi.spyOn(apiClient, "getAdminStatus").mockRejectedValue(new Error("Forbidden"));
     act(() => {

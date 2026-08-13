@@ -72,6 +72,8 @@ DEPLOY_REQUIRED_SNIPPETS = (
     "BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS",
     "flyctl secrets set --stage",
     "delivery_canary=internal",
+    'BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_EMAIL}"',
+    "admin_portal=off",
     "--image --json",
     "capture_fly_release_image.py",
     "registry.fly.io/",

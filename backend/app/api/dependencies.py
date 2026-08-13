@@ -9,6 +9,7 @@ from fastapi import Depends, HTTPException, Request, status
 
 from app.container import Container
 from app.core.config import AppConfig
+from app.core.logging import get_correlation_id
 from app.modules.agents.service import AgentRelayService
 from app.modules.tasks import TaskService
 from app.schemas.auth import User
@@ -119,6 +120,40 @@ def get_current_user(
     return user
 
 
+ADMIN_STATUS_EVENT = "admin_capability_probe"
+"""Log event for the `/admin/status` capability check (009-FR-011)."""
+
+ADMIN_DATA_EVENT = "admin_data_route"
+"""Log event for the lookup and revoke data routes (009-FR-011)."""
+
+ADMIN_PORTAL_FLAG = "admin_portal"
+
+
+def _admin_log_event(request: Request) -> str:
+    """Which admin event this request is, for the FR-011 denial split.
+
+    A capability probe is issued on every `/admin` page load; a data-route
+    denial is a real attempt to read or mutate another account. Collapsing
+    them into one message makes the denial stream unusable as a signal.
+    """
+
+    if _admin_route(request).endswith("/status"):
+        return ADMIN_STATUS_EVENT
+    return ADMIN_DATA_EVENT
+
+
+def _admin_route(request: Request) -> str:
+    """The matched route *template*, never the raw request path.
+
+    The revoke path interpolates a caller-supplied account id, which is raw
+    request input and must stay out of every record (009-FR-008).
+    """
+
+    route = request.scope.get("route")
+    template = getattr(route, "path", None)
+    return template if isinstance(template, str) else "unmatched"
+
+
 def require_operator(
     request: Request,
     auth_service: AuthService = Depends(get_auth_service),
@@ -134,22 +169,85 @@ def require_operator(
     caller's account id only, never their email. Both checks run before any
     account lookup or mutation, so the denial can never vary with whether a
     target account exists (009-FR-002).
+
+    Denial records follow the 009-FR-008 per-event matrix exactly:
+
+    * **401** — correlation id, route template, event and outcome. There is
+      no resolved operator to name, and naming the rejected cookie would leak
+      the credential the request was denied for.
+    * **403** — the same, plus the caller's account id. Never a target id: a
+      denial must be decided before any target is resolved, so there is
+      nothing to name and resolving one would break "deny before touch".
     """
 
+    event = _admin_log_event(request)
+    route = _admin_route(request)
     raw_token = request.cookies.get(config.session.cookie_name)
     user = auth_service.get_user_for_token(raw_token)
     if user is None:
-        logger.warning("Admin access denied: no valid session")
+        logger.warning(
+            "Admin access denied: event=%s route=%s correlation=%s outcome=%s",
+            event,
+            route,
+            get_correlation_id(),
+            "no_valid_session",
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required.",
         )
     if not admin_service.is_operator(user.email):
-        logger.warning("Admin access denied for user %s: not an operator", user.id)
+        logger.warning(
+            "Admin access denied: event=%s route=%s correlation=%s operator=%s "
+            "outcome=%s",
+            event,
+            route,
+            get_correlation_id(),
+            user.id,
+            "not_an_operator",
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized."
         )
     return user
+
+
+def require_admin_portal_enabled(
+    request: Request,
+    operator: User = Depends(require_operator),
+    config: AppConfig = Depends(get_config_dep),
+) -> User:
+    """Gate `/admin` on the default-OFF `admin_portal` rollout flag.
+
+    **Authorization runs first, deliberately** (founder decision, recorded in
+    009-FR-013): this depends on :func:`require_operator`, so with the flag
+    OFF an unauthenticated caller still gets 401 and an authenticated
+    non-operator still gets 403 — identical to the flag-ON responses, so the
+    rollout state is never observable by anyone who is not already an
+    operator. Only an allow-listed operator reaches this check and sees the
+    fail-closed 404 the repository uses for an absent feature.
+
+    ADR-0008: the flag is exposure control layered *on top of* the
+    authorization boundary, never a substitute for it.
+    """
+
+    if not config.feature_flags.private_flag_effective(
+        ADMIN_PORTAL_FLAG, operator.email
+    ):
+        logger.info(
+            "Admin route unavailable: event=%s route=%s correlation=%s operator=%s "
+            "outcome=%s",
+            _admin_log_event(request),
+            _admin_route(request),
+            get_correlation_id(),
+            operator.id,
+            "portal_disabled",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Not found.",
+        )
+    return operator
 
 
 def voice_brain_dump_enabled(user: User, config: AppConfig) -> bool:

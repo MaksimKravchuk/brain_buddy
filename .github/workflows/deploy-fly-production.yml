@@ -326,6 +326,15 @@ jobs:
       # This is the authoritative flag state: it is restaged on every deploy,
       # so a manual `flyctl secrets set BRAIN_BUDDY_FEATURE_FLAGS` is reverted
       # by the next release. Change the rollout here, not out of band.
+      #
+      # `admin_portal=off` is staged explicitly (spec 009, 009-FR-013). It is
+      # the /admin operator surface and it ships OFF: turning it on or off
+      # durably in production means editing this line and deploying, which is
+      # an ASK-class change — a `flyctl secrets set` flip holds only until the
+      # next release. The fastest true emergency lever is instead
+      # `flyctl secrets set BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS=`, which fails
+      # closed immediately but is itself restaged from BRAIN_BUDDY_ADMIN_EMAIL
+      # by the next deploy.
       - name: Stage the smoke identity and feature-flag rollout
         if: steps.classify.outputs.needed == 'true'
         shell: bash
@@ -341,7 +350,7 @@ jobs:
             BRAIN_BUDDY_ADMIN_PASSWORD="${BRAIN_BUDDY_ADMIN_PASSWORD}" \
             BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_EMAIL}" \
             BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS="${BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS}" \
-            BRAIN_BUDDY_FEATURE_FLAGS="delivery_canary=internal,voice_brain_dump=on,external_agent_relay=internal" 2>&1) \
+            BRAIN_BUDDY_FEATURE_FLAGS="delivery_canary=internal,voice_brain_dump=on,external_agent_relay=internal,admin_portal=off" 2>&1) \
             || status=$?
           if [ "${status}" -ne 0 ] \
             && ! printf '%s\n' "${output}" | grep -qi "no change"; then

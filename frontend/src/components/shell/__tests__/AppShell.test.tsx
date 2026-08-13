@@ -81,7 +81,6 @@ beforeEach(() => {
       deletionCancelledNotice: false
     });
   });
-  vi.spyOn(apiClient, "getAdminStatus").mockResolvedValue({ is_operator: false });
 });
 
 afterEach(() => {
@@ -460,35 +459,49 @@ describe("AppShell account menu", () => {
     expect(screen.getByRole("menu", { name: "Account" })).toBeInTheDocument();
   });
 
-  it("hides Admin portal from the account menu for a non-operator", async () => {
+  // These three were inverted, not deleted. Before PD-1 the shell probed
+  // `/admin/status` on every render and showed an "Admin portal" item to an
+  // operator; the assertions below are the same scenarios re-pointed at the
+  // decided behaviour, so a re-introduced menu entry fails here rather than
+  // slipping through as an untested removal.
+
+  it("009-FR-010, 009-FR-011: never renders an Admin portal entry, whatever the server would say", async () => {
     const user = userEvent.setup();
+    const spy = vi.spyOn(apiClient, "getAdminStatus").mockResolvedValue({ is_operator: true });
     renderShell();
 
     await user.click(screen.getByRole("button", { name: "Account menu for max@example.test" }));
+
+    expect(screen.getByRole("menu", { name: "Account" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Admin portal" })).not.toBeInTheDocument();
+    expect(spy).not.toHaveBeenCalled();
+    expect(currentLocation()).not.toBe("/admin");
   });
 
-  it("shows Admin portal for an operator and navigates to /admin", async () => {
+  it("009-SC-006: an authenticated shell issues no admin request during ordinary navigation", async () => {
     const user = userEvent.setup();
-    vi.spyOn(apiClient, "getAdminStatus").mockResolvedValue({ is_operator: true });
+    const spy = vi.spyOn(apiClient, "getAdminStatus");
     renderShell();
 
     await user.click(screen.getByRole("button", { name: "Account menu for max@example.test" }));
-    await waitFor(() => expect(screen.getByRole("menuitem", { name: "Admin portal" })).toBeInTheDocument());
-    await user.click(screen.getByRole("menuitem", { name: "Admin portal" }));
-    expect(currentLocation()).toBe("/admin");
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Account menu for max@example.test" }));
+
+    expect(spy).not.toHaveBeenCalled();
   });
 
-  it("hides Admin portal and does not crash when the status endpoint resolves a null body", async () => {
+  it("009-FR-010: renders the account menu with no admin entry and no capability query at all", async () => {
     const user = userEvent.setup();
-    vi.spyOn(apiClient, "getAdminStatus").mockResolvedValue(
+    const spy = vi.spyOn(apiClient, "getAdminStatus").mockResolvedValue(
       null as unknown as Awaited<ReturnType<typeof apiClient.getAdminStatus>>
     );
     renderShell();
 
     await user.click(screen.getByRole("button", { name: "Account menu for max@example.test" }));
+
     expect(screen.getByRole("menu", { name: "Account" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Admin portal" })).not.toBeInTheDocument();
+    expect(spy).not.toHaveBeenCalled();
   });
 
   it("stays open while the pointer lands inside the menu itself", async () => {

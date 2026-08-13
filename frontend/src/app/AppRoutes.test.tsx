@@ -886,3 +886,88 @@ describe("AppRoutes", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("Thinking canvas isn't built yet — placeholder");
   });
 });
+
+// The real `/admin` route, not a directly-mounted `AdminPage`: wrong route
+// wiring (a missing ProtectedRoute, a path typo) is invisible to a test that
+// renders the component itself (009-FR-005).
+describe("AppRoutes /admin (009-FR-005, 009-FR-010)", () => {
+  it("009-FR-005: a signed-out visitor is redirected to sign-in, with no admin request", async () => {
+    act(() => {
+      useAuthStore.setState({ user: null, status: "anon" });
+    });
+
+    renderRoutes("/admin");
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: /sign in/i })).toBeInTheDocument()
+    );
+    const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.map((call) =>
+      String(call[0])
+    );
+    expect(calls.some((url) => url.includes("/admin"))).toBe(false);
+  });
+
+  it("009-FR-005: a signed-in non-operator reaches the denied state and no lookup form", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/admin/status")) {
+          return Promise.resolve(jsonResponse({ message: "Not authorized." }, 403));
+        }
+        if (url.endsWith("/tasks") || url.includes("/tasks?")) {
+          return Promise.resolve(jsonResponse(taskResponse));
+        }
+        if (url.includes("/projects")) {
+          return Promise.resolve(jsonResponse(projectsResponse));
+        }
+        if (url.includes("/tags")) {
+          return Promise.resolve(jsonResponse(tagsResponse));
+        }
+        return Promise.resolve(jsonResponse(null));
+      })
+    );
+
+    renderRoutes("/admin");
+
+    expect(await screen.findByText("Access denied")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/account id or email/i)).not.toBeInTheDocument();
+  });
+
+  it("009-FR-005: an operator reaches the lookup form by typing the URL", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/admin/status")) {
+          return Promise.resolve(jsonResponse({ is_operator: true }));
+        }
+        if (url.endsWith("/tasks") || url.includes("/tasks?")) {
+          return Promise.resolve(jsonResponse(taskResponse));
+        }
+        if (url.includes("/projects")) {
+          return Promise.resolve(jsonResponse(projectsResponse));
+        }
+        if (url.includes("/tags")) {
+          return Promise.resolve(jsonResponse(tagsResponse));
+        }
+        return Promise.resolve(jsonResponse(null));
+      })
+    );
+
+    renderRoutes("/admin");
+
+    expect(await screen.findByLabelText(/account id or email/i)).toBeInTheDocument();
+    expect(screen.queryByText("Access denied")).not.toBeInTheDocument();
+  });
+
+  it("009-SC-006: an ordinary authenticated screen issues no /admin request", async () => {
+    renderRoutes("/");
+
+    expect(await screen.findByRole("heading", { name: "Next actions" })).toBeInTheDocument();
+    const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.map((call) =>
+      String(call[0])
+    );
+    expect(calls.some((url) => url.includes("/admin"))).toBe(false);
+  });
+});

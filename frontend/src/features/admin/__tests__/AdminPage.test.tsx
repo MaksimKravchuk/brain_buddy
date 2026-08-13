@@ -73,12 +73,64 @@ describe("AdminPage capability gate (009-FR-005, 009-SC-002)", () => {
     expect(screen.queryByText(account.email)).not.toBeInTheDocument();
   });
 
-  it("009-SC-002: denies access when the capability check itself errors", async () => {
-    vi.spyOn(apiClient, "getAdminStatus").mockRejectedValue(new Error("network down"));
+  it("009-FR-013: a flag-OFF 404 renders the same denied state, not a not-found or an error", async () => {
+    vi.spyOn(apiClient, "getAdminStatus").mockRejectedValue(new ApiError("Not Found", 404, null));
     renderPage();
 
     expect(await screen.findByText("Access denied")).toBeInTheDocument();
     expect(screen.queryByLabelText(/account id or email/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /try again/i })).not.toBeInTheDocument();
+  });
+
+  it("009-FR-005: a transient failure renders D-09 with a retry, never a permanent denial", async () => {
+    const spy = vi.spyOn(apiClient, "getAdminStatus").mockRejectedValue(new Error("network down"));
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: /couldn't verify access/i })).toBeInTheDocument();
+    expect(screen.queryByText("Access denied")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/account id or email/i)).not.toBeInTheDocument();
+
+    spy.mockResolvedValue({ is_operator: true });
+    const user = userEvent.setup();
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: /try again/i }));
+    });
+
+    expect(await screen.findByLabelText(/account id or email/i)).toBeInTheDocument();
+  });
+
+  it("009-FR-005: a 5xx on the capability check is retryable, not a denial", async () => {
+    vi.spyOn(apiClient, "getAdminStatus").mockRejectedValue(
+      new ApiError("Server Error", 500, null)
+    );
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: /couldn't verify access/i })).toBeInTheDocument();
+    expect(screen.queryByText("Access denied")).not.toBeInTheDocument();
+  });
+
+  it("009-FR-005: fails closed on an unexpected empty capability body", async () => {
+    vi.spyOn(apiClient, "getAdminStatus").mockResolvedValue(
+      null as unknown as Awaited<ReturnType<typeof apiClient.getAdminStatus>>
+    );
+    renderPage();
+
+    expect(await screen.findByText("Access denied")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/account id or email/i)).not.toBeInTheDocument();
+  });
+
+  it("009-FR-011: queries the capability once for the page and does not refetch on focus", async () => {
+    const spy = vi.spyOn(apiClient, "getAdminStatus").mockResolvedValue({ is_operator: true });
+    renderPage();
+
+    expect(await screen.findByLabelText(/account id or email/i)).toBeInTheDocument();
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      window.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -303,5 +355,172 @@ describe("AdminPage lookup and revoke (009-SC-001, 009-SC-003)", () => {
     expect(await screen.findByText("revoke failed")).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByText("user_1")).toBeInTheDocument();
+  });
+});
+
+describe("AdminPage input classification and partial failures (009-SC-001, 009-SC-003)", () => {
+  beforeEach(() => {
+    act(() => {
+      useAuthStore.setState({
+        user: { id: "operator-1", email: "operator@example.com" },
+        status: "authed",
+        deletionCancelledNotice: false
+      });
+    });
+    vi.spyOn(apiClient, "getAdminStatus").mockResolvedValue({ is_operator: true });
+    mockTaskShellQueries();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  async function submit(value: string) {
+    const user = userEvent.setup();
+    await act(async () => {
+      await user.type(await screen.findByLabelText(/account id or email/i), value);
+      await user.click(screen.getByRole("button", { name: /look up/i }));
+    });
+    return user;
+  }
+
+  it("009-SC-001: sends a server-valid address without a dotted domain as an email", async () => {
+    const spy = vi.spyOn(apiClient, "lookupAdminAccount").mockResolvedValue(account);
+    renderPage();
+
+    await submit("admin@localhost");
+
+    await waitFor(() => expect(spy).toHaveBeenCalledWith({ email: "admin@localhost" }));
+  });
+
+  it("009-SC-001: sends malformed email-like input as an account ID, not an email", async () => {
+    const spy = vi
+      .spyOn(apiClient, "lookupAdminAccount")
+      .mockRejectedValue(new ApiError("Not Found", 404, null));
+    renderPage();
+
+    await submit("a@");
+
+    await waitFor(() => expect(spy).toHaveBeenCalledWith({ account_id: "a@" }));
+    expect(await screen.findByText("No account found.")).toBeInTheDocument();
+  });
+
+  it("009-SC-001: never sends an account ID as an email", async () => {
+    const spy = vi.spyOn(apiClient, "lookupAdminAccount").mockResolvedValue(account);
+    renderPage();
+
+    await submit("user_1");
+
+    await waitFor(() => expect(spy).toHaveBeenCalledWith({ account_id: "user_1" }));
+    expect(spy).not.toHaveBeenCalledWith(expect.objectContaining({ email: expect.anything() }));
+  });
+
+  it("009-SC-001: sends a whitespace variant as typed rather than trimming it into a match", async () => {
+    const spy = vi
+      .spyOn(apiClient, "lookupAdminAccount")
+      .mockRejectedValue(new ApiError("Not Found", 404, null));
+    renderPage();
+
+    await submit(" member@example.com ");
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith({ account_id: " member@example.com " })
+    );
+    expect(spy).not.toHaveBeenCalledWith({ email: "member@example.com" });
+    expect(await screen.findByText("No account found.")).toBeInTheDocument();
+  });
+
+  it("009-SC-003: a revoke that 404s renders the not-found copy, not a raw error", async () => {
+    vi.spyOn(apiClient, "lookupAdminAccount").mockResolvedValue(account);
+    vi.spyOn(apiClient, "revokeAdminAccountSessions").mockRejectedValue(
+      new ApiError("Not Found", 404, null)
+    );
+    renderPage();
+
+    const user = await submit("member@example.com");
+    expect(await screen.findByText("user_1")).toBeInTheDocument();
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: /revoke sessions/i }));
+    });
+    await act(async () => {
+      const dialog = screen.getByRole("dialog");
+      await user.click(within(dialog).getByRole("button", { name: /revoke sessions/i }));
+    });
+
+    expect(await screen.findByText("No account found.")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("009-FR-006: returns focus to the trigger on cancel, Escape and a completed revoke", async () => {
+    vi.spyOn(apiClient, "lookupAdminAccount").mockResolvedValue(account);
+    vi.spyOn(apiClient, "revokeAdminAccountSessions").mockResolvedValue({ revoked_count: 1 });
+    renderPage();
+
+    const user = await submit("member@example.com");
+    expect(await screen.findByText("user_1")).toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: /revoke sessions/i });
+
+    await act(async () => {
+      await user.click(trigger);
+    });
+    expect(screen.getByRole("dialog")).toHaveFocus();
+    await act(async () => {
+      await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /cancel/i }));
+    });
+    expect(trigger).toHaveFocus();
+
+    await act(async () => {
+      await user.click(trigger);
+    });
+    await act(async () => {
+      await user.keyboard("{Escape}");
+    });
+    expect(trigger).toHaveFocus();
+
+    await act(async () => {
+      await user.click(trigger);
+    });
+    await act(async () => {
+      await user.click(
+        within(screen.getByRole("dialog")).getByRole("button", { name: /revoke sessions/i })
+      );
+    });
+    expect(await screen.findByText("Revoked 1 session.")).toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("009-FR-006: names the self-sign-out consequence only when the target is the operator", async () => {
+    vi.spyOn(apiClient, "lookupAdminAccount").mockResolvedValue(account);
+    renderPage();
+
+    const user = await submit("member@example.com");
+    expect(await screen.findByText("user_1")).toBeInTheDocument();
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: /revoke sessions/i }));
+    });
+
+    expect(
+      within(screen.getByRole("dialog")).queryByText(/this is your own account/i)
+    ).not.toBeInTheDocument();
+  });
+
+  it("009-FR-006: warns in the confirm dialog when the operator revokes their own account", async () => {
+    vi.spyOn(apiClient, "lookupAdminAccount").mockResolvedValue({
+      ...account,
+      id: "operator-1",
+      email: "operator@example.com"
+    });
+    renderPage();
+
+    const user = await submit("operator@example.com");
+    expect(await screen.findByText("operator-1")).toBeInTheDocument();
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: /revoke sessions/i }));
+    });
+
+    expect(
+      within(screen.getByRole("dialog")).getByText(/this is your own account/i)
+    ).toBeInTheDocument();
   });
 });

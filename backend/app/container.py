@@ -366,6 +366,11 @@ def build_container(config: AppConfig) -> Container:
         invite_repo=invite_repo,
         password_policy=config.password_policy,
         session_settings=config.session,
+        # Plain configuration value, not the AdminService handle: the
+        # reservation is a rule about which addresses a member may bind
+        # (009-FR-012), and passing a service here would couple auth to the
+        # admin portal in both directions.
+        reserved_emails=config.admin.operator_emails,
         deletion_grace=deletion_grace,
     )
     account_service = AccountService(
@@ -379,6 +384,7 @@ def build_container(config: AppConfig) -> Container:
         voice_operation_repo=voice_operation_repo,
         agent_repo=agent_repo,
         auth_service=auth_service,
+        reserved_emails=config.admin.operator_emails,
         deletion_grace=deletion_grace,
     )
     admin_service = AdminService(
