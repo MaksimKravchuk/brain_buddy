@@ -973,7 +973,7 @@ def validate_mutation_workflow(
         errors.append("mutation workflow must support workflow_dispatch")
     if "pull_request:" in workflow_text or "push:" in workflow_text:
         # The blocking gate lives in ci.yml over the narrower ENFORCED tier
-        # (ADR-0011). This nightly measures the OBSERVED tier, which still
+        # (ADR-0016). This nightly measures the OBSERVED tier, which still
         # contains modules under calibration, so it must stay report-only
         # permanently rather than "for now".
         errors.append("mutation workflow measures the observed tier and must stay report-only")

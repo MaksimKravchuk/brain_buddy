@@ -3,14 +3,14 @@
 Date: 2026-08-10
 Status: Accepted
 Decision owner: BrainBuddy
-Related: ADR-0004, ADR-0006, ADR-0011, ADR-0013
+Related: ADR-0004, ADR-0006, ADR-0016, ADR-0013
 
 ## Context
 
 ADR-0004 established what a trustworthy mutation campaign looks like here: a
 fixed allow-list of deterministic modules, report-only until calibrated, whole
 evidence retained, and survivors either killed by a focused test or documented
-as non-behavioral. ADR-0011 split scope into an observed tier (measured
+as non-behavioral. ADR-0016 split scope into an observed tier (measured
 nightly) and an enforced tier (allowed to block a pull request).
 
 Both ADRs are about the backend. The mobile client had no mutation testing at
@@ -118,7 +118,7 @@ touch a file in the allow-list — not widening the list.
   interrupt delivery.
 - The mobile score is published per-tier and separately from the backend's. A
   single repository-wide number would average scopes calibrated against
-  different constraints and mean nothing, exactly as ADR-0011 concluded.
+  different constraints and mean nothing, exactly as ADR-0016 concluded.
 
 ## Alternatives considered
 

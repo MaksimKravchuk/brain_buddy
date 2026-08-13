@@ -108,10 +108,74 @@ is_feature_number_in_range() {
     [[ "$normalized" < "$MAX_FEATURE_NUMBER" || "$normalized" == "$MAX_FEATURE_NUMBER" ]]
 }
 
+# preserved BrainBuddy override: feature numbers are reserved across every ref,
+# not just the checked-out specs/ tree.
+#
+# Upstream derives the next number from the working tree alone. That tree is
+# per-branch, so two agents branching from the same trunk both see the same
+# highest number and both claim it. The resulting directories have different
+# slugs, so git merges them without a conflict and no reviewer sees anything
+# wrong — while `check_requirement_coverage.py` matches `NNN[-_]FR[-_]nnn`
+# repository-wide and can no longer tell the two features apart. Two collisions
+# (006 and 007) reached open pull requests this way.
+#
+# Scanning history rather than current refs is deliberate: a number used by a
+# deleted branch must stay burned, because tests naming it may already exist.
+GIT_CLAIMED_NUMBERS=""
+GIT_CLAIMED_NUMBERS_LOADED=false
+
+# Every feature number ever added under specs/ on any ref, normalized to the
+# zero-padded width the directory used. Computed once; the auto-correct loop
+# below would otherwise re-run `git log` per candidate.
+load_git_claimed_numbers() {
+    [ "$GIT_CLAIMED_NUMBERS_LOADED" = true ] && return 0
+    GIT_CLAIMED_NUMBERS_LOADED=true
+
+    git rev-parse --git-dir >/dev/null 2>&1 || return 0
+
+    GIT_CLAIMED_NUMBERS=$(
+        git log --all --pretty=format: --name-only --diff-filter=A -- 'specs/*' 2>/dev/null \
+            | grep -Eo '^specs/[0-9]{3,}-' \
+            | grep -Eo '[0-9]+' \
+            | grep -Ev '^[0-9]{8}$' \
+            | sort -u \
+            | tr '\n' ' ' || true
+    )
+    return 0
+}
+
+git_claims_prefix() {
+    local feature_num="$1"
+    load_git_claimed_numbers
+    case " $GIT_CLAIMED_NUMBERS " in
+        *" $feature_num "*) return 0 ;;
+    esac
+    return 1
+}
+
+get_highest_from_git_history() {
+    local highest=0
+    local number
+
+    load_git_claimed_numbers
+    for number in $GIT_CLAIMED_NUMBERS; do
+        is_feature_number_in_range "$number" || continue
+        number=$((10#$number))
+        if [ "$number" -gt "$highest" ]; then
+            highest=$number
+        fi
+    done
+
+    echo "$highest"
+}
+
 # Function to get highest number from specs directory
 get_highest_from_specs() {
     local specs_dir="$1"
-    local highest=0
+    local highest
+    local number
+
+    highest=$(get_highest_from_git_history)
 
     if [ -d "$specs_dir" ]; then
         for dir in "$specs_dir"/*; do
@@ -133,10 +197,13 @@ get_highest_from_specs() {
     echo "$highest"
 }
 
-# Return success when a spec directory owns the given numeric prefix.
+# Return success when a spec directory owns the given numeric prefix, on this
+# branch or on any other ref this clone has seen.
 spec_prefix_exists() {
     local specs_dir="$1"
     local feature_num="$2"
+
+    git_claims_prefix "$feature_num" && return 0
 
     for spec_path in "$specs_dir/${feature_num}-"*; do
         [ -d "$spec_path" ] && return 0
