@@ -23,8 +23,11 @@ before the implementation that satisfies it; Allure taxonomy on every product
 test with the covering feature-qualified id (`NNN-FR-###`/`NNN-SC-###`) in
 the test name or story; acceptance
 graded by an agent that did not write the code; landing class decided by
-`scripts/classify_path_risk.py`, with ASK-class changes landing only through a
-reviewed PR.
+`scripts/classify_path_risk.py`, with SHIP and SHOW landing PR-less through
+verified trunk and ASK-class changes never landing automatically — a PR carries
+their review evidence, but merging it does not by itself update `main` (ADR-0008;
+see `AGENTS.md` and `docs/autonomous-delivery-runbook.md` for the recorded
+approval and ruleset requirements).
 
 **Tests**: Tests are expected for behavior changes; include backend pytest/FastAPI
 TestClient, frontend Vitest/Testing Library, operation-state, or deterministic
