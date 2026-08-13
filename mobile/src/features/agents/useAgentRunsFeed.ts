@@ -19,7 +19,8 @@ import {
   nextPollDelay,
   projectRunsAt,
 } from "@/agents/machine";
-import { useApi } from "@/auth/SessionProvider";
+import { useSession } from "@/auth/SessionProvider";
+import { normalizeServerUrl } from "@/config/serverUrl";
 
 export interface AgentRunsFeed {
   runs: AgentRunResponse[];
@@ -50,8 +51,12 @@ export function useAgentRunsFeed(
   enabled: boolean,
   runtime: AgentRunsPollRuntime = defaultPollRuntime,
 ): AgentRunsFeed {
-  const api = useApi();
-  const scope = useMemo(() => ({ api, taskId }), [api, taskId]);
+  const { api, serverUrl, accountId, serverTimeAnchor } = useSession();
+  const normalizedServerUrl = normalizeServerUrl(serverUrl);
+  const scope = useMemo(
+    () => ({ api, serverUrl: normalizedServerUrl, accountId, taskId }),
+    [api, normalizedServerUrl, accountId, taskId],
+  );
   const emptyView = useCallback(
     () => ({ scope, runs: [] as AgentRunResponse[], loading: enabled, error: null as unknown, online: true, lastSyncedAt: null as number | null }),
     [enabled, scope],
@@ -86,7 +91,13 @@ export function useAgentRunsFeed(
   const activeRef = useRef(false);
   const schedulePollRef = useRef<(current?: AgentRunResponse[] | null) => void>(() => undefined);
   const effectScopeRef = useRef(scope);
-  const now = useCallback(() => runtime.now?.() ?? Date.now(), [runtime]);
+  const now = useCallback(() => {
+    if (!serverTimeAnchor) {
+      return Number.POSITIVE_INFINITY;
+    }
+    const monotonicNow = runtime.now?.() ?? performance.now();
+    return serverTimeAnchor.serverTimeMs + (monotonicNow - serverTimeAnchor.monotonicTimeMs);
+  }, [runtime, serverTimeAnchor]);
 
   const remember = useCallback(
     (incoming: AgentRunResponse[]) => {
@@ -149,17 +160,19 @@ export function useAgentRunsFeed(
       const source = current ?? (runsRef.current.scope === scope ? runsRef.current.runs : []);
       const pollable = source.some(isRunPollable);
       const currentNow = now();
-      const expiryDelay = source
-        .filter((run) => !run.content_expired)
-        .map((run) => Date.parse(run.content_expires_at))
-        .filter((deadline) => !Number.isNaN(deadline) && deadline > currentNow)
-        .reduce<number | null>(
-          (earliest, deadline) =>
-            earliest === null || deadline - currentNow < earliest
-              ? deadline - currentNow
-              : earliest,
-          null,
-        );
+      const expiryDelay = serverTimeAnchor
+        ? source
+            .filter((run) => !run.content_expired)
+            .map((run) => Date.parse(run.content_expires_at))
+            .filter((deadline) => !Number.isNaN(deadline) && deadline > currentNow)
+            .reduce<number | null>(
+              (earliest, deadline) =>
+                earliest === null || deadline - currentNow < earliest
+                  ? deadline - currentNow
+                  : earliest,
+              null,
+            )
+        : null;
       if (!activeRef.current || (!pollable && expiryDelay === null) || cancelPollRef.current) {
         if (!pollable) {
           pollDelayRef.current = null;
@@ -196,7 +209,7 @@ export function useAgentRunsFeed(
         }
       }, delay);
     },
-    [fetchOnce, isCurrentScope, now, runtime, scheduleAfter, scope, updateView],
+    [fetchOnce, isCurrentScope, now, runtime, scheduleAfter, scope, serverTimeAnchor, updateView],
   );
   useEffect(() => {
     schedulePollRef.current = schedulePoll;

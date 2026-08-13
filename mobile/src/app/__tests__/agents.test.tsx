@@ -56,7 +56,7 @@ describe("connected agents screen", () => {
 
     await renderScreen();
 
-    expect(screen.getByText("Release agent")).toBeOnTheScreen();
+    expect(await screen.findByText("Release agent")).toBeOnTheScreen();
     expect(screen.getByText(/Relay rollout is off/)).toBeOnTheScreen();
     expect(backend.callsTo("GET", "/agent-connections")).toHaveLength(1);
     expect(screen.queryByText("Add an agent")).not.toBeOnTheScreen();

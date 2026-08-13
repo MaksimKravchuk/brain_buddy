@@ -1,11 +1,10 @@
 /**
  * What the compact list is allowed to ask the server.
  *
- * The summaries endpoint is gated behind the account's relay flag — with the
- * flag off the backend answers 404, so asking at all would only manufacture an
- * error for a capability the user cannot see. The flag reaches the query as its
- * `enabled` condition, which is exactly what these tests pin down: off means no
- * request, and on means a request about the visible tasks and no others.
+ * Existing-run summaries remain readable when rollout disables new handoffs.
+ * The query is gated only by an authenticated owner and the task IDs currently
+ * on screen: no owner means no request, while a signed-in owner is monitored
+ * regardless of the rollout flag chosen by the consuming screen.
  */
 
 import { Text } from "react-native";
@@ -29,8 +28,8 @@ jest.mock("@/auth/SessionProvider", () => ({
   }),
 }));
 
-function Probe({ taskIds, enabled, interval }: { taskIds: string[]; enabled: boolean; interval?: number }) {
-  const summaries = useAgentRunSummaries(taskIds, enabled, interval);
+function Probe({ taskIds, hasOwner, interval }: { taskIds: string[]; hasOwner: boolean; interval?: number }) {
+  const summaries = useAgentRunSummaries(taskIds, hasOwner, interval);
   return <Text>{Object.keys(summaries.data ?? {}).join(",") || "no summaries"}</Text>;
 }
 
@@ -40,9 +39,9 @@ beforeEach(() => {
 });
 
 describe("useAgentRunSummaries", () => {
-  it("asks nothing at all while the relay flag is off", async () => {
+  it("asks nothing without an authenticated owner", async () => {
     const { renderer, unmount } = await renderWithProviders(
-      <Probe taskIds={["task_1", "task_2"]} enabled={false} />,
+      <Probe taskIds={["task_1", "task_2"]} hasOwner={false} />,
     );
     await settle();
 
@@ -52,8 +51,8 @@ describe("useAgentRunSummaries", () => {
     await unmount();
   });
 
-  it("asks nothing when no task is on screen, flag or not", async () => {
-    const { unmount } = await renderWithProviders(<Probe taskIds={[]} enabled />);
+  it("asks nothing when no task is on screen", async () => {
+    const { unmount } = await renderWithProviders(<Probe taskIds={[]} hasOwner />);
     await settle();
 
     expect(mockListSummaries).not.toHaveBeenCalled();
@@ -75,7 +74,7 @@ describe("useAgentRunSummaries", () => {
     });
 
     const { renderer, client, unmount } = await renderWithProviders(
-      <Probe taskIds={["task_1", "task_2"]} enabled />,
+      <Probe taskIds={["task_1", "task_2"]} hasOwner />,
     );
     await settle();
 
@@ -98,7 +97,7 @@ describe("useAgentRunSummaries", () => {
 
   it("polls boundedly so externally changing compact summaries converge", async () => {
     const { unmount } = await renderWithProviders(
-      <Probe taskIds={["task_1"]} enabled interval={10} />,
+      <Probe taskIds={["task_1"]} hasOwner interval={10} />,
     );
     await settle();
     expect(mockListSummaries).toHaveBeenCalledTimes(1);

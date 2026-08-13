@@ -8,7 +8,6 @@ import {
   EXPIRED_CONTENT_NOTICE,
   eventLabel,
   lastContactLabel,
-  projectRunsAt,
   runsNewestFirst,
   sortedEvents,
 } from "@/agents/machine";
@@ -68,9 +67,7 @@ export function AgentRunSection({
   onRunUpdated,
   onRetry,
 }: AgentRunSectionProps) {
-  // Treat the local retention deadline as authoritative even if no network
-  // response arrives at that instant. Only this redacted projection is rendered.
-  const effectiveRuns = projectRunsAt(runs);
+
   // Only an initial failure with nothing to show is an error state. Once a
   // projection has been received, a later failed refresh must not hide it:
   // the honest answer is the last report plus a warning that it may be stale.
@@ -115,7 +112,7 @@ export function AgentRunSection({
           Checking for a newer report…
         </BBText>
       ) : null}
-      {runsNewestFirst(effectiveRuns).map((run) => (
+      {runsNewestFirst(runs).map((run) => (
         <RunCard key={run.id} run={run} online={online} onRunUpdated={onRunUpdated} />
       ))}
     </View>

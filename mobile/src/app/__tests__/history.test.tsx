@@ -47,6 +47,9 @@ describe("history", () => {
     expect(backend.callsTo("GET", "/tasks").map((call) => call.query)).toContain(
       "state=completed&limit=50",
     );
+    expect(backend.callsTo("GET", "/agent-run-summaries").map((call) => call.query)).toContain(
+      "task_id=t1",
+    );
   });
 
   it("shows cancelled tasks when the route asks for them", async () => {
@@ -94,7 +97,7 @@ describe("history", () => {
     expect(await screen.findByText("Called the notary")).toBeOnTheScreen();
   });
 
-  it("opens terminal rows for recovery without navigating to task detail", async () => {
+  it("opens terminal rows in task detail so the relay timeline remains reachable", async () => {
     await history(undefined, {
       "GET /tasks": () =>
         makeTaskPage([makeTask({ id: "t1", title: "Called the notary", state: "completed" })]),
@@ -102,8 +105,11 @@ describe("history", () => {
 
     await fireEvent.press(await screen.findByLabelText("Called the notary"));
 
-    expect(await screen.findByText("Reopen into")).toBeOnTheScreen();
-    expect(routerSpy().push).not.toHaveBeenCalled();
+    expect(routerSpy().push).toHaveBeenCalledWith({
+      pathname: "/task/[id]",
+      params: { id: "t1", from: "Completed" },
+    });
+    expect(screen.queryByText("Reopen into")).not.toBeOnTheScreen();
   });
 
   it("reopens a task into an explicitly chosen list", async () => {
@@ -115,7 +121,7 @@ describe("history", () => {
       "POST /tasks/t1/transitions": () => makeTask({ id: "t1", state: "next", revision: 5 }),
     });
 
-    await fireEvent.press(await screen.findByLabelText("Called the notary"));
+    await fireEvent.press(await screen.findByLabelText("Reopen task"));
     await fireEvent.press(await screen.findByText("Next"));
     await fireEvent.press(screen.getByText("Reopen"));
 
@@ -144,7 +150,7 @@ describe("history", () => {
         makeTaskPage([makeTask({ id: "t1", title: "Called the notary", state: "completed" })]),
     });
 
-    await fireEvent.press(await screen.findByLabelText("Called the notary"));
+    await fireEvent.press(await screen.findByLabelText("Reopen task"));
     await fireEvent.press(await screen.findByText("Waiting"));
     await fireEvent.press(screen.getByText("Reopen"));
 
@@ -174,7 +180,7 @@ describe("history", () => {
         new FakeHttpError(409, { message: "That task changed elsewhere." }),
     });
 
-    await fireEvent.press(await screen.findByLabelText("Called the notary"));
+    await fireEvent.press(await screen.findByLabelText("Reopen task"));
     await fireEvent.press(await screen.findByText("Next"));
     await fireEvent.press(screen.getByText("Reopen"));
 
@@ -187,7 +193,7 @@ describe("history", () => {
         makeTaskPage([makeTask({ id: "t1", title: "Called the notary", state: "completed" })]),
     });
 
-    await fireEvent.press(await screen.findByLabelText("Called the notary"));
+    await fireEvent.press(await screen.findByLabelText("Reopen task"));
     await screen.findByText("Reopen into");
 
     await fireEvent.press(screen.getByLabelText("Close"));

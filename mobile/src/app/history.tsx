@@ -1,4 +1,4 @@
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, StyleSheet, View } from "react-native";
 
@@ -21,6 +21,7 @@ import { colors, space } from "@/theme/tokens";
  */
 export default function HistoryScreen() {
   const { kind } = useLocalSearchParams<{ kind?: string }>();
+  const router = useRouter();
   const terminalState: TaskState = kind === "cancelled" ? "cancelled" : "completed";
 
   // `state=<terminal>` alone narrows the list to exactly that state
@@ -36,9 +37,9 @@ export default function HistoryScreen() {
     () => (query.data ? query.data.pages.flatMap((page) => page.items) : []),
     [query.data],
   );
-  const { agentRelayEnabled } = useSession();
+  const { accountId } = useSession();
   const visibleTaskIds = useMemo(() => tasks.map((task) => task.id), [tasks]);
-  const agentRuns = useAgentRunSummaries(visibleTaskIds, agentRelayEnabled).data ?? {};
+  const agentRuns = useAgentRunSummaries(visibleTaskIds, accountId !== null).data ?? {};
 
   const title = terminalState === "completed" ? "Completed" : "Cancelled";
 
@@ -85,7 +86,9 @@ export default function HistoryScreen() {
               projectName={projectName(item.project_id)}
               tagNames={tagNames(item.tag_ids)}
               agentRun={agentRuns[item.id]}
-              onPress={() => setReopening(item)}
+              onPress={() =>
+                router.push({ pathname: "/task/[id]", params: { id: item.id, from: title } })
+              }
               onToggleComplete={() => setReopening(item)}
             />
           )}

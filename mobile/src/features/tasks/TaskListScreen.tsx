@@ -60,12 +60,13 @@ export function TaskListScreen({
   const totalKnown = tasks.length;
   const hasMore = query.hasNextPage;
 
-  // Only the tasks actually listed are asked about, and only while the
-  // account's relay flag is on. A failed summary fetch degrades to no chips
-  // rather than an error: the list itself is still perfectly usable.
-  const { agentRelayEnabled } = useSession();
+  // Only the tasks actually listed are asked about, for any signed-in account.
+  // Existing-run monitoring remains available when new relay handoffs are
+  // rolled back. A failed summary fetch degrades to no chips rather than an
+  // error: the list itself is still perfectly usable.
+  const { accountId } = useSession();
   const visibleTaskIds = useMemo(() => tasks.map((task) => task.id), [tasks]);
-  const agentRunQuery = useAgentRunSummaries(visibleTaskIds, agentRelayEnabled);
+  const agentRunQuery = useAgentRunSummaries(visibleTaskIds, accountId !== null);
   const agentRuns = agentRunQuery.data ?? {};
 
   const countLabel = `${totalKnown}${hasMore ? "+" : ""} ${totalKnown === 1 && !hasMore ? "task" : "tasks"}`;
