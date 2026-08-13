@@ -14,7 +14,7 @@ Sync Impact Report:
 - Modified sections: Spec-Driven Development Workflow (canonical flow now names /speckit-design and /speckit-review, and carries the two MUSTs above); Historical Spec Grandfathering (dropped the obsolete v0.12.17 pin; the live pin is recorded in docs/spec-kit-workflow.md); Operational Guardrails (a PR is no longer stated as the merge gate — ADR-0008, dated 2026-07-22, superseded that for SHIP/SHOW)
 - Added sections: None
 - Removed sections: None
-- Templates requiring updates: ✅ .specify/templates/checklist-template.md (dropped the Hermes Kanban handoff reference per ADR-0010's portability decision); ✅ .specify/templates/plan-template.md, spec-template.md, tasks-template.md unaffected
+- Templates requiring updates: ✅ .specify/templates/checklist-template.md (dropped the Hermes Kanban handoff reference per ADR-0010's portability decision); ✅ .specify/templates/tasks-template.md (its delivery-gates block still said ASK-class changes land "only through a reviewed PR", which is exactly the invariant the Operational Guardrails amendment below corrects — a PR merge does not by itself update `main`); ✅ .specify/templates/plan-template.md, spec-template.md unaffected
 - Follow-up TODOs: None
 - Superseded 1.1.1 report, preserved here because this block is rewritten each
   amendment and would otherwise be the only copy lost:
