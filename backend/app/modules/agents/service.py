@@ -764,6 +764,7 @@ class AgentRelayService:
                 payload.endpoint_url is not None
                 and payload.endpoint_url != connection.endpoint_url
             )
+            name_changed = payload.name is not None and payload.name != connection.name
             if destination_changed:
                 if not reauthenticated:
                     raise ValidationFailure(
@@ -773,12 +774,24 @@ class AgentRelayService:
                 assert payload.endpoint_url is not None
                 self._validate_endpoint(payload.endpoint_url)
 
+            if not name_changed and not destination_changed:
+                response = self._connection_response(connection)
+                self._remember(
+                    owner_id=owner_id,
+                    key_hash=key_hash,
+                    command=command,
+                    canonical=canonical,
+                    resource_id=connection_id,
+                    response_body=response.model_dump(mode="json"),
+                )
+                return response
+
             now = self._now()
             updates: dict[str, Any] = {
                 "updated_at": now,
                 "revision": connection.revision + 1,
             }
-            if payload.name is not None:
+            if name_changed:
                 updates["name"] = payload.name
             if destination_changed:
                 updates.update(
@@ -983,14 +996,14 @@ class AgentRelayService:
             connection = self.agent_repo.get_connection(
                 connection_id, owner_id=owner_id
             )
-            if record is not None:
-                return self._replayed_signing_secret(
-                    record, connection, aad=receipt_aad
-                )
             if not reauthenticated:
                 raise ValidationFailure(
                     "Confirm your password to replace this agent's signing secret.",
                     detail={"reason": "reauthentication_required"},
+                )
+            if record is not None:
+                return self._replayed_signing_secret(
+                    record, connection, aad=receipt_aad
                 )
             if connection.status == "disconnected":
                 raise ValidationFailure(
@@ -2221,9 +2234,10 @@ class AgentRelayService:
                     connection.id, owner_id=owner_id
                 )
             except NotFoundError as exc:
-                raise self._authenticated_event_rejection(
-                    connection, "connection_scope_changed"
-                ) from exc
+                # Account purge is a terminal deletion boundary. The body was
+                # authenticated before the purge, but no relay or audit row may
+                # be recreated after the owner-scoped records are gone.
+                raise EventRejected("connection_scope_changed") from exc
             if (
                 active_connection.status == "disconnected"
                 or active_connection.revision != connection.revision

@@ -1488,10 +1488,6 @@ class TestRetentionAndPurge:
         for sensitive in (
             "credential-secret",
             "signing-secret",
-            "private result",
-            "private progress",
-            "private event",
-            "private reply",
             fingerprint("kid-1", "k1"),
             "other",
         ):

@@ -558,6 +558,53 @@ class TestConnectAnAgent:
         assert updated.last_tested_at == current.last_tested_at
         assert updated.revision == current.revision + 1
 
+    def test_update_with_identical_values_is_a_true_no_op(
+        self, service: AgentRelayService, clock: Clock
+    ) -> None:
+        connection_id = connect(service)
+        current = service.get_connection(connection_id, owner_id=OWNER)
+        request = AgentConnectionUpdateRequest(
+            name=current.name,
+            endpoint_url=current.endpoint_url,
+            expected_revision=current.revision,
+        )
+        stored_before = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
+        audit_before = service.list_audit(owner_id=OWNER)
+
+        clock.advance(timedelta(hours=1))
+        first = service.update_connection(
+            connection_id,
+            request,
+            owner_id=OWNER,
+            idempotency_key="idem-no-op",
+            reauthenticated=False,
+        )
+        replay = service.update_connection(
+            connection_id,
+            request,
+            owner_id=OWNER,
+            idempotency_key="idem-no-op",
+            reauthenticated=False,
+        )
+
+        assert first == replay == current
+        assert first.revision == current.revision
+        assert (
+            service.agent_repo.get_connection(connection_id, owner_id=OWNER).updated_at
+            == stored_before.updated_at
+        )
+        assert service.list_audit(owner_id=OWNER) == audit_before
+        with pytest.raises(ConflictError):
+            service.update_connection(
+                connection_id,
+                AgentConnectionUpdateRequest(
+                    name="Different", expected_revision=current.revision
+                ),
+                owner_id=OWNER,
+                idempotency_key="idem-no-op",
+                reauthenticated=False,
+            )
+
     def test_destination_update_requires_reauthentication_and_resets_destination_state(
         self, service: AgentRelayService
     ) -> None:
@@ -3322,6 +3369,52 @@ class TestDisconnectAndRetention:
         with pytest.raises(NotFoundError):
             service.get_run(relay.run.id, owner_id=OWNER)
 
+    def test_event_authenticated_before_account_purge_cannot_recreate_relay_rows(
+        self,
+        relay: Relay,
+        service: AgentRelayService,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        authenticated = Event()
+        resume = Event()
+        original_apply = service._apply_authenticated_event
+
+        def paused_apply(connection: AgentConnectionDocument, event: Any) -> None:
+            authenticated.set()
+            assert resume.wait(timeout=5)
+            original_apply(connection, event)
+
+        monkeypatch.setattr(service, "_apply_authenticated_event", paused_apply)
+        failures: list[BaseException] = []
+
+        def ingest() -> None:
+            try:
+                relay.emit(relay.event("evt_purge_race", "running", 1))
+            except BaseException as exc:  # captured for deterministic thread assertion
+                failures.append(exc)
+
+        contender = Thread(target=ingest)
+        contender.start()
+        assert authenticated.wait(timeout=5)
+        service.delete_all_for_owner(owner_id=OWNER)
+        resume.set()
+        contender.join(timeout=5)
+
+        assert len(failures) == 1
+        assert isinstance(failures[0], EventRejected)
+        assert failures[0].code == "connection_scope_changed"
+        assert service.list_connections(owner_id=OWNER) == []
+        assert service.list_audit(owner_id=OWNER) == []
+        assert service.agent_repo.export_owner_data(
+            owner_id=OWNER, now=relay.clock.now
+        ) == {
+            "connections": [],
+            "runs": [],
+            "events": [],
+            "commands": [],
+            "audit": [],
+        }
+
 
 class TestAudit:
     def test_the_audit_trail_records_actions_without_content_or_secrets(
@@ -3747,6 +3840,23 @@ class TestSigningSecretRotation:
             relay.event("evt_1", "running", 1),
             secret=replay.inbound_signing_secret,
         )
+
+    def test_signing_secret_replay_requires_reauthentication(
+        self, relay: Relay, service: AgentRelayService
+    ) -> None:
+        revision = service.get_connection(relay.connection_id, owner_id=OWNER).revision
+        first = self.rotate(service, relay.connection_id, revision=revision)
+
+        with pytest.raises(ValidationFailure) as refused:
+            self.rotate(
+                service,
+                relay.connection_id,
+                revision=revision,
+                reauthenticated=False,
+            )
+
+        assert refused.value.detail == {"reason": "reauthentication_required"}
+        assert first.inbound_signing_secret not in str(refused.value)
 
     def test_a_replay_does_not_rotate_a_second_time(
         self, relay: Relay, service: AgentRelayService
