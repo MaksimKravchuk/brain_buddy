@@ -84,6 +84,21 @@ class AgentConnectionRotateRequest(StrictBaseModel):
     expected_revision: int = Field(ge=1)
 
 
+class AgentConnectionUpdateRequest(StrictBaseModel):
+    """Bounded metadata/destination update; credentials have their own operation."""
+
+    name: ConnectionName | None = None
+    endpoint_url: str | None = Field(default=None, min_length=1, max_length=2_000)
+    current_password: str | None = Field(default=None, min_length=1, max_length=512)
+    expected_revision: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def _requires_an_update(self) -> AgentConnectionUpdateRequest:
+        if self.name is None and self.endpoint_url is None:
+            raise ValueError("name or endpoint_url is required")
+        return self
+
+
 class AgentConnectionDisconnectRequest(StrictBaseModel):
     current_password: str = Field(min_length=1, max_length=512)
     expected_revision: int = Field(ge=1)
@@ -292,6 +307,7 @@ __all__ = [
     "AgentConnectionSecretResponse",
     "AgentConnectionSigningSecretResponse",
     "AgentConnectionStatus",
+    "AgentConnectionUpdateRequest",
     "AgentContextItemRequest",
     "AgentContextItemResponse",
     "AgentDispatchState",
