@@ -109,15 +109,15 @@ jobs:
         if: always()
         run: |
           mkdir -p mutation-allure-results
-          cp mutation-artifacts/mutation-summary.txt mutation-allure-results/
-          cp mutation-artifacts/mutation-survivors.txt mutation-allure-results/
+          cp mutation-artifacts/mutation-summary.txt mutation-allure-results/mutation-summary.backend.txt
+          cp mutation-artifacts/mutation-survivors.txt mutation-allure-results/mutation-survivors.backend.txt
           cp mutation-artifacts/enforced-summary.txt mutation-allure-results/
           cp mutation-artifacts/enforced-survivors.txt mutation-allure-results/
           python ../scripts/create_mutation_allure_evidence.py \
-            --summary mutation-allure-results/mutation-summary.txt \
-            --survivors mutation-allure-results/mutation-survivors.txt \
+            --summary mutation-allure-results/mutation-summary.backend.txt \
+            --survivors mutation-allure-results/mutation-survivors.backend.txt \
             --scope-label backend \
-            --output mutation-allure-results/mutation-evidence-result.json
+            --output mutation-allure-results/mutation-evidence-result.backend.json
 
       - name: Upload raw mutmut state
         if: always()
@@ -189,8 +189,8 @@ jobs:
           mkdir -p frontend/mutation-artifacts frontend/mutation-allure-results
           python3 scripts/mutation_gate.py summarize-stryker \
             --report frontend/mutation-artifacts/mutation-report.json \
-            --summary-out frontend/mutation-allure-results/mutation-summary.txt \
-            --survivors-out frontend/mutation-allure-results/mutation-survivors.txt
+            --summary-out frontend/mutation-allure-results/mutation-summary.frontend.txt \
+            --survivors-out frontend/mutation-allure-results/mutation-survivors.frontend.txt
           python3 scripts/mutation_gate.py summarize-stryker \
             --report frontend/mutation-artifacts/mutation-report.json \
             --enforced frontend/mutation-enforced-scope.txt \
@@ -199,7 +199,7 @@ jobs:
           {
             echo "### Frontend mutation campaign (report-only)"
             echo '```'
-            cat frontend/mutation-allure-results/mutation-summary.txt
+            cat frontend/mutation-allure-results/mutation-summary.frontend.txt
             echo
             echo "Enforced tier (not yet gating):"
             cat frontend/mutation-artifacts/enforced-summary.txt
@@ -211,10 +211,10 @@ jobs:
         working-directory: .
         run: |
           python3 scripts/create_mutation_allure_evidence.py \
-            --summary frontend/mutation-allure-results/mutation-summary.txt \
-            --survivors frontend/mutation-allure-results/mutation-survivors.txt \
+            --summary frontend/mutation-allure-results/mutation-summary.frontend.txt \
+            --survivors frontend/mutation-allure-results/mutation-survivors.frontend.txt \
             --scope-label frontend \
-            --output frontend/mutation-allure-results/mutation-evidence-result.json
+            --output frontend/mutation-allure-results/mutation-evidence-result.frontend.json
 
       - name: Upload frontend mutation report
         if: always()
@@ -279,12 +279,12 @@ jobs:
           mkdir -p mobile/mutation-artifacts mobile/mutation-allure-results
           python3 scripts/mutation_gate.py summarize-stryker \
             --report mobile/mutation-artifacts/mutation-report.json \
-            --summary-out mobile/mutation-allure-results/mutation-summary.txt \
-            --survivors-out mobile/mutation-allure-results/mutation-survivors.txt
+            --summary-out mobile/mutation-allure-results/mutation-summary.mobile.txt \
+            --survivors-out mobile/mutation-allure-results/mutation-survivors.mobile.txt
           {
             echo "### Mobile mutation campaign (report-only)"
             echo '```'
-            cat mobile/mutation-allure-results/mutation-summary.txt
+            cat mobile/mutation-allure-results/mutation-summary.mobile.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -293,10 +293,10 @@ jobs:
         working-directory: .
         run: |
           python3 scripts/create_mutation_allure_evidence.py \
-            --summary mobile/mutation-allure-results/mutation-summary.txt \
-            --survivors mobile/mutation-allure-results/mutation-survivors.txt \
+            --summary mobile/mutation-allure-results/mutation-summary.mobile.txt \
+            --survivors mobile/mutation-allure-results/mutation-survivors.mobile.txt \
             --scope-label mobile \
-            --output mobile/mutation-allure-results/mutation-evidence-result.json
+            --output mobile/mutation-allure-results/mutation-evidence-result.mobile.json
 
       - name: Upload mobile mutation report
         if: always()
@@ -344,6 +344,13 @@ jobs:
         with:
           pattern: "*-allure-results"
           path: mutation-allure-results
+          # Safe to flatten only because every lane's result and attachment
+          # filename now carries its lane. `merge-multiple` is last-writer-wins
+          # for identical names, and all three lanes used to write
+          # `mutation-evidence-result.json`, `mutation-summary.txt` and
+          # `mutation-survivors.txt` -- so downloading all three and merging
+          # them would have kept exactly one, which is the gap this download
+          # was widened to close, reintroduced one layer down.
           merge-multiple: true
 
       - name: Set up Node.js
