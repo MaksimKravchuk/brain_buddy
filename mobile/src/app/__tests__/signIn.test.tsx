@@ -1,6 +1,10 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 
+import { identityStorageKey } from "@/auth/flagResolution";
 import { DEFAULT_SERVER_URL, saveServerUrl } from "@/config/serverUrl";
+import type { PendingClassificationChange } from "@/features/tasks/classificationTypes";
+import { queueKey } from "@/features/tasks/storageKeys";
 import {
   FakeHttpError,
   installFakeBackend,
@@ -171,5 +175,50 @@ describe("sign-in", () => {
     await waitFor(() => expect(backend.callsTo("POST", "/auth/login")).toHaveLength(1));
     // The login went to the newly chosen server, not the default one.
     expect(screen.getByDisplayValue("http://10.0.0.5:8000/api")).toBeOnTheScreen();
+  });
+
+  it("006-FR-011 treats a trailing slash as the same server and keeps the unsent work", async () => {
+    // `updateServerUrl` normalizes before deciding there is nothing to do, so
+    // comparing raw here means an equivalent URL takes the discard path for a
+    // save that then changes nothing: the person is warned that continuing
+    // loses their unsent work, and with an empty queue the cached project and
+    // Tag lists go with no sheet shown at all. Settings compares normalized;
+    // this screen is the gate's other call site and used not to.
+    const custom = "http://10.0.0.5:8000/api";
+    await saveServerUrl(custom);
+    await AsyncStorage.setItem(
+      identityStorageKey(custom),
+      JSON.stringify({ accountId: "user-1", savedAt: new Date().toISOString() }),
+    );
+    const at = new Date().toISOString();
+    const pending: PendingClassificationChange = {
+      taskId: "task-1",
+      accountId: "user-1",
+      serverUrl: custom,
+      value: { projectId: "proj-q3", tagIds: undefined },
+      observedRevision: 1,
+      originalValue: { projectId: null, tagIds: [] },
+      firstQueuedAt: at,
+      lastEditedAt: at,
+      idempotencyKey: "key-1",
+      sendState: "queued",
+    };
+    await AsyncStorage.setItem(queueKey(custom, "user-1"), JSON.stringify([pending]));
+
+    backend = installFakeBackend({
+      ...SIGNED_OUT,
+      "POST /auth/login": () => makeMe({ id: "user-1" }),
+    });
+    await renderWithSession(<SignInScreen />);
+
+    // Server settings open already: the stored URL is not the default one.
+    await fireEvent.changeText(screen.getByDisplayValue(custom), `${custom}/`);
+    await typeCredentials();
+    await fireEvent.press(screen.getByText("Sign in"));
+
+    await waitFor(() => expect(backend.callsTo("POST", "/auth/login")).toHaveLength(1));
+    // Nobody was asked to give anything up, because nothing was changing.
+    expect(screen.queryByText("1 change has not been sent")).toBeNull();
+    expect(await AsyncStorage.getItem(queueKey(custom, "user-1"))).toContain("task-1");
   });
 });

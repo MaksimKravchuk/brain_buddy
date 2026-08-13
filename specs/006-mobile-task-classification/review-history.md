@@ -183,8 +183,48 @@ pass is not cleanup; it is where this bug class exclusively lives.**
 
 ## Post-merge review, 2026-08-13
 
-The five-PR stack merged, and adversarial review of the merged diff found a
-requirement violation that every gate above had passed.
+The five-PR stack merged, and adversarial review of the merged diff found nine
+further defects. They are recorded here because the acceptance record above is
+what a later reader will consult, and it would otherwise close on the state of
+the code the day it landed rather than the state it is in.
+
+Eight are the kind the gate is not shaped to catch — they live in wiring,
+serialisation order and process lifetime, not in requirements:
+
+- **A drain pass kept sending after its identity was replaced.** `owns()` scoped
+  what a pass *read and wrote on the device* and nothing scoped what it *sent*;
+  the api client resolves its base URL and cookie at call time, so the next
+  entry in the loop went out as account A's write under account B's session —
+  SC-007 over the wire, which is where it matters most.
+- **A queued device write could be redirected by a later identity.** Writes are
+  serialised and each reads the live queue when its turn comes, which is what
+  stops two writers clobbering each other; but the identity-change effect
+  empties that ref, so a write for A waiting behind another called
+  `saveQueue(A, [])` and deleted the unsent work FR-011 keeps *specifically*
+  through an involuntary end.
+- **Clearing an identity's stores was not a barrier.** A stale drain pass and
+  the fire-and-forget picker-cache write both outlive the clear and could put
+  the queue, or the project and Tag names the person wrote, back on a device
+  that had just forgotten how to name them.
+- **A different account signing in deleted only the previous account's flag
+  record**, leaving its queue and picker cache to a sweep that runs only when
+  the *new* account has the rollout flag on. A retention rule conditional on an
+  unrelated feature flag is not a retention rule.
+- **The per-pass safety limit stranded the rest of the queue.** 25 bounds a
+  pass, not a triage session, and the pass holds the drain lock while it runs.
+- **The conflict sheet dated the phone's value from the account-wide sync
+  clock**, which advances on any successful send for any task — so a task last
+  read three weeks ago was labelled "as of just now".
+- **The dismiss-once expiry notice reappeared on every task screen**, because
+  the latch was consulted only when the identity key changed, and on an ordinary
+  remount it has not.
+- **Sign-in compared the server URL raw** where Settings compares it normalized,
+  so a trailing slash took the discard path for a save that changed nothing.
+
+Each carries a test that was mutation-checked: with the production change
+reverted the new test fails, and with it restored it passes.
+
+The ninth is different in kind, and is the one worth carrying forward.
 
 ### FR-008 was violated by the shipped code
 
@@ -228,3 +268,6 @@ carries, so a title edit — or a Tag edit under a project-only change — is st
 a plain resend and raises no prompt. `data-model.md` invariant 10 and T068 now
 state all three branches; no requirement was weakened to fit the code. The fix
 is mutation-checked: reverted, the new tests fail; restored, they pass.
+
+SC-001, SC-006 and the rendering halves of FR-007 and FR-012 remain ungraded —
+T052 and T069 still need a physical iPhone.

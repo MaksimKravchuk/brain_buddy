@@ -32,7 +32,7 @@ import {
   writeClassificationCache,
 } from "@/features/tasks/classificationCache";
 import type { CachedClassificationLists } from "@/features/tasks/classificationTypes";
-import { cacheKey } from "@/features/tasks/storageKeys";
+import { cacheKey, isForgottenKey } from "@/features/tasks/storageKeys";
 import { newIdempotencyKey } from "@/utils/ids";
 
 export const taskKeys = {
@@ -117,6 +117,15 @@ function cacheListsInBackground(
   cacheWrites = cacheWrites
     .catch(() => undefined)
     .then(async () => {
+      // Checked here rather than above, because "is this identity still on the
+      // device" is only meaningful when the write actually runs. This chain is
+      // fire-and-forget from a query callback: a sign-out or server change can
+      // land between the fetch that scheduled it and its turn, and writing then
+      // would put one account's whole project and Tag vocabulary — names the
+      // person wrote — back on a device that has just forgotten them.
+      if (isForgottenKey(key)) {
+        return;
+      }
       const now = Date.now();
       const current = await readClassificationCache({ store: AsyncStorage, key, now });
       await writeClassificationCache({

@@ -455,3 +455,34 @@ describe("006-FR-018 the cross-identity sweep", () => {
     expect(result.deletedKeys).toEqual([queueKey(SERVER_B, ACCOUNT_B)]);
   });
 });
+
+describe("006-FR-011 clearing an identity is a barrier, not just a delete", () => {
+  const IDENTITY_A = { serverUrl: SERVER_A, accountId: ACCOUNT_A };
+
+  it("refuses a queue write that was already in flight when the clear ran", async () => {
+    // The interleaving this exists for: a drain pass whose identity has been
+    // replaced still finishes its own entry into its own key — deliberately,
+    // because that outcome is unambiguously its work — and the writes are
+    // serialised, so one can be sitting behind another when a sign-out lands.
+    // Without a barrier it re-creates the queue the sign-out just deleted,
+    // under a key nothing left on the device can name.
+    await saveQueue(IDENTITY_A, [entry()]);
+
+    await clearIdentityStores(IDENTITY_A);
+    await saveQueue(IDENTITY_A, [entry()]);
+
+    expect(await AsyncStorage.getItem(queueKey(SERVER_A, ACCOUNT_A))).toBeNull();
+  });
+
+  it("leaves every other identity writable", async () => {
+    // The barrier is per identity. Forgetting A must not wedge B, which is the
+    // account that has just signed in and is about to queue its own work.
+    await clearIdentityStores(IDENTITY_A);
+
+    await saveQueue({ serverUrl: SERVER_A, accountId: ACCOUNT_B }, [
+      entry({ accountId: ACCOUNT_B, idempotencyKey: "idem-b" }),
+    ]);
+
+    expect(await AsyncStorage.getItem(queueKey(SERVER_A, ACCOUNT_B))).toContain("idem-b");
+  });
+});

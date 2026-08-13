@@ -30,8 +30,10 @@ import { RETENTION_MS } from "./classificationTypes";
 import type { ClassificationIdentity } from "./storageKeys";
 import {
   cacheKey,
+  forgetIdentityStores,
   identitySuffixOf,
   isClassificationKey,
+  isForgottenKey,
   keysForIdentity,
   queueKey,
   storeOf,
@@ -312,6 +314,13 @@ export async function saveQueue(
   now: number = Date.now(),
 ): Promise<void> {
   const key = queueKey(identity.serverUrl, identity.accountId);
+  if (isForgottenKey(key)) {
+    // This identity's stores were deliberately cleared while this write was
+    // waiting its turn behind another. Writing now would re-create the queue
+    // a sign-out or a server change had just deleted, under a key nothing on
+    // the device can name any more.
+    return;
+  }
   const owned = entries.filter((e) => belongsTo(e, identity)).map((e) => clampEntry(e, now));
   if (owned.length === 0) {
     await AsyncStorage.removeItem(key);
@@ -339,6 +348,10 @@ export async function clearCacheFor(identity: ClassificationIdentity): Promise<v
 /** Both stores of one identity, together. Clearing one and forgetting the
  *  other is the documented bug FR-011 exists to prevent. */
 export async function clearIdentityStores(identity: ClassificationIdentity): Promise<void> {
+  // Tombstoned *before* the delete, not after: a queued write that lands
+  // between the two would otherwise slip underneath the clear and put the work
+  // straight back. See `forgetIdentityStores`.
+  forgetIdentityStores(identity.serverUrl, identity.accountId);
   await AsyncStorage.multiRemove(keysForIdentity(identity.serverUrl, identity.accountId));
 }
 

@@ -134,3 +134,57 @@ export function parseClassificationKey(
     return null;
   }
 }
+
+// ----------------------------------------------------- forgotten identities
+
+/**
+ * Identities whose device stores have been deliberately cleared in this run.
+ *
+ * Clearing is not a barrier on its own, and two writer chains outlive it. A
+ * drain pass whose identity has since been replaced still finishes its own
+ * entry into its own key — that is deliberate, and the one thing about a
+ * half-finished pass that is unambiguously its work. The project and Tag cache
+ * write is fire-and-forget from a React Query callback and answers to nobody.
+ * Either can land *after* `clearIdentityStores` and put unsent work, or the
+ * names the person wrote, back on disk under an identity that has just been
+ * forgotten — where invariant 8b's sweep reaches it only once some *other*
+ * identity signs in successfully. On a device where nobody signs in again it
+ * simply stays, unnameable and undeleted, which is the exact outcome FR-011
+ * exists to prevent.
+ *
+ * Awaiting those chains from the clearing side would mean `SessionProvider`
+ * holding a handle on every writer in the app. A tombstone the writers consult
+ * is the same guarantee from the other end, and it additionally covers a write
+ * that *starts* after the clear, which awaiting cannot.
+ *
+ * Process-lifetime only, and deliberately so: this orders writes within one
+ * run, and a later sign-in to the same identity lifts it (`adoptIdentityStores`
+ * from `persistIdentity`). The one interleaving it does not cover is signing
+ * out and back in as the *same* account while a pass is still in flight, which
+ * resurrects that account's own work for that same account — not a disclosure,
+ * and not worth a heavier mechanism than this.
+ */
+const forgottenSuffixes = new Set<string>();
+
+/** Called by `clearIdentityStores`, before the delete rather than after it:
+ *  a writer that runs between the two would otherwise slip underneath. */
+export function forgetIdentityStores(serverUrl: string, accountId: string): void {
+  forgottenSuffixes.add(identitySuffix(serverUrl, accountId));
+}
+
+/** Lifts the tombstone when this identity is established again. */
+export function adoptIdentityStores(serverUrl: string, accountId: string): void {
+  forgottenSuffixes.delete(identitySuffix(serverUrl, accountId));
+}
+
+/** Whether writing this key would resurrect a store that was cleared. */
+export function isForgottenKey(key: string): boolean {
+  const suffix = identitySuffixOf(key);
+  return suffix !== null && forgottenSuffixes.has(suffix);
+}
+
+/** Tests only. Reset globally in `jest.setup.js`, because a tombstone left
+ *  standing would make the next test's writes silently no-op. */
+export function resetForgottenIdentities(): void {
+  forgottenSuffixes.clear();
+}
