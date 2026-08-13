@@ -12,6 +12,7 @@ _ERROR_DESCRIPTIONS = {
     403: "The re-entered current password did not match.",
     404: "The requested resource is absent or belongs to another owner.",
     409: "The request conflicts with the current resource state.",
+    413: "The request body exceeds the configured size limit.",
     422: "The request path, query, or body does not match the API schema.",
     429: "Too many requests were made within the configured limit.",
 }

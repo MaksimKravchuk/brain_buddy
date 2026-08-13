@@ -44,13 +44,25 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFINITION_RE = re.compile(r"^\s*[-*]\s*\*\*((?:FR|SC)-\d+)\*\*", re.MULTILINE)
 FEATURE_NUMBER_RE = re.compile(r"^(\d{3})-")
 
-TEST_TREES = (
+# Trees that hold nothing but tests: every file in them is evidence, whatever
+# it is called. `mobile/integration/run.ts` is the case that exposed the bug —
+# it was listed as a test tree and then filtered out again by the name hints
+# below, so every integration assertion in the repository was invisible to this
+# gate. A tree named here asserts its own contents; do not add a broad one.
+DEDICATED_TEST_TREES = (
     "backend/tests",
-    "frontend/src",
     "frontend/tests",
-    "mobile/src",
     "mobile/integration",
 )
+
+# Trees that hold product code with tests mixed in, where a filename hint is
+# the only way to tell them apart.
+MIXED_TEST_TREES = (
+    "frontend/src",
+    "mobile/src",
+)
+
+TEST_TREES = DEDICATED_TEST_TREES + MIXED_TEST_TREES
 TEST_SUFFIXES = (".py", ".ts", ".tsx", ".js", ".jsx")
 TEST_NAME_HINTS = ("test", "spec", "__tests__")
 
@@ -60,8 +72,12 @@ def iter_test_files(root: Path):
         base = root / tree
         if not base.is_dir():
             continue
+        dedicated = tree in DEDICATED_TEST_TREES
         for path in base.rglob("*"):
             if not path.is_file() or path.suffix not in TEST_SUFFIXES:
+                continue
+            if dedicated:
+                yield path
                 continue
             lowered = str(path.relative_to(root)).lower()
             if any(hint in lowered for hint in TEST_NAME_HINTS):

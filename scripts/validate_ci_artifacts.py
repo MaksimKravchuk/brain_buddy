@@ -16,6 +16,10 @@ from pathlib import Path
 REQUIRED_ARTIFACTS = {
     "backend-allure-results": "backend/allure-results",
     "frontend-allure-results": "frontend/allure-results",
+    # Mobile was the one lane whose tests produced no Allure evidence, so the
+    # aggregate report spoke for two stacks out of three while reading as if it
+    # covered the product.
+    "mobile-allure-results": "mobile/allure-results",
     "playwright-allure-results": "frontend/allure-results/playwright",
     "allure-report-html": "allure-report",
 }
@@ -144,6 +148,113 @@ NARROW_COVERAGE_SUPPRESSION = re.compile(
 )
 SOURCE_SUFFIXES = (".ts", ".tsx", ".js", ".jsx")
 EXECUTED_ALLURE_STATUSES = {"passed", "failed", "broken"}
+# A change touching no stack uploads no Allure results, and
+# `actions/download-artifact` does not create its target directory when nothing
+# matches. The aggregate validator then failed on a directory that was never
+# going to exist, which made every documentation-only pull request unmergeable
+# -- and stages 1 through 9 of a spec-driven feature produce nothing but
+# documentation commits. The short circuit these strings guard is the fix;
+# deleting it silently restores the breakage for the next spec-only branch.
+#
+# Narrow on purpose in one direction only: it must NOT grow to cover "a lane ran
+# and produced no results". That is a real defect and the validator exists to
+# fail on it.
+#
+# It must, however, name every lane that uploads. This comment previously said
+# only `backend` and `frontend` upload results, that the `e2e` job "derives its
+# own RUN from those two", and that `mobile` uploads none. Each claim decayed
+# separately, and each time the predicate was left behind. Four artifacts match
+# the `*-allure-results` download pattern today: backend, frontend, mobile and
+# playwright.
+#
+# The step anchors below are deliberately two-line, binding the guard to the
+# `if:` on the specific steps it protects. A bare "if: steps.aggregate..."
+# substring was the first version and it did not bite: the "Post PR Allure
+# report link" step carries the same condition joined to another with `&&`, so
+# deleting the gate from the download and validate steps left the substring
+# present and the invariant green over a workflow that fails on every
+# specs-only branch. An invariant satisfiable by code that does not work is
+# worse than none.
+ALLURE_AGGREGATION_REQUIREMENTS = (
+    ("Allure aggregation short-circuit step", "      - name: Decide whether there is anything to aggregate\n        id: aggregate"),
+    (
+        # Four, not three, and not two. This set has been wrong twice for the
+        # same reason: a lane started uploading Allure results and the
+        # invariant was not moved with it. First `mobile`, when the Jest suite
+        # gained taxonomy — a mobile-only pull request then skipped every
+        # aggregation step and still went green. Then `e2e`, which uploads
+        # `playwright-allure-results` under a bare `always()` in a job that is
+        # never path filtered, so it produces results on a docs-only run where
+        # all three stacks are false; the aggregation short-circuited and threw
+        # a complete Playwright suite away. An invariant that names the wrong
+        # set is worse than none: it reads as coverage of exactly the case it
+        # misses.
+        "Allure aggregation predicate over the four uploading lanes",
+        'if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ] || [ "$MOBILE" = "true" ]'
+        ' || [ "$E2E" = "true" ]; then',
+    ),
+    # Selected-to-run is not produced-something. A stack job is skipped when
+    # `spec-kit` is red, which is the normal state of a spec-driven branch, so
+    # the `changes` output alone reports stacks that uploaded nothing.
+    # One entry per uploading stack, and `!= 'skipped'` rather than
+    # `== 'success'`. A stack that ran and failed still uploaded its results
+    # under `always()`, and that is the run whose report a person most needs;
+    # requiring success hid it precisely then.
+    #
+    # Listing all three matters as much as the predicate itself: the shell line
+    # below can name MOBILE while the environment binds it to a constant, and
+    # the invariant would still pass over exactly the regression it claims to
+    # prevent. That is the defect this file's own header warns about.
+    #
+    # Hence anchored to the environment key, not a bare substring. Naming all
+    # three was necessary and not sufficient: the unanchored form asked whether
+    # the expression existed anywhere in the workflow, so binding `MOBILE` to a
+    # constant and leaving the real conjunction on an unread sibling key passed.
+    # The hole was closed only by the accident that each string appeared exactly
+    # once. `KEY: ${{ ... }}` binds the predicate to the variable the shell
+    # below actually reads, which is the property being asserted.
+    (
+        "Allure predicate conjoins selection with the backend job actually running",
+        "          BACKEND: ${{ needs.changes.outputs.backend == 'true'"
+        " && needs.backend.result != 'skipped' }}\n",
+    ),
+    (
+        "Allure predicate conjoins selection with the frontend job actually running",
+        "          FRONTEND: ${{ needs.changes.outputs.frontend == 'true'"
+        " && needs.frontend.result != 'skipped' }}\n",
+    ),
+    (
+        "Allure predicate conjoins selection with the mobile job actually running",
+        "          MOBILE: ${{ needs.changes.outputs.mobile == 'true'"
+        " && needs.mobile.result != 'skipped' }}\n",
+    ),
+    # One conjunct, not two, and that asymmetry is the point. The three stack
+    # lanes are path filtered, so "was it selected" is a real question for them.
+    # `e2e` is deliberately never path filtered and its upload carries a bare
+    # `always()` with no RUN guard, so the job produces results whenever it is
+    # not skipped -- there is no `changes.outputs.e2e` to conjoin, and adding
+    # one would reintroduce the bug by making a docs-only run look empty.
+    #
+    # Anchored to the key for the same reason as the three above: the shell line
+    # can name E2E while the environment binds it to a constant.
+    (
+        "Allure predicate accounts for the never-path-filtered e2e lane",
+        "          E2E: ${{ needs.e2e.result != 'skipped' }}\n",
+    ),
+    (
+        "gate on the Allure download step",
+        "      - name: Download Allure results\n        if: steps.aggregate.outputs.run == 'true'",
+    ),
+    (
+        "gate on the aggregate Allure validation step",
+        "      - name: Validate aggregate Allure results\n        if: steps.aggregate.outputs.run == 'true'",
+    ),
+    (
+        "aggregate Allure taxonomy validation still runs",
+        "--path allure-results --label aggregate-allure",
+    ),
+)
+
 E2E_CI_REQUIREMENTS = (
     ("e2e CI job", "  e2e:"),
     ("Compose Playwright E2E job name", "Compose Playwright E2E"),
@@ -522,10 +633,26 @@ def _path_filter_errors(workflow_text: str) -> list[str]:
         block = _job_block(workflow_text, job)
         if block is None:
             errors.append(f"missing {job} job")
-        elif re.search(r"^    if:", block, flags=re.MULTILINE):
+            continue
+        job_if = re.search(r"^    if:(?P<expr>.*)$", block, flags=re.MULTILINE)
+        if not job_if:
+            continue
+        # The hazard this guards is a job that silently does not run because the
+        # DIFF said so. That reports 'skipped', which ADR-0008 requires Full CI
+        # to treat as a failure, so a candidate must never be able to land on a
+        # check that quietly did not execute.
+        #
+        # A condition that only propagates another job's outcome is not that.
+        # `docker` needs one: with a bare `needs: e2e` it was skipped the moment
+        # E2E failed, so the required check went missing in exactly the case it
+        # exists to explain. Banning every job-level `if` cost that check its
+        # purpose; what stays banned is reading the path filter here.
+        expression = job_if.group("expr")
+        if "needs.changes.outputs" in expression or "env.RUN" in expression:
             errors.append(
-                f"{job} job uses a job-level 'if'; path filtering must gate "
-                "steps so the job still reports success rather than skipped"
+                f"{job} job gates itself on the changed-stack filter with a "
+                "job-level 'if'; path filtering must gate steps so the job "
+                "still reports success rather than skipped"
             )
     return errors
 
@@ -541,11 +668,205 @@ def _job_block(workflow_text: str, job: str) -> str | None:
     return match.group("body") if match else None
 
 
+def _job_names(workflow_text: str) -> list[str]:
+    """Every top-level job key, in file order."""
+
+    jobs_block = re.search(
+        r"^jobs:$(?P<body>.*)\Z", workflow_text, flags=re.MULTILINE | re.DOTALL
+    )
+    if not jobs_block:
+        return []
+    return re.findall(r"^  ([a-z0-9-]+):$", jobs_block.group("body"), flags=re.MULTILINE)
+
+
+def _job_needs(workflow_text: str, job: str) -> set[str] | None:
+    """Return one job's declared ``needs``, or None when the job is absent."""
+
+    block = _job_block(workflow_text, job)
+    if block is None:
+        return None
+
+    inline = re.search(r"^    needs:[ \t]*([A-Za-z0-9_-]+)[ \t]*$", block, flags=re.MULTILINE)
+    if inline:
+        return {inline.group(1)}
+
+    flow = re.search(r"^    needs:[ \t]*\[(?P<items>[^\]]*)\]", block, flags=re.MULTILINE)
+    if flow:
+        return {item.strip() for item in flow.group("items").split(",") if item.strip()}
+
+    listed = re.search(r"^    needs:[ \t]*\n(?P<items>(?:^      - .+\n)+)", block, flags=re.MULTILINE)
+    if listed:
+        return {
+            line.strip().removeprefix("- ").strip()
+            for line in listed.group("items").splitlines()
+            if line.strip()
+        }
+    return set()
+
+
+# The job graph is deliberately flat: independent work runs as independent
+# lanes, and `full-ci` is the single join. Two things then need guarding.
+#
+# First, a lane must not grow an edge that buys nothing. There are exactly three
+# reasons an edge earns its place -- the job consumes the other's output; the
+# other is a cheap check that should fail the run before this expensive one
+# spends runner minutes; or the two build byte-identical artifacts and ordering
+# them lets the second reuse the first's cache instead of paying twice.
+# Chaining the stack jobs behind the documentation and workflow-lint gates
+# satisfies none of them: it once put roughly 35 seconds of markdown validation
+# in front of every test in the run without changing a single result.
+#
+# Second, and more dangerous: with a flat graph `full-ci` is the ONLY thing
+# making a job required. A new job that nobody adds to its `needs` is not a
+# lenient check, it is an absent one, and the run stays green without it. The
+# completeness check below is what makes flattening safe.
+LANE_DEPENDENCY_LIMITS = {
+    # The service lanes consume exactly one thing: the changed-stack decision
+    # that drives their RUN gate. Nothing else may precede them -- they are the
+    # cheap checks everything else is allowed to wait for.
+    "backend": {"changes"},
+    "frontend": {"changes"},
+    "mobile": {"changes"},
+    # The whole-stack lane. It consumes nothing the service lanes produce, but
+    # it may wait for them so a failing linter or unit test stops the run before
+    # anything pays to boot the stack. It may wait for NOTHING ELSE: not mobile
+    # (which ships in neither image), and not docker.
+    "e2e": {"backend", "frontend"},
+    # The image build, ordered after E2E for cache locality: the two build
+    # byte-identical images, so running them in parallel paid the same build
+    # twice on every cold cache. `backend`/`frontend` are deliberately absent --
+    # e2e already waits on them, and restating a transitive edge is the noise
+    # this rule exists to keep out.
+    "docker": {"e2e"},
+    # The mutation measurements consume the enforced-scope decision from
+    # `changes`, and wait on `backend` for cost: mutmut re-runs the backend suite
+    # hundreds of times, so it is the most expensive thing in the workflow to
+    # point at code whose own tests are already failing.
+    "mutation-base": {"changes", "backend"},
+    "mutation-head": {"changes", "backend"},
+    # The gate genuinely consumes both measurements -- it compares them.
+    "mutation-gate": {"changes", "mutation-base", "mutation-head"},
+}
+FULL_CI_JOB = "full-ci"
+ALLURE_REPORT_JOB = "allure-report"
+
+
+def _job_graph_errors(workflow_text: str) -> list[str]:
+    errors: list[str] = []
+    for job, allowed in LANE_DEPENDENCY_LIMITS.items():
+        needs = _job_needs(workflow_text, job)
+        if needs is None:
+            errors.append(f"missing {job} job")
+            continue
+        surplus = sorted(needs - allowed)
+        if surplus:
+            permitted = ", ".join(sorted(allowed))
+            limit = (
+                f"it may depend on {permitted} and nothing else"
+                if permitted
+                else "it must run as an independent lane"
+            )
+            errors.append(
+                f"{job} job declares needs it does not consume: {surplus}; {limit}. "
+                "A lane queued behind unrelated work delays the whole run without "
+                "changing any result."
+            )
+
+    full_ci_needs = _job_needs(workflow_text, FULL_CI_JOB)
+    if full_ci_needs is None:
+        errors.append(f"missing {FULL_CI_JOB} job")
+        return errors
+
+    all_jobs = set(_job_names(workflow_text))
+    expected = all_jobs - {FULL_CI_JOB}
+    missing = sorted(expected - full_ci_needs)
+    if missing:
+        errors.append(
+            f"{FULL_CI_JOB} does not require every job: {missing}. With a flat job "
+            "graph this gate is the only thing that makes a job required, so a job "
+            "missing here is not checked at all."
+        )
+
+    # The aggregate report is the run's closing artifact and the pull request
+    # comment points at it, so it must not be generated while any job can still
+    # change the verdict. Naming only the jobs that produce results left that
+    # true by coincidence: mutation-head runs up to 90 minutes, so on a change
+    # touching the enforced backend scope the report would publish its link long
+    # before mutation-gate decided.
+    report_needs = _job_needs(workflow_text, ALLURE_REPORT_JOB)
+    if report_needs is None:
+        errors.append(f"missing {ALLURE_REPORT_JOB} job")
+        return errors
+    report_expected = all_jobs - {FULL_CI_JOB, ALLURE_REPORT_JOB}
+    report_missing = sorted(report_expected - report_needs)
+    if report_missing:
+        errors.append(
+            f"{ALLURE_REPORT_JOB} does not wait for every other job: {report_missing}. "
+            "It publishes the run's closing report and its pull request link, so a job "
+            "that can still be running when it starts makes that report describe a run "
+            "nobody has finished."
+        )
+    return errors
+
+
 def _missing_e2e_ci_errors(workflow_text: str) -> list[str]:
     errors: list[str] = []
     for label, snippet in E2E_CI_REQUIREMENTS:
         if snippet not in workflow_text:
             errors.append(f"missing {label}: {snippet}")
+    return errors
+
+
+def _missing_allure_aggregation_errors(workflow_text: str) -> list[str]:
+    errors: list[str] = []
+    for label, snippet in ALLURE_AGGREGATION_REQUIREMENTS:
+        if snippet not in workflow_text:
+            errors.append(f"missing {label}: {snippet}")
+    return errors
+
+
+def _undiscoverable_allure_producer_errors(workflow_text: str) -> list[str]:
+    """Every Allure result a job writes must be uploaded where the aggregate looks.
+
+    The predicate above enumerates the lanes that upload. That is necessary and
+    not sufficient, and the difference is the whole reason this function exists:
+    an enumeration can only name artifacts that are *already* called
+    ``*-allure-results``, so a producer whose artifact is named anything else is
+    invisible to it — the invariant stays green while the report silently omits
+    the result. That is not hypothetical. ``mutation-head`` wrote a valid Allure
+    result for the **blocking** mutation gate and uploaded it as
+    ``mutation-gate-evidence``; the aggregate downloads by ``*-allure-results``
+    pattern, so the one result a person most needs when the gate fails was the
+    one no report ever contained.
+
+    So this asks the question from the producing end instead: for every
+    ``create_mutation_allure_evidence.py --output <dir>/<file>`` in the
+    workflow, is ``<dir>`` uploaded under a name the aggregate's pattern
+    matches? A new producer is then caught by construction rather than by
+    somebody remembering to extend a list.
+    """
+    errors: list[str] = []
+    outputs = re.findall(
+        r"create_mutation_allure_evidence\.py[^\n]*(?:\\\s*\n[^\n]*)*?--output\s+(\S+)",
+        workflow_text,
+    )
+    for output in outputs:
+        directory = output.rsplit("/", 1)[0] if "/" in output else output
+        uploaded = re.search(
+            r"name:\s*(\S+)\n\s*path:\s*" + re.escape(directory) + r"\s*\n",
+            workflow_text,
+        )
+        if uploaded is None:
+            errors.append(
+                "an Allure result is written to "
+                f"{directory} but no artifact uploads that directory"
+            )
+        elif not uploaded.group(1).endswith("-allure-results"):
+            errors.append(
+                f"the Allure result written to {directory} is uploaded as "
+                f"'{uploaded.group(1)}', which the aggregate's '*-allure-results' "
+                "pattern does not match, so no report will ever contain it"
+            )
     return errors
 
 
@@ -561,7 +882,10 @@ def validate_workflow(
         errors.extend(_missing_artifact_errors(workflow_text))
         errors.extend(_missing_frontend_ci_errors(workflow_text))
         errors.extend(_missing_e2e_ci_errors(workflow_text))
+        errors.extend(_missing_allure_aggregation_errors(workflow_text))
+        errors.extend(_undiscoverable_allure_producer_errors(workflow_text))
         errors.extend(_path_filter_errors(workflow_text))
+        errors.extend(_job_graph_errors(workflow_text))
         errors.extend(_mutation_gate_errors(workflow_text))
         errors.extend(_concurrency_errors(workflow_text))
         errors.extend(_retention_errors(workflow_text))

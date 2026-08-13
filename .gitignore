@@ -40,6 +40,7 @@ coverage/
 /frontend/mutation-artifacts/
 /frontend/mutation-allure-results/
 /frontend/reports/
+/mobile/allure-results/
 /mobile/.stryker-tmp/
 /mobile/mutation-artifacts/
 /mobile/mutation-allure-results/
@@ -63,6 +64,8 @@ data/
 # Spec Kit extension catalog cache: refetched on demand, machine-specific,
 # and it churns on every `specify extension search`.
 .specify/extensions/.cache/
+# ADR-0009: feature resolution leaves this absent; committed, it pins every run.
+.specify/feature.json
 
 # Codex
 .codex/

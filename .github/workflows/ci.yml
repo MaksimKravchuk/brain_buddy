@@ -11,7 +11,13 @@ on:
     # this file therefore cannot grant itself the power to land.
     branches: ["main", "trunk-candidate/**"]
   pull_request:
-    branches: ["main"]
+    # `stack/**` so a stacked pull request gets the same full CI as one
+    # targeting main. Without it a stack is unreviewable: only the base PR
+    # runs anything, and every slice above it shows four skipped preview jobs
+    # and no evidence at all. These refs are pull-request runs, which carry no
+    # write permission and cannot promote — landing stays owned by the
+    # default-branch deploy workflow, exactly as for `main`.
+    branches: ["main", "stack/**"]
 
 permissions:
   contents: read
@@ -87,10 +93,12 @@ jobs:
   #
   # Filtering applies to pull requests only. Pushes to main and to
   # trunk-candidate/** are the landing path, and those are verified in full.
+  # This job holds no `needs`. It is the only real data dependency the stack
+  # lanes have, so nothing may sit in front of it: a lint gate queued ahead of
+  # it would delay every test in the run without changing any of their results.
   changes:
     name: Changed stacks
     runs-on: ubuntu-latest
-    needs: workflow-lint
     outputs:
       backend: ${{ steps.decide.outputs.backend }}
       frontend: ${{ steps.decide.outputs.frontend }}
@@ -134,8 +142,14 @@ jobs:
               # Shared surfaces exercise everything: a change to CI, the
               # delivery scripts, the Makefile or the Compose stack can alter
               # any stack's result.
+              #
+              # `compose.yaml` is this repository's Compose file. The pattern
+              # used to name only `docker-compose`, which has never matched
+              # anything here, so edits to the real file silently exercised no
+              # stack at all. Both spellings are listed now: the legacy one
+              # costs nothing and survives a rename back.
               if printf '%s\n' "${changed}" | grep -Eq \
-                   '^(\.github/|scripts/|Makefile$|docker-compose)'; then
+                   '^(\.github/|scripts/|Makefile$|compose\.yaml$|docker-compose)'; then
                 echo "shared surface touched; exercising every stack"
               else
                 printf '%s\n' "${changed}" | grep -q '^backend/'  || backend=false
@@ -219,10 +233,12 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "mutation=${mutation}"
 
+  # Validates the markdown under specs/ and the gate scripts themselves. It
+  # shares no input and no artifact with any stack lane, so it is a lane of its
+  # own; `full-ci` is where its result is required, not the stack lanes' `needs`.
   spec-kit:
     name: Spec Kit artifacts
     runs-on: ubuntu-latest
-    needs: workflow-lint
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -249,10 +265,7 @@ jobs:
   backend:
     name: Backend
     runs-on: ubuntu-latest
-    needs:
-      - workflow-lint
-      - spec-kit
-      - changes
+    needs: changes
     # The job always runs; RUN gates its expensive steps. See the `changes` job
     # for why this is not a job-level `if`.
     env:
@@ -370,10 +383,7 @@ jobs:
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
-    needs:
-      - workflow-lint
-      - spec-kit
-      - changes
+    needs: changes
     env:
       RUN: ${{ needs.changes.outputs.frontend }}
     defaults:
@@ -471,10 +481,7 @@ jobs:
   mobile:
     name: Mobile
     runs-on: ubuntu-latest
-    needs:
-      - workflow-lint
-      - spec-kit
-      - changes
+    needs: changes
     env:
       RUN: ${{ needs.changes.outputs.mobile }}
     defaults:
@@ -546,6 +553,24 @@ jobs:
           python3 scripts/validate_coverage_floor.py --stack mobile --format istanbul-summary \
             --report mobile/coverage/coverage-summary.json --floor mobile/coverage-floor.json "${base_args[@]}"
 
+      # Mobile was the one lane whose tests produced no Allure evidence at all,
+      # so the aggregate report covered two stacks out of three. Validated on
+      # the same terms as the others: every result carries epic/feature/story,
+      # a readable title and a meaningful step.
+      - name: Validate mobile Allure results
+        if: always() && env.RUN == 'true'
+        working-directory: .
+        run: python3 scripts/validate_allure_taxonomy.py --path mobile/allure-results --label mobile-jest
+
+      - name: Upload mobile Allure results
+        if: always() && env.RUN == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: mobile-allure-results
+          path: mobile/allure-results
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+
       - name: Set up Python for the integration backend
         if: env.RUN == 'true'
         uses: actions/setup-python@v7
@@ -589,14 +614,17 @@ jobs:
   # the two campaigns overlap and a pull request pays one campaign's wall-clock
   # rather than two. Only mutation-gate waits, and it just reads two artifacts.
   # A push has no base to measure, so every step below skips in seconds.
+  # mutmut re-runs the backend suite hundreds of times. Measuring the
+  # mutation score of code whose own unit tests are failing burns the most
+  # runner minutes in the workflow to learn nothing, so this waits for the
+  # backend lane. `changes` stays: it carries the enforced-scope decision.
   mutation-base:
     name: Backend mutation base measurement
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs:
-      - workflow-lint
-      - spec-kit
       - changes
+      - backend
     # No job-level `if`: a skipped job fails Full CI (ADR-0008). The steps below
     # carry the condition instead.
     env:
@@ -687,14 +715,17 @@ jobs:
   # judge, which forced `needs: mutation-base` and serialised them, doubling a
   # pull request's wall-clock for no reason. Measuring and judging are split so
   # only the judging waits.
+  # mutmut re-runs the backend suite hundreds of times. Measuring the
+  # mutation score of code whose own unit tests are failing burns the most
+  # runner minutes in the workflow to learn nothing, so this waits for the
+  # backend lane. `changes` stays: it carries the enforced-scope decision.
   mutation-head:
     name: Backend mutation head measurement
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs:
-      - workflow-lint
-      - spec-kit
       - changes
+      - backend
     env:
       RUN: ${{ needs.changes.outputs.mutation }}
     steps:
@@ -749,24 +780,34 @@ jobs:
       # Written here rather than in the verdict job so a failing gate still
       # ships its evidence, and tolerant of a campaign that died before writing
       # any: a run that crashed is exactly when someone needs the artifacts.
+      #
+      # The directory and the artifact are both named `*-allure-results` so the
+      # aggregate below actually discovers them. They were called
+      # `mutation-gate-evidence`, which produced a valid Allure result that no
+      # report ever contained: the aggregate downloads by `*-allure-results`
+      # pattern, and this is the BLOCKING gate — the one result a person most
+      # needs in the report was the one silently missing from it. The two `.txt`
+      # files stay in the same directory because the result declares them as
+      # attachments by bare filename, which Allure resolves relative to the
+      # results directory.
       - name: Create blocking-gate Allure evidence
         if: always() && env.RUN == 'true'
         run: |
-          mkdir -p backend/mutation-gate-evidence
+          mkdir -p backend/mutation-gate-allure-results
           for evidence in mutation-summary.txt mutation-survivors.txt; do
             if [ -f "backend/mutation-artifacts/${evidence}" ]; then
-              cp "backend/mutation-artifacts/${evidence}" backend/mutation-gate-evidence/
+              cp "backend/mutation-artifacts/${evidence}" backend/mutation-gate-allure-results/
             else
               echo "the campaign did not produce ${evidence}; see the raw mutmut state" \
-                > "backend/mutation-gate-evidence/${evidence}"
+                > "backend/mutation-gate-allure-results/${evidence}"
             fi
           done
           python3 scripts/create_mutation_allure_evidence.py \
             --mode blocking-gate \
             --scope-label backend \
-            --summary backend/mutation-gate-evidence/mutation-summary.txt \
-            --survivors backend/mutation-gate-evidence/mutation-survivors.txt \
-            --output backend/mutation-gate-evidence/mutation-gate-result.json
+            --summary backend/mutation-gate-allure-results/mutation-summary.txt \
+            --survivors backend/mutation-gate-allure-results/mutation-survivors.txt \
+            --output backend/mutation-gate-allure-results/mutation-gate-result.json
 
       - name: Upload raw mutmut state
         if: always() && env.RUN == 'true'
@@ -790,8 +831,8 @@ jobs:
         if: always() && env.RUN == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: mutation-gate-evidence
-          path: backend/mutation-gate-evidence
+          name: mutation-gate-allure-results
+          path: backend/mutation-gate-allure-results
           if-no-files-found: error
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
@@ -843,48 +884,115 @@ jobs:
           python3 scripts/mutation_gate.py check \
             --stats head-stats/mutation-stats.json "${base_args[@]}"
 
+  # Proves the production Dockerfiles still build. This is a required status
+  # check on main (docs/autonomous-delivery-runbook.md), so the job name is
+  # load-bearing and must not be renamed.
+  #
+  # Gated on `e2e`, and this is the one edge in the graph that exists for
+  # neither of the usual two reasons -- it is there for cache locality.
+  #
+  # This job and the E2E lane build byte-identical images: same Dockerfiles,
+  # same build args, same `stack-*` cache scopes. Running them in parallel meant
+  # paying that build twice whenever the cache was cold, which on a `main` push
+  # is every time. Ordering this one after E2E makes its build a guaranteed hit
+  # on the cache E2E just wrote: measured, roughly 1:01 down to ~20s.
+  #
+  # It costs no wall clock -- E2E is not the last job, so this still lands
+  # before allure-report -- and it keeps the diagnostic value of a separate
+  # check: when E2E goes red, `Docker Images` says at a glance whether the
+  # images built or the journeys failed. `backend`/`frontend` are not listed
+  # because E2E already waits on them; restating a transitive edge is exactly
+  # what the graph rule rejects. It still does not wait on mobile, which ships
+  # in neither image.
+  #
+  # The condition is what makes the diagnostic above actually hold. With a bare
+  # `needs: e2e`, GitHub skips this job the moment E2E fails -- so the separate
+  # required check went missing in precisely the case it exists to explain, and
+  # `full-ci` saw a skipped result on top of the real failure. Spelled out:
+  #   E2E failed   -> run, so `Docker Images` still reports whether the images
+  #                   built when the Playwright journeys are what went red
+  #   E2E skipped  -> skip, because its own gate already decided the services
+  #                   are too broken to be worth building images from
+  #   cancelled    -> skip
+  # This is not path filtering and never hides a check behind the diff, which
+  # is what the job-level `if` ban exists to prevent.
   docker:
     name: Docker Images
     runs-on: ubuntu-latest
-    needs:
-      - backend
-      - frontend
-      - changes
-    env:
-      RUN: ${{ (needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true') && 'true' || 'false' }}
+    needs: e2e
+    if: ${{ !cancelled() && needs.e2e.result != 'skipped' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
-        if: env.RUN == 'true'
         uses: docker/setup-buildx-action@v4
 
+      - name: Expose the Actions cache service to buildx
+        uses: actions/github-script@v9
+        with:
+          script: |
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      # Reads the same cache scopes the E2E lane writes, and deliberately does
+      # not write them back: the two jobs build byte-identical layers, so a
+      # second writer would only spend the repository's shared 10 GB cache quota
+      # storing a duplicate -- and evict the npm and pip caches the other lanes
+      # depend on to do it.
+      #
+      # type=cacheonly: this job proves the Dockerfile builds, it never runs the
+      # image, so exporting one would be pure cost.
       - name: Build backend image
-        if: env.RUN == 'true'
         run: |
           for attempt in 1 2 3; do
-            docker build -t brain-buddy-backend-test -f backend/Dockerfile . && exit 0
+            docker buildx build \
+              --file backend/Dockerfile \
+              --cache-from "type=gha,scope=stack-backend" \
+              --output type=cacheonly . && exit 0
             if [ "$attempt" = 3 ]; then exit 1; fi
             sleep "$((attempt * 10))"
           done
 
+      # Same build args as the E2E lane, so both resolve to the same layers and
+      # therefore to the same cache entries.
       - name: Build frontend image
-        if: env.RUN == 'true'
         run: |
           for attempt in 1 2 3; do
-            docker build -t brain-buddy-frontend-test -f frontend/Dockerfile . && exit 0
+            docker buildx build \
+              --file frontend/Dockerfile \
+              --cache-from "type=gha,scope=stack-frontend" \
+              --build-arg VITE_API_BASE_URL=/api \
+              --output type=cacheonly . && exit 0
             if [ "$attempt" = 3 ]; then exit 1; fi
             sleep "$((attempt * 10))"
           done
 
+  # The whole-stack lane, and the most expensive job in the run.
+  #
+  # It is NEVER path filtered: it is the only check that exercises the backend
+  # and the frontend against each other, so "nothing in my stack changed" is not
+  # a reason to skip it -- a change on either side of the wire can break the pair
+  # while both services' own suites stay green.
+  #
+  # It is still gated on those two services, though. Booting a stack built from
+  # code whose own linter or unit tests just failed proves nothing, and this is
+  # the job that would waste the most runner time doing it. Cheap checks first,
+  # then the expensive one. Same reasoning as the docker job, and like it this
+  # lane does not wait on mobile, which is not part of the Compose stack.
+  #
+  # It does NOT need `docker`. That edge existed only because both jobs built
+  # the same images, and the shared layer cache below replaces it.
   e2e:
     name: Compose Playwright E2E
     runs-on: ubuntu-latest
     needs:
       - backend
       - frontend
-      - docker
+    env:
+      # Pinned so the prebuilt images below are exactly what Compose starts.
+      BRAIN_BUDDY_BACKEND_IMAGE: brain-buddy-backend:ci
+      BRAIN_BUDDY_FRONTEND_IMAGE: brain-buddy-frontend:ci
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -904,7 +1012,59 @@ jobs:
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # buildx talks to the Actions cache service through these two variables. A
+      # `run:` step does not receive them the way a build action does, and
+      # exporting them here keeps a third-party action out of a
+      # candidate-controlled workflow. If the service is unreachable the cache
+      # simply misses and the image builds from scratch: this fails toward doing
+      # MORE work, never toward starting a stale service.
+      - name: Expose the Actions cache service to buildx
+        uses: actions/github-script@v9
+        with:
+          script: |
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      # This is what "services from main, only the change rebuilt" buys. GitHub
+      # scopes its cache so a branch reads the DEFAULT BRANCH's entries: a
+      # service this branch did not touch restores main's layers and is ready in
+      # seconds, while a service it did touch misses from the first changed
+      # layer on and rebuilds. Nothing here branches on the diff -- the layers
+      # are content addressed, so the cache decides, and it can only ever be
+      # wrong in the direction of rebuilding too much.
+      - name: Build the stack images, reusing main's layers
+        run: |
+          # build <dockerfile> <tag> <cache-scope> [extra buildx args...]
+          build() {
+            local dockerfile="$1" tag="$2" scope="$3"
+            shift 3
+            for attempt in 1 2 3; do
+              docker buildx build \
+                --file "${dockerfile}" \
+                --tag "${tag}" \
+                --cache-from "type=gha,scope=stack-${scope}" \
+                --cache-to "type=gha,mode=max,scope=stack-${scope}" \
+                "$@" --load . && return 0
+              if [ "${attempt}" = 3 ]; then return 1; fi
+              sleep "$((attempt * 10))"
+            done
+          }
+          build backend/Dockerfile "${BRAIN_BUDDY_BACKEND_IMAGE}" backend
+          # Same value run_playwright_e2e.sh gives Compose: the frontend bakes
+          # its API base in at build time, so a prebuilt image must be built
+          # with the one the E2E stack actually serves.
+          build frontend/Dockerfile "${BRAIN_BUDDY_FRONTEND_IMAGE}" frontend \
+            --build-arg VITE_API_BASE_URL=/api
+
       - name: Run Compose smoke and Playwright E2E
+        env:
+          # The images are already built and tagged above, so Compose starts
+          # exactly those. --no-build (see run_playwright_e2e.sh) fails closed if
+          # one is missing rather than quietly building an unpinned replacement.
+          BRAIN_BUDDY_E2E_BUILD_IMAGES: "0"
         run: |
           # make test-e2e invokes npm run test:e2e after the Compose stack is ready.
           make test-e2e
@@ -942,12 +1102,38 @@ jobs:
           if-no-files-found: warn
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
+  # backend, frontend, mobile and e2e are real data dependencies: this job
+  # downloads the Allure results each of them uploads, and they are the only
+  # four that emit any. `mobile` joined when the mobile suite started producing
+  # evidence -- without it the aggregate could be generated before mobile
+  # finished writing its results, and Playwright's results arrive with `e2e`.
+  #
+  # Everything else is here for a different reason: this report is the run's
+  # closing artifact and the pull request comment points at it, so it must not
+  # be generated while any job can still change the verdict.
+  #
+  # That is why the list is EVERY job but `full-ci` rather than only the four
+  # that produce results. Naming just the evidence producers, or only those plus
+  # `docker`, left "last" true by coincidence: `mutation-head` carries
+  # timeout-minutes: 90, so on a change that touches the enforced backend scope
+  # mutmut runs far longer than E2E and Docker together, and the report would
+  # publish its link while `mutation-gate` was still deciding. The rule is
+  # checked by `scripts/validate_ci_artifacts.py workflow`, so a new job cannot
+  # quietly start finishing after the report that claims to summarise it.
   allure-report:
     name: Allure Report
     runs-on: ubuntu-latest
     needs:
+      - workflow-lint
+      - changes
+      - spec-kit
       - backend
       - frontend
+      - mobile
+      - mutation-base
+      - mutation-head
+      - mutation-gate
+      - docker
       - e2e
     if: always()
     permissions:
@@ -957,7 +1143,74 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # Four artifacts match the `*-allure-results` pattern downloaded below,
+      # and the predicate has to account for every one of them:
+      # `backend-allure-results`, `frontend-allure-results`,
+      # `mobile-allure-results` and `playwright-allure-results`. When a change
+      # produces none of them the download matches no artifact, and
+      # `actions/download-artifact` does not create the directory — the
+      # validator then failed on a directory that was never going to exist.
+      # Every specs-only commit hit this, which is most of a spec-driven
+      # feature's history.
+      #
+      # This comment used to claim that only `backend` and `frontend` upload
+      # results, that `e2e` "derives its own RUN from those two", and that
+      # `mobile` produces none at all. All three had stopped being true, and
+      # the predicate below was built on them.
+      #
+      # Deliberately a step-level short circuit and not a job-level `if`:
+      # `full-ci` counts a skipped required job as a failure on purpose, so
+      # skipping this job would trade one red build for another.
+      #
+      # It must stay this narrow. "A stack ran and produced no results" is a
+      # real defect and still fails here — that is the whole point of the
+      # validator, and this repository has now found that defect three times.
+      - name: Decide whether there is anything to aggregate
+        id: aggregate
+        # Selected-to-run is NOT the same question as produced-something, and
+        # the first version of this asked the wrong one. `changes` can mark a
+        # stack changed while its job is skipped anyway, because the stack jobs
+        # need `spec-kit` and a red spec gate skips them — which is exactly the
+        # state a spec-driven feature branch sits in. The predicate must be the
+        # conjunction: the stack was selected AND its job actually ran.
+        #
+        # Deliberately NOT "skip if the directory is empty". That would swallow
+        # the one case this validator exists for: a stack that ran and produced
+        # no results.
+        #
+        # E2E is the fourth uploading lane and it is asked a DIFFERENT question,
+        # because it is filtered differently. The three stack lanes are path
+        # filtered, so for them "was this selected" is a real question. `e2e` is
+        # never path filtered (see the job) and it uploads
+        # `playwright-allure-results` under a bare `always()` with no RUN guard,
+        # so it produces evidence on every run it is part of — including a
+        # docs-only one. There is no `changes.outputs.e2e` to conjoin and there
+        # must not be; the only question left is whether the job ran.
+        #
+        # Omitting that term is what this fixes. A docs-only pull request marks
+        # all three stacks false, yet `backend` and `frontend` still RUN with
+        # their steps skipped (see the `changes` job: skipping the jobs would
+        # trip ADR-0008), so `e2e` is not skipped either — it runs the whole
+        # Compose stack and uploads a full set of Playwright results. The
+        # three-stack predicate then short-circuited to run=false and threw them
+        # away: no aggregate report and no pull request link, on precisely the
+        # branches that are nothing but docs commits.
+        env:
+          BACKEND: ${{ needs.changes.outputs.backend == 'true' && needs.backend.result != 'skipped' }}
+          FRONTEND: ${{ needs.changes.outputs.frontend == 'true' && needs.frontend.result != 'skipped' }}
+          MOBILE: ${{ needs.changes.outputs.mobile == 'true' && needs.mobile.result != 'skipped' }}
+          E2E: ${{ needs.e2e.result != 'skipped' }}
+        run: |
+          if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ] || [ "$MOBILE" = "true" ] || [ "$E2E" = "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "A lane that uploads Allure results was exercised; aggregating."
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No lane that uploads Allure results was exercised, so there is nothing to aggregate. Nothing to validate."
+          fi
+
       - name: Download Allure results
+        if: steps.aggregate.outputs.run == 'true'
         uses: actions/download-artifact@v8
         with:
           pattern: '*-allure-results'
@@ -965,9 +1218,11 @@ jobs:
           merge-multiple: true
 
       - name: Validate aggregate Allure results
+        if: steps.aggregate.outputs.run == 'true'
         run: python3 scripts/validate_allure_taxonomy.py --path allure-results --label aggregate-allure
 
       - name: Set up Node.js
+        if: steps.aggregate.outputs.run == 'true'
         uses: actions/setup-node@v7
         with:
           node-version: "20.19.0"
@@ -975,15 +1230,18 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install Allure Report 3 CLI
+        if: steps.aggregate.outputs.run == 'true'
         working-directory: frontend
         run: npm ci
 
       - name: Generate Allure Report 3 HTML
+        if: steps.aggregate.outputs.run == 'true'
         run: |
           cd frontend
           npx allure generate ../allure-results -o ../allure-report
 
       - name: Upload Allure HTML report
+        if: steps.aggregate.outputs.run == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: allure-report-html
@@ -992,7 +1250,7 @@ jobs:
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
       - name: Post PR Allure report link
-        if: github.event_name == 'pull_request'
+        if: steps.aggregate.outputs.run == 'true' && github.event_name == 'pull_request'
         uses: actions/github-script@v9
         with:
           script: |

@@ -25,6 +25,7 @@ import {
 import { chunkSha256Hex, manifestHash } from "../src/braindump/manifest";
 import { uploadChunks } from "../src/braindump/uploader";
 import { startBackend } from "./backend";
+import { verifyNodeSafeClientImport } from "./clientNodeImport";
 import { createCookieFetch } from "./cookieFetch";
 import { makeWav } from "./wav";
 
@@ -74,6 +75,8 @@ function resolvePort(): number {
 }
 
 async function main() {
+  verifyNodeSafeClientImport();
+  ok("API client imports in Node and preserves relay intent snapshots");
   const port = resolvePort();
   console.log("Booting backend…");
   const backend = await startBackend(port);
@@ -180,6 +183,223 @@ async function main() {
     const projects = await client.listProjects();
     assert.equal(projects.find((p) => p.id === project.id)?.open_task_count, 1);
     ok("project/tag classification and filtered lists");
+
+    // --- Classification from the mobile task screen (spec 006) ---
+    //
+    // Everything below runs the real client against a real backend because the
+    // failures worth catching here are all wire-level: whether an explicit
+    // `null` survives serialization as a deliberate clear rather than being
+    // dropped as "no opinion"; whether a Tag set is applied whole; what the
+    // server does with a key it has already seen; and which `detail.resource`
+    // separates the two different 409s the client has to tell apart. A mocked
+    // backend would prove only that the mock was written.
+    console.log("classification (006)");
+    const launch = await client.createProject({ name: "Q3 launch" }, key());
+    const onboarding = await client.createProject({ name: "Onboarding drop-off" }, key());
+    const homeTag = await client.createTag({ name: "home" }, key());
+    const deepTag = await client.createTag({ name: "deep work" }, key());
+
+    const triaged = await client.createTask(
+      { title: "Book the rehearsal room", state: "inbox" },
+      key(),
+    );
+    assert.equal(triaged.project_id, null);
+    assert.deepEqual(triaged.tag_ids, []);
+
+    // 006-FR-001 — set a project from the task detail screen, and read it back.
+    const withProject = await client.updateTask(
+      triaged.id,
+      { project_id: launch.id, expected_revision: triaged.revision },
+      key(),
+    );
+    const afterProject = await client.getTask(triaged.id);
+    assert.equal(
+      afterProject.project_id,
+      launch.id,
+      "006-FR-001: the server must hold the project the phone set",
+    );
+    assert.equal(afterProject.revision, withProject.revision);
+    ok("006-FR-001 a project set on the phone survives a re-read");
+
+    // 006-FR-002 — attach two Tags, then detach one. `tag_ids` is the whole
+    // intended set, so the assertion that matters is that the *other* Tag, and
+    // the project, are untouched by a Tag change.
+    const withTags = await client.updateTask(
+      triaged.id,
+      { tag_ids: [homeTag.id, deepTag.id], expected_revision: afterProject.revision },
+      key(),
+    );
+    assert.deepEqual(
+      [...withTags.tag_ids].sort(),
+      [homeTag.id, deepTag.id].sort(),
+      "006-FR-002: both Tags must attach, and the order they were added in must not matter",
+    );
+    const detached = await client.updateTask(
+      triaged.id,
+      { tag_ids: [homeTag.id], expected_revision: withTags.revision },
+      key(),
+    );
+    assert.deepEqual(
+      detached.tag_ids,
+      [homeTag.id],
+      "006-FR-002: detaching one Tag must leave the other attached",
+    );
+    assert.equal(
+      detached.project_id,
+      launch.id,
+      "006-FR-002: a Tag change must not disturb the project",
+    );
+    ok("006-FR-002 two Tags attach, one detaches, the other and the project untouched");
+
+    // 006-SC-002 — what the phone sent is what the server holds, read back
+    // independently of the response the mutation returned. This is the
+    // automated half of "visible in the web client on the next refresh"; the
+    // other half is a person looking, and quickstart.md says so.
+    const asStored = await client.getTask(triaged.id);
+    assert.equal(
+      asStored.project_id,
+      launch.id,
+      "006-SC-002: the server must hold the project the phone sent, not a merge of it",
+    );
+    assert.deepEqual(
+      [...asStored.tag_ids].sort(),
+      [homeTag.id],
+      "006-SC-002: the server must hold exactly the Tag set the phone sent",
+    );
+    assert.equal(asStored.revision, detached.revision);
+
+    // A task carries at most one project: picking a second replaces the first
+    // rather than adding to it.
+    const reProjected = await client.updateTask(
+      triaged.id,
+      { project_id: onboarding.id, expected_revision: asStored.revision },
+      key(),
+    );
+    assert.equal(
+      (await client.getTask(triaged.id)).project_id,
+      onboarding.id,
+      "006-SC-002: a second project replaces the first — a task holds at most one",
+    );
+    ok("006-SC-002 the server holds exactly what the phone sent");
+
+    // 006-FR-003 — clearing is a supported outcome, not the absence of one, so
+    // it goes as an explicit `null`. `undefined` would mean "untouched" and the
+    // project would survive.
+    const clearedProject = await client.updateTask(
+      triaged.id,
+      { project_id: null, expected_revision: reProjected.revision },
+      key(),
+    );
+    assert.equal(
+      clearedProject.project_id,
+      null,
+      "006-FR-003: an explicit null must clear the project",
+    );
+    assert.deepEqual(
+      clearedProject.tag_ids,
+      [homeTag.id],
+      "006-FR-003: clearing the project must not touch the Tags",
+    );
+    assert.equal(
+      (await client.getTask(triaged.id)).project_id,
+      null,
+      "006-FR-003: the clear must survive a re-read, not just the response",
+    );
+    ok("006-FR-003 an explicit null clears the project and leaves the Tags alone");
+
+    // 006-FR-017 — a queued change reaches the server at most once. A request
+    // that timed out may already have been applied, so the retry carries the
+    // SAME key; the server must replay its stored result rather than apply the
+    // change a second time. This runs well inside the server's 24-hour replay
+    // window, which is the only reason the key can carry the guarantee at all
+    // (data-model invariant 10) — it proves at-most-once *inside* the window
+    // and nothing about outside it.
+    const beforeReplay = await client.getTask(triaged.id);
+    const replayKey = key();
+    const replayBody = {
+      project_id: launch.id,
+      expected_revision: beforeReplay.revision,
+    };
+    const firstSend = await client.updateTask(triaged.id, { ...replayBody }, replayKey);
+    const replaySend = await client.updateTask(triaged.id, { ...replayBody }, replayKey);
+    assert.equal(
+      firstSend.revision,
+      beforeReplay.revision + 1,
+      "006-FR-017: the first send must advance the revision by one",
+    );
+    assert.equal(
+      replaySend.revision,
+      firstSend.revision,
+      "006-FR-017: replaying one key must return the stored result, not apply the change twice",
+    );
+    const afterReplay = await client.getTask(triaged.id);
+    assert.equal(
+      afterReplay.revision,
+      beforeReplay.revision + 1,
+      "006-FR-017: after two PATCHes with the same key the revision advanced exactly once",
+    );
+    assert.equal(
+      afterReplay.project_id,
+      launch.id,
+      "006-FR-017: and project_id is the intended value",
+    );
+    ok("006-FR-017 two PATCHes with one key advance the revision exactly once");
+
+    // 006-FR-017 — the other 409. The client re-mints a key whenever the
+    // payload changes, because a stored key arriving with a different request
+    // hash is refused forever. `detail.resource` is the only thing separating
+    // this from a stale revision, and the drain branches on exactly that
+    // string — so it is asserted against the real server rather than assumed.
+    let reuseError: unknown;
+    try {
+      await client.updateTask(
+        triaged.id,
+        { project_id: onboarding.id, expected_revision: afterReplay.revision },
+        replayKey,
+      );
+    } catch (error) {
+      reuseError = error;
+    }
+    assert.ok(
+      reuseError instanceof ApiError && reuseError.status === 409,
+      "006-FR-017: a spent key carrying a changed payload must be refused",
+    );
+    assert.equal(
+      ((reuseError as ApiError).payload as { detail?: { resource?: string } }).detail?.resource,
+      "Idempotency-Key",
+      "006-FR-017: the refusal must name Idempotency-Key, which is what tells the client to re-mint",
+    );
+    ok("006-FR-017 a spent key with a changed payload → 409 naming Idempotency-Key");
+
+    // 006-FR-008 — a queued change necessarily carries the revision the person
+    // was looking at when they made it, so a rejection is an ordinary outcome
+    // of normal use rather than a rare race. This is the 409 the conflict sheet
+    // exists for, and the one the person answers.
+    let staleError: unknown;
+    try {
+      await client.updateTask(
+        triaged.id,
+        { project_id: onboarding.id, expected_revision: beforeReplay.revision },
+        key(),
+      );
+    } catch (error) {
+      staleError = error;
+    }
+    assert.ok(
+      staleError instanceof ApiError && staleError.status === 409,
+      "006-FR-008: a stale expected_revision on a classification change must be refused, not merged",
+    );
+    assert.equal(
+      ((staleError as ApiError).payload as { detail?: { resource?: string } }).detail?.resource,
+      "Task",
+      "006-FR-008: the refusal must name Task — the client opens the conflict sheet on this and nothing else",
+    );
+    assert.equal(
+      (await client.getTask(triaged.id)).project_id,
+      launch.id,
+      "006-FR-008: nothing of the rejected change may have been applied",
+    );
+    ok("006-FR-008 a stale expected_revision on a classification change → 409, nothing applied");
 
     // --- Brain dump: text-fixture end-to-end ---
     console.log("brain dump (text fixture)");

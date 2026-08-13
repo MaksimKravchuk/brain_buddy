@@ -5,11 +5,14 @@ from __future__ import annotations
 import logging
 import math
 import os
-from collections.abc import Mapping
+import socket
+from collections.abc import Callable, Mapping
 from enum import Enum
 from functools import lru_cache
+from ipaddress import IPv4Address, IPv6Address, ip_address
 from pathlib import Path
 from types import MappingProxyType
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 from pydantic import (
@@ -45,7 +48,25 @@ class AppEnvironment(str, Enum):
 # the backend brain-dump commands and provider discovery, plus the frontend
 # route (which reads the effective flag from ``/api/auth/me``). It ships
 # default OFF and rolls out OFF → INTERNAL → ON like every other flag.
-KNOWN_FEATURE_FLAGS: tuple[str, ...] = ("delivery_canary", "voice_brain_dump")
+#
+# ``mobile_task_classification`` (spec 006, FR-015) gates assigning a project
+# and Tags from the mobile task detail screen. It is purely client-side
+# exposure: no route, service or stored shape changes with it, and the mobile
+# client reads the effective value from ``/api/auth/me`` exactly as the
+# frontend reads ``voice_brain_dump``. Default OFF means the task screen keeps
+# today's presentation until the flag is deliberately turned on.
+#
+# ``external_agent_relay`` (ADR-0008) gates the bring-your-own-agent relay:
+# connection management, hand-off, and the owner-facing run projection. Inbound
+# connector events are deliberately *not* flag-gated — a run already dispatched
+# must keep being able to report even if the flag is later turned off for its
+# owner, or the user would be left with a run frozen mid-flight.
+KNOWN_FEATURE_FLAGS: tuple[str, ...] = (
+    "delivery_canary",
+    "voice_brain_dump",
+    "mobile_task_classification",
+    "external_agent_relay",
+)
 
 
 class FeatureFlagState(str, Enum):
@@ -260,6 +281,207 @@ class VoiceSettings(BaseModel):
     lease_recovery_margin_seconds: float = Field(default=30.0, ge=0, le=600)
 
 
+AGENT_EVENTS_CALLBACK_PATH = "/api/agent-events"
+"""The single path an external agent posts signed run events to."""
+
+
+def _canonical_public_base_url(raw: str, *, environment: AppEnvironment) -> str:
+    """Normalise the callback origin, or refuse to build a configuration.
+
+    This value is baked into every hand-off manifest and travels into a
+    third-party system BrainBuddy does not control, so a wrong one is not
+    recoverable by a later fix: agents already told to report somewhere else
+    simply never arrive. Structural nonsense (credentials, a query, a fragment,
+    an unsupported scheme, junk) is refused in every environment, and production
+    additionally requires a canonical public HTTPS origin. Development keeps
+    localhost so the stack still runs on a laptop.
+    """
+
+    candidate = raw.strip()
+    reject = f"Invalid external-agent relay public base URL: {environment.value} "
+
+    if not candidate:
+        raise ValueError(reject + "requires a non-empty public base URL.")
+    try:
+        parts = urlsplit(candidate)
+        host = parts.hostname
+        port = parts.port
+    except ValueError as exc:
+        raise ValueError(reject + "could not parse the public base URL.") from exc
+
+    if parts.scheme not in {"http", "https"} or not host:
+        raise ValueError(reject + "needs an http(s) public base URL with a host.")
+    if parts.username or parts.password:
+        raise ValueError(reject + "forbids credentials in the public base URL.")
+    if parts.query or parts.fragment:
+        raise ValueError(reject + "forbids a query or fragment in the public base URL.")
+    if parts.path not in {"", "/"}:
+        raise ValueError(
+            reject + "needs a bare origin as the public base URL, with no path."
+        )
+
+    host = host.lower()
+    if environment is AppEnvironment.PRODUCTION:
+        if parts.scheme != "https":
+            raise ValueError(reject + "requires an https public base URL.")
+        if not public_callback_host_is_reachable(host):
+            raise ValueError(
+                reject
+                + "requires a public base URL host that resolves to publicly "
+                + "routable addresses only."
+            )
+
+    netloc = f"[{host}]" if ":" in host else host
+    return f"{parts.scheme}://{netloc}" + (f":{port}" if port is not None else "")
+
+
+CANONICAL_PUBLIC_CALLBACK_HOSTS: frozenset[str] = frozenset(
+    {"brain-buddy-backend.fly.dev"}
+)
+"""The deployment's own callback host, admitted without a lookup.
+
+Deliberately one exact hostname, matched whole and never as a suffix. It is the
+value `fly.backend.toml` sets, so it is already governed by review; resolving it
+at start-up would only make the deploy depend on DNS being answerable from
+wherever the process happens to boot, including CI.
+"""
+
+_SPECIAL_USE_CALLBACK_SUFFIXES: tuple[str, ...] = (
+    # RFC 6761/8375 special-use names, plus the conventional private-network
+    # suffixes. None of them mean anything outside one network, and a
+    # split-horizon resolver can answer for them with a public-looking address,
+    # so they are refused on the name and never resolved.
+    ".localhost",
+    ".local",
+    ".invalid",
+    ".test",
+    ".example",
+    ".internal",
+    ".intranet",
+    ".lan",
+    ".private",
+    ".corp",
+    ".home",
+    ".home.arpa",
+)
+
+_SPECIAL_USE_CALLBACK_NAMES: frozenset[str] = frozenset(
+    {"localhost", "local", "invalid", "test", "example", "internal", "corp", "lan"}
+)
+
+
+def _resolve_callback_host(host: str) -> list[str]:
+    """Every address this name currently answers with. Raises on failure."""
+
+    infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    return [str(info[4][0]) for info in infos]
+
+
+def public_callback_host_is_reachable(
+    host: str, *, resolver: Callable[[str], list[str]] | None = None
+) -> bool:
+    """Whether an agent on the public internet could reach ``host`` at all.
+
+    Fail-closed by construction. A hostname is admitted only when it resolves
+    *and* every answer is globally routable — one private answer among public
+    ones is a split-horizon name, and treating it as public would send hand-off
+    reports to whatever lives at that private address. An unresolvable name is
+    refused outright: production start-up is the last point at which a typo is
+    cheap, and every run dispatched afterwards would report into nothing.
+
+    ``resolver`` is injected by tests so the decision can be exercised without a
+    live lookup; nothing else passes it.
+    """
+
+    if host in CANONICAL_PUBLIC_CALLBACK_HOSTS:
+        return True
+
+    literal = _normalize_callback_address(host)
+    if literal is not None:
+        return _is_globally_routable(literal)
+
+    if host in _SPECIAL_USE_CALLBACK_NAMES or host.endswith(
+        _SPECIAL_USE_CALLBACK_SUFFIXES
+    ):
+        return False
+    if "." not in host:
+        # A single label is a name only this network can resolve.
+        return False
+
+    resolve = resolver if resolver is not None else _resolve_callback_host
+    try:
+        addresses = resolve(host)
+    except OSError:
+        return False
+    if not addresses:
+        return False
+    return all(
+        (parsed := _normalize_callback_address(address)) is not None
+        and _is_globally_routable(parsed)
+        for address in addresses
+    )
+
+
+def _normalize_callback_address(
+    value: str,
+) -> IPv4Address | IPv6Address | None:
+    """Parse an address, unwrapping IPv4-mapped IPv6 so it cannot hide a class."""
+
+    try:
+        parsed = ip_address(value.split("%", 1)[0])
+    except ValueError:
+        return None
+    if isinstance(parsed, IPv6Address) and parsed.ipv4_mapped is not None:
+        return parsed.ipv4_mapped
+    return parsed
+
+
+def _is_globally_routable(address: IPv4Address | IPv6Address) -> bool:
+    """``is_global`` alone misses IPv4 multicast, so each class is named."""
+
+    return (
+        address.is_global
+        and not address.is_multicast
+        and not address.is_loopback
+        and not address.is_link_local
+        and not address.is_private
+        and not address.is_reserved
+        and not address.is_unspecified
+    )
+
+
+class AgentRelaySettings(BaseModel):
+    """Deployment policy for the external-agent relay.
+
+    ``allow_private_destinations`` is the single governed opt-in from FR-004: it
+    admits loopback/private network classes *and* plaintext HTTP, so it exists
+    for local development and for an operator deliberately pointing BrainBuddy
+    at a connector inside their own network. It must stay off in production.
+    """
+
+    public_base_url: str = Field(
+        default="http://localhost:8000",
+        description="Public origin agents call back to with signed run events.",
+    )
+    stale_after_seconds: int = Field(default=7 * 24 * 60 * 60, ge=60)
+    reporting_window_seconds: int = Field(default=60 * 60, ge=60)
+    content_retention_seconds: int = Field(
+        default=30 * 24 * 60 * 60, ge=60, le=30 * 24 * 60 * 60
+    )
+    retention_sweep_interval_seconds: float = Field(default=60.0, ge=1, le=3_600)
+    connector_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
+    connector_max_response_bytes: int = Field(default=64_000, ge=1_024, le=1_048_576)
+    allow_private_destinations: bool = Field(default=False)
+
+    model_config = ConfigDict(frozen=True)
+
+    @property
+    def callback_url(self) -> str:
+        """Exactly ``<origin>/api/agent-events``, never a doubled slash."""
+
+        return f"{self.public_base_url.rstrip('/')}{AGENT_EVENTS_CALLBACK_PATH}"
+
+
 class AppConfig(BaseModel):
     """Top-level Brain Buddy application configuration."""
 
@@ -270,6 +492,7 @@ class AppConfig(BaseModel):
     session: SessionSettings = Field(default_factory=SessionSettings)
     password_policy: PasswordPolicy = Field(default_factory=PasswordPolicy)
     voice: VoiceSettings = Field(default_factory=VoiceSettings)
+    agent_relay: AgentRelaySettings = Field(default_factory=AgentRelaySettings)
     feature_flags: FeatureFlagSettings = Field(default_factory=FeatureFlagSettings)
 
     model_config = ConfigDict(frozen=True)
@@ -494,6 +717,39 @@ def _build_config() -> AppConfig:
         ),
     )
 
+    agent_relay = AgentRelaySettings(
+        public_base_url=_canonical_public_base_url(
+            os.getenv("BRAIN_BUDDY_PUBLIC_BASE_URL", "http://localhost:8000"),
+            environment=environment,
+        ),
+        stale_after_seconds=int(
+            os.getenv("BRAIN_BUDDY_AGENT_STALE_AFTER_SECONDS", str(7 * 24 * 60 * 60))
+        ),
+        reporting_window_seconds=int(
+            os.getenv("BRAIN_BUDDY_AGENT_REPORTING_WINDOW_SECONDS", str(60 * 60))
+        ),
+        content_retention_seconds=int(
+            os.getenv(
+                "BRAIN_BUDDY_AGENT_CONTENT_RETENTION_SECONDS", str(30 * 24 * 60 * 60)
+            )
+        ),
+        retention_sweep_interval_seconds=float(
+            os.getenv("BRAIN_BUDDY_AGENT_RETENTION_SWEEP_INTERVAL_SECONDS", "60")
+        ),
+        connector_timeout_seconds=float(
+            os.getenv("BRAIN_BUDDY_AGENT_CONNECTOR_TIMEOUT_SECONDS", "10")
+        ),
+        connector_max_response_bytes=int(
+            os.getenv("BRAIN_BUDDY_AGENT_CONNECTOR_MAX_RESPONSE_BYTES", "64000")
+        ),
+        # Fails closed: only the exact string "1" opts a deployment in, and
+        # production is never allowed to, whatever the environment says.
+        allow_private_destinations=(
+            os.getenv("BRAIN_BUDDY_AGENT_ALLOW_PRIVATE_DESTINATIONS", "").strip() == "1"
+            and environment is not AppEnvironment.PRODUCTION
+        ),
+    )
+
     return AppConfig(
         environment=environment,
         api_prefix=api_prefix,
@@ -502,6 +758,7 @@ def _build_config() -> AppConfig:
         session=session_config,
         password_policy=password_policy,
         voice=voice,
+        agent_relay=agent_relay,
         feature_flags=_build_feature_flags(),
     )
 
@@ -514,11 +771,13 @@ def get_config() -> AppConfig:
 
 
 __all__ = [
+    "CANONICAL_PUBLIC_CALLBACK_HOSTS",
+    "KNOWN_FEATURE_FLAGS",
+    "AgentRelaySettings",
     "AppConfig",
     "AppEnvironment",
     "FeatureFlagSettings",
     "FeatureFlagState",
-    "KNOWN_FEATURE_FLAGS",
     "PasswordPolicy",
     "SessionSettings",
     "VoiceAudioLimits",
@@ -526,4 +785,5 @@ __all__ = [
     "VoiceRetentionSettings",
     "VoiceSettings",
     "get_config",
+    "public_callback_host_is_reachable",
 ]

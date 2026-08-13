@@ -357,6 +357,299 @@ export default defineConfig({
         self.assertIn("frontend lint", completed.stderr)
         self.assertIn("frontend coverage threshold statements", completed.stderr)
 
+    def test_workflow_rejects_removing_the_allure_aggregation_short_circuit(self) -> None:
+        """Deleting the short circuit makes every specs-only branch unmergeable.
+
+        Nothing uploads Allure results when no stack changed, and
+        `actions/download-artifact` does not create its target directory when
+        the pattern matches nothing, so the aggregate validator failed on a
+        directory that was never going to exist. Stages 1 through 9 of a
+        spec-driven feature produce nothing but documentation commits, so this
+        was not one red build but the whole run.
+
+        Guarded because the regression is a one-line deletion and reads like
+        tidying: the `if:` on those steps looks redundant until you know a
+        specs-only commit exists.
+        """
+        workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+        text = workflow.read_text(encoding="utf-8")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ungated = Path(tmp) / "ci-ungated.yml"
+            ungated.write_text(
+                text.replace("        if: steps.aggregate.outputs.run == 'true'\n", ""),
+                encoding="utf-8",
+            )
+            missing_gate = self.run_validator("workflow", "--ci", str(ungated))
+
+            no_validator = Path(tmp) / "ci-no-validator.yml"
+            no_validator.write_text(
+                text.replace("--path allure-results --label aggregate-allure", "--help"),
+                encoding="utf-8",
+            )
+            dropped_validator = self.run_validator("workflow", "--ci", str(no_validator))
+
+            # The predicate's first version asked whether a stack was *selected*
+            # rather than whether its job actually ran, and shipped red: the
+            # stack jobs need `spec-kit`, so a red spec gate skips them while
+            # `changes` still reports them changed — the normal state of a
+            # spec-driven branch. Guarded so the weaker form cannot come back.
+            selected_only = Path(tmp) / "ci-selected-only.yml"
+            selected_only.write_text(
+                text.replace(
+                    "needs.changes.outputs.backend == 'true' && needs.backend.result != 'skipped'",
+                    "needs.changes.outputs.backend",
+                ),
+                encoding="utf-8",
+            )
+            weaker_predicate = self.run_validator("workflow", "--ci", str(selected_only))
+
+        self.assertNotEqual(missing_gate.returncode, 0)
+        # Both anchored steps must be named, not just whichever fails first.
+        # The first version of this guard used a bare "if: steps.aggregate..."
+        # substring and stayed green under exactly this mutation, because the
+        # "Post PR Allure report link" step joins the same condition to another
+        # with `&&`. The two-line anchors are what make the deletion visible.
+        self.assertIn("gate on the Allure download step", missing_gate.stderr)
+        self.assertIn("gate on the aggregate Allure validation step", missing_gate.stderr)
+
+        # The other direction: the short circuit must not become an excuse to
+        # drop the taxonomy validation itself. Skipping when there is nothing
+        # to aggregate is the fix; skipping when there is, is the defect.
+        self.assertNotEqual(dropped_validator.returncode, 0)
+        self.assertIn("aggregate Allure taxonomy validation still runs", dropped_validator.stderr)
+
+        self.assertNotEqual(weaker_predicate.returncode, 0)
+        self.assertIn(
+            "conjoins selection with the backend job actually running",
+            weaker_predicate.stderr,
+        )
+
+    def test_workflow_rejects_an_aggregation_env_key_bound_to_a_constant(self) -> None:
+        """The conjunction must be bound to the key the shell actually reads.
+
+        The requirement was a bare substring over the whole workflow, so it
+        asked whether the expression existed *anywhere* rather than whether the
+        environment key the predicate consumes carries it. That is satisfiable
+        by code that does not work: bind `MOBILE` to a constant, leave the real
+        conjunction on an unused sibling key, and a mobile-only pull request
+        aggregates nothing while the invariant claiming to prevent exactly that
+        stays green. The file's own header warns about this failure mode, and
+        the mobile entry was added under a comment asserting the hole was
+        closed -- it was closed only by the accident that the string appeared
+        nowhere else.
+
+        Anchored to the key, so all three stacks are checked the same way.
+        """
+        workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+        text = workflow.read_text(encoding="utf-8")
+
+        stacks = (
+            ("MOBILE", "mobile"),
+            ("BACKEND", "backend"),
+            ("FRONTEND", "frontend"),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            for key, stack in stacks:
+                binding = (
+                    f"          {key}: "
+                    "${{ needs.changes.outputs."
+                    f"{stack} == 'true' && needs.{stack}.result != 'skipped' "
+                    "}}\n"
+                )
+                self.assertIn(binding, text)
+                # The shell line still names the key; the environment binds it
+                # to a constant and the conjunction survives, unread, alongside.
+                rewired = Path(tmp) / f"ci-{stack}-rewired.yml"
+                rewired.write_text(
+                    text.replace(
+                        binding,
+                        f"          {key}: false\n"
+                        + binding.replace(f"{key}:", f"{key}_ELIGIBLE:", 1),
+                    ),
+                    encoding="utf-8",
+                )
+
+                result = self.run_validator("workflow", "--ci", str(rewired))
+
+                self.assertNotEqual(
+                    result.returncode,
+                    0,
+                    f"{key} bound to a constant must fail: {result.stdout}",
+                )
+                self.assertIn(
+                    f"conjoins selection with the {stack} job actually running",
+                    result.stderr,
+                )
+
+    def test_workflow_rejects_an_allure_producer_the_aggregate_cannot_discover(
+        self,
+    ) -> None:
+        """Naming the uploading lanes is necessary and not sufficient.
+
+        The predicate enumerates lanes that upload `*-allure-results`. By
+        construction that can only ever name artifacts already called the right
+        thing, so a producer whose artifact is named anything else is invisible
+        to it: the invariant stays green while the report silently omits the
+        result. The list cannot catch the bug the list has, twice, been wrong
+        about.
+
+        `mutation-head` was exactly that. It writes a real Allure result for the
+        **blocking** mutation gate and uploaded it as `mutation-gate-evidence`,
+        which the aggregate's `*-allure-results` pattern does not match — so the
+        one result a person most needs when the gate fails was the one no report
+        ever contained, and no invariant noticed.
+
+        This asks the question from the producing end instead: every
+        `create_mutation_allure_evidence.py --output` directory must be uploaded
+        under a matching name. A new producer is caught by construction.
+        """
+        workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+        text = workflow.read_text(encoding="utf-8")
+
+        # The premise. If the blocking gate stops writing Allure evidence this
+        # test should fail loudly rather than quietly assert nothing.
+        self.assertTrue(
+            "create_mutation_allure_evidence.py" in text,
+            "the blocking mutation gate must still write Allure evidence",
+        )
+        self.assertTrue(
+            "          name: mutation-gate-allure-results\n" in text,
+            "the blocking gate's evidence must upload under a discoverable name",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # The literal pre-fix name: a valid Allure result no report can find.
+            undiscoverable = Path(tmp) / "ci-undiscoverable.yml"
+            undiscoverable.write_text(
+                text.replace(
+                    "          name: mutation-gate-allure-results\n",
+                    "          name: mutation-gate-evidence\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            renamed = self.run_validator("workflow", "--ci", str(undiscoverable))
+
+            # And the other shape: the result is written somewhere nothing
+            # uploads at all.
+            unuploaded = Path(tmp) / "ci-unuploaded.yml"
+            unuploaded.write_text(
+                text.replace(
+                    "          path: backend/mutation-gate-allure-results\n",
+                    "          path: backend/mutation-artifacts\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            missing = self.run_validator("workflow", "--ci", str(unuploaded))
+
+        self.assertNotEqual(
+            renamed.returncode,
+            0,
+            "an Allure result uploaded under a name the aggregate cannot discover "
+            "must fail validation",
+        )
+        self.assertIn("does not match", renamed.stderr)
+        self.assertNotEqual(
+            missing.returncode,
+            0,
+            "an Allure result written to a directory nothing uploads must fail",
+        )
+
+    def test_workflow_rejects_an_aggregation_predicate_that_ignores_the_e2e_lane(
+        self,
+    ) -> None:
+        """The fourth uploading lane must be in the predicate, not just the other three.
+
+        `e2e` uploads `playwright-allure-results`, which matches the
+        `*-allure-results` pattern the aggregation downloads, under a bare
+        `always()` with no RUN guard -- and the job is deliberately never path
+        filtered. The three stack lanes are path filtered but still RUN with
+        their steps skipped, because skipping the jobs would trip ADR-0008's
+        rule that Full CI treats a skipped required job as a failure. So on a
+        docs-only pull request `backend` and `frontend` succeed, `e2e` is
+        therefore not skipped, it runs the whole Compose stack, and it uploads a
+        complete set of Playwright results.
+
+        The three-stack predicate read all three `changes` outputs as false and
+        short-circuited to run=false, discarding those results: no aggregate
+        report and no pull request link, on exactly the specs-only branches that
+        make up most of a spec-driven feature's history. The invariant named the
+        three stacks and so read as coverage of the case it missed -- the same
+        failure mode as the mobile entry before it, for the same reason.
+
+        Guarded in all three shapes the regression can take: dropping the term
+        from the shell predicate, dropping the environment key it reads, and
+        binding that key to a constant while the real expression survives unread
+        on a sibling.
+        """
+        workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+        text = workflow.read_text(encoding="utf-8")
+
+        binding = "          E2E: ${{ needs.e2e.result != 'skipped' }}\n"
+        # The premise the predicate rests on. If e2e ever stops uploading under
+        # an unguarded always(), this test is asserting the wrong thing and
+        # should fail loudly rather than quietly keep passing.
+        #
+        # `assertTrue` rather than `assertIn` throughout: the container here is
+        # the whole 56KB workflow, and assertIn renders it into the failure
+        # message, burying the one line that matters.
+        unguarded_upload = (
+            "      - name: Upload Playwright Allure results\n        if: always()\n"
+        )
+        self.assertTrue(
+            unguarded_upload in text,
+            "e2e must still upload Playwright Allure results unconditionally; "
+            "without that upload the E2E term below is asserting the wrong thing",
+        )
+        self.assertTrue(
+            binding in text,
+            f"the aggregation predicate must bind the e2e lane: {binding!r}",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # The literal pre-fix workflow: three stacks, no e2e term.
+            three_stacks = Path(tmp) / "ci-three-stacks.yml"
+            three_stacks.write_text(
+                text.replace(' || [ "$E2E" = "true" ]; then', "; then"),
+                encoding="utf-8",
+            )
+            dropped_term = self.run_validator("workflow", "--ci", str(three_stacks))
+
+            no_binding = Path(tmp) / "ci-no-e2e-binding.yml"
+            no_binding.write_text(text.replace(binding, ""), encoding="utf-8")
+            dropped_binding = self.run_validator("workflow", "--ci", str(no_binding))
+
+            rewired = Path(tmp) / "ci-e2e-rewired.yml"
+            unread_sibling = binding.replace("E2E:", "E2E_ELIGIBLE:", 1)
+            rewired.write_text(
+                text.replace(binding, "          E2E: false\n" + unread_sibling),
+                encoding="utf-8",
+            )
+            constant_binding = self.run_validator("workflow", "--ci", str(rewired))
+
+        self.assertNotEqual(
+            dropped_term.returncode,
+            0,
+            f"a predicate ignoring the e2e lane must fail: {dropped_term.stdout}",
+        )
+        self.assertIn("predicate over the four uploading lanes", dropped_term.stderr)
+
+        self.assertNotEqual(
+            dropped_binding.returncode,
+            0,
+            f"a missing E2E environment key must fail: {dropped_binding.stdout}",
+        )
+        self.assertIn("never-path-filtered e2e lane", dropped_binding.stderr)
+
+        self.assertNotEqual(
+            constant_binding.returncode,
+            0,
+            f"E2E bound to a constant must fail: {constant_binding.stdout}",
+        )
+        self.assertIn("never-path-filtered e2e lane", constant_binding.stderr)
+
     def test_workflow_rejects_missing_pr_scoped_concurrency(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -447,6 +740,142 @@ jobs:
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("Docker Images", completed.stderr)
 
+    def test_workflow_rejects_stack_lane_chained_behind_an_unrelated_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "ci.yml"
+            workflow.write_text(
+                """
+jobs:
+  backend:
+    needs:
+      - spec-kit
+      - changes
+    steps:
+      - run: pytest
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("backend job declares needs it does not consume", completed.stderr)
+        self.assertIn("spec-kit", completed.stderr)
+
+    def test_workflow_rejects_e2e_queued_behind_gates_that_do_not_guard_it(self) -> None:
+        # Waiting on backend and frontend is allowed -- they are the cheap checks
+        # that should fail before the stack is built. Waiting on the markdown
+        # gate, or on a service that ships in neither image, is not.
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "ci.yml"
+            workflow.write_text(
+                """
+jobs:
+  e2e:
+    name: Compose Playwright E2E
+    needs:
+      - backend
+      - frontend
+      - mobile
+      - spec-kit
+    steps:
+      - run: make test-e2e
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("e2e job declares needs it does not consume", completed.stderr)
+        self.assertIn("mobile", completed.stderr)
+        self.assertIn("spec-kit", completed.stderr)
+        # The legitimate cost gates must not be reported as surplus.
+        self.assertNotIn("'backend'", completed.stderr)
+
+    def test_workflow_accepts_expensive_lanes_gated_on_the_cheap_service_lanes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "ci.yml"
+            workflow.write_text(
+                """
+jobs:
+  e2e:
+    needs:
+      - backend
+      - frontend
+    steps:
+      - run: make test-e2e
+  docker:
+    needs: e2e
+    steps:
+      - run: docker buildx build .
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        # The fixture is a fragment, so other checks still fail it; what matters
+        # is that the job-graph rule raised no complaint about these two.
+        self.assertNotIn("declares needs it does not consume", completed.stderr)
+
+    def test_workflow_rejects_docker_restating_the_edges_e2e_already_carries(self) -> None:
+        # docker waits on e2e for cache locality. Naming backend/frontend as well
+        # restates edges e2e already holds, which is the noise the rule exists to
+        # keep out -- and it would let the pair drift back into running in
+        # parallel and paying the identical image build twice.
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "ci.yml"
+            workflow.write_text(
+                """
+jobs:
+  docker:
+    name: Docker Images
+    needs:
+      - e2e
+      - backend
+      - frontend
+    steps:
+      - run: docker buildx build .
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("docker job declares needs it does not consume", completed.stderr)
+        self.assertIn("backend", completed.stderr)
+
+    def test_workflow_rejects_a_job_absent_from_the_full_ci_gate(self) -> None:
+        # A flat graph makes full-ci the only thing that makes a job required,
+        # so a job missing from its needs is unchecked rather than lenient.
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "ci.yml"
+            workflow.write_text(
+                """
+jobs:
+  changes:
+    steps:
+      - run: echo decide
+  security-scan:
+    steps:
+      - run: echo scan
+  full-ci:
+    needs:
+      - changes
+    steps:
+      - run: echo "${{ contains(needs.*.result, 'skipped') }}"
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("full-ci does not require every job", completed.stderr)
+        self.assertIn("security-scan", completed.stderr)
+
     def test_workflow_accepts_pr_scoped_concurrency_and_conditional_retention(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -484,6 +913,12 @@ jobs:
       - name: Type check
         if: env.RUN == 'true'
         run: npm run typecheck
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mobile-allure-results
+          path: mobile/allure-results
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
   mutation-base:
     name: Backend mutation base measurement
     env:
@@ -515,7 +950,12 @@ jobs:
         if: always() && env.RUN == 'true'
         run: |
           python3 scripts/create_mutation_allure_evidence.py --mode blocking-gate \
-            --summary s.txt --survivors v.txt --output r.json
+            --summary e/s.txt --survivors e/v.txt --output e/r.json
+      - name: Upload blocking-gate Allure evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-allure-results
+          path: e
   mutation-gate:
     name: Backend mutation gate
     env:
@@ -529,6 +969,11 @@ jobs:
     needs:
       - changes
       - backend
+      - mobile
+      - frontend
+      - e2e
+      - docker
+      - allure-report
       - mutation-base
       - mutation-head
       - mutation-gate
@@ -568,8 +1013,6 @@ jobs:
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
   e2e:
     name: Compose Playwright E2E
-    needs:
-      - frontend
     steps:
       - run: |
           make test-e2e
@@ -582,7 +1025,37 @@ jobs:
     steps:
       - run: echo build
   allure-report:
+    name: Allure Report
+    needs:
+      - changes
+      - backend
+      - mobile
+      - frontend
+      - e2e
+      - docker
+      - mutation-base
+      - mutation-head
+      - mutation-gate
     steps:
+      - name: Decide whether there is anything to aggregate
+        id: aggregate
+        env:
+          BACKEND: ${{ needs.changes.outputs.backend == 'true' && needs.backend.result != 'skipped' }}
+          FRONTEND: ${{ needs.changes.outputs.frontend == 'true' && needs.frontend.result != 'skipped' }}
+          MOBILE: ${{ needs.changes.outputs.mobile == 'true' && needs.mobile.result != 'skipped' }}
+          E2E: ${{ needs.e2e.result != 'skipped' }}
+        run: |
+          if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ] || [ "$MOBILE" = "true" ] || [ "$E2E" = "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Download Allure results
+        if: steps.aggregate.outputs.run == 'true'
+        uses: actions/download-artifact@v4
+      - name: Validate aggregate Allure results
+        if: steps.aggregate.outputs.run == 'true'
+        run: python3 scripts/validate_allure_taxonomy.py --path allure-results --label aggregate-allure
       - run: python3 scripts/validate_allure_taxonomy.py
       - run: npx allure generate ../allure-results -o ../allure-report
 """.strip(),
@@ -1227,25 +1700,17 @@ jobs:
         conformant = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
         )
-        serialised = conformant.replace(
+        head_job = (
             "  mutation-head:\n"
             "    name: Backend mutation head measurement\n"
             "    runs-on: ubuntu-latest\n"
             "    timeout-minutes: 90\n"
             "    needs:\n"
-            "      - workflow-lint\n"
-            "      - spec-kit\n"
-            "      - changes\n",
-            "  mutation-head:\n"
-            "    name: Backend mutation head measurement\n"
-            "    runs-on: ubuntu-latest\n"
-            "    timeout-minutes: 90\n"
-            "    needs:\n"
-            "      - workflow-lint\n"
-            "      - spec-kit\n"
             "      - changes\n"
-            "      - mutation-base\n",
-            1,
+            "      - backend\n"
+        )
+        serialised = conformant.replace(
+            head_job, head_job + "      - mutation-base\n", 1
         )
         self.assertNotEqual(serialised, conformant, "fixture edit did not apply")
 
@@ -1278,8 +1743,11 @@ jobs:
         self.assertIn("summarize-mutmut", completed.stderr)
 
     def test_workflow_rejects_a_mutation_gate_hidden_behind_a_job_level_if(self) -> None:
-        # A job-level `if` makes the gate report 'skipped', which is exactly the
-        # result ADR-0008 requires Full CI to treat as a failure.
+        # Gating a job on the changed-stack filter makes it report 'skipped',
+        # which is exactly the result ADR-0008 requires Full CI to treat as a
+        # failure. A condition that only propagates another job's outcome (as
+        # `docker` uses, so it still reports when E2E fails) is a different
+        # thing and stays allowed.
         conformant = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
         )
@@ -1297,7 +1765,55 @@ jobs:
             completed = self.run_validator("workflow", "--ci", str(workflow))
 
         self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("mutation-gate job uses a job-level 'if'", completed.stderr)
+        self.assertIn(
+            "mutation-gate job gates itself on the changed-stack filter", completed.stderr
+        )
+
+    def test_workflow_accepts_an_outcome_propagating_job_level_if(self) -> None:
+        # docker carries one so the required check still reports when E2E fails
+        # instead of vanishing in the case it exists to explain.
+        conformant = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("!cancelled() && needs.e2e.result != 'skipped'", conformant)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "ci.yml"
+            workflow.write_text(conformant, encoding="utf-8")
+
+            completed = self.run_validator(
+                "workflow",
+                "--ci",
+                str(workflow),
+                "--frontend-vite-config",
+                str(REPO_ROOT / "frontend" / "vite.config.ts"),
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_workflow_rejects_a_report_that_can_outrun_a_job(self) -> None:
+        # The report publishes the run's closing link. mutation-head runs up to
+        # 90 minutes, so dropping it here would let the link be posted while the
+        # mutation gate is still deciding.
+        conformant = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        racing = conformant.replace(
+            "      - mutation-gate\n      - docker\n      - e2e\n    if: always()",
+            "      - docker\n      - e2e\n    if: always()",
+            1,
+        )
+        self.assertNotEqual(racing, conformant, "fixture edit did not apply")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "ci.yml"
+            workflow.write_text(racing, encoding="utf-8")
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("allure-report does not wait for every other job", completed.stderr)
+        self.assertIn("mutation-gate", completed.stderr)
 
 
 class CoverageSuppressionTests(unittest.TestCase):

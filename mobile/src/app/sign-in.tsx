@@ -11,15 +11,31 @@ import {
 import { Sprout } from "lucide-react-native";
 
 import { ApiError } from "@/api/client";
+import { loadPersistedIdentity } from "@/auth/identityStorage";
 import { useSession } from "@/auth/SessionProvider";
 import { BBText } from "@/components/BBText";
 import { Button } from "@/components/Button";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { Screen } from "@/components/Screen";
-import { DEFAULT_SERVER_URL } from "@/config/serverUrl";
+import { DEFAULT_SERVER_URL, normalizeServerUrl } from "@/config/serverUrl";
+import { clearIdentityStores, loadQueue } from "@/features/tasks/classificationQueue.storage";
+import type { PendingClassificationChange } from "@/features/tasks/classificationTypes";
+import { DiscardUnsentSheet } from "@/features/tasks/DiscardUnsentSheet";
+import type { ClassificationIdentity } from "@/features/tasks/storageKeys";
+import {
+  performIdentityTransition,
+  planIdentityTransition,
+  resolveIdentity,
+} from "@/features/tasks/taskScreenState";
 import { colors, fonts, radii, space, type as typeScale } from "@/theme/tokens";
 
 type Mode = "sign-in" | "sign-up";
+
+/** The server change waiting on M-05's answer. */
+interface PendingDiscard {
+  identity: ClassificationIdentity;
+  queue: PendingClassificationChange[];
+}
 
 export default function SignInScreen() {
   const { signIn, signUp, serverUrl, updateServerUrl } = useSession();
@@ -31,12 +47,32 @@ export default function SignInScreen() {
   const [serverDraft, setServerDraft] = useState(serverUrl);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const [pendingDiscard, setPendingDiscard] = useState<PendingDiscard | null>(null);
 
-  const submit = async () => {
+  /**
+   * Normalized on the draft side, exactly as Settings compares it: a trailing
+   * slash is the same server, and `updateServerUrl` normalizes it away before
+   * deciding there is nothing to do.
+   *
+   * Compared raw, an equivalent URL takes the discard path for a save that
+   * then changes nothing — the person is warned that continuing loses their
+   * unsent work, or, with an empty queue, `clearServerChange` deletes the
+   * cached project and Tag lists with no sheet shown at all. `serverUrl` needs
+   * no normalizing: it only ever arrives from `loadServerUrl`/`saveServerUrl`,
+   * both of which return a normalized value.
+   *
+   * The empty-draft guard stays in front: a cleared field normalizes to
+   * `DEFAULT_SERVER_URL`, which on a device pointed elsewhere is a real server
+   * change, and clearing a text input is not how anyone asks for one.
+   */
+  const changingServer =
+    showServer && serverDraft.trim() !== "" && normalizeServerUrl(serverDraft) !== serverUrl;
+
+  const runSubmit = async (withServerChange: boolean) => {
     setBusy(true);
     setError(null);
     try {
-      if (showServer && serverDraft.trim() && serverDraft !== serverUrl) {
+      if (withServerChange) {
         await updateServerUrl(serverDraft);
       }
       if (mode === "sign-in") {
@@ -49,6 +85,50 @@ export default function SignInScreen() {
     } finally {
       setBusy(false);
     }
+  };
+
+  /**
+   * FR-011 — the second and last call site of the discard gate.
+   *
+   * A server change is a deliberate identity transition here exactly as it is
+   * in Settings, and `updateServerUrl` clears the previous server's persisted
+   * identity: the warning and the discard therefore run **before** it, never
+   * after, or the key the queue lives under stops being nameable.
+   *
+   * The identity comes from storage rather than from the session, because on
+   * this screen there is no session. A device whose token expired holds its
+   * identity and its unsent work still — FR-011 keeps both through an
+   * involuntary end — so "signed out" here does not mean "nothing to lose".
+   *
+   * Returns true when the sign-in may go ahead now.
+   */
+  const clearServerChange = async (): Promise<boolean> => {
+    const persisted = await loadPersistedIdentity(serverUrl);
+    const identity = resolveIdentity({
+      status: "signed-in",
+      accountId: persisted?.accountId ?? null,
+      serverUrl,
+    });
+    if (!identity) {
+      return true;
+    }
+    const queue = await loadQueue(identity);
+    if (!planIdentityTransition(queue, "server-change").needsWarning) {
+      // FR-011 clears the cached project and Tag lists even with an empty
+      // queue, where no sheet is shown at all.
+      await clearIdentityStores(identity);
+      return true;
+    }
+    setPendingDiscard({ identity, queue });
+    return false;
+  };
+
+  const submit = async () => {
+    if (changingServer && !(await clearServerChange())) {
+      // M-05 is up; the sheet's own answer resumes or cancels this.
+      return;
+    }
+    await runSubmit(changingServer);
   };
 
   const canSubmit =
@@ -142,7 +222,13 @@ export default function SignInScreen() {
               </View>
             ) : null}
 
-            <Button onPress={submit} disabled={!canSubmit} loading={busy}>
+            <Button
+              onPress={() => {
+                void submit();
+              }}
+              disabled={!canSubmit}
+              loading={busy}
+            >
               {mode === "sign-in" ? "Sign in" : "Create account"}
             </Button>
 
@@ -190,6 +276,34 @@ export default function SignInScreen() {
           ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* M-05 — the count, and which action discards it. Never a list. */}
+      <DiscardUnsentSheet
+        visible={pendingDiscard !== null}
+        queue={pendingDiscard?.queue ?? []}
+        trigger="server-change"
+        // Not a connectivity claim: "Stay and let them send" here cancels the
+        // server change, which is precisely what keeps the queue sendable — so
+        // it must stay available. Nobody is signed in on this screen, so a
+        // drain is not what is being offered.
+        online
+        onStay={() => setPendingDiscard(null)}
+        onContinue={() => {
+          const current = pendingDiscard;
+          if (!current) {
+            return;
+          }
+          setPendingDiscard(null);
+          void performIdentityTransition({
+            discard: () => clearIdentityStores(current.identity),
+            transition: () => runSubmit(true),
+          }).catch((failure: unknown) => {
+            // Nothing was discarded and the server was not changed. Surfacing
+            // it on the form is enough here: the sign-in itself never ran.
+            setError(failure);
+          });
+        }}
+      />
     </Screen>
   );
 }
