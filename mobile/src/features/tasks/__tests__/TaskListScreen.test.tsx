@@ -56,6 +56,11 @@ describe("TaskListScreen", () => {
 
     expect(await screen.findByText("Call the notary")).toBeOnTheScreen();
     expect(screen.getByText("Book the venue")).toBeOnTheScreen();
+    await waitFor(() =>
+      expect(backend.callsTo("GET", "/agent-run-summaries").map((call) => call.query)).toContain(
+        "task_id=t1&task_id=t2",
+      ),
+    );
     await waitFor(() => expect(screen.getByText("Wedding")).toBeOnTheScreen());
     expect(screen.getByText("errand")).toBeOnTheScreen();
   });

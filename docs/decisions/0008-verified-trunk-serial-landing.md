@@ -235,10 +235,10 @@ exact-tested-SHA proof. In addition it:
    status — when present — is a known successful terminal state: `complete`,
    `succeeded`, or `success`); failed capture fails the run before any mutation,
    leaving the documented manual recovery path in the runbook;
-4. stages the smoke identity into the Fly backend with `flyctl secrets set --stage`
-   (admin email/password, the internal cohort, and
-   `BRAIN_BUDDY_FEATURE_FLAGS=delivery_canary=internal`) so the deploy release seeds the
-   admin account and marks it internal; secret values are never printed;
+4. stages the smoke identity and production feature-flag assignment into the Fly
+   backend with `flyctl secrets set --stage`, so the deploy release seeds the admin
+   account and marks it internal; the trusted deploy workflow is authoritative for the
+   exact flag assignment, and secret values are never printed;
 5. after deploying, verifies reachability and runs `scripts/production_smoke.sh` — an
    authenticated end-to-end check (login as the provisioned identity, `/auth/me`
    asserting `delivery_canary` is effectively TRUE for this internal user,

@@ -16,18 +16,29 @@ interface SheetProps extends PropsWithChildren {
   visible: boolean;
   onClose: () => void;
   title?: string;
+  /** False while an irreversible command must keep its observer mounted. */
+  dismissible?: boolean;
 }
 
 /** Bottom sheet on the floating-surface elevation (radius 20, scrim, no blur > 8px). */
-export function Sheet({ visible, onClose, title, children }: SheetProps) {
+export function Sheet({ visible, onClose, title, children, dismissible = true }: SheetProps) {
   const insets = useSafeAreaInsets();
+  const requestClose = () => {
+    if (dismissible) onClose();
+  };
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={requestClose}>
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={styles.wrapper}
       >
-        <Pressable accessibilityLabel="Close" style={styles.scrim} onPress={onClose} />
+        <Pressable
+          accessibilityLabel="Close"
+          accessibilityState={{ disabled: !dismissible }}
+          disabled={!dismissible}
+          style={styles.scrim}
+          onPress={requestClose}
+        />
         <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, space.s5) }]}>
           <View style={styles.grabber} />
           {title ? (

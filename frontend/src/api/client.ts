@@ -29,6 +29,22 @@ import type {
   PasswordChangePayload,
   ProfileUpdatePayload
 } from "./accountTypes";
+import type {
+  AgentConnectionCreateRequest,
+  AgentConnectionCreatedResponse,
+  AgentConnectionDisconnectRequest,
+  AgentConnectionResponse,
+  AgentConnectionRotateRequest,
+  AgentConnectionRotateSigningSecretRequest,
+  AgentConnectionSigningSecretResponse,
+  AgentConnectionUpdateRequest,
+  AgentHandoffConfirmRequest,
+  AgentHandoffPreviewRequest,
+  AgentManifestResponse,
+  AgentReplyRequest,
+  AgentRunResponse,
+  AgentRunSummaryResponse
+} from "./agentTypes";
 import { nowMs, recordTelemetry } from "../utils/telemetry";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
@@ -398,6 +414,136 @@ export const apiClient = {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },
       body: { expected_revision: expectedRevision }
+    });
+  },
+
+  // External agent relay. Every mutation carries a caller-generated
+  // Idempotency-Key so a retry can never create a second connection, run, or
+  // connector-side command. Reads and the connection test are naturally safe to
+  // repeat, so they carry none.
+  listAgentConnections(signal?: AbortSignal) {
+    return request<AgentConnectionResponse[]>("/agent-connections", { signal });
+  },
+
+  createAgentConnection(payload: AgentConnectionCreateRequest, idempotencyKey: string) {
+    return request<AgentConnectionCreatedResponse>("/agent-connections", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  getAgentConnection(connectionId: string, signal?: AbortSignal) {
+    return request<AgentConnectionResponse>(`/agent-connections/${connectionId}`, { signal });
+  },
+
+  updateAgentConnection(connectionId: string, payload: AgentConnectionUpdateRequest, idempotencyKey: string) {
+    return request<AgentConnectionResponse>(`/agent-connections/${connectionId}`, {
+      method: "PUT",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  testAgentConnection(connectionId: string) {
+    return request<AgentConnectionResponse>(`/agent-connections/${connectionId}/test`, {
+      method: "POST"
+    });
+  },
+
+  rotateAgentCredential(connectionId: string, payload: AgentConnectionRotateRequest, idempotencyKey: string) {
+    return request<AgentConnectionResponse>(`/agent-connections/${connectionId}/credential`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  /**
+   * Issue a replacement inbound signing secret.
+   *
+   * The create response shows that secret once, so this is the only way back
+   * from losing it. The replacement takes effect immediately, which is why the
+   * request carries the password and the revision the user was looking at.
+   * Retrying an ambiguous attempt must reuse the same key: the server answers
+   * a matching replay with the same secret rather than a blank success.
+   */
+  rotateAgentSigningSecret(
+    connectionId: string,
+    payload: AgentConnectionRotateSigningSecretRequest,
+    idempotencyKey: string
+  ) {
+    return request<AgentConnectionSigningSecretResponse>(
+      `/agent-connections/${connectionId}/signing-secret`,
+      {
+        method: "POST",
+        headers: { "Idempotency-Key": idempotencyKey },
+        body: payload
+      }
+    );
+  },
+
+  disconnectAgentConnection(
+    connectionId: string,
+    payload: AgentConnectionDisconnectRequest,
+    idempotencyKey: string
+  ) {
+    return request<AgentConnectionResponse>(`/agent-connections/${connectionId}/disconnect`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  // Preview reserves nothing the user has not seen: it returns the manifest the
+  // confirmation must name back, so a changed payload cannot be dispatched
+  // against a stale review.
+  previewAgentHandoff(taskId: string, payload: AgentHandoffPreviewRequest, signal?: AbortSignal) {
+    return request<AgentManifestResponse>(`/tasks/${taskId}/agent-runs/preview`, {
+      method: "POST",
+      body: payload,
+      signal
+    });
+  },
+
+  confirmAgentHandoff(taskId: string, payload: AgentHandoffConfirmRequest, idempotencyKey: string) {
+    return request<AgentRunResponse>(`/tasks/${taskId}/agent-runs`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  async listAgentRuns(taskId: string, signal?: AbortSignal) {
+    const runs = await request<AgentRunResponse[]>(`/tasks/${taskId}/agent-runs`, { signal });
+    return Array.isArray(runs) ? runs : [];
+  },
+
+  getAgentRun(runId: string, signal?: AbortSignal) {
+    return request<AgentRunResponse>(`/agent-runs/${runId}`, { signal });
+  },
+
+  listAgentRunSummaries(taskIds: string[], signal?: AbortSignal) {
+    const params = new URLSearchParams();
+    taskIds.forEach((taskId) => params.append("task_id", taskId));
+    return request<Record<string, AgentRunSummaryResponse>>(
+      `/agent-run-summaries?${params.toString()}`,
+      { signal }
+    );
+  },
+
+  replyToAgentRun(runId: string, payload: AgentReplyRequest, idempotencyKey: string) {
+    return request<AgentRunResponse>(`/agent-runs/${runId}/reply`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  cancelAgentRun(runId: string, idempotencyKey: string) {
+    return request<AgentRunResponse>(`/agent-runs/${runId}/cancel`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey }
     });
   },
 
