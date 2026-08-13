@@ -2,14 +2,14 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-10
-- **Extends**: ADR-0004 (deterministic-core mutation policy), ADR-0011
+- **Extends**: ADR-0004 (deterministic-core mutation policy), ADR-0016
   (observed and enforced mutation tiers) — neither is replaced
 - **Relates to**: ADR-0008 (verified trunk serial landing)
 
 ## Context
 
 The backend has had mutation evidence since ADR-0004 and a two-tier scope since
-ADR-0011. The frontend had none. Its only quality number was line coverage, and
+ADR-0016. The frontend had none. Its only quality number was line coverage, and
 that number turned out to be reporting on a subset of the code without saying
 so: four modules — `AppShell.tsx`, `AppRoutes.tsx`, `TaskListPage.tsx` and
 `TaskDetailPanel.tsx`, 2,385 lines between them — carried
@@ -17,7 +17,7 @@ so: four modules — `AppShell.tsx`, `AppRoutes.tsx`, `TaskListPage.tsx` and
 leaves the measurement entirely. The floor read 97.37% while a third of the
 source was unmeasured.
 
-That is the same failure ADR-0011 recorded on the backend, in a different
+That is the same failure ADR-0016 recorded on the backend, in a different
 disguise. There the predicates were *covered and unverified*; here the modules
 were *excluded and presumed verified*. Both times the number was green and the
 question it appeared to answer had not been asked.
@@ -120,7 +120,7 @@ and they fall into five families:
 The first family is the one worth naming, because it is a live temptation. The
 anchors are provably redundant and deleting them would score four more kills for
 nothing. They stay: weakening an assertion to move a number is the failure
-ADR-0011 recorded, and a score bought that way measures nothing. The same logic
+ADR-0016 recorded, and a score bought that way measures nothing. The same logic
 retired one deletion made while working this backlog -- `scoreEntity`'s
 empty-query rank was reachable and covered, not unconstructible, so removing it
 to claim two mutants was moving the number, and it was restored.
@@ -185,7 +185,7 @@ assertions are richer.
 
 ### Enforce immediately on the whole observed scope
 
-Rejected: it is the mistake ADR-0011 already rejected on the backend. A tier
+Rejected: it is the mistake ADR-0016 already rejected on the backend. A tier
 that starts blocking before it is calibrated creates pressure to weaken the
 scope rather than to write assertions.
 

@@ -1,9 +1,28 @@
-# ADR-0011: Separate the observed mutation scope from the enforced one
+# ADR-0016: Separate the observed mutation scope from the enforced one
 
 Date: 2026-08-10
 Status: Accepted
 Decision owner: BrainBuddy
 Related: ADR-0004, ADR-0006, ADR-0008
+Renumbered: accepted as ADR-0011, renumbered to ADR-0016 on 2026-08-13
+
+## Note on the number
+
+This record was accepted as ADR-0011 and carried that number until 2026-08-13.
+Two agents working in parallel each took `0011` on 2026-08-10 — this one and
+"The spec review campaign is a portable stage, not a managed-outcome overlay",
+which landed 54 minutes earlier. Nothing checked for the collision, so both
+merged, and roughly forty references to "ADR-0011" across the repository became
+ambiguous: some meant mutation scope, some meant the review gate.
+
+The earlier record keeps `0011`. Only the identifier changed here; the decision,
+its date, and its content are untouched, so this is not the retroactive
+amendment ADR-0012 prohibits. `0016` also places this record beside ADR-0013 and
+ADR-0015, the other two mutation-scope decisions.
+
+This is the same failure mode as the duplicate `specs/NNN-` directories found
+the same day, and it has the same cause: a number derived from local state by
+agents who cannot see each other's work.
 
 ## Context
 

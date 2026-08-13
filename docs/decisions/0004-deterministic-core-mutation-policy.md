@@ -65,7 +65,7 @@ count, and a mutation score of at least 95% for this unchanged allow-list.
 without being measured; measured directly it was 94.81% (1279 killed, 70 survived, 1 timeout
 of 1350 mutants) — below the bar. After the survivors were worked down the same unchanged
 allow-list scored **97.92% (1319 killed, 28 survived of 1347 mutants)**, reproducible with
-`make mutation-gate-backend`. ADR-0011 records the measurement and the disposition of every
+`make mutation-gate-backend`. ADR-0016 records the measurement and the disposition of every
 survivor. The gate is the `mutation-gate` and `mutation-base` jobs in
 `.github/workflows/ci.yml`.
 

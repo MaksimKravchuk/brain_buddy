@@ -7,8 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Targets live in the `Makefile`; per-package scripts in `frontend/package.json`
 and `mobile/package.json`. Only the things those files don't tell you:
 
-- `make test-backend` builds a Docker test image. For a fast local loop run
-  `cd backend && pytest` against the local venv instead.
+- `make test-backend` runs pytest locally, then the coverage floor and the
+  Allure taxonomy validator. For the bare test loop use `cd backend && pytest`;
+  it skips both gates, so run the make target before reporting anything green.
 - `make dev-frontend` serves Vite on `localhost:5173`; the compose stack serves
   the frontend on `8080` instead.
 - Full frontend Stryker is ~20 min locally (ADR-0013, report-only nightly);
@@ -43,9 +44,16 @@ Non-negotiables, whether or not that skill is loaded:
   trace them; a bare `FR-001` is rejected because every feature restarts at 001.
 - The interview cannot be a subagent: `AskUserQuestion` is stripped from every
   subagent, so human elicitation must run in the main session.
-- The `security-privacy-reviewer` and `ux-a11y-reviewer` agent files under
-  `.claude/agents/` are the **single source of rubric truth** for their lenses —
-  `spec_kit_planning_review.py` points at them rather than restating the rubric.
+- The `architecture-consistency-reviewer`, `security-privacy-reviewer` and
+  `ux-a11y-reviewer` agent files under `.claude/agents/` are the **single source
+  of rubric truth** for their lenses — `spec_kit_planning_review.py` points at
+  them rather than restating the rubric. Only the rubric body is used: the
+  reviewers run as headless `claude -p` processes, so the agents' `model:` and
+  `tools:` frontmatter is inert and `ROLE_CONFIGS` decides both.
+- Feature numbers are reserved across every git ref, not just the checked-out
+  `specs/` tree — two branches claiming one `NNN-` merge without a conflict and
+  then satisfy each other's requirement-coverage gate. `check_spec_kit_specs.py`
+  rejects duplicates; `create-new-feature.sh` avoids creating them.
 - `/speckit-implement` is a preserved override guarded by
   `scripts/check_speckit_manifests.py`; `specify integration upgrade --force`
   must not revert it.

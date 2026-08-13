@@ -26,6 +26,11 @@ That target mirrors the CI job graph. Run it before reporting any change done.
 When you need to scope down, use the per-surface tables below — but say which
 surfaces you skipped and why.
 
+"Mirrors" is a property that has to be maintained, not a promise. `test-mobile`
+omitted the Allure taxonomy validator that CI runs, so a locally-green agent
+could still fail CI on `mobile-jest`. When you add a validator to a CI job, add
+it to the matching make target in the same change.
+
 ## Prerequisites the Makefile does not install
 
 These are the two failures most often misdiagnosed as broken code:
@@ -94,7 +99,7 @@ Watch mode while iterating: `cd frontend && npm run test:watch`
 ```bash
 make typecheck-mobile     # tsc --noEmit
 make lint-mobile          # eslint, every eslint-config-expo rule enforced
-make test-mobile          # jest + the coverage floor
+make test-mobile          # jest + the coverage floor + allure taxonomy
 make integration-mobile   # real api client vs a disposable local backend
 make build-mobile         # expo export --platform ios
 make ci-mobile            # all of the above
@@ -143,13 +148,19 @@ make validate-ci     # the validator unit tests + workflow contract checks
 
 ## The Allure taxonomy contract
 
-Every pytest, Vitest and Playwright **product** test must emit non-empty
+Every pytest, Vitest, Jest and Playwright **product** test must emit non-empty
 `epic`, `feature`, `story`, a human-readable title, and at least one named
 step. Use the central helpers and override only for narrower labels:
 
 - `backend/tests/allure_taxonomy.py`
 - `frontend/src/test/allureTaxonomy.ts`
 - `frontend/tests/allure.fixtures.ts`
+- `mobile/src/test/allureTaxonomy.ts`
+
+Mobile is the one runner whose step cannot come from a hook: in `allure-jest` a
+step follows the executing scope, and during `beforeEach` that scope is the
+fixture rather than the test. So the mobile helper binds labels in `beforeEach`
+and wraps each test body in a step.
 
 Name tests so acceptance can trace them: include the **feature-qualified**
 requirement id in the test name or Allure story — `006-FR-001`, or
