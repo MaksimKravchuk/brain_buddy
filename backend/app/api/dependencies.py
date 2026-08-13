@@ -129,7 +129,11 @@ ADMIN_DATA_EVENT = "admin_data_route"
 ADMIN_PORTAL_FLAG = "admin_portal"
 
 
-def _admin_log_event(request: Request) -> str:
+ADMIN_ROUTE_UNMATCHED = "unmatched"
+"""Fail-closed placeholder when no route template can be resolved."""
+
+
+def _admin_log_event(request: Request, config: AppConfig) -> str:
     """Which admin event this request is, for the FR-011 denial split.
 
     A capability probe is issued on every `/admin` page load; a data-route
@@ -137,21 +141,42 @@ def _admin_log_event(request: Request) -> str:
     them into one message makes the denial stream unusable as a signal.
     """
 
-    if _admin_route(request).endswith("/status"):
+    if _admin_route(request, config).endswith("/status"):
         return ADMIN_STATUS_EVENT
     return ADMIN_DATA_EVENT
 
 
-def _admin_route(request: Request) -> str:
-    """The matched route *template*, never the raw request path.
+def _admin_route(request: Request, config: AppConfig) -> str:
+    """The matched route *template*, canonicalized, never the raw request path.
 
     The revoke path interpolates a caller-supplied account id, which is raw
-    request input and must stay out of every record (009-FR-008).
+    request input and must stay out of every record (009-FR-008) — so the
+    template is the only admissible source, and `request.url.path` and the
+    path params are deliberately never consulted.
+
+    `scope["route"]` is framework-version-dependent, though. Older
+    FastAPI/Starlette expose the route as registered on the application, so the
+    template already carries the `include_router` prefix
+    (`/api/admin/accounts/lookup`). Newer versions let the innermost matching
+    router set it, so the same request yields a router-local template
+    (`/accounts/lookup`). Both are inside this project's declared dependency
+    ranges, and an audit record whose shape depends on which one resolved is
+    not a canonical record. So the mount prefix is re-applied from
+    configuration when — and only when — the template does not already carry
+    it; blind prepending would double it on the older shape.
+
+    Anything that is not a usable absolute template stays redacted: no route,
+    no `path`, an empty path, or a relative one all yield
+    `ADMIN_ROUTE_UNMATCHED` rather than a guess.
     """
 
-    route = request.scope.get("route")
-    template = getattr(route, "path", None)
-    return template if isinstance(template, str) else "unmatched"
+    template = getattr(request.scope.get("route"), "path", None)
+    if not isinstance(template, str) or not template.startswith("/"):
+        return ADMIN_ROUTE_UNMATCHED
+    prefix = f"{config.api_prefix}/admin"
+    if template == prefix or template.startswith(f"{prefix}/"):
+        return template
+    return f"{prefix}{template}"
 
 
 def require_operator(
@@ -180,8 +205,8 @@ def require_operator(
       nothing to name and resolving one would break "deny before touch".
     """
 
-    event = _admin_log_event(request)
-    route = _admin_route(request)
+    event = _admin_log_event(request, config)
+    route = _admin_route(request, config)
     raw_token = request.cookies.get(config.session.cookie_name)
     user = auth_service.get_user_for_token(raw_token)
     if user is None:
@@ -237,8 +262,8 @@ def require_admin_portal_enabled(
         logger.info(
             "Admin route unavailable: event=%s route=%s correlation=%s operator=%s "
             "outcome=%s",
-            _admin_log_event(request),
-            _admin_route(request),
+            _admin_log_event(request, config),
+            _admin_route(request, config),
             get_correlation_id(),
             operator.id,
             "portal_disabled",

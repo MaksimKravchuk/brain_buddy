@@ -892,3 +892,87 @@ def test_009_FR_009_admin_routes_carry_no_permissive_cross_origin_header(
         lowered = {key.lower() for key in resp.headers}
         assert "access-control-allow-origin" not in lowered
         assert "access-control-allow-credentials" not in lowered
+
+
+# ---------------------------------------------------------------------------
+# 009-FR-008 — the logged route template is canonical across framework versions
+# ---------------------------------------------------------------------------
+
+
+class _FakeRoute:
+    """Just the one attribute `_admin_route` reads off `scope["route"]`."""
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+
+
+def _route_for(path_or_route, *, api_prefix: str = "/api") -> str:
+    from types import SimpleNamespace
+
+    from app.api.dependencies import _admin_route
+
+    request = SimpleNamespace(scope={"route": path_or_route})
+    config = SimpleNamespace(api_prefix=api_prefix)
+    return _admin_route(request, config)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("mounted", "router_local", "canonical"),
+    [
+        ("/api/admin/status", "/status", "/api/admin/status"),
+        (
+            "/api/admin/accounts/lookup",
+            "/accounts/lookup",
+            "/api/admin/accounts/lookup",
+        ),
+        (
+            "/api/admin/accounts/{account_id}/revoke-sessions",
+            "/accounts/{account_id}/revoke-sessions",
+            "/api/admin/accounts/{account_id}/revoke-sessions",
+        ),
+    ],
+)
+def test_009_FR_008_route_template_is_canonical_for_both_framework_shapes(
+    mounted: str, router_local: str, canonical: str
+) -> None:
+    """`scope["route"]` is version-dependent; the audit record must not be.
+
+    Older FastAPI/Starlette set `scope["route"]` to the route as registered on
+    the application, carrying the `include_router` prefix. Newer versions let
+    the innermost matching router set it, so the same request yields a
+    router-local template with no prefix. The 009-FR-008 record has to read
+    identically either way, or the audit stream silently changes shape on a
+    dependency bump inside the declared range.
+    """
+
+    assert _route_for(_FakeRoute(mounted)) == canonical
+    assert _route_for(_FakeRoute(router_local)) == canonical
+
+
+def test_009_FR_008_an_already_prefixed_template_is_not_prefixed_twice() -> None:
+    """Guards the obvious wrong fix: unconditional prepending."""
+
+    assert _route_for(_FakeRoute("/api/admin/status")).count("/api/admin") == 1
+
+
+def test_009_FR_008_a_non_default_api_prefix_still_yields_one_canonical_route() -> None:
+    """The prefix is read from configuration, not hard-coded."""
+
+    assert _route_for(_FakeRoute("/status"), api_prefix="/v2") == "/v2/admin/status"
+    assert (
+        _route_for(_FakeRoute("/v2/admin/status"), api_prefix="/v2")
+        == "/v2/admin/status"
+    )
+
+
+@pytest.mark.parametrize(
+    "route",
+    [None, object(), _FakeRoute(""), _FakeRoute("accounts/lookup")],
+    ids=["missing", "no-path-attr", "empty", "not-absolute"],
+)
+def test_009_FR_008_an_unresolvable_route_stays_redacted_and_fail_closed(
+    route,
+) -> None:
+    """No template, no guess: never fall back to the raw caller-supplied path."""
+
+    assert _route_for(route) == "unmatched"
