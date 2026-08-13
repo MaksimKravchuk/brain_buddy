@@ -4,6 +4,7 @@ import { Text } from "react-native";
 
 import { useProjects, useTags } from "@/api/hooks";
 import { DEFAULT_SERVER_URL } from "@/config/serverUrl";
+import { clearIdentityStores } from "@/features/tasks/classificationQueue.storage";
 import { cacheKey } from "@/features/tasks/storageKeys";
 import { installFakeBackend, makeMe, type FakeBackend } from "@/test/fakeBackend";
 import { renderWithSession } from "@/test/harness";
@@ -122,5 +123,48 @@ describe("classification list cache", () => {
     renderWithSession(<Tags />);
 
     await waitFor(() => expect(screen.getByTestId("names")).toHaveTextContent("deep-work"));
+  });
+
+  it("006-FR-011 does not re-create the cache a sign-out deleted mid-write", async () => {
+    // The write-through is fire-and-forget from a query callback, and it reads
+    // the existing cache before merging its half in. That read is an await: a
+    // sign-out landing inside it used to be followed by a write that put the
+    // project and Tag names — the ones the person wrote — straight back onto a
+    // device that had just deliberately forgotten them. Guarding only on entry
+    // to the chain does not cover a write already executing when the clear runs.
+    const key = cacheKey(DEFAULT_SERVER_URL, "user-1");
+    const realGetItem = AsyncStorage.getItem;
+    let released = false;
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    AsyncStorage.getItem = (async (asked: string) => {
+      if (asked === key && !released) {
+        released = true;
+        await held;
+      }
+      return realGetItem.call(AsyncStorage, asked);
+    }) as typeof AsyncStorage.getItem;
+
+    backend = installFakeBackend({
+      "GET /auth/me": () => makeMe({ id: "user-1" }),
+      "GET /projects": () => [
+        { id: "p-1", name: "Wedding", color: null, state: "active", revision: 1, open_task_count: 0 },
+      ],
+    });
+
+    await renderWithSession(<Projects />);
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ok"));
+
+    // The person signs out while that cache read is still open.
+    await clearIdentityStores({ serverUrl: DEFAULT_SERVER_URL, accountId: "user-1" });
+    release();
+    await waitFor(() => expect(AsyncStorage.getItem).toBeDefined());
+    AsyncStorage.getItem = realGetItem;
+
+    // Give the fire-and-forget chain every chance to finish before asserting.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(await AsyncStorage.getItem(key)).toBeNull();
   });
 });
