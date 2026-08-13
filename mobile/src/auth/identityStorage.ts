@@ -16,8 +16,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { clearIdentityStores } from "../features/tasks/classificationQueue.storage";
-import { adoptIdentityStores } from "../features/tasks/storageKeys";
-
 import type { MeResponse } from "../api/types";
 import { flagStorageKey, identityStorageKey, type FeatureFlagRecord } from "./flagResolution";
 
@@ -104,10 +102,6 @@ export async function persistIdentity(
     await AsyncStorage.removeItem(flagStorageKey(serverUrl, previous.accountId));
     await clearIdentityStores({ serverUrl, accountId: previous.accountId });
   }
-  // Lifts any tombstone from an earlier sign-out of *this* identity, so its
-  // own writes are live again. A no-op the first time it signs in.
-  adoptIdentityStores(serverUrl, profile.id);
-
   const savedAt = now.toISOString();
   const identity: PersistedIdentity = { accountId: profile.id, savedAt };
   const flags: PersistedFlagRecord = { flags: sanitizeFlags(profile.feature_flags), savedAt };

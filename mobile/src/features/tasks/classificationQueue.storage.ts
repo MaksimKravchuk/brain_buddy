@@ -33,7 +33,7 @@ import {
   forgetIdentityStores,
   identitySuffixOf,
   isClassificationKey,
-  isForgottenKey,
+  isStoreGenerationCurrent,
   keysForIdentity,
   queueKey,
   storeOf,
@@ -312,13 +312,17 @@ export async function saveQueue(
   identity: ClassificationIdentity,
   entries: PendingClassificationChange[],
   now: number = Date.now(),
+  /** The value `identityStoreGeneration` returned when this write was
+   *  *scheduled*. Omitted by callers with no queue behind them. */
+  generation?: number,
 ): Promise<void> {
   const key = queueKey(identity.serverUrl, identity.accountId);
-  if (isForgottenKey(key)) {
-    // This identity's stores were deliberately cleared while this write was
-    // waiting its turn behind another. Writing now would re-create the queue
-    // a sign-out or a server change had just deleted, under a key nothing on
-    // the device can name any more.
+  if (generation !== undefined && !isStoreGenerationCurrent(key, generation)) {
+    // This identity's stores were deliberately cleared after this write was
+    // scheduled and before it ran. Writing now would either re-create the
+    // queue a sign-out just deleted, or — if the same account has since signed
+    // back in — overwrite the new session's queue with a snapshot from before
+    // it existed.
     return;
   }
   const owned = entries.filter((e) => belongsTo(e, identity)).map((e) => clampEntry(e, now));

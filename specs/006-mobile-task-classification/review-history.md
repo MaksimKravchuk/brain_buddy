@@ -224,6 +224,28 @@ serialisation order and process lifetime, not in requirements:
 Each carries a test that was mutation-checked: with the production change
 reverted the new test fails, and with it restored it passes.
 
+Review of those eight fixes then found three more, and the pattern in all three
+is the same one: **a guard placed before an `await` is not a guard.**
+
+- The pass checked ownership at the head of each iteration, then wrote the
+  `sending` marker — an await — and issued its first request. An identity
+  change landing inside that write slipped straight through; the extra check
+  added for the rejection path only ever covered the *second* request of a
+  step. Every request the pass issues is now preceded by a check with no await
+  between the two.
+- The cache writer checked the fence, then read the existing cache — an await —
+  and wrote the merge. A sign-out inside the read was followed by a write that
+  put the names back.
+- The store fence was a boolean tombstone lifted when the same identity signed
+  in again. The comment above it *acknowledged* that gap and argued past it on
+  the grounds that an account resurrecting its own work is not a disclosure.
+  That reasoning was sound and incomplete: the other half is that the stale
+  pass's now-empty result deletes work the **new** session queued in the
+  meantime, which is plain data loss and has nothing to do with disclosure. A
+  documented exception is not a safe one — writing the gap down made it feel
+  handled. Replaced with a generation counter, which answers "forgotten since
+  *I* started" rather than "forgotten at all", and needs no lifting step.
+
 The ninth is different in kind, and is the one worth carrying forward.
 
 ### FR-008 was violated by the shipped code

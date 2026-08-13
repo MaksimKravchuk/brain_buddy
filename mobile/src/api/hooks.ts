@@ -32,7 +32,11 @@ import {
   writeClassificationCache,
 } from "@/features/tasks/classificationCache";
 import type { CachedClassificationLists } from "@/features/tasks/classificationTypes";
-import { cacheKey, isForgottenKey } from "@/features/tasks/storageKeys";
+import {
+  cacheKey,
+  identityStoreGeneration,
+  isStoreGenerationCurrent,
+} from "@/features/tasks/storageKeys";
 import { newIdempotencyKey } from "@/utils/ids";
 
 export const taskKeys = {
@@ -114,6 +118,9 @@ function cacheListsInBackground(
   if (!key) {
     return;
   }
+  // Captured before the write is queued, so a clear landing at any point after
+  // this line — including inside the read below — fences it out.
+  const generation = identityStoreGeneration(serverUrl, accountId ?? "");
   cacheWrites = cacheWrites
     .catch(() => undefined)
     .then(async () => {
@@ -123,11 +130,18 @@ function cacheListsInBackground(
       // land between the fetch that scheduled it and its turn, and writing then
       // would put one account's whole project and Tag vocabulary — names the
       // person wrote — back on a device that has just forgotten them.
-      if (isForgottenKey(key)) {
+      if (!isStoreGenerationCurrent(key, generation)) {
         return;
       }
       const now = Date.now();
       const current = await readClassificationCache({ store: AsyncStorage, key, now });
+      // Again after the read, which is itself an await: a sign-out landing
+      // inside it would otherwise be followed by a write that re-creates the
+      // cache it just deleted, leaving one account's project and Tag names on
+      // the device after a deliberate transition.
+      if (!isStoreGenerationCurrent(key, generation)) {
+        return;
+      }
       await writeClassificationCache({
         store: AsyncStorage,
         key,

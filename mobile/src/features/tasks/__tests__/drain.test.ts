@@ -987,6 +987,29 @@ describe("006-SC-007 a pass that loses its identity stops sending", () => {
     expect(result.stoppedBecause).toBe("disowned");
   });
 
+  it("issues nothing when ownership is lost inside the send-marker write", async () => {
+    // `commit(plan.queue)` is an await — it puts the `sending` marker on the
+    // device before the request leaves. The head-of-iteration check has already
+    // passed by the time it resumes, so an identity change landing inside that
+    // write used to let the step's FIRST request go out under the new session.
+    // The rejection-path check only ever guarded the optional second one.
+    let owned = true;
+    const rec = recorder();
+
+    const result = await drainQueue([entry()], {
+      ...rec.port,
+      owned: () => owned,
+      persist: async () => {
+        // Somebody signs in while the marker is being written.
+        owned = false;
+      },
+    });
+
+    expect(rec.sent).toHaveLength(0);
+    expect(rec.reread).toHaveLength(0);
+    expect(result.stoppedBecause).toBe("disowned");
+  });
+
   it("sends everything when the caller names no identity to lose", async () => {
     // `owned` is optional, and its absence means "nothing can take this from
     // me" — not "assume the worst". A caller with no identity must not be

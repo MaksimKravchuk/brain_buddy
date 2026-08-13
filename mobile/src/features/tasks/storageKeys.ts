@@ -135,10 +135,11 @@ export function parseClassificationKey(
   }
 }
 
-// ----------------------------------------------------- forgotten identities
+// --------------------------------------------------- identity store fencing
 
 /**
- * Identities whose device stores have been deliberately cleared in this run.
+ * How many times each identity's device stores have been deliberately cleared
+ * in this run.
  *
  * Clearing is not a barrier on its own, and two writer chains outlive it. A
  * drain pass whose identity has since been replaced still finishes its own
@@ -153,38 +154,49 @@ export function parseClassificationKey(
  * exists to prevent.
  *
  * Awaiting those chains from the clearing side would mean `SessionProvider`
- * holding a handle on every writer in the app. A tombstone the writers consult
- * is the same guarantee from the other end, and it additionally covers a write
+ * holding a handle on every writer in the app. A fence the writers consult is
+ * the same guarantee from the other end, and it additionally covers a write
  * that *starts* after the clear, which awaiting cannot.
  *
- * Process-lifetime only, and deliberately so: this orders writes within one
- * run, and a later sign-in to the same identity lifts it (`adoptIdentityStores`
- * from `persistIdentity`). The one interleaving it does not cover is signing
- * out and back in as the *same* account while a pass is still in flight, which
- * resurrects that account's own work for that same account — not a disclosure,
- * and not worth a heavier mechanism than this.
+ * A **generation** rather than a boolean tombstone, because "has this identity
+ * been forgotten" is the wrong question. The right one is "has it been
+ * forgotten since *I* started". Sign out and back in as the same account while
+ * a request is in flight and a boolean is already lifted by the time the old
+ * pass resumes: if its request succeeded, its now-empty result removes work the
+ * *new* session has queued in the meantime; if it failed, it restores work the
+ * deliberate sign-out discarded. Neither is a disclosure, which is why the
+ * first version of this reasoned its way past them — but the first is
+ * straightforward data loss for the person sitting in front of the phone. A
+ * writer that captured generation *n* is refused once the counter moves, and a
+ * writer that starts afterwards captures *n+1* and proceeds. Re-adoption needs
+ * no lifting step at all.
+ *
+ * Process-lifetime only: it orders writes within one run, which is the only
+ * scope in which two live writers can disagree.
  */
-const forgottenSuffixes = new Set<string>();
+const storeGenerations = new Map<string, number>();
 
-/** Called by `clearIdentityStores`, before the delete rather than after it:
- *  a writer that runs between the two would otherwise slip underneath. */
+/** The generation a writer must capture when it *starts*, to be checked again
+ *  when it is finally about to touch the device. */
+export function identityStoreGeneration(serverUrl: string, accountId: string): number {
+  return storeGenerations.get(identitySuffix(serverUrl, accountId)) ?? 0;
+}
+
+/** Called by `clearIdentityStores`, before the delete rather than after it: a
+ *  writer that runs between the two would otherwise slip underneath. */
 export function forgetIdentityStores(serverUrl: string, accountId: string): void {
-  forgottenSuffixes.add(identitySuffix(serverUrl, accountId));
+  const suffix = identitySuffix(serverUrl, accountId);
+  storeGenerations.set(suffix, (storeGenerations.get(suffix) ?? 0) + 1);
 }
 
-/** Lifts the tombstone when this identity is established again. */
-export function adoptIdentityStores(serverUrl: string, accountId: string): void {
-  forgottenSuffixes.delete(identitySuffix(serverUrl, accountId));
-}
-
-/** Whether writing this key would resurrect a store that was cleared. */
-export function isForgottenKey(key: string): boolean {
+/** Whether a writer holding `generation` may still write to `key`. */
+export function isStoreGenerationCurrent(key: string, generation: number): boolean {
   const suffix = identitySuffixOf(key);
-  return suffix !== null && forgottenSuffixes.has(suffix);
+  return suffix !== null && (storeGenerations.get(suffix) ?? 0) === generation;
 }
 
-/** Tests only. Reset globally in `jest.setup.js`, because a tombstone left
+/** Tests only. Reset globally in `jest.setup.js`, because a generation left
  *  standing would make the next test's writes silently no-op. */
-export function resetForgottenIdentities(): void {
-  forgottenSuffixes.clear();
+export function resetIdentityStoreGenerations(): void {
+  storeGenerations.clear();
 }

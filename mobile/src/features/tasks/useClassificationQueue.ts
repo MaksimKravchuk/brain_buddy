@@ -71,7 +71,11 @@ import {
   type ClassificationState,
   type ConflictDecision,
 } from "./conflictDecision";
-import { queueKey, type ClassificationIdentity } from "./storageKeys";
+import {
+  identityStoreGeneration,
+  queueKey,
+  type ClassificationIdentity,
+} from "./storageKeys";
 
 // ------------------------------------------------------------------ contracts
 
@@ -594,6 +598,16 @@ export async function drainQueue(
     // a kill mid-send leaves no trace that an attempt was ever made.
     current = await commit(plan.queue);
 
+    // And again here, because `commit` is an await. The head-of-iteration check
+    // has already passed by the time that storage write resumes, so an identity
+    // change landing inside it would let the *first* request of this step go
+    // out under the new session — the rejection-path check below only guards
+    // the optional second one. Every request this pass issues is now preceded
+    // by a check with no await between the two.
+    if (!owned()) {
+      return stop(current, "disowned");
+    }
+
     let resolution: DrainResolution;
     if (plan.kind === "reread") {
       try {
@@ -1049,6 +1063,10 @@ export function useClassificationQueue(
       // Captured now, used only as the floor if the ref stops being `active`'s
       // before this write's turn comes.
       const scheduled = snapshot ?? queueRef.current;
+      // Captured now for the same reason: what matters is not whether this
+      // identity has ever been forgotten, but whether it was forgotten after
+      // this write was scheduled.
+      const generation = identityStoreGeneration(active.serverUrl, active.accountId);
       const write = writeChainRef.current.then(() => {
         // `queueRef` is read late on purpose — that is what makes a write that
         // waited behind another persist what the device holds *now*. But the
@@ -1060,7 +1078,7 @@ export function useClassificationQueue(
         // writes clobbering each other. Read live only while the ref is still
         // A's; otherwise it says nothing about A at all.
         const live = identityRef.current === active ? queueRef.current : scheduled;
-        return saveQueue(active, snapshot ?? live, Date.now());
+        return saveQueue(active, snapshot ?? live, Date.now(), generation);
       });
       // The chain must survive a failed write, or one rejected save would strand
       // every later one behind it. The caller still sees its own rejection.
