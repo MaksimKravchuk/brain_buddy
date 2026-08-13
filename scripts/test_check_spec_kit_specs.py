@@ -183,6 +183,58 @@ class CheckSpecKitSpecsTests(unittest.TestCase):
         (feature / "tasks.md").write_text(tasks_text)
         return feature
 
+    def _write_complete_feature(self, name: str) -> Path:
+        """A feature directory that satisfies every artifact requirement.
+
+        Used by the duplicate-number tests so they fail on the number and not
+        on a missing artifact the checker happens to reach first.
+        """
+        check_spec_kit_specs.GRANDFATHERED = {}
+        feature = self.specs_dir / name
+        (feature / "checklists").mkdir(parents=True)
+        (feature / "intake.md").write_text("# Intake\n")
+        (feature / "spec.md").write_text("# Spec\n")
+        (feature / "checklists" / "requirements.md").write_text("# Checklist\n")
+        (feature / "design.md").write_text("# Design\n")
+        (feature / "plan.md").write_text("# Plan\n")
+        (feature / "tasks.md").write_text("# Tasks\n\n- [ ] T001 not yet\n")
+        return feature
+
+    def test_two_features_sharing_a_number_fail(self) -> None:
+        """The collision git cannot see.
+
+        Different slugs mean no merge conflict, so nothing upstream of this
+        check rejects the pair — while check_requirement_coverage.py matches
+        `007-FR-001` repository-wide and lets either feature's tests satisfy
+        the other's coverage gate.
+        """
+        self._write_complete_feature("007-external-agent-relay")
+        self._write_complete_feature("007-allure3-quality-gate")
+
+        result, _stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 1)
+        self.assertIn("feature number 007 is claimed by 2 directories", stderr)
+        self.assertIn("specs/007-allure3-quality-gate", stderr)
+        self.assertIn("specs/007-external-agent-relay", stderr)
+
+    def test_distinct_numbers_pass(self) -> None:
+        self._write_complete_feature("007-external-agent-relay")
+        self._write_complete_feature("008-allure3-quality-gate")
+
+        result, _stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 0, stderr)
+
+    def test_duplicate_number_is_reported_for_every_claimant(self) -> None:
+        for slug in ("006-first", "006-second", "006-third"):
+            self._write_complete_feature(slug)
+
+        result, _stdout, stderr = self._run_check()
+
+        self.assertEqual(result, 1)
+        self.assertIn("feature number 006 is claimed by 3 directories", stderr)
+
     def test_planned_but_unbuilt_feature_does_not_require_acceptance(self) -> None:
         """Demanding acceptance.md at planning time would force a fabricated verdict."""
         self._write_planned_feature("# Tasks\n\n- [x] T001 done\n- [ ] T002 not yet\n")

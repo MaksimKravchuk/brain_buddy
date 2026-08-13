@@ -31,6 +31,12 @@ PRESERVED_OVERRIDES: dict[str, tuple[str, str]] = {
         "Hermes; upstream has neither policy.",
         "preserved BrainBuddy override",
     ),
+    ".specify/scripts/bash/create-new-feature.sh": (
+        "Reserves feature numbers across every git ref, not just the "
+        "checked-out specs/ tree; upstream's per-worktree scan lets two "
+        "parallel branches claim one number and merge without a conflict.",
+        "preserved BrainBuddy override",
+    ),
     ".specify/templates/spec-template.md": (
         "Adds consent/local-first and mobile-first callouts required by the "
         "constitution.",

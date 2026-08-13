@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""Run bounded, read-only reviews for the Architect Spec Kit planning lane.
+"""Run bounded, read-only reviews for the Spec Kit planning stage.
 
-The workflow engine owns scheduling and persisted run state. This helper owns
-sandbox enforcement, structured output validation, and deterministic fan-in.
-It never edits product or planning artifacts; only the parent Architect may do
-that after reading the generated review summary.
+`.specify/workflows/speckit/workflow.yml` owns scheduling and persisted run
+state. This helper owns sandbox enforcement, structured output validation, and
+deterministic fan-in. It never edits product or planning artifacts; the caller
+acts on the generated review summary.
+
+The gate is portable (ADR-0011): it needs no managed runtime, and the reviewer
+prompts must not assume one. They said "Hermes Kanban remains the sole
+execution runtime" until 2026-08-13, which contradicted CLAUDE.md,
+docs/spec-kit-workflow.md and .hermes.md — every one of which makes Hermes
+opt-in — and shipped that contradiction into every campaign.
 """
 
 from __future__ import annotations
@@ -522,9 +528,9 @@ Feature artifacts:
 Also inspect relevant accepted/proposed ADRs and current code only where needed to verify factual claims.
 
 Hard boundaries:
-- Do not edit files, run implementation, commit, push, create cards, or propose a second scheduler.
-- Spec Kit tasks are planning input; Hermes Kanban remains the sole execution runtime.
-- Technical decisions belong to Architect. Do not escalate database, framework, API shape, module boundary, testing strategy, migration mechanics, or implementation choices to the product owner.
+- Do not edit files, run implementation, commit, push, or open pull requests. This is a read-only review.
+- Spec Kit tasks are planning input. Do not assume any particular execution runtime, and do not require one: implementation may proceed directly from tasks.md in an isolated worktree.
+- Technical decisions belong to the implementing agent. Do not escalate database, framework, API shape, module boundary, testing strategy, migration mechanics, or implementation choices to the product owner.
 - Product decisions are allowed only for: {allowed_categories}.
 - Cite concrete file paths/symbols/sections in every finding's evidence.
 - Return only JSON matching the supplied schema, with role exactly {role!r}.
@@ -639,12 +645,18 @@ def aggregate_reviews(
         )
     elif product_decisions or "product-decision-required" in verdicts:
         status = "product-decision-required"
-        action = "Block only the Architect Kanban card with this decision packet."
+        action = (
+            "Hold implementation and put this decision packet to the human. "
+            "These are product decisions; no agent may answer them for them."
+        )
     elif "changes-required" in verdicts or any(
         item.get("severity") == "blocking" for item in technical_findings
     ):
         status = "technical-changes-required"
-        action = "Architect resolves technical findings and reruns the review campaign once."
+        action = (
+            "Resolve the technical findings and rerun the review campaign once. "
+            "The cap is two campaigns."
+        )
     elif risk == HUMAN_SIGNOFF_REQUIRED_AT and not human_signoff:
         status = "escalated"
         action = (
@@ -654,7 +666,10 @@ def aggregate_reviews(
         )
     else:
         status = "approved"
-        action = "Architect may finalize tasks.md, analyze, and the compact Kanban handoff."
+        action = (
+            "Proceed: finalize tasks.md, run /speckit-analyze, and begin "
+            "implementation in an isolated worktree."
+        )
 
     # Degradation deliberately does not change the status. Blocking on it
     # would be indistinguishable from the permanent `escalated` the fallback

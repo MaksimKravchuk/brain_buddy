@@ -108,10 +108,105 @@ is_feature_number_in_range() {
     [[ "$normalized" < "$MAX_FEATURE_NUMBER" || "$normalized" == "$MAX_FEATURE_NUMBER" ]]
 }
 
+# preserved BrainBuddy override: feature numbers are reserved across every ref,
+# not just the checked-out specs/ tree.
+#
+# Upstream derives the next number from the working tree alone. That tree is
+# per-branch, so two agents branching from the same trunk both see the same
+# highest number and both claim it. The resulting directories have different
+# slugs, so git merges them without a conflict and no reviewer sees anything
+# wrong — while `check_requirement_coverage.py` matches `NNN[-_]FR[-_]nnn`
+# repository-wide and can no longer tell the two features apart. Two collisions
+# (006 and 007) reached open pull requests this way.
+#
+# Scanning history rather than current refs is deliberate: a number used by a
+# deleted branch must stay burned, because tests naming it may already exist.
+GIT_CLAIMED_NUMBERS=""
+GIT_CLAIMED_NUMBERS_LOADED=false
+
+# `--all` means the refs this clone already has. A number claimed on a PR
+# branch nobody fetched is therefore invisible, so refresh first when a remote
+# is reachable. Bounded and failure-tolerant on purpose: creating a feature
+# must still work offline, and a slow remote must not hang the command.
+#
+# This narrows the window; it does not close it. Two clones can still pick the
+# same number between a fetch and a push, and nothing here publishes a
+# reservation. The authoritative gate is `check_spec_kit_specs.py`, which runs
+# in CI on every pull request and rejects a duplicate prefix before it merges.
+# Set SPECIFY_SKIP_FETCH=1 to skip the refresh.
+refresh_remote_refs() {
+    [ "${SPECIFY_SKIP_FETCH:-}" = "1" ] && return 0
+    git rev-parse --git-dir >/dev/null 2>&1 || return 0
+    git remote get-url origin >/dev/null 2>&1 || return 0
+
+    # The refspec is explicit because `git clone --single-branch` pins
+    # `remote.origin.fetch` to one branch, and a plain `git fetch origin` in
+    # such a clone re-fetches only that branch — leaving every other feature
+    # number invisible. Passing the wildcard on the command line widens this
+    # one invocation without rewriting the clone's configuration.
+    if command -v timeout >/dev/null 2>&1; then
+        GIT_TERMINAL_PROMPT=0 timeout 20 git fetch --quiet origin \
+            "+refs/heads/*:refs/remotes/origin/*" >/dev/null 2>&1 || true
+    else
+        GIT_TERMINAL_PROMPT=0 git fetch --quiet origin \
+            "+refs/heads/*:refs/remotes/origin/*" >/dev/null 2>&1 || true
+    fi
+    return 0
+}
+
+# Every feature number ever added under specs/ on any ref, normalized to the
+# zero-padded width the directory used. Computed once; the auto-correct loop
+# below would otherwise re-run `git log` per candidate.
+load_git_claimed_numbers() {
+    [ "$GIT_CLAIMED_NUMBERS_LOADED" = true ] && return 0
+    GIT_CLAIMED_NUMBERS_LOADED=true
+
+    git rev-parse --git-dir >/dev/null 2>&1 || return 0
+    refresh_remote_refs
+
+    GIT_CLAIMED_NUMBERS=$(
+        git log --all --pretty=format: --name-only --diff-filter=A -- 'specs/*' 2>/dev/null \
+            | grep -Eo '^specs/[0-9]{3,}-' \
+            | grep -Eo '[0-9]+' \
+            | grep -Ev '^[0-9]{8}$' \
+            | sort -u \
+            | tr '\n' ' ' || true
+    )
+    return 0
+}
+
+git_claims_prefix() {
+    local feature_num="$1"
+    load_git_claimed_numbers
+    case " $GIT_CLAIMED_NUMBERS " in
+        *" $feature_num "*) return 0 ;;
+    esac
+    return 1
+}
+
+get_highest_from_git_history() {
+    local highest=0
+    local number
+
+    load_git_claimed_numbers
+    for number in $GIT_CLAIMED_NUMBERS; do
+        is_feature_number_in_range "$number" || continue
+        number=$((10#$number))
+        if [ "$number" -gt "$highest" ]; then
+            highest=$number
+        fi
+    done
+
+    echo "$highest"
+}
+
 # Function to get highest number from specs directory
 get_highest_from_specs() {
     local specs_dir="$1"
-    local highest=0
+    local highest
+    local number
+
+    highest=$(get_highest_from_git_history)
 
     if [ -d "$specs_dir" ]; then
         for dir in "$specs_dir"/*; do
@@ -133,10 +228,13 @@ get_highest_from_specs() {
     echo "$highest"
 }
 
-# Return success when a spec directory owns the given numeric prefix.
+# Return success when a spec directory owns the given numeric prefix, on this
+# branch or on any other ref this clone has seen.
 spec_prefix_exists() {
     local specs_dir="$1"
     local feature_num="$2"
+
+    git_claims_prefix "$feature_num" && return 0
 
     for spec_path in "$specs_dir/${feature_num}-"*; do
         [ -d "$spec_path" ] && return 0
@@ -263,6 +361,11 @@ if [ "$USE_TIMESTAMP" = true ]; then
     FEATURE_NUM=$(date +%Y%m%d-%H%M%S)
     BRANCH_NAME="${FEATURE_NUM}-${BRANCH_SUFFIX}"
 else
+    # Populate the claimed-number cache in THIS shell. `get_highest_from_specs`
+    # runs inside a command substitution, and a subshell inherits the cache but
+    # cannot export it back — without this the fetch would run twice.
+    load_git_claimed_numbers
+
     if [ -n "$BRANCH_NUMBER" ] && [[ ! "$BRANCH_NUMBER" =~ ^[0-9]+$ ]]; then
         echo "Error: --number must be an unsigned integer, got '$BRANCH_NUMBER'" >&2
         exit 1

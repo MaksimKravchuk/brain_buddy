@@ -128,6 +128,37 @@ def _relative(path: Path) -> str:
     return path.relative_to(REPO_ROOT).as_posix()
 
 
+def _validate_unique_numbers(names: list[str], failures: list[str]) -> None:
+    """Reject two feature directories sharing one NNN- prefix.
+
+    Nothing else catches this. `create-new-feature.sh` derives the next number
+    from the local `specs/` tree, which is per-branch, so two agents branching
+    from the same trunk both compute the same number and both merge cleanly —
+    the directory names differ, so git sees no conflict at all.
+
+    The damage lands in `check_requirement_coverage.py`, which matches
+    `NNN[-_]FR[-_]nnn` across the whole repository. Every feature restarts at
+    FR-001, so a shared prefix lets one feature's tests satisfy another's
+    coverage gate: exactly the cross-feature satisfaction the qualified id was
+    introduced to prevent. Two duplicates reached open pull requests before
+    this check existed.
+    """
+    by_number: dict[str, list[str]] = {}
+    for name in names:
+        if FEATURE_DIR_PATTERN.match(name):
+            by_number.setdefault(name.split("-", 1)[0], []).append(name)
+
+    for number, owners in sorted(by_number.items()):
+        if len(owners) > 1:
+            listed = ", ".join(f"specs/{owner}" for owner in sorted(owners))
+            failures.append(
+                f"feature number {number} is claimed by {len(owners)} directories "
+                f"({listed}); renumber all but one, because "
+                "check_requirement_coverage.py matches "
+                f"{number}-FR-nnn repository-wide and cannot tell them apart"
+            )
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -282,6 +313,8 @@ def main() -> int:
 
         _validate_required_files(spec_dir, failures)
 
+    _validate_unique_numbers(sorted(seen_dirs), failures)
+
     for grandfathered_name, config in sorted(GRANDFATHERED.items()):
         if grandfathered_name not in seen_dirs:
             failures.append(
@@ -295,8 +328,12 @@ def main() -> int:
             print(f"- {failure}", file=sys.stderr)
         print(
             "\nNew or materially changed features must follow: constitution -> "
-            "/speckit-specify -> /speckit-clarify -> /speckit-plan -> "
-            "/speckit-checklist -> /speckit-tasks -> /speckit-analyze.",
+            "/speckit-interview -> /speckit-specify -> /speckit-clarify -> "
+            "/speckit-design -> /speckit-plan -> /speckit-review -> "
+            "/speckit-checklist -> /speckit-tasks -> /speckit-analyze -> "
+            "/speckit-implement -> /speckit-accept -> /speckit-report. "
+            "/speckit-design and /speckit-review are mandatory hooks "
+            "(optional: false in .specify/extensions.yml), not suggestions.",
             file=sys.stderr,
         )
         return 1
