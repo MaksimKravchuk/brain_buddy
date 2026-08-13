@@ -134,3 +134,69 @@ export function parseClassificationKey(
     return null;
   }
 }
+
+// --------------------------------------------------- identity store fencing
+
+/**
+ * How many times each identity's device stores have been deliberately cleared
+ * in this run.
+ *
+ * Clearing is not a barrier on its own, and two writer chains outlive it. A
+ * drain pass whose identity has since been replaced still finishes its own
+ * entry into its own key — that is deliberate, and the one thing about a
+ * half-finished pass that is unambiguously its work. The project and Tag cache
+ * write is fire-and-forget from a React Query callback and answers to nobody.
+ * Either can land *after* `clearIdentityStores` and put unsent work, or the
+ * names the person wrote, back on disk under an identity that has just been
+ * forgotten — where invariant 8b's sweep reaches it only once some *other*
+ * identity signs in successfully. On a device where nobody signs in again it
+ * simply stays, unnameable and undeleted, which is the exact outcome FR-011
+ * exists to prevent.
+ *
+ * Awaiting those chains from the clearing side would mean `SessionProvider`
+ * holding a handle on every writer in the app. A fence the writers consult is
+ * the same guarantee from the other end, and it additionally covers a write
+ * that *starts* after the clear, which awaiting cannot.
+ *
+ * A **generation** rather than a boolean tombstone, because "has this identity
+ * been forgotten" is the wrong question. The right one is "has it been
+ * forgotten since *I* started". Sign out and back in as the same account while
+ * a request is in flight and a boolean is already lifted by the time the old
+ * pass resumes: if its request succeeded, its now-empty result removes work the
+ * *new* session has queued in the meantime; if it failed, it restores work the
+ * deliberate sign-out discarded. Neither is a disclosure, which is why the
+ * first version of this reasoned its way past them — but the first is
+ * straightforward data loss for the person sitting in front of the phone. A
+ * writer that captured generation *n* is refused once the counter moves, and a
+ * writer that starts afterwards captures *n+1* and proceeds. Re-adoption needs
+ * no lifting step at all.
+ *
+ * Process-lifetime only: it orders writes within one run, which is the only
+ * scope in which two live writers can disagree.
+ */
+const storeGenerations = new Map<string, number>();
+
+/** The generation a writer must capture when it *starts*, to be checked again
+ *  when it is finally about to touch the device. */
+export function identityStoreGeneration(serverUrl: string, accountId: string): number {
+  return storeGenerations.get(identitySuffix(serverUrl, accountId)) ?? 0;
+}
+
+/** Called by `clearIdentityStores`, before the delete rather than after it: a
+ *  writer that runs between the two would otherwise slip underneath. */
+export function forgetIdentityStores(serverUrl: string, accountId: string): void {
+  const suffix = identitySuffix(serverUrl, accountId);
+  storeGenerations.set(suffix, (storeGenerations.get(suffix) ?? 0) + 1);
+}
+
+/** Whether a writer holding `generation` may still write to `key`. */
+export function isStoreGenerationCurrent(key: string, generation: number): boolean {
+  const suffix = identitySuffixOf(key);
+  return suffix !== null && (storeGenerations.get(suffix) ?? 0) === generation;
+}
+
+/** Tests only. Reset globally in `jest.setup.js`, because a generation left
+ *  standing would make the next test's writes silently no-op. */
+export function resetIdentityStoreGenerations(): void {
+  storeGenerations.clear();
+}

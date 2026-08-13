@@ -17,7 +17,7 @@ import { BBText } from "@/components/BBText";
 import { Button } from "@/components/Button";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { Screen } from "@/components/Screen";
-import { DEFAULT_SERVER_URL } from "@/config/serverUrl";
+import { DEFAULT_SERVER_URL, normalizeServerUrl } from "@/config/serverUrl";
 import { clearIdentityStores, loadQueue } from "@/features/tasks/classificationQueue.storage";
 import type { PendingClassificationChange } from "@/features/tasks/classificationTypes";
 import { DiscardUnsentSheet } from "@/features/tasks/DiscardUnsentSheet";
@@ -49,8 +49,24 @@ export default function SignInScreen() {
   const [error, setError] = useState<unknown>(null);
   const [pendingDiscard, setPendingDiscard] = useState<PendingDiscard | null>(null);
 
+  /**
+   * Normalized on the draft side, exactly as Settings compares it: a trailing
+   * slash is the same server, and `updateServerUrl` normalizes it away before
+   * deciding there is nothing to do.
+   *
+   * Compared raw, an equivalent URL takes the discard path for a save that
+   * then changes nothing — the person is warned that continuing loses their
+   * unsent work, or, with an empty queue, `clearServerChange` deletes the
+   * cached project and Tag lists with no sheet shown at all. `serverUrl` needs
+   * no normalizing: it only ever arrives from `loadServerUrl`/`saveServerUrl`,
+   * both of which return a normalized value.
+   *
+   * The empty-draft guard stays in front: a cleared field normalizes to
+   * `DEFAULT_SERVER_URL`, which on a device pointed elsewhere is a real server
+   * change, and clearing a text input is not how anyone asks for one.
+   */
   const changingServer =
-    showServer && serverDraft.trim() !== "" && serverDraft !== serverUrl;
+    showServer && serverDraft.trim() !== "" && normalizeServerUrl(serverDraft) !== serverUrl;
 
   const runSubmit = async (withServerChange: boolean) => {
     setBusy(true);

@@ -10,6 +10,12 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import type { MeResponse } from "../../api/types";
+import type { PendingClassificationChange } from "../../features/tasks/classificationTypes";
+import {
+  clearIdentityStores,
+  saveQueue,
+} from "../../features/tasks/classificationQueue.storage";
+import { cacheKey, queueKey } from "../../features/tasks/storageKeys";
 import { TASK_CLASSIFICATION_FLAG, flagStorageKey, identityStorageKey } from "../flagResolution";
 import {
   clearPersistedIdentity,
@@ -61,6 +67,24 @@ function profile(id: string, flags: Record<string, boolean> = {}): MeResponse {
   return { id, email: `${id}@example.test`, feature_flags: flags };
 }
 
+/** A queue entry `saveQueue` will accept — it drops anything whose identity
+ *  does not match the key it is being written under (invariant 4). */
+function queueEntry(
+  over: Pick<PendingClassificationChange, "taskId" | "accountId" | "serverUrl">,
+): PendingClassificationChange {
+  const at = new Date().toISOString();
+  return {
+    ...over,
+    value: { projectId: "p1", tagIds: undefined },
+    observedRevision: 1,
+    originalValue: { projectId: null, tagIds: [] },
+    firstQueuedAt: at,
+    lastEditedAt: at,
+    idempotencyKey: `key-${over.taskId}`,
+    sendState: "queued",
+  };
+}
+
 beforeEach(async () => {
   await AsyncStorage.clear();
 });
@@ -101,14 +125,60 @@ describe("persisted identity", () => {
 
   it("006-FR-011 deletes the previous identity's stored keys when a different account signs in", async () => {
     await persistIdentity(SERVER, profile("acct-1", { [TASK_CLASSIFICATION_FLAG]: true }));
+    // All three of the previous account's stores, not just the one this test
+    // used to check. The assertion below said "the key itself is gone" while
+    // naming only the flag record, and the queue and the picker cache were in
+    // fact left behind — which is how they came to be left behind.
+    await AsyncStorage.setItem(queueKey(SERVER, "acct-1"), JSON.stringify([{ taskId: "t1" }]));
+    await AsyncStorage.setItem(
+      cacheKey(SERVER, "acct-1"),
+      JSON.stringify({ projects: [{ id: "p1", name: "Wedding" }], tags: [], fetchedAt: "x" }),
+    );
 
     await persistIdentity(SERVER, profile("acct-2", { [TASK_CLASSIFICATION_FLAG]: false }));
 
-    // Not merely unread: the key itself is gone. Nothing ever reads a key it
-    // will never open again, so deletion needs its own mechanism.
-    expect(await AsyncStorage.getAllKeys()).not.toContain(flagStorageKey(SERVER, "acct-1"));
+    // Not merely unread: the keys themselves are gone. Nothing ever reads a key
+    // it will never open again, so deletion needs its own mechanism — and it
+    // may not be delegated to the classification hook's cross-identity sweep,
+    // which runs only when the *new* account has the rollout flag on. This
+    // profile has it off, which is exactly the case that used to leak.
+    const remaining = await AsyncStorage.getAllKeys();
+    expect(remaining).not.toContain(flagStorageKey(SERVER, "acct-1"));
+    expect(remaining).not.toContain(queueKey(SERVER, "acct-1"));
+    expect(remaining).not.toContain(cacheKey(SERVER, "acct-1"));
+    // The names the person wrote are the point: a project called "Wedding" is
+    // not something to leave on a device for the next account.
+    expect(JSON.stringify(await AsyncStorage.multiGet(remaining))).not.toContain("Wedding");
     expect(await loadPersistedFlags(SERVER, "acct-1")).toBeNull();
     expect((await loadPersistedIdentity(SERVER))?.accountId).toBe("acct-2");
+  });
+
+  it("006-FR-011 leaves the incoming account's own stores alone", async () => {
+    // The other half of the same rule, and the reason it cannot simply clear
+    // everything: acct-2 signing in after acct-1 must keep whatever acct-2 left
+    // behind the last time it was here. Deleting one account's work is FR-011;
+    // deleting the arriving account's work is a bug wearing FR-011's clothes.
+    await persistIdentity(SERVER, profile("acct-1"));
+    await AsyncStorage.setItem(queueKey(SERVER, "acct-2"), JSON.stringify([{ taskId: "t9" }]));
+
+    await persistIdentity(SERVER, profile("acct-2"));
+
+    expect(await AsyncStorage.getItem(queueKey(SERVER, "acct-2"))).toContain("t9");
+  });
+
+  it("006-FR-011 lets a re-signed-in identity write again after being forgotten", async () => {
+    // `clearIdentityStores` tombstones the identity so writes still in flight
+    // cannot resurrect it. Signing back in must lift that, or the account's
+    // queue would be silently unwritable for the rest of the process.
+    await persistIdentity(SERVER, profile("acct-1"));
+    await clearIdentityStores({ serverUrl: SERVER, accountId: "acct-1" });
+
+    await persistIdentity(SERVER, profile("acct-1"));
+    await saveQueue({ serverUrl: SERVER, accountId: "acct-1" }, [
+      queueEntry({ taskId: "t1", accountId: "acct-1", serverUrl: SERVER }),
+    ]);
+
+    expect(await AsyncStorage.getItem(queueKey(SERVER, "acct-1"))).toContain("t1");
   });
 
   it("006-FR-019 marks a rejected session without forgetting who it belonged to", async () => {

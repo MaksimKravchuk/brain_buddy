@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 
-import { setSearchParams } from "@/test/expoRouterMock";
+import { routerSpy, setSearchParams } from "@/test/expoRouterMock";
 import {
   FakeHttpError,
   installFakeBackend,
@@ -21,6 +21,7 @@ let backend: FakeBackend;
 afterEach(() => backend?.restore());
 
 function history(kind: string | undefined, routes: Record<string, RouteHandler> = {}) {
+  backend?.restore();
   backend = installFakeBackend({
     "GET /auth/me": () => makeMe(),
     "GET /projects": () => [makeProject({ id: "p1", name: "Wedding" })],
@@ -45,6 +46,9 @@ describe("history", () => {
     ).toBeOnTheScreen();
     expect(backend.callsTo("GET", "/tasks").map((call) => call.query)).toContain(
       "state=completed&limit=50",
+    );
+    expect(backend.callsTo("GET", "/agent-run-summaries").map((call) => call.query)).toContain(
+      "task_id=t1",
     );
   });
 
@@ -93,6 +97,21 @@ describe("history", () => {
     expect(await screen.findByText("Called the notary")).toBeOnTheScreen();
   });
 
+  it("opens terminal rows in task detail so the relay timeline remains reachable", async () => {
+    await history(undefined, {
+      "GET /tasks": () =>
+        makeTaskPage([makeTask({ id: "t1", title: "Called the notary", state: "completed" })]),
+    });
+
+    await fireEvent.press(await screen.findByLabelText("Called the notary"));
+
+    expect(routerSpy().push).toHaveBeenCalledWith({
+      pathname: "/task/[id]",
+      params: { id: "t1", from: "Completed" },
+    });
+    expect(screen.queryByText("Reopen into")).not.toBeOnTheScreen();
+  });
+
   it("reopens a task into an explicitly chosen list", async () => {
     await history(undefined, {
       "GET /tasks": () =>
@@ -102,7 +121,7 @@ describe("history", () => {
       "POST /tasks/t1/transitions": () => makeTask({ id: "t1", state: "next", revision: 5 }),
     });
 
-    await fireEvent.press(await screen.findByLabelText("Called the notary"));
+    await fireEvent.press(await screen.findByLabelText("Reopen task"));
     await fireEvent.press(await screen.findByText("Next"));
     await fireEvent.press(screen.getByText("Reopen"));
 
@@ -131,7 +150,7 @@ describe("history", () => {
         makeTaskPage([makeTask({ id: "t1", title: "Called the notary", state: "completed" })]),
     });
 
-    await fireEvent.press(await screen.findByLabelText("Called the notary"));
+    await fireEvent.press(await screen.findByLabelText("Reopen task"));
     await fireEvent.press(await screen.findByText("Waiting"));
     await fireEvent.press(screen.getByText("Reopen"));
 
@@ -161,7 +180,7 @@ describe("history", () => {
         new FakeHttpError(409, { message: "That task changed elsewhere." }),
     });
 
-    await fireEvent.press(await screen.findByLabelText("Called the notary"));
+    await fireEvent.press(await screen.findByLabelText("Reopen task"));
     await fireEvent.press(await screen.findByText("Next"));
     await fireEvent.press(screen.getByText("Reopen"));
 
@@ -174,7 +193,7 @@ describe("history", () => {
         makeTaskPage([makeTask({ id: "t1", title: "Called the notary", state: "completed" })]),
     });
 
-    await fireEvent.press(await screen.findByLabelText("Called the notary"));
+    await fireEvent.press(await screen.findByLabelText("Reopen task"));
     await screen.findByText("Reopen into");
 
     await fireEvent.press(screen.getByLabelText("Close"));

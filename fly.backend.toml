@@ -13,6 +13,7 @@ primary_region = 'ams'
   BRAIN_BUDDY_API_KEY_HEADER = 'X-API-Key'
   BRAIN_BUDDY_API_PREFIX = '/api'
   BRAIN_BUDDY_ENV = 'production'
+  BRAIN_BUDDY_PUBLIC_BASE_URL = 'https://brain-buddy-backend.fly.dev'
   # Voice Brain Dump provider roles (ADR-0008). Non-secret selection only; the
   # credentials come from the DEEPGRAM_API_KEY / OPENAI_API_KEY Fly secrets via
   # each role's api_key_env default. Models are pinned rather than inherited so
@@ -38,6 +39,7 @@ primary_region = 'ams'
   [[services.ports]]
     handlers = ['http']
     port = 80
+    force_https = true
 
   [[services.ports]]
     handlers = ['tls', 'http']

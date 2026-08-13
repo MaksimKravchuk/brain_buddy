@@ -36,6 +36,9 @@ jest.mock("expo-audio", () => require("./src/test/expoAudioMock").expoAudioMock(
 jest.mock("expo-file-system", () => require("./src/test/expoFileSystemMock").expoFileSystemMock());
 
 beforeEach(() => {
+  // Process-lifetime store generations from `clearIdentityStores`. Left
+  // standing they would fence the next test's queue and cache writes out.
+  require("./src/features/tasks/storageKeys").resetIdentityStoreGenerations();
   require("./src/test/expoRouterMock").resetRouter();
   require("./src/test/expoCryptoMock").resetUuids();
   require("./src/test/expoAudioMock").resetAudio();

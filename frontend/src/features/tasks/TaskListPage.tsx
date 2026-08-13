@@ -1,10 +1,14 @@
-import { AlertTriangle, CalendarDays, Check, ChevronDown, Layers, Plus, RotateCcw, X } from "lucide-react";
+import { AlertTriangle, Bot, CalendarDays, Check, ChevronDown, Layers, Plus, RotateCcw, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
+import { useAgentRunSummaries } from "../../api/agentHooks";
+import type { AgentRunSummaryResponse } from "../../api/agentTypes";
+
 import { apiClient } from "../../api/client";
+import { useAuthStore } from "../../stores/authStore";
 import { parseOpenTaskState, parseTaskDateView, taskKeys, useProjects, useTags, useTaskDetail, useTaskList } from "../../api/taskHooks";
 import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts, TaskResponse, TaskSubtaskResponse, TaskSort } from "../../api/taskTypes";
 import { AppShell } from "../../components/shell/AppShell";
@@ -340,6 +344,12 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
 
   const hasFrameError = taskQuery.isError || projectsQuery.isError || tagsQuery.isError;
 
+  // Existing run chips stay visible after rollout is disabled; only creation of
+  // new hand-offs is gated. A failed summary fetch still degrades to no chips.
+  const hasOwner = Boolean(useAuthStore((store) => store.user));
+  const agentRunSummaries =
+    useAgentRunSummaries(tasks.map((task) => task.id), hasOwner).data ?? {};
+
   // Shared by the flat list and by every project group, so the two render paths
   // can never drift apart.
   const taskListProps = {
@@ -348,7 +358,8 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     taskSearch: searchParams.toString(),
     selectedTaskId: taskId,
     registerRowLink,
-    onComplete: (task: TaskResponse) => transitionMutation.mutate({ task, action: "complete" as const })
+    onComplete: (task: TaskResponse) => transitionMutation.mutate({ task, action: "complete" as const }),
+    agentRuns: agentRunSummaries
   };
 
   const panel = !panelOpen ? null : taskId ? (
@@ -570,11 +581,18 @@ function groupTasksByProject(tasks: TaskResponse[], projects: ProjectResponse[])
 
 // Every call site names its variant, so there is deliberately no default: a
 // silent fallback would let a new call site render the wrong chip unnoticed.
-function Chip({ variant, children }: { variant: "due" | "neutral"; children: ReactNode }): React.JSX.Element {
+function Chip({ variant, children }: {
+  variant: "due" | "neutral" | "agent" | "needs-you";
+  children: ReactNode;
+}): React.JSX.Element {
   const variantClass =
     variant === "due"
       ? "border-due-border bg-due-bg text-due-fg"
-      : "border-transparent bg-context-bg text-context-fg";
+      : variant === "agent"
+        ? "border-ai-border bg-ai-bg text-ai-fg"
+        : variant === "needs-you"
+          ? "border-needs-you-border bg-needs-you-bg text-needs-you-fg"
+          : "border-transparent bg-context-bg text-context-fg";
   return (
     <span className={`inline-flex h-[22px] shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 text-[11px] font-medium ${variantClass}`}>
       {children}
@@ -594,6 +612,7 @@ function TaskList({
   selectedTaskId,
   registerRowLink,
   onComplete,
+  agentRuns,
   label
 }: {
   tasks: TaskResponse[];
@@ -603,6 +622,8 @@ function TaskList({
   selectedTaskId?: string;
   registerRowLink: (taskId: string, el: HTMLAnchorElement | null) => void;
   onComplete: (task: TaskResponse) => void;
+  /** Latest external run per task, sparse: most tasks have none. */
+  agentRuns: Record<string, AgentRunSummaryResponse>;
   /** Names this list for assistive tech; each group supplies its project name. */
   label?: string;
 }): React.JSX.Element {
@@ -619,6 +640,7 @@ function TaskList({
           isSelected={selectedTaskId === task.id}
           registerRowLink={registerRowLink}
           onComplete={onComplete}
+          agentRun={agentRuns[task.id]}
         />
       ))}
     </div>
@@ -631,7 +653,8 @@ function TaskRow({
   detailPath,
   isSelected,
   registerRowLink,
-  onComplete
+  onComplete,
+  agentRun
 }: {
   task: TaskResponse;
   tags: TagResponse[];
@@ -639,6 +662,7 @@ function TaskRow({
   isSelected: boolean;
   registerRowLink: (taskId: string, el: HTMLAnchorElement | null) => void;
   onComplete: (task: TaskResponse) => void;
+  agentRun?: AgentRunSummaryResponse;
 }): React.JSX.Element {
   const isTerminal = task.state === "completed" || task.state === "cancelled";
   const navigate = useNavigate();
@@ -694,6 +718,14 @@ function TaskRow({
           <Chip variant="due">
             <CalendarDays className="h-[11px] w-[11px]" aria-hidden />
             {formatDueDate(task.due_date)}
+          </Chip>
+        ) : null}
+        {agentRun ? (
+          // The server's own label, verbatim: the card can never describe a run
+          // more confidently than the detail view does.
+          <Chip variant={agentRun.needs_user ? "needs-you" : "agent"}>
+            <Bot className="h-[11px] w-[11px]" aria-hidden />
+            {agentRun.primary_state_label}
           </Chip>
         ) : null}
         {subtasks.length ? (

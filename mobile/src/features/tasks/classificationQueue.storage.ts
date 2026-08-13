@@ -30,8 +30,10 @@ import { RETENTION_MS } from "./classificationTypes";
 import type { ClassificationIdentity } from "./storageKeys";
 import {
   cacheKey,
+  forgetIdentityStores,
   identitySuffixOf,
   isClassificationKey,
+  isStoreGenerationCurrent,
   keysForIdentity,
   queueKey,
   storeOf,
@@ -310,8 +312,19 @@ export async function saveQueue(
   identity: ClassificationIdentity,
   entries: PendingClassificationChange[],
   now: number = Date.now(),
+  /** The value `identityStoreGeneration` returned when this write was
+   *  *scheduled*. Omitted by callers with no queue behind them. */
+  generation?: number,
 ): Promise<void> {
   const key = queueKey(identity.serverUrl, identity.accountId);
+  if (generation !== undefined && !isStoreGenerationCurrent(key, generation)) {
+    // This identity's stores were deliberately cleared after this write was
+    // scheduled and before it ran. Writing now would either re-create the
+    // queue a sign-out just deleted, or — if the same account has since signed
+    // back in — overwrite the new session's queue with a snapshot from before
+    // it existed.
+    return;
+  }
   const owned = entries.filter((e) => belongsTo(e, identity)).map((e) => clampEntry(e, now));
   if (owned.length === 0) {
     await AsyncStorage.removeItem(key);
@@ -339,6 +352,10 @@ export async function clearCacheFor(identity: ClassificationIdentity): Promise<v
 /** Both stores of one identity, together. Clearing one and forgetting the
  *  other is the documented bug FR-011 exists to prevent. */
 export async function clearIdentityStores(identity: ClassificationIdentity): Promise<void> {
+  // Tombstoned *before* the delete, not after: a queued write that lands
+  // between the two would otherwise slip underneath the clear and put the work
+  // straight back. See `forgetIdentityStores`.
+  forgetIdentityStores(identity.serverUrl, identity.accountId);
   await AsyncStorage.multiRemove(keysForIdentity(identity.serverUrl, identity.accountId));
 }
 

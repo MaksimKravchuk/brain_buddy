@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Download } from "lucide-react";
@@ -12,6 +12,7 @@ import type { TaskCounts } from "../../api/taskTypes";
 import { AppShell } from "../../components/shell/AppShell";
 import { Button } from "../../components/ui/Button";
 import { Overlay, OverlayHeader } from "../../components/ui/Overlay";
+import { Feedback, Field, SectionCard } from "../../components/ui/SettingsSection";
 import { useAuthStore } from "../../stores/authStore";
 import { getErrorMessage } from "../../utils/error";
 
@@ -58,81 +59,6 @@ export function AccountSettingsPage(): React.JSX.Element {
       </div>
     </AppShell>
   );
-}
-
-function SectionCard({
-  title,
-  description,
-  children,
-  tone = "default"
-}: {
-  title: string;
-  description: string;
-  children: ReactNode;
-  tone?: "default" | "danger";
-}): React.JSX.Element {
-  const border = tone === "danger" ? "border-rose-200" : "border-slate-200";
-  return (
-    <section className={`rounded-2xl border ${border} bg-white p-5 shadow-soft`}>
-      <h2 className="text-subtitle font-semibold text-slate-900">{title}</h2>
-      <p className="mt-1 text-sm text-slate-500">{description}</p>
-      <div className="mt-4">{children}</div>
-    </section>
-  );
-}
-
-function Field({
-  label,
-  type,
-  value,
-  onChange,
-  autoComplete,
-  name
-}: {
-  label: string;
-  type: string;
-  value: string;
-  onChange: (value: string) => void;
-  autoComplete?: string;
-  name: string;
-}): React.JSX.Element {
-  return (
-    <label className="flex flex-col gap-1 text-sm">
-      <span className="font-medium text-slate-700">{label}</span>
-      <input
-        type={type}
-        name={name}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="rounded-md border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-soft transition-colors duration-200 ease-smooth focus:border-brand-primary focus:outline-none"
-        autoComplete={autoComplete}
-      />
-    </label>
-  );
-}
-
-function Feedback({
-  error,
-  success
-}: {
-  error: string | null;
-  success: string | null;
-}): React.JSX.Element | null {
-  if (error) {
-    return (
-      <p role="alert" className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-        {error}
-      </p>
-    );
-  }
-  if (success) {
-    return (
-      <p role="status" className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-        {success}
-      </p>
-    );
-  }
-  return null;
 }
 
 function ProfileSection(): React.JSX.Element {
