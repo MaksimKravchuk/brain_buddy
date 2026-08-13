@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useMutation } from "@tanstack/react-query";
 
+import { useAdminStatus } from "../../api/adminHooks";
 import { ApiError, apiClient } from "../../api/client";
 import type { AdminAccountResponse } from "../../api/adminTypes";
 import { useProjects, useTags, useTaskList } from "../../api/taskHooks";
@@ -9,18 +10,21 @@ import { AppShell } from "../../components/shell/AppShell";
 import { Button } from "../../components/ui/Button";
 import { Overlay, OverlayHeader } from "../../components/ui/Overlay";
 import { Feedback, Field, SectionCard } from "../../components/ui/SettingsSection";
-import { useAuthStore } from "../../stores/authStore";
 import { getErrorMessage } from "../../utils/error";
 
 const emptyCounts: TaskCounts = { inbox: 0, next: 0, waiting: 0, someday: 0 };
 
 const EMAIL_PATTERN = /^\S+@\S+\.\S+$/;
 
+// 009-FR-005: the /admin route renders only for a signed-in caller the server
+// confirms is an operator, and only the four AdminAccountResponse fields for
+// a found account -- everywhere else it shows a loading or denied state.
 export function AdminPage(): React.JSX.Element {
   const countsQuery = useTaskList({ state: "next", limit: 1 });
   const projectsQuery = useProjects();
   const tagsQuery = useTags();
-  const isOperator = useAuthStore((state) => state.user?.is_operator === true);
+  const adminStatus = useAdminStatus();
+  const isOperator = adminStatus.isSuccess && adminStatus.data?.is_operator === true;
 
   return (
     <AppShell
@@ -35,7 +39,15 @@ export function AdminPage(): React.JSX.Element {
             Look up one member account by ID or email, and revoke its sessions.
           </p>
         </header>
-        {isOperator ? <AdminLookup /> : <AccessDenied />}
+        {adminStatus.isPending ? (
+          <p role="status" className="text-sm text-slate-500">
+            Checking access…
+          </p>
+        ) : isOperator ? (
+          <AdminLookup />
+        ) : (
+          <AccessDenied />
+        )}
       </div>
     </AppShell>
   );

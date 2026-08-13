@@ -12,3 +12,9 @@ export type AdminAccountResponse = {
 export type AdminRevokeSessionsResponse = {
   revoked_count: number;
 };
+
+/** Server-issued operator capability check (`GET /admin/status`); only ever
+ * reachable with `is_operator: true` -- a non-operator gets 401/403 instead. */
+export type AdminStatusResponse = {
+  is_operator: boolean;
+};
