@@ -281,8 +281,8 @@ class VoiceSettings(BaseModel):
     lease_recovery_margin_seconds: float = Field(default=30.0, ge=0, le=600)
 
 
-AGENT_EVENTS_CALLBACK_PATH = "/api/agent-events"
-"""The single path an external agent posts signed run events to."""
+AGENT_EVENTS_PATH = "/agent-events"
+"""The relay endpoint path below the application's configured API prefix."""
 
 
 def _canonical_public_base_url(raw: str, *, environment: AppEnvironment) -> str:
@@ -475,12 +475,6 @@ class AgentRelaySettings(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    @property
-    def callback_url(self) -> str:
-        """Exactly ``<origin>/api/agent-events``, never a doubled slash."""
-
-        return f"{self.public_base_url.rstrip('/')}{AGENT_EVENTS_CALLBACK_PATH}"
-
 
 class AppConfig(BaseModel):
     """Top-level Brain Buddy application configuration."""
@@ -504,6 +498,15 @@ class AppConfig(BaseModel):
     @property
     def log_level(self) -> str:
         return self.logging.normalized_level
+
+    @property
+    def agent_relay_callback_url(self) -> str:
+        """Build the callback from the same prefix mounted by FastAPI."""
+
+        return (
+            f"{self.agent_relay.public_base_url.rstrip('/')}"
+            f"{self.api_prefix.rstrip('/')}{AGENT_EVENTS_PATH}"
+        )
 
 
 def _parse_feature_flag_states(raw: str) -> dict[str, FeatureFlagState]:

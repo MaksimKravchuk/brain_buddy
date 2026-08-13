@@ -2247,18 +2247,20 @@ class AgentRelayService:
                     active_connection, "connection_scope_changed"
                 )
 
-            run = self._event_run(active_connection, event)
+            now = self._now()
+            run = project_run_for_access(
+                self._event_run(active_connection, event), now=now
+            )
             # Consume only after every projection check, so rejection cannot burn
             # an identifier. The repository claim remains the atomic replay gate.
             if not self.agent_repo.consume_event_id(
                 owner_id=owner_id,
                 connection_id=connection.id,
                 event_id=event.event_id,
-                now=self._now(),
+                now=now,
             ):
                 raise self._authenticated_event_rejection(connection, "event_replayed")
 
-            now = self._now()
             self.agent_repo.save_run(
                 run.model_copy(update=self._event_updates(run, event, now=now))
             )

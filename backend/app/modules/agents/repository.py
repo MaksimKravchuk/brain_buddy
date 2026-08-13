@@ -997,32 +997,52 @@ class AgentRepository(BaseRepository):
                     conn.execute("BEGIN IMMEDIATE")
                     rows = conn.execute(
                         """
-                        SELECT payload FROM agent_runs
-                        WHERE content_expired = 0 AND dispatched_at IS NOT NULL
+                        SELECT payload FROM agent_runs AS runs
+                        WHERE dispatched_at IS NOT NULL
                             AND content_expires_at <= ?
+                            AND (
+                                content_expired = 0
+                                OR EXISTS (
+                                    SELECT 1 FROM agent_run_events AS events
+                                    WHERE events.owner_id = runs.owner_id
+                                        AND events.run_id = runs.id
+                                        AND json_extract(events.payload, '$.summary')
+                                            IS NOT NULL
+                                )
+                                OR EXISTS (
+                                    SELECT 1 FROM agent_run_commands AS commands
+                                    WHERE commands.owner_id = runs.owner_id
+                                        AND commands.run_id = runs.id
+                                        AND json_extract(commands.payload, '$.body')
+                                            IS NOT NULL
+                                )
+                            )
                         """,
                         (stamp,),
                     ).fetchall()
                     if not rows:
                         conn.commit()
                         return 0
+                    expired = 0
                     for row in rows:
                         run = self._model(row, AgentRunDocument)
-                        redacted = run.model_copy(
-                            update={
-                                "manifest": None,
-                                "progress_text": None,
-                                "question_text": None,
-                                "result_text": None,
-                                "result_link": None,
-                                "failure_reason": None,
-                                "content_expired": True,
-                                "updated_at": now,
-                                "revision": run.revision + 1,
-                            }
-                        )
-                        self._upsert_run(conn, redacted)
-                        self._retention_mutation_boundary("run")
+                        if not run.content_expired:
+                            redacted = run.model_copy(
+                                update={
+                                    "manifest": None,
+                                    "progress_text": None,
+                                    "question_text": None,
+                                    "result_text": None,
+                                    "result_link": None,
+                                    "failure_reason": None,
+                                    "content_expired": True,
+                                    "updated_at": now,
+                                    "revision": run.revision + 1,
+                                }
+                            )
+                            self._upsert_run(conn, redacted)
+                            self._retention_mutation_boundary("run")
+                            expired += 1
 
                         event_rows = conn.execute(
                             """
@@ -1078,7 +1098,7 @@ class AgentRepository(BaseRepository):
                             )
                             self._retention_mutation_boundary("command")
                     conn.commit()
-                    return len(rows)
+                    return expired
             except BaseException:
                 conn.rollback()
                 raise
