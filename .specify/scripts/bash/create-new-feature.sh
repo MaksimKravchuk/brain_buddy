@@ -124,6 +124,36 @@ is_feature_number_in_range() {
 GIT_CLAIMED_NUMBERS=""
 GIT_CLAIMED_NUMBERS_LOADED=false
 
+# `--all` means the refs this clone already has. A number claimed on a PR
+# branch nobody fetched is therefore invisible, so refresh first when a remote
+# is reachable. Bounded and failure-tolerant on purpose: creating a feature
+# must still work offline, and a slow remote must not hang the command.
+#
+# This narrows the window; it does not close it. Two clones can still pick the
+# same number between a fetch and a push, and nothing here publishes a
+# reservation. The authoritative gate is `check_spec_kit_specs.py`, which runs
+# in CI on every pull request and rejects a duplicate prefix before it merges.
+# Set SPECIFY_SKIP_FETCH=1 to skip the refresh.
+refresh_remote_refs() {
+    [ "${SPECIFY_SKIP_FETCH:-}" = "1" ] && return 0
+    git rev-parse --git-dir >/dev/null 2>&1 || return 0
+    git remote get-url origin >/dev/null 2>&1 || return 0
+
+    # The refspec is explicit because `git clone --single-branch` pins
+    # `remote.origin.fetch` to one branch, and a plain `git fetch origin` in
+    # such a clone re-fetches only that branch — leaving every other feature
+    # number invisible. Passing the wildcard on the command line widens this
+    # one invocation without rewriting the clone's configuration.
+    if command -v timeout >/dev/null 2>&1; then
+        GIT_TERMINAL_PROMPT=0 timeout 20 git fetch --quiet origin \
+            "+refs/heads/*:refs/remotes/origin/*" >/dev/null 2>&1 || true
+    else
+        GIT_TERMINAL_PROMPT=0 git fetch --quiet origin \
+            "+refs/heads/*:refs/remotes/origin/*" >/dev/null 2>&1 || true
+    fi
+    return 0
+}
+
 # Every feature number ever added under specs/ on any ref, normalized to the
 # zero-padded width the directory used. Computed once; the auto-correct loop
 # below would otherwise re-run `git log` per candidate.
@@ -132,6 +162,7 @@ load_git_claimed_numbers() {
     GIT_CLAIMED_NUMBERS_LOADED=true
 
     git rev-parse --git-dir >/dev/null 2>&1 || return 0
+    refresh_remote_refs
 
     GIT_CLAIMED_NUMBERS=$(
         git log --all --pretty=format: --name-only --diff-filter=A -- 'specs/*' 2>/dev/null \
@@ -330,6 +361,11 @@ if [ "$USE_TIMESTAMP" = true ]; then
     FEATURE_NUM=$(date +%Y%m%d-%H%M%S)
     BRANCH_NAME="${FEATURE_NUM}-${BRANCH_SUFFIX}"
 else
+    # Populate the claimed-number cache in THIS shell. `get_highest_from_specs`
+    # runs inside a command substitution, and a subshell inherits the cache but
+    # cannot export it back — without this the fetch would run twice.
+    load_git_claimed_numbers
+
     if [ -n "$BRANCH_NUMBER" ] && [[ ! "$BRANCH_NUMBER" =~ ^[0-9]+$ ]]; then
         echo "Error: --number must be an unsigned integer, got '$BRANCH_NUMBER'" >&2
         exit 1

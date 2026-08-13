@@ -91,7 +91,7 @@ mutation-frontend:
 		--summary-out frontend/mutation-artifacts/enforced-summary.txt \
 		--survivors-out frontend/mutation-artifacts/enforced-survivors.txt
 
-# The ENFORCED-tier measurement (ADR-0011). mutation-backend above measures the
+# The ENFORCED-tier measurement (ADR-0016). mutation-backend above measures the
 # OBSERVED tier, which deliberately includes modules still under calibration, so
 # its score must not be checked against ADR-0004's bar. This target narrows the
 # scope to backend/mutation-enforced-scope.txt and asserts the bar with the
