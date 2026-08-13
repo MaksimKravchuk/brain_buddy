@@ -340,7 +340,7 @@ jobs:
             BRAIN_BUDDY_ADMIN_EMAIL="${BRAIN_BUDDY_ADMIN_EMAIL}" \
             BRAIN_BUDDY_ADMIN_PASSWORD="${BRAIN_BUDDY_ADMIN_PASSWORD}" \
             BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS="${BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS}" \
-            BRAIN_BUDDY_FEATURE_FLAGS="delivery_canary=internal,voice_brain_dump=on" 2>&1) \
+            BRAIN_BUDDY_FEATURE_FLAGS="delivery_canary=internal,voice_brain_dump=on,external_agent_relay=internal" 2>&1) \
             || status=$?
           if [ "${status}" -ne 0 ] \
             && ! printf '%s\n' "${output}" | grep -qi "no change"; then
@@ -350,7 +350,7 @@ jobs:
             echo "Staging the smoke identity secrets failed (exit ${status})." >&2
             exit "${status}"
           fi
-          echo "Staged smoke identity, delivery_canary=internal and voice_brain_dump=on for ${BACKEND_APP}."
+          echo "Staged smoke identity, delivery_canary=internal, voice_brain_dump=on and external_agent_relay=internal for ${BACKEND_APP}."
 
       - name: Deploy backend
         if: steps.classify.outputs.needed == 'true'
