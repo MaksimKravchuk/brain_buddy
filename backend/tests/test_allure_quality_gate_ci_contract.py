@@ -11,7 +11,6 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VALIDATOR = REPO_ROOT / "scripts" / "validate_ci_artifacts.py"
 CLASSIFIER = REPO_ROOT / "scripts" / "classify_path_risk.py"
@@ -46,7 +45,10 @@ def test_008_FR_002_both_reports_precede_the_verdict() -> None:
     assert "npx allure generate ../allure-results -o ../allure-report" in workflow
     assert "npx allure awesome ../allure-results --single-file" in workflow
     assert "name: allure-report-html\n          path: allure-report" in workflow
-    assert "name: allure-report-single-file\n          path: allure-report-single/index.html" in workflow
+    assert (
+        "name: allure-report-single-file\n          path: allure-report-single/index.html"
+        in workflow
+    )
     assert workflow.index("name: allure-report-html") < verdict
     assert workflow.index("name: allure-report-single-file") < verdict
 
@@ -67,4 +69,7 @@ def test_008_FR_008_comment_is_truthful_and_actionable() -> None:
     assert "- **`allure-report-html`**" in workflow
     assert "open the single `index.html`. No local server needed." in workflow
     assert "complete report, including test attachments" in workflow
-    assert "retained for **7 days** on a pull request and **30 days** on a push" in workflow
+    assert (
+        "retained for **7 days** on a pull request and **30 days** on a push"
+        in workflow
+    )
