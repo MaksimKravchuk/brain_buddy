@@ -1059,14 +1059,24 @@ export function useClassificationQueue(
   const writeChainRef = useRef<Promise<unknown>>(Promise.resolve());
 
   const persistLive = useCallback(
-    (active: ClassificationIdentity, snapshot?: PendingClassificationChange[]): Promise<void> => {
+    (
+      active: ClassificationIdentity,
+      snapshot?: PendingClassificationChange[],
+      /** The generation of the *operation* this write belongs to, when that
+       *  operation is longer-lived than the write — a drain pass, whose request
+       *  may have been in flight across a whole sign-out. Omitted by callers
+       *  that are themselves the operation, like a single enqueue. */
+      passGeneration?: number,
+    ): Promise<void> => {
       // Captured now, used only as the floor if the ref stops being `active`'s
       // before this write's turn comes.
       const scheduled = snapshot ?? queueRef.current;
-      // Captured now for the same reason: what matters is not whether this
-      // identity has ever been forgotten, but whether it was forgotten after
-      // this write was scheduled.
-      const generation = identityStoreGeneration(active.serverUrl, active.accountId);
+      // What matters is not whether this identity has ever been forgotten, but
+      // whether it was forgotten after the operation this write belongs to
+      // began. For a lone enqueue that is now; for a drain pass it is when the
+      // pass started, which is why it may be passed in — see below.
+      const generation =
+        passGeneration ?? identityStoreGeneration(active.serverUrl, active.accountId);
       const write = writeChainRef.current.then(() => {
         // `queueRef` is read late on purpose — that is what makes a write that
         // waited behind another persist what the device holds *now*. But the
@@ -1113,6 +1123,18 @@ export function useClassificationQueue(
       // own key, which is the one thing that is unambiguously its work.
       const owns = (): boolean => identityRef.current === active;
 
+      // Captured once, here, and used for every write this pass makes.
+      //
+      // Reading it per-write reads it when the write is *scheduled*, and a pass
+      // whose request was in flight across a sign-out schedules its writes
+      // afterwards — by which time the counter has already moved and, if the
+      // same account signed back in, the pass captures the NEW generation and
+      // sails through its own fence. Its stale successful result then deletes
+      // the new session's queue; its stale failure resurrects the one the
+      // sign-out discarded. The fence has to be stamped when the pass begins,
+      // because the pass is the thing being fenced.
+      const passGeneration = identityStoreGeneration(active.serverUrl, active.accountId);
+
       // `MAX_DRAIN_STEPS` bounds one *pass*, not the queue. An offline triage
       // session can leave far more than that behind, and a pass that stopped on
       // the cap simply returned with the rest still queued: nothing read
@@ -1146,10 +1168,10 @@ export function useClassificationQueue(
               // just set, not onto the queue as it was before the attempt.
               queueRef.current = next;
               setQueue(next);
-              await persistLive(active);
+              await persistLive(active, undefined, passGeneration);
               return;
             }
-            await persistLive(active, next);
+            await persistLive(active, next, passGeneration);
           },
         });
         if (owns()) {
@@ -1165,7 +1187,7 @@ export function useClassificationQueue(
           setQueue(merged);
           // The pass's own last write went out before this merge existed, so
           // the device would otherwise keep a queue this line has superseded.
-          await persistLive(active);
+          await persistLive(active, undefined, passGeneration);
         }
         if (result.lastSyncedAt) {
           setLastSyncedAt(result.lastSyncedAt);
