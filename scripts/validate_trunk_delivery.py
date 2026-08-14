@@ -421,13 +421,21 @@ def _check(
 #: `KNOWN_FEATURE_FLAGS` in the released image a rollback restores. A staged
 #: secret survives the image swap, and that image raises at startup on a name
 #: it does not know — so staging a newer flag turns rollback into a crash loop.
-#: Widen this only after the rollback target itself knows the name.
+#:
+#: Provenance is the deployed image, not a source SHA: the captured rollback
+#: target is
+#: registry.fly.io/brain-buddy-backend:deployment-01KZXF74W98F1NVPHYKGD8QD0S,
+#: and these three names are what its machine startup logs showed it accepting
+#: during the automatic rollback in deploy run 31775660872 — the same logs
+#: showed it crashing on `external_agent_relay`. Widen this only after a
+#: successful deployment has made a newer, known-compatible image the captured
+#: rollback target; agreeing with the candidate tree instead is what caused
+#: that incident.
 ROLLBACK_KNOWN_FEATURE_FLAGS = frozenset(
     {
         "delivery_canary",
-        "voice_brain_dump",
         "mobile_task_classification",
-        "external_agent_relay",
+        "voice_brain_dump",
     }
 )
 
