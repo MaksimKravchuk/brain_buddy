@@ -20,11 +20,15 @@ not authorize landing, deployment, rollout expansion, or App Store submission.
    staging that name crashed the image the automatic rollback restored in
    deploy run 31775660872, because a staged secret survives the image swap and
    that image rejects an unknown flag at startup. The relay therefore ships
-   default OFF by omission — it stays that way until a successful deployment
-   of a backend that knows the name has become the captured rollback target,
-   at which point naming it in that workflow line is an audited ASK edit. Do
-   not widen the cohort as part of this release, and do not set the flag out
-   of band: the next release restages the workflow's value regardless.
+   default OFF by omission. That rollback-compatibility blocker has since been
+   cleared — the captured rollback target is now a 009 image that parses the
+   name — but clearing it authorized nothing: parseable is not the same as
+   approved to ship, this rollout is still ungranted, and the validator pins
+   the exact authorized staged string separately from the compatibility
+   allow-list. Naming the relay in that workflow line remains an audited
+   ASK edit that has not been made. Do not widen the cohort as part of this
+   release, and do not set the flag out of band: the next release restages the
+   workflow's value regardless.
 5. Using a disposable HTTPS connector and an internal account, verify connect
    and test, reviewed task/context hand-off, one dispatch under duplicate
    confirmation, authenticated run updates, reply/cancel when supported,

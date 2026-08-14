@@ -418,30 +418,47 @@ def _check(
     return 0
 
 
-#: `KNOWN_FEATURE_FLAGS` in the released image a rollback restores. A staged
+#: The flag names the released image a rollback restores can parse. A staged
 #: secret survives the image swap, and that image raises at startup on a name
 #: it does not know — so staging a newer flag turns rollback into a crash loop.
 #:
 #: Provenance is the deployed image, not a source SHA: the captured rollback
 #: target is
-#: registry.fly.io/brain-buddy-backend:deployment-01KZXF74W98F1NVPHYKGD8QD0S,
-#: and these three names are what its machine startup logs showed it accepting
-#: during the automatic rollback in deploy run 31775660872 — the same logs
-#: showed it crashing on `external_agent_relay`. Widen this only after a
+#: registry.fly.io/brain-buddy-backend:deployment-01M00243625JAFN5S6G4CVZ7DH,
+#: the healthy release left by the default-OFF baseline deployment (run
+#: 31798252344 for exact main d9ec122f, authenticated production smoke passed).
+#: Built from the 009 revision, it parses `admin_portal` and
+#: `external_agent_relay` too — unlike the pre-009 image that crash-looped on
+#: `external_agent_relay` in deploy run 31775660872. Widen this only after a
 #: successful deployment has made a newer, known-compatible image the captured
-#: rollback target; agreeing with the candidate tree instead is what caused
-#: that incident.
+#: rollback target, as that baseline release did; agreeing with the candidate
+#: tree instead is what caused the incident.
+#:
+#: This is a safety allow-list only. Parseable is not authorized — see
+#: `AUTHORIZED_STAGED_FEATURE_FLAGS`.
 ROLLBACK_KNOWN_FEATURE_FLAGS = frozenset(
     {
         "delivery_canary",
         "mobile_task_classification",
         "voice_brain_dump",
+        "external_agent_relay",
+        "admin_portal",
     }
+)
+
+#: The exact rollout the release is authorized to stage. Kept separate from the
+#: allow-list above so that widening compatibility can never quietly enable a
+#: product: `external_agent_relay` is parseable by the rollback image and is
+#: still absent here, because spec 007's rollout is separately governed and
+#: omission is the OFF state every image agrees on. Changing this string is an
+#: ASK-class rollout decision.
+AUTHORIZED_STAGED_FEATURE_FLAGS = (
+    "delivery_canary=internal,voice_brain_dump=on,admin_portal=internal"
 )
 
 
 def _staged_feature_flag_errors(text: str) -> list[str]:
-    """Every staged flag name must be one the rollback image can parse."""
+    """The staged rollout must be rollback-parseable *and* the authorized one."""
 
     match = re.search(r'BRAIN_BUDDY_FEATURE_FLAGS="([^"]*)"', text)
     if match is None:
@@ -449,21 +466,30 @@ def _staged_feature_flag_errors(text: str) -> list[str]:
             "the deploy job must stage BRAIN_BUDDY_FEATURE_FLAGS as the "
             "authoritative rollout state"
         ]
+    staged = match.group(1)
+    errors: list[str] = []
     names = {
-        entry.split("=", 1)[0].strip()
-        for entry in match.group(1).split(",")
-        if entry.strip()
+        entry.split("=", 1)[0].strip() for entry in staged.split(",") if entry.strip()
     }
     unknown = sorted(names - ROLLBACK_KNOWN_FEATURE_FLAGS)
     if unknown:
-        return [
+        errors.append(
             f"staged feature flag(s) {unknown} are unknown to the image a "
             "rollback restores; a staged secret survives the image swap and "
-            "that image fails startup on an unknown flag name. Ship the first "
+            "that image fails startup on an unknown flag name. Ship the "
             "release with the flag omitted (omission is OFF) and name it here "
             "only once the rollback target already knows it"
-        ]
-    return []
+        )
+    if staged != AUTHORIZED_STAGED_FEATURE_FLAGS:
+        errors.append(
+            f"the staged rollout {staged!r} is not the authorized rollout "
+            f"{AUTHORIZED_STAGED_FEATURE_FLAGS!r}; this line is the "
+            "authoritative production flag state, so adding a name, dropping "
+            "one or restaging one at another state is an ASK-class decision "
+            "that must change that constant deliberately. A name being "
+            "rollback-parseable does not make it authorized"
+        )
+    return errors
 
 
 def _landing_job_errors(raw_text: str) -> list[str]:
