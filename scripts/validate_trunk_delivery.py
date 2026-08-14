@@ -37,6 +37,7 @@ run before any dependencies are installed.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -290,13 +291,6 @@ DEPLOY_REQUIREMENTS = (
         "and revoke its sessions",
     ),
     (
-        "admin portal staged off",
-        "admin_portal=off",
-        "spec 009 009-FR-013: the /admin surface ships default OFF and its "
-        "production state is this line, not the code default; enabling it is "
-        "a deliberate ASK-class edit here plus a deploy",
-    ),
-    (
         "documented release image capture",
         "--image --json",
         "rollback capture must use the documented flyctl releases form",
@@ -424,6 +418,46 @@ def _check(
     return 0
 
 
+#: `KNOWN_FEATURE_FLAGS` in the released image a rollback restores. A staged
+#: secret survives the image swap, and that image raises at startup on a name
+#: it does not know — so staging a newer flag turns rollback into a crash loop.
+#: Widen this only after the rollback target itself knows the name.
+ROLLBACK_KNOWN_FEATURE_FLAGS = frozenset(
+    {
+        "delivery_canary",
+        "voice_brain_dump",
+        "mobile_task_classification",
+        "external_agent_relay",
+    }
+)
+
+
+def _staged_feature_flag_errors(text: str) -> list[str]:
+    """Every staged flag name must be one the rollback image can parse."""
+
+    match = re.search(r'BRAIN_BUDDY_FEATURE_FLAGS="([^"]*)"', text)
+    if match is None:
+        return [
+            "the deploy job must stage BRAIN_BUDDY_FEATURE_FLAGS as the "
+            "authoritative rollout state"
+        ]
+    names = {
+        entry.split("=", 1)[0].strip()
+        for entry in match.group(1).split(",")
+        if entry.strip()
+    }
+    unknown = sorted(names - ROLLBACK_KNOWN_FEATURE_FLAGS)
+    if unknown:
+        return [
+            f"staged feature flag(s) {unknown} are unknown to the image a "
+            "rollback restores; a staged secret survives the image swap and "
+            "that image fails startup on an unknown flag name. Ship the first "
+            "release with the flag omitted (omission is OFF) and name it here "
+            "only once the rollback target already knows it"
+        ]
+    return []
+
+
 def _landing_job_errors(raw_text: str) -> list[str]:
     """Structural checks the flat snippet lists cannot express.
 
@@ -436,7 +470,7 @@ def _landing_job_errors(raw_text: str) -> list[str]:
         for line in raw_text.splitlines()
         if not line.lstrip().startswith("#")
     )
-    errors: list[str] = []
+    errors: list[str] = _staged_feature_flag_errors(text)
     if "contents: write" in text:
         errors.append(
             "no job may hold GITHUB_TOKEN contents: write; the landing push "

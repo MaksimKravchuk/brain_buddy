@@ -71,10 +71,14 @@ rather than hidden, and every lane below is RED-first.*
   flag-OFF 404. The flag is exposure control **in addition to**
   `require_operator`, never instead of it (ADR-0008).
 - [x] **B4** GREEN: `.github/workflows/deploy-fly-production.yml` stages
-  `admin_portal=off` explicitly in the authoritative
-  `BRAIN_BUDDY_FEATURE_FLAGS` value, with the ASK-class edit-and-deploy
-  requirement and the emergency allow-list lever recorded in place.
-  Pinned by `scripts/validate_trunk_delivery.py` (+ its mutation test) and by
+  **no `admin_portal` entry** in the authoritative `BRAIN_BUDDY_FEATURE_FLAGS`
+  value. Omission is OFF, and it is the only rollback-compatible first
+  release: a staged secret outlives the image, so `admin_portal=off` would be
+  pending when a rollback restores the pre-009 image and would fail its
+  startup on an unknown flag name. The ASK-class edit-and-deploy requirement
+  for enabling it later, and the emergency allow-list lever, are recorded in
+  place. Pinned by `scripts/validate_trunk_delivery.py`
+  (`_staged_feature_flag_errors` + its mutation test) and by
   `backend/tests/test_admin_deploy_contract.py`. *(009-FR-013, PD-2)*
 
 *Checkpoint: the flag-off and flag-on cases in `test_admin_api.py`.*

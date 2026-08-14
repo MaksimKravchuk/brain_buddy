@@ -327,10 +327,19 @@ jobs:
       # so a manual `flyctl secrets set BRAIN_BUDDY_FEATURE_FLAGS` is reverted
       # by the next release. Change the rollout here, not out of band.
       #
-      # `admin_portal=off` is staged explicitly (spec 009, 009-FR-013). It is
-      # the /admin operator surface and it ships OFF: turning it on or off
-      # durably in production means editing this line and deploying, which is
-      # an ASK-class change — a `flyctl secrets set` flip holds only until the
+      # `admin_portal` (spec 009, 009-FR-013) is deliberately NOT named here on
+      # its first release. Secrets are app-scoped and survive an image swap, so
+      # anything staged now is still pending if a rollback restores the
+      # captured pre-009 image — and that image rejects an unknown flag name at
+      # startup, turning the rollback lever into a crash loop (the same happens
+      # if staging partially succeeds and rollback then runs). Omission is the
+      # OFF state both images agree on, and the new backend already defaults an
+      # unnamed flag to OFF, so nothing is lost by leaving it out.
+      #
+      # Enabling the portal later means adding `admin_portal=internal` or
+      # `=on` to this line and deploying — an audited ASK-class edit, and only
+      # once the image a rollback would restore already knows the name. A
+      # `flyctl secrets set` flip is never the answer: it holds only until the
       # next release. The fastest true emergency lever is instead
       # `flyctl secrets set BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS=`, which fails
       # closed immediately but is itself restaged from BRAIN_BUDDY_ADMIN_EMAIL
@@ -350,7 +359,7 @@ jobs:
             BRAIN_BUDDY_ADMIN_PASSWORD="${BRAIN_BUDDY_ADMIN_PASSWORD}" \
             BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_EMAIL}" \
             BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS="${BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS}" \
-            BRAIN_BUDDY_FEATURE_FLAGS="delivery_canary=internal,voice_brain_dump=on,external_agent_relay=internal,admin_portal=off" 2>&1) \
+            BRAIN_BUDDY_FEATURE_FLAGS="delivery_canary=internal,voice_brain_dump=on,external_agent_relay=internal" 2>&1) \
             || status=$?
           if [ "${status}" -ne 0 ] \
             && ! printf '%s\n' "${output}" | grep -qi "no change"; then

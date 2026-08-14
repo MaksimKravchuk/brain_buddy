@@ -160,9 +160,13 @@ same way any member is. See [design.md](design.md) for the single screen.
   so the rollout state is observable only to someone who is already an
   operator. Denial records follow the FR-008 matrix, including the 404 row.
   The production flag state is the `BRAIN_BUDDY_FEATURE_FLAGS` value staged by
-  `.github/workflows/deploy-fly-production.yml`, which stages `admin_portal=off`
-  and is restaged on every release; turning the portal on or off durably is an
-  edit to that ASK-class line plus a deploy, not a `flyctl secrets set`.
+  `.github/workflows/deploy-fly-production.yml`, restaged on every release. On
+  this first release that value deliberately **omits** `admin_portal`, which is
+  the OFF state: a staged secret survives an image swap, so naming a flag the
+  rolled-back pre-009 image cannot parse would crash-loop it at startup.
+  Turning the portal on later is an edit to that ASK-class line plus a deploy —
+  never a `flyctl secrets set` — and is safe only once the image a rollback
+  would restore already knows the name.
 
 ## Success Criteria
 
