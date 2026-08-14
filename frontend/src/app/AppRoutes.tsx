@@ -2,6 +2,7 @@ import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import { ProtectedRoute } from "../components/auth/ProtectedRoute";
 import { AccountSettingsPage } from "../features/account/AccountSettingsPage";
+import { AdminPage } from "../features/admin/AdminPage";
 import { AgentSettingsGate } from "../features/agents/AgentSettingsGate";
 import { BrainDumpGate } from "../features/brain-dump/BrainDumpGate";
 import type { BrainDumpLocationState } from "../features/brain-dump/brainDumpNavigation";
@@ -67,6 +68,14 @@ function workspaceRoutes(): React.JSX.Element {
         element={
           <ProtectedRoute>
             <AgentSettingsGate />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin"
+        element={
+          <ProtectedRoute>
+            <AdminPage />
           </ProtectedRoute>
         }
       />

@@ -67,6 +67,7 @@ class AccountService:
         voice_operation_repo: OperationRepository,
         agent_repo: AgentRepository,
         auth_service: AuthService,
+        reserved_emails: frozenset[str] = frozenset(),
         deletion_grace: timedelta = DELETION_GRACE,
     ) -> None:
         self.user_repo = user_repo
@@ -79,6 +80,11 @@ class AccountService:
         self.voice_operation_repo = voice_operation_repo
         self.agent_repo = agent_repo
         self.auth_service = auth_service
+        # Plain configuration values (the normalized operator allow-list), not
+        # a service handle: reserving an address is a rule about this
+        # account's email, and coupling AccountService to AdminService would
+        # invert the layering for one frozenset (009-FR-012).
+        self.reserved_emails = reserved_emails
         self.deletion_grace = deletion_grace
 
     # ------------------------------------------------------------------
@@ -128,10 +134,17 @@ class AccountService:
         """Move the account to a new address after re-checking the password.
 
         A conflict with another account is collapsed into the same generic
-        `ValidationFailure` as any other rejection (see module note).
+        `ValidationFailure` as any other rejection (see module note) — and so
+        is a configured operator address (009-FR-012). Operator authority is
+        matched on `user.email` and an email change is unverified, so without
+        this a member could grant themselves the portal by moving onto a
+        listed address. The refusal is byte-identical to the taken-address
+        one, so it never discloses that the address is reserved.
         """
 
         self._require_current_password(user, current_password)
+        if self.user_repo.normalize_email(new_email) in self.reserved_emails:
+            raise ValidationFailure(_EMAIL_REJECTED_MESSAGE)
         try:
             return self.user_repo.update_email(user.id, new_email)
         except ConflictError as exc:

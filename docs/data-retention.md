@@ -19,6 +19,7 @@ in-app privacy policy (`frontend/src/pages/PrivacyPolicyPage.tsx`, served at
 | Raw voice audio | `data/brain-dump-media/<owner>/…` | 24 hours after processing (`BRAIN_BUDDY_VOICE_RAW_AUDIO_RETENTION_SECONDS`), or immediate user deletion | Sweep (`purge_expired_raw_audio`) / in-app "Delete raw audio" |
 | Invites | `data/invites/<code>.json` | Indefinite, but `used_by_user_id` is scrubbed to `"deleted-user"` on account purge | Purge (`InviteRepository.scrub_user`) |
 | Server logs (correlation IDs, no content) | process stdout / Fly logs | Fly's log retention | Platform |
+| **Admin access records** (an operator looked up, or revoked sessions for, one account: operator account id, resolved target account id, outcome — no email, display name, or request body) | process stdout / Fly logs | Fly's log retention | Platform |
 | Mobile pending classification queue (task, project and tag **ids**) | device `AsyncStorage`, key `bb.pendingClassification.<server>.<account>` | 30 days from last edit, or immediately on a deliberate identity transition | Mobile client sweep across all stored identities (spec 006, FR-011/FR-018) |
 | Mobile cached project and Tag lists (user-authored **names**) | device `AsyncStorage`, key `bb.classificationCache.<server>.<account>` | 30 days from last fetch, or immediately on a deliberate identity transition — including when the queue is empty | Mobile client sweep (spec 006, FR-011/FR-018) |
 
@@ -50,8 +51,34 @@ that was accepted rather than moved to the Keychain.
    → invite scrub → **user record last**. If the process dies mid-purge the
    account is still past-due and the next pass re-runs everything.
 
-Nothing user-identifiable survives a purge; consumed invites keep only the
-`"deleted-user"` sentinel so they stay burned.
+Nothing user-identifiable survives a purge **in the data store**; consumed
+invites keep only the `"deleted-user"` sentinel so they stay burned. The one
+record about a person that a purge deliberately does not reach is the admin
+access record described below — it is a log line, not a stored object, and
+`purge_account` touches no logs.
+
+### Admin access records (spec 009)
+
+When an operator uses the `/admin` portal, the application logs that it
+happened: the operator's account id, the resolved target account id, and the
+outcome. Nothing else — no email, no display name, no credential, token or
+session hash, no member content, and no raw request input. The disposition
+below is a deliberate controller decision, not an omission:
+
+- **Retention:** whatever window the platform applies to stdout (Fly's log
+  retention). There is no application-side store, so there is no
+  application-side lifecycle to enforce.
+- **Purge:** an account purge does **not** reach these records. They are
+  accountability records about an operator's action, held by the controller
+  for security purposes, and they identify the member only by an account id
+  that no longer resolves to anything after the purge.
+- **Export:** they are **excluded** from `GET /api/account/export` (see
+  below), alongside the other categories that are secrets or controller-side
+  security records rather than the member's own content.
+
+Anything beyond this — an append-only audit store, an admin-access history
+UI, or a bounded application-enforced retention window — is explicitly out of
+scope for spec 009 and would need its own decision.
 
 ## Export contents
 
@@ -59,7 +86,9 @@ Nothing user-identifiable survives a purge; consumed invites keep only the
 `trees/…`, `tasks/…`, `voice/operations.json`, `voice/audio/…`).
 Deliberately excluded, and documented in the manifest: the password hash
 (secret, not portable personal data), session records (revoked secrets), and
-idempotency records (transient duplicates of exported data). Raw audio
+idempotency records (transient duplicates of exported data). Also excluded:
+**admin access records** — content-free platform log lines recording that an
+operator looked up or revoked sessions for an account (see above). Raw audio
 appears only while it is inside its 24-hour retention window.
 
 Also excluded: **mobile pending classification changes that have not yet

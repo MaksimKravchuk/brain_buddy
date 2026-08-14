@@ -72,6 +72,7 @@ DEPLOY_REQUIRED_SNIPPETS = (
     "BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS",
     "flyctl secrets set --stage",
     "delivery_canary=internal",
+    'BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_EMAIL}"',
     "--image --json",
     "capture_fly_release_image.py",
     "registry.fly.io/",
@@ -235,6 +236,32 @@ class DeployContractTest(unittest.TestCase):
                     )
                 finally:
                     mutated.unlink()
+
+    def test_staging_a_flag_the_rollback_image_cannot_parse_fails(self) -> None:
+        """A staged secret outlives the image, so it must stay parseable.
+
+        Fly secrets are app-scoped: a flag named on this release is still
+        pending when a rollback restores the captured pre-009 image, and that
+        image raises at startup on an unknown name. Staging it would break the
+        rollback lever at the moment it is needed.
+        """
+
+        text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+        needle = 'BRAIN_BUDDY_FEATURE_FLAGS="delivery_canary=internal'
+        self.assertIn(needle, text)
+        mutated = _temp_workflow(
+            text.replace(needle, f"{needle},admin_portal=off", 1)
+        )
+        try:
+            self.assertEqual(validate_deploy_workflow(mutated), 1)
+        finally:
+            mutated.unlink()
+
+    def test_a_comment_may_still_name_the_flag_it_does_not_stage(self) -> None:
+        """Documentation of the future ASK edit must not trip the checker."""
+
+        self.assertIn("admin_portal", DEPLOY_WORKFLOW.read_text(encoding="utf-8"))
+        self.assertEqual(validate_deploy_workflow(DEPLOY_WORKFLOW), 0)
 
     def test_missing_land_job_fails(self) -> None:
         mutated = _mutated_copy(DEPLOY_WORKFLOW, "\n  land:")

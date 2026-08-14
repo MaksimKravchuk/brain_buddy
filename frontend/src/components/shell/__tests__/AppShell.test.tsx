@@ -1,8 +1,10 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { apiClient } from "../../../api/client";
 import type { ProjectResponse, TagResponse, TaskCounts } from "../../../api/taskTypes";
 import { useAuthStore } from "../../../stores/authStore";
 import { AppShell } from "../AppShell";
@@ -49,19 +51,22 @@ function renderShell(
     onRenameTag: vi.fn(),
     onDeleteTag: vi.fn()
   };
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
-    <MemoryRouter initialEntries={initialEntries}>
-      <Routes>
-        <Route
-          path="*"
-          element={
-            <AppShell counts={counts} projects={projects} tags={tags} activeState="next" {...handlers} {...overrides}>
-              <RoutedTaskListContent />
-            </AppShell>
-          }
-        />
-      </Routes>
-    </MemoryRouter>
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={initialEntries}>
+        <Routes>
+          <Route
+            path="*"
+            element={
+              <AppShell counts={counts} projects={projects} tags={tags} activeState="next" {...handlers} {...overrides}>
+                <RoutedTaskListContent />
+              </AppShell>
+            }
+          />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>
   );
   return handlers;
 }
@@ -82,6 +87,7 @@ afterEach(() => {
   act(() => {
     useAuthStore.setState({ user: null, status: "loading", deletionCancelledNotice: false });
   });
+  vi.restoreAllMocks();
 });
 
 describe("AppShell canonical sidebar", () => {
@@ -453,6 +459,51 @@ describe("AppShell account menu", () => {
     expect(screen.getByRole("menu", { name: "Account" })).toBeInTheDocument();
   });
 
+  // These three were inverted, not deleted. Before PD-1 the shell probed
+  // `/admin/status` on every render and showed an "Admin portal" item to an
+  // operator; the assertions below are the same scenarios re-pointed at the
+  // decided behaviour, so a re-introduced menu entry fails here rather than
+  // slipping through as an untested removal.
+
+  it("009-FR-010, 009-FR-011: never renders an Admin portal entry, whatever the server would say", async () => {
+    const user = userEvent.setup();
+    const spy = vi.spyOn(apiClient, "getAdminStatus").mockResolvedValue({ is_operator: true });
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Account menu for max@example.test" }));
+
+    expect(screen.getByRole("menu", { name: "Account" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Admin portal" })).not.toBeInTheDocument();
+    expect(spy).not.toHaveBeenCalled();
+    expect(currentLocation()).not.toBe("/admin");
+  });
+
+  it("009-SC-006: an authenticated shell issues no admin request during ordinary navigation", async () => {
+    const user = userEvent.setup();
+    const spy = vi.spyOn(apiClient, "getAdminStatus");
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Account menu for max@example.test" }));
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Account menu for max@example.test" }));
+
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("009-FR-010: renders the account menu with no admin entry and no capability query at all", async () => {
+    const user = userEvent.setup();
+    const spy = vi.spyOn(apiClient, "getAdminStatus").mockResolvedValue(
+      null as unknown as Awaited<ReturnType<typeof apiClient.getAdminStatus>>
+    );
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Account menu for max@example.test" }));
+
+    expect(screen.getByRole("menu", { name: "Account" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Admin portal" })).not.toBeInTheDocument();
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it("stays open while the pointer lands inside the menu itself", async () => {
     const user = userEvent.setup();
     renderShell();
@@ -471,11 +522,13 @@ describe("AppShell account menu", () => {
       });
     });
     const { unmount } = render(
-      <MemoryRouter initialEntries={["/tasks/next"]}>
-        <AppShell counts={counts} projects={projects} tags={tags} activeState="next">
-          <div>content</div>
-        </AppShell>
-      </MemoryRouter>
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={["/tasks/next"]}>
+          <AppShell counts={counts} projects={projects} tags={tags} activeState="next">
+            <div>content</div>
+          </AppShell>
+        </MemoryRouter>
+      </QueryClientProvider>
     );
 
     const named = screen.getByRole("button", { name: "Account menu for max@example.test" });
@@ -489,11 +542,13 @@ describe("AppShell account menu", () => {
       useAuthStore.setState({ user: null });
     });
     render(
-      <MemoryRouter initialEntries={["/tasks/next"]}>
-        <AppShell counts={counts} projects={projects} tags={tags} activeState="next">
-          <div>content</div>
-        </AppShell>
-      </MemoryRouter>
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={["/tasks/next"]}>
+          <AppShell counts={counts} projects={projects} tags={tags} activeState="next">
+            <div>content</div>
+          </AppShell>
+        </MemoryRouter>
+      </QueryClientProvider>
     );
 
     const anonymous = screen.getByRole("button", { name: "Account menu" });

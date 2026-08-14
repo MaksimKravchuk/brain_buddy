@@ -48,7 +48,10 @@ def _clear_session_cookie(response: Response, config: AppConfig) -> None:
 
 
 def _me_response(
-    user: User, config: AppConfig, *, deletion_cancelled: bool = False
+    user: User,
+    config: AppConfig,
+    *,
+    deletion_cancelled: bool = False,
 ) -> MeResponse:
     return MeResponse(
         id=user.id,
