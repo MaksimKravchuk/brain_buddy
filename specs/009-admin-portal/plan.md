@@ -70,7 +70,7 @@ must describe the delivered surface, not the intended one.
 | `frontend/src/app/AppRoutes.tsx` | `/admin` route behind `ProtectedRoute` (AppRoutes.tsx:75-78) |
 | `frontend/src/components/shell/__tests__/AppShell.test.tsx` | **(repair — rewrite)** the three menu-item tests are inverted, not deleted, and the shared `getAdminStatus` spy now asserts the call never happens (PD-1, 009-FR-010) |
 | `frontend/src/pages/PrivacyPolicyPage.tsx` | **(repair)** the user-facing summary `docs/data-retention.md` requires to stay in sync: operator/support account administration as a purpose, its Art. 6(1)(f) basis, content-free platform-log retention, and exclusion from export and purge; `LAST_UPDATED` bumped. Text only (PD-4, 009-SC-005) |
-| `.github/workflows/deploy-fly-production.yml` | stages `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_EMAIL}"` on every deploy. This is the PD-2 decision made concrete, and it is an ASK-class file. **(repair)** the authoritative `BRAIN_BUDDY_FEATURE_FLAGS` value also stages `admin_portal=off`, with the ASK-class edit-and-deploy requirement and the emergency `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS=` lever recorded in place. Both are pinned by `scripts/validate_trunk_delivery.py` and `backend/tests/test_admin_deploy_contract.py` |
+| `.github/workflows/deploy-fly-production.yml` | stages `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_EMAIL}"` on every deploy. This is the PD-2 decision made concrete, and it is an ASK-class file. **(repair)** the authoritative `BRAIN_BUDDY_FEATURE_FLAGS` value deliberately **does not name `admin_portal` on this release**: Fly secrets are app-scoped and survive an image swap, so a staged `admin_portal=off` would still be pending when a rollback restores the captured pre-009 image — whose allow-list has no such flag and which fails startup on an unknown name. Omission *is* OFF for both images. The ASK-class edit-and-deploy requirement for enabling it later, and the emergency `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS=` lever, are recorded in place. Pinned by `scripts/validate_trunk_delivery.py` (rollback-parseability check plus its mutation test) and `backend/tests/test_admin_deploy_contract.py` |
 | `.env.example` | **(repair)** document `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS` — the claim that this was done was false, see tasks.md |
 | `docs/auth.md` | **(repair)** the seeded admin account is no longer privilege-free; `BRAIN_BUDDY_ADMIN_PASSWORD` is an admin-grade credential (PD-2, PD-5) |
 | `docs/data-retention.md` | **(repair)** admin access records as their own processing category: platform log retention, excluded from export, not reached by purge (PD-4, 009-SC-005) |
@@ -177,7 +177,8 @@ Consequences, all mandatory:
 1. The `admin_portal` flag is the first lever, **with the same restaging
    caveat as lever 2**: `BRAIN_BUDDY_FEATURE_FLAGS` is pinned in
    `.github/workflows/deploy-fly-production.yml` (which now stages
-   `admin_portal=off`) and restaged on every release, so an out-of-band
+   `admin_portal` is deliberately unnamed there on this release, which is OFF)
+   and restaged on every release, so an out-of-band
    `flyctl secrets set` acts immediately but is reverted by the next deploy.
    The durable levers are editing that ASK-class workflow line plus a deploy,
    or a code revert. Turning the portal **on** in production is the same
