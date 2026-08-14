@@ -336,6 +336,127 @@ class DeployContractTest(unittest.TestCase):
         self.assertIn("external_agent_relay", DEPLOY_WORKFLOW.read_text(encoding="utf-8"))
         self.assertEqual(validate_deploy_workflow(DEPLOY_WORKFLOW), 0)
 
+    def _rollback_contract_mutant(self, needle: str, replacement: str, count: int = 1) -> Path:
+        text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn(needle, text)
+        return _temp_workflow(text.replace(needle, replacement, count))
+
+    def test_prior_revision_authority_live_scrape_is_rejected(self) -> None:
+        """Reading the prior rollout back from the live app would report
+        whatever the failing release just staged, not the previous one."""
+
+        mutated = self._rollback_contract_mutant(
+            _MODULE.PRIOR_REVISION_READ,
+            'flyctl secrets list --app "${BACKEND_APP}"',
+        )
+        try:
+            self.assertEqual(validate_deploy_workflow(mutated), 1)
+        finally:
+            mutated.unlink()
+
+    def test_prior_revision_authority_hardcode_is_rejected(self) -> None:
+        """A remembered default rots silently, so the capture step must read
+        the previous revision, never fall back to a literal string."""
+
+        text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+        needle = "python3 scripts/extract_staged_feature_flags.py)"
+        self.assertIn(needle, text)
+        mutated = _temp_workflow(
+            text.replace(_MODULE.PRIOR_REVISION_READ, "", 1).replace(
+                needle,
+                needle
+                + ' || echo "delivery_canary=internal,voice_brain_dump=on,'
+                'admin_portal=internal"',
+                1,
+            )
+        )
+        try:
+            self.assertEqual(validate_deploy_workflow(mutated), 1)
+        finally:
+            mutated.unlink()
+
+    def test_capture_after_first_fly_mutation_is_rejected(self) -> None:
+        """An unreadable prior rollout must abort the run before any Fly
+        mutation, not after — so a capture step reordered behind one must
+        fail validation."""
+
+        marker = f"      - name: {_MODULE.CAPTURE_PREVIOUS_ROLLOUT_STEP}\n"
+        mutated = self._rollback_contract_mutant(
+            marker,
+            "      - name: Sneak an early mutation\n"
+            "        shell: bash\n"
+            '        run: flyctl secrets set --stage --app "${BACKEND_APP}" FOO=bar\n'
+            "\n" + marker,
+        )
+        try:
+            self.assertEqual(validate_deploy_workflow(mutated), 1)
+        finally:
+            mutated.unlink()
+
+    def test_missing_add_mask_on_captured_rollout_is_rejected(self) -> None:
+        mutated = self._rollback_contract_mutant(
+            'echo "::add-mask::${previous_flags}"\n', ""
+        )
+        try:
+            self.assertEqual(validate_deploy_workflow(mutated), 1)
+        finally:
+            mutated.unlink()
+
+    def test_missing_github_env_export_of_captured_rollout_is_rejected(self) -> None:
+        mutated = self._rollback_contract_mutant(
+            'echo "PREVIOUS_FEATURE_FLAGS=${previous_flags}" >> "${GITHUB_ENV}"\n',
+            'echo "PREVIOUS_FEATURE_FLAGS=${previous_flags}"\n',
+        )
+        try:
+            self.assertEqual(validate_deploy_workflow(mutated), 1)
+        finally:
+            mutated.unlink()
+
+    def test_rollback_restore_not_using_captured_variable_is_rejected(self) -> None:
+        """The rollback must restage the captured ``${PREVIOUS_FEATURE_FLAGS}``
+        value, never a literal rollout guessed at rollback time."""
+
+        mutated = self._rollback_contract_mutant(
+            _MODULE.PREVIOUS_ROLLOUT_RESTORE,
+            'BRAIN_BUDDY_FEATURE_FLAGS="delivery_canary=internal,'
+            'voice_brain_dump=on,admin_portal=internal"',
+        )
+        try:
+            self.assertEqual(validate_deploy_workflow(mutated), 1)
+        finally:
+            mutated.unlink()
+
+    def test_restore_after_backend_image_deploy_is_rejected(self) -> None:
+        """The restage must precede the backend image redeploy, because that
+        deploy is the release which applies the pending secret; restaging
+        after it leaves the restored image running the failed release's
+        flags until some later release."""
+
+        text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+        rollback_start = text.index(f"      - name: {_MODULE.ROLLBACK_STEP}\n")
+        restore_block_start = text.index("          status=0\n", rollback_start)
+        images_block_start = text.index(
+            '          flyctl deploy --config fly.frontend.toml --app'
+            ' "${FRONTEND_APP}" \\\n',
+            restore_block_start,
+        )
+        images_block_end = text.index(
+            '            --image "${PREVIOUS_BACKEND_IMAGE}"\n', images_block_start
+        ) + len('            --image "${PREVIOUS_BACKEND_IMAGE}"\n')
+
+        restore_block = text[restore_block_start:images_block_start]
+        images_block = text[images_block_start:images_block_end]
+        mutated = _temp_workflow(
+            text[:restore_block_start]
+            + images_block
+            + restore_block
+            + text[images_block_end:]
+        )
+        try:
+            self.assertEqual(validate_deploy_workflow(mutated), 1)
+        finally:
+            mutated.unlink()
+
     def test_missing_land_job_fails(self) -> None:
         mutated = _mutated_copy(DEPLOY_WORKFLOW, "\n  land:")
         try:

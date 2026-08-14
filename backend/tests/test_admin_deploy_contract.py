@@ -196,7 +196,9 @@ def test_009_FR_013_the_portal_is_effective_only_for_the_internal_operator(
     )
 
     assert settings.private_flag_effective("admin_portal", operator) is True
-    assert settings.private_flag_effective("admin_portal", "member@example.com") is False
+    assert (
+        settings.private_flag_effective("admin_portal", "member@example.com") is False
+    )
     assert settings.private_flag_effective("admin_portal", None) is False
 
     assert "admin_portal" in PRIVATE_FEATURE_FLAGS
