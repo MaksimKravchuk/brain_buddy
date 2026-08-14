@@ -237,20 +237,27 @@ class DeployContractTest(unittest.TestCase):
                 finally:
                     mutated.unlink()
 
+    def _staged_flag_mutant(self, replacement: str) -> Path:
+        """Restage a different flag string, leaving the rest of the file alone."""
+
+        text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+        needle = f'BRAIN_BUDDY_FEATURE_FLAGS="{_MODULE.AUTHORIZED_STAGED_FEATURE_FLAGS}"'
+        self.assertIn(needle, text)
+        return _temp_workflow(
+            text.replace(needle, f'BRAIN_BUDDY_FEATURE_FLAGS="{replacement}"', 1)
+        )
+
     def test_staging_a_flag_the_rollback_image_cannot_parse_fails(self) -> None:
         """A staged secret outlives the image, so it must stay parseable.
 
         Fly secrets are app-scoped: a flag named on this release is still
-        pending when a rollback restores the captured pre-009 image, and that
-        image raises at startup on an unknown name. Staging it would break the
-        rollback lever at the moment it is needed.
+        pending when a rollback restores the captured image, and that image
+        raises at startup on a name it has never heard of. Staging it would
+        break the rollback lever at the moment it is needed.
         """
 
-        text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
-        needle = 'BRAIN_BUDDY_FEATURE_FLAGS="delivery_canary=internal'
-        self.assertIn(needle, text)
-        mutated = _temp_workflow(
-            text.replace(needle, f"{needle},admin_portal=off", 1)
+        mutated = self._staged_flag_mutant(
+            f"{_MODULE.AUTHORIZED_STAGED_FEATURE_FLAGS},future_unshipped_flag=on"
         )
         try:
             self.assertEqual(validate_deploy_workflow(mutated), 1)
@@ -260,23 +267,37 @@ class DeployContractTest(unittest.TestCase):
     def test_staging_external_agent_relay_fails(self) -> None:
         """The incident mutant: run 31775660872 staged exactly this name.
 
-        The image the automatic rollback restored allows only
-        ``delivery_canary``, ``mobile_task_classification`` and
-        ``voice_brain_dump``; it crashed at startup on ``external_agent_relay``.
-        Any release that stages that name again must fail here, in CI, and not
-        at the reachability gate.
+        It crash-looped the pre-009 image the automatic rollback restored. The
+        *current* rollback target parses the name, so compatibility no longer
+        objects — and that is the point: rollback-safe is not authorized to
+        ship. Spec 007's rollout is separately governed, so staging it must
+        still fail here, in CI, and not at the reachability gate.
         """
 
-        text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
-        needle = 'BRAIN_BUDDY_FEATURE_FLAGS="delivery_canary=internal'
-        self.assertIn(needle, text)
-        mutated = _temp_workflow(
-            text.replace(needle, f"{needle},external_agent_relay=internal", 1)
+        mutated = self._staged_flag_mutant(
+            f"{_MODULE.AUTHORIZED_STAGED_FEATURE_FLAGS},external_agent_relay=internal"
         )
         try:
             self.assertEqual(validate_deploy_workflow(mutated), 1)
         finally:
             mutated.unlink()
+        self.assertIn("external_agent_relay", _MODULE.ROLLBACK_KNOWN_FEATURE_FLAGS)
+
+    def test_dropping_or_downgrading_the_admin_portal_rollout_fails(self) -> None:
+        """The staged line is the authoritative rollout, so silently reverting
+        or restaging it at another state must not pass validation."""
+
+        for staged in (
+            "delivery_canary=internal,voice_brain_dump=on",
+            "delivery_canary=internal,voice_brain_dump=on,admin_portal=off",
+            "delivery_canary=internal,voice_brain_dump=on,admin_portal=on",
+        ):
+            with self.subTest(staged=staged):
+                mutated = self._staged_flag_mutant(staged)
+                try:
+                    self.assertEqual(validate_deploy_workflow(mutated), 1)
+                finally:
+                    mutated.unlink()
 
     def test_repo_deploy_workflow_stages_only_rollback_parseable_flags(self) -> None:
         """The shipped workflow itself, not just a mutant, holds the contract."""
@@ -292,15 +313,149 @@ class DeployContractTest(unittest.TestCase):
         self.assertEqual(
             _MODULE.ROLLBACK_KNOWN_FEATURE_FLAGS,
             frozenset(
-                {"delivery_canary", "mobile_task_classification", "voice_brain_dump"}
+                {
+                    "delivery_canary",
+                    "mobile_task_classification",
+                    "voice_brain_dump",
+                    "external_agent_relay",
+                    "admin_portal",
+                }
             ),
         )
+        self.assertEqual(staged, _MODULE.AUTHORIZED_STAGED_FEATURE_FLAGS)
+        self.assertEqual(
+            _MODULE.AUTHORIZED_STAGED_FEATURE_FLAGS,
+            "delivery_canary=internal,voice_brain_dump=on,admin_portal=internal",
+        )
+        self.assertNotIn("external_agent_relay", staged)
 
-    def test_a_comment_may_still_name_the_flag_it_does_not_stage(self) -> None:
-        """Documentation of the future ASK edit must not trip the checker."""
+    def test_a_comment_may_still_name_a_flag_it_does_not_stage(self) -> None:
+        """Documentation of the ungranted relay rollout must not trip the
+        checker, which reads the staged value and not the prose."""
 
-        self.assertIn("admin_portal", DEPLOY_WORKFLOW.read_text(encoding="utf-8"))
+        self.assertIn("external_agent_relay", DEPLOY_WORKFLOW.read_text(encoding="utf-8"))
         self.assertEqual(validate_deploy_workflow(DEPLOY_WORKFLOW), 0)
+
+    def _rollback_contract_mutant(self, needle: str, replacement: str, count: int = 1) -> Path:
+        text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn(needle, text)
+        return _temp_workflow(text.replace(needle, replacement, count))
+
+    def test_prior_revision_authority_live_scrape_is_rejected(self) -> None:
+        """Reading the prior rollout back from the live app would report
+        whatever the failing release just staged, not the previous one."""
+
+        mutated = self._rollback_contract_mutant(
+            _MODULE.PRIOR_REVISION_READ,
+            'flyctl secrets list --app "${BACKEND_APP}"',
+        )
+        try:
+            self.assertEqual(validate_deploy_workflow(mutated), 1)
+        finally:
+            mutated.unlink()
+
+    def test_prior_revision_authority_hardcode_is_rejected(self) -> None:
+        """A remembered default rots silently, so the capture step must read
+        the previous revision, never fall back to a literal string."""
+
+        text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+        needle = "python3 scripts/extract_staged_feature_flags.py)"
+        self.assertIn(needle, text)
+        mutated = _temp_workflow(
+            text.replace(_MODULE.PRIOR_REVISION_READ, "", 1).replace(
+                needle,
+                needle
+                + ' || echo "delivery_canary=internal,voice_brain_dump=on,'
+                'admin_portal=internal"',
+                1,
+            )
+        )
+        try:
+            self.assertEqual(validate_deploy_workflow(mutated), 1)
+        finally:
+            mutated.unlink()
+
+    def test_capture_after_first_fly_mutation_is_rejected(self) -> None:
+        """An unreadable prior rollout must abort the run before any Fly
+        mutation, not after — so a capture step reordered behind one must
+        fail validation."""
+
+        marker = f"      - name: {_MODULE.CAPTURE_PREVIOUS_ROLLOUT_STEP}\n"
+        mutated = self._rollback_contract_mutant(
+            marker,
+            "      - name: Sneak an early mutation\n"
+            "        shell: bash\n"
+            '        run: flyctl secrets set --stage --app "${BACKEND_APP}" FOO=bar\n'
+            "\n" + marker,
+        )
+        try:
+            self.assertEqual(validate_deploy_workflow(mutated), 1)
+        finally:
+            mutated.unlink()
+
+    def test_missing_add_mask_on_captured_rollout_is_rejected(self) -> None:
+        mutated = self._rollback_contract_mutant(
+            'echo "::add-mask::${previous_flags}"\n', ""
+        )
+        try:
+            self.assertEqual(validate_deploy_workflow(mutated), 1)
+        finally:
+            mutated.unlink()
+
+    def test_missing_github_env_export_of_captured_rollout_is_rejected(self) -> None:
+        mutated = self._rollback_contract_mutant(
+            'echo "PREVIOUS_FEATURE_FLAGS=${previous_flags}" >> "${GITHUB_ENV}"\n',
+            'echo "PREVIOUS_FEATURE_FLAGS=${previous_flags}"\n',
+        )
+        try:
+            self.assertEqual(validate_deploy_workflow(mutated), 1)
+        finally:
+            mutated.unlink()
+
+    def test_rollback_restore_not_using_captured_variable_is_rejected(self) -> None:
+        """The rollback must restage the captured ``${PREVIOUS_FEATURE_FLAGS}``
+        value, never a literal rollout guessed at rollback time."""
+
+        mutated = self._rollback_contract_mutant(
+            _MODULE.PREVIOUS_ROLLOUT_RESTORE,
+            'BRAIN_BUDDY_FEATURE_FLAGS="delivery_canary=internal,'
+            'voice_brain_dump=on,admin_portal=internal"',
+        )
+        try:
+            self.assertEqual(validate_deploy_workflow(mutated), 1)
+        finally:
+            mutated.unlink()
+
+    def test_restore_after_backend_image_deploy_is_rejected(self) -> None:
+        """The restage must precede the backend image redeploy, because that
+        deploy is the release which applies the pending secret; restaging
+        after it leaves the restored image running the failed release's
+        flags until some later release."""
+
+        text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+        rollback_start = text.index(f"      - name: {_MODULE.ROLLBACK_STEP}\n")
+        restore_block_start = text.index("          status=0\n", rollback_start)
+        images_block_start = text.index(
+            '          flyctl deploy --config fly.frontend.toml --app'
+            ' "${FRONTEND_APP}" \\\n',
+            restore_block_start,
+        )
+        images_block_end = text.index(
+            '            --image "${PREVIOUS_BACKEND_IMAGE}"\n', images_block_start
+        ) + len('            --image "${PREVIOUS_BACKEND_IMAGE}"\n')
+
+        restore_block = text[restore_block_start:images_block_start]
+        images_block = text[images_block_start:images_block_end]
+        mutated = _temp_workflow(
+            text[:restore_block_start]
+            + images_block
+            + restore_block
+            + text[images_block_end:]
+        )
+        try:
+            self.assertEqual(validate_deploy_workflow(mutated), 1)
+        finally:
+            mutated.unlink()
 
     def test_missing_land_job_fails(self) -> None:
         mutated = _mutated_copy(DEPLOY_WORKFLOW, "\n  land:")

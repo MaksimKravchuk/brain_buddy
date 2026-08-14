@@ -188,10 +188,16 @@ jobs:
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
     steps:
+      # fetch-depth: 0 because the rollback contract reads the PREVIOUS
+      # revision of this workflow (see the flag-capture step below), and a
+      # default shallow checkout has no parent tree to read. The deploy-need
+      # classifier below still deepens defensively; that is a no-op on a
+      # complete clone.
       - name: Check out the CI-tested revision
         uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
 
       # The production smoke identity is the seeded admin account
       # (create-or-rotate on backend startup). The unit-tested preflight
@@ -276,6 +282,35 @@ jobs:
           fi
           echo "needed=${needed}" >> "${GITHUB_OUTPUT}"
 
+      # Rolling back the IMAGES is not rolling back the RELEASE. Fly secrets
+      # are app-scoped and survive an image swap, so the flag string this run
+      # is about to stage is still pending when a rollback restores the old
+      # image — which would then boot under the rollout of the release that
+      # just failed. A failed admin enablement could therefore leave
+      # admin_portal=internal live after a "successful" rollback.
+      #
+      # The previous rollout is read from the previous revision of THIS
+      # workflow, the same line that is authoritative for production. It is
+      # deliberately NOT read back from `flyctl secrets` (that reports what the
+      # failing release already staged) and deliberately NOT hard-coded (a
+      # remembered default rots silently). The unit-tested helper fails closed
+      # on a missing, ambiguous or malformed prior assignment, and it runs here
+      # — before the first Fly mutation — so an unreadable prior rollout aborts
+      # the run instead of the rollback.
+      - name: Capture the previous release's feature-flag rollout
+        if: steps.classify.outputs.needed == 'true'
+        shell: bash
+        env:
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          previous_flags=$(git show "${TESTED_SHA}^:.github/workflows/deploy-fly-production.yml" \
+            | python3 scripts/extract_staged_feature_flags.py)
+          # Masked before it is exported, so no later step can echo it.
+          echo "::add-mask::${previous_flags}"
+          echo "PREVIOUS_FEATURE_FLAGS=${previous_flags}" >> "${GITHUB_ENV}"
+          echo "Captured the previous release's feature-flag rollout for rollback."
+
       - name: Set up Flyctl
         if: steps.classify.outputs.needed == 'true'
         uses: superfly/flyctl-actions/setup-flyctl@v1
@@ -337,20 +372,25 @@ jobs:
       # a name out.
       #
       # The captured rollback target is currently
-      # registry.fly.io/brain-buddy-backend:deployment-01KZXF74W98F1NVPHYKGD8QD0S,
-      # whose allow-list — read from its machine startup logs during the
-      # automatic rollback in deploy run 31775660872 — is exactly
-      # delivery_canary, mobile_task_classification and voice_brain_dump.
-      # `external_agent_relay` (spec 007) was staged by that run and crashed
-      # the restored image at startup; it is therefore NOT named here, and
-      # `admin_portal` (spec 009, 009-FR-013) is likewise not named on its
-      # first release. Both features ship in the candidate image, default OFF
-      # by omission.
+      # registry.fly.io/brain-buddy-backend:deployment-01M00243625JAFN5S6G4CVZ7DH,
+      # the healthy release left by the default-OFF baseline deployment (run
+      # 31798252344 for exact main d9ec122f, authenticated smoke passed). It is
+      # built from the 009 revision, so it parses both `admin_portal` (spec 009,
+      # 009-FR-013) and `external_agent_relay` (spec 007) — unlike the pre-009
+      # image that crash-looped on the relay name in deploy run 31775660872.
+      # Naming `admin_portal` here is therefore rollback-safe at last, and this
+      # release rolls it out to the internal operator cohort.
       #
-      # Enabling either later means adding `<flag>=internal` or `<flag>=on`
-      # to this line and deploying — an audited ASK-class edit, and only after
-      # a successful deployment has made a newer, known-compatible image the
-      # captured rollback target, so the restore path already knows the name. A
+      # `external_agent_relay` stays omitted. Being parseable by the rollback
+      # image makes it *safe* to stage, not *authorized* to ship: spec 007's
+      # rollout is separately governed and has not been granted, so the relay
+      # remains default OFF by omission. `scripts/validate_trunk_delivery.py`
+      # pins that distinction — a compatibility allow-list plus a separate
+      # exact authorized rollout string — and fails CI on either violation.
+      #
+      # Changing any of this means editing this line and deploying — an
+      # audited ASK-class edit, and only while the image a rollback would
+      # restore already knows every name staged. A
       # `flyctl secrets set` flip is never the answer: it holds only until the
       # next release. The fastest true emergency lever is instead
       # `flyctl secrets set BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS=`, which fails
@@ -371,7 +411,7 @@ jobs:
             BRAIN_BUDDY_ADMIN_PASSWORD="${BRAIN_BUDDY_ADMIN_PASSWORD}" \
             BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_EMAIL}" \
             BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS="${BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS}" \
-            BRAIN_BUDDY_FEATURE_FLAGS="delivery_canary=internal,voice_brain_dump=on" 2>&1) \
+            BRAIN_BUDDY_FEATURE_FLAGS="delivery_canary=internal,voice_brain_dump=on,admin_portal=internal" 2>&1) \
             || status=$?
           if [ "${status}" -ne 0 ] \
             && ! printf '%s\n' "${output}" | grep -qi "no change"; then
@@ -381,7 +421,7 @@ jobs:
             echo "Staging the smoke identity secrets failed (exit ${status})." >&2
             exit "${status}"
           fi
-          echo "Staged smoke identity, delivery_canary=internal and voice_brain_dump=on for ${BACKEND_APP}."
+          echo "Staged smoke identity, delivery_canary=internal, voice_brain_dump=on and admin_portal=internal for ${BACKEND_APP} (external_agent_relay stays omitted, i.e. OFF)."
 
       - name: Deploy backend
         if: steps.classify.outputs.needed == 'true'
@@ -427,9 +467,16 @@ jobs:
 
       # Runs only when something failed after the rollback images were
       # captured (staging, deploy, reachability, or authenticated smoke). It
-      # restores the captured images frontend-first so the frontend is never
-      # newer than the backend, re-verifies health, and leaves the workflow
-      # failed — a rollback is loud containment, not success.
+      # restores the previous release state — the previous rollout captured
+      # from ${TESTED_SHA}^ first, then the captured images frontend-first so
+      # the frontend is never newer than the backend — re-verifies health, and
+      # leaves the workflow failed: a rollback is loud containment, not success.
+      #
+      # The restage must precede the BACKEND image deploy, because that deploy
+      # is the release that applies the pending staged secret: staging after it
+      # would leave the restored image running the failed release's flags until
+      # some later release. Ordering against the frontend does not matter (the
+      # secret is backend-app-scoped), so frontend-first survives.
       - name: Roll back to the captured images and verify
         if: failure() && steps.capture.outcome == 'success'
         shell: bash
@@ -438,6 +485,30 @@ jobs:
         run: |
           set -euo pipefail
           echo "Post-deploy verification failed; rolling back to captured images." >&2
+          if [ -z "${PREVIOUS_FEATURE_FLAGS:-}" ]; then
+            echo "No previous feature-flag rollout was captured, so restoring the old" >&2
+            echo "image would boot it under this release's pending flags — the crash-loop" >&2
+            echo "this contract exists to prevent. Refusing to roll back automatically;" >&2
+            echo "follow the manual containment path in" >&2
+            echo "docs/autonomous-delivery-runbook.md." >&2
+            exit 1
+          fi
+          # Same idempotence tolerance as staging: an unchanged rollout makes
+          # flyctl report "no change" non-zero, which must not fail a rollback.
+          # flyctl names secrets but never prints their values.
+          status=0
+          output=$(flyctl secrets set --stage --app "${BACKEND_APP}" \
+            BRAIN_BUDDY_FEATURE_FLAGS="${PREVIOUS_FEATURE_FLAGS}" 2>&1) \
+            || status=$?
+          if [ "${status}" -ne 0 ] \
+            && ! printf '%s\n' "${output}" | grep -qi "no change"; then
+            printf '%s\n' "${output}" >&2
+            echo "Restaging the previous feature-flag rollout failed (exit ${status})." >&2
+            echo "Rolling back the image now would start it under this release's flags," >&2
+            echo "so this fails closed instead." >&2
+            exit "${status}"
+          fi
+          echo "Restaged the previous release's feature-flag rollout for ${BACKEND_APP}." >&2
           flyctl deploy --config fly.frontend.toml --app "${FRONTEND_APP}" \
             --image "${PREVIOUS_FRONTEND_IMAGE}"
           flyctl deploy --config fly.backend.toml --app "${BACKEND_APP}" \
