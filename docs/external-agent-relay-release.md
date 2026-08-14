@@ -16,8 +16,15 @@ not authorize landing, deployment, rollout expansion, or App Store submission.
    Keep private relay destinations disabled unless separately governed.
 4. Let the exact landed `main` SHA run
    `.github/workflows/deploy-fly-production.yml`. The workflow authoritatively
-   stages `external_agent_relay=internal`; do not widen the cohort as part of
-   this release.
+   stages the flag string, and it no longer names `external_agent_relay`:
+   staging that name crashed the image the automatic rollback restored in
+   deploy run 31775660872, because a staged secret survives the image swap and
+   that image rejects an unknown flag at startup. The relay therefore ships
+   default OFF by omission — it stays that way until a successful deployment
+   of a backend that knows the name has become the captured rollback target,
+   at which point naming it in that workflow line is an audited ASK edit. Do
+   not widen the cohort as part of this release, and do not set the flag out
+   of band: the next release restages the workflow's value regardless.
 5. Using a disposable HTTPS connector and an internal account, verify connect
    and test, reviewed task/context hand-off, one dispatch under duplicate
    confirmation, authenticated run updates, reply/cancel when supported,
@@ -26,15 +33,16 @@ not authorize landing, deployment, rollout expansion, or App Store submission.
 
 ### Fly rollback
 
-Use the images captured by the failed release run; do **not** re-run the normal
-production workflow, because it authoritatively stages the relay back to
-`INTERNAL`. With `BACKEND_APP`, `FRONTEND_APP`, `PREVIOUS_BACKEND_IMAGE`, and
-`PREVIOUS_FRONTEND_IMAGE` set to that run's recorded values, contain and roll
-back directly:
+Use the images captured by the failed release run. With `BACKEND_APP`,
+`FRONTEND_APP`, `PREVIOUS_BACKEND_IMAGE`, and `PREVIOUS_FRONTEND_IMAGE` set to
+that run's recorded values, contain and roll back directly. The staged flag
+string must name only flags the restored image can parse — naming a flag it
+does not know fails its startup, which is how run 31775660872 turned a
+rollback into a crash loop:
 
 ```bash
 flyctl secrets set --app "${BACKEND_APP}" \
-  BRAIN_BUDDY_FEATURE_FLAGS='delivery_canary=internal,voice_brain_dump=on,external_agent_relay=off'
+  BRAIN_BUDDY_FEATURE_FLAGS='delivery_canary=internal,voice_brain_dump=on'
 flyctl deploy --config fly.frontend.toml --app "${FRONTEND_APP}" \
   --image "${PREVIOUS_FRONTEND_IMAGE}"
 flyctl deploy --config fly.backend.toml --app "${BACKEND_APP}" \
