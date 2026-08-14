@@ -361,3 +361,69 @@ def test_export_requires_auth(anonymous_api_client: TestClient) -> None:
     """Anonymous callers get the standard 401 envelope."""
 
     assert anonymous_api_client.get("/api/account/export").status_code == 401
+
+
+def test_009_SC_005_export_contains_no_admin_access_section_or_record(
+    api_client: TestClient, caplog
+) -> None:
+    """Admin access records live only in content-free platform logs (PD-4).
+
+    A distinctive sentinel is planted *into a real admin record* first, so
+    this cannot pass merely because no admin activity happened: the record is
+    proved to exist in the log stream and then proved absent from the export,
+    in both the archive's names and its bytes.
+    """
+
+    import logging
+
+    sentinel = "ZZADMINLOGSENTINELZZ"
+    me = api_client.get("/api/auth/me").json()
+    container = _container(api_client)
+    admin_service = container.admin_service
+
+    with caplog.at_level(logging.INFO, logger="app.services.admin_service"):
+        admin_service.find_account(
+            operator_id=f"operator_{sentinel}", account_id=me["id"], email=None
+        )
+    records = "\n".join(
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "app.services.admin_service"
+    )
+    assert sentinel in records, "the admin record under test was never emitted"
+
+    archive = _download_zip(api_client)
+    names = archive.namelist()
+
+    assert not [name for name in names if "admin" in name.lower()]
+    manifest = json.loads(archive.read("export_manifest.json"))
+    assert not [key for key in manifest["counts"] if "admin" in key.lower()]
+
+    for name in names:
+        assert sentinel.encode() not in archive.read(name), name
+
+
+def test_009_SC_005_account_purge_leaves_admin_log_records_alone(
+    api_client: TestClient, caplog
+) -> None:
+    """Purge is a data-store operation; it never claims to reach stdout logs."""
+
+    import logging
+
+    sentinel = "ZZPURGEADMINSENTINELZZ"
+    me = api_client.get("/api/auth/me").json()
+    container = _container(api_client)
+
+    with caplog.at_level(logging.INFO, logger="app.services.admin_service"):
+        container.admin_service.find_account(
+            operator_id=f"operator_{sentinel}", account_id=me["id"], email=None
+        )
+
+    container.account_service.purge_due_accounts()
+
+    emitted = "\n".join(
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "app.services.admin_service"
+    )
+    assert sentinel in emitted

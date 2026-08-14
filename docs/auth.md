@@ -54,7 +54,24 @@ fly secrets set \
   -a <backend-app>
 ```
 
-The admin account is a normal account — it has no elevated privileges, it just happens to exist when the app boots. Treat the env vars with the same care as any other secret: a leak of `BRAIN_BUDDY_ADMIN_PASSWORD` is a leak of that account.
+### The seeded account now carries operator privilege in production
+
+This changed with the minimum admin portal (spec 009, [ADR-0017](decisions/0017-operator-account-administration-narrow-owner-scoping-exception.md)). The seeded account used to be a normal account that merely happened to exist at boot. It is no longer:
+
+- The `/admin` portal authorizes operators from `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS`, a server-owned, fail-closed allow-list (`.env.example` documents the format).
+- **In production that list is deliberately pinned to `BRAIN_BUDDY_ADMIN_EMAIL`**, staged by `.github/workflows/deploy-fly-production.yml` on every release. The seeded admin is the sole operator, by decision, not by accident.
+- An operator can look up any account (id, canonical email, optional display name, deletion-requested state) and revoke every session for any account. Member *content* — trees, tasks, voice operations, exports — stays owner-scoped and is not reachable; ADR-0017 bounds the exception to those two operations.
+
+**`BRAIN_BUDDY_ADMIN_PASSWORD` is therefore an admin-grade credential.** A leak is no longer a leak of one account; it confers cross-account lookup and session revoke over every member. The same value is also the production smoke identity replayed by `scripts/production_smoke.sh` on every deploy, so it lives in GitHub environment secrets — that blast radius is accepted deliberately for a one-maintainer deployment rather than mitigated with a second identity.
+
+Two operational consequences worth knowing before you touch it:
+
+- Rotating `BRAIN_BUDDY_ADMIN_EMAIL` transfers who holds operator power.
+- Adding a second operator by hand (`fly secrets set BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS=…`) is reverted by the next deploy, which restages the pinned value.
+
+A configured operator address is **reserved**: signup and self-serve email change refuse to bind an account to it, so nobody can grant themselves operator power by moving their account onto a listed address. Only the seed path above may provision that identity.
+
+Outside production, an empty `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS` (the default) means nobody is an operator and `/admin` is unreachable.
 
 ## Account management (GDPR data rights)
 

@@ -68,6 +68,22 @@ KNOWN_FEATURE_FLAGS: tuple[str, ...] = (
     "external_agent_relay",
 )
 
+# Server-owned flags that are configured exactly like the ones above but are
+# deliberately **not** projected into the member-facing ``feature_flags``
+# payload of ``/api/auth/me``, ``/login`` and ``/signup``. Adding a flag to
+# ``KNOWN_FEATURE_FLAGS`` changes that shared response shape for every member
+# and broadcasts its rollout state to callers who can never use it.
+#
+# ``admin_portal`` (spec 009, 009-FR-013) gates the `/admin` operator surface.
+# It ships default OFF, is read only by ``require_admin_portal_enabled`` after
+# authorization has already succeeded (009-FR-002 precedence), and stays off
+# the member payload so 009-FR-010 keeps holding: no member-facing response
+# shape changes, and a non-operator can never observe the rollout state.
+PRIVATE_FEATURE_FLAGS: tuple[str, ...] = ("admin_portal",)
+
+# Every flag name ``BRAIN_BUDDY_FEATURE_FLAGS`` may configure.
+ALL_FEATURE_FLAGS: tuple[str, ...] = KNOWN_FEATURE_FLAGS + PRIVATE_FEATURE_FLAGS
+
 
 class FeatureFlagState(str, Enum):
     """Rollout stage of one allow-listed feature flag."""
@@ -97,19 +113,16 @@ class FeatureFlagSettings(BaseModel):
     def validate_states(
         cls, states: Mapping[str, FeatureFlagState]
     ) -> Mapping[str, FeatureFlagState]:
-        unknown = sorted(set(states) - set(KNOWN_FEATURE_FLAGS))
+        unknown = sorted(set(states) - set(ALL_FEATURE_FLAGS))
         if unknown:
             raise ValueError(
                 f"Unknown feature flag(s) {unknown}; allowed flags are "
-                f"{sorted(KNOWN_FEATURE_FLAGS)}."
+                f"{sorted(ALL_FEATURE_FLAGS)}."
             )
         # The frozen model only blocks attribute assignment; the proxy makes
         # the mapping itself read-only so items cannot be mutated either.
         return MappingProxyType(
-            {
-                name: states.get(name, FeatureFlagState.OFF)
-                for name in KNOWN_FEATURE_FLAGS
-            }
+            {name: states.get(name, FeatureFlagState.OFF) for name in ALL_FEATURE_FLAGS}
         )
 
     @field_serializer("states")
@@ -134,20 +147,68 @@ class FeatureFlagSettings(BaseModel):
             normalized.add(candidate)
         return frozenset(normalized)
 
-    def effective_flags(self, email: str | None) -> dict[str, bool]:
-        """Effective boolean flag payload for one authenticated user."""
-
+    def _is_effective(self, name: str, email: str | None) -> bool:
         normalized = (email or "").strip().lower()
-        effective: dict[str, bool] = {}
-        for name in KNOWN_FEATURE_FLAGS:
-            state = self.states[name]
-            if state is FeatureFlagState.ON:
-                effective[name] = True
-            elif state is FeatureFlagState.INTERNAL:
-                effective[name] = bool(normalized) and normalized in self.internal_users
-            else:
-                effective[name] = False
-        return effective
+        state = self.states[name]
+        if state is FeatureFlagState.ON:
+            return True
+        if state is FeatureFlagState.INTERNAL:
+            return bool(normalized) and normalized in self.internal_users
+        return False
+
+    def effective_flags(self, email: str | None) -> dict[str, bool]:
+        """Effective boolean flag payload for one authenticated user.
+
+        Deliberately projects only `KNOWN_FEATURE_FLAGS`: this dict is the
+        member-facing `/api/auth/me` (and `/login`, `/signup`) payload, so a
+        private flag must never appear here (009-FR-010, 009-FR-013).
+        """
+
+        return {name: self._is_effective(name, email) for name in KNOWN_FEATURE_FLAGS}
+
+    def private_flag_effective(self, name: str, email: str | None) -> bool:
+        """Effective value of one `PRIVATE_FEATURE_FLAGS` entry.
+
+        Read only server-side, by a dependency that has already made its
+        authorization decision — never serialized into any response.
+        """
+
+        if name not in PRIVATE_FEATURE_FLAGS:
+            raise ValueError(
+                f"'{name}' is not a private feature flag; "
+                f"private flags are {sorted(PRIVATE_FEATURE_FLAGS)}."
+            )
+        return self._is_effective(name, email)
+
+
+class AdminSettings(BaseModel):
+    """Server-owned allow-list of operators for the `/admin` portal (009-FR-001).
+
+    Deliberately separate from `FeatureFlagSettings.internal_users`: that list
+    gates feature *exposure* for a rollout cohort, this one gates a real
+    authorization decision (account lookup, session revoke). Reusing one list
+    for both would let a feature-flag test cohort silently gain admin power.
+    """
+
+    operator_emails: frozenset[str] = Field(
+        default_factory=frozenset,
+        description="Normalized emails authorized to use the admin portal.",
+    )
+
+    model_config = ConfigDict(frozen=True)
+
+    @field_validator("operator_emails")
+    @classmethod
+    def validate_operator_emails(cls, emails: frozenset[str]) -> frozenset[str]:
+        normalized: set[str] = set()
+        for email in emails:
+            candidate = email.strip().lower()
+            if not candidate or "@" not in candidate:
+                raise ValueError(
+                    f"Admin operator email '{email}' is not an email address."
+                )
+            normalized.add(candidate)
+        return frozenset(normalized)
 
 
 class LoggingSettings(BaseModel):
@@ -488,6 +549,7 @@ class AppConfig(BaseModel):
     voice: VoiceSettings = Field(default_factory=VoiceSettings)
     agent_relay: AgentRelaySettings = Field(default_factory=AgentRelaySettings)
     feature_flags: FeatureFlagSettings = Field(default_factory=FeatureFlagSettings)
+    admin: AdminSettings = Field(default_factory=AdminSettings)
 
     model_config = ConfigDict(frozen=True)
 
@@ -544,6 +606,15 @@ def _build_feature_flags() -> FeatureFlagSettings:
         if value.strip()
     )
     return FeatureFlagSettings(states=states, internal_users=internal_users)
+
+
+def _build_admin_settings() -> AdminSettings:
+    operator_emails = frozenset(
+        value.strip()
+        for value in os.getenv("BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS", "").split(",")
+        if value.strip()
+    )
+    return AdminSettings(operator_emails=operator_emails)
 
 
 def _read_schema_version(data_dir: Path) -> str:
@@ -763,6 +834,7 @@ def _build_config() -> AppConfig:
         voice=voice,
         agent_relay=agent_relay,
         feature_flags=_build_feature_flags(),
+        admin=_build_admin_settings(),
     )
 
 
@@ -774,8 +846,11 @@ def get_config() -> AppConfig:
 
 
 __all__ = [
+    "ALL_FEATURE_FLAGS",
     "CANONICAL_PUBLIC_CALLBACK_HOSTS",
     "KNOWN_FEATURE_FLAGS",
+    "PRIVATE_FEATURE_FLAGS",
+    "AdminSettings",
     "AgentRelaySettings",
     "AppConfig",
     "AppEnvironment",

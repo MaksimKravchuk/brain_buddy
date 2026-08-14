@@ -36,6 +36,7 @@ from app.repositories import (
 )
 from app.services import (
     AccountService,
+    AdminService,
     AuthService,
     NodeService,
     RelationService,
@@ -84,6 +85,7 @@ class Container:
     validation_service: ValidationService
     auth_service: AuthService
     account_service: AccountService
+    admin_service: AdminService
     task_service: TaskService
     voice_brain_dump_service: VoiceBrainDumpService
     agent_relay_service: AgentRelayService
@@ -364,6 +366,11 @@ def build_container(config: AppConfig) -> Container:
         invite_repo=invite_repo,
         password_policy=config.password_policy,
         session_settings=config.session,
+        # Plain configuration value, not the AdminService handle: the
+        # reservation is a rule about which addresses a member may bind
+        # (009-FR-012), and passing a service here would couple auth to the
+        # admin portal in both directions.
+        reserved_emails=config.admin.operator_emails,
         deletion_grace=deletion_grace,
     )
     account_service = AccountService(
@@ -377,7 +384,13 @@ def build_container(config: AppConfig) -> Container:
         voice_operation_repo=voice_operation_repo,
         agent_repo=agent_repo,
         auth_service=auth_service,
+        reserved_emails=config.admin.operator_emails,
         deletion_grace=deletion_grace,
+    )
+    admin_service = AdminService(
+        user_repo=user_repo,
+        session_repo=session_repo,
+        operator_emails=config.admin.operator_emails,
     )
 
     return Container(
@@ -399,6 +412,7 @@ def build_container(config: AppConfig) -> Container:
         validation_service=validation_service,
         auth_service=auth_service,
         account_service=account_service,
+        admin_service=admin_service,
         task_service=task_service,
         voice_brain_dump_service=voice_brain_dump_service,
         agent_relay_service=agent_relay_service,
