@@ -337,20 +337,25 @@ jobs:
       # a name out.
       #
       # The captured rollback target is currently
-      # registry.fly.io/brain-buddy-backend:deployment-01KZXF74W98F1NVPHYKGD8QD0S,
-      # whose allow-list — read from its machine startup logs during the
-      # automatic rollback in deploy run 31775660872 — is exactly
-      # delivery_canary, mobile_task_classification and voice_brain_dump.
-      # `external_agent_relay` (spec 007) was staged by that run and crashed
-      # the restored image at startup; it is therefore NOT named here, and
-      # `admin_portal` (spec 009, 009-FR-013) is likewise not named on its
-      # first release. Both features ship in the candidate image, default OFF
-      # by omission.
+      # registry.fly.io/brain-buddy-backend:deployment-01M00243625JAFN5S6G4CVZ7DH,
+      # the healthy release left by the default-OFF baseline deployment (run
+      # 31798252344 for exact main d9ec122f, authenticated smoke passed). It is
+      # built from the 009 revision, so it parses both `admin_portal` (spec 009,
+      # 009-FR-013) and `external_agent_relay` (spec 007) — unlike the pre-009
+      # image that crash-looped on the relay name in deploy run 31775660872.
+      # Naming `admin_portal` here is therefore rollback-safe at last, and this
+      # release rolls it out to the internal operator cohort.
       #
-      # Enabling either later means adding `<flag>=internal` or `<flag>=on`
-      # to this line and deploying — an audited ASK-class edit, and only after
-      # a successful deployment has made a newer, known-compatible image the
-      # captured rollback target, so the restore path already knows the name. A
+      # `external_agent_relay` stays omitted. Being parseable by the rollback
+      # image makes it *safe* to stage, not *authorized* to ship: spec 007's
+      # rollout is separately governed and has not been granted, so the relay
+      # remains default OFF by omission. `scripts/validate_trunk_delivery.py`
+      # pins that distinction — a compatibility allow-list plus a separate
+      # exact authorized rollout string — and fails CI on either violation.
+      #
+      # Changing any of this means editing this line and deploying — an
+      # audited ASK-class edit, and only while the image a rollback would
+      # restore already knows every name staged. A
       # `flyctl secrets set` flip is never the answer: it holds only until the
       # next release. The fastest true emergency lever is instead
       # `flyctl secrets set BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS=`, which fails
@@ -371,7 +376,7 @@ jobs:
             BRAIN_BUDDY_ADMIN_PASSWORD="${BRAIN_BUDDY_ADMIN_PASSWORD}" \
             BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_EMAIL}" \
             BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS="${BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS}" \
-            BRAIN_BUDDY_FEATURE_FLAGS="delivery_canary=internal,voice_brain_dump=on" 2>&1) \
+            BRAIN_BUDDY_FEATURE_FLAGS="delivery_canary=internal,voice_brain_dump=on,admin_portal=internal" 2>&1) \
             || status=$?
           if [ "${status}" -ne 0 ] \
             && ! printf '%s\n' "${output}" | grep -qi "no change"; then
@@ -381,7 +386,7 @@ jobs:
             echo "Staging the smoke identity secrets failed (exit ${status})." >&2
             exit "${status}"
           fi
-          echo "Staged smoke identity, delivery_canary=internal and voice_brain_dump=on for ${BACKEND_APP}."
+          echo "Staged smoke identity, delivery_canary=internal, voice_brain_dump=on and admin_portal=internal for ${BACKEND_APP} (external_agent_relay stays omitted, i.e. OFF)."
 
       - name: Deploy backend
         if: steps.classify.outputs.needed == 'true'

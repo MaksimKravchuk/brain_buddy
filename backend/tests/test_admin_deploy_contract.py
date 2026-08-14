@@ -5,8 +5,8 @@ restaged from the deploy workflow on every release, so the workflow line — not
 the code default and not a `flyctl secrets set` — is the authoritative
 production state. Two properties therefore need a regression test rather than a
 sentence: the operator allow-list is bound to the seeded admin identity (PD-2),
-and the staged flag string stays **rollback-compatible** while the portal is
-OFF (009-FR-013).
+and the staged flag string stays **rollback-compatible** while it rolls the
+portal out to the internal operator (009-FR-013).
 
 Rollback compatibility is the sharp edge, and it has already cut once. Fly
 secrets are app-scoped and survive an image swap, so a secret staged by a
@@ -17,11 +17,15 @@ itself partially succeeds and rollback then runs.
 
 Deploy run 31775660872 proved this in production: it staged
 `external_agent_relay=internal`, the candidate failed the public reachability
-gate, and the automatic rollback restored an image that knows only
-`delivery_canary`, `mobile_task_classification` and `voice_brain_dump`. The
-allow-list pinned below is read from that image's startup logs, not from a
-source SHA and not from this tree. The release therefore names no flag either
-image is unsure of: OFF by omission, which both agree on.
+gate, and the automatic rollback restored an image that could not parse the
+name. The allow-list pinned below is read from the *current* rollback target,
+not from a source SHA and not from this tree.
+
+That target has since moved on: the default-OFF baseline release made a 009
+image the healthy current one, so both `admin_portal` and `external_agent_relay`
+are now rollback-parseable. Parseable is not the same as authorized — only
+`admin_portal` is being rolled out, and the relay stays omitted, which is the
+OFF state every image agrees on.
 
 `scripts/test_validate_trunk_delivery.py` proves the *validator* rejects a
 workflow with either property removed; this proves the workflow the repository
@@ -45,26 +49,40 @@ from app.core.config import (
 )
 
 #: The image a rollback actually restores, identified the only way that is
-#: verifiable: by the release image ref, not by a source SHA. Deploy run
-#: 31775660872 rolled production back to this exact image, so it — not any
-#: commit the repository believes is deployed — defines the contract.
+#: verifiable: by the release image ref, not by a source SHA. The default-OFF
+#: baseline deployment (run 31798252344 for exact main d9ec122f, authenticated
+#: production smoke passed) left this image running and healthy, so it — not
+#: any commit the repository believes is deployed — defines the contract.
 ROLLBACK_TARGET_IMAGE = (
-    "registry.fly.io/brain-buddy-backend:deployment-01KZXF74W98F1NVPHYKGD8QD0S"
+    "registry.fly.io/brain-buddy-backend:deployment-01M00243625JAFN5S6G4CVZ7DH"
 )
 
-#: `KNOWN_FEATURE_FLAGS` as it exists in that image, read from the machine
-#: startup logs of run 31775660872: the image accepted these three names and
-#: crashed at startup on `external_agent_relay`. Pinned as a literal on
-#: purpose — reading it from the current tree would make this test agree with
-#: whatever the candidate does, which is exactly the failure being guarded.
-#: Widening this set is only honest once a *successful* deployment has made a
-#: newer, known-compatible image the captured rollback target.
+#: The flag names that image can parse. It was built from the 009 revision, so
+#: it knows `admin_portal` and `external_agent_relay` as well as the three the
+#: pre-009 image knew — which is exactly the precondition that makes staging
+#: `admin_portal` rollback-safe. Pinned as a literal on purpose: reading it
+#: from the current tree would make this test agree with whatever the candidate
+#: does, which is the failure run 31775660872 was. Widening it is only honest
+#: once a *successful* deployment has made a newer image the captured rollback
+#: target, as that baseline release did.
+#:
+#: This is a safety allow-list. It says nothing about which rollouts are
+#: authorized — `external_agent_relay` is parseable here and still must not be
+#: staged.
 ROLLBACK_KNOWN_FEATURE_FLAGS = frozenset(
     {
         "delivery_canary",
         "mobile_task_classification",
         "voice_brain_dump",
+        "external_agent_relay",
+        "admin_portal",
     }
+)
+
+#: The exact rollout this release stages, as one string. Pinned whole so that a
+#: dropped name, an added name or a downgraded state all fail here.
+AUTHORIZED_STAGED_FEATURE_FLAGS = (
+    "delivery_canary=internal,voice_brain_dump=on,admin_portal=internal"
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -140,78 +158,72 @@ def test_009_FR_013_the_validator_pins_the_same_rollback_allow_list() -> None:
     validator = _load_validator()
 
     assert validator.ROLLBACK_KNOWN_FEATURE_FLAGS == ROLLBACK_KNOWN_FEATURE_FLAGS
+    assert validator.AUTHORIZED_STAGED_FEATURE_FLAGS == AUTHORIZED_STAGED_FEATURE_FLAGS
     assert ROLLBACK_TARGET_IMAGE in VALIDATOR.read_text(encoding="utf-8"), (
         "the validator must name the image whose allow-list it encodes, so the "
         "provenance is auditable rather than assumed"
     )
 
 
-def test_009_FR_013_omission_keeps_both_unstaged_rollouts_off(
+def test_009_FR_013_the_release_stages_exactly_the_authorized_rollout(
     workflow_text: str,
 ) -> None:
-    """The names dropped from the staged string are OFF in the candidate too.
+    """Turning the portal on is an edit to this line, so pin the whole line.
 
-    `external_agent_relay` (removed after run 31775660872) and `admin_portal`
-    (never staged) both remain in the candidate runtime; neither is enabled by
-    the release, including for the internal smoke cohort, because an unnamed
-    flag defaults to OFF.
+    An equality rather than a set of `in` checks, so that adding a name,
+    dropping one, or downgrading `admin_portal` all fail here.
     """
 
-    staged = _staged_flag_string(workflow_text)
-    names = set(_parse_feature_flag_states(staged))
-    assert "external_agent_relay" not in names
-    assert "admin_portal" not in names
+    assert _staged_flag_string(workflow_text) == AUTHORIZED_STAGED_FEATURE_FLAGS
+
+
+def test_009_FR_013_the_portal_is_effective_only_for_the_internal_operator(
+    workflow_text: str,
+) -> None:
+    """`internal` means the seeded cohort and nobody else — not ON by another
+    name, and still not visible to any member.
+
+    The flag is exposure control layered on top of `require_operator`
+    (009-FR-002 precedence), so this asserts only its own reach. It stays a
+    `PRIVATE_FEATURE_FLAGS` entry, so enabling it changes no member-facing
+    response shape (009-FR-010).
+    """
+
+    operator = "operator@example.com"
+    settings = FeatureFlagSettings(
+        states=_parse_feature_flag_states(_staged_flag_string(workflow_text)),
+        internal_users=frozenset({operator}),
+    )
+
+    assert settings.private_flag_effective("admin_portal", operator) is True
+    assert settings.private_flag_effective("admin_portal", "member@example.com") is False
+    assert settings.private_flag_effective("admin_portal", None) is False
+
+    assert "admin_portal" in PRIVATE_FEATURE_FLAGS
+    assert "admin_portal" not in settings.effective_flags(operator)
+
+
+def test_009_FR_013_the_relay_rollout_stays_omitted_and_off(
+    workflow_text: str,
+) -> None:
+    """Rollback-parseable is not authorized to ship.
+
+    The current rollback target parses `external_agent_relay`, so nothing about
+    compatibility stops it being staged; spec 007's rollout is separately
+    governed and this release does not grant it. Omission is OFF.
+    """
+
+    assert "external_agent_relay" in ROLLBACK_KNOWN_FEATURE_FLAGS
+    assert "external_agent_relay" not in AUTHORIZED_STAGED_FEATURE_FLAGS
 
     smoke = "smoke@example.com"
     settings = FeatureFlagSettings(
-        states=_parse_feature_flag_states(staged),
+        states=_parse_feature_flag_states(_staged_flag_string(workflow_text)),
         internal_users=frozenset({smoke}),
     )
 
     assert settings.effective_flags(smoke)["external_agent_relay"] is False
     assert settings.effective_flags(None)["external_agent_relay"] is False
-    assert settings.private_flag_effective("admin_portal", smoke) is False
-
-
-def test_009_FR_013_no_private_flag_is_named_in_the_first_release(
-    workflow_text: str,
-) -> None:
-    """Every flag this feature added is new, so none may be staged yet.
-
-    Generalized past `admin_portal` deliberately: the next private flag has
-    the same rollback problem, and should fail here rather than in production.
-    """
-
-    names = set(_parse_feature_flag_states(_staged_flag_string(workflow_text)))
-    assert names.isdisjoint(PRIVATE_FEATURE_FLAGS)
-
-
-def test_009_FR_013_omission_is_off_for_the_new_code(workflow_text: str) -> None:
-    """Omission is not a gap in the contract — it is how the portal ships OFF.
-
-    The candidate defaults an unnamed flag to OFF, so the staged string and the
-    runtime posture agree without either image having to name it.
-    """
-
-    staged = _staged_flag_string(workflow_text)
-    settings = FeatureFlagSettings(states=_parse_feature_flag_states(staged))
-
-    for flag in PRIVATE_FEATURE_FLAGS:
-        assert settings.private_flag_effective(flag, "operator@example.com") is False
-        assert settings.private_flag_effective(flag, None) is False
-
-
-def test_009_FR_013_enabling_later_means_naming_the_flag_here(
-    workflow_text: str,
-) -> None:
-    """Turning the portal on is an audited ASK edit to this line, not a secret.
-
-    It is safe only once rollback compatibility is deliberately handled — the
-    rollback target must already know the name before it is ever staged.
-    """
-
-    assert "admin_portal" in workflow_text  # documented, not staged
-    assert "admin_portal=" not in _staged_flag_string(workflow_text)
 
 
 def test_009_FR_013_enabling_the_portal_is_documented_as_a_workflow_edit(
