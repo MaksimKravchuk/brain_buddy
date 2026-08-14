@@ -257,6 +257,45 @@ class DeployContractTest(unittest.TestCase):
         finally:
             mutated.unlink()
 
+    def test_staging_external_agent_relay_fails(self) -> None:
+        """The incident mutant: run 31775660872 staged exactly this name.
+
+        The image the automatic rollback restored allows only
+        ``delivery_canary``, ``mobile_task_classification`` and
+        ``voice_brain_dump``; it crashed at startup on ``external_agent_relay``.
+        Any release that stages that name again must fail here, in CI, and not
+        at the reachability gate.
+        """
+
+        text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+        needle = 'BRAIN_BUDDY_FEATURE_FLAGS="delivery_canary=internal'
+        self.assertIn(needle, text)
+        mutated = _temp_workflow(
+            text.replace(needle, f"{needle},external_agent_relay=internal", 1)
+        )
+        try:
+            self.assertEqual(validate_deploy_workflow(mutated), 1)
+        finally:
+            mutated.unlink()
+
+    def test_repo_deploy_workflow_stages_only_rollback_parseable_flags(self) -> None:
+        """The shipped workflow itself, not just a mutant, holds the contract."""
+
+        text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+        staged = text.split('BRAIN_BUDDY_FEATURE_FLAGS="', 1)[1].split('"', 1)[0]
+        names = {
+            entry.split("=", 1)[0].strip()
+            for entry in staged.split(",")
+            if entry.strip()
+        }
+        self.assertEqual(names - _MODULE.ROLLBACK_KNOWN_FEATURE_FLAGS, set())
+        self.assertEqual(
+            _MODULE.ROLLBACK_KNOWN_FEATURE_FLAGS,
+            frozenset(
+                {"delivery_canary", "mobile_task_classification", "voice_brain_dump"}
+            ),
+        )
+
     def test_a_comment_may_still_name_the_flag_it_does_not_stage(self) -> None:
         """Documentation of the future ASK edit must not trip the checker."""
 

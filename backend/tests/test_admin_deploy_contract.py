@@ -8,14 +8,20 @@ sentence: the operator allow-list is bound to the seeded admin identity (PD-2),
 and the staged flag string stays **rollback-compatible** while the portal is
 OFF (009-FR-013).
 
-Rollback compatibility is the sharp edge. Fly secrets are app-scoped and
-survive an image swap, so a secret staged by the 009 release is still pending
-when a rollback restores the captured pre-009 image. That image's allow-list
-does not contain `admin_portal` and it raises at startup on an unknown flag
-name — so staging `admin_portal=off` would turn a rollback into a crash loop,
-and would do the same if staging itself partially succeeded and rollback ran.
-The first release therefore names no new flag at all: OFF by omission, which
-both images agree on.
+Rollback compatibility is the sharp edge, and it has already cut once. Fly
+secrets are app-scoped and survive an image swap, so a secret staged by a
+release is still pending when a rollback restores the captured image. That
+image raises at startup on an unknown flag name — so staging a name it does
+not know turns a rollback into a crash loop, and does the same if staging
+itself partially succeeds and rollback then runs.
+
+Deploy run 31775660872 proved this in production: it staged
+`external_agent_relay=internal`, the candidate failed the public reachability
+gate, and the automatic rollback restored an image that knows only
+`delivery_canary`, `mobile_task_classification` and `voice_brain_dump`. The
+allow-list pinned below is read from that image's startup logs, not from a
+source SHA and not from this tree. The release therefore names no flag either
+image is unsure of: OFF by omission, which both agree on.
 
 `scripts/test_validate_trunk_delivery.py` proves the *validator* rejects a
 workflow with either property removed; this proves the workflow the repository
@@ -25,8 +31,10 @@ requirement-coverage gate can see it.
 
 from __future__ import annotations
 
+import importlib.util
 import re
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -36,23 +44,43 @@ from app.core.config import (
     _parse_feature_flag_states,
 )
 
-#: The exact base this release rolls back to.
-ROLLBACK_TARGET_SHA = "566c1578e7ee2cc61e6e10c255e891bf58c55ccb"
+#: The image a rollback actually restores, identified the only way that is
+#: verifiable: by the release image ref, not by a source SHA. Deploy run
+#: 31775660872 rolled production back to this exact image, so it — not any
+#: commit the repository believes is deployed — defines the contract.
+ROLLBACK_TARGET_IMAGE = (
+    "registry.fly.io/brain-buddy-backend:deployment-01KZXF74W98F1NVPHYKGD8QD0S"
+)
 
-#: `KNOWN_FEATURE_FLAGS` as it exists in that image. Pinned as a literal on
-#: purpose: reading it from the current tree would make this test agree with
+#: `KNOWN_FEATURE_FLAGS` as it exists in that image, read from the machine
+#: startup logs of run 31775660872: the image accepted these three names and
+#: crashed at startup on `external_agent_relay`. Pinned as a literal on
+#: purpose — reading it from the current tree would make this test agree with
 #: whatever the candidate does, which is exactly the failure being guarded.
+#: Widening this set is only honest once a *successful* deployment has made a
+#: newer, known-compatible image the captured rollback target.
 ROLLBACK_KNOWN_FEATURE_FLAGS = frozenset(
     {
         "delivery_canary",
-        "voice_brain_dump",
         "mobile_task_classification",
-        "external_agent_relay",
+        "voice_brain_dump",
     }
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "deploy-fly-production.yml"
+VALIDATOR = REPO_ROOT / "scripts" / "validate_trunk_delivery.py"
+
+
+def _load_validator() -> ModuleType:
+    """Import the CI validator by path; it lives outside the backend package."""
+
+    assert VALIDATOR.is_file(), VALIDATOR
+    spec = importlib.util.spec_from_file_location("validate_trunk_delivery", VALIDATOR)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 @pytest.fixture(scope="module")
@@ -94,10 +122,55 @@ def test_009_FR_013_staged_flags_stay_parseable_by_the_rollback_image(
 
     unknown_to_rollback_image = sorted(names - ROLLBACK_KNOWN_FEATURE_FLAGS)
     assert unknown_to_rollback_image == [], (
-        f"{unknown_to_rollback_image} would crash the {ROLLBACK_TARGET_SHA[:8]} "
-        "image at startup after a rollback; the first release must not name a "
-        "flag that image has never heard of"
+        f"{unknown_to_rollback_image} would crash {ROLLBACK_TARGET_IMAGE} at "
+        "startup after a rollback; a release must not stage a flag that the "
+        "captured rollback image has never heard of"
     )
+
+
+def test_009_FR_013_the_validator_pins_the_same_rollback_allow_list() -> None:
+    """One contract, stated twice, must not drift into two.
+
+    The CI validator and this test both encode the captured rollback image's
+    allow-list. Run 31775660872 failed because they agreed with each other on
+    a set neither had checked against the deployed image; keeping them equal
+    at least makes one honest correction fix both.
+    """
+
+    validator = _load_validator()
+
+    assert validator.ROLLBACK_KNOWN_FEATURE_FLAGS == ROLLBACK_KNOWN_FEATURE_FLAGS
+    assert ROLLBACK_TARGET_IMAGE in VALIDATOR.read_text(encoding="utf-8"), (
+        "the validator must name the image whose allow-list it encodes, so the "
+        "provenance is auditable rather than assumed"
+    )
+
+
+def test_009_FR_013_omission_keeps_both_unstaged_rollouts_off(
+    workflow_text: str,
+) -> None:
+    """The names dropped from the staged string are OFF in the candidate too.
+
+    `external_agent_relay` (removed after run 31775660872) and `admin_portal`
+    (never staged) both remain in the candidate runtime; neither is enabled by
+    the release, including for the internal smoke cohort, because an unnamed
+    flag defaults to OFF.
+    """
+
+    staged = _staged_flag_string(workflow_text)
+    names = set(_parse_feature_flag_states(staged))
+    assert "external_agent_relay" not in names
+    assert "admin_portal" not in names
+
+    smoke = "smoke@example.com"
+    settings = FeatureFlagSettings(
+        states=_parse_feature_flag_states(staged),
+        internal_users=frozenset({smoke}),
+    )
+
+    assert settings.effective_flags(smoke)["external_agent_relay"] is False
+    assert settings.effective_flags(None)["external_agent_relay"] is False
+    assert settings.private_flag_effective("admin_portal", smoke) is False
 
 
 def test_009_FR_013_no_private_flag_is_named_in_the_first_release(
