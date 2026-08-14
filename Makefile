@@ -125,6 +125,7 @@ validate-ci:
 	python3 -m unittest scripts/test_validate_coverage_floor.py -v
 	python3 -m unittest scripts/test_mutation_gate.py -v
 	python3 -m unittest scripts/test_validate_trunk_delivery.py -v
+	python3 -m unittest scripts/test_extract_staged_feature_flags.py -v
 	python3 -m unittest scripts/test_submit_to_trunk.py -v
 	python3 -m unittest scripts/test_production_smoke.py -v
 	python3 -m unittest scripts/test_capture_fly_release_image.py -v
