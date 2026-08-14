@@ -321,6 +321,30 @@ DEPLOY_REQUIREMENTS = (
         "rollback must redeploy the captured backend image",
     ),
     (
+        "prior-revision rollout authority",
+        'git show "${TESTED_SHA}^:.github/workflows/deploy-fly-production.yml"',
+        "the previous feature-flag rollout must be read from the previous "
+        "revision of this workflow — never scraped from the live app (which "
+        "reports what the failing release staged) and never hard-coded",
+    ),
+    (
+        "tested rollout parser",
+        "extract_staged_feature_flags.py",
+        "the prior rollout must be parsed by the unit-tested fail-closed "
+        "helper, so an ambiguous or malformed prior assignment aborts the run "
+        "instead of the rollback",
+    ),
+    (
+        "masked captured rollout",
+        "::add-mask::",
+        "the captured prior rollout must be masked before it is exported",
+    ),
+    (
+        "exported captured rollout",
+        "PREVIOUS_FEATURE_FLAGS=",
+        "the captured prior rollout must be exported for the rollback step",
+    ),
+    (
         "exact tested revision checkout",
         "workflow_run.head_sha",
         "the workflow must operate on the exact CI-tested revision",
@@ -457,10 +481,43 @@ AUTHORIZED_STAGED_FEATURE_FLAGS = (
 )
 
 
+#: The deploy-job steps whose bodies carry structural obligations. Checks are
+#: scoped to these blocks rather than to the whole file, so a guard that moved
+#: into the wrong step — or into prose — still fails.
+STAGE_ROLLOUT_STEP = "Stage the smoke identity and feature-flag rollout"
+CAPTURE_PREVIOUS_ROLLOUT_STEP = "Capture the previous release's feature-flag rollout"
+ROLLBACK_STEP = "Roll back to the captured images and verify"
+
+#: The prior rollout is authoritative only because of where it is read from.
+PRIOR_REVISION_READ = (
+    'git show "${TESTED_SHA}^:.github/workflows/deploy-fly-production.yml"'
+)
+PREVIOUS_ROLLOUT_RESTORE = 'BRAIN_BUDDY_FEATURE_FLAGS="${PREVIOUS_FEATURE_FLAGS}"'
+BACKEND_ROLLBACK_DEPLOY = '--image "${PREVIOUS_BACKEND_IMAGE}"'
+
+#: Reading the live app back would report exactly the rollout the failing
+#: release staged, which is the value the rollback exists to undo.
+LIVE_SECRET_SCRAPES = ("flyctl secrets list", "flyctl ssh console")
+
+
+def _step_block(text: str, step_name: str) -> str | None:
+    """The body of one named deploy-job step, up to the next step at its indent."""
+
+    marker = f"      - name: {step_name}\n"
+    start = text.find(marker)
+    if start == -1:
+        return None
+    end = text.find("\n      - name: ", start + len(marker))
+    return text[start:] if end == -1 else text[start:end]
+
+
 def _staged_feature_flag_errors(text: str) -> list[str]:
     """The staged rollout must be rollback-parseable *and* the authorized one."""
 
-    match = re.search(r'BRAIN_BUDDY_FEATURE_FLAGS="([^"]*)"', text)
+    # Scoped to the staging step so the rollback step's restore assignment can
+    # never be read as the declared rollout.
+    scope = _step_block(text, STAGE_ROLLOUT_STEP) or text
+    match = re.search(r'BRAIN_BUDDY_FEATURE_FLAGS="([^"$]*)"', scope)
     if match is None:
         return [
             "the deploy job must stage BRAIN_BUDDY_FEATURE_FLAGS as the "
@@ -492,6 +549,101 @@ def _staged_feature_flag_errors(text: str) -> list[str]:
     return errors
 
 
+def _rollback_rollout_errors(text: str) -> list[str]:
+    """Rolling the IMAGES back is not rolling the RELEASE back.
+
+    Fly secrets are app-scoped and outlive an image swap, so the rollout this
+    run staged is still pending when a rollback restores the old image. Unless
+    the previous rollout is captured before anything is mutated and restaged
+    before the previous BACKEND image is deployed, a failed enablement leaves
+    the new flags live behind an old image. Order is checked positionally, so
+    a guard that exists but runs too late fails here.
+    """
+
+    errors: list[str] = []
+    capture = _step_block(text, CAPTURE_PREVIOUS_ROLLOUT_STEP)
+    rollback = _step_block(text, ROLLBACK_STEP)
+    if capture is None:
+        errors.append(
+            f"the deploy job must hold a {CAPTURE_PREVIOUS_ROLLOUT_STEP!r} step "
+            "that reads the rollout the rollback target was released with"
+        )
+    if rollback is None:
+        errors.append(
+            f"the deploy job must hold a {ROLLBACK_STEP!r} step; without it "
+            "nothing restores the previous release state"
+        )
+    if capture is None or rollback is None:
+        return errors
+
+    if PRIOR_REVISION_READ not in capture:
+        errors.append(
+            "the previous rollout must be read from the previous revision of "
+            f"this workflow ({PRIOR_REVISION_READ!r}); a live read-back would "
+            "report the rollout the failing release staged"
+        )
+    if "extract_staged_feature_flags.py" not in capture:
+        errors.append(
+            "the previous rollout must be parsed by the unit-tested "
+            "fail-closed helper, not by an inline expression"
+        )
+    if "::add-mask::" not in capture:
+        errors.append("the captured previous rollout must be masked")
+    if 'PREVIOUS_FEATURE_FLAGS=' not in capture or "GITHUB_ENV" not in capture:
+        errors.append(
+            "the captured previous rollout must be exported as "
+            "PREVIOUS_FEATURE_FLAGS via GITHUB_ENV for the rollback step"
+        )
+
+    # Capture must precede the first remote mutation anywhere in the workflow.
+    capture_at = text.find(f"      - name: {CAPTURE_PREVIOUS_ROLLOUT_STEP}\n")
+    mutations = [
+        position
+        for position in (text.find("flyctl secrets set"), text.find("flyctl deploy"))
+        if position != -1
+    ]
+    if mutations and capture_at > min(mutations):
+        errors.append(
+            "the previous rollout must be captured BEFORE the first Fly "
+            "mutation, so an unreadable prior rollout aborts the run rather "
+            "than the rollback"
+        )
+
+    for scrape in LIVE_SECRET_SCRAPES:
+        if scrape in rollback:
+            errors.append(
+                f"the rollback must not recover flags with {scrape!r}; the live "
+                "app holds the rollout the failing release staged"
+            )
+    restore_at = rollback.find(PREVIOUS_ROLLOUT_RESTORE)
+    if restore_at == -1:
+        errors.append(
+            f"the rollback must restage {PREVIOUS_ROLLOUT_RESTORE} — the value "
+            "captured from the previous revision, never a literal rollout"
+        )
+    else:
+        backend_at = rollback.find(BACKEND_ROLLBACK_DEPLOY)
+        if backend_at == -1:
+            errors.append(
+                "the rollback must deploy the captured previous backend image"
+            )
+        elif restore_at > backend_at:
+            errors.append(
+                "the previous rollout must be restaged BEFORE the previous "
+                "backend image is deployed; that deploy is the release which "
+                "applies the pending secret, so restaging after it leaves the "
+                "restored image running the failed release's flags"
+            )
+    for name in sorted(ROLLBACK_KNOWN_FEATURE_FLAGS):
+        if f"{name}=" in rollback:
+            errors.append(
+                f"the rollback names {name!r} literally; the previous rollout "
+                "is whatever the previous revision staged, so hard-coding one "
+                "here reintroduces the guess this contract removed"
+            )
+    return errors
+
+
 def _landing_job_errors(raw_text: str) -> list[str]:
     """Structural checks the flat snippet lists cannot express.
 
@@ -505,6 +657,7 @@ def _landing_job_errors(raw_text: str) -> list[str]:
         if not line.lstrip().startswith("#")
     )
     errors: list[str] = _staged_feature_flag_errors(text)
+    errors.extend(_rollback_rollout_errors(text))
     if "contents: write" in text:
         errors.append(
             "no job may hold GITHUB_TOKEN contents: write; the landing push "

@@ -188,10 +188,16 @@ jobs:
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
     steps:
+      # fetch-depth: 0 because the rollback contract reads the PREVIOUS
+      # revision of this workflow (see the flag-capture step below), and a
+      # default shallow checkout has no parent tree to read. The deploy-need
+      # classifier below still deepens defensively; that is a no-op on a
+      # complete clone.
       - name: Check out the CI-tested revision
         uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
 
       # The production smoke identity is the seeded admin account
       # (create-or-rotate on backend startup). The unit-tested preflight
@@ -275,6 +281,35 @@ jobs:
             echo "Every changed path is deploy-inert; skipping the production release."
           fi
           echo "needed=${needed}" >> "${GITHUB_OUTPUT}"
+
+      # Rolling back the IMAGES is not rolling back the RELEASE. Fly secrets
+      # are app-scoped and survive an image swap, so the flag string this run
+      # is about to stage is still pending when a rollback restores the old
+      # image — which would then boot under the rollout of the release that
+      # just failed. A failed admin enablement could therefore leave
+      # admin_portal=internal live after a "successful" rollback.
+      #
+      # The previous rollout is read from the previous revision of THIS
+      # workflow, the same line that is authoritative for production. It is
+      # deliberately NOT read back from `flyctl secrets` (that reports what the
+      # failing release already staged) and deliberately NOT hard-coded (a
+      # remembered default rots silently). The unit-tested helper fails closed
+      # on a missing, ambiguous or malformed prior assignment, and it runs here
+      # — before the first Fly mutation — so an unreadable prior rollout aborts
+      # the run instead of the rollback.
+      - name: Capture the previous release's feature-flag rollout
+        if: steps.classify.outputs.needed == 'true'
+        shell: bash
+        env:
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          previous_flags=$(git show "${TESTED_SHA}^:.github/workflows/deploy-fly-production.yml" \
+            | python3 scripts/extract_staged_feature_flags.py)
+          # Masked before it is exported, so no later step can echo it.
+          echo "::add-mask::${previous_flags}"
+          echo "PREVIOUS_FEATURE_FLAGS=${previous_flags}" >> "${GITHUB_ENV}"
+          echo "Captured the previous release's feature-flag rollout for rollback."
 
       - name: Set up Flyctl
         if: steps.classify.outputs.needed == 'true'
@@ -432,9 +467,16 @@ jobs:
 
       # Runs only when something failed after the rollback images were
       # captured (staging, deploy, reachability, or authenticated smoke). It
-      # restores the captured images frontend-first so the frontend is never
-      # newer than the backend, re-verifies health, and leaves the workflow
-      # failed — a rollback is loud containment, not success.
+      # restores the previous release state — the previous rollout captured
+      # from ${TESTED_SHA}^ first, then the captured images frontend-first so
+      # the frontend is never newer than the backend — re-verifies health, and
+      # leaves the workflow failed: a rollback is loud containment, not success.
+      #
+      # The restage must precede the BACKEND image deploy, because that deploy
+      # is the release that applies the pending staged secret: staging after it
+      # would leave the restored image running the failed release's flags until
+      # some later release. Ordering against the frontend does not matter (the
+      # secret is backend-app-scoped), so frontend-first survives.
       - name: Roll back to the captured images and verify
         if: failure() && steps.capture.outcome == 'success'
         shell: bash
@@ -443,6 +485,30 @@ jobs:
         run: |
           set -euo pipefail
           echo "Post-deploy verification failed; rolling back to captured images." >&2
+          if [ -z "${PREVIOUS_FEATURE_FLAGS:-}" ]; then
+            echo "No previous feature-flag rollout was captured, so restoring the old" >&2
+            echo "image would boot it under this release's pending flags — the crash-loop" >&2
+            echo "this contract exists to prevent. Refusing to roll back automatically;" >&2
+            echo "follow the manual containment path in" >&2
+            echo "docs/autonomous-delivery-runbook.md." >&2
+            exit 1
+          fi
+          # Same idempotence tolerance as staging: an unchanged rollout makes
+          # flyctl report "no change" non-zero, which must not fail a rollback.
+          # flyctl names secrets but never prints their values.
+          status=0
+          output=$(flyctl secrets set --stage --app "${BACKEND_APP}" \
+            BRAIN_BUDDY_FEATURE_FLAGS="${PREVIOUS_FEATURE_FLAGS}" 2>&1) \
+            || status=$?
+          if [ "${status}" -ne 0 ] \
+            && ! printf '%s\n' "${output}" | grep -qi "no change"; then
+            printf '%s\n' "${output}" >&2
+            echo "Restaging the previous feature-flag rollout failed (exit ${status})." >&2
+            echo "Rolling back the image now would start it under this release's flags," >&2
+            echo "so this fails closed instead." >&2
+            exit "${status}"
+          fi
+          echo "Restaged the previous release's feature-flag rollout for ${BACKEND_APP}." >&2
           flyctl deploy --config fly.frontend.toml --app "${FRONTEND_APP}" \
             --image "${PREVIOUS_FRONTEND_IMAGE}"
           flyctl deploy --config fly.backend.toml --app "${BACKEND_APP}" \
