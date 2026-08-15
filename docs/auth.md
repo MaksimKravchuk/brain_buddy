@@ -59,16 +59,16 @@ fly secrets set \
 This changed with the minimum admin portal (spec 009, [ADR-0017](decisions/0017-operator-account-administration-narrow-owner-scoping-exception.md)). The seeded account used to be a normal account that merely happened to exist at boot. It is no longer:
 
 - The `/admin` portal authorizes operators from `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS`, a server-owned, fail-closed allow-list (`.env.example` documents the format).
-- **In production that list is deliberately pinned to `BRAIN_BUDDY_ADMIN_EMAIL`**, staged by `.github/workflows/deploy-fly-production.yml` on every release. The seeded admin is the sole operator, by decision, not by accident.
+- **In production that list comes from the dedicated `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS` production environment secret**, staged by `.github/workflows/deploy-fly-production.yml` on every release. It is deliberately independent of the rotating smoke admin identity.
 - An operator can look up any account (id, canonical email, optional display name, deletion-requested state) and revoke every session for any account. Member *content* — trees, tasks, voice operations, exports — stays owner-scoped and is not reachable; ADR-0017 bounds the exception to those two operations.
 - An operator can also change, without a deploy, which members are exposed to the two runtime-manageable rollout flags (`voice_brain_dump`, `mobile_task_classification`): set each to off, on, or a named list of accounts, or clear the override back to the deploy default. This is exposure control, never authorization — no authorization decision reads a runtime-managed flag, and the operator allow-list and the `admin_portal` gate stay deployment configuration. See [ADR-0018](decisions/0018-runtime-feature-flag-overlay.md) for the two-flag scope, the audit and purge obligations, and why the other flags are excluded.
 
-**`BRAIN_BUDDY_ADMIN_PASSWORD` is therefore an admin-grade credential.** A leak is no longer a leak of one account; it confers cross-account lookup and session revoke over every member. The same value is also the production smoke identity replayed by `scripts/production_smoke.sh` on every deploy, so it lives in GitHub environment secrets — that blast radius is accepted deliberately for a one-maintainer deployment rather than mitigated with a second identity.
+**Credentials for an account named in `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS` are therefore admin-grade credentials.** A leak confers cross-account lookup and session revoke over every member. The production smoke credentials are managed separately and do not grant operator authority unless that address is also deliberately included in the operator allow-list.
 
 Two operational consequences worth knowing before you touch it:
 
-- Rotating `BRAIN_BUDDY_ADMIN_EMAIL` transfers who holds operator power.
-- Adding a second operator by hand (`fly secrets set BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS=…`) is reverted by the next deploy, which restages the pinned value.
+- Rotating `BRAIN_BUDDY_ADMIN_EMAIL` changes the smoke identity without transferring operator power.
+- Change the GitHub production environment secret `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS` to change operators; direct Fly secret edits are reverted by the next deploy.
 
 A configured operator address is **reserved**: signup and self-serve email change refuse to bind an account to it, so nobody can grant themselves operator power by moving their account onto a listed address. Only the seed path above may provision that identity.
 

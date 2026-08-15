@@ -283,12 +283,16 @@ DEPLOY_REQUIREMENTS = (
         "the delivery canary must be pinned to the internal cohort",
     ),
     (
-        "operator allow-list bound to the seeded admin identity",
-        'BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_EMAIL}"',
-        "spec 009 PD-2/009-FR-001: production operator authority is exactly "
-        "the seeded admin identity, restaged on every release — drift or "
-        "removal of this binding silently changes who can look up any account "
-        "and revoke its sessions",
+        "operator allow-list secret mapping",
+        "secrets.BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS",
+        "the production operator allow-list must come from its dedicated "
+        "production environment secret",
+    ),
+    (
+        "dedicated operator allow-list staging",
+        'BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS}"',
+        "the durable production operator allow-list must be staged from its "
+        "dedicated secret on every release",
     ),
     (
         "documented release image capture",
@@ -367,6 +371,12 @@ DEPLOY_REQUIREMENTS = (
 )
 
 DEPLOY_FORBIDDEN = (
+    (
+        "operator allow-list alias to smoke identity",
+        'BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_EMAIL}"',
+        "the durable operator allow-list must not be replaced by the rotating "
+        "smoke admin identity",
+    ),
     (
         "masked failure",
         "|| true",

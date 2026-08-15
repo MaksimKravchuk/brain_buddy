@@ -204,13 +204,18 @@ jobs:
       # mirrors backend startup validation — email-shaped admin and cohort
       # entries, the 12–128 character password policy, and case-insensitive
       # cohort membership — so a deploy that could only fail AFTER mutating
-      # production fails closed here instead. It prints variable names only,
-      # never values.
+      # production fails closed here instead. It also fail-closes on the
+      # durable operator allow-list (BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS):
+      # non-empty, email-shaped entries, but deliberately NOT membership of
+      # the smoke admin — that allow-list is staged from its own dedicated
+      # secret and must never be conflated with the rotating smoke identity.
+      # It prints variable names only, never values.
       - name: Fail closed on a missing or non-internal smoke identity
         env:
           BRAIN_BUDDY_ADMIN_EMAIL: ${{ secrets.BRAIN_BUDDY_ADMIN_EMAIL }}
           BRAIN_BUDDY_ADMIN_PASSWORD: ${{ secrets.BRAIN_BUDDY_ADMIN_PASSWORD }}
           BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS: ${{ secrets.BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS }}
+          BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS: ${{ secrets.BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS }}
         run: python3 scripts/check_smoke_identity_cohort.py
 
       # Re-verified here, immediately before the first Fly mutation, even
@@ -351,9 +356,13 @@ jobs:
           } >> "${GITHUB_ENV}"
           echo "Captured rollback images for ${backend_app} and ${frontend_app}."
 
-      # Stage (no immediate restart) the smoke identity and the feature-flag
-      # rollout so the deploy release below applies them: the backend
-      # seeds/rotates the admin account on startup and marks it internal.
+      # Stage (no immediate restart) the smoke identity, the durable operator
+      # allow-list, and the feature-flag rollout so the deploy release below
+      # applies them: the backend seeds/rotates the admin account on startup
+      # and marks it internal. The operator allow-list is staged from its own
+      # dedicated secret (BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS) — never aliased
+      # to BRAIN_BUDDY_ADMIN_EMAIL, which rotates with the smoke identity and
+      # would otherwise silently overwrite the real operator on every deploy.
       # Values come only from GitHub production environment secrets and are
       # never printed; an unchanged secret set is tolerated so redeploys of
       # the same configuration stay idempotent.
@@ -394,8 +403,8 @@ jobs:
       # `flyctl secrets set` flip is never the answer: it holds only until the
       # next release. The fastest true emergency lever is instead
       # `flyctl secrets set BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS=`, which fails
-      # closed immediately but is itself restaged from BRAIN_BUDDY_ADMIN_EMAIL
-      # by the next deploy.
+      # closed immediately but is itself restaged from the dedicated
+      # BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS secret by the next deploy.
       - name: Stage the smoke identity and feature-flag rollout
         if: steps.classify.outputs.needed == 'true'
         shell: bash
@@ -403,13 +412,14 @@ jobs:
           BRAIN_BUDDY_ADMIN_EMAIL: ${{ secrets.BRAIN_BUDDY_ADMIN_EMAIL }}
           BRAIN_BUDDY_ADMIN_PASSWORD: ${{ secrets.BRAIN_BUDDY_ADMIN_PASSWORD }}
           BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS: ${{ secrets.BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS }}
+          BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS: ${{ secrets.BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS }}
         run: |
           set -euo pipefail
           status=0
           output=$(flyctl secrets set --stage --app "${BACKEND_APP}" \
             BRAIN_BUDDY_ADMIN_EMAIL="${BRAIN_BUDDY_ADMIN_EMAIL}" \
             BRAIN_BUDDY_ADMIN_PASSWORD="${BRAIN_BUDDY_ADMIN_PASSWORD}" \
-            BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_EMAIL}" \
+            BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS}" \
             BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS="${BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS}" \
             BRAIN_BUDDY_FEATURE_FLAGS="delivery_canary=internal,voice_brain_dump=on,admin_portal=internal" 2>&1) \
             || status=$?

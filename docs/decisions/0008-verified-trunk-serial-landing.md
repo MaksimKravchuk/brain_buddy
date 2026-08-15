@@ -178,7 +178,8 @@ order:
    environment with a **custom deployment branch policy allowing only `main`**, move
    `FLY_API_TOKEN` into it as an environment secret — **deleting any repository-level
    `FLY_API_TOKEN`** — and store `BRAIN_BUDDY_ADMIN_EMAIL`,
-   `BRAIN_BUDDY_ADMIN_PASSWORD`, and `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS` there.
+   `BRAIN_BUDDY_ADMIN_PASSWORD`, `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS`, and
+   `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS` there.
 2. Submit the delivery-machinery change and let **exact-SHA candidate CI** pass the
    full required job set.
 3. Perform the **explicitly authorized manual admin fast-forward** of `main` to that
@@ -193,7 +194,8 @@ order:
    bypass; `landing` **and** `production` environments each restricted to branch
    `main` by a custom deployment branch policy; `TRUNK_LANDING_SSH_KEY` present in
    `landing`; `FLY_API_TOKEN`, `BRAIN_BUDDY_ADMIN_EMAIL`, `BRAIN_BUDDY_ADMIN_PASSWORD`,
-   and `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS` present in `production`; **no
+   `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS`, and `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS`
+   present in `production`; **no
    repository-level `FLY_API_TOKEN` remaining**; and a test candidate landing
    end-to-end. Automation MUST NOT be declared active before this remote verification.
 
@@ -205,16 +207,17 @@ production credentials: it runs in the GitHub `production` environment under
 `contents: read`. The `production` environment MUST carry a **custom deployment branch
 policy allowing only `main`**, and MUST hold the production secrets —
 `FLY_API_TOKEN` (an **environment secret only**: a repository-level `FLY_API_TOKEN`
-MUST NOT exist), `BRAIN_BUDDY_ADMIN_EMAIL`, `BRAIN_BUDDY_ADMIN_PASSWORD`, and
-`BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS` — so only default-branch `workflow_run`
-executions can read them. Candidate-controlled CI can neither request the environment
+MUST NOT exist), `BRAIN_BUDDY_ADMIN_EMAIL`, `BRAIN_BUDDY_ADMIN_PASSWORD`,
+`BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS`, and `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS` —
+so only default-branch `workflow_run` executions can read them. Candidate-controlled CI can neither request the environment
 (validator-enforced in-repo, like the `landing` environment) nor satisfy its branch
 policy remotely. Both controls are bootstrap verification items (see Bootstrap). The
 workflow has no manual dispatch trigger: a manual deploy would carry no deterministic
 exact-tested-SHA proof. In addition it:
 
 1. fails before any deploy when `BRAIN_BUDDY_ADMIN_EMAIL` / `BRAIN_BUDDY_ADMIN_PASSWORD`
-   / `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS` environment secrets are missing, or when
+   / `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS` / `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS`
+   environment secrets are missing, or when
    the identity would not survive backend startup validation, which the unit-tested
    `scripts/check_smoke_identity_cohort.py` mirrors: the normalized admin email and
    every normalized cohort entry must be email-shaped (contain `@`), the password must
@@ -270,7 +273,8 @@ for trunk candidates.
   `main` only). The `production` environment MUST likewise restrict deployments to
   branch `main` and MUST hold `FLY_API_TOKEN` (environment secret only — a
   repository-level `FLY_API_TOKEN` MUST NOT exist), `BRAIN_BUDDY_ADMIN_EMAIL`,
-  `BRAIN_BUDDY_ADMIN_PASSWORD`, and `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS` (which
+  `BRAIN_BUDDY_ADMIN_PASSWORD`, `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS`, and
+  `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS` (which
   must include the admin email so the smoke user is in the internal cohort); their
   absence fails closed rather than degrading silently. The landing and production
   environments stay separate: neither job can read the other's secrets, and
