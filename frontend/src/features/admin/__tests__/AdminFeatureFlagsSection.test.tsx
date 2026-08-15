@@ -625,4 +625,60 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
       expect(within(dialog).getByRole("button", { name }).className).toMatch(/min-h-\[44px\]/);
     }
   });
+
+  it("010-SC-008: cancelling a last-member removal restores focus to that row's Remove", async () => {
+    vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue(
+      bothFlags({
+        override_mode: "selected_users",
+        source: "runtime",
+        selected_users: [{ account_id: "user_a", email: "a@example.com" }]
+      })
+    );
+    const remove = vi.spyOn(apiClient, "removeAdminFeatureFlagUser");
+
+    const voice = await ready();
+    const trigger = within(voice).getByRole("button", { name: "Remove a@example.com" });
+    await userEvent.click(trigger);
+    await screen.findByRole("dialog");
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(document.activeElement).toBe(trigger);
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("010-SC-008: cancelling a clear-override restores focus to the clear action", async () => {
+    vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue(
+      bothFlags({ override_mode: "on", source: "runtime", deploy_default_state: "internal" })
+    );
+    const clear = vi.spyOn(apiClient, "clearAdminFeatureFlagOverride");
+
+    const voice = await ready();
+    const trigger = within(voice).getByRole("button", { name: /use deploy default/i });
+    await userEvent.click(trigger);
+    await screen.findByRole("dialog");
+
+    await userEvent.keyboard("{Escape}");
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(document.activeElement).toBe(trigger);
+    expect(clear).not.toHaveBeenCalled();
+  });
+
+  it("010-SC-008: F-10 renders a server error with no correlation ID and no dangling ref", async () => {
+    vi.spyOn(apiClient, "setAdminFeatureFlagMode").mockRejectedValue(
+      // A response arrived, so this is not the unreachable case — but the
+      // server supplied no correlation ID, so none may be rendered.
+      new ApiError("Bad Request", 400, { message: "'nope' is not manageable." })
+    );
+
+    const voice = await ready();
+    await userEvent.click(within(voice).getByRole("radio", { name: "On" }));
+
+    const alert = await within(row(VOICE)).findByRole("alert");
+    expect(alert).toHaveTextContent("'nope' is not manageable.");
+    expect(alert).not.toHaveTextContent(/ref:/);
+    expect(alert).not.toHaveTextContent(/could not reach the server/i);
+  });
 });

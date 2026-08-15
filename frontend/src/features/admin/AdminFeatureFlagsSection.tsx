@@ -54,11 +54,15 @@ const TAP_TARGET = "min-h-[44px]";
 
 type ConfirmKind = "mode-off" | "clear-override" | "remove-last";
 
-interface PendingConfirm {
-  kind: ConfirmKind;
-  accountId?: string;
-  restoreFocus: () => void;
-}
+/**
+ * A discriminated union deliberately: only `remove-last` names an account, so
+ * modelling `accountId` as optional on every kind would create a "confirmed a
+ * removal with no target" branch that cannot happen and cannot be tested.
+ */
+type PendingConfirm =
+  | { kind: "mode-off"; restoreFocus: () => void }
+  | { kind: "clear-override"; restoreFocus: () => void }
+  | { kind: "remove-last"; accountId: string; restoreFocus: () => void };
 
 /**
  * Where focus goes once a mutation's response has been rendered (`F-09`).
@@ -315,21 +319,18 @@ function FlagRow({
     addMutation.mutate(query);
   };
 
-  const dismissConfirm = () => {
-    const pending = confirm;
+  const dismissConfirm = (pending: PendingConfirm) => {
     setConfirm(null);
-    pending?.restoreFocus();
+    pending.restoreFocus();
   };
 
-  const runConfirm = () => {
-    const pending = confirm;
+  const runConfirm = (pending: PendingConfirm) => {
     setConfirm(null);
-    if (!pending) return;
     if (pending.kind === "mode-off") {
       modeMutation.mutate("off");
     } else if (pending.kind === "clear-override") {
       clearMutation.mutate();
-    } else if (pending.accountId) {
+    } else {
       removeMutation.mutate(pending.accountId);
     }
   };
@@ -482,8 +483,8 @@ function FlagRow({
         <ConfirmStep
           flag={flag}
           kind={confirm.kind}
-          onCancel={dismissConfirm}
-          onConfirm={runConfirm}
+          onCancel={() => dismissConfirm(confirm)}
+          onConfirm={() => runConfirm(confirm)}
         />
       ) : null}
     </article>

@@ -50,6 +50,40 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
             "404",
             "422",
         },
+        # Runtime feature-flag management (spec 010). Every one sits behind the
+        # same 009 gate, so 401/403/404 are identical to the routes above; 400
+        # is a refused flag name or a cohort mutation outside SELECTED_USERS
+        # mode, and 503 (not listed here, which only registers 4xx) is the
+        # refusal issued while the runtime document is unreadable.
+        ("/api/admin/feature-flags", "get"): {"401", "403", "404"},
+        ("/api/admin/feature-flags/{flag}/mode", "put"): {
+            "400",
+            "401",
+            "403",
+            "404",
+            "422",
+        },
+        ("/api/admin/feature-flags/{flag}", "delete"): {
+            "400",
+            "401",
+            "403",
+            "404",
+            "422",
+        },
+        ("/api/admin/feature-flags/{flag}/selected-users", "post"): {
+            "400",
+            "401",
+            "403",
+            "404",
+            "422",
+        },
+        ("/api/admin/feature-flags/{flag}/selected-users/{account_id}", "delete"): {
+            "400",
+            "401",
+            "403",
+            "404",
+            "422",
+        },
         ("/api/agent-connections", "get"): {"401", "404"},
         ("/api/agent-connections", "post"): {
             "400",
