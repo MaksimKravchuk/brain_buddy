@@ -61,6 +61,14 @@ class AppEnvironment(str, Enum):
 # connector events are deliberately *not* flag-gated — a run already dispatched
 # must keep being able to report even if the flag is later turned off for its
 # owner, or the user would be left with a run frozen mid-flight.
+#
+# Runtime-manageable subset (spec 010, DD-1): ``voice_brain_dump`` and
+# ``mobile_task_classification`` only. Those two may be overlaid at runtime by
+# ``FeatureFlagOverrideRepository``'s document; the settings below stay their
+# deploy-staged baseline and rollback floor. ``delivery_canary`` (a production
+# release-smoke input) and ``external_agent_relay`` (whose secret box is decided
+# once at container construction) are deliberately **not** runtime-manageable
+# and always resolve from this configuration alone.
 KNOWN_FEATURE_FLAGS: tuple[str, ...] = (
     "delivery_canary",
     "voice_brain_dump",

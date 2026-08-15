@@ -12,6 +12,7 @@ import { Button } from "../../components/ui/Button";
 import { Overlay, OverlayHeader } from "../../components/ui/Overlay";
 import { Feedback, Field, SectionCard } from "../../components/ui/SettingsSection";
 import { getErrorMessage } from "../../utils/error";
+import { AdminFeatureFlagsSection } from "./AdminFeatureFlagsSection";
 
 const emptyCounts: TaskCounts = { inbox: 0, next: 0, waiting: 0, someday: 0 };
 
@@ -61,7 +62,14 @@ export function AdminPage(): React.JSX.Element {
             Checking access…
           </p>
         ) : isOperator ? (
-          <AdminLookup />
+          // 010: the runtime flag section lives inside the operator-confirmed
+          // branch only. An operator denied at D-08, unverified at D-09 or still
+          // checking at D-01 never sees it, so this feature adds no new denial
+          // state and no new way to observe the operator allow-list.
+          <>
+            <AdminLookup />
+            <AdminFeatureFlagsSection />
+          </>
         ) : couldNotVerify ? (
           <AccessUnverified onRetry={() => void adminStatus.refetch()} />
         ) : (

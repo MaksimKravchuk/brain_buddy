@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from typing import IO, Any
 
 from app.exceptions import (
+    BrainBuddyError,
     ConflictError,
     NotFoundError,
     ReauthFailedError,
@@ -23,6 +24,7 @@ from app.exceptions import (
 from app.modules.agents.repository import AgentRepository
 from app.modules.tasks import TaskRepository
 from app.repositories import (
+    FeatureFlagOverrideRepository,
     InviteRepository,
     SessionRepository,
     UserRepository,
@@ -66,6 +68,7 @@ class AccountService:
         task_repo: TaskRepository,
         voice_operation_repo: OperationRepository,
         agent_repo: AgentRepository,
+        feature_flag_repo: FeatureFlagOverrideRepository,
         auth_service: AuthService,
         reserved_emails: frozenset[str] = frozenset(),
         deletion_grace: timedelta = DELETION_GRACE,
@@ -79,6 +82,7 @@ class AccountService:
         self.task_repo = task_repo
         self.voice_operation_repo = voice_operation_repo
         self.agent_repo = agent_repo
+        self.feature_flag_repo = feature_flag_repo
         self.auth_service = auth_service
         # Plain configuration values (the normalized operator allow-list), not
         # a service handle: reserving an address is a rule about this
@@ -370,7 +374,19 @@ class AccountService:
                 continue
             if user.deletion_requested_at + self.deletion_grace > current:
                 continue
-            self.purge_account(user.id)
+            try:
+                self.purge_account(user.id)
+            except BrainBuddyError:
+                # DD-13: one account whose runtime-flag cohort cannot be
+                # scrubbed (a corrupt document) must not stall every other
+                # member's due deletion. The account stays past-due and this
+                # sweep retries it on the next pass, once an operator repairs
+                # the document; the count reports only what actually purged.
+                logger.warning(
+                    "Purge deferred for %s; retrying on the next sweep pass",
+                    user.id,
+                )
+                continue
             purged += 1
         return purged
 
@@ -380,8 +396,17 @@ class AccountService:
         The user record is deleted last: if any earlier step dies, the
         account is still past-due on the next sweep pass and the whole purge
         re-runs. Every step tolerates already-deleted data.
+
+        `feature_flag_repo.scrub_user` deliberately **raises** rather than
+        skipping when the runtime flag document is degraded (DD-13), so it
+        runs first, before any destructive step — erasure is always
+        complete-or-not-yet-started, never silently partial. The cost is that
+        the account, its email and its password hash (and every other owned
+        record) are retained past the documented 14-day promise for as long
+        as that document stays corrupt.
         """
 
+        self.feature_flag_repo.scrub_user(user_id)
         self.session_repo.delete_all_for_user(user_id)
         self.voice_operation_repo.delete_all_for_owner(owner_id=user_id)
         # External-agent connections, credentials, runs, events, commands, and

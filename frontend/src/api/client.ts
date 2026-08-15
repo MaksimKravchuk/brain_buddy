@@ -32,6 +32,9 @@ import type {
 import type {
   AdminAccountLookupRequest,
   AdminAccountResponse,
+  AdminFeatureFlagMode,
+  AdminFeatureFlagsResponse,
+  AdminFeatureFlagUserRequest,
   AdminRevokeSessionsResponse,
   AdminStatusResponse
 } from "./adminTypes";
@@ -589,6 +592,41 @@ export const apiClient = {
     return request<AdminRevokeSessionsResponse>(
       `/admin/accounts/${encodeURIComponent(accountId)}/revoke-sessions`,
       { method: "POST" }
+    );
+  },
+
+  // Runtime feature-flag management (010). Every mutation returns the full
+  // authoritative post-mutation state, so the screen re-renders from the
+  // server's answer rather than from optimistic local state (010-FR-010).
+  getAdminFeatureFlags(signal?: AbortSignal) {
+    return request<AdminFeatureFlagsResponse>("/admin/feature-flags", { signal });
+  },
+
+  setAdminFeatureFlagMode(flag: string, mode: AdminFeatureFlagMode) {
+    return request<AdminFeatureFlagsResponse>(
+      `/admin/feature-flags/${encodeURIComponent(flag)}/mode`,
+      { method: "PUT", body: { mode } }
+    );
+  },
+
+  clearAdminFeatureFlagOverride(flag: string) {
+    return request<AdminFeatureFlagsResponse>(
+      `/admin/feature-flags/${encodeURIComponent(flag)}`,
+      { method: "DELETE" }
+    );
+  },
+
+  addAdminFeatureFlagUser(flag: string, payload: AdminFeatureFlagUserRequest) {
+    return request<AdminFeatureFlagsResponse>(
+      `/admin/feature-flags/${encodeURIComponent(flag)}/selected-users`,
+      { method: "POST", body: payload }
+    );
+  },
+
+  removeAdminFeatureFlagUser(flag: string, accountId: string) {
+    return request<AdminFeatureFlagsResponse>(
+      `/admin/feature-flags/${encodeURIComponent(flag)}/selected-users/${encodeURIComponent(accountId)}`,
+      { method: "DELETE" }
     );
   }
 };

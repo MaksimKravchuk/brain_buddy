@@ -12,6 +12,7 @@ from app.api.contracts import error_responses
 from app.api.dependencies import (
     get_config_dep,
     get_current_user,
+    get_feature_flag_service,
     get_task_service,
     get_voice_brain_dump_service,
     require_voice_brain_dump_enabled,
@@ -71,6 +72,7 @@ from app.schemas.tasks import (
     TaskTransitionRequest,
     TaskUpdateRequest,
 )
+from app.services import FeatureFlagService
 from app.workflows.voice_brain_dump.audio_media import canonical_audio_mime_type
 from app.workflows.voice_brain_dump.domain import (
     BrainDumpOperationDocument,
@@ -328,7 +330,7 @@ def command_brain_dump_operation(
     payload: ExpectedRevisionRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
-    config: AppConfig = Depends(get_config_dep),
+    feature_flags: FeatureFlagService = Depends(get_feature_flag_service),
     voice_brain_dump_service: VoiceBrainDumpService = Depends(
         get_voice_brain_dump_service
     ),
@@ -336,9 +338,11 @@ def command_brain_dump_operation(
     # Privacy authority over an existing operation stays reachable with the flag
     # OFF (ADR-0002 reversible withdrawal/deletion): withdraw consent, cancel,
     # and delete raw audio are never gated. Every forward/new-capture action is,
-    # returning the same fail-closed 404 the gated routes do.
+    # returning the same fail-closed 404 the gated routes do. The check resolves
+    # through the runtime resolver, so an operator's override reaches this call
+    # site too (010-FR-008).
     if action not in _VOICE_OFF_REACHABLE_ACTIONS and not voice_brain_dump_enabled(
-        current_user, config
+        current_user, feature_flags
     ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

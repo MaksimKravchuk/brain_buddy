@@ -189,4 +189,29 @@ describe("BrainDumpGate", () => {
     expect(screen.queryByTestId("brain-dump-route")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Record" })).not.toBeInTheDocument();
   });
+  it("010-FR-009: a later /auth/me payload turns the capability on with no logout or reload", async () => {
+    // 010-SC-004's client half: the gate re-renders straight from the refreshed
+    // session state, so a member whose flag an operator just turned on gets the
+    // capability without signing out, signing back in or reloading.
+    await hydrateFromMeResponse({
+      id: "user_1",
+      email: "founder@example.test",
+      feature_flags: { voice_brain_dump: false }
+    });
+
+    renderGate("/brain-dump/new");
+    expect(screen.queryByTestId("brain-dump-route")).not.toBeInTheDocument();
+
+    vi.spyOn(authApi, "me").mockResolvedValue({
+      id: "user_1",
+      email: "founder@example.test",
+      feature_flags: { voice_brain_dump: true }
+    });
+    await act(async () => {
+      await useAuthStore.getState().refreshSession();
+    });
+
+    expect(await screen.findByTestId("brain-dump-route")).toBeInTheDocument();
+    expect(screen.queryByText("Voice brain dump is off")).not.toBeInTheDocument();
+  });
 });
