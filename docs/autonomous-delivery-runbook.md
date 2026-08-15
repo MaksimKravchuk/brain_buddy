@@ -105,7 +105,8 @@ The bootstrap MUST happen in this exact order:
    the GitHub `production` environment with a **custom deployment branch policy
    allowing only `main`**; move `FLY_API_TOKEN` into it as an environment secret and
    **delete any repository-level `FLY_API_TOKEN`**; store `BRAIN_BUDDY_ADMIN_EMAIL`,
-   `BRAIN_BUDDY_ADMIN_PASSWORD`, and `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS` there.
+   `BRAIN_BUDDY_ADMIN_PASSWORD`, `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS`, and
+   `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS` there.
 2. Run **exact-SHA candidate CI** on the bootstrap change and let the full required
    job set pass.
 3. Perform the **explicitly authorized manual admin fast-forward** of `main` to that
@@ -119,8 +120,9 @@ The bootstrap MUST happen in this exact order:
    (`restrict_updates`, deploy key sole bypass, required checks); `landing` **and**
    `production` environments each restricted to branch `main`;
    `TRUNK_LANDING_SSH_KEY` present in `landing`; `FLY_API_TOKEN`,
-   `BRAIN_BUDDY_ADMIN_EMAIL`, `BRAIN_BUDDY_ADMIN_PASSWORD`, and
-   `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS` present in `production`; **no
+   `BRAIN_BUDDY_ADMIN_EMAIL`, `BRAIN_BUDDY_ADMIN_PASSWORD`,
+   `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS`, and `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS`
+   present in `production`; **no
    repository-level `FLY_API_TOKEN` remaining**; and a test candidate landing
    end-to-end. Do **not** claim the automation is active before this remote
    verification.
@@ -157,9 +159,9 @@ item (step 5 above):
   `TRUNK_LANDING_SSH_KEY`.
 - The `production` environment MUST restrict its deployments to branch `main`
   (custom branch policy) and MUST hold `FLY_API_TOKEN`, `BRAIN_BUDDY_ADMIN_EMAIL`,
-  `BRAIN_BUDDY_ADMIN_PASSWORD`, and `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS` as
-  environment secrets, so only default-branch `workflow_run` executions can read
-  them.
+  `BRAIN_BUDDY_ADMIN_PASSWORD`, `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS`, and
+  `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS` as environment secrets, so only
+  default-branch `workflow_run` executions can read them.
 - **No repository-level `FLY_API_TOKEN` may exist** — the token lives only in the
   `production` environment. (In-repo defense-in-depth: the trunk validator forbids
   candidate-controlled CI from requesting either the `landing` or the `production`
@@ -201,6 +203,9 @@ git push origin --delete trunk-candidate/<sha>
   identity. The deploy stages them into the Fly backend (see below) so the backend
   seeds/rotates this admin account on release; the smoke logs in with the same values.
   Missing secrets fail the deploy before any mutation.
+- `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS` — the durable production operator allow-list,
+  staged from this dedicated secret on every release and never aliased to the rotating
+  smoke admin identity.
 - `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS` — comma-separated internal cohort; it must
   include the admin email. This is enforced mechanically before any remote mutation:
   `scripts/check_smoke_identity_cohort.py` fails the deploy (naming variable names
@@ -209,7 +214,8 @@ git push origin --delete trunk-candidate/<sha>
   email and every normalized cohort entry must be email-shaped (contain `@`), the
   password must satisfy the backend password policy (12–128 characters), and the
   normalized admin email must be a member of the normalized cohort.
-- These three are the only smoke-related GitHub secrets. The smoke script's
+- The admin identity and internal cohort are the only smoke-related GitHub secrets.
+  The operator allow-list is an independent deployment secret. The smoke script's
   `BRAIN_BUDDY_SMOKE_EMAIL` / `BRAIN_BUDDY_SMOKE_PASSWORD` are its private process-env
   names, mapped inside the deploy step from the admin secrets — do not create GitHub
   secrets with the `BRAIN_BUDDY_SMOKE_*` names.
@@ -226,10 +232,11 @@ by `scripts/capture_fly_release_image.py` (tolerant of Fly's JSON field casings;
 present — is a known successful terminal state: `complete`, `succeeded`, or
 `success`); failed capture aborts the run before any mutation. It then stages the smoke identity into the Fly backend with
 `flyctl secrets set --stage` (`BRAIN_BUDDY_ADMIN_EMAIL`, `BRAIN_BUDDY_ADMIN_PASSWORD`,
-`BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS`, and the production feature-flag assignment;
-values are never printed), so the deploy release seeds the admin smoke account and marks it
-internal. The trusted deploy workflow is authoritative for the exact production flag
-assignment. Its staged value is restaged on every deploy, so a manual
+`BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS`, `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS`, and the
+production feature-flag assignment; values are never printed), so the deploy release
+seeds the admin smoke account, preserves the durable operator allow-list, and marks the
+smoke account internal. The trusted deploy workflow is authoritative for the exact
+production flag assignment. Its staged value is restaged on every deploy, so a manual
 `flyctl secrets set BRAIN_BUDDY_FEATURE_FLAGS` is reverted by the next release; change the
 rollout in the workflow instead.
 
