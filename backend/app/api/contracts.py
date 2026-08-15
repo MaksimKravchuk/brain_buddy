@@ -15,6 +15,7 @@ _ERROR_DESCRIPTIONS = {
     413: "The request body exceeds the configured size limit.",
     422: "The request path, query, or body does not match the API schema.",
     429: "Too many requests were made within the configured limit.",
+    503: "A required store is temporarily unusable; the request was refused.",
 }
 
 

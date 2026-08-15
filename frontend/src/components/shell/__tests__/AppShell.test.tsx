@@ -478,6 +478,30 @@ describe("AppShell account menu", () => {
     expect(currentLocation()).not.toBe("/admin");
   });
 
+  it("010-FR-006: the shell issues no request to any /admin route, including the new flag routes", async () => {
+    // PD-1 holds unchanged for feature 010: `/admin` is reached only by typing
+    // the URL, so a member who never does issues no admin request of any kind
+    // — the flag routes are behind the same gate and the same silence.
+    const user = userEvent.setup();
+    const spies = [
+      vi.spyOn(apiClient, "getAdminStatus"),
+      vi.spyOn(apiClient, "getAdminFeatureFlags"),
+      vi.spyOn(apiClient, "setAdminFeatureFlagMode"),
+      vi.spyOn(apiClient, "clearAdminFeatureFlagOverride"),
+      vi.spyOn(apiClient, "addAdminFeatureFlagUser"),
+      vi.spyOn(apiClient, "removeAdminFeatureFlagUser")
+    ];
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Account menu for max@example.test" }));
+    await user.keyboard("{Escape}");
+
+    for (const spy of spies) {
+      expect(spy).not.toHaveBeenCalled();
+    }
+    expect(screen.queryByRole("menuitem", { name: /feature flag/i })).not.toBeInTheDocument();
+  });
+
   it("009-SC-006: an authenticated shell issues no admin request during ordinary navigation", async () => {
     const user = userEvent.setup();
     const spy = vi.spyOn(apiClient, "getAdminStatus");

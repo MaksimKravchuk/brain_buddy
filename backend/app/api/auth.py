@@ -5,7 +5,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from app.api.contracts import error_responses
-from app.api.dependencies import get_auth_service, get_config_dep, get_current_user
+from app.api.dependencies import (
+    get_auth_service,
+    get_config_dep,
+    get_current_user,
+    get_feature_flag_service,
+)
 from app.core.config import AppConfig
 from app.core.rate_limit import login_rate_limiter
 from app.exceptions import ConflictError
@@ -15,7 +20,12 @@ from app.schemas.auth import (
     SignupRequest,
     User,
 )
-from app.services import AuthService, InvalidCredentialsError, InvalidInviteError
+from app.services import (
+    AuthService,
+    FeatureFlagService,
+    InvalidCredentialsError,
+    InvalidInviteError,
+)
 
 router = APIRouter(tags=["auth"])
 
@@ -49,16 +59,24 @@ def _clear_session_cookie(response: Response, config: AppConfig) -> None:
 
 def _me_response(
     user: User,
-    config: AppConfig,
+    feature_flags: FeatureFlagService,
     *,
     deletion_cancelled: bool = False,
 ) -> MeResponse:
+    """The one place the member-facing `feature_flags` payload is built.
+
+    Covers `/auth/me`, `/auth/login` and `/auth/signup` in a single call. The
+    resolver overlays only the two **managed** flags; `delivery_canary` and
+    `external_agent_relay` keep resolving from the environment inside the same
+    dict, and the key set stays exactly `KNOWN_FEATURE_FLAGS` (010-FR-008).
+    """
+
     return MeResponse(
         id=user.id,
         email=user.email,
         display_name=user.display_name,
         deletion_cancelled=deletion_cancelled,
-        feature_flags=config.feature_flags.effective_flags(user.email),
+        feature_flags=feature_flags.effective_flags(user),
     )
 
 
@@ -73,6 +91,7 @@ def signup(
     response: Response,
     auth_service: AuthService = Depends(get_auth_service),
     config: AppConfig = Depends(get_config_dep),
+    feature_flags: FeatureFlagService = Depends(get_feature_flag_service),
 ) -> MeResponse:
     try:
         user, raw_token = auth_service.signup(
@@ -91,7 +110,7 @@ def signup(
         ) from exc
 
     _set_session_cookie(response, raw_token, config)
-    return _me_response(user, config)
+    return _me_response(user, feature_flags)
 
 
 @router.post(
@@ -103,6 +122,7 @@ def login(
     response: Response,
     auth_service: AuthService = Depends(get_auth_service),
     config: AppConfig = Depends(get_config_dep),
+    feature_flags: FeatureFlagService = Depends(get_feature_flag_service),
 ) -> MeResponse:
     if not login_rate_limiter.check(_client_ip(request)):
         raise HTTPException(
@@ -119,7 +139,7 @@ def login(
         ) from exc
 
     _set_session_cookie(response, raw_token, config)
-    return _me_response(user, config, deletion_cancelled=deletion_cancelled)
+    return _me_response(user, feature_flags, deletion_cancelled=deletion_cancelled)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -138,6 +158,6 @@ def logout(
 @router.get("/me", response_model=MeResponse, responses=error_responses(401))
 def me(
     current_user: User = Depends(get_current_user),
-    config: AppConfig = Depends(get_config_dep),
+    feature_flags: FeatureFlagService = Depends(get_feature_flag_service),
 ) -> MeResponse:
-    return _me_response(current_user, config)
+    return _me_response(current_user, feature_flags)

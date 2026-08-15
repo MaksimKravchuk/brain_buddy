@@ -25,6 +25,7 @@ from app.modules.agents.secrets import (
 from app.modules.agents.service import AgentRelayService, TaskSnapshot
 from app.modules.tasks import TaskRepository, TaskService
 from app.repositories import (
+    FeatureFlagOverrideRepository,
     IndexRepository,
     InviteRepository,
     ProviderRepository,
@@ -38,6 +39,7 @@ from app.services import (
     AccountService,
     AdminService,
     AuthService,
+    FeatureFlagService,
     NodeService,
     RelationService,
     TreeService,
@@ -78,6 +80,7 @@ class Container:
     task_repo: TaskRepository
     voice_operation_repo: OperationRepository
     agent_repo: AgentRepository
+    feature_flag_repo: FeatureFlagOverrideRepository
     tree_service: TreeService
     node_service: NodeService
     relation_service: RelationService
@@ -86,6 +89,7 @@ class Container:
     auth_service: AuthService
     account_service: AccountService
     admin_service: AdminService
+    feature_flag_service: FeatureFlagService
     task_service: TaskService
     voice_brain_dump_service: VoiceBrainDumpService
     agent_relay_service: AgentRelayService
@@ -273,6 +277,23 @@ def build_container(config: AppConfig) -> Container:
     task_repo = TaskRepository(data_root)
     voice_operation_repo = OperationRepository(data_root)
     agent_repo = AgentRepository(data_root)
+    feature_flag_repo = FeatureFlagOverrideRepository(data_root)
+
+    # Built before the services that read a managed flag: `_voice_enabled_for_
+    # owner` below and every `/admin/feature-flags` route resolve through this
+    # one instance, so a mutation is visible to the very next evaluation
+    # (010-FR-005, 010-FR-008).
+    admin_service = AdminService(
+        user_repo=user_repo,
+        session_repo=session_repo,
+        operator_emails=config.admin.operator_emails,
+    )
+    feature_flag_service = FeatureFlagService(
+        repository=feature_flag_repo,
+        config=config,
+        user_repo=user_repo,
+        admin_service=admin_service,
+    )
 
     tree_service = TreeService(tree_repo, index_repo)
     node_service = NodeService(tree_repo, tree_service)
@@ -300,9 +321,7 @@ def build_container(config: AppConfig) -> Container:
         user = user_repo.get_by_id(owner_id)
         if user is None:
             return False
-        return config.feature_flags.effective_flags(user.email).get(
-            "voice_brain_dump", False
-        )
+        return feature_flag_service.is_effective("voice_brain_dump", user)
 
     voice_brain_dump_service = VoiceBrainDumpService(
         voice_operation_repo,
@@ -383,14 +402,10 @@ def build_container(config: AppConfig) -> Container:
         task_repo=task_repo,
         voice_operation_repo=voice_operation_repo,
         agent_repo=agent_repo,
+        feature_flag_repo=feature_flag_repo,
         auth_service=auth_service,
         reserved_emails=config.admin.operator_emails,
         deletion_grace=deletion_grace,
-    )
-    admin_service = AdminService(
-        user_repo=user_repo,
-        session_repo=session_repo,
-        operator_emails=config.admin.operator_emails,
     )
 
     return Container(
@@ -405,6 +420,7 @@ def build_container(config: AppConfig) -> Container:
         task_repo=task_repo,
         voice_operation_repo=voice_operation_repo,
         agent_repo=agent_repo,
+        feature_flag_repo=feature_flag_repo,
         tree_service=tree_service,
         node_service=node_service,
         relation_service=relation_service,
@@ -413,6 +429,7 @@ def build_container(config: AppConfig) -> Container:
         auth_service=auth_service,
         account_service=account_service,
         admin_service=admin_service,
+        feature_flag_service=feature_flag_service,
         task_service=task_service,
         voice_brain_dump_service=voice_brain_dump_service,
         agent_relay_service=agent_relay_service,
