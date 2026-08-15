@@ -72,7 +72,8 @@ DEPLOY_REQUIRED_SNIPPETS = (
     "BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS",
     "flyctl secrets set --stage",
     "delivery_canary=internal",
-    'BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_EMAIL}"',
+    "secrets.BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS",
+    'BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS}"',
     "--image --json",
     "capture_fly_release_image.py",
     "registry.fly.io/",
@@ -598,6 +599,27 @@ class DeployContractTest(unittest.TestCase):
         text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
         mutated = _temp_workflow(
             text.replace("git push origin", "git push --force origin", 1)
+        )
+        try:
+            self.assertEqual(validate_deploy_workflow(mutated), 1)
+        finally:
+            mutated.unlink()
+
+    def test_operator_email_aliased_to_admin_identity_is_rejected(self) -> None:
+        """The exact incident this contract exists to prevent: the operator
+        allow-list re-aliased to the smoke admin identity instead of staged
+        from its own dedicated secret. Every deploy would silently overwrite
+        the real operator with the rotating smoke identity."""
+
+        text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+        needle = 'BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS}"'
+        self.assertIn(needle, text)
+        mutated = _temp_workflow(
+            text.replace(
+                needle,
+                'BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_EMAIL}"',
+                1,
+            )
         )
         try:
             self.assertEqual(validate_deploy_workflow(mutated), 1)

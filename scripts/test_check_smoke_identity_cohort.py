@@ -7,6 +7,14 @@ cohort entry is not email-shaped (backend startup would reject them after the
 deploy mutated production), when the admin password violates the backend
 password policy (seeding would fail at startup), or when the normalized admin
 email is not a member of the normalized comma-separated internal cohort.
+
+It must also fail closed when the durable production operator allow-list
+(``BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS``) is missing, empty, or contains a
+non-email entry. That allow-list is deliberately independent of the smoke
+identity and its internal cohort: unlike them it need not include the admin
+email, because conflating the two is the bug this preflight guards against
+(a production deploy must not silently overwrite the real operator with the
+rotating smoke identity).
 """
 
 from __future__ import annotations
@@ -29,6 +37,7 @@ preflight_errors = _MODULE.preflight_errors
 
 ADMIN_EMAIL = "Deploy.Admin@Example.COM"
 ADMIN_PASSWORD = "super-secret-admin-password"
+OPERATOR_EMAILS = "Operator.One@Example.COM"
 
 
 def _run(env_overrides: dict[str, str | None]) -> subprocess.CompletedProcess[str]:
@@ -39,6 +48,7 @@ def _run(env_overrides: dict[str, str | None]) -> subprocess.CompletedProcess[st
         "BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS": (
             f"other@example.com, {ADMIN_EMAIL.lower()}"
         ),
+        "BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS": OPERATOR_EMAILS,
     }
     for key, value in env_overrides.items():
         if value is None:
@@ -84,11 +94,44 @@ class PreflightErrorsTest(unittest.TestCase):
         email: str = "admin@example.com",
         password: str = "long-enough-password",
         cohort: str = "admin@example.com",
+        operator_emails: str = "operator@example.com",
     ) -> list[str]:
-        return preflight_errors(email, password, cohort)
+        return preflight_errors(email, password, cohort, operator_emails)
 
     def test_valid_identity_has_no_errors(self) -> None:
         self.assertEqual(self._errors(), [])
+
+    def test_operator_emails_need_not_include_the_admin_email(self) -> None:
+        """The allow-list is independent of the smoke identity on purpose —
+        conflating them is exactly the bug this preflight guards against."""
+
+        self.assertEqual(
+            self._errors(
+                email="admin@example.com",
+                cohort="admin@example.com",
+                operator_emails="someone-else@example.com",
+            ),
+            [],
+        )
+
+    def test_empty_operator_emails_is_rejected(self) -> None:
+        errors = self._errors(operator_emails="")
+        self.assertTrue(
+            any("BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS" in e for e in errors)
+        )
+
+    def test_blank_operator_emails_is_rejected(self) -> None:
+        errors = self._errors(operator_emails="   , ,")
+        self.assertTrue(
+            any("BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS" in e for e in errors)
+        )
+
+    def test_non_email_operator_entry_is_rejected(self) -> None:
+        errors = self._errors(operator_emails="operator@example.com, bogus-entry")
+        self.assertTrue(
+            any("BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS" in e for e in errors)
+        )
+        self.assertFalse(any("bogus-entry" in e for e in errors))
 
     def test_admin_email_without_at_sign_is_rejected(self) -> None:
         errors = self._errors(email="not-an-email", cohort="not-an-email")
@@ -137,6 +180,7 @@ class PreflightScriptTest(unittest.TestCase):
             "BRAIN_BUDDY_ADMIN_EMAIL",
             "BRAIN_BUDDY_ADMIN_PASSWORD",
             "BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS",
+            "BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS",
         ):
             for value in (None, "", "   "):
                 with self.subTest(missing=missing, value=value):
@@ -180,6 +224,14 @@ class PreflightScriptTest(unittest.TestCase):
         self.assertIn("BRAIN_BUDDY_ADMIN_PASSWORD", result.stderr)
         self.assertNotIn("eleven-char", result.stdout + result.stderr)
 
+    def test_non_email_operator_entry_fails_closed(self) -> None:
+        result = _run(
+            {"BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS": "operator-bogus-entry"}
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS", result.stderr)
+        self.assertNotIn("operator-bogus-entry", result.stdout + result.stderr)
+
     def test_output_never_contains_secret_values(self) -> None:
         for overrides in (
             {},
@@ -192,6 +244,7 @@ class PreflightScriptTest(unittest.TestCase):
                 combined = result.stdout + result.stderr
                 self.assertNotIn(ADMIN_PASSWORD, combined)
                 self.assertNotIn(ADMIN_EMAIL.lower(), combined.lower())
+                self.assertNotIn(OPERATOR_EMAILS.lower(), combined.lower())
 
 
 if __name__ == "__main__":

@@ -4,9 +4,10 @@
 restaged from the deploy workflow on every release, so the workflow line — not
 the code default and not a `flyctl secrets set` — is the authoritative
 production state. Two properties therefore need a regression test rather than a
-sentence: the operator allow-list is bound to the seeded admin identity (PD-2),
-and the staged flag string stays **rollback-compatible** while it rolls the
-portal out to the internal operator (009-FR-013).
+sentence: the operator allow-list is staged from its own dedicated secret,
+never aliased to the smoke admin identity (PD-2), and the staged flag string
+stays **rollback-compatible** while it rolls the portal out to the internal
+operator (009-FR-013).
 
 Rollback compatibility is the sharp edge, and it has already cut once. Fly
 secrets are app-scoped and survive an image swap, so a secret staged by a
@@ -107,14 +108,26 @@ def workflow_text() -> str:
     return DEPLOY_WORKFLOW.read_text(encoding="utf-8")
 
 
-def test_009_FR_001_production_operators_are_exactly_the_seeded_admin_identity(
+def test_009_FR_001_production_operators_come_from_the_dedicated_operator_secret(
     workflow_text: str,
 ) -> None:
-    """PD-2 made concrete: the binding, not just the variable name."""
+    """PD-2 made concrete: a durable operator identity, not the smoke alias.
+
+    The smoke admin identity (``BRAIN_BUDDY_ADMIN_EMAIL``) rotates with every
+    deploy that changes it; aliasing the operator allow-list to it meant every
+    production deploy silently overwrote the real operator with the smoke
+    identity. The dedicated ``BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS`` secret is
+    staged instead, and the alias must never reappear.
+    """
 
     assert (
-        'BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_EMAIL}"'
+        'BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS}"'
         in workflow_text
+    )
+    assert "secrets.BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS" in workflow_text
+    assert (
+        'BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_EMAIL}"'
+        not in workflow_text
     )
 
 
