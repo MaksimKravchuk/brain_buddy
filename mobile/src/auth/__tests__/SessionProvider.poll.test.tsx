@@ -275,4 +275,65 @@ describe("010-FR-009 SessionProvider background flag refresh", () => {
 
     expect(screen.getByTestId("status")).toHaveTextContent("signed-out");
   });
+
+  /**
+   * `sessionRefreshGeneration` (see the note above it in SessionProvider.tsx):
+   * two overlapping `refreshSession` calls on the same identity — here, two
+   * interval fires stacked before either resolves — must apply only the
+   * response to the call that started *last*, regardless of which settles
+   * first. Without the guard, whichever response resolves last wins by
+   * arrival order, so a slow, older, disabled answer could roll back a fast,
+   * newer, enabled one.
+   */
+  it("010-FR-009 a slower older refresh cannot roll back a faster newer one", async () => {
+    const resolvers: ((me: ReturnType<typeof makeMe>) => void)[] = [];
+    backend = installFakeBackend({
+      "GET /auth/me": () =>
+        new Promise((resolve) => {
+          resolvers.push(resolve);
+        }),
+    });
+
+    await render(
+      <QueryClientProvider client={makeQueryClient()}>
+        <SessionProvider>
+          <SessionProbe />
+        </SessionProvider>
+      </QueryClientProvider>,
+    );
+
+    // The mount-time probe: settle it signed in with the flag off.
+    await waitFor(() => expect(resolvers.length).toBe(1));
+    await act(async () => {
+      resolvers[0](makeMe({ feature_flags: { voice_brain_dump: false } }));
+    });
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("signed-in"));
+    expect(screen.getByTestId("voice")).toHaveTextContent("false");
+
+    // Two refresh intervals fire back-to-back before either's response
+    // arrives — the older (first) request is still in flight when the newer
+    // (second) one starts.
+    await advance(SESSION_REFRESH_INTERVAL_MS);
+    await waitFor(() => expect(resolvers.length).toBe(2));
+    await advance(SESSION_REFRESH_INTERVAL_MS);
+    await waitFor(() => expect(resolvers.length).toBe(3));
+
+    // The newer request resolves first, enabling the flag.
+    await act(async () => {
+      resolvers[2](makeMe({ feature_flags: { voice_brain_dump: true } }));
+    });
+    await waitFor(() => expect(screen.getByTestId("voice")).toHaveTextContent("true"));
+
+    // The older request resolves after, disabling the flag — this response
+    // must be dropped, not applied on top of the newer one.
+    await act(async () => {
+      resolvers[1](makeMe({ feature_flags: { voice_brain_dump: false } }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId("voice")).toHaveTextContent("true");
+    expect(screen.getByTestId("status")).toHaveTextContent("signed-in");
+  });
 });

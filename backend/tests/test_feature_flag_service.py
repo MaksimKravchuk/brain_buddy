@@ -30,13 +30,17 @@ from app.main import create_app
 from app.repositories import SessionRepository, UserRepository
 from app.repositories.feature_flag import (
     MANAGED_FLAGS,
+    DegradedRuntimeFlagsError,
     FeatureFlagOverrideRepository,
     FlagMode,
     FlagOverride,
 )
 from app.schemas.auth import Invite, User
 from app.services import AdminService
-from app.services.feature_flag_service import FeatureFlagService
+from app.services.feature_flag_service import (
+    FeatureFlagService,
+    SelectedUserNotFoundError,
+)
 from app.utils.time import utcnow
 
 SERVICE_LOGGER = "app.services.feature_flag_service"
@@ -531,8 +535,6 @@ def test_010_FR_004_degraded_falls_back_and_refuses_every_mutation(
     )
     assert service.describe(operator_id="user_op").degraded is True
 
-    from app.repositories.feature_flag import DegradedRuntimeFlagsError
-
     with pytest.raises(DegradedRuntimeFlagsError):
         service.set_mode("voice_brain_dump", FlagMode.ON, operator_id="user_op")
     with pytest.raises(DegradedRuntimeFlagsError):
@@ -637,6 +639,217 @@ def test_010_FR_006_a_removal_of_a_non_account_shaped_id_is_not_logged_verbatim(
     message = [r.getMessage() for r in caplog.records if r.name == SERVICE_LOGGER][-1]
     assert "someone@example.com" not in message
     assert "account=-" in message
+
+
+# ---------------------------------------------------------------------------
+# B7a — revalidation under the write lock: purge and concurrent mode changes
+# ---------------------------------------------------------------------------
+
+
+def test_010_FR_007_a_purge_racing_the_lock_does_not_resurrect_the_scrubbed_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An account purged between resolution and the lock is refused, not
+    silently re-added (010-FR-007, DD-13).
+
+    `admin_service.find_account` is the last step `add_selected_user` takes
+    before acquiring the repository's write lock, so hooking it deterministically
+    simulates a purge that scrubs the cohort and deletes the account in the
+    exact gap between that resolution and the lock — the same gap a real,
+    unsynchronized purge could win.
+    """
+
+    config = _config(monkeypatch, tmp_path, flags="")
+    service = _service(config, tmp_path)
+    _seed_account(tmp_path, "user_purged", "purged@example.com")
+    service.set_mode("voice_brain_dump", FlagMode.SELECTED_USERS, operator_id="user_op")
+
+    real_find_account = service.admin_service.find_account
+
+    def _find_then_purge(**kwargs: object) -> User | None:
+        found = real_find_account(**kwargs)
+        assert found is not None
+        # `AccountService.purge_account` runs `feature_flag_repo.scrub_user`
+        # first and `user_repo.delete` last (see account_service.py); these
+        # are the two steps that matter for this race.
+        service.repository.scrub_user(found.id)
+        service.user_repo.delete(found.id)
+        return found
+
+    monkeypatch.setattr(service.admin_service, "find_account", _find_then_purge)
+
+    with pytest.raises(SelectedUserNotFoundError):
+        service.add_selected_user(
+            "voice_brain_dump", operator_id="user_op", account_id="user_purged"
+        )
+
+    view = service.describe(operator_id="user_op")
+    cohort = next(f for f in view.flags if f.name == "voice_brain_dump")
+    assert cohort.selected_users == ()
+
+
+def test_010_FR_010_a_concurrent_clear_racing_add_selected_user_is_refused_not_applied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A `clear_override` landing between account resolution and the locked
+    write is a clean refusal, not a write onto a cohort that no longer exists
+    (010-FR-010)."""
+
+    config = _config(monkeypatch, tmp_path, flags="")
+    service = _service(config, tmp_path)
+    _seed_account(tmp_path, "user_chosen", "chosen@example.com")
+    service.set_mode("voice_brain_dump", FlagMode.SELECTED_USERS, operator_id="user_op")
+
+    real_find_account = service.admin_service.find_account
+
+    def _find_then_clear(**kwargs: object) -> User | None:
+        found = real_find_account(**kwargs)
+        # Simulate a second operator's `clear_override` landing in the gap
+        # between this add's account resolution and the lock it is about to
+        # take.
+        service.clear_override("voice_brain_dump", operator_id="user_other")
+        return found
+
+    monkeypatch.setattr(service.admin_service, "find_account", _find_then_clear)
+
+    caplog.clear()
+    with (
+        caplog.at_level(logging.INFO, logger=SERVICE_LOGGER),
+        pytest.raises(ValidationFailure),
+    ):
+        service.add_selected_user(
+            "voice_brain_dump", operator_id="user_op", account_id="user_chosen"
+        )
+
+    view = service.describe(operator_id="user_op")
+    cleared = next(f for f in view.flags if f.name == "voice_brain_dump")
+    assert cleared.override_mode is None
+
+    records = [r.getMessage() for r in caplog.records if r.name == SERVICE_LOGGER]
+    add_records = [m for m in records if "action=add_selected_user" in m]
+    assert len(add_records) == 1
+    assert "outcome=refused_mode_not_selected_users" in add_records[0]
+    assert "account=-" in add_records[0]
+
+
+def test_010_FR_010_a_concurrent_mode_change_racing_remove_selected_user_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A `set_mode` away from SELECTED_USERS landing between this call's start
+    and its locked write is a clean refusal, never a `KeyError` from indexing
+    a snapshot the race already changed underneath it (010-FR-010).
+
+    `repository.mutate` is the one call both the pre-fix and current
+    `remove_selected_user` reach only once, right before the lock, so hooking
+    it is the version-independent way to land the race in that exact gap.
+    """
+
+    config = _config(monkeypatch, tmp_path, flags="")
+    service = _service(config, tmp_path)
+    service.set_mode("voice_brain_dump", FlagMode.SELECTED_USERS, operator_id="user_op")
+    service.repository.mutate(
+        lambda current: {
+            **current,
+            "voice_brain_dump": FlagOverride(
+                mode=FlagMode.SELECTED_USERS, selected_users=("user_chosen",)
+            ),
+        }
+    )
+
+    real_mutate = service.repository.mutate
+    triggered = False
+
+    def _mutate_after_racing_mode_change(apply: object) -> object:
+        nonlocal triggered
+        if not triggered:
+            triggered = True
+            service.set_mode("voice_brain_dump", FlagMode.OFF, operator_id="user_other")
+        return real_mutate(apply)
+
+    monkeypatch.setattr(service.repository, "mutate", _mutate_after_racing_mode_change)
+
+    caplog.clear()
+    with (
+        caplog.at_level(logging.INFO, logger=SERVICE_LOGGER),
+        pytest.raises(ValidationFailure),
+    ):
+        service.remove_selected_user(
+            "voice_brain_dump", "user_chosen", operator_id="user_op"
+        )
+
+    view = service.describe(operator_id="user_op")
+    retained = next(f for f in view.flags if f.name == "voice_brain_dump")
+    assert retained.override_mode == FlagMode.OFF
+    # DD-6: the race left the cohort retained, and the refused remove must
+    # not have touched it either.
+    assert [u.account_id for u in retained.selected_users] == ["user_chosen"]
+
+    records = [r.getMessage() for r in caplog.records if r.name == SERVICE_LOGGER]
+    remove_records = [m for m in records if "action=remove_selected_user" in m]
+    assert len(remove_records) == 1
+    assert "outcome=refused_mode_not_selected_users" in remove_records[0]
+    assert "account=-" in remove_records[0]
+
+
+@pytest.mark.parametrize(
+    "action,call",
+    [
+        (
+            "set_mode",
+            lambda service: service.set_mode(
+                "voice_brain_dump", FlagMode.ON, operator_id="user_op"
+            ),
+        ),
+        (
+            "clear_override",
+            lambda service: service.clear_override(
+                "voice_brain_dump", operator_id="user_op"
+            ),
+        ),
+        (
+            "add_selected_user",
+            lambda service: service.add_selected_user(
+                "voice_brain_dump", operator_id="user_op", account_id="user_chosen"
+            ),
+        ),
+        (
+            "remove_selected_user",
+            lambda service: service.remove_selected_user(
+                "voice_brain_dump", "user_chosen", operator_id="user_op"
+            ),
+        ),
+    ],
+)
+def test_010_FR_006_a_refused_write_against_a_degraded_document_records_exactly_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    action: str,
+    call: object,
+) -> None:
+    """Every mutation's own repository write can be refused for a degraded
+    document; that refusal is still exactly one content-free record naming no
+    account, not zero (010-FR-004, 010-FR-006, DD-10)."""
+
+    config = _config(monkeypatch, tmp_path, flags="")
+    service = _service(config, tmp_path)
+    _seed_account(tmp_path, "user_chosen", "chosen@example.com")
+    path = service.repository.document_path
+    path.write_text("{not json", encoding="utf-8")
+
+    caplog.clear()
+    with (
+        caplog.at_level(logging.INFO, logger=SERVICE_LOGGER),
+        pytest.raises(DegradedRuntimeFlagsError),
+    ):
+        call(service)  # type: ignore[operator]
+
+    records = [r.getMessage() for r in caplog.records if r.name == SERVICE_LOGGER]
+    assert len(records) == 1
+    assert f"action={action}" in records[0]
+    assert "outcome=refused_degraded" in records[0]
+    assert "account=-" in records[0]
+    assert "operator=user_op" in records[0]
 
 
 # ---------------------------------------------------------------------------
