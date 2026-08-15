@@ -7,6 +7,7 @@ import {
   useState,
   type PropsWithChildren,
 } from "react";
+import { AppState, type AppStateStatus } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { createApiClient, type ApiClient } from "@/api/client";
@@ -47,6 +48,12 @@ import { classifySessionFailure, resolveFailedProbe } from "./sessionOutcome";
  */
 /** Monotonic across the process; see the note where it is used. */
 let identityEpoch = 0;
+
+/**
+ * Bumped by every `refreshSession` call, and only by `refreshSession` calls —
+ * see the note above that function.
+ */
+let sessionRefreshGeneration = 0;
 
 export type SessionStatus = "loading" | "signed-out" | "signed-in" | "signed-in-offline";
 
@@ -102,6 +109,13 @@ const SessionContext = createContext<SessionContextValue | null>(null);
  * the client's full 30 s request timeout. The launch probe keeps the default.
  */
 const SERVER_CHANGE_PROBE_TIMEOUT_MS = 8_000;
+
+/**
+ * How often a signed-in, foregrounded session re-reads its identity and flags
+ * (010-FR-009). The same founder-set value the web store uses, stated as one
+ * named constant so changing it is one edit per client.
+ */
+export const SESSION_REFRESH_INTERVAL_MS = 15_000;
 
 export function SessionProvider({ children }: PropsWithChildren) {
   const queryClient = useQueryClient();
@@ -280,6 +294,104 @@ export function SessionProvider({ children }: PropsWithChildren) {
       cancelled = true;
     };
   }, [probe]);
+
+  /**
+   * The background poll's own read (010-FR-009, DD-11) — deliberately not
+   * `probe()`.
+   *
+   * `probe()` is a *transition*: it bumps the identity epoch and, on any
+   * failure, settles the session signed-out or signed-in-offline so a cold
+   * launch cannot hang. That is exactly wrong for a refresh of a session that
+   * is already established: a network blip would sign the person out. So this
+   * bumps nothing and swallows a transient failure, leaving `me`, `status` and
+   * the resolved flags untouched. A 401 needs no handling here at all — the api
+   * client's `onUnauthorized` already ran `handleUnauthorized`, which moved the
+   * epoch, so the guard below drops this result on the floor.
+   *
+   * It also avoids `adoptProfile`, whose `resetPrivateAgentState` is a
+   * transition-only concern: running it every fifteen seconds would clear the
+   * private agent cache on a cadence nobody asked for.
+   *
+   * `identityEpoch` alone is not enough to order these calls against each
+   * other: it guards against a real transition (login/logout/probe), but
+   * `refreshSession` never bumps it, so two overlapping same-identity calls —
+   * the interval firing and the foreground-return handler calling this
+   * directly both reach `start()`'s effect within one tick of each other —
+   * would both pass that guard regardless of which resolves first. A slower
+   * older response could then resolve after a faster newer one and clobber
+   * its flags. `sessionRefreshGeneration` is bumped by every call to this
+   * function and checked before every state or persistence write, so only
+   * the most recently *started* call's response is ever applied — matching
+   * `authStore.refreshSession`'s guard on the web client.
+   */
+  const refreshSession = useCallback(async () => {
+    const epoch = identityEpoch;
+    const requestGeneration = ++sessionRefreshGeneration;
+    let profile: MeResponse;
+    try {
+      profile = await api.me();
+    } catch {
+      return;
+    }
+    if (identityEpoch !== epoch || requestGeneration !== sessionRefreshGeneration) {
+      return;
+    }
+    setMe(profile);
+    setFlags(profile.feature_flags ?? null);
+    // Keeps the persisted copy current too, so an offline launch resolves the
+    // flag the operator most recently set rather than a stale one (FR-020).
+    const record = await persistIdentity(currentServerUrl(), profile);
+    if (identityEpoch !== epoch || requestGeneration !== sessionRefreshGeneration) {
+      return;
+    }
+    setIdentity(record);
+  }, [api]);
+
+  /**
+   * 010-FR-009: while signed in and foregrounded, re-read `/auth/me` on the
+   * shared 15-second interval, and immediately on returning to the foreground
+   * rather than waiting out the remainder of it. Suspended — not merely paused
+   * mid-tick — while the app is backgrounded or inactive, and never started at
+   * all while signed out. No new transport: this is the endpoint the session
+   * already reads.
+   */
+  const isSignedIn = status === "signed-in";
+  useEffect(() => {
+    if (!isSignedIn) {
+      return;
+    }
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const start = () => {
+      if (timer !== null) {
+        return;
+      }
+      timer = setInterval(() => {
+        void refreshSession();
+      }, SESSION_REFRESH_INTERVAL_MS);
+    };
+    const suspend = () => {
+      if (timer === null) {
+        return;
+      }
+      clearInterval(timer);
+      timer = null;
+    };
+    if (AppState.currentState === "active") {
+      start();
+    }
+    const subscription = AppState.addEventListener("change", (next: AppStateStatus) => {
+      if (next === "active") {
+        start();
+        void refreshSession();
+      } else {
+        suspend();
+      }
+    });
+    return () => {
+      suspend();
+      subscription.remove();
+    };
+  }, [isSignedIn, refreshSession]);
 
   const signIn = useCallback(
     async (email: string, password: string) => {

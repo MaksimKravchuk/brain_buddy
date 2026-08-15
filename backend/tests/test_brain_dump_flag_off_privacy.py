@@ -20,8 +20,17 @@ from tests.test_brain_dump_operations_api import (
 
 
 def _set_voice_flag(api_client, state: FeatureFlagState) -> None:
+    """Restage the deploy-time baseline this app was built with.
+
+    Since spec 010 the two managed flags resolve through
+    ``FeatureFlagService``, which holds the config it was constructed with, so
+    a harness that restaged only ``app.state.config`` would no longer move the
+    baseline the gate actually reads. Production never restages either: both
+    are built once from the same immutable config at startup.
+    """
+
     config = api_client.app.state.config
-    api_client.app.state.config = config.model_copy(
+    restaged = config.model_copy(
         update={
             "feature_flags": FeatureFlagSettings(
                 states={"voice_brain_dump": state},
@@ -29,6 +38,8 @@ def _set_voice_flag(api_client, state: FeatureFlagState) -> None:
             )
         }
     )
+    api_client.app.state.config = restaged
+    api_client.app.state.container.feature_flag_service.config = restaged
 
 
 def _revision(api_client, operation_id: str) -> int:

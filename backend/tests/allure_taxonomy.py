@@ -122,6 +122,26 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
     ),
     "config": (EPIC_QUALITY, "Configuration", "App configuration"),
     "feature_flags": (EPIC_QUALITY, "Feature flags", "Server-owned rollout flags"),
+    "feature_flag_repository": (
+        EPIC_QUALITY,
+        "Feature flags",
+        "Runtime rollout document persistence",
+    ),
+    "feature_flag_service": (
+        EPIC_QUALITY,
+        "Feature flags",
+        "Runtime rollout overlay resolution",
+    ),
+    "admin_feature_flags_api": (
+        EPIC_AUTH,
+        "Admin portal",
+        "Runtime feature-flag management routes",
+    ),
+    "account_service": (
+        EPIC_AUTH,
+        "Account deletion",
+        "Purge ordering and sweep isolation",
+    ),
     "health": (EPIC_QUALITY, "Health", "Health endpoint"),
     "utils_file_ops": (EPIC_QUALITY, "File utilities", "Atomic file operations"),
     "utils_time": (EPIC_QUALITY, "Time utilities", "Time helpers"),

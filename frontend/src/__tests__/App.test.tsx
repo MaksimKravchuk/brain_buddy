@@ -50,4 +50,20 @@ describe("App", () => {
 
     expect(screen.getByText("App routes")).toBeInTheDocument();
   });
+  it("010-FR-009: opens no WebSocket and no EventSource anywhere in the app", () => {
+    // The live-propagation requirement is deliberately bounded to a polled GET
+    // of an endpoint that already exists: no new transport on either client.
+    const socket = vi.fn();
+    const events = vi.fn();
+    vi.stubGlobal("WebSocket", socket);
+    vi.stubGlobal("EventSource", events);
+
+    try {
+      render(<App />);
+      expect(socket).not.toHaveBeenCalled();
+      expect(events).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

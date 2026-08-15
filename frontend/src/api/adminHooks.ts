@@ -7,6 +7,7 @@ import { useAuthStore, type AuthStatus } from "../stores/authStore";
 export interface AdminKeyset {
   all: readonly ["admin", string];
   status: () => readonly ["admin", string, "status"];
+  featureFlags: () => readonly ["admin", string, "feature-flags"];
 }
 
 /**
@@ -21,7 +22,8 @@ export function adminKeysFor(ownerId: string | null): AdminKeyset {
   const all = ["admin", ownerId ?? "anonymous"] as const;
   return {
     all,
-    status: () => [...all, "status"] as const
+    status: () => [...all, "status"] as const,
+    featureFlags: () => [...all, "feature-flags"] as const
   };
 }
 
@@ -93,5 +95,28 @@ export function useAdminStatus() {
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     refetchOnMount: false
+  });
+}
+
+/**
+ * Runtime feature-flag state for the operator screen (010-FR-010).
+ *
+ * Under the same owner-scoped `adminKeys`, so `purgeAdminRecords` and
+ * `bindAdminSession` already cover it. Unlike `useAdminStatus` this query *is*
+ * refetchable — flag state genuinely drifts, because another operator (or
+ * another tab) can change it — but only `AdminPage` ever mounts it, so
+ * 009-FR-011's "no admin request from any other screen" still holds.
+ */
+export function useAdminFeatureFlags() {
+  const isAuthed = useAuthStore((state) => state.status === "authed");
+  const ownerId = useAuthStore((state) => state.user?.id ?? null);
+  const keys = useMemo(() => adminKeysFor(ownerId), [ownerId]);
+  return useQuery({
+    enabled: isAuthed,
+    queryKey: keys.featureFlags(),
+    queryFn: ({ signal }) => apiClient.getAdminFeatureFlags(signal),
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false
   });
 }
