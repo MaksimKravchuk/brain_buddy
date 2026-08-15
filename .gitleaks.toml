@@ -1,0 +1,40 @@
+[extend]
+useDefault = true
+
+# These exact synthetic fixtures use credential-shaped field names to exercise
+# product behavior. Requiring both the file and line shape keeps real values in
+# other files, or on other lines in these files, detectable.
+[[allowlists]]
+description = "Synthetic voice-report run keys"
+condition = "AND"
+regexTarget = "line"
+paths = ['''^backend/tests/fixtures/voice_brain_dump/reference_corpus/(live_report\.(317aca5|900eeb8)|example_report\.redacted\.v2)\.json$''']
+regexes = ['''"run_key"\s*:''']
+
+[[allowlists]]
+description = "Historical synthetic redacted voice-report run key"
+condition = "AND"
+regexTarget = "line"
+paths = ['''^backend/tests/fixtures/voice_brain_dump/reference_corpus/example_report\.redacted\.v1\.json$''']
+regexes = ['''^\s*"run_key"\s*:''']
+
+[[allowlists]]
+description = "Synthetic repository idempotency key"
+condition = "AND"
+regexTarget = "line"
+paths = ['''^backend/tests/test_agent_repository\.py$''']
+regexes = ['''make_idempotency\(key\s*=''']
+
+[[allowlists]]
+description = "Synthetic mobile integration password"
+condition = "AND"
+regexTarget = "line"
+paths = ['''^mobile/integration/run\.ts$''']
+regexes = ['''const password\s*=''']
+
+[[allowlists]]
+description = "Synthetic agent relay signing secrets"
+condition = "AND"
+regexTarget = "line"
+paths = ['''^(frontend/src/features/agents/__tests__/AgentSettingsPage\.test\.tsx|backend/tests/test_agent_relay_api\.py)$''']
+regexes = ['''(inbound_signing_secret\s*:|fixed_secret\s*=)''']
