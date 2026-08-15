@@ -66,9 +66,11 @@ def _me_response(
     """The one place the member-facing `feature_flags` payload is built.
 
     Covers `/auth/me`, `/auth/login` and `/auth/signup` in a single call. The
-    resolver overlays only the two **managed** flags; `delivery_canary` and
-    `external_agent_relay` keep resolving from the environment inside the same
-    dict, and the key set stays exactly `KNOWN_FEATURE_FLAGS` (010-FR-008).
+    resolver overlays all three **managed** flags (`voice_brain_dump`,
+    `mobile_task_classification`, `external_agent_relay`) from the shared
+    SQLite-backed `FeatureFlagService`; `delivery_canary` alone remains the
+    environment-owned deployment control, and the key set stays exactly
+    `KNOWN_FEATURE_FLAGS` (010-FR-008).
     """
 
     return MeResponse(

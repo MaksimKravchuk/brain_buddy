@@ -27,7 +27,7 @@ _SPEC.loader.exec_module(_MODULE)
 extract_staged_flags = _MODULE.extract_staged_flags
 ExtractionError = _MODULE.ExtractionError
 
-AUTHORIZED = "delivery_canary=internal,voice_brain_dump=on,admin_portal=internal"
+AUTHORIZED = "delivery_canary=internal"
 
 
 def _workflow(staged: str, *, extra: str = "") -> str:

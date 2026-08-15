@@ -18,19 +18,17 @@ import { focusFirstAvailable } from "./flagFocus";
 /**
  * Runtime feature-flag control, the second section on `/admin` (010-FR-010).
  *
- * Realizes design states `F-01`…`F-13`. Three properties are load-bearing and
+ * Realizes design states `F-01`…`F-13`. Two properties are load-bearing and
  * easy to lose in a refactor:
  *
- * * **Deploy-default inheritance is not a fourth mode.** While `source` is
- *   `deploy_default` the radio group has *no* checked input and the baseline is
- *   shown as its own value in the source note (DD-3). Mapping an inherited
- *   `internal` onto one of the three override radios is the specific
- *   contradiction DD-3 exists to close.
- * * **Confirmation is a fixed three-operation allowlist** (DD-12): setting a
- *   flag OFF, removing the *last* cohort member, and clearing an override.
- *   Not a computed "does this zero the population" rule — that is unenforceable
- *   against a concurrent edit from another tab, and this feature deliberately
- *   ships no revision protocol.
+ * * **Mode is always present, never null** (ADR-0019, DD-3/DD-15 retired the
+ *   inherited deploy-default state): exactly one of the three radios is
+ *   always checked, matching the flag's stored SQLite mode.
+ * * **Confirmation is a fixed two-operation allowlist** (DD-12): setting a
+ *   flag OFF, and removing the *last* cohort member. Not a computed "does
+ *   this zero the population" rule — that is unenforceable against a
+ *   concurrent edit from another tab, and this feature deliberately ships no
+ *   revision protocol.
  * * **Every result is rendered from the server's returned state**, never from
  *   what the operator clicked: each mutation returns the full post-mutation
  *   document and that response replaces the cached read.
@@ -52,7 +50,7 @@ const UNREACHABLE_COPY = "Could not reach the server. Check your connection and 
 
 const TAP_TARGET = "min-h-[44px]";
 
-type ConfirmKind = "mode-off" | "clear-override" | "remove-last";
+type ConfirmKind = "mode-off" | "remove-last";
 
 /**
  * A discriminated union deliberately: only `remove-last` names an account, so
@@ -61,7 +59,6 @@ type ConfirmKind = "mode-off" | "clear-override" | "remove-last";
  */
 type PendingConfirm =
   | { kind: "mode-off"; restoreFocus: () => void }
-  | { kind: "clear-override"; restoreFocus: () => void }
   | { kind: "remove-last"; accountId: string; restoreFocus: () => void };
 
 /**
@@ -74,7 +71,6 @@ type PendingConfirm =
  */
 type FocusRequest =
   | { kind: "mode"; mode: AdminFeatureFlagMode }
-  | { kind: "clear" }
   | { kind: "add" }
   | { kind: "after-remove"; removed: string };
 
@@ -139,8 +135,8 @@ export function AdminFeatureFlagsSection(): React.JSX.Element {
             role="alert"
             className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
           >
-            Runtime flag state could not be read. Every flag is resolving from the deploy
-            default, and changes are disabled until this is repaired.
+            Runtime flag state could not be read. Every flag is resolving as
+            ineffective, and changes are disabled until this is repaired.
           </p>
         ) : null}
         {flags.map((flag) => (
@@ -168,13 +164,12 @@ function FlagRow({
   const [focusRequest, setFocusRequest] = useState<FocusRequest | null>(null);
 
   const radioRefs = useRef(new Map<AdminFeatureFlagMode, HTMLInputElement | null>());
-  const clearRef = useRef<HTMLButtonElement | null>(null);
   const addInputRef = useRef<HTMLInputElement | null>(null);
   const removeRefs = useRef(new Map<string, HTMLButtonElement | null>());
   const countRef = useRef<HTMLParagraphElement | null>(null);
 
   const headingId = `flag-${flag.name}-heading`;
-  const isCohortMode = flag.override_mode === "selected_users";
+  const isCohortMode = flag.mode === "selected_users";
 
   const adopt = (data: AdminFeatureFlagsResponse) => {
     queryClient.setQueryData(adminKeysFor(ownerId).featureFlags(), data);
@@ -209,17 +204,6 @@ function FlagRow({
       adopt(data);
       setSaved(true);
       setFocusRequest({ kind: "mode", mode });
-    },
-    onError: fail
-  });
-
-  const clearMutation = useMutation({
-    mutationFn: () => apiClient.clearAdminFeatureFlagOverride(flag.name),
-    onMutate: beginMutation,
-    onSuccess: (data) => {
-      adopt(data);
-      setSaved(true);
-      setFocusRequest({ kind: "clear" });
     },
     onError: fail
   });
@@ -264,10 +248,6 @@ function FlagRow({
     }
     if (focusRequest.kind === "mode") {
       focusFirstAvailable([radioRefs.current.get(focusRequest.mode)]);
-    } else if (focusRequest.kind === "clear") {
-      // The clear action disappears with the override it removed, so the mode
-      // group the flag now inherits is the defined target.
-      focusFirstAvailable([clearRef.current, radioRefs.current.get("off")]);
     } else if (focusRequest.kind === "add") {
       focusFirstAvailable([addInputRef.current]);
     } else {
@@ -282,10 +262,7 @@ function FlagRow({
   }, [focusRequest, flag]);
 
   const busy =
-    modeMutation.isPending ||
-    clearMutation.isPending ||
-    addMutation.isPending ||
-    removeMutation.isPending;
+    modeMutation.isPending || addMutation.isPending || removeMutation.isPending;
   const locked = disabled || busy;
 
   const onModeChange = (mode: AdminFeatureFlagMode) => {
@@ -328,8 +305,6 @@ function FlagRow({
     setConfirm(null);
     if (pending.kind === "mode-off") {
       modeMutation.mutate("off");
-    } else if (pending.kind === "clear-override") {
-      clearMutation.mutate();
     } else {
       removeMutation.mutate(pending.accountId);
     }
@@ -354,7 +329,7 @@ function FlagRow({
               type="radio"
               name={`mode-${flag.name}`}
               value={mode}
-              checked={flag.override_mode === mode}
+              checked={flag.mode === mode}
               disabled={locked}
               ref={(node) => {
                 radioRefs.current.set(mode, node);
@@ -365,35 +340,6 @@ function FlagRow({
           </label>
         ))}
       </fieldset>
-
-      <div
-        data-testid={`source-note-${flag.name}`}
-        className="flex flex-col gap-2 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between"
-      >
-        <span>
-          {flag.source === "runtime"
-            ? `Runtime override · Deploy default: ${flag.deploy_default_state}`
-            : `Deploy default (${flag.deploy_default_state})`}
-        </span>
-        {flag.source === "runtime" ? (
-          <Button
-            type="button"
-            variant="secondary"
-            size="md"
-            className={TAP_TARGET}
-            ref={clearRef}
-            disabled={locked}
-            onClick={() =>
-              setConfirm({
-                kind: "clear-override",
-                restoreFocus: () => clearRef.current?.focus()
-              })
-            }
-          >
-            Use deploy default
-          </Button>
-        ) : null}
-      </div>
 
       <p
         ref={countRef}
@@ -493,8 +439,7 @@ function FlagRow({
 
 const CONFIRM_COPY: Record<ConfirmKind, { title: string; action: string }> = {
   "mode-off": { title: "Turn off", action: "Turn off" },
-  "remove-last": { title: "Remove the last selected user?", action: "Remove user" },
-  "clear-override": { title: "Use deploy default", action: "Use deploy default" }
+  "remove-last": { title: "Remove the last selected user?", action: "Remove user" }
 };
 
 function ConfirmStep({
@@ -512,9 +457,7 @@ function ConfirmStep({
   const body =
     kind === "mode-off"
       ? `Turn ${flag.name} off for everyone?`
-      : kind === "remove-last"
-        ? `Remove the last selected user? ${flag.name} will be off for everyone.`
-        : `Use the deploy default for ${flag.name}? It currently ships ${flag.deploy_default_state} and this clears the runtime override.`;
+      : `Remove the last selected user? ${flag.name} will be off for everyone.`;
 
   return (
     <Overlay labelledBy={titleId} onClose={onCancel} size="narrow">

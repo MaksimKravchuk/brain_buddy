@@ -103,49 +103,18 @@ def _teardown_admin_world(operator_client, member_client, monkeypatch) -> None:
 def admin_world(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Generator[tuple[TestClient, dict, TestClient, dict], None, None]:
-    """One app with `admin_portal=on`: an operator and a non-operator member.
+    """One app with an operator and a non-operator member.
 
-    The flag state is set explicitly rather than inherited: the default is OFF
-    (009-FR-013), so a fixture that stayed silent would mask every
-    authorization outcome behind a 404 for the operator.
+    No flag stages `/admin`'s reachability any more (ADR-0019, DD-14): the
+    Admin Portal is always available to an authenticated, allow-listed
+    operator, so this fixture stages no feature flags at all.
     """
-
-    _app, operator_client, operator_me, member_client, member_me = _build_admin_world(
-        tmp_path, monkeypatch, flags="admin_portal=on"
-    )
-    yield operator_client, operator_me, member_client, member_me
-    _teardown_admin_world(operator_client, member_client, monkeypatch)
-
-
-@pytest.fixture
-def admin_world_flag_off(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Generator[tuple[TestClient, dict, TestClient, dict], None, None]:
-    """The same world with `admin_portal` left at its default-OFF state."""
 
     _app, operator_client, operator_me, member_client, member_me = _build_admin_world(
         tmp_path, monkeypatch, flags=""
     )
     yield operator_client, operator_me, member_client, member_me
     _teardown_admin_world(operator_client, member_client, monkeypatch)
-
-
-@pytest.fixture
-def anonymous_flag_off_client(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Generator[TestClient, None, None]:
-    """An unauthenticated client against a default-OFF admin portal."""
-
-    data_root = tmp_path / "admin-off-anon"
-    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(data_root))
-    monkeypatch.setenv("BRAIN_BUDDY_ENV", "test")
-    monkeypatch.setenv("BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS", TEST_USER_EMAIL)
-    monkeypatch.delenv("BRAIN_BUDDY_FEATURE_FLAGS", raising=False)
-    get_config.cache_clear()
-    client = BrainBuddyTestClient(create_app())
-    yield client
-    client.close()
-    get_config.cache_clear()
 
 
 def _messages(caplog: pytest.LogCaptureFixture, logger: str) -> str:
@@ -314,9 +283,9 @@ def test_009_FR_010_existing_auth_me_is_unaffected_by_this_feature(
 ) -> None:
     """The whole `/api/auth/me` body is pinned, not just `id`.
 
-    With `admin_portal` ON for this operator, the member-facing payload must
-    still carry exactly the pre-feature key set — no `admin_portal` key, no
-    other addition (009-FR-010, 009-FR-013).
+    The member-facing payload must carry exactly the pre-feature key set —
+    no `admin_portal` key, which does not exist as a flag at all any more
+    (009-FR-010, DD-14).
     """
 
     operator_client, operator_me, _member_client, _member_me = admin_world
@@ -417,7 +386,9 @@ def test_009_FR_008_status_403_log_has_account_id_but_not_email(
 
 
 # ---------------------------------------------------------------------------
-# 009-FR-013 / 009-SC-007 — default-OFF rollout flag, authorization first
+# DD-14 (2026-08-15, supersedes 009-FR-013/009-SC-007) — `admin_portal` is
+# deleted outright; the Admin Portal is always reachable by an authenticated,
+# allow-listed operator, with no flag left that could hide it.
 # ---------------------------------------------------------------------------
 
 
@@ -429,17 +400,13 @@ def test_009_FR_008_status_403_log_has_account_id_but_not_email(
         ("POST", "/api/admin/accounts/user_anything/revoke-sessions"),
     ],
 )
-def test_009_FR_013_flag_off_still_answers_401_to_an_unauthenticated_caller(
-    anonymous_flag_off_client: TestClient, method: str, path: str
+def test_010_DD_14_an_unauthenticated_caller_still_gets_401(
+    anonymous_api_client: TestClient, method: str, path: str
 ) -> None:
-    """Authorization is evaluated before the rollout gate (founder decision).
+    """Authorization is unaffected by DD-14: no flag ever gated it, so an
+    unauthenticated caller still gets 401 with no flag staged at all."""
 
-    With `admin_portal` OFF the unauthenticated answer stays 401, so the flag
-    can never soften the authentication boundary (ADR-0008: exposure control,
-    never authorization).
-    """
-
-    resp = anonymous_flag_off_client.request(method, path, json={"account_id": "x"})
+    resp = anonymous_api_client.request(method, path, json={"account_id": "x"})
     assert resp.status_code == 401
 
 
@@ -451,43 +418,43 @@ def test_009_FR_013_flag_off_still_answers_401_to_an_unauthenticated_caller(
         ("POST", "/api/admin/accounts/user_anything/revoke-sessions"),
     ],
 )
-def test_009_FR_013_flag_off_still_answers_403_to_an_authenticated_non_operator(
-    admin_world_flag_off, method: str, path: str
+def test_010_DD_14_an_authenticated_non_operator_still_gets_403(
+    admin_world, method: str, path: str
 ) -> None:
-    """A non-operator's response is flag-invariant, so it discloses no rollout.
-
-    403 with the flag OFF and 403 with it ON — identical, which is what makes
-    the design's non-disclosure claim true at the API level.
-    """
-
-    _operator_client, _operator_me, member_client, _member_me = admin_world_flag_off
+    _operator_client, _operator_me, member_client, _member_me = admin_world
     resp = member_client.request(method, path, json={"account_id": "x"})
     assert resp.status_code == 403
 
 
 @pytest.mark.parametrize(
-    ("method", "path"),
+    ("method", "path_template"),
     [
         ("GET", "/api/admin/status"),
         ("POST", "/api/admin/accounts/lookup"),
-        ("POST", "/api/admin/accounts/user_anything/revoke-sessions"),
+        ("POST", "/api/admin/accounts/{member_id}/revoke-sessions"),
     ],
 )
-def test_009_SC_007_flag_off_answers_404_to_an_allow_listed_operator(
-    admin_world_flag_off, method: str, path: str
+def test_010_DD_14_an_allow_listed_operator_never_sees_a_404_with_no_flag_staged(
+    admin_world, method: str, path_template: str
 ) -> None:
-    """Only an operator sees the feature-absent 404 — the repository convention."""
+    """There is no flag left that could hide these routes from an operator.
 
-    operator_client, _operator_me, _member_client, member_me = admin_world_flag_off
+    `revoke-sessions` is targeted at the member's own (real) account id: a
+    made-up id would 404 for an unrelated reason — the account genuinely
+    doesn't exist — which is not the DD-14 question this test asks.
+    """
+
+    operator_client, _operator_me, _member_client, member_me = admin_world
+    path = path_template.format(member_id=member_me["id"])
     body = {"account_id": member_me["id"]} if path.endswith("lookup") else None
     resp = operator_client.request(method, path, json=body)
-    assert resp.status_code == 404
+    assert resp.status_code != 404, resp.text
 
 
-def test_009_SC_007_turning_the_flag_on_restores_lookup_and_revoke(
+def test_010_DD_14_lookup_and_revoke_work_with_no_feature_flags_staged(
     admin_world,
 ) -> None:
-    """The flag-ON world is the SC-001..SC-003 behavior, with nothing else changed."""
+    """The SC-001..SC-003 behavior holds with nothing about it flag-gated."""
 
     operator_client, _operator_me, _member_client, member_me = admin_world
 
@@ -500,25 +467,6 @@ def test_009_SC_007_turning_the_flag_on_restores_lookup_and_revoke(
         f"/api/admin/accounts/{member_me['id']}/revoke-sessions"
     )
     assert revoke.status_code == 200
-
-
-def test_009_FR_013_flag_off_denial_for_an_operator_touches_no_target_account(
-    admin_world_flag_off, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The 404 is decided before AdminService is asked anything."""
-
-    from app.services.admin_service import AdminService
-
-    def _explode(*_args, **_kwargs):  # pragma: no cover - must never run
-        raise AssertionError("AdminService.find_account ran behind a disabled flag")
-
-    monkeypatch.setattr(AdminService, "find_account", _explode)
-
-    operator_client, _operator_me, _member_client, member_me = admin_world_flag_off
-    resp = operator_client.post(
-        "/api/admin/accounts/lookup", json={"account_id": member_me["id"]}
-    )
-    assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------

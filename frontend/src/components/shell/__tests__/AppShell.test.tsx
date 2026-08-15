@@ -487,7 +487,6 @@ describe("AppShell account menu", () => {
       vi.spyOn(apiClient, "getAdminStatus"),
       vi.spyOn(apiClient, "getAdminFeatureFlags"),
       vi.spyOn(apiClient, "setAdminFeatureFlagMode"),
-      vi.spyOn(apiClient, "clearAdminFeatureFlagOverride"),
       vi.spyOn(apiClient, "addAdminFeatureFlagUser"),
       vi.spyOn(apiClient, "removeAdminFeatureFlagUser")
     ];

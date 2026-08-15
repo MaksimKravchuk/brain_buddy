@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient
 from app.api.agents import MAX_EVENT_BODY_BYTES, _bounded_event_body, _verify_password
 from app.container import Container
 from app.core import get_config
-from app.core.config import FeatureFlagSettings, FeatureFlagState
+from app.core.config import FeatureFlagState
 from app.core.rate_limit import sensitive_action_rate_limiter
 from app.main import _run_privacy_maintenance_sweep, create_app
 from app.modules.agents import service as agent_service_module
@@ -35,6 +35,7 @@ from app.modules.agents.connector import (
     ConnectorTestOutcome,
 )
 from app.modules.agents.domain import PROTOCOL_VERSION, AgentCapabilities
+from app.repositories.feature_flag import FlagMode
 from app.schemas.auth import Invite, User
 from app.services.auth_service import AuthService
 from app.utils.time import utcnow
@@ -240,15 +241,14 @@ def hand_off(
 
 
 def set_relay_flag(client: TestClient, state: FeatureFlagState) -> None:
+    """Flip the runtime-owned `external_agent_relay` flag through the same
+    SQLite-backed service request-time gating consults (ADR-0019) — `config`
+    no longer holds any runtime authority for a managed flag to override."""
+
     app: Any = client.app
-    config = app.state.config
-    app.state.config = config.model_copy(
-        update={
-            "feature_flags": FeatureFlagSettings(
-                states={"external_agent_relay": state},
-                internal_users=config.feature_flags.internal_users,
-            )
-        }
+    container: Container = app.state.container
+    container.feature_flag_service.set_mode(
+        "external_agent_relay", FlagMode(state.value), operator_id="test-harness"
     )
 
 
@@ -1008,14 +1008,7 @@ class TestEventIngestRoutes:
             json={"connection_id": created["id"]},
         ).json()
 
-        app: Any = client.app
-        app.state.config = app.state.config.model_copy(
-            update={
-                "feature_flags": FeatureFlagSettings(
-                    states={"external_agent_relay": FeatureFlagState.OFF}
-                )
-            }
-        )
+        set_relay_flag(client, FeatureFlagState.OFF)
 
         callback = self._emit(
             client,

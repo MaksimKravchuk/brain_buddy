@@ -781,6 +781,95 @@ def test_dark_production_relay_secret_boundary_never_materializes_a_secret(
             operation()
 
 
+def _corrupt_feature_flag_store(config: AppConfig) -> None:
+    """Overwrite the migrated SQLite file with bytes no connection can open,
+    forcing every subsequent read of it to come back degraded (DD-2)."""
+
+    db_path = config.data_dir / "feature_flags.sqlite3"
+    db_path.write_bytes(b"not a sqlite database")
+
+
+def test_degraded_flag_store_dark_production_still_boots_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A corrupt/locked flag store must not crash boot: a degraded read is
+    conservative for *rollout* (every managed flag ineffective, every mutation
+    refused) but must not be conflated with "confirmed ON" for the relay's
+    key requirement when there is no persisted relay data to protect."""
+
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "production")
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv(
+        "BRAIN_BUDDY_PUBLIC_BASE_URL", "https://brain-buddy-backend.fly.dev"
+    )
+    monkeypatch.setenv("BRAIN_BUDDY_FEATURE_FLAGS", "external_agent_relay=off")
+    monkeypatch.delenv("BRAIN_BUDDY_AGENT_RELAY_KEYS", raising=False)
+    config = get_config()
+
+    # Prime a healthy migrated store (external_agent_relay=off, no data) before
+    # corrupting it, so the degraded read below is the only variable in play.
+    build_container(config)
+    _corrupt_feature_flag_store(config)
+    get_config.cache_clear()  # type: ignore[attr-defined]
+    config = get_config()
+
+    container = build_container(config)
+
+    assert container.feature_flag_repo.read().degraded is True
+    assert container.agent_repo.has_any_relay_data() is False
+    secret_box = container.agent_relay_service.secret_box
+    assert repr(secret_box) == "UnavailableRelaySecretBox()"
+    operations = (
+        lambda: secret_box.active_key_id,
+        lambda: secret_box.seal("secret", aad="scope"),
+        lambda: secret_box.fingerprint("secret"),
+        lambda: secret_box.fingerprint_candidates("secret"),
+        lambda: secret_box.fingerprint_matches("stored", "secret"),
+        lambda: secret_box.open(
+            SealedSecret(key_id="missing", ciphertext="not-secret"), aad="scope"
+        ),
+    )
+    for operation in operations:
+        with pytest.raises(SecretsUnavailable, match="required before relay data"):
+            operation()
+
+
+def test_degraded_flag_store_with_existing_relay_data_still_requires_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Degraded flags fail closed for rollout, but persisted relay data is
+    never flag-gated on the way in and must remain decryptable: a degraded
+    read must not waive the key requirement once relay data already exists,
+    exactly like a healthy, confirmed-OFF store with data (see the ``off,
+    True, False`` case of ``test_production_relay_key_startup_matrix``)."""
+
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "production")
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv(
+        "BRAIN_BUDDY_PUBLIC_BASE_URL", "https://brain-buddy-backend.fly.dev"
+    )
+    monkeypatch.setenv("BRAIN_BUDDY_FEATURE_FLAGS", "external_agent_relay=off")
+    monkeypatch.delenv("BRAIN_BUDDY_AGENT_RELAY_KEYS", raising=False)
+    config = get_config()
+
+    build_container(config)  # prime a healthy migrated store, as above
+    AgentRepository(config.data_dir).append_audit(
+        AgentAuditEntryDocument(
+            id="audit_existing",
+            owner_id="owner_existing",
+            action="run_dispatched",
+            outcome="ok",
+            created_at=utcnow(),
+        )
+    )
+    _corrupt_feature_flag_store(config)
+    get_config.cache_clear()  # type: ignore[attr-defined]
+    config = get_config()
+
+    with pytest.raises(SecretsUnavailable):
+        build_container(config)
+
+
 class TestAgentRelayCallbackStartup:
     """The same policy, observed where it actually bites: app startup."""
 

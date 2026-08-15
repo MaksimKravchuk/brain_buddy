@@ -11,6 +11,7 @@ import logging
 import shutil
 import tempfile
 import zipfile
+from contextlib import suppress
 from datetime import datetime, timedelta
 from typing import IO, Any
 
@@ -393,18 +394,59 @@ class AccountService:
     def purge_account(self, user_id: str) -> None:
         """Erase every trace of an account. Idempotent and crash-safe.
 
-        The user record is deleted last: if any earlier step dies, the
-        account is still past-due on the next sweep pass and the whole purge
-        re-runs. Every step tolerates already-deleted data.
+        The very first step, before `feature_flag_repo.scrub_user` or any
+        other step runs, is to durably mark the account non-cancellable:
+        `UserRepository.mutate` atomically advances `deletion_requested_at`
+        to the grace cutoff (`utcnow() - deletion_grace`) whenever the
+        account doesn't already carry a past-due marker — this is the
+        explicit hard-purge point-of-no-return. An absent marker or one
+        still inside its grace window is moved to the cutoff; an already
+        past-due marker (the normal due-sweep path) is preserved exactly,
+        never rewritten. `FeatureFlagService.add_selected_user` re-reads that
+        durable marker while holding the SQLite cohort-mutation lock, before
+        committing a cohort write. This marker-before-scrub ordering closes
+        the cohort re-add race: without it, a concurrent add that lands
+        after scrub releases its lock but before the user record is deleted
+        would find a still-existing, unmarked account and re-add it, leaving
+        an orphaned ID once purge deletes the user (010-FR-007, DD-13).
+        Landing the marker at the cutoff rather than at `utcnow()` also
+        closes a second race: `AuthService.login` fresh-checks this same
+        marker under its own write lock before it may cancel a pending
+        deletion, and a marker stamped at `utcnow()` would still read as
+        ordinary, cancellable, within-grace to that check — a concurrent,
+        otherwise-valid login could resurrect an account purge has already
+        started destroying. A marker at the cutoff always reads as past-due,
+        so `login` refuses it like any bad credential instead. The mutation
+        is a no-op if the account is already gone (a retried purge); it does
+        not recreate the user.
 
-        `feature_flag_repo.scrub_user` deliberately **raises** rather than
-        skipping when the runtime flag document is degraded (DD-13), so it
-        runs first, before any destructive step — erasure is always
+        The user record is still deleted last: if any later step dies, the
+        marker (and the rest of the account) survives, the account stays
+        past-due on the next sweep pass, and the whole purge re-runs. Every
+        step tolerates already-deleted data.
+
+        `feature_flag_repo.scrub_user` still deliberately **raises** rather
+        than skipping when the runtime flag document is degraded (DD-13), so
+        it runs before every other destructive step — erasure is always
         complete-or-not-yet-started, never silently partial. The cost is that
         the account, its email and its password hash (and every other owned
         record) are retained past the documented 14-day promise for as long
-        as that document stays corrupt.
+        as that document stays corrupt — but the durable deletion-pending
+        marker is already in place by then, so retries and cohort mutations
+        stay fail-safe even while purge itself is blocked.
         """
+
+        cutoff = utcnow() - self.deletion_grace
+        with suppress(NotFoundError):
+            self.user_repo.mutate(
+                user_id,
+                lambda fresh: (
+                    fresh
+                    if fresh.deletion_requested_at is not None
+                    and fresh.deletion_requested_at <= cutoff
+                    else fresh.model_copy(update={"deletion_requested_at": cutoff})
+                ),
+            )
 
         self.feature_flag_repo.scrub_user(user_id)
         self.session_repo.delete_all_for_user(user_id)

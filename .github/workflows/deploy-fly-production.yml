@@ -291,8 +291,14 @@ jobs:
       # are app-scoped and survive an image swap, so the flag string this run
       # is about to stage is still pending when a rollback restores the old
       # image — which would then boot under the rollout of the release that
-      # just failed. A failed admin enablement could therefore leave
-      # admin_portal=internal live after a "successful" rollback.
+      # just failed.
+      #
+      # ADR-0019 (2026-08-15): `admin_portal` is deleted outright and
+      # `voice_brain_dump` is now SQLite-managed through the admin portal
+      # itself, so neither is staged here any more — staging either would be
+      # inert on an already-migrated volume and would only reseed a fresh
+      # one's one-time migration. `delivery_canary` is the only entry left,
+      # unaffected by the correction.
       #
       # The previous rollout is read from the previous revision of THIS
       # workflow, the same line that is authoritative for production. It is
@@ -315,6 +321,43 @@ jobs:
           echo "::add-mask::${previous_flags}"
           echo "PREVIOUS_FEATURE_FLAGS=${previous_flags}" >> "${GITHUB_ENV}"
           echo "Captured the previous release's feature-flag rollout for rollback."
+
+      # ADR-0019 (2026-08-15): the very first SQLite-aware backend to boot
+      # must seed its one-time ledger migration from the exact previous
+      # rollout, or migration only ever sees the delivery-only baseline below
+      # and a flag like voice_brain_dump=on is lost before any operator could
+      # restore it. "First" is detected from immutable git content only —
+      # never live app state, never a human toggle — so re-running this
+      # workflow against the same two SHAs always yields the same answer. The
+      # marker is the migration-ledger id compiled into
+      # backend/app/repositories/feature_flag.py: its presence in the CURRENT
+      # revision and absence in the PREVIOUS one is the exact boundary a
+      # fresh SQLite volume crosses. Every ordinary deploy afterward has the
+      # marker on both sides and takes the delivery-only path below.
+      - name: Detect the first SQLite-managed feature-flag transition
+        if: steps.classify.outputs.needed == 'true'
+        shell: bash
+        env:
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          MARKER='_MIGRATION_LEDGER_ID = "adr-0019-sqlite-v1"'
+          current_has_marker=false
+          if git show "${TESTED_SHA}:backend/app/repositories/feature_flag.py" 2>/dev/null \
+            | grep -qF "${MARKER}"; then
+            current_has_marker=true
+          fi
+          previous_has_marker=false
+          if git show "${TESTED_SHA}^:backend/app/repositories/feature_flag.py" 2>/dev/null \
+            | grep -qF "${MARKER}"; then
+            previous_has_marker=true
+          fi
+          if [ "${current_has_marker}" = "true" ] && [ "${previous_has_marker}" = "false" ]; then
+            echo "FIRST_TRANSITION=true" >> "${GITHUB_ENV}"
+            echo "First SQLite-managed feature-flag transition detected for this deploy."
+          else
+            echo "FIRST_TRANSITION=false" >> "${GITHUB_ENV}"
+          fi
 
       - name: Set up Flyctl
         if: steps.classify.outputs.needed == 'true'
@@ -385,10 +428,11 @@ jobs:
       # the healthy release left by the default-OFF baseline deployment (run
       # 31798252344 for exact main d9ec122f, authenticated smoke passed). It is
       # built from the 009 revision, so it parses both `admin_portal` (spec 009,
-      # 009-FR-013) and `external_agent_relay` (spec 007) — unlike the pre-009
-      # image that crash-looped on the relay name in deploy run 31775660872.
-      # Naming `admin_portal` here is therefore rollback-safe at last, and this
-      # release rolls it out to the internal operator cohort.
+      # retired by ADR-0019) and `external_agent_relay` (spec 007) — unlike the
+      # pre-009 image that crash-looped on the relay name in deploy run
+      # 31775660872. Neither name is staged here any more (ADR-0019): the
+      # rollback-parseable set only matters for names this release could ever
+      # stage, and `admin_portal` is no longer one of them.
       #
       # `external_agent_relay` stays omitted. Being parseable by the rollback
       # image makes it *safe* to stage, not *authorized* to ship: spec 007's
@@ -421,7 +465,7 @@ jobs:
             BRAIN_BUDDY_ADMIN_PASSWORD="${BRAIN_BUDDY_ADMIN_PASSWORD}" \
             BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS}" \
             BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS="${BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS}" \
-            BRAIN_BUDDY_FEATURE_FLAGS="delivery_canary=internal,voice_brain_dump=on,admin_portal=internal" 2>&1) \
+            BRAIN_BUDDY_FEATURE_FLAGS="delivery_canary=internal" 2>&1) \
             || status=$?
           if [ "${status}" -ne 0 ] \
             && ! printf '%s\n' "${output}" | grep -qi "no change"; then
@@ -431,7 +475,98 @@ jobs:
             echo "Staging the smoke identity secrets failed (exit ${status})." >&2
             exit "${status}"
           fi
-          echo "Staged smoke identity, delivery_canary=internal, voice_brain_dump=on and admin_portal=internal for ${BACKEND_APP} (external_agent_relay stays omitted, i.e. OFF)."
+          # Exported so the first-transition cleanup step below can restage
+          # this exact literal by reference instead of repeating it — another
+          # literal BRAIN_BUDDY_FEATURE_FLAGS assignment here would give
+          # scripts/extract_staged_feature_flags.py two candidates for "the"
+          # rollout the next deploy captures, and it fails closed rather than
+          # guessing between them.
+          echo "AUTHORIZED_STAGED_FEATURE_FLAGS=delivery_canary=internal" >> "${GITHUB_ENV}"
+          echo "Staged smoke identity and delivery_canary=internal for ${BACKEND_APP} (voice_brain_dump, mobile_task_classification and external_agent_relay are SQLite-managed through the admin portal and stay omitted from this string; admin_portal no longer exists as a flag)."
+
+      # Overwrites the delivery-only rollout the step above just staged, so
+      # THIS call — not that one — is what the backend below actually boots
+      # under. Fails closed on anything malformed and never prints a flag
+      # name or value. Only the one retired name, admin_portal (deleted,
+      # ADR-0019 DD-14), is silently dropped — the new image cannot parse it
+      # and omission is the OFF state every image agrees on. Any other name
+      # outside the known managed set is NOT guessed to be safe to drop: it
+      # fails the run, since the new image cannot parse it either and a
+      # captured rollout should never name anything else. A captured state
+      # outside the legacy off/internal/on vocabulary fails the same way.
+      - name: Stage the first-transition feature-flag seed
+        if: steps.classify.outputs.needed == 'true' && env.FIRST_TRANSITION == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! staged=$(python3 - <<'PY'
+          import os
+          import sys
+
+          RETIRED = {"admin_portal"}
+
+          KNOWN = {
+              "delivery_canary",
+              "voice_brain_dump",
+              "mobile_task_classification",
+              "external_agent_relay",
+          }
+
+          VALID_STATES = {"off", "internal", "on"}
+
+          previous = os.environ.get("PREVIOUS_FEATURE_FLAGS", "")
+          entries = []
+          seen = set()
+          for raw in previous.split(","):
+              entry = raw.strip()
+              if not entry:
+                  print("error: the captured previous rollout has an empty entry", file=sys.stderr)
+                  sys.exit(1)
+              name, sep, state = entry.partition("=")
+              name = name.strip()
+              state = state.strip()
+              if not sep or not name or not state:
+                  print("error: the captured previous rollout has a malformed entry", file=sys.stderr)
+                  sys.exit(1)
+              if name in seen:
+                  print("error: the captured previous rollout repeats a flag name", file=sys.stderr)
+                  sys.exit(1)
+              seen.add(name)
+              if name in RETIRED:
+                  continue
+              if name not in KNOWN:
+                  print("error: the captured previous rollout has an unrecognized flag name", file=sys.stderr)
+                  sys.exit(1)
+              if state not in VALID_STATES:
+                  print("error: the captured previous rollout has an invalid flag state", file=sys.stderr)
+                  sys.exit(1)
+              entries.append(f"{name}={state}")
+
+          if "delivery_canary" not in {e.split("=", 1)[0] for e in entries}:
+              print(
+                  "error: the sanitized first-transition seed is missing delivery_canary",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          print(",".join(entries))
+          PY
+          ); then
+            echo "Sanitizing the captured previous rollout for the new image failed." >&2
+            exit 1
+          fi
+          echo "::add-mask::${staged}"
+          status=0
+          output=$(flyctl secrets set --stage --app "${BACKEND_APP}" \
+            BRAIN_BUDDY_FEATURE_FLAGS="${staged}" 2>&1) \
+            || status=$?
+          if [ "${status}" -ne 0 ] \
+            && ! printf '%s\n' "${output}" | grep -qi "no change"; then
+            printf '%s\n' "${output}" >&2
+            echo "Staging the first-transition feature-flag seed failed (exit ${status})." >&2
+            exit "${status}"
+          fi
+          echo "Staged the first-transition feature-flag seed for ${BACKEND_APP} (value not printed)."
 
       - name: Deploy backend
         if: steps.classify.outputs.needed == 'true'
@@ -474,6 +609,30 @@ jobs:
         run: |
           set -euo pipefail
           SMOKE_BASE_URL="https://${FRONTEND_APP}.fly.dev" ./scripts/production_smoke.sh
+
+      # After a first-transition deploy has passed reachability and smoke,
+      # the app-scoped BRAIN_BUDDY_FEATURE_FLAGS goes back to delivery-only
+      # for the NEXT release: runtime code never reads it again once the
+      # ledger migration has committed (ADR-0019), and every deploy after
+      # this one takes the ordinary path above. This only stages (`flyctl
+      # secrets set --stage`) — it never triggers a second image deploy, so
+      # the backend that just passed smoke is left running untouched.
+      - name: Restage delivery-only rollout after a first-transition deploy
+        if: steps.classify.outputs.needed == 'true' && env.FIRST_TRANSITION == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=0
+          output=$(flyctl secrets set --stage --app "${BACKEND_APP}" \
+            BRAIN_BUDDY_FEATURE_FLAGS="${AUTHORIZED_STAGED_FEATURE_FLAGS}" 2>&1) \
+            || status=$?
+          if [ "${status}" -ne 0 ] \
+            && ! printf '%s\n' "${output}" | grep -qi "no change"; then
+            printf '%s\n' "${output}" >&2
+            echo "Restaging the delivery-only rollout failed (exit ${status})." >&2
+            exit "${status}"
+          fi
+          echo "Restaged the delivery-only rollout for ${BACKEND_APP} (no image deploy)."
 
       # Runs only when something failed after the rollback images were
       # captured (staging, deploy, reachability, or authenticated smoke). It

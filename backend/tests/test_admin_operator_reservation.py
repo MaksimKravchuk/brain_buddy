@@ -48,7 +48,9 @@ def reservation_world(
     monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path / "reservation-data"))
     monkeypatch.setenv("BRAIN_BUDDY_ENV", "test")
     monkeypatch.setenv("BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS", UNCLAIMED_OPERATOR_EMAIL)
-    monkeypatch.setenv("BRAIN_BUDDY_FEATURE_FLAGS", "admin_portal=on")
+    # `admin_portal` no longer exists as a flag (DD-14): `/admin` needs no
+    # staged flag to be reachable by an allow-listed operator.
+    monkeypatch.delenv("BRAIN_BUDDY_FEATURE_FLAGS", raising=False)
     get_config.cache_clear()
     app = create_app()
 

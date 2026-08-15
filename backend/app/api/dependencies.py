@@ -135,8 +135,6 @@ ADMIN_STATUS_EVENT = "admin_capability_probe"
 ADMIN_DATA_EVENT = "admin_data_route"
 """Log event for the lookup and revoke data routes (009-FR-011)."""
 
-ADMIN_PORTAL_FLAG = "admin_portal"
-
 
 ADMIN_ROUTE_UNMATCHED = "unmatched"
 """Fail-closed placeholder when no route template can be resolved."""
@@ -246,44 +244,6 @@ def require_operator(
     return user
 
 
-def require_admin_portal_enabled(
-    request: Request,
-    operator: User = Depends(require_operator),
-    config: AppConfig = Depends(get_config_dep),
-) -> User:
-    """Gate `/admin` on the default-OFF `admin_portal` rollout flag.
-
-    **Authorization runs first, deliberately** (founder decision, recorded in
-    009-FR-013): this depends on :func:`require_operator`, so with the flag
-    OFF an unauthenticated caller still gets 401 and an authenticated
-    non-operator still gets 403 — identical to the flag-ON responses, so the
-    rollout state is never observable by anyone who is not already an
-    operator. Only an allow-listed operator reaches this check and sees the
-    fail-closed 404 the repository uses for an absent feature.
-
-    ADR-0008: the flag is exposure control layered *on top of* the
-    authorization boundary, never a substitute for it.
-    """
-
-    if not config.feature_flags.private_flag_effective(
-        ADMIN_PORTAL_FLAG, operator.email
-    ):
-        logger.info(
-            "Admin route unavailable: event=%s route=%s correlation=%s operator=%s "
-            "outcome=%s",
-            _admin_log_event(request, config),
-            _admin_route(request, config),
-            get_correlation_id(),
-            operator.id,
-            "portal_disabled",
-        )
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Not found.",
-        )
-    return operator
-
-
 def voice_brain_dump_enabled(user: User, feature_flags: FeatureFlagService) -> bool:
     """Whether the ADR-0008 ``voice_brain_dump`` rollout flag is effective.
 
@@ -323,17 +283,21 @@ def require_voice_brain_dump_enabled(
     return current_user
 
 
-def external_agent_relay_enabled(user: User, config: AppConfig) -> bool:
-    """Whether the ADR-0008 ``external_agent_relay`` rollout flag is effective."""
+def external_agent_relay_enabled(user: User, feature_flags: FeatureFlagService) -> bool:
+    """Whether ``external_agent_relay`` is effective for this user (DD-16).
 
-    return config.feature_flags.effective_flags(user.email).get(
-        "external_agent_relay", False
-    )
+    Resolves through the runtime resolver rather than `config.feature_flags`
+    directly (010-FR-008): the SQLite rollout answer is ANDed with the
+    construction-time relay capability, so a runtime ON never exposes the
+    relay without a constructed secret box.
+    """
+
+    return feature_flags.is_effective("external_agent_relay", user)
 
 
 def require_external_agent_relay_enabled(
     current_user: User = Depends(get_current_user),
-    config: AppConfig = Depends(get_config_dep),
+    feature_flags: FeatureFlagService = Depends(get_feature_flag_service),
 ) -> User:
     """Gate relay operations that create or enable future external work.
 
@@ -347,7 +311,7 @@ def require_external_agent_relay_enabled(
     deliberately not gated, so rollback never abandons already-dispatched work.
     """
 
-    if not external_agent_relay_enabled(current_user, config):
+    if not external_agent_relay_enabled(current_user, feature_flags):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="External agent relay is not available.",

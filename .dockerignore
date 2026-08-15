@@ -21,6 +21,9 @@ __pycache__/
 venv/
 *.egg-info/
 
+# Local runtime data (per-service SQLite stores); must never enter a build context
+backend/data/
+
 # Logs and coverage
 *.log
 *.log.*

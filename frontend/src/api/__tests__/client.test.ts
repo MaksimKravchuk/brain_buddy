@@ -400,7 +400,7 @@ describe("apiClient", () => {
     await expect(apiClient.listTags()).rejects.toThrow("Request failed");
   });
 
-  // 010: the five runtime feature-flag routes. Every screen-level test mocks
+  // 010: the four runtime feature-flag routes. Every screen-level test mocks
   // `apiClient`, so without these the wire shape — method, path, encoding and
   // body — would be asserted nowhere at all.
   it("010-FR-010: reads the runtime flag list from the admin route", async () => {
@@ -425,17 +425,6 @@ describe("apiClient", () => {
     expect(url).toBe("/api/admin/feature-flags/voice_brain_dump/mode");
     expect(init.method).toBe("PUT");
     expect(JSON.parse(init.body)).toEqual({ mode: "selected_users" });
-  });
-
-  it("010-FR-003: clears one flag's override with a DELETE on the flag itself", async () => {
-    fetchMock.mockResolvedValue(response({ degraded: false, flags: [] }));
-
-    await apiClient.clearAdminFeatureFlagOverride("mobile_task_classification");
-
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("/api/admin/feature-flags/mobile_task_classification");
-    expect(init.method).toBe("DELETE");
-    expect(init.body).toBeUndefined();
   });
 
   it("010-FR-007: adds a selected user with exactly one lookup key", async () => {

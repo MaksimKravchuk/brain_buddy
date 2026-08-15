@@ -2066,5 +2066,26 @@ class AllureQualityGateWorkflowTests(unittest.TestCase):
         self.assertTrue(any("--max-failures" in error for error in errors), errors)
 
 
+class DockerignoreLocalDataExclusionTests(unittest.TestCase):
+    def dockerignore_rules(self) -> list[str]:
+        raw = (REPO_ROOT / ".dockerignore").read_text(encoding="utf-8")
+        return [
+            stripped
+            for line in raw.splitlines()
+            for stripped in [line.strip()]
+            if stripped and not stripped.startswith("#")
+        ]
+
+    def test_excludes_the_backend_data_directory_exactly(self) -> None:
+        self.assertIn(
+            "backend/data/",
+            self.dockerignore_rules(),
+            "backend/data/ must stay excluded so local persisted SQLite stores never enter a Docker build context",
+        )
+
+    def test_does_not_narrow_the_rule_to_a_single_file(self) -> None:
+        self.assertNotIn("backend/data/feature_flags.sqlite3", self.dockerignore_rules())
+
+
 if __name__ == "__main__":
     unittest.main()

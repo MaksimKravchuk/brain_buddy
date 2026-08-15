@@ -609,13 +609,6 @@ export const apiClient = {
     );
   },
 
-  clearAdminFeatureFlagOverride(flag: string) {
-    return request<AdminFeatureFlagsResponse>(
-      `/admin/feature-flags/${encodeURIComponent(flag)}`,
-      { method: "DELETE" }
-    );
-  },
-
   addAdminFeatureFlagUser(flag: string, payload: AdminFeatureFlagUserRequest) {
     return request<AdminFeatureFlagsResponse>(
       `/admin/feature-flags/${encodeURIComponent(flag)}/selected-users`,

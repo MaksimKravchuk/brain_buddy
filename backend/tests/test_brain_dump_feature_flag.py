@@ -1,10 +1,11 @@
 """T034: the ``voice_brain_dump`` server rollout flag gates the backend feature.
 
 The native voice Brain Dump commands and provider discovery are exposed only
-when the ADR-0008 rollout flag ``voice_brain_dump`` is effective for the caller:
-OFF blocks everyone, INTERNAL allows only the allow-listed cohort, ON allows
-every authenticated user. A blocked caller gets a fail-closed 404 (the feature
-is simply not present for them), never a partial execution.
+when the ADR-0019 SQLite-backed runtime flag ``voice_brain_dump`` is effective
+for the caller: OFF blocks everyone, SELECTED_USERS allows only the
+allow-listed cohort, ON allows every authenticated user. A blocked caller gets
+a fail-closed 404 (the feature is simply not present for them), never a
+partial execution.
 """
 
 from __future__ import annotations
@@ -18,12 +19,14 @@ from fastapi.testclient import TestClient
 from app.container import Container
 from app.core.config import get_config
 from app.main import create_app
+from app.repositories.feature_flag import FlagMode
 from app.schemas.auth import Invite
 from app.utils.time import utcnow
 
-INTERNAL_EMAIL = "voice-cohort@example.com"
+COHORT_EMAIL = "voice-cohort@example.com"
 OUTSIDER_EMAIL = "voice-outsider@example.com"
 PASSWORD = "correct-horse-battery-staple"
+OPERATOR_ID = "test_operator"
 
 _CONSENT_BODY = {
     "consent": {
@@ -49,15 +52,11 @@ def _signed_up_client(
     *,
     email: str,
     flags: str,
-    internal_users: str | None = None,
 ) -> TestClient:
     monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("BRAIN_BUDDY_ENV", "test")
     monkeypatch.setenv("BRAIN_BUDDY_FEATURE_FLAGS", flags)
-    if internal_users is None:
-        monkeypatch.delenv("BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS", raising=False)
-    else:
-        monkeypatch.setenv("BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS", internal_users)
+    monkeypatch.delenv("BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS", raising=False)
     get_config.cache_clear()  # type: ignore[attr-defined]
     app = create_app()
     container: Container = app.state.container
@@ -70,6 +69,21 @@ def _signed_up_client(
     )
     assert resp.status_code == 201, resp.text
     return client
+
+
+def _sign_up_second_client(client: TestClient, *, email: str) -> TestClient:
+    """A second authenticated client against the same running app/container."""
+
+    container: Container = client.app.state.container
+    invite_code = f"invite_{email.split('@', 1)[0]}"
+    container.invite_repo.create(Invite(code=invite_code, created_at=utcnow()))
+    second = TestClient(client.app)
+    resp = second.post(
+        "/api/auth/signup",
+        json={"email": email, "password": PASSWORD, "invite_code": invite_code},
+    )
+    assert resp.status_code == 201, resp.text
+    return second
 
 
 def _start(client: TestClient):
@@ -131,32 +145,47 @@ def test_off_blocks_gated_operation_command_path(
     assert "not available" in resp.text.lower()
 
 
-def test_internal_allows_only_the_cohort(
+def test_selected_users_allows_only_the_cohort(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     client = _signed_up_client(
-        tmp_path,
-        monkeypatch,
-        email=INTERNAL_EMAIL,
-        flags="voice_brain_dump=internal",
-        internal_users=INTERNAL_EMAIL,
+        tmp_path, monkeypatch, email=COHORT_EMAIL, flags="voice_brain_dump=off"
     )
+    container: Container = client.app.state.container
+    container.feature_flag_service.set_mode(
+        "voice_brain_dump", FlagMode.SELECTED_USERS, operator_id=OPERATOR_ID
+    )
+    container.feature_flag_service.add_selected_user(
+        "voice_brain_dump", operator_id=OPERATOR_ID, email=COHORT_EMAIL
+    )
+
     assert client.get("/api/brain-dump-providers").status_code == 200
     assert _start(client).status_code == 201
 
 
-def test_internal_blocks_non_cohort_user(
+def test_selected_users_blocks_non_cohort_user(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     client = _signed_up_client(
-        tmp_path,
-        monkeypatch,
-        email=OUTSIDER_EMAIL,
-        flags="voice_brain_dump=internal",
-        internal_users=INTERNAL_EMAIL,
+        tmp_path, monkeypatch, email=COHORT_EMAIL, flags="voice_brain_dump=off"
     )
-    assert client.get("/api/brain-dump-providers").status_code == 404
-    assert _start(client).status_code == 404
+    outsider = _sign_up_second_client(client, email=OUTSIDER_EMAIL)
+
+    container: Container = client.app.state.container
+    container.feature_flag_service.set_mode(
+        "voice_brain_dump", FlagMode.SELECTED_USERS, operator_id=OPERATOR_ID
+    )
+    container.feature_flag_service.add_selected_user(
+        "voice_brain_dump", operator_id=OPERATOR_ID, email=COHORT_EMAIL
+    )
+
+    # The cohort truly contains the internal account, not merely "everyone
+    # excluded": the same mutation that blocks the outsider still admits it.
+    assert client.get("/api/brain-dump-providers").status_code == 200
+    assert _start(client).status_code == 201
+
+    assert outsider.get("/api/brain-dump-providers").status_code == 404
+    assert _start(outsider).status_code == 404
 
 
 def test_on_allows_every_authenticated_user(

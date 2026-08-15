@@ -18,9 +18,7 @@ const MOBILE = "mobile_task_classification";
 function flag(overrides: Partial<AdminFeatureFlagState> = {}): AdminFeatureFlagState {
   return {
     name: VOICE,
-    override_mode: null,
-    source: "deploy_default",
-    deploy_default_state: "off",
+    mode: "off",
     selected_users: [],
     ...overrides
   };
@@ -86,40 +84,21 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
     expect(screen.queryByRole("radio")).not.toBeInTheDocument();
   });
 
-  it("010-FR-003: F-02 shows no checked radio while inheriting, with the deploy state as its own value", async () => {
-    vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue(
-      bothFlags({ override_mode: null, source: "deploy_default", deploy_default_state: "internal" })
-    );
-
+  it("010-FR-003: F-02 checks exactly the stored mode, even OFF — the mode is always present, never null", async () => {
     const voice = await ready();
 
-    for (const name of ["Off", "On", "Selected users"]) {
-      expect(within(voice).getByRole("radio", { name })).not.toBeChecked();
-    }
-    expect(within(voice).getByText(/deploy default \(internal\)/i)).toBeInTheDocument();
-    // An inherited `internal` baseline is never mapped onto one of the three
-    // override radios (DD-3) — and there is nothing to clear.
-    expect(
-      within(voice).queryByRole("button", { name: /use deploy default/i })
-    ).not.toBeInTheDocument();
+    expect(within(voice).getByRole("radio", { name: "Off" })).toBeChecked();
+    expect(within(voice).getByRole("radio", { name: "On" })).not.toBeChecked();
+    expect(within(voice).getByRole("radio", { name: "Selected users" })).not.toBeChecked();
   });
 
-  it("010-FR-010: F-02 checks exactly the overridden mode and offers the clear action", async () => {
-    vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue(
-      bothFlags({ override_mode: "on", source: "runtime", deploy_default_state: "internal" })
-    );
+  it("010-FR-010: F-02 checks exactly the overridden mode", async () => {
+    vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue(bothFlags({ mode: "on" }));
 
     const voice = await ready();
 
     expect(within(voice).getByRole("radio", { name: "On" })).toBeChecked();
     expect(within(voice).getByRole("radio", { name: "Off" })).not.toBeChecked();
-    expect(within(voice).getByText(/runtime override/i)).toBeInTheDocument();
-    // Never hidden merely because an override is active: the operator must see
-    // what "Use deploy default" would fall back to before clicking it (DD-3).
-    expect(within(voice).getByText(/deploy default: internal/i)).toBeInTheDocument();
-    expect(
-      within(voice).getByRole("button", { name: /use deploy default/i })
-    ).toBeInTheDocument();
   });
 
   it("010-FR-010: the mode control is a native fieldset/legend radio group", async () => {
@@ -133,8 +112,7 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
   it("010-FR-005: F-03 keeps the retained cohort count visible while the mode is on", async () => {
     vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue(
       bothFlags({
-        override_mode: "on",
-        source: "runtime",
+        mode: "on",
         selected_users: [{ account_id: "user_a", email: "a@example.com" }]
       })
     );
@@ -150,8 +128,7 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
   it("010-FR-010: F-04 gives each Remove action an accessible name carrying the row identity", async () => {
     vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue(
       bothFlags({
-        override_mode: "selected_users",
-        source: "runtime",
+        mode: "selected_users",
         selected_users: [
           { account_id: "user_a", email: "a@example.com" },
           { account_id: "user_b", email: "b@example.com" }
@@ -169,7 +146,7 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
 
   it("010-FR-010: F-05 states the consequence when a selected-users cohort is empty", async () => {
     vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue(
-      bothFlags({ override_mode: "selected_users", source: "runtime" })
+      bothFlags({ mode: "selected_users" })
     );
 
     const voice = await ready();
@@ -180,7 +157,7 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
 
   it("010-FR-007: F-06 renders the add form only in selected-users mode", async () => {
     vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue(
-      bothFlags({ override_mode: "selected_users", source: "runtime" })
+      bothFlags({ mode: "selected_users" })
     );
 
     const voice = await ready();
@@ -194,7 +171,7 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
 
   it("010-FR-007: F-07 shows 009's own no-match copy and adds nobody", async () => {
     vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue(
-      bothFlags({ override_mode: "selected_users", source: "runtime" })
+      bothFlags({ mode: "selected_users" })
     );
     const add = vi
       .spyOn(apiClient, "addAdminFeatureFlagUser")
@@ -213,7 +190,7 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
     const set = vi.spyOn(apiClient, "setAdminFeatureFlagMode").mockResolvedValue(
       // The server answers `selected_users`, not the `on` that was clicked: the
       // row must show what the server stored, not what the operator asked for.
-      bothFlags({ override_mode: "selected_users", source: "runtime" })
+      bothFlags({ mode: "selected_users" })
     );
 
     const voice = await ready();
@@ -225,15 +202,13 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
     expect(within(voice).getByRole("radio", { name: "On" })).not.toBeChecked();
   });
 
-  it("010-FR-010: F-08a confirms exactly the three allowlisted mutations and nothing else", async () => {
+  it("010-FR-010: F-08a confirms exactly the two allowlisted mutations and nothing else", async () => {
     const cohort = (
       members: Array<{ account_id: string; email: string | null }>,
       mode: "selected_users" | "on" = "selected_users"
     ) =>
       bothFlags({
-        override_mode: mode,
-        source: "runtime",
-        deploy_default_state: "internal",
+        mode,
         selected_users: members
       });
     const a = { account_id: "user_a", email: "a@example.com" };
@@ -276,8 +251,9 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
   });
 
   it("010-FR-010: F-08a gates setting a flag OFF behind a confirmation", async () => {
+    vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue(bothFlags({ mode: "on" }));
     const set = vi.spyOn(apiClient, "setAdminFeatureFlagMode").mockResolvedValue(
-      bothFlags({ override_mode: "off", source: "runtime" })
+      bothFlags({ mode: "off" })
     );
 
     const voice = await ready();
@@ -294,14 +270,13 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
   it("010-FR-010: F-08a gates removing the last remaining cohort member", async () => {
     vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue(
       bothFlags({
-        override_mode: "selected_users",
-        source: "runtime",
+        mode: "selected_users",
         selected_users: [{ account_id: "user_a", email: "a@example.com" }]
       })
     );
     const remove = vi
       .spyOn(apiClient, "removeAdminFeatureFlagUser")
-      .mockResolvedValue(bothFlags({ override_mode: "selected_users", source: "runtime" }));
+      .mockResolvedValue(bothFlags({ mode: "selected_users" }));
 
     const voice = await ready();
     await userEvent.click(within(voice).getByRole("button", { name: "Remove a@example.com" }));
@@ -318,26 +293,8 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
     await waitFor(() => expect(remove).toHaveBeenCalledWith(VOICE, "user_a"));
   });
 
-  it("010-FR-010: F-08a gates clearing a runtime override and previews the deploy default", async () => {
-    vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue(
-      bothFlags({ override_mode: "on", source: "runtime", deploy_default_state: "internal" })
-    );
-    const clear = vi
-      .spyOn(apiClient, "clearAdminFeatureFlagOverride")
-      .mockResolvedValue(bothFlags({ deploy_default_state: "internal" }));
-
-    const voice = await ready();
-    await userEvent.click(within(voice).getByRole("button", { name: /use deploy default/i }));
-
-    expect(clear).not.toHaveBeenCalled();
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(/it currently ships internal/i)).toBeInTheDocument();
-
-    await userEvent.click(within(dialog).getByRole("button", { name: "Use deploy default" }));
-    await waitFor(() => expect(clear).toHaveBeenCalledWith(VOICE));
-  });
-
   it("010-SC-008: F-08a is dismissible by Escape and by Cancel, restoring focus each time", async () => {
+    vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue(bothFlags({ mode: "on" }));
     const set = vi.spyOn(apiClient, "setAdminFeatureFlagMode").mockResolvedValue(bothFlags());
 
     const voice = await ready();
@@ -364,8 +321,7 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
   it("010-SC-008: F-09 moves focus to the next remaining Remove action after a row removal", async () => {
     vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue(
       bothFlags({
-        override_mode: "selected_users",
-        source: "runtime",
+        mode: "selected_users",
         selected_users: [
           { account_id: "user_a", email: "a@example.com" },
           { account_id: "user_b", email: "b@example.com" }
@@ -374,8 +330,7 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
     );
     vi.spyOn(apiClient, "removeAdminFeatureFlagUser").mockResolvedValue(
       bothFlags({
-        override_mode: "selected_users",
-        source: "runtime",
+        mode: "selected_users",
         selected_users: [{ account_id: "user_b", email: "b@example.com" }]
       })
     );
@@ -393,13 +348,12 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
   it("010-SC-008: F-09 falls back to the add input, then the count region, as rows run out", async () => {
     vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue(
       bothFlags({
-        override_mode: "selected_users",
-        source: "runtime",
+        mode: "selected_users",
         selected_users: [{ account_id: "user_a", email: "a@example.com" }]
       })
     );
     vi.spyOn(apiClient, "removeAdminFeatureFlagUser").mockResolvedValue(
-      bothFlags({ override_mode: "selected_users", source: "runtime" })
+      bothFlags({ mode: "selected_users" })
     );
 
     const voice = await ready();
@@ -439,7 +393,7 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
 
   it("010-FR-010: F-09 returns focus to the triggering control after a mode change", async () => {
     vi.spyOn(apiClient, "setAdminFeatureFlagMode").mockResolvedValue(
-      bothFlags({ override_mode: "on", source: "runtime" })
+      bothFlags({ mode: "on" })
     );
 
     const voice = await ready();
@@ -481,7 +435,7 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
 
   it("010-SC-008: F-11 disables every control on a degraded store and offers no reset", async () => {
     vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue(
-      response([flag({ override_mode: "on", source: "runtime" }), flag({ name: MOBILE })], true)
+      response([flag({ mode: "on" }), flag({ name: MOBILE })], true)
     );
 
     const voice = await ready();
@@ -492,7 +446,6 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
     for (const radio of within(voice).getAllByRole("radio")) {
       expect(radio).toBeDisabled();
     }
-    expect(within(voice).getByRole("button", { name: /use deploy default/i })).toBeDisabled();
     expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /reset/i })).not.toBeInTheDocument();
   });
@@ -500,14 +453,13 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
   it("010-FR-007: F-12 renders an unresolvable stored ID and keeps it removable", async () => {
     vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue(
       bothFlags({
-        override_mode: "selected_users",
-        source: "runtime",
+        mode: "selected_users",
         selected_users: [{ account_id: "user_gone", email: null }]
       })
     );
     const remove = vi
       .spyOn(apiClient, "removeAdminFeatureFlagUser")
-      .mockResolvedValue(bothFlags({ override_mode: "selected_users", source: "runtime" }));
+      .mockResolvedValue(bothFlags({ mode: "selected_users" }));
 
     const voice = await ready();
 
@@ -539,10 +491,10 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
 
   it("010-FR-007: sends the typed value as typed, classifying it exactly as feature 009 does", async () => {
     vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue(
-      bothFlags({ override_mode: "selected_users", source: "runtime" })
+      bothFlags({ mode: "selected_users" })
     );
     const add = vi.spyOn(apiClient, "addAdminFeatureFlagUser").mockResolvedValue(
-      bothFlags({ override_mode: "selected_users", source: "runtime" })
+      bothFlags({ mode: "selected_users" })
     );
 
     const voice = await ready();
@@ -571,7 +523,7 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
 
   it("010-FR-010: an empty add submission sends nothing", async () => {
     vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue(
-      bothFlags({ override_mode: "selected_users", source: "runtime" })
+      bothFlags({ mode: "selected_users" })
     );
     const add = vi.spyOn(apiClient, "addAdminFeatureFlagUser").mockResolvedValue(bothFlags());
 
@@ -594,15 +546,14 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
   it("010-SC-008: the section reflows to the stated stacked layout at 390×851", async () => {
     // jsdom has no layout engine, so a measured height is always zero. What is
     // checkable — and what design.md's "Mobile reflow at 390×851" section
-    // actually states — is the treatment: the mode fieldset, source note,
-    // cohort rows and confirm controls stack rather than sitting side by side,
-    // and every tappable control carries the 44px minimum.
+    // actually states — is the treatment: the mode fieldset, cohort rows and
+    // confirm controls stack rather than sitting side by side, and every
+    // tappable control carries the 44px minimum.
     window.innerWidth = 390;
     window.innerHeight = 851;
     vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue(
       bothFlags({
-        override_mode: "selected_users",
-        source: "runtime",
+        mode: "selected_users",
         selected_users: [{ account_id: "user_a", email: "a@example.com" }]
       })
     );
@@ -611,7 +562,6 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
 
     const group = within(voice).getByRole("group", { name: new RegExp(`${VOICE} mode`, "i") });
     expect(group.className).toMatch(/flex-wrap/);
-    expect(within(voice).getByTestId(`source-note-${VOICE}`).className).toMatch(/flex-col/);
     expect(within(voice).getByTestId(`cohort-row-user_a`).className).toMatch(/flex-col/);
     expect(within(voice).getByTestId(`add-form-${VOICE}`).className).toMatch(/flex-col/);
     expect(
@@ -629,8 +579,7 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
   it("010-SC-008: cancelling a last-member removal restores focus to that row's Remove", async () => {
     vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue(
       bothFlags({
-        override_mode: "selected_users",
-        source: "runtime",
+        mode: "selected_users",
         selected_users: [{ account_id: "user_a", email: "a@example.com" }]
       })
     );
@@ -646,24 +595,6 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(document.activeElement).toBe(trigger);
     expect(remove).not.toHaveBeenCalled();
-  });
-
-  it("010-SC-008: cancelling a clear-override restores focus to the clear action", async () => {
-    vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue(
-      bothFlags({ override_mode: "on", source: "runtime", deploy_default_state: "internal" })
-    );
-    const clear = vi.spyOn(apiClient, "clearAdminFeatureFlagOverride");
-
-    const voice = await ready();
-    const trigger = within(voice).getByRole("button", { name: /use deploy default/i });
-    await userEvent.click(trigger);
-    await screen.findByRole("dialog");
-
-    await userEvent.keyboard("{Escape}");
-
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(document.activeElement).toBe(trigger);
-    expect(clear).not.toHaveBeenCalled();
   });
 
   it("010-SC-008: F-10 renders a server error with no correlation ID and no dangling ref", async () => {

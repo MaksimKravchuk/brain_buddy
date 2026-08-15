@@ -1,29 +1,33 @@
-"""Resolve effective rollout flags from the runtime overlay, then the baseline.
+"""Resolve effective rollout flags exclusively from the SQLite store (ADR-0019).
 
-**Overlay, do not replace.** :class:`FeatureFlagSettings` keeps computing exactly
-what it computes today. This service asks the runtime document whether a
-**managed** flag has an entry and, only when it does, answers from that entry
-alone — never blending the two sources (010-FR-003). Everything else, including
-`delivery_canary` and `external_agent_relay`, falls through to the environment
-computation untouched (010-FR-002, DD-1). Delete the overlay and the old answer
-is what remains, which is what makes 010-SC-003 provable by construction.
+**SQLite is authoritative, not an overlay.** Each of the three **managed**
+flags (`voice_brain_dump`, `mobile_task_classification`, `external_agent_relay`)
+resolves exclusively from its SQLite row — there is no per-request fallback to
+`config.feature_flags` for these three any more (DD-15, 010-FR-003).
+`delivery_canary` alone still resolves from config, through the narrow
+`FeatureFlagSettings.delivery_canary_effective` — never through
+`FeatureFlagSettings.effective_flags`, the retired aggregate resolver that
+would also evaluate the environment baseline for the three managed flags on
+every call. `external_agent_relay`'s effective value
+additionally ANDs the SQLite rollout answer with a constructor-supplied
+`relay_capability_available` boolean, so a runtime ON can never expose the
+relay without a constructed secret box (DD-16).
 
 Every operator mutation emits exactly one dedicated, content-free record, and
-every cohort-resolving read emits exactly one aggregate record (010-FR-006,
-DD-10). A mutation's returned view deliberately does **not** emit the aggregate
-record: that would make a mutation produce two of this feature's own records
-where FR-006 requires one.
+every cohort-resolving read emits exactly one aggregate record (FR-006,
+DD-10). A mutation's returned view deliberately does **not** emit the
+aggregate record: that would make a mutation produce two of this feature's
+own records where FR-006 requires one.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass
 
 from app.core.config import AppConfig
 from app.core.logging import get_correlation_id
-from app.exceptions import BrainBuddyError, ValidationFailure
+from app.exceptions import BrainBuddyError, StorageUnavailableError, ValidationFailure
 from app.repositories import UserRepository
 from app.repositories.feature_flag import (
     MANAGED_FLAGS,
@@ -39,12 +43,11 @@ from app.services.admin_service import ACCOUNT_ID_PATTERN, AdminService
 
 logger = logging.getLogger(__name__)
 
-SOURCE_RUNTIME = "runtime"
-SOURCE_DEPLOY_DEFAULT = "deploy_default"
-
 #: Placeholder used wherever a record has no attributable account id. Mirrors
 #: `AdminService.find_account`'s own "-" so the two records read alike.
 _NO_ACCOUNT = "-"
+
+_RELAY_FLAG = "external_agent_relay"
 
 
 class SelectedUserNotFoundError(BrainBuddyError):
@@ -73,12 +76,14 @@ class SelectedUserView:
 
 @dataclass(frozen=True, slots=True)
 class ManagedFlagView:
-    """One managed flag as the operator screen needs it (DD-3's three fields)."""
+    """One managed flag as the operator screen needs it.
+
+    There is no more inherited-state split after ADR-0019 (DD-3, DD-15):
+    `mode` is always present, exactly the flag's stored SQLite value.
+    """
 
     name: str
-    override_mode: FlagMode | None
-    source: str
-    deploy_default_state: str
+    mode: FlagMode
     selected_users: tuple[SelectedUserView, ...]
 
 
@@ -100,31 +105,41 @@ class FeatureFlagService:
         config: AppConfig,
         user_repo: UserRepository,
         admin_service: AdminService,
+        relay_capability_available: bool = False,
     ) -> None:
         self.repository = repository
         self.config = config
         self.user_repo = user_repo
         self.admin_service = admin_service
-        self._cached: RuntimeOverlay | None = None
-        self._cache_key: tuple[int, int] | None = None
+        self._relay_capability_available = relay_capability_available
 
     # ------------------------------------------------------------------
     # Evaluation
     # ------------------------------------------------------------------
 
     def effective_flags(self, user: User) -> dict[str, bool]:
-        """The member-facing flag payload, with managed flags overlaid.
+        """The member-facing flag payload; every key resolved independently.
 
-        The key set is exactly `KNOWN_FEATURE_FLAGS`, unchanged (010-FR-008):
-        this only replaces two values inside the dict the config already built.
+        The key set is exactly `KNOWN_FEATURE_FLAGS` (010-FR-008).
+        `delivery_canary` resolves from `FeatureFlagSettings
+        .delivery_canary_effective` alone; the three managed flags resolve
+        exclusively from their SQLite rows. This never calls
+        `FeatureFlagSettings.effective_flags`, the retired aggregate
+        environment resolver, for any managed flag (DD-15).
         """
 
-        resolved = self.config.feature_flags.effective_flags(user.email)
-        overlay = self._overlay()
+        resolved: dict[str, bool] = {
+            "delivery_canary": self.config.feature_flags.delivery_canary_effective(
+                user.email
+            )
+        }
+        overlay = self.repository.read()
         for name in MANAGED_FLAGS:
             entry = overlay.flags.get(name)
-            if entry is not None:
-                resolved[name] = _entry_admits(entry, user)
+            effective = False if entry is None else _entry_admits(entry, user)
+            if name == _RELAY_FLAG:
+                effective = effective and self._relay_capability_available
+            resolved[name] = effective
         return resolved
 
     def is_effective(self, name: str, user: User) -> bool:
@@ -139,7 +154,7 @@ class FeatureFlagService:
     def describe(self, *, operator_id: str) -> RuntimeFlagsView:
         """The operator view, plus the one aggregate audit record (DD-10)."""
 
-        view = self._view(self._overlay())
+        view = self._view(self.repository.read())
         resolved = sum(
             1
             for flag in view.flags
@@ -163,53 +178,23 @@ class FeatureFlagService:
     def set_mode(
         self, flag: str, mode: FlagMode | str, *, operator_id: str
     ) -> RuntimeFlagsView:
-        """Put one managed flag into one of the three runtime-override modes."""
+        """Put one managed flag into one of the three runtime modes."""
 
         action = "set_mode"
         self._require_managed(flag, operator_id=operator_id, action=action)
         resolved_mode = self._require_mode(flag, mode, operator_id=operator_id)
 
         def _apply(current: dict[str, FlagOverride]) -> dict[str, FlagOverride]:
-            existing = current.get(flag)
+            existing = current[flag]
             # DD-6: a cohort is retained, not cleared, by a mode change.
-            retained = existing.selected_users if existing is not None else ()
-            current[flag] = FlagOverride(mode=resolved_mode, selected_users=retained)
+            current[flag] = FlagOverride(
+                mode=resolved_mode, selected_users=existing.selected_users
+            )
             return current
 
-        try:
-            overlay = self._mutate(_apply)
-        except DegradedRuntimeFlagsError:
-            self._record(
-                action, flag=flag, operator_id=operator_id, outcome="refused_degraded"
-            )
-            raise
-        except OSError:
-            self._record(
-                action, flag=flag, operator_id=operator_id, outcome="write_failed"
-            )
-            raise
-        self._record(action, flag=flag, operator_id=operator_id)
-        return self._view(overlay)
-
-    def clear_override(self, flag: str, *, operator_id: str) -> RuntimeFlagsView:
-        """Delete one managed flag's whole runtime entry, cohort included (DD-3)."""
-
-        action = "clear_override"
-        self._require_managed(flag, operator_id=operator_id, action=action)
-
-        try:
-            overlay = self.repository.clear(flag)
-        except DegradedRuntimeFlagsError:
-            self._record(
-                action, flag=flag, operator_id=operator_id, outcome="refused_degraded"
-            )
-            raise
-        except OSError:
-            self._record(
-                action, flag=flag, operator_id=operator_id, outcome="write_failed"
-            )
-            raise
-        self._invalidate()
+        overlay = self._mutate(
+            _apply, action=action, flag=flag, operator_id=operator_id
+        )
         self._record(action, flag=flag, operator_id=operator_id)
         return self._view(overlay)
 
@@ -259,32 +244,16 @@ class FeatureFlagService:
             return current
 
         try:
-            overlay = self._mutate(_apply)
-        except DegradedRuntimeFlagsError:
-            self._record(
-                action, flag=flag, operator_id=operator_id, outcome="refused_degraded"
-            )
-            raise
-        except ValidationFailure:
-            self._record(
-                action,
+            overlay = self._mutate(
+                _apply,
+                action=action,
                 flag=flag,
                 operator_id=operator_id,
-                outcome="refused_mode_not_selected_users",
+                write_failed_account=found.id,
             )
-            raise
         except SelectedUserNotFoundError:
             self._record(
                 action, flag=flag, operator_id=operator_id, outcome="no_account_found"
-            )
-            raise
-        except OSError:
-            self._record(
-                action,
-                flag=flag,
-                operator_id=operator_id,
-                account=found.id,
-                outcome="write_failed",
             )
             raise
         self._record(action, flag=flag, operator_id=operator_id, account=found.id)
@@ -314,30 +283,13 @@ class FeatureFlagService:
             )
             return current
 
-        try:
-            overlay = self._mutate(_apply)
-        except DegradedRuntimeFlagsError:
-            self._record(
-                action, flag=flag, operator_id=operator_id, outcome="refused_degraded"
-            )
-            raise
-        except ValidationFailure:
-            self._record(
-                action,
-                flag=flag,
-                operator_id=operator_id,
-                outcome="refused_mode_not_selected_users",
-            )
-            raise
-        except OSError:
-            self._record(
-                action,
-                flag=flag,
-                operator_id=operator_id,
-                account=record_account,
-                outcome="write_failed",
-            )
-            raise
+        overlay = self._mutate(
+            _apply,
+            action=action,
+            flag=flag,
+            operator_id=operator_id,
+            write_failed_account=record_account,
+        )
         self._record(action, flag=flag, operator_id=operator_id, account=record_account)
         return self._view(overlay)
 
@@ -381,11 +333,9 @@ class FeatureFlagService:
         """The flag's entry, iff its *locked, freshly read* mode is SELECTED_USERS.
 
         Called only from inside a mutate callback, so `current` is the
-        snapshot taken under the repository lock rather than the service's
-        cached read — a concurrent `set_mode`/`clear_override` racing this
-        call is therefore always resolved one way or the other, never
-        observed half-applied, and a flag a concurrent `clear_override` just
-        removed is a normal refusal rather than a `KeyError` (010-FR-010).
+        snapshot taken under the repository's transaction — a concurrent
+        `set_mode` racing this call is therefore always resolved one way or
+        the other, never observed half-applied (010-FR-010).
         """
 
         entry = current.get(flag)
@@ -418,32 +368,55 @@ class FeatureFlagService:
             outcome,
         )
 
-    def _mutate(self, apply: MutationFn) -> RuntimeOverlay:
-        overlay = self.repository.mutate(apply)
-        self._invalidate()
-        return overlay
+    def _mutate(
+        self,
+        apply: MutationFn,
+        *,
+        action: str,
+        flag: str,
+        operator_id: str,
+        write_failed_account: str | None = None,
+    ) -> RuntimeOverlay:
+        """Run one repository mutation, recording exactly one refusal record.
 
-    def _invalidate(self) -> None:
-        self._cached = None
-        self._cache_key = None
+        `write_failed_account` names the already-resolved target only for a
+        generic write failure (add/remove already know their target); a
+        degraded store or a mode-mismatch refusal never names an account —
+        the mutation was refused before any target-specific step (DD-10).
 
-    def _stat_key(self) -> tuple[int, int] | None:
-        """Modification time and size, the pair a replacement always changes."""
+        A write failure surfaces as `OSError` (e.g. a permission failure
+        opening the database file) or `StorageUnavailableError` — the
+        repository's own translation of a mid-transaction `sqlite3.Error`
+        (disk full, EIO, a lock timeout), mirroring
+        `TaskRepository._sqlite_guard` — so both must be caught for the audit
+        obligation to hold regardless of which layer a given failure
+        surfaces at.
+        """
 
         try:
-            stat = os.stat(self.repository.document_path)
-        except OSError:
-            return None
-        return (stat.st_mtime_ns, stat.st_size)
-
-    def _overlay(self) -> RuntimeOverlay:
-        key = self._stat_key()
-        if self._cached is not None and self._cache_key == key:
-            return self._cached
-        overlay = self.repository.read()
-        self._cached = overlay
-        self._cache_key = key
-        return overlay
+            return self.repository.mutate(apply)
+        except DegradedRuntimeFlagsError:
+            self._record(
+                action, flag=flag, operator_id=operator_id, outcome="refused_degraded"
+            )
+            raise
+        except ValidationFailure:
+            self._record(
+                action,
+                flag=flag,
+                operator_id=operator_id,
+                outcome="refused_mode_not_selected_users",
+            )
+            raise
+        except (OSError, StorageUnavailableError):
+            self._record(
+                action,
+                flag=flag,
+                operator_id=operator_id,
+                account=write_failed_account,
+                outcome="write_failed",
+            )
+            raise
 
     def _view(self, overlay: RuntimeOverlay) -> RuntimeFlagsView:
         flags: list[ManagedFlagView] = []
@@ -452,11 +425,7 @@ class FeatureFlagService:
             flags.append(
                 ManagedFlagView(
                     name=name,
-                    override_mode=entry.mode if entry is not None else None,
-                    source=(
-                        SOURCE_RUNTIME if entry is not None else SOURCE_DEPLOY_DEFAULT
-                    ),
-                    deploy_default_state=self.config.feature_flags.states[name].value,
+                    mode=entry.mode if entry is not None else FlagMode.OFF,
                     selected_users=self._resolve_cohort(entry),
                 )
             )
@@ -505,8 +474,6 @@ __all__ = [
     "FeatureFlagService",
     "ManagedFlagView",
     "RuntimeFlagsView",
-    "SOURCE_DEPLOY_DEFAULT",
-    "SOURCE_RUNTIME",
     "SelectedUserNotFoundError",
     "SelectedUserView",
 ]

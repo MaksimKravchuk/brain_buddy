@@ -1,15 +1,13 @@
-"""Minimum admin portal routes: exact account lookup and session revoke.
+"""Minimum admin portal routes: exact account lookup, session revoke, and
+runtime feature-flag management.
 
-Every route requires `require_admin_portal_enabled`, which composes
-`require_operator` — a valid session AND allow-list membership — checked
-before any account lookup or mutation runs, so a denial never varies with
-whether the target account exists (009-FR-002). Authorization is evaluated
-*before* the default-OFF `admin_portal` rollout flag: with the flag OFF an
-unauthenticated caller still gets 401 and a non-operator still gets 403, and
-only an allow-listed operator sees the fail-closed 404 (009-FR-013).
-The mutation relies on the repository's existing `SameSite=Lax`
-session-cookie posture like every other mutating route (009-FR-009); no
-additional origin check is added.
+Every route requires `require_operator` — a valid session AND allow-list
+membership, deny-before-touch (009-FR-002) — directly. There is no more
+`admin_portal` rollout flag layered on top: the Admin Portal is key
+functionality and is always reachable by an authenticated, allow-listed
+operator (ADR-0019, DD-14). The mutation relies on the repository's existing
+`SameSite=Lax` session-cookie posture like every other mutating route
+(009-FR-009); no additional origin check is added.
 """
 
 from __future__ import annotations
@@ -19,12 +17,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.schemas.admin import (
     AdminAccountLookupRequest,
     AdminAccountResponse,
-    AdminFeatureFlagDeployState,
     AdminFeatureFlagMode,
     AdminFeatureFlagModeRequest,
     AdminFeatureFlagSelectedUser,
     AdminFeatureFlagSelectedUserRequest,
-    AdminFeatureFlagSource,
     AdminFeatureFlagsResponse,
     AdminFeatureFlagState,
     AdminRevokeSessionsResponse,
@@ -38,17 +34,13 @@ from app.services.feature_flag_service import (
 )
 
 from .contracts import error_responses
-from .dependencies import (
-    get_admin_service,
-    get_feature_flag_service,
-    require_admin_portal_enabled,
-)
+from .dependencies import get_admin_service, get_feature_flag_service, require_operator
 
 router = APIRouter(tags=["admin"])
 
 _DEGRADED_DETAIL = (
-    "Runtime flag state could not be read. Every flag is resolving from the "
-    "deploy default, and changes are disabled until this is repaired."
+    "Runtime flag state could not be read. Every flag is resolving as "
+    "ineffective, and changes are disabled until this is repaired."
 )
 
 
@@ -65,15 +57,7 @@ def _flags_response(view: RuntimeFlagsView) -> AdminFeatureFlagsResponse:
         flags=[
             AdminFeatureFlagState(
                 name=flag.name,
-                override_mode=(
-                    None
-                    if flag.override_mode is None
-                    else AdminFeatureFlagMode(flag.override_mode.value)
-                ),
-                source=AdminFeatureFlagSource(flag.source),
-                deploy_default_state=AdminFeatureFlagDeployState(
-                    flag.deploy_default_state
-                ),
+                mode=AdminFeatureFlagMode(flag.mode.value),
                 selected_users=[
                     AdminFeatureFlagSelectedUser(
                         account_id=member.account_id, email=member.email
@@ -106,11 +90,9 @@ def _account_response(user: User) -> AdminAccountResponse:
 @router.get(
     "/status",
     response_model=AdminStatusResponse,
-    responses=error_responses(401, 403, 404),
+    responses=error_responses(401, 403),
 )
-def admin_status(
-    _operator: User = Depends(require_admin_portal_enabled),
-) -> AdminStatusResponse:
+def admin_status(_operator: User = Depends(require_operator)) -> AdminStatusResponse:
     """Server-issued operator capability check for the frontend (009-FR-002).
 
     Kept off the shared signup/login/me payload so a non-operator's response
@@ -128,7 +110,7 @@ def admin_status(
 )
 def lookup_account(
     payload: AdminAccountLookupRequest,
-    operator: User = Depends(require_admin_portal_enabled),
+    operator: User = Depends(require_operator),
     admin_service: AdminService = Depends(get_admin_service),
 ) -> AdminAccountResponse:
     user = admin_service.find_account(
@@ -148,7 +130,7 @@ def lookup_account(
 )
 def revoke_sessions(
     account_id: str,
-    operator: User = Depends(require_admin_portal_enabled),
+    operator: User = Depends(require_operator),
     admin_service: AdminService = Depends(get_admin_service),
 ) -> AdminRevokeSessionsResponse:
     revoked = admin_service.revoke_sessions(
@@ -160,16 +142,16 @@ def revoke_sessions(
 @router.get(
     "/feature-flags",
     response_model=AdminFeatureFlagsResponse,
-    responses=error_responses(401, 403, 404),
+    responses=error_responses(401, 403),
 )
 def list_feature_flags(
-    operator: User = Depends(require_admin_portal_enabled),
+    operator: User = Depends(require_operator),
     feature_flags: FeatureFlagService = Depends(get_feature_flag_service),
 ) -> AdminFeatureFlagsResponse:
-    """Read every runtime-manageable flag's mode, source and cohort (010-FR-010).
+    """Read every runtime-manageable flag's mode and cohort (010-FR-010).
 
-    Behind the same 009 gate as every mutation, deliberately: FR-006 counts
-    this route among the five, so a denial performs no repository read here
+    Behind the same gate as every mutation, deliberately: FR-006 counts this
+    route among the four, so a denial performs no repository read here
     either.
     """
 
@@ -179,41 +161,18 @@ def list_feature_flags(
 @router.put(
     "/feature-flags/{flag}/mode",
     response_model=AdminFeatureFlagsResponse,
-    responses=error_responses(400, 401, 403, 404, 422, 503),
+    responses=error_responses(400, 401, 403, 422, 503),
 )
 def set_feature_flag_mode(
     flag: str,
     payload: AdminFeatureFlagModeRequest,
-    operator: User = Depends(require_admin_portal_enabled),
+    operator: User = Depends(require_operator),
     feature_flags: FeatureFlagService = Depends(get_feature_flag_service),
 ) -> AdminFeatureFlagsResponse:
     """Put one managed flag into OFF, ON or SELECTED_USERS (010-FR-005)."""
 
     try:
         view = feature_flags.set_mode(flag, payload.mode.value, operator_id=operator.id)
-    except DegradedRuntimeFlagsError as exc:
-        raise _degraded() from exc
-    return _flags_response(view)
-
-
-@router.delete(
-    "/feature-flags/{flag}",
-    response_model=AdminFeatureFlagsResponse,
-    responses=error_responses(400, 401, 403, 404, 422, 503),
-)
-def clear_feature_flag_override(
-    flag: str,
-    operator: User = Depends(require_admin_portal_enabled),
-    feature_flags: FeatureFlagService = Depends(get_feature_flag_service),
-) -> AdminFeatureFlagsResponse:
-    """Delete one flag's whole runtime entry, cohort included (DD-3).
-
-    Distinct from setting a mode: only deleting the entry restores actual
-    environment inheritance, including the `internal`-stage cohort.
-    """
-
-    try:
-        view = feature_flags.clear_override(flag, operator_id=operator.id)
     except DegradedRuntimeFlagsError as exc:
         raise _degraded() from exc
     return _flags_response(view)
@@ -227,7 +186,7 @@ def clear_feature_flag_override(
 def add_feature_flag_selected_user(
     flag: str,
     payload: AdminFeatureFlagSelectedUserRequest,
-    operator: User = Depends(require_admin_portal_enabled),
+    operator: User = Depends(require_operator),
     feature_flags: FeatureFlagService = Depends(get_feature_flag_service),
 ) -> AdminFeatureFlagsResponse:
     """Add one exactly-matched account to a SELECTED_USERS cohort (010-FR-007).
@@ -256,12 +215,12 @@ def add_feature_flag_selected_user(
 @router.delete(
     "/feature-flags/{flag}/selected-users/{account_id}",
     response_model=AdminFeatureFlagsResponse,
-    responses=error_responses(400, 401, 403, 404, 422, 503),
+    responses=error_responses(400, 401, 403, 422, 503),
 )
 def remove_feature_flag_selected_user(
     flag: str,
     account_id: str,
-    operator: User = Depends(require_admin_portal_enabled),
+    operator: User = Depends(require_operator),
     feature_flags: FeatureFlagService = Depends(get_feature_flag_service),
 ) -> AdminFeatureFlagsResponse:
     """Remove one stored account ID. Idempotent by ID, with no lookup (DD-7).

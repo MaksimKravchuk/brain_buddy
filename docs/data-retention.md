@@ -18,7 +18,7 @@ in-app privacy policy (`frontend/src/pages/PrivacyPolicyPage.tsx`, served at
 | Voice operations (transcripts, consent records) | `data/voice_operations.sqlite3` + `brain-dump-operations/` mirrors | Life of account; uncommitted working artifacts 7 days | Sweep (`purge_expired_working_artifacts`) / purge |
 | Raw voice audio | `data/brain-dump-media/<owner>/…` | 24 hours after processing (`BRAIN_BUDDY_VOICE_RAW_AUDIO_RETENTION_SECONDS`), or immediate user deletion | Sweep (`purge_expired_raw_audio`) / in-app "Delete raw audio" |
 | Invites | `data/invites/<code>.json` | Indefinite, but `used_by_user_id` is scrubbed to `"deleted-user"` on account purge | Purge (`InviteRepository.scrub_user`) |
-| Runtime feature-flag rollout document (flag modes plus the **account ids** an operator selected — no email, display name, credential or member content) | `data/feature-flags/runtime.json` | Life of the deployment; an account's id is removed from every cohort on account purge | Purge (`FeatureFlagOverrideRepository.scrub_user`) |
+| Runtime feature-flag rollout store (flag modes plus the **account ids** an operator selected — no email, display name, credential or member content) | `data/feature_flags.sqlite3` | Life of the deployment; an account's id is removed from every cohort on account purge | Purge (`FeatureFlagOverrideRepository.scrub_user`) |
 | Server logs (correlation IDs, no content) | process stdout / Fly logs | Fly's log retention | Platform |
 | **Admin access records** (an operator looked up, or revoked sessions for, one account; or changed a runtime feature flag's mode, cleared its override, or added or removed one selected account; or read the flag list, resolving its cohorts: operator account id, resolved target account id where the operation names one, flag name, action, outcome, and per-read flag and resolved-account counts — no email, display name, or request body) | process stdout / Fly logs | Fly's log retention | Platform |
 | Mobile pending classification queue (task, project and tag **ids**) | device `AsyncStorage`, key `bb.pendingClassification.<server>.<account>` | 30 days from last edit, or immediately on a deliberate identity transition | Mobile client sweep across all stored identities (spec 006, FR-011/FR-018) |
@@ -46,17 +46,35 @@ that was accepted rather than moved to the Keychain.
    daemon-thread loop outside tests) calls
    `AccountService.purge_due_accounts()`. Manual/ops entrypoint:
    `python -m app.cli purge-due-accounts`.
-5. `purge_account` deletes in a crash-safe, idempotent order — sessions →
-   voice (SQLite rows, JSON mirrors, raw audio) → tasks (SQLite rows, JSON
-   mirrors) → trees (directories incl. versions + validation, index entries)
-   → invite scrub → runtime feature-flag cohort scrub → **user record last**.
-   If the process dies mid-purge the account is still past-due and the next
-   pass re-runs everything. The cohort scrub is fail-closed (ADR-0018 §7): if
-   the runtime flag document exists but cannot be parsed, the purge halts
-   *before* the user record is deleted and retries on every subsequent pass
-   until an operator repairs the document, so erasure is complete-or-pending
-   rather than silently partial. One such account never blocks another's due
-   purge.
+5. `purge_account` first durably stamps `deletion_requested_at` (a
+   non-destructive marker write that never overwrites an existing timestamp),
+   then deletes in a crash-safe, idempotent order — runtime feature-flag
+   cohort scrub → sessions → voice (SQLite rows, JSON mirrors, raw audio) →
+   external-agent connections/runs → tasks (SQLite rows, JSON mirrors) →
+   trees (directories incl. versions + validation, index entries) → invite
+   scrub → **user record last**. The cohort scrub runs before every other
+   destructive step, not after: it deliberately raises rather than skipping
+   when the runtime flag store is degraded, so erasure is always
+   complete-or-not-yet-started rather than silently partial. If the process
+   dies mid-purge the marker and the rest of the account survive, the account
+   stays past-due, and the next pass re-runs everything. One such account
+   never blocks another's due purge.
+
+   The authoritative runtime store is `feature_flags.sqlite3`; the legacy
+   `feature-flags/runtime.json` document is retained on the volume only so an
+   older image can still be rolled back onto it, and once the PII-free
+   `feature-flags/sqlite-migration-complete.json` marker exists that document
+   is never read again as a migration or runtime source, even if the SQLite
+   file is deleted or recreated (the marker records only a migration id and
+   timestamp — no account, email or environment value). Because a retained
+   rollback artifact that still names a purged account would be a privacy
+   leak, the cohort scrub also removes the account ID from that legacy
+   document; failing to do so halts the purge before the user record is
+   deleted, the same as a degraded SQLite store. A degraded SQLite store —
+   unreadable, a missing row, or a row whose mode is invalid — likewise
+   leaves every managed flag fail-closed OFF and blocks the destructive part
+   of purge until an operator repairs it, retrying on every subsequent sweep
+   pass.
 
 Nothing user-identifiable survives a purge **in the data store**; consumed
 invites keep only the `"deleted-user"` sentinel so they stay burned. The one
@@ -71,8 +89,8 @@ happened: the operator's account id, the resolved target account id, and the
 outcome. Nothing else — no email, no display name, no credential, token or
 session hash, no member content, and no raw request input. Spec 010 adds this
 feature's own records under the identical disposition: one record per runtime
-feature-flag mutation (set mode, clear override, add selected account, remove
-selected account) carrying the operator id, flag name, action, the target
+feature-flag mutation (set mode, add selected account, remove selected
+account) carrying the operator id, flag name, action, the target
 account id when the operation names one, and the outcome; plus one aggregate
 record per flag-list read carrying the operator id, the flag count and the
 resolved-account count. The disposition below is a deliberate controller
@@ -103,7 +121,7 @@ idempotency records (transient duplicates of exported data). Also excluded:
 **admin access records** — content-free platform log lines recording that an
 operator looked up or revoked sessions for an account, or changed a runtime
 feature flag (see above). Also excluded: the **runtime feature-flag rollout
-document** — controller-side rollout configuration recording only whether an
+store** — controller-side rollout configuration recording only whether an
 operator selected your account id for a flag, never any content of yours. Raw
 audio appears only while it is inside its 24-hour retention window.
 

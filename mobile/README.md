@@ -29,9 +29,10 @@ npx expo start            # scan the QR code with the iPhone camera
   `http://<your-lan-ip>:8000/api`. Phone and laptop must share a network.
   Outside production the session cookie is not `Secure`, so plain HTTP works.
 - **Voice brain dump** requires the `voice_brain_dump` feature flag for your
-  account (`BRAIN_BUDDY_FEATURE_FLAGS="voice_brain_dump=on"` locally); the
-  mic button hides itself when the flag is off or no STT provider is
-  configured.
+  account. On a fresh local database, `BRAIN_BUDDY_FEATURE_FLAGS="voice_brain_dump=on"`
+  seeds that flag once during the one-time SQLite migration (ADR-0019); after
+  that it's managed through the Admin Portal, not this variable. The mic
+  button hides itself when the flag is off or no STT provider is configured.
 
 Everything in the app runs inside Expo Go — no dev build needed for v1.
 

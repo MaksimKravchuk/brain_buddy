@@ -1,7 +1,8 @@
-"""The server-owned operator allow-list and the private admin_portal flag.
+"""The server-owned operator allow-list (009-FR-001) and the ADR-0019
+deletion of the `admin_portal` flag (DD-14, superseding 009-FR-013).
 
-009-FR-001 and 009-FR-013; the ids are on the individual tests so the
-requirement-coverage gate tracks assertions rather than a module header.
+The ids are on the individual tests so the requirement-coverage gate tracks
+assertions rather than a module header.
 """
 
 from __future__ import annotations
@@ -66,56 +67,30 @@ def test_009_FR_001_app_config_reads_the_operator_env_var(
 
 
 # ---------------------------------------------------------------------------
-# 009-FR-013 — the private, default-OFF admin_portal rollout flag
+# DD-14 (2026-08-15, supersedes 009-FR-013) — `admin_portal` is deleted
+# outright, not merely excluded: it is not a configurable flag name anywhere.
 # ---------------------------------------------------------------------------
 
 
-def test_009_FR_013_admin_portal_is_a_configurable_flag_that_defaults_off(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("BRAIN_BUDDY_FEATURE_FLAGS", raising=False)
-    settings = FeatureFlagSettings()
+def test_010_DD_14_admin_portal_is_not_a_configurable_flag_name() -> None:
+    """`admin_portal` does not exist in `ALL_FEATURE_FLAGS`/`KNOWN_FEATURE_FLAGS`
+    at all — there is no flag left that could hide `/admin` behind it."""
 
-    assert "admin_portal" in ALL_FEATURE_FLAGS
-    assert (
-        settings.private_flag_effective("admin_portal", "anyone@example.com") is False
-    )
-
-
-def test_009_FR_013_admin_portal_can_be_turned_on_through_the_flag_string() -> None:
-    settings = FeatureFlagSettings(states={"admin_portal": FeatureFlagState.ON})
-
-    assert settings.private_flag_effective("admin_portal", "op@example.com") is True
-
-
-def test_009_FR_013_admin_portal_internal_stage_honors_the_internal_cohort() -> None:
-    settings = FeatureFlagSettings(
-        states={"admin_portal": FeatureFlagState.INTERNAL},
-        internal_users=frozenset({"op@example.com"}),
-    )
-
-    assert settings.private_flag_effective("admin_portal", "op@example.com") is True
-    assert settings.private_flag_effective("admin_portal", "other@example.com") is False
-
-
-def test_009_FR_013_admin_portal_is_absent_from_the_member_facing_payload() -> None:
-    """009-FR-010: adding it to KNOWN_FEATURE_FLAGS would change every member's
-    `/api/auth/me` response shape and broadcast the rollout state."""
-
-    settings = FeatureFlagSettings(states={"admin_portal": FeatureFlagState.ON})
-
-    assert "admin_portal" not in settings.effective_flags("op@example.com")
+    assert "admin_portal" not in ALL_FEATURE_FLAGS
     assert "admin_portal" not in KNOWN_FEATURE_FLAGS
-    assert set(settings.effective_flags("op@example.com")) == set(KNOWN_FEATURE_FLAGS)
+    assert ALL_FEATURE_FLAGS == KNOWN_FEATURE_FLAGS
 
 
-def test_009_FR_013_effective_flags_is_not_a_way_to_read_a_private_flag() -> None:
-    settings = FeatureFlagSettings(states={"admin_portal": FeatureFlagState.ON})
+def test_010_DD_14_configuring_admin_portal_fails_closed_like_any_unknown_name() -> (
+    None
+):
+    """Staging `admin_portal=on` fails application startup exactly like any
+    other undeclared flag name — DD-14 gives it no distinct code path."""
 
-    with pytest.raises(ValueError, match="not a private feature flag"):
-        settings.private_flag_effective("voice_brain_dump", "op@example.com")
+    with pytest.raises(ValueError, match="Unknown feature flag"):
+        FeatureFlagSettings(states={"admin_portal": FeatureFlagState.ON})
 
 
-def test_009_FR_013_an_unknown_flag_name_still_fails_closed() -> None:
+def test_010_DD_14_an_unknown_flag_name_still_fails_closed() -> None:
     with pytest.raises(ValueError, match="Unknown feature flag"):
         FeatureFlagSettings(states={"admin_portal_v2": FeatureFlagState.ON})

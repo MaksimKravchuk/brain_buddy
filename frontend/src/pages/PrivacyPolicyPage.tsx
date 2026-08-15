@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 
 // Update these two constants when the policy text changes or the contact moves.
 const CONTACT_EMAIL = "maksim.v.kravchuk@gmail.com";
-const LAST_UPDATED = "August 14, 2026";
+const LAST_UPDATED = "August 15, 2026";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
   return (
@@ -94,9 +94,9 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
             what we did, not of you.
           </p>
           <p>
-            To turn a feature on or off for particular accounts we keep one rollout file: it
-            holds only your account id, it is scrubbed when your account is purged, and it is
-            excluded from your data export.
+            To turn a feature on or off for particular accounts we keep one SQLite store
+            covering three managed flags: it holds only your account id per flag, it is
+            scrubbed when your account is purged, and it is excluded from your data export.
           </p>
         </Section>
 

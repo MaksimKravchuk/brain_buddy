@@ -6,7 +6,8 @@ import logging
 import math
 import os
 import socket
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
 from ipaddress import IPv4Address, IPv6Address, ip_address
@@ -62,13 +63,21 @@ class AppEnvironment(str, Enum):
 # must keep being able to report even if the flag is later turned off for its
 # owner, or the user would be left with a run frozen mid-flight.
 #
-# Runtime-manageable subset (spec 010, DD-1): ``voice_brain_dump`` and
-# ``mobile_task_classification`` only. Those two may be overlaid at runtime by
-# ``FeatureFlagOverrideRepository``'s document; the settings below stay their
-# deploy-staged baseline and rollback floor. ``delivery_canary`` (a production
-# release-smoke input) and ``external_agent_relay`` (whose secret box is decided
-# once at container construction) are deliberately **not** runtime-manageable
-# and always resolve from this configuration alone.
+# Runtime-manageable subset (spec 010, DD-1, DD-15, DD-16, superseded
+# 2026-08-15): ``voice_brain_dump``, ``mobile_task_classification`` and
+# ``external_agent_relay`` are managed exclusively by the SQLite-backed
+# ``FeatureFlagOverrideRepository`` once the one-time migration has run
+# (ADR-0019). Their deploy-staged environment text reaches this module only as
+# the raw ``ManagedFlagMigrationInput`` below, parsed solely by the one-time
+# migration; they have no runtime state here at all, because the normal
+# per-request resolver is `FeatureFlagService`, not this class.
+# ``delivery_canary`` (a production release-smoke input) is the only flag
+# that still resolves from this configuration on every request.
+#
+# ``admin_portal`` no longer exists as a flag at all (DD-14): the Admin
+# Portal is key functionality and is always reachable by an authenticated,
+# allow-listed operator (`require_operator`), never gated by a flag that
+# could lock the only operator out.
 KNOWN_FEATURE_FLAGS: tuple[str, ...] = (
     "delivery_canary",
     "voice_brain_dump",
@@ -76,21 +85,25 @@ KNOWN_FEATURE_FLAGS: tuple[str, ...] = (
     "external_agent_relay",
 )
 
-# Server-owned flags that are configured exactly like the ones above but are
-# deliberately **not** projected into the member-facing ``feature_flags``
-# payload of ``/api/auth/me``, ``/login`` and ``/signup``. Adding a flag to
-# ``KNOWN_FEATURE_FLAGS`` changes that shared response shape for every member
-# and broadcasts its rollout state to callers who can never use it.
-#
-# ``admin_portal`` (spec 009, 009-FR-013) gates the `/admin` operator surface.
-# It ships default OFF, is read only by ``require_admin_portal_enabled`` after
-# authorization has already succeeded (009-FR-002 precedence), and stays off
-# the member payload so 009-FR-010 keeps holding: no member-facing response
-# shape changes, and a non-operator can never observe the rollout state.
-PRIVATE_FEATURE_FLAGS: tuple[str, ...] = ("admin_portal",)
+# Every flag name ``BRAIN_BUDDY_FEATURE_FLAGS`` may configure. There is no
+# more private subset (DD-14): ``PRIVATE_FEATURE_FLAGS`` held only
+# ``admin_portal``, which is deleted outright, not merely excluded.
+ALL_FEATURE_FLAGS: tuple[str, ...] = KNOWN_FEATURE_FLAGS
 
-# Every flag name ``BRAIN_BUDDY_FEATURE_FLAGS`` may configure.
-ALL_FEATURE_FLAGS: tuple[str, ...] = KNOWN_FEATURE_FLAGS + PRIVATE_FEATURE_FLAGS
+# The flags this configuration still owns *at runtime*: the only ones whose
+# environment entry is parsed and validated when the application boots, and the
+# only ones `FeatureFlagSettings.states` may hold or accept. Everything else
+# ``BRAIN_BUDDY_FEATURE_FLAGS`` may name is managed migration input (DD-15) —
+# see ``ManagedFlagMigrationInput`` below.
+ENVIRONMENT_OWNED_FLAGS: tuple[str, ...] = ("delivery_canary",)
+
+# The complement: the flags SQLite owns after the one-time migration. Derived
+# rather than restated so the two sets cannot drift apart, and mirrored by
+# `app.repositories.feature_flag.MANAGED_FLAGS`, which is where they are
+# actually resolved.
+RUNTIME_MANAGED_FLAGS: tuple[str, ...] = tuple(
+    name for name in KNOWN_FEATURE_FLAGS if name not in ENVIRONMENT_OWNED_FLAGS
+)
 
 
 class FeatureFlagState(str, Enum):
@@ -101,17 +114,89 @@ class FeatureFlagState(str, Enum):
     ON = "on"
 
 
+def _normalize_internal_users(users: frozenset[str]) -> frozenset[str]:
+    """Normalize a cohort of internal-user emails, rejecting a non-email."""
+
+    normalized: set[str] = set()
+    for user in users:
+        candidate = user.strip().lower()
+        if not candidate or "@" not in candidate:
+            raise ValueError(
+                f"Internal feature-flag user '{user}' is not an email address."
+            )
+        normalized.add(candidate)
+    return frozenset(normalized)
+
+
+def _reject_unknown_flags(names: Iterable[str]) -> None:
+    unknown = sorted(set(names) - set(ALL_FEATURE_FLAGS))
+    if unknown:
+        raise ValueError(
+            f"Unknown feature flag(s) {unknown}; allowed flags are "
+            f"{sorted(ALL_FEATURE_FLAGS)}."
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ManagedFlagMigrationSeed:
+    """The parsed deploy-staged baseline for the three managed flags.
+
+    Produced only by :meth:`FeatureFlagSettings.load_managed_migration_seed`,
+    and only consumed by the repository's one-time migration (DD-15).
+    """
+
+    states: Mapping[str, FeatureFlagState]
+    internal_users: frozenset[str] = frozenset()
+
+
+class ManagedFlagMigrationInput(BaseModel):
+    """The raw, **deliberately unparsed** managed-flag environment text.
+
+    ADR-0019 leaves the three managed flags entirely to SQLite once the
+    one-time migration has run, but the deploy still stages their baseline in
+    ``BRAIN_BUDDY_FEATURE_FLAGS`` for a first start. Parsing that text while
+    building the configuration made every later boot depend on it: a stale or
+    malformed managed entry raised before the repository could even look at
+    its ledger, so an already-migrated deployment could not start at all.
+
+    The text is therefore carried verbatim here and parsed exactly once, by
+    :meth:`FeatureFlagSettings.load_managed_migration_seed`, inside the
+    serialized first-migration path. Post-migration it is never parsed, and so
+    can never affect startup or runtime (DD-15).
+    """
+
+    raw_states: str = Field(default="", description="Raw BRAIN_BUDDY_FEATURE_FLAGS.")
+    raw_internal_users: str = Field(
+        default="", description="Raw BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS."
+    )
+
+    model_config = ConfigDict(frozen=True)
+
+
 class FeatureFlagSettings(BaseModel):
-    """Server-owned rollout flags: allow-listed, default OFF, fail closed."""
+    """The environment-owned rollout flags: default OFF, fail closed.
+
+    Post-ADR-0019 this class is **not** an answer for the three managed flags,
+    in any form: `states` holds exactly `ENVIRONMENT_OWNED_FLAGS` and refuses a
+    managed key outright, and there is no aggregate resolver over
+    `KNOWN_FEATURE_FLAGS` to project one (DD-15). A managed flag's only runtime
+    answer is its SQLite row, read through `FeatureFlagService`. The
+    deploy-staged managed text still arrives here, but only as the unparsed
+    `migration_input` below.
+    """
 
     states: Mapping[str, FeatureFlagState] = Field(
         default_factory=dict,
         validate_default=True,
-        description="Rollout stage per allow-listed flag; missing flags are OFF.",
+        description="Rollout stage per environment-owned flag; missing are OFF.",
     )
     internal_users: frozenset[str] = Field(
         default_factory=frozenset,
         description="Normalized emails eligible for INTERNAL-stage flags.",
+    )
+    migration_input: ManagedFlagMigrationInput = Field(
+        default_factory=ManagedFlagMigrationInput,
+        description="Raw managed-flag env text, parsed only by migration.",
     )
 
     model_config = ConfigDict(frozen=True)
@@ -121,16 +206,27 @@ class FeatureFlagSettings(BaseModel):
     def validate_states(
         cls, states: Mapping[str, FeatureFlagState]
     ) -> Mapping[str, FeatureFlagState]:
-        unknown = sorted(set(states) - set(ALL_FEATURE_FLAGS))
-        if unknown:
+        _reject_unknown_flags(states)
+        # A managed key is refused rather than stored or silently dropped: a
+        # caller passing one believes it is setting that flag, and either
+        # materializing it or ignoring it would leave them with an answer that
+        # the SQLite store — the only authority for those three — disagrees
+        # with (DD-15).
+        managed = sorted(set(states) & set(RUNTIME_MANAGED_FLAGS))
+        if managed:
             raise ValueError(
-                f"Unknown feature flag(s) {unknown}; allowed flags are "
-                f"{sorted(ALL_FEATURE_FLAGS)}."
+                f"Feature flag(s) {managed} are managed at runtime by the "
+                "SQLite feature-flag store (ADR-0019) and cannot be set in "
+                "runtime configuration; this configuration owns "
+                f"{sorted(ENVIRONMENT_OWNED_FLAGS)} only."
             )
         # The frozen model only blocks attribute assignment; the proxy makes
         # the mapping itself read-only so items cannot be mutated either.
         return MappingProxyType(
-            {name: states.get(name, FeatureFlagState.OFF) for name in ALL_FEATURE_FLAGS}
+            {
+                name: states.get(name, FeatureFlagState.OFF)
+                for name in ENVIRONMENT_OWNED_FLAGS
+            }
         )
 
     @field_serializer("states")
@@ -145,17 +241,47 @@ class FeatureFlagSettings(BaseModel):
     @field_validator("internal_users")
     @classmethod
     def validate_internal_users(cls, users: frozenset[str]) -> frozenset[str]:
-        normalized: set[str] = set()
-        for user in users:
-            candidate = user.strip().lower()
-            if not candidate or "@" not in candidate:
-                raise ValueError(
-                    f"Internal feature-flag user '{user}' is not an email address."
-                )
-            normalized.add(candidate)
-        return frozenset(normalized)
+        return _normalize_internal_users(users)
+
+    def load_managed_migration_seed(self) -> ManagedFlagMigrationSeed:
+        """Parse the deploy-staged managed-flag baseline, failing closed.
+
+        The sole parser of the raw managed input, and the only place a managed
+        flag's environment value exists in parsed form at all — the runtime
+        `states` map above cannot hold one (DD-15). It projects exactly
+        `RUNTIME_MANAGED_FLAGS`: `delivery_canary` may appear in the same
+        variable and is validated at startup, but seeding it here would hand
+        the migration a fourth row for a flag SQLite does not own. It keeps
+        the full pre-correction strictness — malformed, unknown and duplicated
+        entries all raise, and a cohort entry that is not an email raises —
+        because a first start must not seed rows from input nobody validated.
+        Callers hand this method to the repository as a callback so it runs
+        inside the serialized first-migration transaction, never at import or
+        boot time.
+        """
+
+        states = _parse_feature_flag_states(self.migration_input.raw_states)
+        _reject_unknown_flags(states)
+        return ManagedFlagMigrationSeed(
+            states=MappingProxyType(
+                {
+                    name: states.get(name, FeatureFlagState.OFF)
+                    for name in RUNTIME_MANAGED_FLAGS
+                }
+            ),
+            internal_users=_normalize_internal_users(
+                _split_env_list(self.migration_input.raw_internal_users)
+            ),
+        )
 
     def _is_effective(self, name: str, email: str | None) -> bool:
+        """Resolve one *environment-owned* flag. Anything else raises KeyError.
+
+        Reachable only through `delivery_canary_effective`; `states` holds no
+        managed key, so this cannot answer for one even if a later caller
+        tried (DD-15).
+        """
+
         normalized = (email or "").strip().lower()
         state = self.states[name]
         if state is FeatureFlagState.ON:
@@ -164,29 +290,18 @@ class FeatureFlagSettings(BaseModel):
             return bool(normalized) and normalized in self.internal_users
         return False
 
-    def effective_flags(self, email: str | None) -> dict[str, bool]:
-        """Effective boolean flag payload for one authenticated user.
+    def delivery_canary_effective(self, email: str | None) -> bool:
+        """Effective `delivery_canary` value — this class's whole resolver API.
 
-        Deliberately projects only `KNOWN_FEATURE_FLAGS`: this dict is the
-        member-facing `/api/auth/me` (and `/login`, `/signup`) payload, so a
-        private flag must never appear here (009-FR-010, 009-FR-013).
+        There is deliberately no aggregate `effective_flags(email)` over
+        `KNOWN_FEATURE_FLAGS` any more: it evaluated an environment baseline
+        for the three flags SQLite owns, so its mere existence was a second
+        answer waiting for a call site. The member-facing payload is assembled
+        by `FeatureFlagService.effective_flags`, which combines this one value
+        with the three SQLite rows (DD-15, 010-FR-003, 010-FR-008).
         """
 
-        return {name: self._is_effective(name, email) for name in KNOWN_FEATURE_FLAGS}
-
-    def private_flag_effective(self, name: str, email: str | None) -> bool:
-        """Effective value of one `PRIVATE_FEATURE_FLAGS` entry.
-
-        Read only server-side, by a dependency that has already made its
-        authorization decision — never serialized into any response.
-        """
-
-        if name not in PRIVATE_FEATURE_FLAGS:
-            raise ValueError(
-                f"'{name}' is not a private feature flag; "
-                f"private flags are {sorted(PRIVATE_FEATURE_FLAGS)}."
-            )
-        return self._is_effective(name, email)
+        return self._is_effective("delivery_canary", email)
 
 
 class AdminSettings(BaseModel):
@@ -579,6 +694,25 @@ class AppConfig(BaseModel):
         )
 
 
+def _parse_feature_flag_entry(entry: str) -> tuple[str, FeatureFlagState]:
+    """Parse one ``flag_name=state`` pair, failing closed on any oddity."""
+
+    name, separator, state_value = entry.partition("=")
+    name = name.strip()
+    state_value = state_value.strip().lower()
+    if not separator or not name or not state_value:
+        raise ValueError(
+            f"Feature flag entry '{entry}' must look like 'flag_name=state'."
+        )
+    try:
+        return name, FeatureFlagState(state_value)
+    except ValueError as exc:
+        raise ValueError(
+            f"Feature flag '{name}' has invalid state '{state_value}'; "
+            "expected one of off, internal, on."
+        ) from exc
+
+
 def _parse_feature_flag_states(raw: str) -> dict[str, FeatureFlagState]:
     """Parse ``name=state,name=state`` pairs, failing closed on any oddity."""
 
@@ -587,33 +721,64 @@ def _parse_feature_flag_states(raw: str) -> dict[str, FeatureFlagState]:
         entry = entry.strip()
         if not entry:
             continue
-        name, separator, state_value = entry.partition("=")
-        name = name.strip()
-        state_value = state_value.strip().lower()
-        if not separator or not name or not state_value:
-            raise ValueError(
-                f"Feature flag entry '{entry}' must look like 'flag_name=state'."
-            )
+        name, state = _parse_feature_flag_entry(entry)
         if name in states:
             raise ValueError(f"Feature flag '{name}' is configured more than once.")
-        try:
-            states[name] = FeatureFlagState(state_value)
-        except ValueError as exc:
-            raise ValueError(
-                f"Feature flag '{name}' has invalid state '{state_value}'; "
-                "expected one of off, internal, on."
-            ) from exc
+        states[name] = state
     return states
 
 
+def _parse_environment_owned_states(raw: str) -> dict[str, FeatureFlagState]:
+    """Parse only the entries this configuration still owns at runtime.
+
+    An entry naming anything other than an `ENVIRONMENT_OWNED_FLAGS` member —
+    a managed flag, an unknown name, or an anonymous ``=on`` — is skipped
+    here, not accepted: it is migration input, validated by
+    `FeatureFlagSettings.load_managed_migration_seed` at the one moment it can
+    still matter (DD-15). Skipping it is what lets an already-migrated
+    deployment boot with a stale or malformed managed entry still staged, and
+    `delivery_canary` is still parsed with the full pre-correction strictness
+    so a malformed release-smoke input fails startup exactly as before.
+    """
+
+    states: dict[str, FeatureFlagState] = {}
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        if entry.partition("=")[0].strip() not in ENVIRONMENT_OWNED_FLAGS:
+            continue
+        name, state = _parse_feature_flag_entry(entry)
+        if name in states:
+            raise ValueError(f"Feature flag '{name}' is configured more than once.")
+        states[name] = state
+    return states
+
+
+def _split_env_list(raw: str) -> frozenset[str]:
+    return frozenset(value.strip() for value in raw.split(",") if value.strip())
+
+
 def _build_feature_flags() -> FeatureFlagSettings:
-    states = _parse_feature_flag_states(os.getenv("BRAIN_BUDDY_FEATURE_FLAGS", ""))
-    internal_users = frozenset(
-        value.strip()
-        for value in os.getenv("BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS", "").split(",")
-        if value.strip()
+    raw_states = os.getenv("BRAIN_BUDDY_FEATURE_FLAGS", "")
+    raw_internal_users = os.getenv("BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS", "")
+    states = _parse_environment_owned_states(raw_states)
+    # The cohort list is migration input too, with one exception: it is a real
+    # runtime input while `delivery_canary=internal` resolves against it, and
+    # is then validated at startup exactly as before (DD-15).
+    internal_users = (
+        _split_env_list(raw_internal_users)
+        if states.get("delivery_canary") is FeatureFlagState.INTERNAL
+        else frozenset()
     )
-    return FeatureFlagSettings(states=states, internal_users=internal_users)
+    return FeatureFlagSettings(
+        states=states,
+        internal_users=internal_users,
+        migration_input=ManagedFlagMigrationInput(
+            raw_states=raw_states,
+            raw_internal_users=raw_internal_users,
+        ),
+    )
 
 
 def _build_admin_settings() -> AdminSettings:
@@ -856,14 +1021,17 @@ def get_config() -> AppConfig:
 __all__ = [
     "ALL_FEATURE_FLAGS",
     "CANONICAL_PUBLIC_CALLBACK_HOSTS",
+    "ENVIRONMENT_OWNED_FLAGS",
     "KNOWN_FEATURE_FLAGS",
-    "PRIVATE_FEATURE_FLAGS",
+    "RUNTIME_MANAGED_FLAGS",
     "AdminSettings",
     "AgentRelaySettings",
     "AppConfig",
     "AppEnvironment",
     "FeatureFlagSettings",
     "FeatureFlagState",
+    "ManagedFlagMigrationInput",
+    "ManagedFlagMigrationSeed",
     "PasswordPolicy",
     "SessionSettings",
     "VoiceAudioLimits",

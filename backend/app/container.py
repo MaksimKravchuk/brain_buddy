@@ -11,7 +11,6 @@ from app.ai.providers import MockValidationProvider, OpenAIValidationProvider
 from app.core.config import (
     AppConfig,
     AppEnvironment,
-    FeatureFlagState,
     VoiceProviderSettings,
 )
 from app.modules.agents.connector import GenericHttpConnector
@@ -35,6 +34,7 @@ from app.repositories import (
     ValidationRepository,
     VersionRepository,
 )
+from app.repositories.feature_flag import FlagMode
 from app.services import (
     AccountService,
     AdminService,
@@ -131,13 +131,34 @@ class _UnavailableRelaySecretBox(SecretBox):
         self._raise()
 
 
-def _build_agent_secret_box(config: AppConfig, repo: AgentRepository) -> SecretBox:
+def _build_agent_secret_box(
+    config: AppConfig,
+    repo: AgentRepository,
+    feature_flag_repo: FeatureFlagOverrideRepository,
+) -> SecretBox:
+    """Decide, once at construction, whether the placeholder secret box is safe.
+
+    DD-16: the relay's *rollout* mode now lives in SQLite, not the retired
+    environment baseline. A degraded read (corrupt or locked store) fails
+    closed for rollout, exactly like a healthy row explicitly OFF — every
+    managed flag is ineffective and every mutation refused either way — so it
+    is treated the same as a confirmed-OFF read for the placeholder shortcut.
+    Degraded can never *waive* the key requirement, though: when relay data
+    already exists on disk, inbound events reached it without being
+    flag-gated, so those persisted credentials must stay decryptable — real
+    keys are required regardless of what the flag store says.
+    """
+
     raw_keys = os.getenv("BRAIN_BUDDY_AGENT_RELAY_KEYS")
-    relay_state = config.feature_flags.states["external_agent_relay"]
+    overlay = feature_flag_repo.read()
+    relay_entry = overlay.flags.get("external_agent_relay")
+    relay_effectively_off_fail_closed = overlay.degraded or (
+        relay_entry is not None and relay_entry.mode is FlagMode.OFF
+    )
     if (
         config.environment is AppEnvironment.PRODUCTION
         and not (raw_keys or "").strip()
-        and relay_state is FeatureFlagState.OFF
+        and relay_effectively_off_fail_closed
         and not repo.has_any_relay_data()
     ):
         return _UnavailableRelaySecretBox()
@@ -277,7 +298,30 @@ def build_container(config: AppConfig) -> Container:
     task_repo = TaskRepository(data_root)
     voice_operation_repo = OperationRepository(data_root)
     agent_repo = AgentRepository(data_root)
-    feature_flag_repo = FeatureFlagOverrideRepository(data_root)
+
+    def _resolve_account_id_by_email(email: str) -> str | None:
+        """Migration-only lookup: an email that does not resolve is skipped,
+        never substituted (DD-15)."""
+
+        account = user_repo.get_by_email(email)
+        return account.id if account is not None else None
+
+    feature_flag_repo = FeatureFlagOverrideRepository(
+        data_root,
+        # A callback, not a value: the deploy-staged managed-flag baseline is
+        # parsed only if this volume has never migrated (DD-15), so a stale or
+        # malformed staging value cannot fail an already-migrated boot.
+        load_migration_seed=config.feature_flags.load_managed_migration_seed,
+        resolve_account_id=_resolve_account_id_by_email,
+    )
+
+    # Built once, here, so the migration-time SQLite read `_build_agent_secret_
+    # box` needs (DD-16) sees the same repository instance every other flag
+    # read and mutation goes through.
+    agent_secret_box = _build_agent_secret_box(config, agent_repo, feature_flag_repo)
+    relay_capability_available = not isinstance(
+        agent_secret_box, _UnavailableRelaySecretBox
+    )
 
     # Built before the services that read a managed flag: `_voice_enabled_for_
     # owner` below and every `/admin/feature-flags` route resolve through this
@@ -293,6 +337,7 @@ def build_container(config: AppConfig) -> Container:
         config=config,
         user_repo=user_repo,
         admin_service=admin_service,
+        relay_capability_available=relay_capability_available,
     )
 
     tree_service = TreeService(tree_repo, index_repo)
@@ -362,7 +407,7 @@ def build_container(config: AppConfig) -> Container:
             max_response_bytes=relay_settings.connector_max_response_bytes,
             allow_private_destinations=relay_settings.allow_private_destinations,
         ),
-        secret_box=_build_agent_secret_box(config, agent_repo),
+        secret_box=agent_secret_box,
         task_snapshot=_task_snapshot,
         callback_url=config.agent_relay_callback_url,
         stale_after=timedelta(seconds=relay_settings.stale_after_seconds),

@@ -15,20 +15,21 @@ not authorize landing, deployment, rollout expansion, or App Store submission.
    secret store with an active encryption key. Never print or commit key bytes.
    Keep private relay destinations disabled unless separately governed.
 4. Let the exact landed `main` SHA run
-   `.github/workflows/deploy-fly-production.yml`. The workflow authoritatively
-   stages the flag string, and it no longer names `external_agent_relay`:
-   staging that name crashed the image the automatic rollback restored in
-   deploy run 31775660872, because a staged secret survives the image swap and
-   that image rejects an unknown flag at startup. The relay therefore ships
-   default OFF by omission. That rollback-compatibility blocker has since been
+   `.github/workflows/deploy-fly-production.yml`. Historically the workflow
+   staged the relay's rollout in the flag string; staging that name crashed
+   the image the automatic rollback restored in deploy run 31775660872,
+   because a staged secret survives the image swap and that image rejects an
+   unknown flag at startup. That rollback-compatibility blocker has since been
    cleared — the captured rollback target is now a 009 image that parses the
-   name — but clearing it authorized nothing: parseable is not the same as
-   approved to ship, this rollout is still ungranted, and the validator pins
-   the exact authorized staged string separately from the compatibility
-   allow-list. Naming the relay in that workflow line remains an audited
-   ASK edit that has not been made. Do not widen the cohort as part of this
-   release, and do not set the flag out of band: the next release restages the
-   workflow's value regardless.
+   name — but rollout is no longer granted through this workflow line at all:
+   `external_agent_relay` is one of the three Admin Portal SQLite-managed
+   flags (ADR-0019), evaluated as two independent axes AND'd together — the
+   *rollout* (OFF/ON/SELECTED_USERS, set at `/admin`, effective within about
+   fifteen seconds, no deploy required) and the *capability* (whether step
+   3's `BRAIN_BUDDY_AGENT_RELAY_KEYS` actually constructed a secret box at
+   boot). Either being unfavorable fails closed. Do not widen the cohort as
+   part of this release; that is a separate, audited Admin Portal action, not
+   a workflow or environment edit.
 5. Using a disposable HTTPS connector and an internal account, verify connect
    and test, reviewed task/context hand-off, one dispatch under duplicate
    confirmation, authenticated run updates, reply/cancel when supported,
@@ -38,15 +39,45 @@ not authorize landing, deployment, rollout expansion, or App Store submission.
 ### Fly rollback
 
 Use the images captured by the failed release run. With `BACKEND_APP`,
-`FRONTEND_APP`, `PREVIOUS_BACKEND_IMAGE`, and `PREVIOUS_FRONTEND_IMAGE` set to
-that run's recorded values, contain and roll back directly. The staged flag
-string must name only flags the restored image can parse — naming a flag it
-does not know fails its startup, which is how run 31775660872 turned a
-rollback into a crash loop:
+`FRONTEND_APP`, `PREVIOUS_BACKEND_IMAGE`, `PREVIOUS_FRONTEND_IMAGE`, and
+`TESTED_SHA` (the failed release's exact tested SHA) set to that run's
+recorded values, contain and roll back directly. The staged flag string must
+name only flags the restored image can parse — naming a flag it does not know
+fails its startup, which is how run 31775660872 turned a rollback into a
+crash loop. Do not hardcode or guess that string: derive it exactly the way
+the deploy workflow's own rollback step does, by reading it from the
+PREVIOUS revision of the deploy workflow — `${TESTED_SHA}^`, the parent of the
+failed release — through the unit-tested `scripts/extract_staged_feature_flags.py`
+parser, which fails closed on anything malformed or ambiguous and never prints
+a flag name or value. Ordinarily that previous revision staged only
+`delivery_canary`; the restage always restores that exact captured previous
+revision string as-is, which may include legacy managed flags such as
+`voice_brain_dump` — that is intentional, since the restored old image needs
+its own previous contract, not the current one. Stage the derived
+rollout before restoring the previous backend image — that image is the
+release which applies the pending secret, so staging after it would leave the
+restored image running the failing release's flags — while the frontend image
+is still restored first:
 
 ```bash
-flyctl secrets set --app "${BACKEND_APP}" \
-  BRAIN_BUDDY_FEATURE_FLAGS='delivery_canary=internal,voice_brain_dump=on'
+if ! PREVIOUS_FEATURE_FLAGS=$(git show "${TESTED_SHA}^:.github/workflows/deploy-fly-production.yml" \
+  | python3 scripts/extract_staged_feature_flags.py); then
+  echo "Could not derive the previous feature-flag rollout from TESTED_SHA's" >&2
+  echo "parent revision of the deploy workflow. Refusing to roll back the" >&2
+  echo "images — restoring an old image under an unknown or guessed rollout" >&2
+  echo "is exactly the crash loop this contract exists to prevent. Contain" >&2
+  echo "and escalate per the incident procedure in" >&2
+  echo "docs/autonomous-delivery-runbook.md; do not substitute a hardcoded" >&2
+  echo "delivery-only rollout." >&2
+  exit 1
+fi
+if [ -z "${PREVIOUS_FEATURE_FLAGS}" ]; then
+  echo "Derived an empty previous feature-flag rollout. Refusing to roll" >&2
+  echo "back the images; contain and escalate instead." >&2
+  exit 1
+fi
+flyctl secrets set --stage --app "${BACKEND_APP}" \
+  BRAIN_BUDDY_FEATURE_FLAGS="${PREVIOUS_FEATURE_FLAGS}"
 flyctl deploy --config fly.frontend.toml --app "${FRONTEND_APP}" \
   --image "${PREVIOUS_FRONTEND_IMAGE}"
 flyctl deploy --config fly.backend.toml --app "${BACKEND_APP}" \

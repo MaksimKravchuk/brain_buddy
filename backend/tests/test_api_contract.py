@@ -40,9 +40,9 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
         ("/api/auth/logout", "post"): set(),
         ("/api/auth/me", "get"): {"401"},
         ("/api/auth/signup", "post"): {"400", "409", "422"},
-        # 404 is the flag-OFF answer for an allow-listed operator
-        # (009-FR-013): authorization first, rollout gate second.
-        ("/api/admin/status", "get"): {"401", "403", "404"},
+        # No rollout gate: `admin_portal` is deleted outright (ADR-0019 DD-14),
+        # so an allow-listed operator's authorization check is the whole story.
+        ("/api/admin/status", "get"): {"401", "403"},
         ("/api/admin/accounts/lookup", "post"): {"401", "403", "404", "422"},
         ("/api/admin/accounts/{account_id}/revoke-sessions", "post"): {
             "401",
@@ -51,23 +51,16 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
             "422",
         },
         # Runtime feature-flag management (spec 010). Every one sits behind the
-        # same 009 gate, so 401/403/404 are identical to the routes above; 400
-        # is a refused flag name or a cohort mutation outside SELECTED_USERS
-        # mode, and 503 (not listed here, which only registers 4xx) is the
-        # refusal issued while the runtime document is unreadable.
-        ("/api/admin/feature-flags", "get"): {"401", "403", "404"},
+        # same 009 gate, so 401/403 are identical to the routes above; 400 is a
+        # refused flag name or a cohort mutation outside SELECTED_USERS mode,
+        # 404 (selected-users add only) is an unresolved account, and 503 (not
+        # listed here, which only registers 4xx) is the refusal issued while
+        # the SQLite flag store is unreadable.
+        ("/api/admin/feature-flags", "get"): {"401", "403"},
         ("/api/admin/feature-flags/{flag}/mode", "put"): {
             "400",
             "401",
             "403",
-            "404",
-            "422",
-        },
-        ("/api/admin/feature-flags/{flag}", "delete"): {
-            "400",
-            "401",
-            "403",
-            "404",
             "422",
         },
         ("/api/admin/feature-flags/{flag}/selected-users", "post"): {
@@ -81,7 +74,6 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
             "400",
             "401",
             "403",
-            "404",
             "422",
         },
         ("/api/agent-connections", "get"): {"401", "404"},

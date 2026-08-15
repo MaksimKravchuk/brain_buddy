@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 
-from app.core.config import FeatureFlagSettings, FeatureFlagState
+from app.repositories.feature_flag import FlagMode
 from tests.test_brain_dump_operations_api import (
     _manifest_hash,
     _start_operation,
@@ -19,27 +19,17 @@ from tests.test_brain_dump_operations_api import (
 )
 
 
-def _set_voice_flag(api_client, state: FeatureFlagState) -> None:
-    """Restage the deploy-time baseline this app was built with.
+def _set_voice_flag(api_client, state: FlagMode) -> None:
+    """Move the SQLite-backed runtime flag (ADR-0019) to the given mode.
 
-    Since spec 010 the two managed flags resolve through
-    ``FeatureFlagService``, which holds the config it was constructed with, so
-    a harness that restaged only ``app.state.config`` would no longer move the
-    baseline the gate actually reads. Production never restages either: both
-    are built once from the same immutable config at startup.
+    Since ADR-0019 ``voice_brain_dump`` resolves exclusively from the
+    ``FeatureFlagOverrideRepository``, so the gate is moved the same way an
+    operator would: through ``FeatureFlagService.set_mode``.
     """
 
-    config = api_client.app.state.config
-    restaged = config.model_copy(
-        update={
-            "feature_flags": FeatureFlagSettings(
-                states={"voice_brain_dump": state},
-                internal_users=config.feature_flags.internal_users,
-            )
-        }
+    api_client.app.state.container.feature_flag_service.set_mode(
+        "voice_brain_dump", state, operator_id="test_operator"
     )
-    api_client.app.state.config = restaged
-    api_client.app.state.container.feature_flag_service.config = restaged
 
 
 def _revision(api_client, operation_id: str) -> int:
@@ -58,7 +48,7 @@ def test_flag_off_keeps_privacy_controls_reachable_gates_new_capture(
     )
     op_id = operation["id"]
 
-    _set_voice_flag(api_client, FeatureFlagState.OFF)
+    _set_voice_flag(api_client, FlagMode.OFF)
 
     # New-capture / forward surfaces are gated: fail-closed 404 "not available".
     start = api_client.post(

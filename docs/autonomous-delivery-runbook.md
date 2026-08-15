@@ -62,9 +62,13 @@ external effects — never land automatically; they use the ASK landing procedur
    takes the proof-only path (no push, so no recursion) and idempotently redeploys the
    same SHA, failing closed if a newer landing superseded it. The consumed candidate
    CI run plus the landing proof remain the evidence. Production exposure of
-   the new behavior remains gated by server-owned feature flags (default OFF; rollout
-   OFF → INTERNAL → ON via `BRAIN_BUDDY_FEATURE_FLAGS` /
-   `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS`).
+   the new behavior remains gated by server-owned feature flags (default OFF).
+   `delivery_canary` still rolls out OFF → INTERNAL → ON via
+   `BRAIN_BUDDY_FEATURE_FLAGS` / `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS` at
+   deploy time. The three SQLite-managed flags (`voice_brain_dump`,
+   `mobile_task_classification`, `external_agent_relay`) instead roll out
+   OFF → SELECTED_USERS → ON through the Admin Portal at runtime, independent
+   of this landing/deploy path (ADR-0019).
 6. Evidence for the landing is the candidate push (actor + SHA), the candidate CI run,
    and the release workflow run (its `land` and `deploy` jobs) — record their URLs
    where a task requires an evidence packet. No PR object exists for SHIP/SHOW
@@ -251,10 +255,23 @@ the tree without masking the original failure; cleanup counts as done only once 
 trap. If verification fails, the workflow redeploys the captured images frontend-first, re-verifies `/health`
 and frontend reachability, and stays failed. If the rollback itself cannot be verified,
 the run fails without claiming recovery — then follow the manual path: identify the last
-healthy release with `flyctl releases --app <app> --image`, redeploy its image with
-`flyctl deploy --config <config> --app <app> --image <captured registry.fly.io ref>`
-(frontend first, then backend), and re-run `scripts/production_smoke.sh` against
-production before declaring containment.
+healthy release with `flyctl releases --app <app> --image` and the exact `TESTED_SHA` of
+the failed release. Derive `PREVIOUS_FEATURE_FLAGS` the same way the workflow's own
+rollback step does — never hardcode or guess it — by reading the PREVIOUS revision of the
+deploy workflow (`${TESTED_SHA}^`, the parent of the failed release) through the
+unit-tested `scripts/extract_staged_feature_flags.py` parser:
+`git show "${TESTED_SHA}^:.github/workflows/deploy-fly-production.yml" | python3
+scripts/extract_staged_feature_flags.py`. That parser fails closed on anything malformed
+or ambiguous and never prints a flag name or value; require its output to be non-empty.
+If extraction is unavailable or its output is empty, refuse the image rollback outright —
+do not guess or substitute a hardcoded delivery-only rollout — and use containment and
+escalation instead. Otherwise stage the derived value with `flyctl secrets set --stage
+--app <app> BRAIN_BUDDY_FEATURE_FLAGS="${PREVIOUS_FEATURE_FLAGS}"` BEFORE redeploying the
+backend image — that deploy is the release which applies the pending secret, so staging
+after it would leave the restored image running the failing release's flags — then
+redeploy the captured images with `flyctl deploy --config <config> --app <app> --image
+<captured registry.fly.io ref>` (frontend first, then backend), and re-run
+`scripts/production_smoke.sh` against production before declaring containment.
 
 ## Current preview implementation
 

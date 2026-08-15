@@ -368,6 +368,31 @@ DEPLOY_REQUIREMENTS = (
         "github.event.workflow_run.head_branch == 'main'",
         "main CI runs must be consumed (proof-only, no push)",
     ),
+    (
+        "first-transition detection step",
+        "Detect the first SQLite-managed feature-flag transition",
+        "the deploy job must detect the first SQLite-managed transition from "
+        "immutable git content before staging any feature-flag rollout",
+    ),
+    (
+        "first-transition marker",
+        '_MIGRATION_LEDGER_ID = "adr-0019-sqlite-v1"',
+        "first-transition detection must key off the ADR-0019 "
+        "migration-ledger marker compiled into the repository",
+    ),
+    (
+        "first-transition seed step",
+        "Stage the first-transition feature-flag seed",
+        "the first SQLite-aware backend must boot with the sanitized "
+        "previous rollout so ledger migration sees it, not the "
+        "delivery-only baseline",
+    ),
+    (
+        "first-transition cleanup step",
+        "Restage delivery-only rollout after a first-transition deploy",
+        "after a successful first-transition deploy the authoritative "
+        "rollout must return to delivery-only for the next release",
+    ),
 )
 
 DEPLOY_FORBIDDEN = (
@@ -470,13 +495,16 @@ def _check(
 #:
 #: This is a safety allow-list only. Parseable is not authorized — see
 #: `AUTHORIZED_STAGED_FEATURE_FLAGS`.
+#:
+#: ADR-0019 (2026-08-15) deletes `admin_portal` outright, so it is dropped
+#: from this allow-list too: no future release can ever stage a name that no
+#: longer exists anywhere in the system (DD-14).
 ROLLBACK_KNOWN_FEATURE_FLAGS = frozenset(
     {
         "delivery_canary",
         "mobile_task_classification",
         "voice_brain_dump",
         "external_agent_relay",
-        "admin_portal",
     }
 )
 
@@ -486,9 +514,13 @@ ROLLBACK_KNOWN_FEATURE_FLAGS = frozenset(
 #: still absent here, because spec 007's rollout is separately governed and
 #: omission is the OFF state every image agrees on. Changing this string is an
 #: ASK-class rollout decision.
-AUTHORIZED_STAGED_FEATURE_FLAGS = (
-    "delivery_canary=internal,voice_brain_dump=on,admin_portal=internal"
-)
+#:
+#: ADR-0019 (2026-08-15): `voice_brain_dump`/`mobile_task_classification`/
+#: `external_agent_relay` are now managed live through the admin portal's
+#: SQLite store, and `admin_portal` no longer exists as a flag (DD-14, DD-15)
+#: — staging either would be inert on an already-migrated volume, so
+#: `delivery_canary` is the only entry left.
+AUTHORIZED_STAGED_FEATURE_FLAGS = "delivery_canary=internal"
 
 
 #: The deploy-job steps whose bodies carry structural obligations. Checks are
@@ -497,6 +529,16 @@ AUTHORIZED_STAGED_FEATURE_FLAGS = (
 STAGE_ROLLOUT_STEP = "Stage the smoke identity and feature-flag rollout"
 CAPTURE_PREVIOUS_ROLLOUT_STEP = "Capture the previous release's feature-flag rollout"
 ROLLBACK_STEP = "Roll back to the captured images and verify"
+DETECT_FIRST_TRANSITION_STEP = "Detect the first SQLite-managed feature-flag transition"
+STAGE_FIRST_TRANSITION_SEED_STEP = "Stage the first-transition feature-flag seed"
+CLEANUP_FIRST_TRANSITION_STEP = "Restage delivery-only rollout after a first-transition deploy"
+
+#: The migration-ledger id compiled into
+#: ``backend/app/repositories/feature_flag.py`` (ADR-0019). Its presence in
+#: the CURRENT tested revision and absence in the PREVIOUS one is the exact,
+#: immutable-git-content boundary a fresh SQLite volume crosses — detection
+#: must never depend on live app state or a human toggle.
+FIRST_TRANSITION_MARKER = '_MIGRATION_LEDGER_ID = "adr-0019-sqlite-v1"'
 
 #: The prior rollout is authoritative only because of where it is read from.
 PRIOR_REVISION_READ = (
@@ -519,6 +561,21 @@ def _step_block(text: str, step_name: str) -> str | None:
         return None
     end = text.find("\n      - name: ", start + len(marker))
     return text[start:] if end == -1 else text[start:end]
+
+
+def _known_flags_block(step_text: str) -> str | None:
+    """The body of the sanitizer's ``KNOWN`` allow-list, scoped so a name only
+
+    documented elsewhere in the step (e.g. the separate ``RETIRED`` set) is
+    never mistaken for an allow-listed, stageable one.
+    """
+
+    marker = "KNOWN = {\n"
+    start = step_text.find(marker)
+    if start == -1:
+        return None
+    end = step_text.find("\n          }", start)
+    return None if end == -1 else step_text[start:end]
 
 
 def _staged_feature_flag_errors(text: str) -> list[str]:
@@ -654,6 +711,159 @@ def _rollback_rollout_errors(text: str) -> list[str]:
     return errors
 
 
+def _first_transition_errors(text: str) -> list[str]:
+    """The first SQLite-aware boot must not lose a pre-migration rollout.
+
+    Detection must come from immutable git content (never live app state,
+    never a human toggle); the seed staged for that one boot must be
+    sanitized to names the new image can parse and must never allow-list the
+    retired ``admin_portal``; and the authoritative rollout must return to
+    delivery-only afterward without ever deploying a second image.
+    """
+
+    errors: list[str] = []
+    detect = _step_block(text, DETECT_FIRST_TRANSITION_STEP)
+    seed = _step_block(text, STAGE_FIRST_TRANSITION_SEED_STEP)
+    cleanup = _step_block(text, CLEANUP_FIRST_TRANSITION_STEP)
+    if detect is None or seed is None or cleanup is None:
+        errors.append(
+            "the deploy job must hold the first-transition detect, seed and "
+            "cleanup steps so a pre-migration rollout is never lost"
+        )
+        return errors
+
+    if FIRST_TRANSITION_MARKER not in detect:
+        errors.append(
+            "first-transition detection must key off the ADR-0019 "
+            "migration-ledger marker, not a guess"
+        )
+    if 'git show "${TESTED_SHA}:backend/app/repositories/feature_flag.py"' not in detect:
+        errors.append(
+            "first-transition detection must read the CURRENT revision's "
+            "immutable git content, not live app state or a human toggle"
+        )
+    if 'git show "${TESTED_SHA}^:backend/app/repositories/feature_flag.py"' not in detect:
+        errors.append(
+            "first-transition detection must read the PREVIOUS revision's "
+            "immutable git content, not live app state or a human toggle"
+        )
+    if "FIRST_TRANSITION=true" not in detect or "FIRST_TRANSITION=false" not in detect:
+        errors.append(
+            "first-transition detection must set FIRST_TRANSITION "
+            "deterministically for every consumed run, both directions"
+        )
+
+    if "env.FIRST_TRANSITION == 'true'" not in seed:
+        errors.append(
+            "the first-transition seed must be staged only when "
+            "FIRST_TRANSITION is true"
+        )
+    if "PREVIOUS_FEATURE_FLAGS" not in seed:
+        errors.append(
+            "the first-transition seed must be derived from the captured "
+            "PREVIOUS_FEATURE_FLAGS, never a fresh guess"
+        )
+    if 'RETIRED = {"admin_portal"}' not in seed:
+        errors.append(
+            "the first-transition seed must explicitly retire admin_portal "
+            "by name (ADR-0019 DD-14) and silently drop only that one name; "
+            "any other unrecognized name must fail the run instead of being "
+            "guessed to be safe to drop"
+        )
+    known_block = _known_flags_block(seed)
+    if known_block is None:
+        errors.append(
+            "the first-transition seed must declare a KNOWN allow-list of "
+            "stageable flag names"
+        )
+    elif '"admin_portal"' in known_block:
+        errors.append(
+            "the first-transition seed must never allow-list admin_portal "
+            "among the stageable KNOWN flag names; it is retired (ADR-0019 "
+            "DD-14) and the new image cannot parse it"
+        )
+    if (
+        "if name not in KNOWN:" not in seed
+        or "error: the captured previous rollout has an unrecognized flag name"
+        not in seed
+    ):
+        errors.append(
+            "the first-transition seed must fail closed, with a value-free "
+            "diagnostic, on a flag name outside the known managed set "
+            "instead of silently dropping it; only the explicitly retired "
+            "admin_portal may be dropped without failing the run"
+        )
+    if 'VALID_STATES = {"off", "internal", "on"}' not in seed:
+        errors.append(
+            "the first-transition seed must restrict a captured flag's "
+            "state to the legacy off/internal/on vocabulary"
+        )
+    if (
+        "if state not in VALID_STATES:" not in seed
+        or "error: the captured previous rollout has an invalid flag state"
+        not in seed
+    ):
+        errors.append(
+            "the first-transition seed must reject, with a value-free "
+            "diagnostic, a captured state outside off/internal/on instead "
+            "of staging it verbatim"
+        )
+    if "::add-mask::" not in seed:
+        errors.append("the first-transition seed must be masked before it is staged")
+    if 'BRAIN_BUDDY_FEATURE_FLAGS="${' not in seed:
+        errors.append(
+            "the first-transition seed must be staged from a computed "
+            "variable, never a second literal — scripts/extract_staged_"
+            "feature_flags.py requires exactly one literal "
+            "BRAIN_BUDDY_FEATURE_FLAGS assignment in this file for the next "
+            "deploy's capture to stay unambiguous"
+        )
+    for name in sorted(ROLLBACK_KNOWN_FEATURE_FLAGS):
+        if f'"{name}"' not in seed:
+            errors.append(
+                f"the first-transition seed must allow-list {name!r} so a "
+                "managed flag surviving in the captured rollout is not "
+                "silently dropped"
+            )
+
+    if "env.FIRST_TRANSITION == 'true'" not in cleanup:
+        errors.append(
+            "the delivery-only cleanup must run only after a first-transition "
+            "deploy"
+        )
+    if "flyctl deploy" in cleanup:
+        errors.append(
+            "the delivery-only cleanup must only stage the rollout "
+            "(flyctl secrets set --stage); it must never trigger a second "
+            "image deploy"
+        )
+    if 'BRAIN_BUDDY_FEATURE_FLAGS="${' not in cleanup:
+        errors.append(
+            "the delivery-only cleanup must restage from a computed "
+            "variable, never a second literal, for the same reason as the "
+            "seed step above"
+        )
+
+    seed_at = text.find(f"      - name: {STAGE_FIRST_TRANSITION_SEED_STEP}\n")
+    backend_deploy_at = text.find("      - name: Deploy backend\n")
+    if seed_at == -1 or backend_deploy_at == -1 or seed_at > backend_deploy_at:
+        errors.append(
+            "the first-transition seed must be staged before the backend is "
+            "deployed, or the new image would boot under the delivery-only "
+            "baseline and lose the pre-migration rollout"
+        )
+
+    cleanup_at = text.find(f"      - name: {CLEANUP_FIRST_TRANSITION_STEP}\n")
+    smoke_at = text.find("      - name: Authenticated production smoke\n")
+    if cleanup_at == -1 or smoke_at == -1 or cleanup_at < smoke_at:
+        errors.append(
+            "the delivery-only cleanup must run only after authenticated "
+            "production smoke has passed, never before"
+        )
+
+    return errors
+
+
 def _landing_job_errors(raw_text: str) -> list[str]:
     """Structural checks the flat snippet lists cannot express.
 
@@ -668,6 +878,7 @@ def _landing_job_errors(raw_text: str) -> list[str]:
     )
     errors: list[str] = _staged_feature_flag_errors(text)
     errors.extend(_rollback_rollout_errors(text))
+    errors.extend(_first_transition_errors(text))
     if "contents: write" in text:
         errors.append(
             "no job may hold GITHUB_TOKEN contents: write; the landing push "

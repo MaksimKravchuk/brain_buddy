@@ -1,4 +1,11 @@
-"""The runtime overlay resolver: fallback parity, per-flag overlay, refusals.
+"""The runtime SQLite resolver: exclusive authority, per-flag semantics, refusals.
+
+ADR-0019 (2026-08-15) replaced the original JSON-overlay-plus-environment
+design with SQLite as the sole source of truth for three managed flags. The
+tests below target that contract directly: there is no more per-request
+fallback to the environment baseline, no "deploy default" to inherit or
+clear, and no `clear_override` mutation (DD-2, DD-3, DD-15; see
+`test_feature_flag_repository.py` for the migration contract itself).
 
 Requirement ids live on the individual tests below, deliberately **not** in
 this docstring: `scripts/check_requirement_coverage.py` scans file text, so an
@@ -7,11 +14,9 @@ id parked in a module header reports covered while nothing asserts it.
 
 from __future__ import annotations
 
-import itertools
-import json
 import logging
-import os
-from collections.abc import Generator
+import sqlite3
+from collections.abc import Callable, Generator
 from pathlib import Path
 
 import pytest
@@ -19,13 +24,13 @@ from fastapi.testclient import TestClient
 
 from app.container import Container
 from app.core.config import (
-    ALL_FEATURE_FLAGS,
     KNOWN_FEATURE_FLAGS,
-    PRIVATE_FEATURE_FLAGS,
     AppConfig,
+    FeatureFlagSettings,
+    ManagedFlagMigrationSeed,
     get_config,
 )
-from app.exceptions import ValidationFailure
+from app.exceptions import StorageUnavailableError, ValidationFailure
 from app.main import create_app
 from app.repositories import SessionRepository, UserRepository
 from app.repositories.feature_flag import (
@@ -94,10 +99,40 @@ def _user(user_id: str, email: str) -> User:
     )
 
 
-def _service(config: AppConfig, data_dir: Path) -> FeatureFlagService:
+def _service(
+    config: AppConfig,
+    data_dir: Path,
+    *,
+    relay_capability_available: bool = True,
+    load_migration_seed: Callable[[], ManagedFlagMigrationSeed] | None = None,
+) -> FeatureFlagService:
+    """Build a service wired the way `build_container` wires production: the
+    repository's one-time migration seeds from the same config the service
+    resolves `delivery_canary` from, so `flags=`/`internal_users=` in `_config`
+    are visible to both (ADR-0019 §3).
+
+    `load_migration_seed` overrides that seed callback, so a test can build a
+    service over an *already-migrated* directory whose only parser of managed
+    environment text refuses to run.
+    """
+
     user_repo = UserRepository(data_dir)
+
+    def _resolve_account_id(email: str) -> str | None:
+        account = user_repo.get_by_email(email)
+        return account.id if account is not None else None
+
+    repository = FeatureFlagOverrideRepository(
+        data_dir,
+        load_migration_seed=(
+            load_migration_seed
+            if load_migration_seed is not None
+            else config.feature_flags.load_managed_migration_seed
+        ),
+        resolve_account_id=_resolve_account_id,
+    )
     return FeatureFlagService(
-        repository=FeatureFlagOverrideRepository(data_dir),
+        repository=repository,
         config=config,
         user_repo=user_repo,
         admin_service=AdminService(
@@ -105,46 +140,20 @@ def _service(config: AppConfig, data_dir: Path) -> FeatureFlagService:
             session_repo=SessionRepository(data_dir),
             operator_emails=frozenset(),
         ),
+        relay_capability_available=relay_capability_available,
     )
 
 
 # ---------------------------------------------------------------------------
-# B1 — fallback parity with the environment-only implementation
+# B1 — the key set, and the one flag that stays environment-owned
 # ---------------------------------------------------------------------------
 
 
-def test_010_SC_003_no_runtime_document_matches_the_environment_answer_exactly(
+def test_010_FR_008_delivery_canary_always_matches_the_environment_answer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """With no runtime document the overlay is invisible for every flag state."""
-
-    states = ("off", "internal", "on")
-    for index, combination in enumerate(
-        itertools.product(states, repeat=len(KNOWN_FEATURE_FLAGS))
-    ):
-        data_dir = tmp_path / f"case-{index}"
-        data_dir.mkdir()
-        flags = ",".join(
-            f"{name}={state}"
-            for name, state in zip(KNOWN_FEATURE_FLAGS, combination, strict=True)
-        )
-        config = _config(
-            monkeypatch, data_dir, flags=flags, internal_users=COHORT_EMAIL
-        )
-        service = _service(config, data_dir)
-        for user in (
-            _user("user_cohort", COHORT_EMAIL),
-            _user("user_outsider", OUTSIDER_EMAIL),
-        ):
-            assert service.effective_flags(
-                user
-            ) == config.feature_flags.effective_flags(user.email), flags
-
-
-def test_010_FR_008_unmanaged_flags_always_match_the_environment_answer(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """`delivery_canary`/`external_agent_relay` never gain a runtime entry."""
+    """`delivery_canary` is the only flag ADR-0019 leaves environment-owned; a
+    managed-flag mutation elsewhere never changes its effective value."""
 
     config = _config(
         monkeypatch,
@@ -160,10 +169,75 @@ def test_010_FR_008_unmanaged_flags_always_match_the_environment_answer(
         _user("user_outsider", OUTSIDER_EMAIL),
     ):
         resolved = service.effective_flags(user)
-        environment = config.feature_flags.effective_flags(user.email)
-        assert resolved["delivery_canary"] == environment["delivery_canary"]
-        assert resolved["external_agent_relay"] == environment["external_agent_relay"]
+        environment = config.feature_flags.delivery_canary_effective(user.email)
+        assert resolved["delivery_canary"] == environment
         assert resolved["voice_brain_dump"] is True
+
+
+@pytest.mark.parametrize(
+    "delivery_canary_state,cohort_expected,outsider_expected",
+    [
+        ("off", False, False),
+        ("internal", True, False),
+        ("on", True, True),
+    ],
+)
+def test_010_DD_15_effective_flags_never_consults_the_retired_env_resolver(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    delivery_canary_state: str,
+    cohort_expected: bool,
+    outsider_expected: bool,
+) -> None:
+    """`effective_flags`/`is_effective`/`describe` must resolve every managed
+    flag exclusively from a healthy SQLite store, never from the environment
+    baseline ADR-0019 retired for those three (DD-15).
+
+    Two halves, because the retirement has two parts. The aggregate resolver
+    `FeatureFlagSettings.effective_flags` is *gone*, so its absence is asserted
+    structurally rather than by trapping a call to it. What is left of the
+    managed environment input — the raw text — has exactly one parser,
+    `load_managed_migration_seed`, so a second service reading the same
+    already-migrated directory with a seed loader that raises on any call
+    proves runtime resolution never reaches for it.
+
+    `delivery_canary` alone still resolves from config, through a narrower
+    method, and must keep resolving OFF/INTERNAL/ON correctly for both a
+    cohort and a non-cohort user."""
+
+    config = _config(
+        monkeypatch,
+        tmp_path,
+        flags=f"delivery_canary={delivery_canary_state}",
+        internal_users=COHORT_EMAIL,
+    )
+    service = _service(config, tmp_path)
+    service.set_mode("voice_brain_dump", FlagMode.ON, operator_id="user_op")
+
+    assert not hasattr(FeatureFlagSettings, "effective_flags")
+    assert not hasattr(config.feature_flags, "effective_flags")
+
+    def _raiser() -> ManagedFlagMigrationSeed:
+        raise AssertionError(
+            "runtime resolution must never parse the managed environment input"
+        )
+
+    sealed = _service(config, tmp_path, load_migration_seed=_raiser)
+
+    cohort_user = _user("user_cohort", COHORT_EMAIL)
+    outsider = _user("user_outsider", OUTSIDER_EMAIL)
+
+    cohort_result = sealed.effective_flags(cohort_user)
+    outsider_result = sealed.effective_flags(outsider)
+
+    assert set(cohort_result) == set(KNOWN_FEATURE_FLAGS)
+    assert cohort_result["delivery_canary"] is cohort_expected
+    assert outsider_result["delivery_canary"] is outsider_expected
+    assert cohort_result["voice_brain_dump"] is True
+    assert outsider_result["voice_brain_dump"] is True
+
+    assert sealed.is_effective("voice_brain_dump", outsider) is True
+    assert sealed.describe(operator_id="user_op").degraded is False
 
 
 def test_010_FR_003_key_set_is_exactly_known_feature_flags(
@@ -180,50 +254,46 @@ def test_010_FR_003_key_set_is_exactly_known_feature_flags(
     )
 
 
-# ---------------------------------------------------------------------------
-# B2 — rollback equivalence (the pre-010 code path)
-# ---------------------------------------------------------------------------
-
-
-def test_010_SC_003_pre_010_evaluation_ignores_an_existing_runtime_document(
+def test_010_FR_003_effective_flags_never_blend_sqlite_with_the_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The environment-only path is inert to a document a newer build wrote."""
+    """A managed flag's effective value is exclusively its SQLite row — there
+    is no per-flag fallback to the environment baseline after migration
+    (DD-15). Every one of the three managed flags exhibits this, including
+    `external_agent_relay`."""
 
     config = _config(
         monkeypatch,
         tmp_path,
-        flags="voice_brain_dump=internal,mobile_task_classification=on",
-        internal_users=COHORT_EMAIL,
+        flags=(
+            "voice_brain_dump=on,mobile_task_classification=on,"
+            "external_agent_relay=on"
+        ),
     )
-    service = _service(config, tmp_path)
-    service.set_mode("voice_brain_dump", FlagMode.ON, operator_id="user_op")
-    service.set_mode("mobile_task_classification", FlagMode.OFF, operator_id="user_op")
+    service = _service(config, tmp_path, relay_capability_available=True)
+    user = _user("user_env_only", OUTSIDER_EMAIL)
 
-    outsider = _user("user_outsider", OUTSIDER_EMAIL)
-    # `config.feature_flags.effective_flags` is the pre-010 code path verbatim:
-    # it has no knowledge of the document, so it must neither read it nor raise.
-    environment_only = config.feature_flags.effective_flags(outsider.email)
+    for flag in MANAGED_FLAGS:
+        service.set_mode(flag, FlagMode.OFF, operator_id="user_op")
 
-    assert environment_only == {
-        "delivery_canary": False,
-        "voice_brain_dump": False,
-        "mobile_task_classification": True,
-        "external_agent_relay": False,
-    }
-    assert service.effective_flags(outsider)["voice_brain_dump"] is True
+    # Every managed flag's environment baseline says ON; SQLite alone says
+    # OFF. If the resolver still blended the two, at least one would read
+    # True here — DD-15 requires none to.
+    for flag in MANAGED_FLAGS:
+        assert service.is_effective(flag, user) is False
 
 
 # ---------------------------------------------------------------------------
-# B3 — per-flag overlay, never a merge
+# B3 — per-flag semantics: the stored mode is the whole answer
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("flag", MANAGED_FLAGS)
-def test_010_FR_003_runtime_off_beats_an_environment_on(
+def test_010_FR_003_a_stored_off_is_effective_for_nobody(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str
 ) -> None:
-    """A runtime OFF override is effective for nobody, whatever the baseline says."""
+    """A stored OFF is effective for nobody, whatever the deploy-staged
+    baseline said before migration."""
 
     config = _config(monkeypatch, tmp_path, flags=f"{flag}=on")
     service = _service(config, tmp_path)
@@ -234,10 +304,10 @@ def test_010_FR_003_runtime_off_beats_an_environment_on(
 
 
 @pytest.mark.parametrize("flag", MANAGED_FLAGS)
-def test_010_FR_003_runtime_on_beats_an_environment_off(
+def test_010_FR_003_a_stored_on_is_effective_for_every_authenticated_user(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str
 ) -> None:
-    """A runtime ON override is effective for every authenticated user."""
+    """A stored ON is effective for every authenticated user."""
 
     config = _config(monkeypatch, tmp_path, flags=f"{flag}=off")
     service = _service(config, tmp_path)
@@ -268,7 +338,7 @@ def test_010_FR_007_selected_users_admits_exactly_the_stored_ids(
 
     assert service.effective_flags(_user("user_chosen", OUTSIDER_EMAIL))[flag] is True
     # In the environment INTERNAL cohort, but not in the runtime set: the
-    # overlay answers alone and never blends the two sources.
+    # SQLite row answers alone.
     assert service.effective_flags(_user("user_cohort", COHORT_EMAIL))[flag] is False
 
 
@@ -297,61 +367,43 @@ def test_010_FR_007_a_stored_id_belonging_to_no_account_grants_nothing(
 # ---------------------------------------------------------------------------
 
 
-_REFUSED_FLAGS = (
-    "admin_portal",
-    "delivery_canary",
-    "external_agent_relay",
-    "not_a_flag_at_all",
-)
+_REFUSED_FLAGS = ("delivery_canary", "not_a_flag_at_all")
+"""`admin_portal` no longer exists as a flag at all (ADR-0019, DD-14) — it is
+not part of this refused set because it cannot even be configured any more."""
 
 
 @pytest.mark.parametrize("flag", _REFUSED_FLAGS)
 def test_010_FR_002_every_mutation_refuses_an_unmanaged_flag(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str
 ) -> None:
-    """Every mutation refuses a flag outside the two-flag managed set."""
+    """Every mutation refuses a flag outside the three-flag managed set."""
 
-    config = _config(monkeypatch, tmp_path, flags="admin_portal=on,delivery_canary=on")
+    config = _config(monkeypatch, tmp_path, flags="delivery_canary=on")
     service = _service(config, tmp_path)
 
     with pytest.raises(ValidationFailure):
         service.set_mode(flag, FlagMode.ON, operator_id="user_op")
     with pytest.raises(ValidationFailure):
-        service.clear_override(flag, operator_id="user_op")
-    with pytest.raises(ValidationFailure):
         service.add_selected_user(flag, operator_id="user_op", account_id="user_a")
     with pytest.raises(ValidationFailure):
         service.remove_selected_user(flag, "user_a", operator_id="user_op")
 
-    assert service.repository.document_path.exists() is False
 
-
-def test_010_SC_006_a_refused_flag_keeps_its_environment_value(
+def test_010_SC_006_delivery_canary_keeps_its_environment_value(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A refused flag's effective value stays exactly the environment answer."""
+    """`delivery_canary`'s effective value stays exactly the environment
+    answer: a mutation naming it is refused and never changes it."""
 
-    config = _config(
-        monkeypatch,
-        tmp_path,
-        flags="admin_portal=internal,delivery_canary=on,external_agent_relay=internal",
-        internal_users=COHORT_EMAIL,
-    )
+    config = _config(monkeypatch, tmp_path, flags="delivery_canary=on")
     service = _service(config, tmp_path)
-    for flag in _REFUSED_FLAGS:
-        with pytest.raises(ValidationFailure):
-            service.set_mode(flag, FlagMode.OFF, operator_id="user_op")
+    with pytest.raises(ValidationFailure):
+        service.set_mode("delivery_canary", FlagMode.OFF, operator_id="user_op")
 
-    cohort = _user("user_cohort", COHORT_EMAIL)
-    resolved = service.effective_flags(cohort)
-    environment = config.feature_flags.effective_flags(cohort.email)
-    for name in KNOWN_FEATURE_FLAGS:
-        assert resolved[name] == environment[name]
-    for name in PRIVATE_FEATURE_FLAGS:
-        assert config.feature_flags.private_flag_effective(name, cohort.email) is True
-    assert set(ALL_FEATURE_FLAGS) == set(KNOWN_FEATURE_FLAGS) | set(
-        PRIVATE_FEATURE_FLAGS
-    )
+    user = _user("user_a", OUTSIDER_EMAIL)
+    resolved = service.effective_flags(user)
+    environment = config.feature_flags.delivery_canary_effective(user.email)
+    assert resolved["delivery_canary"] == environment is True
 
 
 def test_010_FR_002_an_unknown_mode_value_is_refused(
@@ -365,7 +417,7 @@ def test_010_FR_002_an_unknown_mode_value_is_refused(
     with pytest.raises(ValidationFailure):
         service.set_mode("voice_brain_dump", "sideways", operator_id="user_op")
 
-    assert service.repository.document_path.exists() is False
+    assert service.repository.read().flags["voice_brain_dump"].mode is FlagMode.OFF
 
 
 # ---------------------------------------------------------------------------
@@ -415,7 +467,7 @@ def test_010_FR_010_cohort_mutations_are_refused_outside_selected_users_mode(
         "voice_brain_dump", operator_id="user_op", account_id="user_chosen"
     )
     service.set_mode("voice_brain_dump", inactive_mode, operator_id="user_op")
-    before = service.repository.document_path.read_bytes()
+    before = service.repository.read().flags
 
     with pytest.raises(ValidationFailure):
         service.add_selected_user(
@@ -426,34 +478,11 @@ def test_010_FR_010_cohort_mutations_are_refused_outside_selected_users_mode(
             "voice_brain_dump", "user_chosen", operator_id="user_op"
         )
 
-    assert service.repository.document_path.read_bytes() == before
-
-
-def test_010_FR_005_clearing_an_override_deletes_the_retained_cohort(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Clearing deletes the whole entry, cohort included, unlike a mode change."""
-
-    config = _config(monkeypatch, tmp_path, flags="voice_brain_dump=internal")
-    service = _service(config, tmp_path)
-    _seed_account(tmp_path, "user_chosen", "chosen@example.com")
-    service.set_mode("voice_brain_dump", FlagMode.SELECTED_USERS, operator_id="user_op")
-    service.add_selected_user(
-        "voice_brain_dump", operator_id="user_op", account_id="user_chosen"
-    )
-
-    service.clear_override("voice_brain_dump", operator_id="user_op")
-
-    view = service.describe(operator_id="user_op")
-    cleared = next(f for f in view.flags if f.name == "voice_brain_dump")
-    assert cleared.override_mode is None
-    assert cleared.source == "deploy_default"
-    assert cleared.deploy_default_state == "internal"
-    assert cleared.selected_users == ()
+    assert service.repository.read().flags == before
 
 
 # ---------------------------------------------------------------------------
-# B6 — cache invalidation
+# B6 — no cache sits in front of SQLite
 # ---------------------------------------------------------------------------
 
 
@@ -472,46 +501,38 @@ def test_010_FR_005_a_mutation_is_visible_to_the_very_next_evaluation(
     assert service.effective_flags(user)["voice_brain_dump"] is False
 
 
-def test_010_FR_005_a_document_replaced_underneath_the_service_is_picked_up(
+def test_010_FR_005_a_mutation_committed_by_a_second_connection_is_visible(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A same-size replacement with a newer mtime is re-read, not served stale."""
+    """No cache sits between the service and the SQLite store: a row committed
+    through a second repository instance over the same database is visible on
+    the very next read, exactly like a same-process mutation (DD-15 — SQLite
+    alone is authoritative, so there is nothing to invalidate)."""
 
     config = _config(monkeypatch, tmp_path, flags="voice_brain_dump=off")
     service = _service(config, tmp_path)
-    _seed_account(tmp_path, "user_aaa", "aaa@example.com")
-    _seed_account(tmp_path, "user_bbb", "bbb@example.com")
-    service.set_mode("voice_brain_dump", FlagMode.SELECTED_USERS, operator_id="user_op")
-    service.add_selected_user(
-        "voice_brain_dump", operator_id="user_op", account_id="user_aaa"
-    )
-    user = _user("user_aaa", "aaa@example.com")
-    assert service.effective_flags(user)["voice_brain_dump"] is True
-
-    path = service.repository.document_path
-    original = path.read_text(encoding="utf-8")
-    document = json.loads(original)
-    document["voice_brain_dump"]["selected_users"] = ["user_bbb"]
-    replacement = json.dumps(document, indent=2, ensure_ascii=True) + "\n"
-    # Same byte length, new modification time: a size-only cache key would
-    # keep serving the stale answer forever.
-    assert len(replacement) == len(original)
-    stat_before = path.stat()
-    path.write_text(replacement, encoding="utf-8")
-    os.utime(path, ns=(stat_before.st_atime_ns, stat_before.st_mtime_ns + 1_000_000))
-
+    user = _user("user_a", OUTSIDER_EMAIL)
     assert service.effective_flags(user)["voice_brain_dump"] is False
 
+    other = FeatureFlagOverrideRepository(tmp_path)
+    other.mutate(
+        lambda current: {**current, "voice_brain_dump": FlagOverride(mode=FlagMode.ON)}
+    )
+
+    assert service.effective_flags(user)["voice_brain_dump"] is True
+
 
 # ---------------------------------------------------------------------------
-# B7 — degraded behaviour
+# B7 — degraded behaviour (DD-2)
 # ---------------------------------------------------------------------------
 
 
-def test_010_FR_004_degraded_falls_back_and_refuses_every_mutation(
+def test_010_FR_004_degraded_resolves_every_managed_flag_ineffective_and_refuses_every_mutation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A degraded document resolves from the baseline and refuses every write."""
+    """A degraded store resolves every managed flag ineffective for everyone —
+    there is no environment fallback to answer from post-migration — and
+    refuses every mutation."""
 
     config = _config(
         monkeypatch,
@@ -520,14 +541,17 @@ def test_010_FR_004_degraded_falls_back_and_refuses_every_mutation(
         internal_users=COHORT_EMAIL,
     )
     service = _service(config, tmp_path)
-    path = service.repository.document_path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("{not json", encoding="utf-8")
-    before = path.read_bytes()
+    _seed_account(tmp_path, "user_x", "x@example.com")
+    with sqlite3.connect(service.repository.db_path) as conn:
+        conn.execute(
+            "UPDATE feature_flags SET mode = ? WHERE flag = ?",
+            ("sideways", "voice_brain_dump"),
+        )
+        conn.commit()
 
     assert (
         service.effective_flags(_user("user_cohort", COHORT_EMAIL))["voice_brain_dump"]
-        is True
+        is False
     )
     assert (
         service.effective_flags(_user("user_out", OUTSIDER_EMAIL))["voice_brain_dump"]
@@ -538,14 +562,17 @@ def test_010_FR_004_degraded_falls_back_and_refuses_every_mutation(
     with pytest.raises(DegradedRuntimeFlagsError):
         service.set_mode("voice_brain_dump", FlagMode.ON, operator_id="user_op")
     with pytest.raises(DegradedRuntimeFlagsError):
-        service.clear_override("voice_brain_dump", operator_id="user_op")
-    assert path.read_bytes() == before
+        service.add_selected_user(
+            "voice_brain_dump", operator_id="user_op", account_id="user_x"
+        )
 
 
-def test_010_SC_008_an_absent_document_describes_as_healthy(
+def test_010_SC_008_a_freshly_migrated_store_describes_as_healthy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An absent document is healthy, not degraded (DD-2)."""
+    """A freshly migrated store — the only state construction ever leaves,
+    absence being impossible after migration (DD-2) — describes as healthy
+    with every managed flag present."""
 
     config = _config(monkeypatch, tmp_path, flags="voice_brain_dump=on")
     service = _service(config, tmp_path)
@@ -554,9 +581,6 @@ def test_010_SC_008_an_absent_document_describes_as_healthy(
 
     assert view.degraded is False
     assert [flag.name for flag in view.flags] == list(MANAGED_FLAGS)
-    for flag in view.flags:
-        assert flag.override_mode is None
-        assert flag.source == "deploy_default"
 
 
 def test_010_FR_006_describe_emits_exactly_one_aggregate_record(
@@ -580,7 +604,7 @@ def test_010_FR_006_describe_emits_exactly_one_aggregate_record(
     assert len(records) == 1
     message = records[0].getMessage()
     assert "operator=user_op" in message
-    assert "flags=2" in message
+    assert "flags=3" in message
     assert "resolved_accounts=1" in message
     assert "chosen@example.com" not in message
 
@@ -605,16 +629,14 @@ def test_010_FR_006_each_mutation_emits_exactly_one_content_free_record(
         service.remove_selected_user(
             "voice_brain_dump", "user_chosen", operator_id="user_op"
         )
-        service.clear_override("voice_brain_dump", operator_id="user_op")
 
     records = [r.getMessage() for r in caplog.records if r.name == SERVICE_LOGGER]
-    assert len(records) == 4
+    assert len(records) == 3
     assert "action=set_mode" in records[0]
     assert "action=add_selected_user" in records[1]
     assert "account=user_chosen" in records[1]
     assert "action=remove_selected_user" in records[2]
     assert "account=user_chosen" in records[2]
-    assert "action=clear_override" in records[3]
     for message in records:
         assert "operator=user_op" in message
         assert "outcome=" in message
@@ -691,13 +713,15 @@ def test_010_FR_007_a_purge_racing_the_lock_does_not_resurrect_the_scrubbed_id(
 def test_010_FR_007_add_is_refused_while_purge_has_scrubbed_the_cohort_but_not_yet_deleted_the_user(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """`AccountService.purge_account` scrubs the feature-flag cohort *first*
-    and deletes the user record *last* (see account_service.py). In the
-    window between those two steps the account is due for deletion but still
-    resolves through `admin_service.find_account` and `UserRepository`, so the
-    existence check alone does not refuse it. `add_selected_user` must still
-    refuse there, and never reinsert the ID, using the account's own durable
-    `deletion_requested_at` rather than a new lock, subsystem or tombstone
+    """`AccountService.purge_account` marks the account's `deletion_requested_at`
+    before it scrubs the feature-flag cohort, and scrubs the cohort before it
+    deletes the user record *last* (see account_service.py). In the window
+    between the scrub and the delete the account is due for deletion but
+    still resolves through `admin_service.find_account` and `UserRepository`,
+    so the existence check alone does not refuse it. `add_selected_user` must
+    still refuse there, and never reinsert the ID, using the account's own
+    durable `deletion_requested_at` rather than a new lock, subsystem or
+    tombstone
     (010-FR-007, DD-13).
     """
 
@@ -706,9 +730,9 @@ def test_010_FR_007_add_is_refused_while_purge_has_scrubbed_the_cohort_but_not_y
     user = _seed_account(tmp_path, "user_due", "due@example.com")
     service.set_mode("voice_brain_dump", FlagMode.SELECTED_USERS, operator_id="user_op")
 
-    # Mirror the real purge's exact ordering up to (not including) its final
-    # step: the cohort is scrubbed, and the account is marked due for
-    # deletion, but the user record itself is not deleted yet.
+    # Construct the real purge's intermediate state directly, short of its
+    # final step: the account is marked due for deletion and the cohort is
+    # scrubbed, but the user record itself is not deleted yet.
     service.repository.scrub_user(user.id)
     service.user_repo.mutate(
         user.id,
@@ -739,12 +763,12 @@ def test_010_FR_007_add_is_refused_while_purge_has_scrubbed_the_cohort_but_not_y
     assert "due@example.com" not in add_records[0]
 
 
-def test_010_FR_010_a_concurrent_clear_racing_add_selected_user_is_refused_not_applied(
+def test_010_FR_010_a_concurrent_mode_change_racing_add_selected_user_is_refused_not_applied(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A `clear_override` landing between account resolution and the locked
-    write is a clean refusal, not a write onto a cohort that no longer exists
-    (010-FR-010)."""
+    """A `set_mode` away from SELECTED_USERS landing between this add's
+    account resolution and its locked write is a clean refusal, not a write
+    onto a cohort mode that no longer applies (010-FR-010)."""
 
     config = _config(monkeypatch, tmp_path, flags="")
     service = _service(config, tmp_path)
@@ -753,15 +777,14 @@ def test_010_FR_010_a_concurrent_clear_racing_add_selected_user_is_refused_not_a
 
     real_find_account = service.admin_service.find_account
 
-    def _find_then_clear(**kwargs: object) -> User | None:
+    def _find_then_change_mode(**kwargs: object) -> User | None:
         found = real_find_account(**kwargs)
-        # Simulate a second operator's `clear_override` landing in the gap
-        # between this add's account resolution and the lock it is about to
-        # take.
-        service.clear_override("voice_brain_dump", operator_id="user_other")
+        # Simulate a second operator's `set_mode` landing in the gap between
+        # this add's account resolution and the lock it is about to take.
+        service.set_mode("voice_brain_dump", FlagMode.OFF, operator_id="user_other")
         return found
 
-    monkeypatch.setattr(service.admin_service, "find_account", _find_then_clear)
+    monkeypatch.setattr(service.admin_service, "find_account", _find_then_change_mode)
 
     caplog.clear()
     with (
@@ -773,8 +796,8 @@ def test_010_FR_010_a_concurrent_clear_racing_add_selected_user_is_refused_not_a
         )
 
     view = service.describe(operator_id="user_op")
-    cleared = next(f for f in view.flags if f.name == "voice_brain_dump")
-    assert cleared.override_mode is None
+    changed = next(f for f in view.flags if f.name == "voice_brain_dump")
+    assert changed.mode is FlagMode.OFF
 
     records = [r.getMessage() for r in caplog.records if r.name == SERVICE_LOGGER]
     add_records = [m for m in records if "action=add_selected_user" in m]
@@ -830,7 +853,7 @@ def test_010_FR_010_a_concurrent_mode_change_racing_remove_selected_user_is_refu
 
     view = service.describe(operator_id="user_op")
     retained = next(f for f in view.flags if f.name == "voice_brain_dump")
-    assert retained.override_mode == FlagMode.OFF
+    assert retained.mode is FlagMode.OFF
     # DD-6: the race left the cohort retained, and the refused remove must
     # not have touched it either.
     assert [u.account_id for u in retained.selected_users] == ["user_chosen"]
@@ -849,12 +872,6 @@ def test_010_FR_010_a_concurrent_mode_change_racing_remove_selected_user_is_refu
             "set_mode",
             lambda service: service.set_mode(
                 "voice_brain_dump", FlagMode.ON, operator_id="user_op"
-            ),
-        ),
-        (
-            "clear_override",
-            lambda service: service.clear_override(
-                "voice_brain_dump", operator_id="user_op"
             ),
         ),
         (
@@ -879,14 +896,18 @@ def test_010_FR_006_a_refused_write_against_a_degraded_document_records_exactly_
     call: object,
 ) -> None:
     """Every mutation's own repository write can be refused for a degraded
-    document; that refusal is still exactly one content-free record naming no
+    store; that refusal is still exactly one content-free record naming no
     account, not zero (010-FR-004, 010-FR-006, DD-10)."""
 
     config = _config(monkeypatch, tmp_path, flags="")
     service = _service(config, tmp_path)
     _seed_account(tmp_path, "user_chosen", "chosen@example.com")
-    path = service.repository.document_path
-    path.write_text("{not json", encoding="utf-8")
+    with sqlite3.connect(service.repository.db_path) as conn:
+        conn.execute(
+            "UPDATE feature_flags SET mode = ? WHERE flag = ?",
+            ("sideways", "voice_brain_dump"),
+        )
+        conn.commit()
 
     caplog.clear()
     with (
@@ -914,13 +935,6 @@ def test_010_FR_006_a_refused_write_against_a_degraded_document_records_exactly_
             None,
         ),
         (
-            "clear_override",
-            lambda service: service.clear_override(
-                "voice_brain_dump", operator_id="user_op"
-            ),
-            None,
-        ),
-        (
             "add_selected_user",
             lambda service: service.add_selected_user(
                 "voice_brain_dump", operator_id="user_op", account_id="user_chosen"
@@ -944,38 +958,47 @@ def test_010_FR_006_an_atomic_write_failure_records_exactly_one_write_failed_aud
     call: object,
     expected_account: str | None,
 ) -> None:
-    """A generic `OSError` from the repository's atomic write — disk full,
-    EIO, a permission failure — is never swallowed: it still surfaces to the
-    caller so the existing 5xx behavior is unchanged, but each of the four
-    mutations first records exactly one dedicated, content-free failure audit
-    rather than none, and the document itself is untouched (010-FR-006,
-    DD-10).
+    """A generic `OSError`/`StorageUnavailableError` from the repository's
+    write — disk full, EIO, a permission failure — is never swallowed: it
+    still surfaces to the caller so the existing 5xx behavior is unchanged,
+    but each of the three mutations first records exactly one dedicated,
+    content-free failure audit rather than none, and the store itself is
+    untouched (010-FR-006, DD-10).
     """
 
     config = _config(monkeypatch, tmp_path, flags="")
     service = _service(config, tmp_path)
     _seed_account(tmp_path, "user_chosen", "chosen@example.com")
     service.set_mode("voice_brain_dump", FlagMode.SELECTED_USERS, operator_id="user_op")
-    before = service.repository.document_path.read_bytes()
+    before = service.repository.read().flags
 
-    original_replace = Path.replace
+    class _FailingConnection(sqlite3.Connection):
+        """`sqlite3.Connection.execute` is a read-only slot on the instance,
+        so the mid-transaction failure is injected via a `factory=` subclass
+        rather than monkeypatching the instance."""
 
-    def _explode(self: Path, target: str | os.PathLike[str]) -> Path:
-        if Path(target) == service.repository.document_path:
-            raise OSError("disk full")
-        return original_replace(self, target)
+        def execute(self, sql: str, *params: object) -> sqlite3.Cursor:
+            if sql.strip().upper().startswith("BEGIN IMMEDIATE"):
+                raise sqlite3.OperationalError("disk full")
+            return super().execute(sql, *params)
 
-    monkeypatch.setattr(Path, "replace", _explode)
+    original_connect = sqlite3.connect
+
+    def _explode(*args: object, **kwargs: object) -> sqlite3.Connection:
+        kwargs["factory"] = _FailingConnection
+        return original_connect(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(sqlite3, "connect", _explode)
 
     caplog.clear()
     with (
         caplog.at_level(logging.INFO, logger=SERVICE_LOGGER),
-        pytest.raises(OSError),
+        pytest.raises(StorageUnavailableError),
     ):
         call(service)  # type: ignore[operator]
 
     monkeypatch.undo()
-    assert service.repository.document_path.read_bytes() == before
+    assert service.repository.read().flags == before
 
     records = [r.getMessage() for r in caplog.records if r.name == SERVICE_LOGGER]
     matching = [m for m in records if f"action={action}" in m]
@@ -1116,10 +1139,14 @@ def test_010_FR_008_runtime_cohort_opens_every_voice_brain_dump_call_site(
     )
 
 
-def test_010_FR_008_external_agent_relay_keeps_reading_the_environment_only(
+def test_010_DD_16_external_agent_relay_now_resolves_through_sqlite_not_env_alone(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`external_agent_relay` is untouched by the resolver and by any override."""
+    """`external_agent_relay` is runtime-manageable through the SQLite
+    resolver, exactly like the other two managed flags — the environment
+    baseline only ever seeds it once, at migration. A runtime SQLite override
+    on this flag must reach `/api/auth/me` the same way a `voice_brain_dump`
+    override already does."""
 
     from app.api.dependencies import external_agent_relay_enabled
 
@@ -1127,20 +1154,14 @@ def test_010_FR_008_external_agent_relay_keeps_reading_the_environment_only(
         tmp_path,
         monkeypatch,
         email=OUTSIDER_EMAIL,
-        flags="external_agent_relay=on,voice_brain_dump=off",
-    )
-    _override(container, "voice_brain_dump", FlagOverride(mode=FlagMode.ON))
-    # A runtime entry for an unmanaged flag can only be planted by bypassing the
-    # repository's own managed-flag reconciliation, and even then it is ignored.
-    container.feature_flag_repo.document_path.write_text(
-        json.dumps({"external_agent_relay": {"mode": "off"}}, indent=2) + "\n",
-        encoding="utf-8",
+        flags="external_agent_relay=off",
     )
 
-    config = container.feature_flag_service.config
+    _override(container, "external_agent_relay", FlagOverride(mode=FlagMode.ON))
+
     user = container.user_repo.get_by_id(me["id"])
     assert user is not None
-    assert external_agent_relay_enabled(user, config) is True
+    assert external_agent_relay_enabled(user, container.feature_flag_service) is True
     assert (
         client.get("/api/auth/me").json()["feature_flags"]["external_agent_relay"]
         is True
@@ -1210,3 +1231,75 @@ def test_010_FR_008_a_runtime_off_override_keeps_owner_authority_routes_reachabl
     )
     assert blocked.status_code == 404
     assert "not available" in blocked.text.lower()
+
+
+# ---------------------------------------------------------------------------
+# DD-16 — the relay's capability boolean is a second, independent axis
+# ---------------------------------------------------------------------------
+
+
+def test_010_DD_16_external_agent_relay_is_now_a_runtime_manageable_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DD-16 makes `external_agent_relay` manageable like the other two flags:
+    a mutation naming it must be accepted, not refused as unmanaged."""
+
+    config = _config(monkeypatch, tmp_path, flags="external_agent_relay=off")
+    service = _service(config, tmp_path)
+
+    view = service.set_mode("external_agent_relay", FlagMode.ON, operator_id="user_op")
+
+    assert any(
+        flag.name == "external_agent_relay" and flag.mode is FlagMode.ON
+        for flag in view.flags
+    )
+
+
+def test_010_DD_16_service_constructor_accepts_the_relay_capability_boolean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`FeatureFlagService` takes a constructor-supplied capability boolean, so
+    the relay's effective value can AND it with the SQLite rollout answer."""
+
+    config = _config(monkeypatch, tmp_path, flags="external_agent_relay=off")
+
+    _service(config, tmp_path, relay_capability_available=True)
+
+
+def test_010_DD_16_relay_effective_value_ands_rollout_with_capability(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A runtime ON never exposes the relay when no capability was constructed;
+    a configured capability never overrides a SQLite OFF/non-matching answer —
+    both axes must be favorable (DD-16)."""
+
+    config = _config(monkeypatch, tmp_path, flags="external_agent_relay=off")
+    user = _user("user_relay", OUTSIDER_EMAIL)
+
+    rollout_on_capability_missing = _service(
+        config, tmp_path / "case-a", relay_capability_available=False
+    )
+    rollout_on_capability_missing.set_mode(
+        "external_agent_relay", FlagMode.ON, operator_id="user_op"
+    )
+    assert rollout_on_capability_missing.is_effective("external_agent_relay", user) is (
+        False
+    )
+
+    rollout_off_capability_present = _service(
+        config, tmp_path / "case-b", relay_capability_available=True
+    )
+    assert (
+        rollout_off_capability_present.is_effective("external_agent_relay", user)
+        is False
+    )
+
+    rollout_on_capability_present = _service(
+        config, tmp_path / "case-c", relay_capability_available=True
+    )
+    rollout_on_capability_present.set_mode(
+        "external_agent_relay", FlagMode.ON, operator_id="user_op"
+    )
+    assert (
+        rollout_on_capability_present.is_effective("external_agent_relay", user) is True
+    )

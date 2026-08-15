@@ -56,32 +56,16 @@ class AdminStatusResponse(StrictBaseModel):
 
 
 class AdminFeatureFlagMode(str, Enum):
-    """The three runtime-override states one managed flag may hold (010-FR-003)."""
+    """The three runtime states one managed flag may hold (010-FR-003).
+
+    Always present, never null: ADR-0019 (DD-3, DD-15) retired the
+    inherited-baseline/"deploy default" split, so a managed flag's stored
+    `mode` is the entire answer.
+    """
 
     OFF = "off"
     ON = "on"
     SELECTED_USERS = "selected_users"
-
-
-class AdminFeatureFlagDeployState(str, Enum):
-    """The environment baseline's own vocabulary — never a mode (DD-3).
-
-    Deliberately a separate type from :class:`AdminFeatureFlagMode`: `internal`
-    is a deploy stage with no runtime-override equivalent, and collapsing the
-    two would force the screen to render an inherited `internal` baseline as one
-    of the three override radios, which DD-3 forbids.
-    """
-
-    OFF = "off"
-    INTERNAL = "internal"
-    ON = "on"
-
-
-class AdminFeatureFlagSource(str, Enum):
-    """Whether a flag's current answer comes from the overlay or the baseline."""
-
-    RUNTIME = "runtime"
-    DEPLOY_DEFAULT = "deploy_default"
 
 
 class AdminFeatureFlagSelectedUser(StrictBaseModel):
@@ -95,18 +79,10 @@ class AdminFeatureFlagSelectedUser(StrictBaseModel):
 
 
 class AdminFeatureFlagState(StrictBaseModel):
-    """One managed flag, as DD-3's three independent fields."""
+    """One managed flag: its stored mode and its retained cohort."""
 
     name: str = Field(description="Managed feature-flag name.")
-    override_mode: AdminFeatureFlagMode | None = Field(
-        description="The runtime override's mode, or null while inheriting."
-    )
-    source: AdminFeatureFlagSource = Field(
-        description="Where the current answer comes from."
-    )
-    deploy_default_state: AdminFeatureFlagDeployState = Field(
-        description="The environment baseline, always present even under an override."
-    )
+    mode: AdminFeatureFlagMode = Field(description="The flag's stored runtime mode.")
     selected_users: list[AdminFeatureFlagSelectedUser] = Field(
         default_factory=list,
         description="The retained cohort, shown even while the mode is off or on.",
@@ -117,7 +93,7 @@ class AdminFeatureFlagsResponse(StrictBaseModel):
     """Every managed flag plus the runtime store's health (010-FR-004)."""
 
     degraded: bool = Field(
-        description="True when the runtime document exists but could not be read."
+        description="True when the SQLite store exists but could not be read."
     )
     flags: list[AdminFeatureFlagState] = Field(
         description="Exactly the runtime-manageable flags, in a stable order."
@@ -150,12 +126,10 @@ class AdminFeatureFlagSelectedUserRequest(StrictBaseModel):
 __all__ = [
     "AdminAccountLookupRequest",
     "AdminAccountResponse",
-    "AdminFeatureFlagDeployState",
     "AdminFeatureFlagMode",
     "AdminFeatureFlagModeRequest",
     "AdminFeatureFlagSelectedUser",
     "AdminFeatureFlagSelectedUserRequest",
-    "AdminFeatureFlagSource",
     "AdminFeatureFlagState",
     "AdminFeatureFlagsResponse",
     "AdminRevokeSessionsResponse",

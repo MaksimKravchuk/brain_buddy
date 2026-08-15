@@ -19,18 +19,12 @@ export type AdminStatusResponse = {
   is_operator: boolean;
 };
 
-/** The three runtime-override states one managed flag may hold (010-FR-003). */
-export type AdminFeatureFlagMode = "off" | "on" | "selected_users";
-
 /**
- * The deploy-staged baseline's own vocabulary. Deliberately a different type
- * from `AdminFeatureFlagMode`: `internal` is a deploy stage with no override
- * equivalent, and mapping it onto one of the three radios is exactly what
- * DD-3 forbids.
+ * The three runtime states one managed flag may hold (010-FR-003). Always
+ * present, never null: ADR-0019 (DD-3, DD-15) retired the inherited
+ * deploy-default state, so a flag's stored mode is the entire answer.
  */
-export type AdminFeatureFlagDeployState = "off" | "internal" | "on";
-
-export type AdminFeatureFlagSource = "runtime" | "deploy_default";
+export type AdminFeatureFlagMode = "off" | "on" | "selected_users";
 
 /** One cohort row. `email` is resolved live server-side and never stored. */
 export type AdminFeatureFlagSelectedUser = {
@@ -40,11 +34,7 @@ export type AdminFeatureFlagSelectedUser = {
 
 export type AdminFeatureFlagState = {
   name: string;
-  /** Null while the flag inherits the deploy default: no radio is then checked. */
-  override_mode: AdminFeatureFlagMode | null;
-  source: AdminFeatureFlagSource;
-  /** Always present, even under an override, so "Use deploy default" previews. */
-  deploy_default_state: AdminFeatureFlagDeployState;
+  mode: AdminFeatureFlagMode;
   selected_users: AdminFeatureFlagSelectedUser[];
 };
 

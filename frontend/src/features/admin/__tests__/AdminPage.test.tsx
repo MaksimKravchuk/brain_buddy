@@ -612,9 +612,7 @@ describe("AdminPage feature-flag section placement (010-FR-006, 009-FR-005)", ()
       flags: [
         {
           name: "voice_brain_dump",
-          override_mode: null,
-          source: "deploy_default",
-          deploy_default_state: "off",
+          mode: "off",
           selected_users: []
         }
       ]

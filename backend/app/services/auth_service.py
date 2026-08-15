@@ -230,6 +230,15 @@ class AuthService:
         deletion already past its grace period refuses the login with the
         same generic error, before any session is created: the account is
         past the point of no return and must never be resurrected mid-purge.
+
+        The initial `get_by_email` read above is only ever a stale snapshot
+        — a concurrent purge can mark, scrub and delete the account at any
+        point after it. So the fresh-marker mutate below always runs, even
+        when that snapshot shows no marker at all: an unmarked snapshot must
+        not let a purge that starts mid-call slip past the check. A second
+        race window remains between that mutate and session creation, so
+        once the session exists we re-read the user one more time and roll
+        the session back if a purge landed in that gap too.
         """
 
         normalized_email = self.user_repo.normalize_email(email)
@@ -243,28 +252,43 @@ class AuthService:
         if not self._verify_password(password, user.password_hash):
             raise InvalidCredentialsError()
 
-        deletion_cancelled = False
-        if user.deletion_requested_at is not None:
-            if utcnow() >= user.deletion_requested_at + self.deletion_grace:
+        cancelled = False
+
+        def _refresh_marker(fresh: User) -> User:
+            nonlocal cancelled
+            if fresh.deletion_requested_at is None:
+                return fresh
+            if utcnow() >= fresh.deletion_requested_at + self.deletion_grace:
                 raise InvalidCredentialsError()
-            try:
-                # Patch the single field under the repo write lock so a
-                # concurrent account mutation can't be clobbered (nor can
-                # this cancellation be lost to one).
-                user = self.user_repo.mutate(
-                    user.id,
-                    lambda fresh: fresh.model_copy(
-                        update={"deletion_requested_at": None}
-                    ),
-                )
-            except NotFoundError:
-                # Purged between the credential check and the write — the
-                # account is gone; behave like any bad credential.
-                raise InvalidCredentialsError() from None
-            deletion_cancelled = True
+            cancelled = True
+            return fresh.model_copy(update={"deletion_requested_at": None})
+
+        try:
+            # Always patch under the repo write lock — even when the stale
+            # snapshot above carried no marker — re-checking the fresh
+            # marker there so a concurrent purge that has already advanced
+            # it to past-due (or deleted the account outright) cannot be
+            # resurrected by that stale read.
+            user = self.user_repo.mutate(user.id, _refresh_marker)
+        except NotFoundError:
+            # Purged between the credential check and the write — the
+            # account is gone; behave like any bad credential.
+            raise InvalidCredentialsError() from None
+
+        deletion_cancelled = cancelled
+        if deletion_cancelled:
             logger.info("Login cancelled pending deletion for %s", user.id)
 
-        raw_token, _ = self._create_session(user.id)
+        raw_token, session = self._create_session(user.id)
+
+        # Close the later window: a purge that starts after the fresh
+        # mutate above but completes before this point must not leave the
+        # just-created session orphaned once it deletes the account.
+        post_check = self.user_repo.get_by_id(user.id)
+        if post_check is None or post_check.deletion_requested_at is not None:
+            self.session_repo.delete(session.token_hash)
+            raise InvalidCredentialsError()
+
         return user, raw_token, deletion_cancelled
 
     # ------------------------------------------------------------------

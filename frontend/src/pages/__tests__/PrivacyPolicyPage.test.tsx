@@ -53,22 +53,25 @@ describe("PrivacyPolicyPage", () => {
     expect(screen.getByText(/Operators never see your content/i)).toBeInTheDocument();
   });
 
-  it("010-SC-007: names the runtime rollout document and its disposition", () => {
+  it("010-SC-007: names the runtime SQLite store and its disposition", () => {
     renderPolicy();
 
     // docs/data-retention.md names this page as the user-facing summary that
-    // must stay in sync with it, and spec 010 registers one new store there.
-    // The three decided facts are pinned: what it holds, that purge scrubs it,
-    // and that it is outside the export.
-    expect(screen.getByText(/one rollout file/i)).toBeInTheDocument();
-    expect(screen.getByText(/holds only your account id/i)).toBeInTheDocument();
+    // must stay in sync with it. Spec 010 moved the three managed flags
+    // (voice_brain_dump, mobile_task_classification, external_agent_relay)
+    // from a rollout file into one SQLite store; the decided facts pinned
+    // here are what it holds, that purge scrubs it, and that it is outside
+    // the export.
+    expect(screen.getByText(/one SQLite store/i)).toBeInTheDocument();
+    expect(screen.getByText(/covering three managed flags/i)).toBeInTheDocument();
+    expect(screen.getByText(/holds only your account id per flag/i)).toBeInTheDocument();
     expect(screen.getByText(/scrubbed when your account is purged/i)).toBeInTheDocument();
     expect(screen.getByText(/excluded from your data export/i)).toBeInTheDocument();
   });
 
   it("records the date the policy last changed", () => {
     renderPolicy();
-    expect(screen.getByText(/August 14, 2026/)).toBeInTheDocument();
+    expect(screen.getByText(/August 15, 2026/)).toBeInTheDocument();
   });
 
   it("links back to sign in", () => {
