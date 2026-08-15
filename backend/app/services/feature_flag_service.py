@@ -183,6 +183,11 @@ class FeatureFlagService:
                 action, flag=flag, operator_id=operator_id, outcome="refused_degraded"
             )
             raise
+        except OSError:
+            self._record(
+                action, flag=flag, operator_id=operator_id, outcome="write_failed"
+            )
+            raise
         self._record(action, flag=flag, operator_id=operator_id)
         return self._view(overlay)
 
@@ -197,6 +202,11 @@ class FeatureFlagService:
         except DegradedRuntimeFlagsError:
             self._record(
                 action, flag=flag, operator_id=operator_id, outcome="refused_degraded"
+            )
+            raise
+        except OSError:
+            self._record(
+                action, flag=flag, operator_id=operator_id, outcome="write_failed"
             )
             raise
         self._invalidate()
@@ -232,7 +242,15 @@ class FeatureFlagService:
             # meantime. Re-checking existence here, under the same lock the
             # write commits under, is what stops that purge's deletion from
             # being resurrected by this cohort write (010-FR-007, DD-13).
-            if self.user_repo.get_by_id(found.id) is None:
+            #
+            # `AccountService.purge_account` scrubs this cohort *first* and
+            # deletes the user record *last*, so the account can still
+            # resolve here even though its membership has already been
+            # erased. `deletion_requested_at` is the durable, existing signal
+            # that a purge for this account is due or in flight; refusing on
+            # it closes that window without a second lock or a tombstone.
+            fresh = self.user_repo.get_by_id(found.id)
+            if fresh is None or fresh.deletion_requested_at is not None:
                 raise SelectedUserNotFoundError()
             current[flag] = FlagOverride(
                 mode=entry.mode,
@@ -258,6 +276,15 @@ class FeatureFlagService:
         except SelectedUserNotFoundError:
             self._record(
                 action, flag=flag, operator_id=operator_id, outcome="no_account_found"
+            )
+            raise
+        except OSError:
+            self._record(
+                action,
+                flag=flag,
+                operator_id=operator_id,
+                account=found.id,
+                outcome="write_failed",
             )
             raise
         self._record(action, flag=flag, operator_id=operator_id, account=found.id)
@@ -300,6 +327,15 @@ class FeatureFlagService:
                 flag=flag,
                 operator_id=operator_id,
                 outcome="refused_mode_not_selected_users",
+            )
+            raise
+        except OSError:
+            self._record(
+                action,
+                flag=flag,
+                operator_id=operator_id,
+                account=record_account,
+                outcome="write_failed",
             )
             raise
         self._record(action, flag=flag, operator_id=operator_id, account=record_account)

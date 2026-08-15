@@ -688,6 +688,57 @@ def test_010_FR_007_a_purge_racing_the_lock_does_not_resurrect_the_scrubbed_id(
     assert cohort.selected_users == ()
 
 
+def test_010_FR_007_add_is_refused_while_purge_has_scrubbed_the_cohort_but_not_yet_deleted_the_user(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """`AccountService.purge_account` scrubs the feature-flag cohort *first*
+    and deletes the user record *last* (see account_service.py). In the
+    window between those two steps the account is due for deletion but still
+    resolves through `admin_service.find_account` and `UserRepository`, so the
+    existence check alone does not refuse it. `add_selected_user` must still
+    refuse there, and never reinsert the ID, using the account's own durable
+    `deletion_requested_at` rather than a new lock, subsystem or tombstone
+    (010-FR-007, DD-13).
+    """
+
+    config = _config(monkeypatch, tmp_path, flags="")
+    service = _service(config, tmp_path)
+    user = _seed_account(tmp_path, "user_due", "due@example.com")
+    service.set_mode("voice_brain_dump", FlagMode.SELECTED_USERS, operator_id="user_op")
+
+    # Mirror the real purge's exact ordering up to (not including) its final
+    # step: the cohort is scrubbed, and the account is marked due for
+    # deletion, but the user record itself is not deleted yet.
+    service.repository.scrub_user(user.id)
+    service.user_repo.mutate(
+        user.id,
+        lambda fresh: fresh.model_copy(update={"deletion_requested_at": utcnow()}),
+    )
+    assert service.user_repo.get_by_id(user.id) is not None
+
+    caplog.clear()
+    with (
+        caplog.at_level(logging.INFO, logger=SERVICE_LOGGER),
+        pytest.raises(SelectedUserNotFoundError),
+    ):
+        service.add_selected_user(
+            "voice_brain_dump", operator_id="user_op", account_id="user_due"
+        )
+
+    # The purge now reaches its final step.
+    service.user_repo.delete(user.id)
+
+    view = service.describe(operator_id="user_op")
+    cohort = next(f for f in view.flags if f.name == "voice_brain_dump")
+    assert cohort.selected_users == ()
+
+    records = [r.getMessage() for r in caplog.records if r.name == SERVICE_LOGGER]
+    add_records = [m for m in records if "action=add_selected_user" in m]
+    assert len(add_records) == 1
+    assert "outcome=no_account_found" in add_records[0]
+    assert "due@example.com" not in add_records[0]
+
+
 def test_010_FR_010_a_concurrent_clear_racing_add_selected_user_is_refused_not_applied(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -850,6 +901,92 @@ def test_010_FR_006_a_refused_write_against_a_degraded_document_records_exactly_
     assert "outcome=refused_degraded" in records[0]
     assert "account=-" in records[0]
     assert "operator=user_op" in records[0]
+
+
+@pytest.mark.parametrize(
+    "action,call,expected_account",
+    [
+        (
+            "set_mode",
+            lambda service: service.set_mode(
+                "voice_brain_dump", FlagMode.ON, operator_id="user_op"
+            ),
+            None,
+        ),
+        (
+            "clear_override",
+            lambda service: service.clear_override(
+                "voice_brain_dump", operator_id="user_op"
+            ),
+            None,
+        ),
+        (
+            "add_selected_user",
+            lambda service: service.add_selected_user(
+                "voice_brain_dump", operator_id="user_op", account_id="user_chosen"
+            ),
+            "user_chosen",
+        ),
+        (
+            "remove_selected_user",
+            lambda service: service.remove_selected_user(
+                "voice_brain_dump", "user_chosen", operator_id="user_op"
+            ),
+            "user_chosen",
+        ),
+    ],
+)
+def test_010_FR_006_an_atomic_write_failure_records_exactly_one_write_failed_audit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    action: str,
+    call: object,
+    expected_account: str | None,
+) -> None:
+    """A generic `OSError` from the repository's atomic write — disk full,
+    EIO, a permission failure — is never swallowed: it still surfaces to the
+    caller so the existing 5xx behavior is unchanged, but each of the four
+    mutations first records exactly one dedicated, content-free failure audit
+    rather than none, and the document itself is untouched (010-FR-006,
+    DD-10).
+    """
+
+    config = _config(monkeypatch, tmp_path, flags="")
+    service = _service(config, tmp_path)
+    _seed_account(tmp_path, "user_chosen", "chosen@example.com")
+    service.set_mode("voice_brain_dump", FlagMode.SELECTED_USERS, operator_id="user_op")
+    before = service.repository.document_path.read_bytes()
+
+    original_replace = Path.replace
+
+    def _explode(self: Path, target: str | os.PathLike[str]) -> Path:
+        if Path(target) == service.repository.document_path:
+            raise OSError("disk full")
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", _explode)
+
+    caplog.clear()
+    with (
+        caplog.at_level(logging.INFO, logger=SERVICE_LOGGER),
+        pytest.raises(OSError),
+    ):
+        call(service)  # type: ignore[operator]
+
+    monkeypatch.undo()
+    assert service.repository.document_path.read_bytes() == before
+
+    records = [r.getMessage() for r in caplog.records if r.name == SERVICE_LOGGER]
+    matching = [m for m in records if f"action={action}" in m]
+    assert len(matching) == 1
+    assert "outcome=write_failed" in matching[0]
+    assert "chosen@example.com" not in matching[0]
+    assert "operator=user_op" in matching[0]
+    if expected_account is None:
+        assert "account=-" in matching[0]
+    else:
+        assert f"account={expected_account}" in matching[0]
 
 
 # ---------------------------------------------------------------------------
