@@ -588,3 +588,69 @@ describe("AdminPage capability isolation across sessions (009-FR-005)", () => {
     unbind();
   });
 });
+
+describe("AdminPage feature-flag section placement (010-FR-006, 009-FR-005)", () => {
+  beforeEach(() => {
+    act(() => {
+      useAuthStore.setState({
+        user: { id: "operator-1", email: "operator@example.com" },
+        status: "authed",
+        deletionCancelledNotice: false
+      });
+    });
+    mockTaskShellQueries();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("010-FR-006: renders the flag section only inside the operator-confirmed branch", async () => {
+    vi.spyOn(apiClient, "getAdminStatus").mockResolvedValue({ is_operator: true });
+    const flags = vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue({
+      degraded: false,
+      flags: [
+        {
+          name: "voice_brain_dump",
+          override_mode: null,
+          source: "deploy_default",
+          deploy_default_state: "off",
+          selected_users: []
+        }
+      ]
+    });
+
+    renderPage();
+
+    expect(await screen.findByRole("article", { name: "voice_brain_dump" })).toBeInTheDocument();
+    // Feature 009's own section is untouched and still on the same screen.
+    expect(screen.getByLabelText(/account id or email/i)).toBeInTheDocument();
+    expect(flags).toHaveBeenCalledTimes(1);
+  });
+
+  it("010-FR-006: D-01 renders no flag section and issues no flag read while checking", () => {
+    vi.spyOn(apiClient, "getAdminStatus").mockReturnValue(new Promise(() => {}));
+    const flags = vi.spyOn(apiClient, "getAdminFeatureFlags");
+
+    renderPage();
+
+    expect(screen.getByRole("status")).toHaveTextContent(/checking access/i);
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(flags).not.toHaveBeenCalled();
+  });
+
+  it("010-FR-006: D-08 and D-09 render no flag section and issue no flag read", async () => {
+    const flags = vi.spyOn(apiClient, "getAdminFeatureFlags");
+    vi.spyOn(apiClient, "getAdminStatus").mockRejectedValue(new ApiError("Forbidden", 403, null));
+    const denied = renderPage();
+    expect(await screen.findByText("Access denied")).toBeInTheDocument();
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    denied.unmount();
+
+    vi.spyOn(apiClient, "getAdminStatus").mockRejectedValue(new Error("network down"));
+    renderPage();
+    expect(await screen.findByRole("heading", { name: /couldn't verify access/i })).toBeInTheDocument();
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(flags).not.toHaveBeenCalled();
+  });
+});

@@ -17,6 +17,7 @@ from app.services import (
     AccountService,
     AdminService,
     AuthService,
+    FeatureFlagService,
     NodeService,
     RelationService,
     TreeService,
@@ -82,6 +83,14 @@ def get_admin_service(
     container: Container = Depends(get_container),
 ) -> AdminService:
     return container.admin_service
+
+
+def get_feature_flag_service(
+    container: Container = Depends(get_container),
+) -> FeatureFlagService:
+    """The runtime rollout resolver for the two managed flags (010-FR-008)."""
+
+    return container.feature_flag_service
 
 
 def get_task_service(container: Container = Depends(get_container)) -> TaskService:
@@ -275,17 +284,21 @@ def require_admin_portal_enabled(
     return operator
 
 
-def voice_brain_dump_enabled(user: User, config: AppConfig) -> bool:
-    """Whether the ADR-0008 ``voice_brain_dump`` rollout flag is effective."""
+def voice_brain_dump_enabled(user: User, feature_flags: FeatureFlagService) -> bool:
+    """Whether the ADR-0008 ``voice_brain_dump`` rollout flag is effective.
 
-    return config.feature_flags.effective_flags(user.email).get(
-        "voice_brain_dump", False
-    )
+    Resolves through the runtime resolver rather than `config.feature_flags`
+    directly (010-FR-008): a runtime override on this managed flag must reach
+    every one of its call sites, or the operator screen would be lying about
+    who can capture.
+    """
+
+    return feature_flags.is_effective("voice_brain_dump", user)
 
 
 def require_voice_brain_dump_enabled(
     current_user: User = Depends(get_current_user),
-    config: AppConfig = Depends(get_config_dep),
+    feature_flags: FeatureFlagService = Depends(get_feature_flag_service),
 ) -> User:
     """Gate the new-capture voice Brain Dump routes on the ADR-0008 rollout flag.
 
@@ -302,7 +315,7 @@ def require_voice_brain_dump_enabled(
     :func:`voice_brain_dump_enabled` only for the gated actions.
     """
 
-    if not voice_brain_dump_enabled(current_user, config):
+    if not voice_brain_dump_enabled(current_user, feature_flags):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Voice brain dump is not available.",

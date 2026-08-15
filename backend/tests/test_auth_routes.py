@@ -9,8 +9,10 @@ from fastapi.testclient import TestClient
 
 from app.container import Container
 from app.core import get_config
+from app.core.config import KNOWN_FEATURE_FLAGS
 from app.core.rate_limit import LOGIN_MAX_ATTEMPTS
 from app.main import create_app
+from app.repositories.feature_flag import FlagMode, FlagOverride
 from app.schemas.auth import Invite
 from app.utils.time import utcnow
 
@@ -149,3 +151,88 @@ def test_login_rate_limiter_triggers_429(tmp_path, monkeypatch) -> None:
 def test_me_requires_authentication(anonymous_api_client) -> None:
     resp = anonymous_api_client.get("/api/auth/me")
     assert resp.status_code == 401
+
+
+def test_010_SC_003_feature_flags_key_set_is_exactly_known_feature_flags(
+    tmp_path, monkeypatch
+) -> None:
+    """The member-facing key set is pinned on all three identity responses.
+
+    This is the evidence that the mobile client's existing request/response
+    contract needs no change for 010-FR-008: adding or removing a key here
+    would change a payload every client already reads. `delivery_canary` and
+    `external_agent_relay` stay in the payload — this feature removes them only
+    from *runtime management*, not from the contract — and `admin_portal` stays
+    out of it (009-FR-010).
+    """
+
+    client, _container, code = _bootstrap(tmp_path, monkeypatch, subdir="flagkeys")
+    signup = client.post(
+        "/api/auth/signup",
+        json={
+            "email": "keys@example.com",
+            "password": "very-long-password",
+            "invite_code": code,
+        },
+    )
+    assert signup.status_code == 201, signup.text
+    client.cookies.clear()
+    login = client.post(
+        "/api/auth/login",
+        json={"email": "keys@example.com", "password": "very-long-password"},
+    )
+    me = client.get("/api/auth/me")
+
+    expected = set(KNOWN_FEATURE_FLAGS)
+    for response in (signup, login, me):
+        payload = response.json()["feature_flags"]
+        assert set(payload) == expected, response.request.url
+        assert "admin_portal" not in payload
+    assert expected == {
+        "delivery_canary",
+        "voice_brain_dump",
+        "mobile_task_classification",
+        "external_agent_relay",
+    }
+
+
+def test_010_FR_008_a_runtime_override_reaches_login_and_signup_not_only_me(
+    tmp_path, monkeypatch
+) -> None:
+    """`_me_response` is the single resolution point for all three routes.
+
+    Prior coverage was `/me`-only, so a resolver wired into `/me` alone would
+    have passed while login and signup kept serving the deploy baseline.
+    """
+
+    monkeypatch.setenv("BRAIN_BUDDY_FEATURE_FLAGS", "voice_brain_dump=off")
+    client, container, code = _bootstrap(tmp_path, monkeypatch, subdir="flagoverride")
+    container.invite_repo.create(Invite(code="invite_second", created_at=utcnow()))
+    container.feature_flag_repo.mutate(
+        lambda current: {**current, "voice_brain_dump": FlagOverride(mode=FlagMode.ON)}
+    )
+
+    signup = client.post(
+        "/api/auth/signup",
+        json={
+            "email": "override@example.com",
+            "password": "very-long-password",
+            "invite_code": code,
+        },
+    )
+    assert signup.status_code == 201, signup.text
+    client.cookies.clear()
+    login = client.post(
+        "/api/auth/login",
+        json={"email": "override@example.com", "password": "very-long-password"},
+    )
+    me = client.get("/api/auth/me")
+
+    for response in (signup, login, me):
+        payload = response.json()["feature_flags"]
+        assert payload["voice_brain_dump"] is True
+        # Only the overridden flag moves; every other value stays exactly what
+        # the environment computed.
+        assert payload["mobile_task_classification"] is False
+        assert payload["delivery_canary"] is False
+        assert payload["external_agent_relay"] is False
