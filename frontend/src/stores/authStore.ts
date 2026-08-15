@@ -36,6 +36,15 @@ interface AuthStoreState {
   scheduleDeletionNotice: (purgeAt: string) => void;
 }
 
+// Bumped by every transition (hydrate/login/signup/logout/clearSession) and
+// by every `refreshSession` call itself, so a `refreshSession` result only
+// applies if nothing newer — another refresh, or a real transition — has
+// started since. Without this, a slow poll response can resolve after a
+// logout or an A->B account switch and resurrect the wrong session, or an
+// out-of-order pair of overlapping polls can let the older response clobber
+// the newer one (010-FR-009).
+let sessionGeneration = 0;
+
 export const useAuthStore = create<AuthStoreState>((set) => ({
   user: null,
   status: "loading",
@@ -43,6 +52,7 @@ export const useAuthStore = create<AuthStoreState>((set) => ({
   deletionScheduledFor: null,
 
   async hydrate() {
+    sessionGeneration += 1;
     try {
       const me = await authApi.me();
       if (me) {
@@ -56,12 +66,18 @@ export const useAuthStore = create<AuthStoreState>((set) => ({
   },
 
   async refreshSession() {
+    const requestGeneration = ++sessionGeneration;
     let me: AuthUser | null;
     try {
       me = await authApi.me();
     } catch {
       // Transient: network error, timeout, 5xx. The member did not make this
       // request, so it must not produce an error, a redirect or a sign-out.
+      return;
+    }
+    if (requestGeneration !== sessionGeneration) {
+      // Superseded by a newer refresh or a transition while this request was
+      // in flight — applying it now would apply stale (or wrong-account) data.
       return;
     }
     if (me) {
@@ -72,6 +88,7 @@ export const useAuthStore = create<AuthStoreState>((set) => ({
   },
 
   async login(payload) {
+    sessionGeneration += 1;
     const user = await authApi.login(payload);
     set({
       user,
@@ -82,11 +99,13 @@ export const useAuthStore = create<AuthStoreState>((set) => ({
   },
 
   async signup(payload) {
+    sessionGeneration += 1;
     const user = await authApi.signup(payload);
     set({ user, status: "authed" });
   },
 
   async logout() {
+    sessionGeneration += 1;
     // Always clear local state, even if the network call fails — the user
     // asked to sign out and we shouldn't block them on a transient error.
     try {
@@ -98,6 +117,7 @@ export const useAuthStore = create<AuthStoreState>((set) => ({
   },
 
   clearSession() {
+    sessionGeneration += 1;
     set({ user: null, status: "anon" });
   },
 

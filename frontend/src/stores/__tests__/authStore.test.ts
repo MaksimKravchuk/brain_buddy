@@ -1,7 +1,7 @@
 import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { authApi } from "../../api/auth";
+import { authApi, type AuthUser } from "../../api/auth";
 import { FLAG_REFRESH_INTERVAL_MS, startFlagRefresh, useAuthStore } from "../authStore";
 
 describe("authStore", () => {
@@ -102,6 +102,85 @@ describe("authStore", () => {
     useAuthStore.getState().clearSession();
     expect(useAuthStore.getState().status).toBe("anon");
     expect(useAuthStore.getState().user).toBeNull();
+  });
+});
+
+/**
+ * A request/transition generation guard on `refreshSession` (see the comment
+ * above `sessionGeneration` in authStore.ts): a poll response that resolves
+ * after something newer has started — a transition or a later poll — must be
+ * dropped instead of applied.
+ */
+describe("authStore refreshSession generation guard", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const deferred = <T>() => {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((res) => {
+      resolve = res;
+    });
+    return { promise, resolve };
+  };
+
+  it("a slower in-flight refresh does not resurrect the session after logout", async () => {
+    const pending = deferred<AuthUser | null>();
+    vi.spyOn(authApi, "me").mockReturnValue(pending.promise);
+    vi.spyOn(authApi, "logout").mockResolvedValue(undefined);
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+
+    const refreshPromise = useAuthStore.getState().refreshSession();
+    await useAuthStore.getState().logout();
+    expect(useAuthStore.getState().status).toBe("anon");
+
+    pending.resolve({ id: "u1", email: "a@b.c" });
+    await refreshPromise;
+
+    expect(useAuthStore.getState().status).toBe("anon");
+    expect(useAuthStore.getState().user).toBeNull();
+  });
+
+  it("switching from account A to account B drops A's slower in-flight refresh", async () => {
+    const pending = deferred<AuthUser | null>();
+    vi.spyOn(authApi, "me").mockReturnValue(pending.promise);
+    vi.spyOn(authApi, "logout").mockResolvedValue(undefined);
+    vi.spyOn(authApi, "login").mockResolvedValue({ id: "u2", email: "b@b.c" });
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+
+    const refreshPromise = useAuthStore.getState().refreshSession();
+    await useAuthStore.getState().logout();
+    await useAuthStore.getState().login({ email: "b@b.c", password: "x" });
+
+    pending.resolve({ id: "u1", email: "a@b.c" });
+    await refreshPromise;
+
+    expect(useAuthStore.getState().status).toBe("authed");
+    expect(useAuthStore.getState().user?.id).toBe("u2");
+  });
+
+  it("only the newest of two overlapping refreshes applies, even if it resolves first", async () => {
+    const first = deferred<AuthUser | null>();
+    const second = deferred<AuthUser | null>();
+    vi.spyOn(authApi, "me")
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    useAuthStore.setState({
+      user: { id: "u1", email: "a@b.c", feature_flags: { x: false } },
+      status: "authed"
+    });
+
+    const firstRefresh = useAuthStore.getState().refreshSession();
+    const secondRefresh = useAuthStore.getState().refreshSession();
+
+    second.resolve({ id: "u1", email: "a@b.c", feature_flags: { x: true } });
+    await secondRefresh;
+    expect(useAuthStore.getState().user?.feature_flags?.x).toBe(true);
+
+    first.resolve({ id: "u1", email: "a@b.c", feature_flags: { x: false } });
+    await firstRefresh;
+
+    expect(useAuthStore.getState().user?.feature_flags?.x).toBe(true);
   });
 });
 

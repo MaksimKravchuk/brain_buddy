@@ -398,13 +398,15 @@ class AccountService:
         re-runs. Every step tolerates already-deleted data.
 
         `feature_flag_repo.scrub_user` deliberately **raises** rather than
-        skipping when the runtime flag document is degraded (DD-13), so this
-        aborts before `user_repo.delete` and erasure is always complete-or-
-        pending, never silently partial. The cost is that the account, its
-        email and its password hash are retained past the documented 14-day
-        promise for as long as that document stays corrupt.
+        skipping when the runtime flag document is degraded (DD-13), so it
+        runs first, before any destructive step — erasure is always
+        complete-or-not-yet-started, never silently partial. The cost is that
+        the account, its email and its password hash (and every other owned
+        record) are retained past the documented 14-day promise for as long
+        as that document stays corrupt.
         """
 
+        self.feature_flag_repo.scrub_user(user_id)
         self.session_repo.delete_all_for_user(user_id)
         self.voice_operation_repo.delete_all_for_owner(owner_id=user_id)
         # External-agent connections, credentials, runs, events, commands, and
@@ -421,7 +423,6 @@ class AccountService:
                 # owner, so it must not survive this retry.
                 self.tree_service.remove_stale_tree_state(entry.id)
         self.invite_repo.scrub_user(user_id)
-        self.feature_flag_repo.scrub_user(user_id)
         self.user_repo.delete(user_id)
         logger.info("Purged account %s and all owned data", user_id)
 
