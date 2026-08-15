@@ -399,4 +399,69 @@ describe("apiClient", () => {
 
     await expect(apiClient.listTags()).rejects.toThrow("Request failed");
   });
+
+  // 010: the five runtime feature-flag routes. Every screen-level test mocks
+  // `apiClient`, so without these the wire shape — method, path, encoding and
+  // body — would be asserted nowhere at all.
+  it("010-FR-010: reads the runtime flag list from the admin route", async () => {
+    fetchMock.mockResolvedValue(response({ degraded: false, flags: [] }));
+
+    await expect(apiClient.getAdminFeatureFlags()).resolves.toEqual({
+      degraded: false,
+      flags: []
+    });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/admin/feature-flags");
+    expect(init.method).toBe("GET");
+    expect(init.credentials).toBe("include");
+  });
+
+  it("010-FR-005: sets one flag's mode with the mode in the body", async () => {
+    fetchMock.mockResolvedValue(response({ degraded: false, flags: [] }));
+
+    await apiClient.setAdminFeatureFlagMode("voice_brain_dump", "selected_users");
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/admin/feature-flags/voice_brain_dump/mode");
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(init.body)).toEqual({ mode: "selected_users" });
+  });
+
+  it("010-FR-003: clears one flag's override with a DELETE on the flag itself", async () => {
+    fetchMock.mockResolvedValue(response({ degraded: false, flags: [] }));
+
+    await apiClient.clearAdminFeatureFlagOverride("mobile_task_classification");
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/admin/feature-flags/mobile_task_classification");
+    expect(init.method).toBe("DELETE");
+    expect(init.body).toBeUndefined();
+  });
+
+  it("010-FR-007: adds a selected user with exactly one lookup key", async () => {
+    fetchMock.mockResolvedValue(response({ degraded: false, flags: [] }));
+
+    await apiClient.addAdminFeatureFlagUser("voice_brain_dump", {
+      email: "member@example.com"
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/admin/feature-flags/voice_brain_dump/selected-users");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ email: "member@example.com" });
+  });
+
+  it("010-FR-007: percent-encodes the flag and the account id it removes", async () => {
+    fetchMock.mockResolvedValue(response({ degraded: false, flags: [] }));
+
+    // A stored id that no longer resolves is still removable, and a path-shaped
+    // value must never escape its own segment on the way out.
+    await apiClient.removeAdminFeatureFlagUser("voice_brain_dump", "../users/user_a");
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(
+      "/api/admin/feature-flags/voice_brain_dump/selected-users/..%2Fusers%2Fuser_a"
+    );
+    expect(init.method).toBe("DELETE");
+  });
 });

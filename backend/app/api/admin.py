@@ -199,7 +199,7 @@ def set_feature_flag_mode(
 @router.delete(
     "/feature-flags/{flag}",
     response_model=AdminFeatureFlagsResponse,
-    responses=error_responses(400, 401, 403, 404, 503),
+    responses=error_responses(400, 401, 403, 404, 422, 503),
 )
 def clear_feature_flag_override(
     flag: str,
@@ -256,7 +256,7 @@ def add_feature_flag_selected_user(
 @router.delete(
     "/feature-flags/{flag}/selected-users/{account_id}",
     response_model=AdminFeatureFlagsResponse,
-    responses=error_responses(400, 401, 403, 404, 503),
+    responses=error_responses(400, 401, 403, 404, 422, 503),
 )
 def remove_feature_flag_selected_user(
     flag: str,
