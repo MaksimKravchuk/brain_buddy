@@ -202,12 +202,13 @@ describe("010-FR-009 SessionProvider background flag refresh", () => {
 
   it("010-SC-004 a transient poll failure leaves the session and its flags untouched", async () => {
     let failNext = false;
+    let voice = true;
     backend = installFakeBackend({
       "GET /auth/me": () => {
         if (failNext) {
           throw new TypeError("Network request failed");
         }
-        return makeMe({ feature_flags: { voice_brain_dump: true } });
+        return makeMe({ feature_flags: { voice_brain_dump: voice } });
       },
     });
     await renderProbe();
@@ -228,6 +229,15 @@ describe("010-FR-009 SessionProvider background flag refresh", () => {
     expect(meCalls()).toBe(afterMount + 2);
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("signed-in"));
     expect(screen.getByTestId("voice")).toHaveTextContent("true");
+
+    // The next successful interval still applies a live flag change made
+    // while the transient failure was in effect -- recovering the poll must
+    // not require a relogin to pick up a server-side flip.
+    voice = false;
+    await advance(SESSION_REFRESH_INTERVAL_MS);
+    expect(meCalls()).toBe(afterMount + 3);
+    await waitFor(() => expect(screen.getByTestId("voice")).toHaveTextContent("false"));
+    expect(screen.getByTestId("status")).toHaveTextContent("signed-in");
   });
 
   it("010-SC-004 a 401 on the poll signs the session out and stops the poll", async () => {
